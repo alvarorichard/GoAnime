@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"net/http/httputil"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/manifoldco/promptui"
@@ -23,6 +24,28 @@ type Anime struct {
 type Episode struct {
 	Number string
 	URL    string
+}
+
+func debugHTTPGet(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Print the request URL for debugging
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		log.Printf("Failed to dump request: %v", err)
+	}
+	log.Println(string(dump))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 func main() {
@@ -100,6 +123,8 @@ func searchAnime(animeName string) (string, error) {
 		currentPageURL = baseURL + nextPageURL
 	}
 }
+
+
 func selectAnime(animes []Anime) int {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}",
@@ -122,8 +147,10 @@ func selectAnime(animes []Anime) int {
 	return index
 }
 
+
+
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-	resp, err := http.Get(animeURL)
+	resp, err := debugHTTPGet(animeURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anime details: %v", err)
 	}
@@ -134,12 +161,12 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 		return nil, fmt.Errorf("failed to parse anime details: %v", err)
 	}
 
-	episodesContainer := doc.Find(".container.secao.anime.secao_episodes ul li")
+	episodesContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
 
 	episodes := make([]Episode, 0)
 	episodesContainer.Each(func(i int, s *goquery.Selection) {
-		episodeNum := s.Find("div.ep_num").Text()
-		episodeURL, _ := s.Find("a").Attr("href")
+		episodeNum := s.Text()
+		episodeURL, _ := s.Attr("href")
 
 		episode := Episode{
 			Number: strings.TrimSpace(episodeNum),
@@ -150,6 +177,10 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 
 	return episodes, nil
 }
+
+
+
+
 
 func selectEpisode(episodes []Episode) int {
 	templates := &promptui.SelectTemplates{
@@ -185,3 +216,5 @@ func playVideo(videoURL string) {
 		log.Fatalf("Video player failed: %v", err)
 	}
 }
+
+
