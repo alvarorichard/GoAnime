@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
+	"os"
+  "os/exec"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -30,7 +31,7 @@ func PlayVideo(Url string){
 
   if err != nil{
     log.Fatalf("Failed to start video player: %v", err)
-    return
+    os.Exit(1)
   }
 }
 
@@ -51,7 +52,7 @@ func selectEpisode(episodes []Episode) string{
   index, _, err := prompt.Run()
   if err != nil{
     log.Fatalf("Failed to select episode: %v", err)
-    return ""
+    os.Exit(1)
   }
 
   return episodes[index].Url
@@ -61,13 +62,15 @@ func getAnimeEpisodes(animeUrl string) ([]Episode, error){
   resp, err := http.Get(animeUrl)
   
   if err != nil {
-		return nil, fmt.Errorf("failed to get anime details: %v", err)
+    log.Fatalf("failed to get anime details: %v\n", err)
+    os.Exit(1)
 	}
 	defer resp.Body.Close()
   
   doc, err := goquery.NewDocumentFromReader(resp.Body)
   if err != nil{
-    return nil, fmt.Errorf("failed to parse anime details: %v", err)
+    log.Fatalf("failed to parse anime details: %v\n", err)
+    os.Exit(1)
   }
 
   episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
@@ -104,8 +107,8 @@ func selectAnime(animes []Anime) int {
   index, _, err := prompt.Run()
 
   if err != nil {
-		log.Fatalf("Failed to select anime: %v", err)
-    return 0
+		log.Fatalf("Failed to select anime: %v\n", err)
+    os.Exit(1)
 	}
 
   return index
@@ -117,7 +120,8 @@ func searchAnime(animeName string) (string, error){
   for {
     response, err := http.Get(currentPageURL)
     if err != nil{
-      return "", fmt.Errorf("failed to perform search resquest: %v", err)
+      log.Fatalf("failed to perform search resquest: %v\n", err)
+      os.Exit(1)
     }
 
     defer response.Body.Close()
@@ -125,7 +129,8 @@ func searchAnime(animeName string) (string, error){
     doc, err := goquery.NewDocumentFromReader(response.Body)
 
     if err != nil{
-      return "", fmt.Errorf("failed to parse response: %v", err)
+      log.Fatalf("failed to parse response: %v\n", err)
+      os.Exit(1)
     }
 
     animes := make([]Anime, 0)
@@ -148,7 +153,8 @@ func searchAnime(animeName string) (string, error){
 
     nextPage, exists := doc.Find(".pagination .next a").Attr("href")
     if !exists || nextPage == ""{
-      return "", fmt.Errorf("no anime found with the given name")
+      log.Fatalf("no anime found with the given name")
+      os.Exit(1)
     }
 
     currentPageURL = baseSiteUrl + nextPage
@@ -169,8 +175,8 @@ func getUserInput(label string) string{
   result, err := prompt.Run()
 
   if err != nil{
-    log.Fatal(err)
-    return ""
+    log.Fatalf("Error from adquire user input: %v\n", err)
+    os.Exit(1)
   }
 
   return result
@@ -182,14 +188,14 @@ func main(){
 
   if err != nil{
     log.Fatalf("Failed to get anime episodes: %v", err)
-    return
+    os.Exit(1)
   }
 
   episodes, err := getAnimeEpisodes(animeURL)
 
   if err != nil || len(episodes) <= 0{
     log.Fatalln("Failed to catching episodes from selected anime")
-    return
+    os.Exit(1)
   }
 
   selectedEpisode := selectEpisode(episodes)
