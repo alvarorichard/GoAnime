@@ -1,7 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
+  "fmt"
+  "io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -25,32 +27,73 @@ type Anime struct {
 	Episodes []Episode
 }
 
-func extractVideoUrl(url string) string {
-	resp, err := http.Get(url)
+type VideoResponse struct {
+	Data     []VideoData `json:"data"`
+	Resposta struct {
+		Status string `json:"status"`
+		Text   string `json:"text"`
+	} `json:"resposta"`
+}
+
+type VideoData struct {
+	Src   string `json:"src"`
+	Label string `json:"label"`
+}
+
+func extractVideoURL(url string) (string, error) {
+	response, err := http.Get(url)
 	if err != nil {
-		log.Fatalf("Failed to make the request: %v\n", err)
-		os.Exit(1)
+		return "", err
+	}
+	defer response.Body.Close()
+	// Check the response status code
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
 
-	defer resp.Body.Close()
+	// Convert the response body to a string
+  doc, _ := goquery.NewDocumentFromReader(response.Body)
 
-	if resp.StatusCode >= 300 {
-		log.Fatalf("Failed to fetch the URL, status code: %d", resp.StatusCode)
-		os.Exit(1)
-	}
+  videoElements := doc.Find("video")
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+  if videoElements.Length() > 0{
+    oldDataVideo, exists := videoElements.Attr("data-video-src")
+    if exists != false{
+      fmt.Errorf("data-video-src not founded")
+    }
+    return oldDataVideo, nil
+  }
+  
+	return "", nil
+}
+
+func extractActualVideoURL(videoSrc string) (string,error) {
+  response, err := http.Get(videoSrc)
 	if err != nil {
-		log.Fatalf("Failed to parse the document: %v", err)
-		os.Exit(1)
+		return "", err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
 
-	var videoURL string
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
 
-	doc.Find("div#main_div_video video#my-video").Each(func(i int, s *goquery.Selection) {
-		videoURL, _ = s.Attr("data-video-src")
-	})
-	return videoURL
+	var videoResponse VideoResponse
+	err = json.Unmarshal(body, &videoResponse)
+	if err != nil {
+		return "", err
+	}
+
+	if len(videoResponse.Data) == 0 {
+		return "", fmt.Errorf("no video data found")
+	}
+
+	return videoResponse.Data[0].Src, nil
 }
 
 func PlayVideo(videoURL string) {
@@ -59,14 +102,12 @@ func PlayVideo(videoURL string) {
 
 	if err != nil {
 		log.Fatalf("Failed to start video player: %v", err)
-		os.Exit(1)
 	}
 
 	err = cmd.Wait()
 
 	if err != nil {
 		log.Fatalf("Failed to play video: %v", err)
-		os.Exit(1)
 	}
 }
 
@@ -234,12 +275,13 @@ func main() {
 	}
 
 	selectedEpisodeURL := selectEpisode(episodes)
-	videoURL := extractVideoUrl(selectedEpisodeURL)
-
-	if videoURL == "" {
-		log.Fatalln("No video URL found")
-		os.Exit(1)
+	videoURL,err := extractVideoURL(selectedEpisodeURL)
+	
+  if err != nil {
+		log.Fatalf("Failed to extract video URL: %v", err)
 	}
+  
+  videoURL, err = extractActualVideoURL(videoURL)
 
-	PlayVideo(videoURL)
+  PlayVideo(videoURL)
 }
