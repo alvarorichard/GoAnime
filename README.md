@@ -23,17 +23,12 @@ git clone https://github.com/alvarorichard/GoAnime.git
 ```
 ```shell
 cd GoAnime
+sudo bash install.sh
 ```
-```go
-go get github.com/PuerkitoBio/goquery
-```
-```go
-go get github.com/manifoldco/promptui
-```
-## Usage
 
+## Usage
 ```go
-go run main.go
+go-anime
 ```
 
 The program will prompt you to input the name of an anime. Enter the name of the anime you wish to watch.
