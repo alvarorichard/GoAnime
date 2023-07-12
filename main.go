@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	//"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -11,24 +12,26 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
-    "github.com/cavaliergopher/grab/v3"
+	"github.com/cavaliergopher/grab/v3"
+
+
 )
 
-
-const baseSiteUrl string = "https://animefire.net"
+const baseSiteURL string = "https://animefire.net"
 
 type Episode struct {
 	Number string
-	Url    string
+	URL    string
 }
 
 type Anime struct {
 	Name     string
-	Url      string
+	URL      string
 	Episodes []Episode
 }
 
@@ -120,7 +123,6 @@ func extractVideoURL(url string) (string, error) {
 	}
 	defer response.Body.Close()
 
-	// Convert the response body to a string
 	doc, _ := goquery.NewDocumentFromReader(response.Body)
 
 	videoElements := doc.Find("video")
@@ -140,7 +142,6 @@ func extractVideoURL(url string) (string, error) {
 }
 
 func extractActualVideoURL(videoSrc string) (string, error) {
-	fmt.Println(videoSrc)
 	response, err := http.Get(videoSrc)
 	if err != nil {
 		return "", err
@@ -204,11 +205,11 @@ func selectEpisode(episodes []Episode) (string, string) {
 		os.Exit(1)
 	}
 
-	return episodes[index].Url, episodes[index].Number
+	return episodes[index].URL, episodes[index].Number
 }
 
-func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
-	resp, err := http.Get(animeUrl)
+func getAnimeEpisodes(animeURL string) ([]Episode, error) {
+	resp, err := http.Get(animeURL)
 
 	if err != nil {
 		log.Fatalf("Failed to get anime details: %v\n", err)
@@ -232,7 +233,7 @@ func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
 
 		episode := Episode{
 			Number: episodeNum,
-			Url:    episodeURL,
+			URL:    episodeURL,
 		}
 		episodes = append(episodes, episode)
 	})
@@ -271,7 +272,7 @@ func selectAnime(db *sql.DB, animes []Anime) int {
 }
 
 func searchAnime(db *sql.DB, animeName string) (string, error) {
-	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteUrl, animeName)
+	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
 
 	for {
 		response, err := http.Get(currentPageURL)
@@ -293,7 +294,7 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 		doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 			anime := Anime{
 				Name: strings.TrimSpace(s.Text()),
-				Url:  s.AttrOr("href", ""),
+				URL:  s.AttrOr("href", ""),
 			}
 			animeName = strings.TrimSpace(s.Text())
 
@@ -304,7 +305,7 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 			index := selectAnime(db, animes)
 			selectedAnime := animes[index]
 
-			return selectedAnime.Url, nil
+			return selectedAnime.URL, nil
 		}
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
@@ -313,7 +314,7 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 			os.Exit(1)
 		}
 
-		currentPageURL = baseSiteUrl + nextPage
+		currentPageURL = baseSiteURL + nextPage
 		if err != nil {
 			log.Fatalf("Failed to add anime names to the database: %v", err)
 		}
@@ -359,12 +360,37 @@ func askForDownload() bool {
 
 func DownloadVideo(url string, destPath string) error {
 	client := grab.NewClient()
-	req, _ := grab.NewRequest(destPath, url)
+
+	req, err := grab.NewRequest(destPath, url)
+	if err != nil {
+		return err
+	}
+
 	resp := client.Do(req)
+
+	fmt.Printf("Downloading %s...\n", req.URL())
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+Loop:
+	for {
+		select {
+		case <-ticker.C:
+			fmt.Printf("Progress: %.2f%% complete, %.2f MB downloaded\n",
+				resp.Progress()*100,
+				float64(resp.BytesComplete())/1024/1024)
+
+		case <-resp.Done:
+			break Loop
+		}
+	}
 
 	if err := resp.Err(); err != nil {
 		return err
 	}
+
+	fmt.Printf("Download saved to %s\n", resp.Filename)
 
 	return nil
 }
