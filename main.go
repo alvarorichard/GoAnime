@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	//"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -15,11 +14,10 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/cavaliergopher/grab/v3"
-
-
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -123,6 +121,7 @@ func extractVideoURL(url string) (string, error) {
 	}
 	defer response.Body.Close()
 
+	// Convert the response body to a string
 	doc, _ := goquery.NewDocumentFromReader(response.Body)
 
 	videoElements := doc.Find("video")
@@ -142,6 +141,7 @@ func extractVideoURL(url string) (string, error) {
 }
 
 func extractActualVideoURL(videoSrc string) (string, error) {
+	fmt.Println(videoSrc)
 	response, err := http.Get(videoSrc)
 	if err != nil {
 		return "", err
@@ -210,7 +210,6 @@ func selectEpisode(episodes []Episode) (string, string) {
 
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 	resp, err := http.Get(animeURL)
-
 	if err != nil {
 		log.Fatalf("Failed to get anime details: %v\n", err)
 		os.Exit(1)
@@ -359,38 +358,36 @@ func askForDownload() bool {
 }
 
 func DownloadVideo(url string, destPath string) error {
-	client := grab.NewClient()
-
 	req, err := grab.NewRequest(destPath, url)
 	if err != nil {
 		return err
 	}
 
+	client := grab.NewClient()
 	resp := client.Do(req)
 
-	fmt.Printf("Downloading %s...\n", req.URL())
+	progressBar := pb.StartNew(int(resp.Size()))
+	progressBar.Set(pb.Bytes, true)
+	progressBar.SetWidth(80)
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
 
+	done := resp.Done
 Loop:
 	for {
 		select {
-		case <-ticker.C:
-			fmt.Printf("Progress: %.2f%% complete, %.2f MB downloaded\n",
-				resp.Progress()*100,
-				float64(resp.BytesComplete())/1024/1024)
-
-		case <-resp.Done:
+		case <-done:
+			progressBar.Finish()
 			break Loop
+		case <-ticker.C:
+			progressBar.SetCurrent(resp.BytesComplete())
 		}
 	}
 
 	if err := resp.Err(); err != nil {
 		return err
 	}
-
-	fmt.Printf("Download saved to %s\n", resp.Filename)
 
 	return nil
 }
