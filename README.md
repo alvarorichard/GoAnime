@@ -17,6 +17,7 @@ GoAnime is a simple command-line interface (CLI) built in Go that allows users t
 * PuerkitoBio/goquery
 * manifoldco/promptui
 * mattn/go-sqlite3
+* cavaliergopher/grab/v3
 ## how to install and run
 
 ```shell
