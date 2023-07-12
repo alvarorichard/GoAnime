@@ -44,6 +44,7 @@ The selected episode will then play in VLC media player.
 
 - Fuzzy Search in GoAnime:
     - [x] First Step: Save all animes listed in search 
-    - [] Second Step: Fixing VLC bug in media show
+    - [x] Second Step: Fixing VLC bug in media show
+    - [x] Third Step: Working in a fuzzy search
 # Thanks 
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
