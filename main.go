@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/cavaliergopher/grab/v3"
+	//"github.com/cheggaaa/pb/v3"
+
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -210,6 +211,7 @@ func selectEpisode(episodes []Episode) (string, string) {
 
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 	resp, err := http.Get(animeURL)
+
 	if err != nil {
 		log.Fatalf("Failed to get anime details: %v\n", err)
 		os.Exit(1)
@@ -357,40 +359,52 @@ func askForDownload() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-func DownloadVideo(url string, destPath string) error {
-	req, err := grab.NewRequest(destPath, url)
-	if err != nil {
-		return err
+func askForPlayOffline() bool {
+	prompt := promptui.Select{
+		Label: "Do you want to play the downloaded version offline",
+		Items: []string{"Yes", "No"},
 	}
 
+	_, result, err := prompt.Run()
+
+	if err != nil {
+		log.Fatalf("Error acquiring user input: %v", err)
+		os.Exit(1)
+	}
+
+	return strings.ToLower(result) == "yes"
+}
+
+
+
+func DownloadVideo(url string, destPath string) error {
 	client := grab.NewClient()
+	req, _ := grab.NewRequest(destPath, url)
 	resp := client.Do(req)
 
-	progressBar := pb.StartNew(int(resp.Size()))
-	progressBar.Set(pb.Bytes, true)
-	progressBar.SetWidth(80)
+	done := make(chan struct{})
+	defer close(done)
 
-	ticker := time.NewTicker(time.Millisecond * 100)
-	defer ticker.Stop()
-
-	done := resp.Done
-Loop:
-	for {
-		select {
-		case <-done:
-			progressBar.Finish()
-			break Loop
-		case <-ticker.C:
-			progressBar.SetCurrent(resp.BytesComplete())
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.Tick(time.Millisecond * 100):
+				fmt.Printf("Download progress: %.2f%%\n", resp.Progress()*100)
+			}
 		}
-	}
+	}()
 
-	if err := resp.Err(); err != nil {
+	err := resp.Err()
+	if err != nil {
 		return err
 	}
 
 	return nil
 }
+
+
 
 func main() {
 	db, err := initializeDB()
@@ -443,6 +457,10 @@ func main() {
 		}
 
 		fmt.Println("Video downloaded successfully!")
+
+		if askForPlayOffline() {
+			PlayVideo(downloadPath)
+		}
 	} else {
 		PlayVideo(videoURL)
 	}
