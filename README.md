@@ -39,5 +39,10 @@ The program will then present a list of episodes for the selected anime. Again, 
 
 The selected episode will then play in VLC media player.
 
+## Working in progress
+
+- Fuzzy Search in GoAnime:
+    - [x] First Step: Save all animes listed in search 
+    - [] Second Step: Fixing VLC bug in media show
 # Thanks 
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
