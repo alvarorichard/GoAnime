@@ -52,28 +52,29 @@ func databaseFormatter(str string) string {
 	return result
 }
 
-func listAnimeNamesFromDB(db *sql.DB) error {
-	query := `
-		SELECT name FROM anime
-	`
+func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
+  query := `
+    SELECT name from anime
+  `
 
-	rows, err := db.Query(query)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
+  rows, err := db.Query(query)
 
-	fmt.Println("Anime names:")
-	for rows.Next() {
-		var name string
-		err := rows.Scan(&name)
-		if err != nil {
-			return err
-		}
-		fmt.Println(name)
-	}
+  if err != nil{
+    return nil, err
+  }
 
-	return nil
+  defer rows.Close()
+
+  var animeNames []string
+  for rows.Next(){
+    var name string
+    err := rows.Scan(&name)
+    if err != nil{
+      return nil, err
+    }
+    animeNames = append(animeNames, name)
+  }
+  return animeNames, nil
 }
 
 func initializeDB() (*sql.DB, error){
@@ -256,7 +257,6 @@ func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
 }
 
 func selectAnime(db *sql.DB,animes []Anime) int {
-
   animesName := make([]string, 0)
   for i := range(animes){
     animesName = append(animesName, animes[i].Name) 
@@ -343,7 +343,7 @@ func treatingAnimeName(animeName string) string {
 	return spacelessName
 }
 
-func getUserInput(label string) string {
+func getUserInput(label string, db *sql.DB) string {
 	prompt := promptui.Prompt{
 		Label: label,
 	}
@@ -366,7 +366,7 @@ func main() {
 
   defer db.Close()
 
-	animeName := getUserInput("Enter anime name")
+	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
   
 	if err != nil {
