@@ -1,17 +1,20 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
+  "encoding/json"
   "fmt"
   "io/ioutil"
 	"log"
 	"net/http"
 	"os"
+  "os/user"
 	"os/exec"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/manifoldco/promptui"
+  _ "github.com/mattn/go-sqlite3"
 )
 
 const baseSiteUrl string = "https://animefire.net"
@@ -40,6 +43,78 @@ type VideoData struct {
 	Label string `json:"label"`
 }
 
+func listAnimeNamesFromDB(db *sql.DB) error {
+	query := `
+		SELECT name FROM anime
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fmt.Println("Anime names:")
+	for rows.Next() {
+		var name string
+		err := rows.Scan(&name)
+		if err != nil {
+			return err
+		}
+		fmt.Println(name)
+	}
+
+	return nil
+}
+
+func initializeDB() (*sql.DB, error){
+  currentUser, err := user.Current()
+	if err != nil {
+		return nil, err
+	}
+  
+  dirPath := currentUser.HomeDir + "/.local/goanime"
+    
+  err = os.MkdirAll(dirPath, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+  db, err := sql.Open("sqlite3", dirPath+"/anime.db")
+  if err != nil{
+    return nil, err
+  }
+
+  createTableSQL := `
+    CREATE TABLE IF NOT EXISTS anime(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT
+  );
+  `
+
+  _, err = db.Exec(createTableSQL)
+  if err != nil{
+    return db, nil
+  }
+
+  return db, nil
+}
+
+func addAnimeNamesToDB(db *sql.DB, animeNames []string) error {
+	insertSQL := `
+		INSERT INTO anime (name) VALUES (?)
+	`
+
+	for _, name := range animeNames {
+		_, err := db.Exec(insertSQL, name)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func extractVideoURL(url string) (string, error) {
 	response, err := http.Get(url)
 	if err != nil {
@@ -59,7 +134,13 @@ func extractVideoURL(url string) (string, error) {
   if videoElements.Length() > 0{
     oldDataVideo, exists := videoElements.Attr("data-video-src")
     if exists != false{
-      fmt.Errorf("data-video-src not founded")
+      videoElements = doc.Find("div")
+      DataVideo, exists := videoElements.Attr("data-video-src")
+      if exists != false{
+        fmt.Println("Não encontramos o vídeo")
+      }else{
+        return DataVideo, nil
+      }
     }
     return oldDataVideo, nil
   }
@@ -96,7 +177,7 @@ func extractActualVideoURL(videoSrc string) (string,error) {
 	return videoResponse.Data[0].Src, nil
 }
 
-func PlayVideo(videoURL string) {
+func PlayVideoVLC(videoURL string) {
 	cmd := exec.Command("vlc", "-vvv", videoURL)
 	err := cmd.Start()
 
@@ -166,8 +247,15 @@ func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
 	return episodes, nil
 }
 
-func selectAnime(animes []Anime) int {
-	templates := &promptui.SelectTemplates{
+func selectAnime(db *sql.DB,animes []Anime) int {
+
+  animesName := make([]string, 0)
+  for i := range(animes){
+    animesName = append(animesName, animes[i].Name) 
+  }
+  addAnimeNamesToDB(db, animesName)
+	
+  templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}",
 		Active:   "▶ {{ .Name | cyan }}",
 		Inactive: "  {{ .Name | white }}",
@@ -179,7 +267,8 @@ func selectAnime(animes []Anime) int {
 		Items:     animes,
 		Templates: templates,
 	}
-
+  
+  
 	index, _, err := prompt.Run()
 
 	if err != nil {
@@ -190,7 +279,7 @@ func selectAnime(animes []Anime) int {
 	return index
 }
 
-func searchAnime(animeName string) (string, error) {
+func searchAnime(db *sql.DB,animeName string) (string, error) {
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteUrl, animeName)
 
 	for {
@@ -208,20 +297,20 @@ func searchAnime(animeName string) (string, error) {
 			log.Fatalf("Failed to parse response: %v\n", err)
 			os.Exit(1)
 		}
-
+    
 		animes := make([]Anime, 0)
-
 		doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 			anime := Anime{
 				Name: strings.TrimSpace(s.Text()),
 				Url:  s.AttrOr("href", ""),
 			}
+      animeName = strings.TrimSpace(s.Text())
 
 			animes = append(animes, anime)
 		})
 
 		if len(animes) > 0 {
-			index := selectAnime(animes)
+			index := selectAnime(db, animes)
 			selectedAnime := animes[index]
 
 			return selectedAnime.Url, nil
@@ -234,6 +323,9 @@ func searchAnime(animeName string) (string, error) {
 		}
 
 		currentPageURL = baseSiteUrl + nextPage
+    if err != nil{
+      log.Fatalf("Failed to add anime names to the database: %v", err)
+    }
 	}
 }
 
@@ -259,21 +351,28 @@ func getUserInput(label string) string {
 }
 
 func main() {
-	animeName := getUserInput("Enter anime name")
-	animeURL, err := searchAnime(treatingAnimeName(animeName))
+  db, err := initializeDB()
+  if err != nil{
+    log.Fatal(err)
+  }
 
+  defer db.Close()
+
+	animeName := getUserInput("Enter anime name")
+	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
+  
 	if err != nil {
 		log.Fatalf("Failed to get anime episodes: %v", err)
 		os.Exit(1)
 	}
-
+  
 	episodes, err := getAnimeEpisodes(animeURL)
 
 	if err != nil || len(episodes) <= 0 {
 		log.Fatalln("Failed to fetch episodes from selected anime")
 		os.Exit(1)
 	}
-
+  
 	selectedEpisodeURL := selectEpisode(episodes)
 	videoURL,err := extractVideoURL(selectedEpisodeURL)
 	
@@ -282,6 +381,6 @@ func main() {
 	}
   
   videoURL, err = extractActualVideoURL(videoURL)
-
-  PlayVideo(videoURL)
+  
+  PlayVideoVLC(videoURL)
 }
