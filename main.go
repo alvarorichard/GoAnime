@@ -12,20 +12,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
-<<<<<<< HEAD
 	"time"
-<<<<<<< Updated upstream
-||||||| edc6f87
-=======
   "regexp"
->>>>>>> alvarorichard-main
-||||||| Stash base
-=======
-||||||| parent of f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
-=======
-  "regexp"
->>>>>>> f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
->>>>>>> Stashed changes
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
@@ -55,20 +43,6 @@ type VideoData struct {
 	Label string `json:"label"`
 }
 
-<<<<<<< Updated upstream
-func databaseFormatter(str string) string {
-	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
-	result := regex.ReplaceAllString(str, "")
-	result = strings.TrimSpace(result)
-  result = strings.ToLower(result)
-	return result
-}
-||||||| Stash base
-func listAnimeNamesFromDB(db *sql.DB) error {
-	query := `
-		SELECT name FROM anime
-	`
-=======
 func databaseFormatter(str string) string {
 	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
 	result := regex.ReplaceAllString(str, "")
@@ -77,42 +51,17 @@ func databaseFormatter(str string) string {
 	return result
 }
 
-<<<<<<< HEAD
 func listAnimeNamesFromDB(db *sql.DB) error {
 	query := `
 		SELECT name FROM anime
 	`
->>>>>>> Stashed changes
-||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
-func listAnimeNamesFromDB(db *sql.DB) error {
-	query := `
-		SELECT name FROM anime
-	`
-=======
-func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
-  query := `
-    SELECT name from anime
-  `
->>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
-<<<<<<< HEAD
-func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
-  query := `
-    SELECT name from anime
-  `
-||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
 	rows, err := db.Query(query)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-=======
-  rows, err := db.Query(query)
->>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
-<<<<<<< HEAD
-  rows, err := db.Query(query)
-||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
 	fmt.Println("Anime names:")
 	for rows.Next() {
 		var name string
@@ -122,81 +71,13 @@ func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
 		}
 		fmt.Println(name)
 	}
-=======
-  if err != nil{
-    return nil, err
-  }
->>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
-<<<<<<< HEAD
-||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
 	return nil
 }
 
-func initializeDB() (*sql.DB, error){
-  currentUser, err := user.Current()
-	if err != nil {
-		return nil, err
-	}
-  
-  dirPath := currentUser.HomeDir + "/.local/goanime"
-    
-  err = os.MkdirAll(dirPath, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-
-  db, err := sql.Open("sqlite3", dirPath+"/anime.db")
-=======
-  defer rows.Close()
-
-  var animeNames []string
-  for rows.Next(){
-    var name string
-    err := rows.Scan(&name)
-    if err != nil{
-      return nil, err
-    }
-    animeNames = append(animeNames, name)
-  }
-  return animeNames, nil
-}
 
 func initializeDB() (*sql.DB, error){
   currentUser, err := user.Current()
-	if err != nil {
-		return nil, err
-	}
-  
-  dirPath := currentUser.HomeDir + "/.local/goanime"
-    
-  err = os.MkdirAll(dirPath, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-
-  db, err := sql.Open("sqlite3", dirPath+"/anime.db")
->>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
-  if err != nil{
-    return nil, err
-  }
-
-  defer rows.Close()
-
-  var animeNames []string
-  for rows.Next(){
-    var name string
-    err := rows.Scan(&name)
-    if err != nil{
-      return nil, err
-    }
-    animeNames = append(animeNames, name)
-  }
-  return animeNames, nil
-}
-
-func initializeDB() (*sql.DB, error) {
-	currentUser, err := user.Current()
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +250,6 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 	return episodes, nil
 }
 
-<<<<<<< HEAD
 func selectAnime(db *sql.DB, animes []Anime) int {
 
 	animesName := make([]string, 0)
@@ -379,25 +259,6 @@ func selectAnime(db *sql.DB, animes []Anime) int {
 	addAnimeNamesToDB(db, animesName)
 
 	templates := &promptui.SelectTemplates{
-||||||| edc6f87
-func selectAnime(db *sql.DB,animes []Anime) int {
-  animesName := make([]string, 0)
-  for i := range(animes){
-    animesName = append(animesName, animes[i].Name) 
-  }
-  addAnimeNamesToDB(db, animesName)
-	
-  templates := &promptui.SelectTemplates{
-=======
-func selectAnime(db *sql.DB,animes []Anime) int {
-  animesName := make([]string, 0)
-  for i := range(animes){
-    animesName = append(animesName, animes[i].Name) 
-  }
-  addAnimeNamesToDB(db, animesName)
-	
-  templates := &promptui.SelectTemplates{
->>>>>>> alvarorichard-main
 		Label:    "{{ . }}",
 		Active:   "▶ {{ .Name | cyan }}",
 		Inactive: "  {{ .Name | white }}",
@@ -537,7 +398,7 @@ func DownloadVideo(url string, destPath string) error {
 			case <-done:
 				return
 			case <-time.Tick(time.Millisecond * 100):
-				fmt.Printf("Download progress: %.2f%%\n", resp.Progress()*100)
+				fmt.Printf("Download progress: %.2f%%\r", resp.Progress()*100)
 			}
 		}
 	}()
@@ -558,25 +419,9 @@ func main() {
 
 	defer db.Close()
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-	animeName := getUserInput("Enter anime name")
+	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db, treatingAnimeName(animeName))
 
-||||||| edc6f87
-	animeName := getUserInput("Enter anime name")
-||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
-	animeName := getUserInput("Enter anime name")
-=======
-	animeName := getUserInput("Enter anime name", db)
->>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
-	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
-  
-=======
-	animeName := getUserInput("Enter anime name", db)
-	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
-  
->>>>>>> alvarorichard-main
 	if err != nil {
 		log.Fatalf("Failed to get anime episodes: %v", err)
 		os.Exit(1)
