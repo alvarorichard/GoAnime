@@ -14,18 +14,10 @@ import (
 	"strings"
 <<<<<<< HEAD
 	"time"
-<<<<<<< Updated upstream
 ||||||| edc6f87
 =======
   "regexp"
 >>>>>>> alvarorichard-main
-||||||| Stash base
-=======
-||||||| parent of f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
-=======
-  "regexp"
->>>>>>> f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
->>>>>>> Stashed changes
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
@@ -55,7 +47,6 @@ type VideoData struct {
 	Label string `json:"label"`
 }
 
-<<<<<<< Updated upstream
 func databaseFormatter(str string) string {
 	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
 	result := regex.ReplaceAllString(str, "")
@@ -63,25 +54,6 @@ func databaseFormatter(str string) string {
   result = strings.ToLower(result)
 	return result
 }
-||||||| Stash base
-func listAnimeNamesFromDB(db *sql.DB) error {
-	query := `
-		SELECT name FROM anime
-	`
-=======
-func databaseFormatter(str string) string {
-	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
-	result := regex.ReplaceAllString(str, "")
-	result = strings.TrimSpace(result)
-  result = strings.ToLower(result)
-	return result
-}
-
-func listAnimeNamesFromDB(db *sql.DB) error {
-	query := `
-		SELECT name FROM anime
-	`
->>>>>>> Stashed changes
 
 func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
   query := `
