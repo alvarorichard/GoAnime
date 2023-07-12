@@ -2,41 +2,52 @@ package main
 
 import (
 	"database/sql"
-  "encoding/json"
-  "fmt"
-  "io/ioutil"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-  "os/user"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strings"
+<<<<<<< HEAD
+	"time"
+<<<<<<< Updated upstream
+||||||| edc6f87
+=======
   "regexp"
+>>>>>>> alvarorichard-main
+||||||| Stash base
+=======
+||||||| parent of f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
+=======
+  "regexp"
+>>>>>>> f318945 ([Feat]: Using regex from sanitize sqlite3 insertion)
+>>>>>>> Stashed changes
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/cavaliergopher/grab/v3"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/manifoldco/promptui"
-  _ "github.com/mattn/go-sqlite3"
 )
 
-const baseSiteUrl string = "https://animefire.net"
+const baseSiteURL string = "https://animefire.net"
 
 type Episode struct {
 	Number string
-	Url    string
+	URL    string
 }
 
 type Anime struct {
 	Name     string
-	Url      string
+	URL      string
 	Episodes []Episode
 }
 
 type VideoResponse struct {
-	Data     []VideoData `json:"data"`
-	Resposta struct {
-		Status string `json:"status"`
-		Text   string `json:"text"`
-	} `json:"resposta"`
+	Data []VideoData `json:"data"`
 }
 
 type VideoData struct {
@@ -44,6 +55,20 @@ type VideoData struct {
 	Label string `json:"label"`
 }
 
+<<<<<<< Updated upstream
+func databaseFormatter(str string) string {
+	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
+	result := regex.ReplaceAllString(str, "")
+	result = strings.TrimSpace(result)
+  result = strings.ToLower(result)
+	return result
+}
+||||||| Stash base
+func listAnimeNamesFromDB(db *sql.DB) error {
+	query := `
+		SELECT name FROM anime
+	`
+=======
 func databaseFormatter(str string) string {
 	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
 	result := regex.ReplaceAllString(str, "")
@@ -52,17 +77,77 @@ func databaseFormatter(str string) string {
 	return result
 }
 
+<<<<<<< HEAD
+func listAnimeNamesFromDB(db *sql.DB) error {
+	query := `
+		SELECT name FROM anime
+	`
+>>>>>>> Stashed changes
+||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
+func listAnimeNamesFromDB(db *sql.DB) error {
+	query := `
+		SELECT name FROM anime
+	`
+=======
 func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
   query := `
     SELECT name from anime
   `
+>>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
+<<<<<<< HEAD
+func listAnimeNamesFromDB(db *sql.DB) ([]string, error) {
+  query := `
+    SELECT name from anime
+  `
+||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
+	rows, err := db.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+=======
   rows, err := db.Query(query)
+>>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
+<<<<<<< HEAD
+  rows, err := db.Query(query)
+||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
+	fmt.Println("Anime names:")
+	for rows.Next() {
+		var name string
+		err := rows.Scan(&name)
+		if err != nil {
+			return err
+		}
+		fmt.Println(name)
+	}
+=======
   if err != nil{
     return nil, err
   }
+>>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
 
+<<<<<<< HEAD
+||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
+	return nil
+}
+
+func initializeDB() (*sql.DB, error){
+  currentUser, err := user.Current()
+	if err != nil {
+		return nil, err
+	}
+  
+  dirPath := currentUser.HomeDir + "/.local/goanime"
+    
+  err = os.MkdirAll(dirPath, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+  db, err := sql.Open("sqlite3", dirPath+"/anime.db")
+=======
   defer rows.Close()
 
   var animeNames []string
@@ -91,23 +176,56 @@ func initializeDB() (*sql.DB, error){
 	}
 
   db, err := sql.Open("sqlite3", dirPath+"/anime.db")
+>>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
   if err != nil{
     return nil, err
   }
 
-  createTableSQL := `
+  defer rows.Close()
+
+  var animeNames []string
+  for rows.Next(){
+    var name string
+    err := rows.Scan(&name)
+    if err != nil{
+      return nil, err
+    }
+    animeNames = append(animeNames, name)
+  }
+  return animeNames, nil
+}
+
+func initializeDB() (*sql.DB, error) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return nil, err
+	}
+
+	dirPath := filepath.Join(currentUser.HomeDir, ".local", "goanime")
+
+	err = os.MkdirAll(dirPath, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", filepath.Join(dirPath, "anime.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	createTableSQL := `
     CREATE TABLE IF NOT EXISTS anime(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE
   );
   `
 
-  _, err = db.Exec(createTableSQL)
-  if err != nil{
-    return db, nil
-  }
+	_, err = db.Exec(createTableSQL)
+	if err != nil {
+		return db, nil
+	}
 
-  return db, nil
+	return db, nil
 }
 
 func addAnimeNamesToDB(db *sql.DB, animeNames []string) error {
@@ -131,39 +249,34 @@ func extractVideoURL(url string) (string, error) {
 		return "", err
 	}
 	defer response.Body.Close()
-	// Check the response status code
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("request failed with status: %s", response.Status)
-	}
 
 	// Convert the response body to a string
-  doc, _ := goquery.NewDocumentFromReader(response.Body)
+	doc, _ := goquery.NewDocumentFromReader(response.Body)
 
-  videoElements := doc.Find("video")
+	videoElements := doc.Find("video")
 
-  if videoElements.Length() > 0{
-    oldDataVideo, _ := videoElements.Attr("data-video-src")
-    return oldDataVideo, nil
-  }else{
-    videoElements = doc.Find("div")
-    if videoElements.Length() > 0{
-      oldDataVideo, _ := videoElements.Attr("data-video-src")
-      return oldDataVideo, nil
-    }
-  }
-  
+	if videoElements.Length() > 0 {
+		oldDataVideo, _ := videoElements.Attr("data-video-src")
+		return oldDataVideo, nil
+	} else {
+		videoElements = doc.Find("div")
+		if videoElements.Length() > 0 {
+			oldDataVideo, _ := videoElements.Attr("data-video-src")
+			return oldDataVideo, nil
+		}
+	}
+
 	return "", nil
 }
 
-func extractActualVideoURL(videoSrc string) (string,error) {
-  fmt.Println(videoSrc)
-  response, err := http.Get(videoSrc)
+func extractActualVideoURL(videoSrc string) (string, error) {
+	fmt.Println(videoSrc)
+	response, err := http.Get(videoSrc)
 	if err != nil {
 		return "", err
 	}
 	defer response.Body.Close()
 
-  
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
@@ -182,7 +295,7 @@ func extractActualVideoURL(videoSrc string) (string,error) {
 	if len(videoResponse.Data) == 0 {
 		return "", fmt.Errorf("no video data found")
 	}
-  
+
 	return videoResponse.Data[0].Src, nil
 }
 
@@ -201,7 +314,7 @@ func PlayVideo(videoURL string) {
 	}
 }
 
-func selectEpisode(episodes []Episode) string {
+func selectEpisode(episodes []Episode) (string, string) {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}",
 		Active:   "▶ {{ .Number | cyan }}",
@@ -221,11 +334,11 @@ func selectEpisode(episodes []Episode) string {
 		os.Exit(1)
 	}
 
-	return episodes[index].Url
+	return episodes[index].URL, episodes[index].Number
 }
 
-func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
-	resp, err := http.Get(animeUrl)
+func getAnimeEpisodes(animeURL string) ([]Episode, error) {
+	resp, err := http.Get(animeURL)
 
 	if err != nil {
 		log.Fatalf("Failed to get anime details: %v\n", err)
@@ -249,13 +362,24 @@ func getAnimeEpisodes(animeUrl string) ([]Episode, error) {
 
 		episode := Episode{
 			Number: episodeNum,
-			Url:    episodeURL,
+			URL:    episodeURL,
 		}
 		episodes = append(episodes, episode)
 	})
 	return episodes, nil
 }
 
+<<<<<<< HEAD
+func selectAnime(db *sql.DB, animes []Anime) int {
+
+	animesName := make([]string, 0)
+	for i := range animes {
+		animesName = append(animesName, animes[i].Name)
+	}
+	addAnimeNamesToDB(db, animesName)
+
+	templates := &promptui.SelectTemplates{
+||||||| edc6f87
 func selectAnime(db *sql.DB,animes []Anime) int {
   animesName := make([]string, 0)
   for i := range(animes){
@@ -264,6 +388,16 @@ func selectAnime(db *sql.DB,animes []Anime) int {
   addAnimeNamesToDB(db, animesName)
 	
   templates := &promptui.SelectTemplates{
+=======
+func selectAnime(db *sql.DB,animes []Anime) int {
+  animesName := make([]string, 0)
+  for i := range(animes){
+    animesName = append(animesName, animes[i].Name) 
+  }
+  addAnimeNamesToDB(db, animesName)
+	
+  templates := &promptui.SelectTemplates{
+>>>>>>> alvarorichard-main
 		Label:    "{{ . }}",
 		Active:   "▶ {{ .Name | cyan }}",
 		Inactive: "  {{ .Name | white }}",
@@ -275,8 +409,7 @@ func selectAnime(db *sql.DB,animes []Anime) int {
 		Items:     animes,
 		Templates: templates,
 	}
-  
-  
+
 	index, _, err := prompt.Run()
 
 	if err != nil {
@@ -287,8 +420,8 @@ func selectAnime(db *sql.DB,animes []Anime) int {
 	return index
 }
 
-func searchAnime(db *sql.DB,animeName string) (string, error) {
-	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteUrl, animeName)
+func searchAnime(db *sql.DB, animeName string) (string, error) {
+	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
 
 	for {
 		response, err := http.Get(currentPageURL)
@@ -305,14 +438,14 @@ func searchAnime(db *sql.DB,animeName string) (string, error) {
 			log.Fatalf("Failed to parse response: %v\n", err)
 			os.Exit(1)
 		}
-    
+
 		animes := make([]Anime, 0)
 		doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 			anime := Anime{
 				Name: strings.TrimSpace(s.Text()),
-				Url:  s.AttrOr("href", ""),
+				URL:  s.AttrOr("href", ""),
 			}
-      animeName = strings.TrimSpace(s.Text())
+			animeName = strings.TrimSpace(s.Text())
 
 			animes = append(animes, anime)
 		})
@@ -321,7 +454,7 @@ func searchAnime(db *sql.DB,animeName string) (string, error) {
 			index := selectAnime(db, animes)
 			selectedAnime := animes[index]
 
-			return selectedAnime.Url, nil
+			return selectedAnime.URL, nil
 		}
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
@@ -330,10 +463,10 @@ func searchAnime(db *sql.DB,animeName string) (string, error) {
 			os.Exit(1)
 		}
 
-		currentPageURL = baseSiteUrl + nextPage
-    if err != nil{
-      log.Fatalf("Failed to add anime names to the database: %v", err)
-    }
+		currentPageURL = baseSiteURL + nextPage
+		if err != nil {
+			log.Fatalf("Failed to add anime names to the database: %v", err)
+		}
 	}
 }
 
@@ -351,48 +484,202 @@ func getUserInput(label string, db *sql.DB) string {
 	result, err := prompt.Run()
 
 	if err != nil {
-		log.Fatalf("Error acquiring user input: %v\n", err)
+		log.Fatalf("Error acquiring user input: %v", err)
 		os.Exit(1)
 	}
 
 	return result
 }
 
+func askForDownload() bool {
+	prompt := promptui.Select{
+		Label: "Do you want to download the episode",
+		Items: []string{"Yes", "No"},
+	}
+
+	_, result, err := prompt.Run()
+
+	if err != nil {
+		log.Fatalf("Error acquiring user input: %v", err)
+		os.Exit(1)
+	}
+
+	return strings.ToLower(result) == "yes"
+}
+
+func askForPlayOffline() bool {
+	prompt := promptui.Select{
+		Label: "Do you want to play the downloaded version offline",
+		Items: []string{"Yes", "No"},
+	}
+
+	_, result, err := prompt.Run()
+
+	if err != nil {
+		log.Fatalf("Error acquiring user input: %v", err)
+		os.Exit(1)
+	}
+
+	return strings.ToLower(result) == "yes"
+}
+
+func DownloadVideo(url string, destPath string) error {
+	client := grab.NewClient()
+	req, _ := grab.NewRequest(destPath, url)
+	resp := client.Do(req)
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.Tick(time.Millisecond * 100):
+				fmt.Printf("Download progress: %.2f%%\n", resp.Progress()*100)
+			}
+		}
+	}()
+
+	err := resp.Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
-  db, err := initializeDB()
-  if err != nil{
-    log.Fatal(err)
-  }
+	db, err := initializeDB()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-  defer db.Close()
+	defer db.Close()
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+	animeName := getUserInput("Enter anime name")
+	animeURL, err := searchAnime(db, treatingAnimeName(animeName))
+
+||||||| edc6f87
+	animeName := getUserInput("Enter anime name")
+||||||| parent of 3e8580c ([Feat]: Improved interlacement of code)
+	animeName := getUserInput("Enter anime name")
+=======
+	animeName := getUserInput("Enter anime name", db)
+>>>>>>> 3e8580c ([Feat]: Improved interlacement of code)
+	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
+  
+=======
 	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db,treatingAnimeName(animeName))
   
+>>>>>>> alvarorichard-main
 	if err != nil {
 		log.Fatalf("Failed to get anime episodes: %v", err)
 		os.Exit(1)
 	}
-  
+
 	episodes, err := getAnimeEpisodes(animeURL)
 
 	if err != nil || len(episodes) <= 0 {
 		log.Fatalln("Failed to fetch episodes from selected anime")
 		os.Exit(1)
 	}
-  
-	selectedEpisodeURL := selectEpisode(episodes)
-	videoURL,err := extractVideoURL(selectedEpisodeURL)
-	
-  if err != nil {
+
+	selectedEpisodeURL, episodeNumber := selectEpisode(episodes)
+
+	videoURL, err := extractVideoURL(selectedEpisodeURL)
+
+	if err != nil {
 		log.Fatalf("Failed to extract video URL: %v", err)
 	}
-  
-  videoURL, err = extractActualVideoURL(videoURL)
 
-  if err != nil {
-    log.Fatal("Failed to extract the api")
-  }
+	videoURL, err = extractActualVideoURL(videoURL)
 
-  PlayVideo(videoURL)
+	if err != nil {
+		log.Fatal("Failed to extract the api")
+	}
+
+	downloadAll := false
+	if askForDownload() {
+		templates := &promptui.SelectTemplates{
+			Label:    "{{ . }}",
+			Active:   "▶ {{ . }}",
+			Inactive: "  {{ . }}",
+			Selected: "▶ {{ . }}",
+		}
+
+		prompt := promptui.Select{
+			Label:     "Download option",
+			Items:     []string{"Download All Episodes", "Download Selected Episode"},
+			Templates: templates,
+		}
+
+		_, result, err := prompt.Run()
+		if err != nil {
+			log.Fatalf("Error acquiring user input: %v", err)
+		}
+
+		switch result {
+		case "Download All Episodes":
+			downloadAll = true
+		case "Download Selected Episode":
+			// Do nothing, proceed with the selected episode download
+		}
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("Failed to get current user: %v", err)
+	}
+
+	downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
+
+	if downloadAll {
+		for _, episode := range episodes {
+			videoURL, err = extractVideoURL(episode.URL)
+
+			if err != nil {
+				log.Fatalf("Failed to extract video URL: %v", err)
+			}
+
+			videoURL, err = extractActualVideoURL(videoURL)
+
+			if err != nil {
+				log.Fatal("Failed to extract the api")
+			}
+
+			episodePath := filepath.Join(downloadPath, episode.Number+".mp4")
+			err = DownloadVideo(videoURL, episodePath)
+
+			if err != nil {
+				log.Fatalf("Failed to download video: %v", err)
+			}
+
+			fmt.Printf("Episode %s downloaded successfully!\n", episode.Number)
+		}
+	} else {
+		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
+		err = DownloadVideo(videoURL, episodePath)
+
+		if err != nil {
+			log.Fatalf("Failed to download video: %v", err)
+		}
+
+		fmt.Println("Video downloaded successfully!")
+	}
+
+	if askForPlayOffline() {
+		var playPath string
+		if downloadAll {
+			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
+		} else {
+			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
+		}
+
+		PlayVideo(playPath)
+	}
 }
