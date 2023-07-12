@@ -132,29 +132,28 @@ func extractVideoURL(url string) (string, error) {
   videoElements := doc.Find("video")
 
   if videoElements.Length() > 0{
-    oldDataVideo, exists := videoElements.Attr("data-video-src")
-    if exists != false{
-      videoElements = doc.Find("div")
-      DataVideo, exists := videoElements.Attr("data-video-src")
-      if exists != false{
-        fmt.Println("Não encontramos o vídeo")
-      }else{
-        return DataVideo, nil
-      }
-    }
+    oldDataVideo, _ := videoElements.Attr("data-video-src")
     return oldDataVideo, nil
+  }else{
+    videoElements = doc.Find("div")
+    if videoElements.Length() > 0{
+      oldDataVideo, _ := videoElements.Attr("data-video-src")
+      return oldDataVideo, nil
+    }
   }
   
 	return "", nil
 }
 
 func extractActualVideoURL(videoSrc string) (string,error) {
+  fmt.Println(videoSrc)
   response, err := http.Get(videoSrc)
 	if err != nil {
 		return "", err
 	}
 	defer response.Body.Close()
 
+  
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
@@ -173,11 +172,11 @@ func extractActualVideoURL(videoSrc string) (string,error) {
 	if len(videoResponse.Data) == 0 {
 		return "", fmt.Errorf("no video data found")
 	}
-
+  
 	return videoResponse.Data[0].Src, nil
 }
 
-func PlayVideoVLC(videoURL string) {
+func PlayVideo(videoURL string) {
 	cmd := exec.Command("vlc", "-vvv", videoURL)
 	err := cmd.Start()
 
@@ -381,6 +380,10 @@ func main() {
 	}
   
   videoURL, err = extractActualVideoURL(videoURL)
-  
-  PlayVideoVLC(videoURL)
+
+  if err != nil {
+    log.Fatal("Failed to extract the api")
+  }
+
+  PlayVideo(videoURL)
 }
