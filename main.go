@@ -10,15 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/manifoldco/promptui"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/cavaliergopher/grab/v3"
-	
-
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/manifoldco/promptui"
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -73,14 +72,14 @@ func initializeDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	dirPath := currentUser.HomeDir + "/.local/goanime"
+	dirPath := filepath.Join(currentUser.HomeDir, ".local", "goanime")
 
 	err = os.MkdirAll(dirPath, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", dirPath+"/anime.db")
+	db, err := sql.Open("sqlite3", filepath.Join(dirPath, "anime.db"))
 	if err != nil {
 		return nil, err
 	}
@@ -375,8 +374,6 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-
-
 func DownloadVideo(url string, destPath string) error {
 	client := grab.NewClient()
 	req, _ := grab.NewRequest(destPath, url)
@@ -403,8 +400,6 @@ func DownloadVideo(url string, destPath string) error {
 
 	return nil
 }
-
-
 
 func main() {
 	db, err := initializeDB()
@@ -443,25 +438,83 @@ func main() {
 		log.Fatal("Failed to extract the api")
 	}
 
+	downloadAll := false
 	if askForDownload() {
-		currentUser, err := user.Current()
-		if err != nil {
-			log.Fatalf("Failed to get current user: %v", err)
+		templates := &promptui.SelectTemplates{
+			Label:    "{{ . }}",
+			Active:   "▶ {{ . }}",
+			Inactive: "  {{ . }}",
+			Selected: "▶ {{ . }}",
 		}
 
-		downloadPath := currentUser.HomeDir + "/Downloads/" + treatingAnimeName(animeName) + "_" + episodeNumber + ".mp4"
-		err = DownloadVideo(videoURL, downloadPath)
+		prompt := promptui.Select{
+			Label:     "Download option",
+			Items:     []string{"Download All Episodes", "Download Selected Episode"},
+			Templates: templates,
+		}
+
+		_, result, err := prompt.Run()
+		if err != nil {
+			log.Fatalf("Error acquiring user input: %v", err)
+		}
+
+		switch result {
+		case "Download All Episodes":
+			downloadAll = true
+		case "Download Selected Episode":
+			// Do nothing, proceed with the selected episode download
+		}
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatalf("Failed to get current user: %v", err)
+	}
+
+	downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
+
+	if downloadAll {
+		for _, episode := range episodes {
+			videoURL, err = extractVideoURL(episode.URL)
+
+			if err != nil {
+				log.Fatalf("Failed to extract video URL: %v", err)
+			}
+
+			videoURL, err = extractActualVideoURL(videoURL)
+
+			if err != nil {
+				log.Fatal("Failed to extract the api")
+			}
+
+			episodePath := filepath.Join(downloadPath, episode.Number+".mp4")
+			err = DownloadVideo(videoURL, episodePath)
+
+			if err != nil {
+				log.Fatalf("Failed to download video: %v", err)
+			}
+
+			fmt.Printf("Episode %s downloaded successfully!\n", episode.Number)
+		}
+	} else {
+		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
+		err = DownloadVideo(videoURL, episodePath)
 
 		if err != nil {
 			log.Fatalf("Failed to download video: %v", err)
 		}
 
 		fmt.Println("Video downloaded successfully!")
+	}
 
-		if askForPlayOffline() {
-			PlayVideo(downloadPath)
+	if askForPlayOffline() {
+		var playPath string
+		if downloadAll {
+			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
+		} else {
+			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
 		}
-	} else {
-		PlayVideo(videoURL)
+
+		PlayVideo(playPath)
 	}
 }
