@@ -11,6 +11,7 @@ import (
   "os/user"
 	"os/exec"
 	"strings"
+  "regexp"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/manifoldco/promptui"
@@ -41,6 +42,14 @@ type VideoResponse struct {
 type VideoData struct {
 	Src   string `json:"src"`
 	Label string `json:"label"`
+}
+
+func databaseFormatter(str string) string {
+	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
+	result := regex.ReplaceAllString(str, "")
+	result = strings.TrimSpace(result)
+  result = strings.ToLower(result)
+	return result
 }
 
 func listAnimeNamesFromDB(db *sql.DB) error {
@@ -106,7 +115,7 @@ func addAnimeNamesToDB(db *sql.DB, animeNames []string) error {
 	`
 
 	for _, name := range animeNames {
-		_, err := db.Exec(insertSQL, name)
+		_, err := db.Exec(insertSQL, databaseFormatter(name))
 		if err != nil {
 			return err
 		}
