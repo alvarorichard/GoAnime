@@ -88,7 +88,7 @@ func initializeDB() (*sql.DB, error){
   createTableSQL := `
     CREATE TABLE IF NOT EXISTS anime(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT
+    name TEXT UNIQUE
   );
   `
 
@@ -102,7 +102,7 @@ func initializeDB() (*sql.DB, error){
 
 func addAnimeNamesToDB(db *sql.DB, animeNames []string) error {
 	insertSQL := `
-		INSERT INTO anime (name) VALUES (?)
+		INSERT OR IGNORE INTO anime (name) VALUES (?)
 	`
 
 	for _, name := range animeNames {
