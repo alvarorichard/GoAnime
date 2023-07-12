@@ -11,11 +11,12 @@ GoAnime is a simple command-line interface (CLI) built in Go that allows users t
 
 * Go (at latest version)
 *  VLC Media Player
+* Sqlite3
 
 ## Dependencies
 * PuerkitoBio/goquery
 * manifoldco/promptui
-
+* mattn/go-sqlite3
 ## how to install and run
 
 ```shell
@@ -39,5 +40,11 @@ The program will then present a list of episodes for the selected anime. Again, 
 
 The selected episode will then play in VLC media player.
 
+## Working in progress
+
+- Fuzzy Search in GoAnime:
+    - [x] First Step: Save all animes listed in search 
+    - [x] Second Step: Fixing VLC bug in media show
+    - [x] Third Step: Working in a fuzzy search
 # Thanks 
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
