@@ -10,6 +10,7 @@ require (
 
 require (
 	github.com/VividCortex/ewma v1.2.0 // indirect
+	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/cavaliercoder/grab v3.0.1+incompatible // indirect
 	github.com/cavaliergopher/grab/v3 v3.0.1 // indirect
@@ -20,7 +21,9 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/vbauerster/mpb/v5 v5.4.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.6.0 // indirect
+	gopkg.in/cheggaaa/pb.v1 v1.0.28 // indirect
 
 )
