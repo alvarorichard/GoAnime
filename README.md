@@ -47,5 +47,6 @@ The selected episode will then play in VLC media player.
     - [x] First Step: Save all animes listed in search 
     - [x] Second Step: Fixing VLC bug in media show
     - [x] Third Step: Working in a fuzzy search
+    - [x] Fourth Step: Working and improve MultiThread Download
 # Thanks 
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
