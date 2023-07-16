@@ -15,7 +15,7 @@ import (
 	"time"
 	"regexp"
 	"sync"
-	"runtime"
+	//"runtime"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
@@ -386,36 +386,33 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
+
 func DownloadVideo(urls []string, destPath string) error {
 	var wg sync.WaitGroup
 	client := grab.NewClient()
 
-	// Limit the number of active downloads.
-	maxDownloads := runtime.NumCPU()
-	downloadSem := make(chan struct{}, maxDownloads)
-
 	// Create a new progress bar.
-	bar := pb.StartNew(len(urls))
+	bar := pb.Full.Start(len(urls))
 
 	for _, url := range urls {
 		req, _ := grab.NewRequest(destPath, url)
 		resp := client.Do(req)
 
 		wg.Add(1)
-		downloadSem <- struct{}{} // Acquire a token.
-
 		go func(resp *grab.Response) {
 			defer wg.Done()
 
-			ticker := time.NewTicker(500 * time.Millisecond)
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
 
 			for {
 				select {
 				case <-ticker.C:
-					// Update the progress bar.
-					bar.Set(resp.Size(), resp.BytesComplete())
+					// Update the progress bar with the current progress.
+					bar.SetCurrent(resp.BytesComplete())
 				case <-resp.Done:
-					<-downloadSem // Release the token.
+					// Update the progress bar to 100% when the download is complete.
+					bar.SetCurrent(resp.Size())
 					return
 				}
 			}
@@ -423,8 +420,6 @@ func DownloadVideo(urls []string, destPath string) error {
 	}
 
 	wg.Wait()
-
-	// Finish the progress bar.
 	bar.Finish()
 
 	return nil
