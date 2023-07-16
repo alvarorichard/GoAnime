@@ -13,12 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-  "regexp"
+	"regexp"
+	"sync"
+	"runtime"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/manifoldco/promptui"
+	"github.com/cheggaaa/pb/v3"
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -47,7 +50,7 @@ func databaseFormatter(str string) string {
 	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
 	result := regex.ReplaceAllString(str, "")
 	result = strings.TrimSpace(result)
-  result = strings.ToLower(result)
+	result = strings.ToLower(result)
 	return result
 }
 
@@ -75,9 +78,8 @@ func listAnimeNamesFromDB(db *sql.DB) error {
 	return nil
 }
 
-
-func initializeDB() (*sql.DB, error){
-  currentUser, err := user.Current()
+func initializeDB() (*sql.DB, error) {
+	currentUser, err := user.Current()
 	if err != nil {
 		return nil, err
 	}
@@ -384,29 +386,46 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-func DownloadVideo(url string, destPath string) error {
+func DownloadVideo(urls []string, destPath string) error {
+	var wg sync.WaitGroup
 	client := grab.NewClient()
-	req, _ := grab.NewRequest(destPath, url)
-	resp := client.Do(req)
 
-	done := make(chan struct{})
-	defer close(done)
+	// Limit the number of active downloads.
+	maxDownloads := runtime.NumCPU()
+	downloadSem := make(chan struct{}, maxDownloads)
 
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-time.Tick(time.Millisecond * 100):
-				fmt.Printf("Download progress: %.2f%%\r", resp.Progress()*100)
+	// Create a new progress bar.
+	bar := pb.StartNew(len(urls))
+
+	for _, url := range urls {
+		req, _ := grab.NewRequest(destPath, url)
+		resp := client.Do(req)
+
+		wg.Add(1)
+		downloadSem <- struct{}{} // Acquire a token.
+
+		go func(resp *grab.Response) {
+			defer wg.Done()
+
+			ticker := time.NewTicker(500 * time.Millisecond)
+
+			for {
+				select {
+				case <-ticker.C:
+					// Update the progress bar.
+					bar.Set(resp.Size(), resp.BytesComplete())
+				case <-resp.Done:
+					<-downloadSem // Release the token.
+					return
+				}
 			}
-		}
-	}()
-
-	err := resp.Err()
-	if err != nil {
-		return err
+		}(resp)
 	}
+
+	wg.Wait()
+
+	// Finish the progress bar.
+	bar.Finish()
 
 	return nil
 }
@@ -418,6 +437,8 @@ func main() {
 	}
 
 	defer db.Close()
+
+	// ... restante do código ...
 
 	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db, treatingAnimeName(animeName))
@@ -457,7 +478,7 @@ func main() {
 		downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
 
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-		err = DownloadVideo(videoURL, episodePath)
+		err = DownloadVideo([]string{videoURL}, episodePath)
 
 		if err != nil {
 			log.Fatalf("Failed to download video: %v", err)
