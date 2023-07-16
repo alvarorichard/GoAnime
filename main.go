@@ -448,65 +448,14 @@ func main() {
 		log.Fatal("Failed to extract the api")
 	}
 
-	downloadAll := false
 	if askForDownload() {
-		templates := &promptui.SelectTemplates{
-			Label:    "{{ . }}",
-			Active:   "▶ {{ . }}",
-			Inactive: "  {{ . }}",
-			Selected: "▶ {{ . }}",
-		}
-
-		prompt := promptui.Select{
-			Label:     "Download option",
-			Items:     []string{"Download All Episodes", "Download Selected Episode"},
-			Templates: templates,
-		}
-
-		_, result, err := prompt.Run()
+		currentUser, err := user.Current()
 		if err != nil {
-			log.Fatalf("Error acquiring user input: %v", err)
+			log.Fatalf("Failed to get current user: %v", err)
 		}
 
-		switch result {
-		case "Download All Episodes":
-			downloadAll = true
-		case "Download Selected Episode":
-			// Do nothing, proceed with the selected episode download
-		}
-	}
+		downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
 
-	currentUser, err := user.Current()
-	if err != nil {
-		log.Fatalf("Failed to get current user: %v", err)
-	}
-
-	downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
-
-	if downloadAll {
-		for _, episode := range episodes {
-			videoURL, err = extractVideoURL(episode.URL)
-
-			if err != nil {
-				log.Fatalf("Failed to extract video URL: %v", err)
-			}
-
-			videoURL, err = extractActualVideoURL(videoURL)
-
-			if err != nil {
-				log.Fatal("Failed to extract the api")
-			}
-
-			episodePath := filepath.Join(downloadPath, episode.Number+".mp4")
-			err = DownloadVideo(videoURL, episodePath)
-
-			if err != nil {
-				log.Fatalf("Failed to download video: %v", err)
-			}
-
-			fmt.Printf("Episode %s downloaded successfully!\n", episode.Number)
-		}
-	} else {
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
 		err = DownloadVideo(videoURL, episodePath)
 
@@ -515,16 +464,12 @@ func main() {
 		}
 
 		fmt.Println("Video downloaded successfully!")
-	}
 
-	if askForPlayOffline() {
-		var playPath string
-		if downloadAll {
-			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
-		} else {
-			playPath = filepath.Join(downloadPath, episodeNumber+".mp4")
+		if askForPlayOffline() {
+			playPath := filepath.Join(downloadPath, episodeNumber+".mp4")
+			PlayVideo(playPath)
 		}
-
-		PlayVideo(playPath)
+	} else {
+		PlayVideo(videoURL)
 	}
 }
