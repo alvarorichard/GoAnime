@@ -409,10 +409,10 @@ func DownloadVideo(urls []string, destPath string) error {
 				select {
 				case <-ticker.C:
 					// Update the progress bar with the current progress.
-					bar.SetCurrent(resp.BytesComplete())
+					bar.SetCurrent(resp.BytesComplete() % 100)
 				case <-resp.Done:
 					// Update the progress bar to 100% when the download is complete.
-					bar.SetCurrent(resp.Size())
+					bar.SetCurrent(resp.Size() % 100)
 					return
 				}
 			}
@@ -470,16 +470,19 @@ func main() {
 			log.Fatalf("Failed to get current user: %v", err)
 		}
 
-		downloadPath := filepath.Join(currentUser.HomeDir, "Downloads", treatingAnimeName(animeName))
-
+		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", databaseFormatter(animeURL))
+    
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-		err = DownloadVideo([]string{videoURL}, episodePath)
-
-		if err != nil {
-			log.Fatalf("Failed to download video: %v", err)
-		}
-
-		fmt.Println("Video downloaded successfully!")
+    
+    _, err = os.Stat(episodePath)
+    
+    if os.IsNotExist(err){
+      err = DownloadVideo([]string{videoURL}, episodePath)
+		  if err != nil {
+			  log.Fatalf("Failed to download video: %v", err)
+		  }
+		  fmt.Println("Video downloaded successfully!")
+    }
 
 		if askForPlayOffline() {
 			playPath := filepath.Join(downloadPath, episodeNumber+".mp4")
