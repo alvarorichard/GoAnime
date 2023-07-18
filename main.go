@@ -54,6 +54,16 @@ func databaseFormatter(str string) string {
 	return result
 }
 
+func DownloadFolderFormatter(str string) string {
+  regex := regexp.MustCompile(`https:\/\/animefire\.net\/video\/([^\/?]+)`)
+	match := regex.FindStringSubmatch(str)
+	if len(match) > 1 {
+		finalStep := match[1]
+    return finalStep
+  }
+  return ""
+}
+
 func listAnimeNamesFromDB(db *sql.DB) error {
 	query := `
 		SELECT name FROM anime
@@ -409,10 +419,10 @@ func DownloadVideo(urls []string, destPath string) error {
 				select {
 				case <-ticker.C:
 					// Update the progress bar with the current progress.
-					bar.SetCurrent(resp.BytesComplete() % 100)
+					bar.SetCurrent(resp.Size() - resp.BytesComplete())
 				case <-resp.Done:
 					// Update the progress bar to 100% when the download is complete.
-					bar.SetCurrent(resp.Size() % 100)
+					bar.SetCurrent((resp.Size() - resp.BytesComplete()) / 1000000)
 					return
 				}
 			}
@@ -469,9 +479,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get current user: %v", err)
 		}
-
-		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", databaseFormatter(animeURL))
-    
+      
+		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", DownloadFolderFormatter(animeURL))
+      
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
     
     _, err = os.Stat(episodePath)
