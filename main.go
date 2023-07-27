@@ -15,7 +15,6 @@ import (
 	"time"
 	"regexp"
 	"sync"
-	//"runtime"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
