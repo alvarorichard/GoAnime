@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -15,14 +16,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"bytes"
-
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -224,14 +223,13 @@ func selectWithFZF(items []string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-
 func selectAnimeFZF(animes []Anime) string {
 	animeNames := make([]string, len(animes))
 	for i, anime := range animes {
 		animeNames[i] = anime.Name
 	}
 
-	selectedAnime, err := selectWithFZF(animeNames)  // <-- Changed this line
+	selectedAnime, err := selectWithFZF(animeNames) // <-- Changed this line
 	if err != nil {
 		log.Fatalf("Failed to select anime with FZF: %v", err)
 	}
@@ -371,7 +369,6 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 	return episodes, nil
 }
 
-
 func selectEpisode(episodes []Episode) (string, string) {
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ . }}",
@@ -394,7 +391,6 @@ func selectEpisode(episodes []Episode) (string, string) {
 
 	return episodes[index].URL, episodes[index].Number
 }
-
 
 func DownloadVideo(urls []string, destPath string) error {
 	var wg sync.WaitGroup
@@ -437,7 +433,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	 
 	defer db.Close()
 
 	animeName := getUserInput("Enter anime name", db)
