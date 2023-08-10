@@ -11,16 +11,18 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strings"
-	"time"
 	"regexp"
+	"strings"
 	"sync"
+	"time"
+	"bytes"
+
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cavaliergopher/grab/v3"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/manifoldco/promptui"
 	"github.com/cheggaaa/pb/v3"
+	"github.com/manifoldco/promptui"
 )
 
 const baseSiteURL string = "https://animefire.net"
@@ -54,13 +56,13 @@ func databaseFormatter(str string) string {
 }
 
 func DownloadFolderFormatter(str string) string {
-  regex := regexp.MustCompile(`https:\/\/animefire\.net\/video\/([^\/?]+)`)
+	regex := regexp.MustCompile(`https:\/\/animefire\.net\/video\/([^\/?]+)`)
 	match := regex.FindStringSubmatch(str)
 	if len(match) > 1 {
 		finalStep := match[1]
-    return finalStep
-  }
-  return ""
+		return finalStep
+	}
+	return ""
 }
 
 func listAnimeNamesFromDB(db *sql.DB) error {
@@ -142,7 +144,6 @@ func extractVideoURL(url string) (string, error) {
 	}
 	defer response.Body.Close()
 
-	// Convert the response body to a string
 	doc, _ := goquery.NewDocumentFromReader(response.Body)
 
 	videoElements := doc.Find("video")
@@ -206,90 +207,36 @@ func PlayVideo(videoURL string) {
 	}
 }
 
-func selectEpisode(episodes []Episode) (string, string) {
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}",
-		Active:   "▶ {{ .Number | cyan }}",
-		Inactive: "  {{ .Number | white }}",
-		Selected: "▶ {{ .Number | cyan | underline }}",
-	}
+func selectWithFZF(items []string) (string, error) {
+	cmd := exec.Command("fzf")
+	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
 
-	prompt := promptui.Select{
-		Label:     "Select the episode",
-		Items:     episodes,
-		Templates: templates,
-	}
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 
-	index, _, err := prompt.Run()
+	err := cmd.Run()
 	if err != nil {
-		log.Fatalf("Failed to select episode: %v", err)
-		os.Exit(1)
+		return "", fmt.Errorf("Failed to select item with FZF: %v. Stderr: %s", err, stderr.String())
 	}
 
-	return episodes[index].URL, episodes[index].Number
+	return strings.TrimSpace(out.String()), nil
 }
 
-func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-	resp, err := http.Get(animeURL)
 
+func selectAnimeFZF(animes []Anime) string {
+	animeNames := make([]string, len(animes))
+	for i, anime := range animes {
+		animeNames[i] = anime.Name
+	}
+
+	selectedAnime, err := selectWithFZF(animeNames)  // <-- Changed this line
 	if err != nil {
-		log.Fatalf("Failed to get anime details: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		log.Fatalf("Failed to parse anime details: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to select anime with FZF: %v", err)
 	}
 
-	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
-
-	episodes := make([]Episode, 0)
-
-	episodeContainer.Each(func(i int, s *goquery.Selection) {
-		episodeNum := s.Text()
-		episodeURL, _ := s.Attr("href")
-
-		episode := Episode{
-			Number: episodeNum,
-			URL:    episodeURL,
-		}
-		episodes = append(episodes, episode)
-	})
-	return episodes, nil
-}
-
-func selectAnime(db *sql.DB, animes []Anime) int {
-
-	animesName := make([]string, 0)
-	for i := range animes {
-		animesName = append(animesName, animes[i].Name)
-	}
-	addAnimeNamesToDB(db, animesName)
-
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}",
-		Active:   "▶ {{ .Name | cyan }}",
-		Inactive: "  {{ .Name | white }}",
-		Selected: "▶ {{ .Name | cyan | underline }}",
-	}
-
-	prompt := promptui.Select{
-		Label:     "Select the anime",
-		Items:     animes,
-		Templates: templates,
-	}
-
-	index, _, err := prompt.Run()
-
-	if err != nil {
-		log.Fatalf("Failed to select anime: %v\n", err)
-		os.Exit(1)
-	}
-
-	return index
+	return selectedAnime
 }
 
 func searchAnime(db *sql.DB, animeName string) (string, error) {
@@ -323,10 +270,12 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 		})
 
 		if len(animes) > 0 {
-			index := selectAnime(db, animes)
-			selectedAnime := animes[index]
-
-			return selectedAnime.URL, nil
+			selectedAnimeName := selectAnimeFZF(animes)
+			for _, anime := range animes {
+				if anime.Name == selectedAnimeName {
+					return anime.URL, nil
+				}
+			}
 		}
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
@@ -394,13 +343,63 @@ func askForPlayOffline() bool {
 
 	return strings.ToLower(result) == "yes"
 }
+func getAnimeEpisodes(animeURL string) ([]Episode, error) {
+	resp, err := http.Get(animeURL)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get anime details: %v", err)
+	}
+	defer resp.Body.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse anime details: %v", err)
+	}
+
+	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
+
+	var episodes []Episode
+	episodeContainer.Each(func(i int, s *goquery.Selection) {
+		episodeNum := s.Text()
+		episodeURL, _ := s.Attr("href")
+
+		episode := Episode{
+			Number: episodeNum,
+			URL:    episodeURL,
+		}
+		episodes = append(episodes, episode)
+	})
+	return episodes, nil
+}
+
+
+func selectEpisode(episodes []Episode) (string, string) {
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}",
+		Active:   "▶ {{ .Number | cyan }}",
+		Inactive: "  {{ .Number | white }}",
+		Selected: "▶ {{ .Number | cyan | underline }}",
+	}
+
+	prompt := promptui.Select{
+		Label:     "Select the episode",
+		Items:     episodes,
+		Templates: templates,
+	}
+
+	index, _, err := prompt.Run()
+	if err != nil {
+		log.Fatalf("Failed to select episode: %v", err)
+		os.Exit(1)
+	}
+
+	return episodes[index].URL, episodes[index].Number
+}
 
 
 func DownloadVideo(urls []string, destPath string) error {
 	var wg sync.WaitGroup
 	client := grab.NewClient()
 
-	// Create a new progress bar.
 	bar := pb.Full.Start(len(urls))
 
 	for _, url := range urls {
@@ -417,10 +416,8 @@ func DownloadVideo(urls []string, destPath string) error {
 			for {
 				select {
 				case <-ticker.C:
-					// Update the progress bar with the current progress.
 					bar.SetCurrent(resp.Size() - resp.BytesComplete())
 				case <-resp.Done:
-					// Update the progress bar to 100% when the download is complete.
 					bar.SetCurrent((resp.Size() - resp.BytesComplete()) / 1000000)
 					return
 				}
@@ -440,9 +437,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	 
 	defer db.Close()
-
-	// ... restante do código ...
 
 	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db, treatingAnimeName(animeName))
@@ -478,20 +474,20 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get current user: %v", err)
 		}
-      
+
 		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", DownloadFolderFormatter(animeURL))
-      
+
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-    
-    _, err = os.Stat(episodePath)
-    
-    if os.IsNotExist(err){
-      err = DownloadVideo([]string{videoURL}, episodePath)
-		  if err != nil {
-			  log.Fatalf("Failed to download video: %v", err)
-		  }
-		  fmt.Println("Video downloaded successfully!")
-    }
+
+		_, err = os.Stat(episodePath)
+
+		if os.IsNotExist(err) {
+			err = DownloadVideo([]string{videoURL}, episodePath)
+			if err != nil {
+				log.Fatalf("Failed to download video: %v", err)
+			}
+			fmt.Println("Video downloaded successfully!")
+		}
 
 		if askForPlayOffline() {
 			playPath := filepath.Join(downloadPath, episodeNumber+".mp4")
