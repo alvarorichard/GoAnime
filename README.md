@@ -46,7 +46,28 @@ Fedora:
 sudo dnf install fzf
 ```
 
+# Windows 
+```shell
+winget install fzf
+```
+or 
+```shell
+choco install fzf
+```
+or
+```shell
+scoop install fzf
+```
 
+Rember add vlc to path
+
+use this command to add vlc to path
+```shell
+set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
+```
+or follow this tutorial for add vlc to path 
+
+[How to add vlc to path](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
 
 
 
