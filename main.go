@@ -24,7 +24,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const baseSiteURL string = "https://animefire.net"
+const baseSiteURL string = "https://animefire.vip/"
 
 type Episode struct {
 	Number string
