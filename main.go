@@ -24,7 +24,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const baseSiteURL string = "https://animefire.vip/"
+const baseSiteURL string = "https://animefire.plus/"
 
 type Episode struct {
 	Number string
@@ -55,7 +55,7 @@ func databaseFormatter(str string) string {
 }
 
 func DownloadFolderFormatter(str string) string {
-	regex := regexp.MustCompile(`https:\/\/animefire\.net\/video\/([^\/?]+)`)
+	regex := regexp.MustCompile(`https:\/\/animefire\.plus\/video\/([^\/?]+)`)
 	match := regex.FindStringSubmatch(str)
 	if len(match) > 1 {
 		finalStep := match[1]
