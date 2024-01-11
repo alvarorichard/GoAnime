@@ -46,6 +46,11 @@ Fedora:
 sudo dnf install fzf
 ```
 
+macOS:
+```shell
+brew install fzf
+```
+
 # Windows 
 ```shell
 winget install fzf
