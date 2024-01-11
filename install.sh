@@ -10,7 +10,7 @@ function compile(){
   fi
   GOOS=$GOOS GOARCH=$GOARCH go build main.go
 }
-
+# add bin to path macOS only
 function install_macos(){
   mv main /usr/local/bin/goanime
   ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
