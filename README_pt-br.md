@@ -72,7 +72,7 @@ scoop install fzf
 
 Lembre-se de adicionar o vlc ao caminho
 
-Use o comando para adicionar o vlc a path
+Use o comando para adicionar o vlc a path:
 ```shell
 set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
 ```
