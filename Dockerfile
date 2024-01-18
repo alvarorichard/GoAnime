@@ -9,7 +9,7 @@ RUN apt-get update && \
 RUN add-apt-repository ppa:longsleep/golang-backports
 
 # Update and install Golang and other essentials
-RUN apt-get update && apt-get install -y golang-go vlc
+RUN apt-get update && apt-get install -y golang-go vlc fzf
 
 # Install fzf
 RUN git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf && \
