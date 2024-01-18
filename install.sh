@@ -1,10 +1,24 @@
 #!/bin/bash
 
-# Assuming the Go binary is in /usr/local/go/bin
-GO_PATH="/usr/local/go/bin/go"
+# Find the full path of the Go executable
+GO_PATH=$(which go)
 
+# Check if Go is installed
+if [ -z "$GO_PATH" ]; then
+    echo "Go is not installed or not in the PATH"
+    exit 1
+fi
+
+# Get GOOS and GOARCH
 GOOS=$($GO_PATH env GOOS)
 GOARCH=$($GO_PATH env GOARCH)
+
+# Determine the installation directory
+if [ -w /usr/local/bin ]; then
+    INSTALL_DIR="/usr/local/bin"
+else
+    INSTALL_DIR="/usr/bin"
+fi
 
 if [ "$(uname)" == "Darwin" ]; then
     GOOS=darwin
@@ -12,7 +26,7 @@ if [ "$(uname)" == "Darwin" ]; then
 fi
 
 function compile(){
-  # Using the full path for the Go executable
+  # Use the full path for the Go executable
   GOOS=$GOOS GOARCH=$GOARCH $GO_PATH build main.go
 }
 
