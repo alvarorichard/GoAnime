@@ -396,33 +396,34 @@ func DownloadVideo(urls []string, destPath string) error {
 	var wg sync.WaitGroup
 	client := grab.NewClient()
 
-	bar := pb.Full.Start(len(urls))
-
 	for _, url := range urls {
 		req, _ := grab.NewRequest(destPath, url)
 		resp := client.Do(req)
 
-		wg.Add(1)
-		go func(resp *grab.Response) {
-			defer wg.Done()
+		// Crie uma nova barra de progresso para cada download.
+		bar := pb.Full.Start64(resp.Size())
+		bar.Set("prefix", fmt.Sprintf("Downloading %s: ", filepath.Base(req.URL().Path)))
 
-			ticker := time.NewTicker(100 * time.Millisecond)
+		wg.Add(1)
+		go func(resp *grab.Response, bar *pb.ProgressBar) {
+			defer wg.Done()
+			defer bar.Finish() // Finalize a barra ao completar este download.
+
+			ticker := time.NewTicker(500 * time.Millisecond)
 			defer ticker.Stop()
 
 			for {
 				select {
 				case <-ticker.C:
-					bar.SetCurrent(resp.Size() - resp.BytesComplete())
+					bar.SetCurrent(resp.BytesComplete())
 				case <-resp.Done:
-					bar.SetCurrent((resp.Size() - resp.BytesComplete()) / 1000000)
 					return
 				}
 			}
-		}(resp)
+		}(resp, bar) // Passe a barra como argumento para a goroutine.
 	}
 
 	wg.Wait()
-	bar.Finish()
 
 	return nil
 }
