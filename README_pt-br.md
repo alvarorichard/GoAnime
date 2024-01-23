@@ -6,8 +6,10 @@
 </h4>
 
 <p align="center">
-  <img src="https://i.imgur.com/rgkp8OS.png" alt="Imagem logo" />
+  <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="Imagem logo" />
 </p>
+
+[![GitHub license](https://img.shields.io/github/license/alvarorichard/GoAnime)](alvarorichard/GoAnime/blob/master/LICENSE) ![GitHub stars](https://img.shields.io/github/stars/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/languages/count/alvarorichard/ZennityLang) ![GitHub stars](https://img.shields.io/github/languages/top/alvarorichard/GoAnime)  ![GitHub stars](https://img.shields.io/github/last-commit/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/forks/alvarorichard/GoAnime?style=social)
 
 # GoAnime
 GoAnime é uma interface de linha de comando (CLI) simples construída em Go que permite aos usuários pesquisar um anime e reproduzir episódios diretamente no VLC. Ele raspa dados do site para fornecer uma seleção de anime e episódios ao usuário.
