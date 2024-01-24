@@ -1,4 +1,4 @@
-module goanime
+module github.com/fnxln/GoAnime
 
 go 1.20
 
