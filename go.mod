@@ -1,5 +1,4 @@
-module github.com/alvarorichard/GoAnime
-
+module github.com/alvarorichard/Goanime
 go 1.20
 
 require (
