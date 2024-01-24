@@ -27,7 +27,12 @@ GoAnime é uma interface de linha de comando (CLI) simples construída em Go que
 * cavaliergopher/grab/v3
 * fzf
 
-## como instalar e executar
+### Instalação Universal (Só precisa do go instalado)
+```shell
+go install github.com/alvarorichard/GoAnime@latest
+```
+
+## Métodos de instalação manual
 
 ```shell
 git clone https://github.com/alvarorichard/GoAnime.git
@@ -71,6 +76,27 @@ ou
 ```shell
 scoop install fzf
 ```
+## Instalação somente para Windows
+
+Para instalar o GoAnime no Windows usando o script PowerShell install.ps1, siga estes passos:
+
+1. Abra o PowerShell como Administrador
+2.Habilite a Execução de Scripts no PowerShell (se ainda não estiver habilitada):
+
+No PowerShell, execute o seguinte comando para permitir a execução de scripts:
+
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+3. Execute o Script de Instalação:
+
+Execute o script install.ps1:
+
+```powershell
+.\install.ps1
+```
+
+
 
 Lembre-se de adicionar o vlc ao caminho
 
@@ -82,10 +108,16 @@ ou siga este tutorial para adicionar o vlc a path
 
 [Como adicionar o VLC ao PATH](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
 
-## Como usar
+## Uso no Linux e macOS
 
 ```shell
 go-anime
+```
+
+## Uso no Windows
+
+```go
+goanime
 ```
 
 O programa solicitará que você insira o nome de um anime. Digite o nome do anime que deseja assistir.
