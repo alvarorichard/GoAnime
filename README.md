@@ -66,7 +66,7 @@ macOS:
 brew install fzf
 ```
 
-# Windows 
+### Windows 
 ```shell
 winget install fzf
 ```
@@ -78,6 +78,36 @@ or
 ```shell
 scoop install fzf
 ```
+
+# Windows install only
+To install GoAnime on Windows using the `install.ps1` PowerShell script, follow these steps:
+
+1. Open PowerShell as Administrator
+
+2.Enable PowerShell Script Execution (if not already enabled):
+
+
+In the PowerShell window, execute the following command to allow the execution of scripts:
+
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+3. Run the Install Script:
+
+Execute the `install.ps1` script:
+
+```powershell
+.\install.ps1
+```
+
+
+
+
+
+
+
+
 
 Rember add vlc to path
 
@@ -91,10 +121,18 @@ or follow this tutorial for add vlc to path
 
 
 
-## Usage
+### Usage in Linux and macOS
 ```go
 go-anime
 ```
+
+### Usage in Windows
+
+```go
+goanime
+```
+
+
 
 The program will prompt you to input the name of an anime. Enter the name of the anime you wish to watch.
 
