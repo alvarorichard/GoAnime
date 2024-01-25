@@ -13,7 +13,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 'latest' # Set the Go version to the latest stable version.
+          go-version: '1.21.6' # Set the Go version to the latest stable version.
 
       - name: Check out code
         uses: actions/checkout@v3
