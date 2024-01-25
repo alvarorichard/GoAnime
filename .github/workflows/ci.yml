@@ -20,7 +20,7 @@ jobs:
 
       - name: Install fzf
         run: |
-          wget -O fzf.tar.gz "https://github.com/junegunn/fzf-bin/releases/latest/download/fzf-linux_amd64.tgz"
+         wget -O fzf.tar.gz "https://github.com/junegunn/fzf/releases/download/0.46.0/fzf-0.46.0-linux_amd64.tar.gz"
           tar -xzf fzf.tar.gz
           chmod +x fzf
           sudo mv fzf /usr/local/bin/
