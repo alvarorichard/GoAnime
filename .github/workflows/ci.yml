@@ -1,30 +1,24 @@
-name: GoAnime Build
+name: GoAnime CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        runs-on: [ubuntu-latest]
-    runs-on: ${{ matrix.runs-on }}
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      -
-
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 'latest'
+          go-version: 'latest' # Set the Go version to the latest stable version.
 
-      - name: Download fzf
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Install fzf
         run: |
           wget -O fzf.tar.gz "https://github.com/junegunn/fzf-bin/releases/latest/download/fzf-linux_amd64.tgz"
           tar -xzf fzf.tar.gz
@@ -36,9 +30,10 @@ jobs:
           sudo apt update
           sudo apt install -y vlc
 
-      - name: Build goanime
-        run: |
-          go build -o goanime
-          ./goanime   # Example to check if the application runs
+      - name: Get dependencies
+        run: go get -v -t -d ./...
 
-      # Additional steps for testing or deployment can be added here.
+      - name: Run tests
+        run: go test -v ./...
+
+      # Add additional steps if needed
