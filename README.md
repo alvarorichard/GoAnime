@@ -14,7 +14,7 @@
 
 
 # GoAnime 
-GoAnime is a simple command-line interface (CLI) built in Go that allows users to search for an anime and play episodes directly in VLC. It scrapes data from the website  provide a selection of anime and episodes to the user.
+GoAnime is a simple command-line interface (CLI) built in Go that allows users to search for an anime and play episodes directly in VLC. It scrapes data from  website to provide a selection of anime and episodes to the user, with a special focus and objective on offering animes that are both subtitled and dubbed in Portuguese.
 
 ## Prerequisites
 
