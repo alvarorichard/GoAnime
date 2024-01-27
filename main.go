@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	//"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 const baseSiteURL string = "https://animefire.plus/"
@@ -206,35 +207,54 @@ func PlayVideo(videoURL string) {
 	}
 }
 
-func selectWithFZF(items []string) (string, error) {
-	cmd := exec.Command("fzf")
-	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
+// func selectWithFZF(items []string) (string, error) {
+// 	cmd := exec.Command("go-fuzzyfinder")
+// 	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
 
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
+// 	var out bytes.Buffer
+// 	var stderr bytes.Buffer
+// 	cmd.Stdout = &out
+// 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+// 	err := cmd.Run()
+// 	if err != nil {
+// 		return "", fmt.Errorf("Failed to select item with FZF: %v. Stderr: %s", err, stderr.String())
+// 	}
+
+// 	return strings.TrimSpace(out.String()), nil
+// }
+
+func selectWithGoFuzzyFinder(items []string) (string, error) {
+	idx, err := fuzzyfinder.Find(
+		items,
+		func(i int) string {
+			return items[i]
+		},
+	)
 	if err != nil {
-		return "", fmt.Errorf("Failed to select item with FZF: %v. Stderr: %s", err, stderr.String())
+		return "", fmt.Errorf("Failed to select item with go-fuzzyfinder: %v", err)
 	}
 
-	return strings.TrimSpace(out.String()), nil
+	return items[idx], nil
 }
 
-func selectAnimeFZF(animes []Anime) string {
+func selectAnimeWithGoFuzzyFinder(animes []Anime) string {
 	animeNames := make([]string, len(animes))
 	for i, anime := range animes {
 		animeNames[i] = anime.Name
 	}
 
-	selectedAnime, err := selectWithFZF(animeNames) // <-- Changed this line
+	idx, err := fuzzyfinder.Find(
+		animeNames,
+		func(i int) string {
+			return animeNames[i]
+		},
+	)
 	if err != nil {
-		log.Fatalf("Failed to select anime with FZF: %v", err)
+		log.Fatalf("Failed to select anime with go-fuzzyfinder: %v", err)
 	}
 
-	return selectedAnime
+	return animes[idx].Name
 }
 
 func searchAnime(db *sql.DB, animeName string) (string, error) {
@@ -268,7 +288,7 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 		})
 
 		if len(animes) > 0 {
-			selectedAnimeName := selectAnimeFZF(animes)
+			selectedAnimeName := selectAnimeWithGoFuzzyFinder(animes)
 			for _, anime := range animes {
 				if anime.Name == selectedAnimeName {
 					return anime.URL, nil
