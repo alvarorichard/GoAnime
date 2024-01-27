@@ -608,7 +608,7 @@ func main() {
 		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 			os.MkdirAll(downloadPath, os.ModePerm)
 		}
-	
+	      // teste
 		_, err = os.Stat(episodePath)
 		if os.IsNotExist(err) {
 			numThreads := 4 // Set the number of threads for downloading
