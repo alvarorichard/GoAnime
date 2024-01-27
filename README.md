@@ -27,7 +27,7 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 * manifoldco/promptui
 * mattn/go-sqlite3
 * cavaliergopher/grab/v3
-* fzf 
+
 ## how to install and run
 
 ### Universal install (Only needs go installed  
@@ -41,43 +41,13 @@ git clone https://github.com/alvarorichard/GoAnime.git
 ```
 ```shell
 cd GoAnime
+```
+```shell
 sudo bash install.sh
 ```
 to install fzf in debian,ArchLinux or Fedora
 
-debian :
-```shell
-sudo apt install fzf
-```
-ArchLinux :
 
-```shell
-sudo pacman -S fzf
-```
-
-Fedora: 
-
-```shell
-sudo dnf install fzf
-```
-
-macOS:
-```shell
-brew install fzf
-```
-
-### Windows 
-```shell
-winget install fzf
-```
-or 
-```shell
-choco install fzf
-```
-or
-```shell
-scoop install fzf
-```
 
 # Windows install only
 To install GoAnime on Windows using the `install.ps1` PowerShell script, follow these steps:
