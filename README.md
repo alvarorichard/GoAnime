@@ -27,6 +27,7 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 * manifoldco/promptui
 * mattn/go-sqlite3
 * cavaliergopher/grab/v3
+* ktr0731/go-fuzzyfinder
 
 ## how to install and run
 
@@ -45,7 +46,7 @@ cd GoAnime
 ```shell
 sudo bash install.sh
 ```
-to install fzf in debian,ArchLinux or Fedora
+
 
 
 
