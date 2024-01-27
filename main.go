@@ -15,11 +15,13 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
+	//"time"
+	"io"
+	"strconv"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/cavaliergopher/grab/v3"
-	"github.com/cheggaaa/pb/v3"
+	//"github.com/cavaliergopher/grab/v3"
+	//"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -412,41 +414,135 @@ func selectEpisode(episodes []Episode) (string, string) {
 	return episodes[index].URL, episodes[index].Number
 }
 
-func DownloadVideo(urls []string, destPath string) error {
-	var wg sync.WaitGroup
-	client := grab.NewClient()
+// func DownloadVideo(urls []string, destPath string) error {
+// 	var wg sync.WaitGroup
+// 	client := grab.NewClient()
 
-	for _, url := range urls {
-		req, _ := grab.NewRequest(destPath, url)
-		resp := client.Do(req)
+// 	for _, url := range urls {
+// 		req, _ := grab.NewRequest(destPath, url)
+// 		resp := client.Do(req)
 
-		// Crie uma nova barra de progresso para cada download.
-		bar := pb.Full.Start64(resp.Size())
-		bar.Set("prefix", fmt.Sprintf("Downloading %s: ", filepath.Base(req.URL().Path)))
+// 		// Crie uma nova barra de progresso para cada download.
+// 		bar := pb.Full.Start64(resp.Size())
+// 		bar.Set("prefix", fmt.Sprintf("Downloading %s: ", filepath.Base(req.URL().Path)))
 
-		wg.Add(1)
-		go func(resp *grab.Response, bar *pb.ProgressBar) {
-			defer wg.Done()
-			defer bar.Finish() // Finalize a barra ao completar este download.
+// 		wg.Add(1)
+// 		go func(resp *grab.Response, bar *pb.ProgressBar) {
+// 			defer wg.Done()
+// 			defer bar.Finish() // Finalize a barra ao completar este download.
 
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
+// 			ticker := time.NewTicker(500 * time.Millisecond)
+// 			defer ticker.Stop()
 
-			for {
-				select {
-				case <-ticker.C:
-					bar.SetCurrent(resp.BytesComplete())
-				case <-resp.Done:
-					return
-				}
-			}
-		}(resp, bar) // Passe a barra como argumento para a goroutine.
-	}
+// 			for {
+// 				select {
+// 				case <-ticker.C:
+// 					bar.SetCurrent(resp.BytesComplete())
+// 				case <-resp.Done:
+// 					return
+// 				}
+// 			}
+// 		}(resp, bar) // Passe a barra como argumento para a goroutine.
+// 	}
 
-	wg.Wait()
+// 	wg.Wait()
 
-	return nil
+// 	return nil
+// }
+
+func DownloadVideo(url string, destPath string, numThreads int) error {
+    // Get the size of the file
+    resp, err := http.Head(url)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    // Check if server supports partial content
+
+if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+	return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
 }
+
+contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+if err != nil {
+	return err
+}
+
+// Calculate size of each chunk
+chunkSize := contentLength / numThreads
+    var wg sync.WaitGroup
+
+    for i := 0; i < numThreads; i++ {
+        from := i * chunkSize
+        to := from + chunkSize - 1
+        if i == numThreads-1 {
+            to = contentLength - 1
+        }
+
+        wg.Add(1)
+        go func(from, to, part int) {
+            defer wg.Done()
+
+            req, err := http.NewRequest("GET", url, nil)
+            if err != nil {
+                log.Printf("Thread %d: error creating request: %v\n", part, err)
+                return
+            }
+            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+            req.Header.Add("Range", rangeHeader)
+
+            client := &http.Client{}
+            resp, err := client.Do(req)
+            if err != nil {
+                log.Printf("Thread %d: error on request: %v\n", part, err)
+                return
+            }
+            defer resp.Body.Close()
+
+            partFilePath := fmt.Sprintf("%s.part%d", destPath, part)
+            file, err := os.Create(partFilePath)
+            if err != nil {
+                log.Printf("Thread %d: error creating file: %v\n", part, err)
+                return
+            }
+            defer file.Close()
+
+            _, err = io.Copy(file, resp.Body)
+            if err != nil {
+                log.Printf("Thread %d: error writing to file: %v\n", part, err)
+            }
+        }(from, to, i)
+    }
+
+    wg.Wait()
+
+    // Combine the file parts
+    outFile, err := os.Create(destPath)
+    if err != nil {
+        return err
+    }
+    defer outFile.Close()
+
+    for i := 0; i < numThreads; i++ {
+        partFilePath := fmt.Sprintf("%s.part%d", destPath, i)
+        partFile, err := os.Open(partFilePath)
+        if err != nil {
+            return err
+        }
+
+        _, err = io.Copy(outFile, partFile)
+        partFile.Close()
+        os.Remove(partFilePath) // Clean up part file
+
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+
 
 func main() {
 	db, err := initializeDB()
@@ -504,26 +600,29 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get current user: %v", err)
 		}
-
-		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", DownloadFolderFormatter(animeURL))
-
+	
+		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-
+	
+		// Create download directory if it doesn't exist
+		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+			os.MkdirAll(downloadPath, os.ModePerm)
+		}
+	
 		_, err = os.Stat(episodePath)
-
 		if os.IsNotExist(err) {
-			err = DownloadVideo([]string{videoURL}, episodePath)
+			numThreads := 4 // Set the number of threads for downloading
+			err = DownloadVideo(videoURL, episodePath, numThreads)
 			if err != nil {
 				log.Fatalf("Failed to download video: %v", err)
 			}
 			fmt.Println("Video downloaded successfully!")
 		}
-
+	
 		if askForPlayOffline() {
-			playPath := filepath.Join(downloadPath, episodeNumber+".mp4")
-			PlayVideo(playPath)
+			PlayVideo(episodePath)
 		}
-	} else {
+	}else {
 		PlayVideo(videoURL)
 	}
 }
