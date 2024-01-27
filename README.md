@@ -30,7 +30,7 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 
 ## how to install and run
 
-### Universal install (Only needs go installed  
+### Universal install (Only needs go installed and recommended for most users)  
 ```shell
 go install github.com/alvarorichard/Goanime@latest
 ```
