@@ -21,7 +21,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	//"github.com/cavaliergopher/grab/v3"
-	//"github.com/cheggaaa/pb/v3"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/manifoldco/promptui"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -458,20 +458,30 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
     }
     defer resp.Body.Close()
 
-    // Check if server supports partial content
+    // Check if the server supports partial content
+    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+        return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
+    }
 
-if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-	return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
-}
+    // Get the content length from the header
+    contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+    if err != nil {
+        return err
+    }
 
-contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-if err != nil {
-	return err
-}
-
-// Calculate size of each chunk
-chunkSize := contentLength / numThreads
+    // Calculate size of each chunk
+    chunkSize := contentLength / numThreads
     var wg sync.WaitGroup
+
+    // Create progress bars
+    bars := make([]*pb.ProgressBar, numThreads)
+    for i := range bars {
+        bars[i] = pb.Full.Start64(int64(chunkSize))
+    }
+    pool, err := pb.StartPool(bars...)
+    if err != nil {
+        return err
+    }
 
     for i := 0; i < numThreads; i++ {
         from := i * chunkSize
@@ -481,7 +491,7 @@ chunkSize := contentLength / numThreads
         }
 
         wg.Add(1)
-        go func(from, to, part int) {
+        go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
 
             req, err := http.NewRequest("GET", url, nil)
@@ -508,14 +518,31 @@ chunkSize := contentLength / numThreads
             }
             defer file.Close()
 
-            _, err = io.Copy(file, resp.Body)
-            if err != nil {
-                log.Printf("Thread %d: error writing to file: %v\n", part, err)
+            buf := make([]byte, 1024) // Buffer for copying
+            for {
+                n, err := resp.Body.Read(buf)
+                if n > 0 {
+                    _, writeErr := file.Write(buf[:n])
+                    if writeErr != nil {
+                        log.Printf("Thread %d: error writing to file: %v\n", part, writeErr)
+                        return
+                    }
+                    bar.Add(n)
+                }
+                if err == io.EOF {
+                    break
+                }
+                if err != nil {
+                    log.Printf("Thread %d: error reading response body: %v\n", part, err)
+                    return
+                }
             }
-        }(from, to, i)
+            bar.Finish()
+        }(from, to, i, bars[i])
     }
 
     wg.Wait()
+    pool.Stop()
 
     // Combine the file parts
     outFile, err := os.Create(destPath)
@@ -542,6 +569,7 @@ chunkSize := contentLength / numThreads
 
     return nil
 }
+
 
 
 func main() {
