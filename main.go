@@ -1,6 +1,7 @@
 package main
 
 import (
+	//"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -11,20 +12,22 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strings"
-	"time"
 	"regexp"
+	"strings"
 	"sync"
-	//"runtime"
+	//"time"
+	"io"
+	"strconv"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/cavaliergopher/grab/v3"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/manifoldco/promptui"
+	//"github.com/cavaliergopher/grab/v3"
 	"github.com/cheggaaa/pb/v3"
+	"github.com/manifoldco/promptui"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
-const baseSiteURL string = "https://animefire.net"
+const baseSiteURL string = "https://animefire.plus/"
 
 type Episode struct {
 	Number string
@@ -55,13 +58,13 @@ func databaseFormatter(str string) string {
 }
 
 func DownloadFolderFormatter(str string) string {
-  regex := regexp.MustCompile(`https:\/\/animefire\.net\/video\/([^\/?]+)`)
+	regex := regexp.MustCompile(`https:\/\/animefire\.plus\/video\/([^\/?]+)`)
 	match := regex.FindStringSubmatch(str)
 	if len(match) > 1 {
 		finalStep := match[1]
-    return finalStep
-  }
-  return ""
+		return finalStep
+	}
+	return ""
 }
 
 func listAnimeNamesFromDB(db *sql.DB) error {
@@ -143,7 +146,6 @@ func extractVideoURL(url string) (string, error) {
 	}
 	defer response.Body.Close()
 
-	// Convert the response body to a string
 	doc, _ := goquery.NewDocumentFromReader(response.Body)
 
 	videoElements := doc.Find("video")
@@ -207,90 +209,54 @@ func PlayVideo(videoURL string) {
 	}
 }
 
-func selectEpisode(episodes []Episode) (string, string) {
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}",
-		Active:   "▶ {{ .Number | cyan }}",
-		Inactive: "  {{ .Number | white }}",
-		Selected: "▶ {{ .Number | cyan | underline }}",
-	}
+// func selectWithFZF(items []string) (string, error) {
+// 	cmd := exec.Command("go-fuzzyfinder")
+// 	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
 
-	prompt := promptui.Select{
-		Label:     "Select the episode",
-		Items:     episodes,
-		Templates: templates,
-	}
+// 	var out bytes.Buffer
+// 	var stderr bytes.Buffer
+// 	cmd.Stdout = &out
+// 	cmd.Stderr = &stderr
 
-	index, _, err := prompt.Run()
+// 	err := cmd.Run()
+// 	if err != nil {
+// 		return "", fmt.Errorf("Failed to select item with FZF: %v. Stderr: %s", err, stderr.String())
+// 	}
+
+// 	return strings.TrimSpace(out.String()), nil
+// }
+
+func selectWithGoFuzzyFinder(items []string) (string, error) {
+	idx, err := fuzzyfinder.Find(
+		items,
+		func(i int) string {
+			return items[i]
+		},
+	)
 	if err != nil {
-		log.Fatalf("Failed to select episode: %v", err)
-		os.Exit(1)
+		return "", fmt.Errorf("Failed to select item with go-fuzzyfinder: %v", err)
 	}
 
-	return episodes[index].URL, episodes[index].Number
+	return items[idx], nil
 }
 
-func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-	resp, err := http.Get(animeURL)
+func selectAnimeWithGoFuzzyFinder(animes []Anime) string {
+	animeNames := make([]string, len(animes))
+	for i, anime := range animes {
+		animeNames[i] = anime.Name
+	}
 
+	idx, err := fuzzyfinder.Find(
+		animeNames,
+		func(i int) string {
+			return animeNames[i]
+		},
+	)
 	if err != nil {
-		log.Fatalf("Failed to get anime details: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		log.Fatalf("Failed to parse anime details: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to select anime with go-fuzzyfinder: %v", err)
 	}
 
-	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
-
-	episodes := make([]Episode, 0)
-
-	episodeContainer.Each(func(i int, s *goquery.Selection) {
-		episodeNum := s.Text()
-		episodeURL, _ := s.Attr("href")
-
-		episode := Episode{
-			Number: episodeNum,
-			URL:    episodeURL,
-		}
-		episodes = append(episodes, episode)
-	})
-	return episodes, nil
-}
-
-func selectAnime(db *sql.DB, animes []Anime) int {
-
-	animesName := make([]string, 0)
-	for i := range animes {
-		animesName = append(animesName, animes[i].Name)
-	}
-	addAnimeNamesToDB(db, animesName)
-
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}",
-		Active:   "▶ {{ .Name | cyan }}",
-		Inactive: "  {{ .Name | white }}",
-		Selected: "▶ {{ .Name | cyan | underline }}",
-	}
-
-	prompt := promptui.Select{
-		Label:     "Select the anime",
-		Items:     animes,
-		Templates: templates,
-	}
-
-	index, _, err := prompt.Run()
-
-	if err != nil {
-		log.Fatalf("Failed to select anime: %v\n", err)
-		os.Exit(1)
-	}
-
-	return index
+	return animes[idx].Name
 }
 
 func searchAnime(db *sql.DB, animeName string) (string, error) {
@@ -324,10 +290,12 @@ func searchAnime(db *sql.DB, animeName string) (string, error) {
 		})
 
 		if len(animes) > 0 {
-			index := selectAnime(db, animes)
-			selectedAnime := animes[index]
-
-			return selectedAnime.URL, nil
+			selectedAnimeName := selectAnimeWithGoFuzzyFinder(animes)
+			for _, anime := range animes {
+				if anime.Name == selectedAnimeName {
+					return anime.URL, nil
+				}
+			}
 		}
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
@@ -395,45 +363,214 @@ func askForPlayOffline() bool {
 
 	return strings.ToLower(result) == "yes"
 }
+func getAnimeEpisodes(animeURL string) ([]Episode, error) {
+	resp, err := http.Get(animeURL)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get anime details: %v", err)
+	}
+	defer resp.Body.Close()
 
-
-func DownloadVideo(urls []string, destPath string) error {
-	var wg sync.WaitGroup
-	client := grab.NewClient()
-
-	// Create a new progress bar.
-	bar := pb.Full.Start(len(urls))
-
-	for _, url := range urls {
-		req, _ := grab.NewRequest(destPath, url)
-		resp := client.Do(req)
-
-		wg.Add(1)
-		go func(resp *grab.Response) {
-			defer wg.Done()
-
-			ticker := time.NewTicker(100 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					// Update the progress bar with the current progress.
-					bar.SetCurrent(resp.Size() - resp.BytesComplete())
-				case <-resp.Done:
-					// Update the progress bar to 100% when the download is complete.
-					bar.SetCurrent((resp.Size() - resp.BytesComplete()) / 1000000)
-					return
-				}
-			}
-		}(resp)
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse anime details: %v", err)
 	}
 
-	wg.Wait()
-	bar.Finish()
+	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
 
-	return nil
+	var episodes []Episode
+	episodeContainer.Each(func(i int, s *goquery.Selection) {
+		episodeNum := s.Text()
+		episodeURL, _ := s.Attr("href")
+
+		episode := Episode{
+			Number: episodeNum,
+			URL:    episodeURL,
+		}
+		episodes = append(episodes, episode)
+	})
+	return episodes, nil
 }
+
+func selectEpisode(episodes []Episode) (string, string) {
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}",
+		Active:   "▶ {{ .Number | cyan }}",
+		Inactive: "  {{ .Number | white }}",
+		Selected: "▶ {{ .Number | cyan | underline }}",
+	}
+
+	prompt := promptui.Select{
+		Label:     "Select the episode",
+		Items:     episodes,
+		Templates: templates,
+	}
+
+	index, _, err := prompt.Run()
+	if err != nil {
+		log.Fatalf("Failed to select episode: %v", err)
+		os.Exit(1)
+	}
+
+	return episodes[index].URL, episodes[index].Number
+}
+
+// func DownloadVideo(urls []string, destPath string) error {
+// 	var wg sync.WaitGroup
+// 	client := grab.NewClient()
+
+// 	for _, url := range urls {
+// 		req, _ := grab.NewRequest(destPath, url)
+// 		resp := client.Do(req)
+
+// 		// Crie uma nova barra de progresso para cada download.
+// 		bar := pb.Full.Start64(resp.Size())
+// 		bar.Set("prefix", fmt.Sprintf("Downloading %s: ", filepath.Base(req.URL().Path)))
+
+// 		wg.Add(1)
+// 		go func(resp *grab.Response, bar *pb.ProgressBar) {
+// 			defer wg.Done()
+// 			defer bar.Finish() // Finalize a barra ao completar este download.
+
+// 			ticker := time.NewTicker(500 * time.Millisecond)
+// 			defer ticker.Stop()
+
+// 			for {
+// 				select {
+// 				case <-ticker.C:
+// 					bar.SetCurrent(resp.BytesComplete())
+// 				case <-resp.Done:
+// 					return
+// 				}
+// 			}
+// 		}(resp, bar) // Passe a barra como argumento para a goroutine.
+// 	}
+
+// 	wg.Wait()
+
+// 	return nil
+// }
+
+func DownloadVideo(url string, destPath string, numThreads int) error {
+    // Get the size of the file
+    resp, err := http.Head(url)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    // Check if the server supports partial content
+    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+        return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
+    }
+
+    // Get the content length from the header
+    contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+    if err != nil {
+        return err
+    }
+
+    // Calculate size of each chunk
+    chunkSize := contentLength / numThreads
+    var wg sync.WaitGroup
+
+    // Create progress bars
+    bars := make([]*pb.ProgressBar, numThreads)
+    for i := range bars {
+        bars[i] = pb.Full.Start64(int64(chunkSize))
+    }
+    pool, err := pb.StartPool(bars...)
+    if err != nil {
+        return err
+    }
+
+    for i := 0; i < numThreads; i++ {
+        from := i * chunkSize
+        to := from + chunkSize - 1
+        if i == numThreads-1 {
+            to = contentLength - 1
+        }
+
+        wg.Add(1)
+        go func(from, to, part int, bar *pb.ProgressBar) {
+            defer wg.Done()
+
+            req, err := http.NewRequest("GET", url, nil)
+            if err != nil {
+                log.Printf("Thread %d: error creating request: %v\n", part, err)
+                return
+            }
+            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+            req.Header.Add("Range", rangeHeader)
+
+            client := &http.Client{}
+            resp, err := client.Do(req)
+            if err != nil {
+                log.Printf("Thread %d: error on request: %v\n", part, err)
+                return
+            }
+            defer resp.Body.Close()
+
+            partFilePath := fmt.Sprintf("%s.part%d", destPath, part)
+            file, err := os.Create(partFilePath)
+            if err != nil {
+                log.Printf("Thread %d: error creating file: %v\n", part, err)
+                return
+            }
+            defer file.Close()
+
+            buf := make([]byte, 1024) // Buffer for copying
+            for {
+                n, err := resp.Body.Read(buf)
+                if n > 0 {
+                    _, writeErr := file.Write(buf[:n])
+                    if writeErr != nil {
+                        log.Printf("Thread %d: error writing to file: %v\n", part, writeErr)
+                        return
+                    }
+                    bar.Add(n)
+                }
+                if err == io.EOF {
+                    break
+                }
+                if err != nil {
+                    log.Printf("Thread %d: error reading response body: %v\n", part, err)
+                    return
+                }
+            }
+            bar.Finish()
+        }(from, to, i, bars[i])
+    }
+
+    wg.Wait()
+    pool.Stop()
+
+    // Combine the file parts
+    outFile, err := os.Create(destPath)
+    if err != nil {
+        return err
+    }
+    defer outFile.Close()
+
+    for i := 0; i < numThreads; i++ {
+        partFilePath := fmt.Sprintf("%s.part%d", destPath, i)
+        partFile, err := os.Open(partFilePath)
+        if err != nil {
+            return err
+        }
+
+        _, err = io.Copy(outFile, partFile)
+        partFile.Close()
+        os.Remove(partFilePath) // Clean up part file
+
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+
+
 
 func main() {
 	db, err := initializeDB()
@@ -443,7 +580,19 @@ func main() {
 
 	defer db.Close()
 
-	// ... restante do código ...
+	cyan := "\033[38;5;50m"
+	reset := "\033[0m"
+
+	fmt.Println(cyan + `
+	$$$$$$\             $$$$$$\             $$\                         
+	$$  __$$\           $$  __$$\           \__|                        
+	$$ /  \__| $$$$$$\  $$ /  $$ |$$$$$$$\  $$\ $$$$$$\$$$$\   $$$$$$\  
+	$$ |$$$$\ $$  __$$\ $$$$$$$$ |$$  __$$\ $$ |$$  _$$  _$$\ $$  __$$\ 
+	$$ |\_$$ |$$ /  $$ |$$  __$$ |$$ |  $$ |$$ |$$ / $$ / $$ |$$$$$$$$ |
+	$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |$$   ____|
+	\$$$$$$  |\$$$$$$  |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |\$$$$$$$\ 
+	 \______/  \______/ \__|  \__|\__|  \__|\__|\__| \__| \__| \_______|
+	` + reset)
 
 	animeName := getUserInput("Enter anime name", db)
 	animeURL, err := searchAnime(db, treatingAnimeName(animeName))
@@ -479,26 +628,29 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to get current user: %v", err)
 		}
-      
-		downloadPath := filepath.Join(currentUser.HomeDir, "/.local/goanime/downloads/anime/", DownloadFolderFormatter(animeURL))
-      
+	
+		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-    
-    _, err = os.Stat(episodePath)
-    
-    if os.IsNotExist(err){
-      err = DownloadVideo([]string{videoURL}, episodePath)
-		  if err != nil {
-			  log.Fatalf("Failed to download video: %v", err)
-		  }
-		  fmt.Println("Video downloaded successfully!")
-    }
-
-		if askForPlayOffline() {
-			playPath := filepath.Join(downloadPath, episodeNumber+".mp4")
-			PlayVideo(playPath)
+	
+		// Create download directory if it doesn't exist
+		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+			os.MkdirAll(downloadPath, os.ModePerm)
 		}
-	} else {
+	      // teste
+		_, err = os.Stat(episodePath)
+		if os.IsNotExist(err) {
+			numThreads := 4 // Set the number of threads for downloading
+			err = DownloadVideo(videoURL, episodePath, numThreads)
+			if err != nil {
+				log.Fatalf("Failed to download video: %v", err)
+			}
+			fmt.Println("Video downloaded successfully!")
+		}
+	
+		if askForPlayOffline() {
+			PlayVideo(episodePath)
+		}
+	}else {
 		PlayVideo(videoURL)
 	}
 }
