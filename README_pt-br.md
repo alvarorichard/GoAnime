@@ -17,12 +17,10 @@ GoAnime é uma interface de linha de comando (CLI) simples, desenvolvida em Go, 
 
 * Go (na versão mais recente)
 * VLC Media Player
-* Sqlite3
 
 ## Dependências
 * PuerkitoBio/goquery
 * manifoldco/promptui
-* mattn/go-sqlite3
 * cavaliergopher/grab/v3
 * ktr0731/go-fuzzyfinder
 
