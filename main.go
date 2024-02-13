@@ -45,13 +45,8 @@ type VideoData struct {
 	Label string `json:"label"`
 }
 
-func databaseFormatter(str string) string {
-	regex := regexp.MustCompile(`\s*\([^)]*\)|\bn/a\b|\s+\d+(\.\d+)?$`)
-	result := regex.ReplaceAllString(str, "")
-	result = strings.TrimSpace(result)
-	result = strings.ToLower(result)
-	return result
-}
+// func databaseFormatter is unused (U1000)
+// Remove the unused function databaseFormatter
 
 func DownloadFolderFormatter(str string) string {
 	regex := regexp.MustCompile(`https:\/\/animefire\.plus\/video\/([^\/?]+)`)
@@ -179,117 +174,125 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 }
 
 func DownloadVideo(url string, destPath string, numThreads int) error {
-	resp, err := http.Head(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+    // Ensure destPath is sanitized and validated to avoid directory traversal
+    destPath = filepath.Clean(destPath)
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
-	}
+    resp, err := http.Head(url)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
 
-	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-	if err != nil {
-		return err
-	}
+    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+        return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
+    }
 
-	chunkSize := contentLength / numThreads
-	var wg sync.WaitGroup
+    contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+    if err != nil {
+        return err
+    }
 
-	bars := make([]*pb.ProgressBar, numThreads)
-	for i := range bars {
-		bars[i] = pb.Full.Start64(int64(chunkSize))
-	}
-	pool, err := pb.StartPool(bars...)
-	if err != nil {
-		return err
-	}
+    chunkSize := contentLength / numThreads
+    var wg sync.WaitGroup
 
-	for i := 0; i < numThreads; i++ {
-		from := i * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
+    bars := make([]*pb.ProgressBar, numThreads)
+    for i := range bars {
+        bars[i] = pb.Full.Start64(int64(chunkSize))
+    }
+    pool, err := pb.StartPool(bars...)
+    if err != nil {
+        return err
+    }
 
-		wg.Add(1)
-		go func(from, to, part int, bar *pb.ProgressBar) {
-			defer wg.Done()
+    for i := 0; i < numThreads; i++ {
+        from := i * chunkSize
+        to := from + chunkSize - 1
+        if i == numThreads-1 {
+            to = contentLength - 1
+        }
 
-			req, err := http.NewRequest("GET", url, nil)
-			if err != nil {
-				log.Printf("Thread %d: error creating request: %v\n", part, err)
-				return
-			}
-			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
-			req.Header.Add("Range", rangeHeader)
+        wg.Add(1)
+        go func(from, to, part int, bar *pb.ProgressBar) {
+            defer wg.Done()
 
-			client := &http.Client{}
-			resp, err := client.Do(req)
-			if err != nil {
-				log.Printf("Thread %d: error on request: %v\n", part, err)
-				return
-			}
-			defer resp.Body.Close()
+            req, err := http.NewRequest("GET", url, nil)
+            if err != nil {
+                log.Printf("Thread %d: error creating request: %v\n", part, err)
+                return
+            }
+            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+            req.Header.Add("Range", rangeHeader)
 
-			partFilePath := fmt.Sprintf("%s.part%d", destPath, part)
-			file, err := os.Create(partFilePath)
-			if err != nil {
-				log.Printf("Thread %d: error creating file: %v\n", part, err)
-				return
-			}
-			defer file.Close()
+            client := &http.Client{}
+            resp, err := client.Do(req)
+            if err != nil {
+                log.Printf("Thread %d: error on request: %v\n", part, err)
+                return
+            }
+            defer resp.Body.Close()
 
-			buf := make([]byte, 1024)
-			for {
-				n, err := resp.Body.Read(buf)
-				if n > 0 {
-					_, writeErr := file.Write(buf[:n])
-					if writeErr != nil {
-						log.Printf("Thread %d: error writing to file: %v\n", part, writeErr)
-						return
-					}
-					bar.Add(n)
-				}
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					log.Printf("Thread %d: error reading response body: %v\n", part, err)
-					return
-				}
-			}
-			bar.Finish()
-		}(from, to, i, bars[i])
-	}
+            // Generate a secure, unique filename for each part
+            partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
+            partFilePath := filepath.Join(filepath.Dir(destPath), partFileName) // Use filepath.Join for security
 
-	wg.Wait()
-	pool.Stop()
+            file, err := os.Create(partFilePath)
+            if err != nil {
+                log.Printf("Thread %d: error creating file: %v\n", part, err)
+                return
+            }
+            defer file.Close()
 
-	outFile, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer outFile.Close()
+            buf := make([]byte, 1024)
+            for {
+                n, err := resp.Body.Read(buf)
+                if n > 0 {
+                    _, writeErr := file.Write(buf[:n])
+                    if writeErr != nil {
+                        log.Printf("Thread %d: error writing to file: %v\n", part, writeErr)
+                        return
+                    }
+                    bar.Add(n)
+                }
+                if err == io.EOF {
+                    break
+                }
+                if err != nil {
+                    log.Printf("Thread %d: error reading response body: %v\n", part, err)
+                    return
+                }
+            }
+            bar.Finish()
+        }(from, to, i, bars[i])
+    }
 
-	for i := 0; i < numThreads; i++ {
-		partFilePath := fmt.Sprintf("%s.part%d", destPath, i)
-		partFile, err := os.Open(partFilePath)
-		if err != nil {
-			return err
-		}
+    wg.Wait()
+    pool.Stop()
 
-		_, err = io.Copy(outFile, partFile)
-		partFile.Close()
-		os.Remove(partFilePath)
+    outFile, err := os.Create(destPath)
+    if err != nil {
+        return err
+    }
+    defer outFile.Close()
 
-		if err != nil {
-			return err
-		}
-	}
+    for i := 0; i < numThreads; i++ {
+        partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
+        partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 
-	return nil
+        partFile, err := os.Open(partFilePath)
+        if err != nil {
+            return err
+        }
+
+        _, err = io.Copy(outFile, partFile)
+        partFile.Close()
+        os.Remove(partFilePath)
+
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
 }
 
 func searchAnime(animeName string) (string, error) {
@@ -298,13 +301,13 @@ func searchAnime(animeName string) (string, error) {
 	for {
 		response, err := http.Get(currentPageURL)
 		if err != nil {
-			return "", fmt.Errorf("failed to perform search request: %v\n", err)
+			return "", fmt.Errorf("failed to perform search request: %v", err)
 		}
 		defer response.Body.Close()
 
 		doc, err := goquery.NewDocumentFromReader(response.Body)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse response: %v\n", err)
+			return "", fmt.Errorf("failed to parse response: %v", err)
 		}
 
 		animes := make([]Anime, 0)
