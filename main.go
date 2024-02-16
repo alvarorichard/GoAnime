@@ -83,46 +83,121 @@ func extractVideoURL(url string) (string, error) {
 	return videoSrc, nil
 }
 
+// func extractActualVideoURL(videoSrc string) (string, error) {
+// 	response, err := http.Get(videoSrc)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to fetch video source: %v", err)
+// 	}
+// 	defer response.Body.Close()
+
+// 	if response.StatusCode != http.StatusOK {
+// 		return "", fmt.Errorf("request failed with status: %s", response.Status)
+// 	}
+
+// 	body, err := ioutil.ReadAll(response.Body)
+// 	if err != nil {
+// 		return "", fmt.Errorf("failed to read response body: %v", err)
+// 	}
+
+// 	var videoResponse VideoResponse
+// 	if err := json.Unmarshal(body, &videoResponse); err != nil {
+// 		return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
+// 	}
+
+// 	if len(videoResponse.Data) == 0 {
+// 		return "", errors.New("no video data found in the response")
+// 	}
+
+// 	return videoResponse.Data[0].Src, nil
+// }
+
+
 func extractActualVideoURL(videoSrc string) (string, error) {
-	response, err := http.Get(videoSrc)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch video source: %v", err)
-	}
-	defer response.Body.Close()
+    response, err := http.Get(videoSrc)
+    if err != nil {
+        return "", fmt.Errorf("failed to fetch video source: %v", err)
+    }
+    defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("request failed with status: %s", response.Status)
-	}
+    if response.StatusCode != http.StatusOK {
+        return "", fmt.Errorf("request failed with status: %s", response.Status)
+    }
 
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %v", err)
-	}
+    body, err := ioutil.ReadAll(response.Body)
+    if err != nil {
+        return "", fmt.Errorf("failed to read response body: %v", err)
+    }
 
-	var videoResponse VideoResponse
-	if err := json.Unmarshal(body, &videoResponse); err != nil {
-		return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
-	}
+    var videoResponse VideoResponse
+    if err := json.Unmarshal(body, &videoResponse); err != nil {
+        return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
+    }
 
-	if len(videoResponse.Data) == 0 {
-		return "", errors.New("no video data found in the response")
-	}
+    if len(videoResponse.Data) == 0 {
+        return "", errors.New("no video data found in the response")
+    }
 
-	return videoResponse.Data[0].Src, nil
+    // Function to compare video quality labels and return the highest quality video URL
+    highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
+    if highestQualityVideoURL == "" {
+        return "", errors.New("no suitable video quality found")
+    }
+
+    return highestQualityVideoURL, nil
 }
 
-func PlayVideo(videoURL string) error {
-	cmd := exec.Command("vlc", "-vvv", videoURL)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start video player: %v", err)
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("failed to play video: %v", err)
-	}
-
-	return nil
+// Assumes that the quality label contains resolution information (e.g., "1080p").
+// This function can be adapted based on the actual format of the quality labels.
+func selectHighestQualityVideo(videos []VideoData) string {
+    var highestQuality string
+    var highestQualityURL string
+    for _, video := range videos {
+        if isHigherQuality(video.Label, highestQuality) {
+            highestQuality = video.Label
+            highestQualityURL = video.Src
+        }
+    }
+    return highestQualityURL
 }
+
+// Compares two quality labels and returns true if the first is of higher quality than the second.
+func isHigherQuality(quality1, quality2 string) bool {
+    // Extract numeric part of the quality labels (assuming format "720p", "1080p", etc.)
+    quality1Value, _ := strconv.Atoi(strings.TrimRight(quality1, "p"))
+    quality2Value, _ := strconv.Atoi(strings.TrimRight(quality2, "p"))
+    return quality1Value > quality2Value
+}
+
+
+// func PlayVideo(videoURL string) error {
+// 	cmd := exec.Command("vlc", "-vvv", videoURL)
+// 	if err := cmd.Start(); err != nil {
+// 		return fmt.Errorf("failed to start video player: %v", err)
+// 	}
+
+// 	if err := cmd.Wait(); err != nil {
+// 		return fmt.Errorf("failed to play video: %v", err)
+// 	}
+
+// 	return nil
+// }
+
+// test this function quality
+
+func PlayVideo(videoURL string, quality string) error {
+    fmt.Printf("Playing video in %s quality...\n", quality)
+    cmd := exec.Command("vlc", "-vvv", videoURL)
+    if err := cmd.Start(); err != nil {
+        return fmt.Errorf("failed to start video player: %v", err)
+    }
+
+    if err := cmd.Wait(); err != nil {
+        return fmt.Errorf("failed to play video: %v", err)
+    }
+
+    return nil
+}
+
 
 func selectWithGoFuzzyFinder(items []string) (string, error) {
 	if len(items) == 0 {
@@ -498,10 +573,12 @@ func main() {
 			fmt.Println("Video downloaded successfully!")
 		}
 
+		//fix this and improve 
+
 		if askForPlayOffline() {
-			PlayVideo(episodePath)
+			PlayVideo(episodePath, "1080p")
 		}
 	} else {
-		PlayVideo(videoURL)
+		PlayVideo(videoURL, "1080p")
 	}
 }
