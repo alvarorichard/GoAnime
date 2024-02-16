@@ -169,34 +169,34 @@ func isHigherQuality(quality1, quality2 string) bool {
 }
 
 
-// func PlayVideo(videoURL string) error {
-// 	cmd := exec.Command("vlc", "-vvv", videoURL)
-// 	if err := cmd.Start(); err != nil {
-// 		return fmt.Errorf("failed to start video player: %v", err)
-// 	}
+func PlayVideo(videoURL string) error {
+	cmd := exec.Command("vlc", "-vvv", videoURL)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start video player: %v", err)
+	}
 
-// 	if err := cmd.Wait(); err != nil {
-// 		return fmt.Errorf("failed to play video: %v", err)
-// 	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("failed to play video: %v", err)
+	}
 
-// 	return nil
-// }
+	return nil
+}
 
 // test this function quality
 
-func PlayVideo(videoURL string, quality string) error {
-    fmt.Printf("Playing video in %s quality...\n", quality)
-    cmd := exec.Command("vlc", "-vvv", videoURL)
-    if err := cmd.Start(); err != nil {
-        return fmt.Errorf("failed to start video player: %v", err)
-    }
+// func PlayVideo(videoURL string, quality string) error {
+//     fmt.Printf("Playing video in %s quality...\n", quality)
+//     cmd := exec.Command("vlc", "-vvv", videoURL)
+//     if err := cmd.Start(); err != nil {
+//         return fmt.Errorf("failed to start video player: %v", err)
+//     }
 
-    if err := cmd.Wait(); err != nil {
-        return fmt.Errorf("failed to play video: %v", err)
-    }
+//     if err := cmd.Wait(); err != nil {
+//         return fmt.Errorf("failed to play video: %v", err)
+//     }
 
-    return nil
-}
+//     return nil
+// }
 
 
 func selectWithGoFuzzyFinder(items []string) (string, error) {
@@ -574,11 +574,10 @@ func main() {
 		}
 
 		//fix this and improve 
-
-		if askForPlayOffline() {
-			PlayVideo(episodePath, "1080p")
+        if askForPlayOffline() {
+			PlayVideo(episodePath)
 		}
 	} else {
-		PlayVideo(videoURL, "1080p")
+		PlayVideo(videoURL)
 	}
 }
