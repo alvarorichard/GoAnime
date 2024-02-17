@@ -83,33 +83,6 @@ func extractVideoURL(url string) (string, error) {
 	return videoSrc, nil
 }
 
-// func extractActualVideoURL(videoSrc string) (string, error) {
-// 	response, err := http.Get(videoSrc)
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to fetch video source: %v", err)
-// 	}
-// 	defer response.Body.Close()
-
-// 	if response.StatusCode != http.StatusOK {
-// 		return "", fmt.Errorf("request failed with status: %s", response.Status)
-// 	}
-
-// 	body, err := ioutil.ReadAll(response.Body)
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to read response body: %v", err)
-// 	}
-
-// 	var videoResponse VideoResponse
-// 	if err := json.Unmarshal(body, &videoResponse); err != nil {
-// 		return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
-// 	}
-
-// 	if len(videoResponse.Data) == 0 {
-// 		return "", errors.New("no video data found in the response")
-// 	}
-
-// 	return videoResponse.Data[0].Src, nil
-// }
 
 
 func extractActualVideoURL(videoSrc string) (string, error) {
@@ -182,21 +155,6 @@ func PlayVideo(videoURL string) error {
 	return nil
 }
 
-// test this function quality
-
-// func PlayVideo(videoURL string, quality string) error {
-//     fmt.Printf("Playing video in %s quality...\n", quality)
-//     cmd := exec.Command("vlc", "-vvv", videoURL)
-//     if err := cmd.Start(); err != nil {
-//         return fmt.Errorf("failed to start video player: %v", err)
-//     }
-
-//     if err := cmd.Wait(); err != nil {
-//         return fmt.Errorf("failed to play video: %v", err)
-//     }
-
-//     return nil
-// }
 
 
 func selectWithGoFuzzyFinder(items []string) (string, error) {
