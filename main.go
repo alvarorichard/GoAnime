@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"bufio"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -142,17 +143,93 @@ func isHigherQuality(quality1, quality2 string) bool {
 }
 
 
-func PlayVideo(videoURL string) error {
-	cmd := exec.Command("vlc", "-vvv", videoURL)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start video player: %v", err)
+// func PlayVideo(videoURL string) error {
+// 	cmd := exec.Command("vlc", "-vvv", videoURL)
+// 	if err := cmd.Start(); err != nil {
+// 		return fmt.Errorf("failed to start video player: %v", err)
+// 	}
+
+// 	if err := cmd.Wait(); err != nil {
+// 		return fmt.Errorf("failed to play video: %v", err)
+// 	}
+
+// 	return nil
+// }
+
+func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("vlc", "-vvv", videoURL)
+		if err := cmd.Start(); err != nil {
+			fmt.Printf("Failed to start video player: %v\n", err)
+			return
+		}
+
+		if err := cmd.Wait(); err != nil {
+			fmt.Printf("Failed to play video: %v\n", err)
+		}
+	}()
+
+	// Command listener for navigating episodes
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+
+	for {
+		char, _, err := reader.ReadRune()
+		if err != nil {
+			fmt.Printf("Failed to read command: %v\n", err)
+			break
+		}
+
+		switch char {
+		case 'n':
+			if currentEpisodeIndex+1 < len(episodes) {
+				currentEpisodeIndex++
+				fmt.Printf("Switching to next episode: %s\n", episodes[currentEpisodeIndex].Number)
+				wg.Wait() // Wait for the current video to stop
+				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				if err != nil {
+					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+					continue
+				}
+				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+			} else {
+				fmt.Println("Already at the last episode.")
+			}
+		case 'p':
+			if currentEpisodeIndex > 0 {
+				currentEpisodeIndex--
+				fmt.Printf("Switching to previous episode: %s\n", episodes[currentEpisodeIndex].Number)
+				wg.Wait() // Wait for the current video to stop
+				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				if err != nil {
+					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+					continue
+				}
+				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+			} else {
+				fmt.Println("Already at the first episode.")
+			}
+		case 'q':
+			fmt.Println("Quitting video playback.")
+			return nil
+		}
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("failed to play video: %v", err)
-	}
-
+	wg.Wait()
 	return nil
+}
+
+func getVideoURLForEpisode(episodeURL string) (string, error) {
+	// Assuming extractVideoURL and extractActualVideoURL functions are defined elsewhere
+	videoURL, err := extractVideoURL(episodeURL)
+	if err != nil {
+		return "", err
+	}
+	return extractActualVideoURL(videoURL)
 }
 
 
@@ -533,9 +610,9 @@ func main() {
 
 		//fix this and improve 
         if askForPlayOffline() {
-			PlayVideo(episodePath)
+			PlayVideo(episodePath, episodes, 0)
 		}
 	} else {
-		PlayVideo(videoURL)
+		PlayVideo(videoURL, episodes, 0)
 	}
 }
