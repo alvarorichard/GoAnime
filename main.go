@@ -17,6 +17,12 @@ import (
 	"strings"
 	"sync"
 	"bufio"
+	"net"
+	"crypto/tls"
+	"time"
+	"context"
+
+	
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -59,8 +65,85 @@ func DownloadFolderFormatter(str string) string {
 	return ""
 }
 
+func IsDisallowedIP(hostIP string) bool {
+	ip := net.ParseIP(hostIP)
+	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()
+}
+
+func SafeTransport(timeout time.Duration) *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := net.DialTimeout(network, addr, timeout)
+			if err != nil {
+				return nil, err
+			}
+			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+			if IsDisallowedIP(ip) {
+				return nil, errors.New("ip address is not allowed")
+			}
+			return c, err
+		},
+		DialTLS: func(network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: timeout}
+			c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{})
+			if err != nil {
+				return nil, err
+			}
+
+			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+			if IsDisallowedIP(ip) {
+				return nil, errors.New("ip address is not allowed")
+			}
+
+			err = c.Handshake()
+			if err != nil {
+				return c, err
+			}
+
+			return c, c.Handshake()
+		},
+		TLSHandshakeTimeout: timeout,
+	}
+}
+
+func SafeGet(url string) (*http.Response, error) {
+	const clientConnectTimeout = time.Second * 10
+	httpClient := &http.Client{
+		Transport: SafeTransport(clientConnectTimeout),
+	}
+	return httpClient.Get(url)
+}
+
+
+
+// cuidado
+//func extractVideoURL(url string) (string, error) {
+//	response, err := http.Get(url)
+//	if err != nil {
+//		return "", fmt.Errorf("failed to fetch URL: %v", err)
+//	}
+//	defer response.Body.Close()
+
+//	doc, err := goquery.NewDocumentFromReader(response.Body)
+//	if err != nil {
+//		return "", fmt.Errorf("failed to parse HTML: %v", err)
+//	}
+
+//	videoElements := doc.Find("video")
+//	if videoElements.Length() == 0 {
+//		videoElements = doc.Find("div")
+//	}
+
+//	if videoElements.Length() == 0 {
+//		return "", errors.New("no video elements found in the HTML")
+//	}
+
+//	videoSrc, _ := videoElements.Attr("data-video-src")
+//	return videoSrc, nil
+//}
+
 func extractVideoURL(url string) (string, error) {
-	response, err := http.Get(url)
+	response, err := SafeGet(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %v", err)
 	}
@@ -86,7 +169,9 @@ func extractVideoURL(url string) (string, error) {
 
 
 
-func extractActualVideoURL(videoSrc string) (string, error) {
+
+// cuidado 
+/*func extractActualVideoURL(videoSrc string) (string, error) {
     response, err := http.Get(videoSrc)
     if err != nil {
         return "", fmt.Errorf("failed to fetch video source: %v", err)
@@ -119,6 +204,42 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 
     return highestQualityVideoURL, nil
 }
+//*/
+
+func extractActualVideoURL(videoSrc string) (string, error) {
+	response, err := SafeGet(videoSrc)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch video source: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request failed with status: %s", response.Status)
+	}
+
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	var videoResponse VideoResponse
+	if err := json.Unmarshal(body, &videoResponse); err != nil {
+		return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
+	}
+
+	if len(videoResponse.Data) == 0 {
+		return "", errors.New("no video data found in the response")
+	}
+
+	// Function to compare video quality labels and return the highest quality video URL
+	highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
+	if highestQualityVideoURL == "" {
+		return "", errors.New("no suitable video quality found")
+	}
+
+	return highestQualityVideoURL, nil
+}
+
 
 // Assumes that the quality label contains resolution information (e.g., "1080p").
 // This function can be adapted based on the actual format of the quality labels.
@@ -542,20 +663,7 @@ func selectEpisode(episodes []Episode) (string, string) {
 }
 
 func main() {
-	cyan := "\033[38;5;50m"
-	reset := "\033[0m"
-
-	fmt.Println(cyan + `
-	$$$$$$\             $$$$$$\             $$\                         
-	$$  __$$\           $$  __$$\           \__|                        
-	$$ /  \__| $$$$$$\  $$ /  $$ |$$$$$$$\  $$\ $$$$$$\$$$$\   $$$$$$\  
-	$$ |$$$$\ $$  __$$\ $$$$$$$$ |$$  __$$\ $$ |$$  _$$  _$$\ $$  __$$\ 
-	$$ |\_$$ |$$ /  $$ |$$  __$$ |$$ |  $$ |$$ |$$ / $$ / $$ |$$$$$$$$ |
-	$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |$$   ____|
-	\$$$$$$  |\$$$$$$  |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |\$$$$$$$\ 
-	 \______/  \______/ \__|  \__|\__|  \__|\__|\__| \__| \__| \_______|
-	` + reset)
-
+	
 	animeName := getUserInput("Enter anime name")
 	animeURL, err := searchAnime(treatingAnimeName(animeName))
 
@@ -615,4 +723,4 @@ func main() {
 	} else {
 		PlayVideo(videoURL, episodes, 0)
 	}
-}
+} 
