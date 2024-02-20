@@ -408,11 +408,17 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
     // Ensure destPath is sanitized and validated to avoid directory traversal
     destPath = filepath.Clean(destPath)
 
-    resp, err := http.Head(url)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
+	const clientConnectTimeout = 10 * time.Second
+	httpClient := &http.Client{
+		Transport: SafeTransport(clientConnectTimeout),
+	}
+
+	resp, err := httpClient.Head(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 
     if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
         return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
@@ -454,6 +460,7 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
             rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
             req.Header.Add("Range", rangeHeader)
 
+        
             client := &http.Client{}
             resp, err := client.Do(req)
             if err != nil {
