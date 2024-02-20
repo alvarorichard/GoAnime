@@ -10,6 +10,7 @@
   <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="Imagem logo" />
 </p>
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/ac059f8c42b04547877f6fa14650adc1)](https://app.codacy.com/gh/alvarorichard/GoAnime?utm_source=github.com&utm_medium=referral&utm_content=alvarorichard/GoAnime&utm_campaign=Badge_Grade)
 [![GitHub license](https://img.shields.io/github/license/alvarorichard/GoAnime)](alvarorichard/GoAnime/blob/master/LICENSE) ![GitHub stars](https://img.shields.io/github/stars/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/languages/count/alvarorichard/ZennityLang) ![GitHub stars](https://img.shields.io/github/languages/top/alvarorichard/GoAnime)  ![GitHub stars](https://img.shields.io/github/last-commit/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/forks/alvarorichard/GoAnime?style=social) [![Build Status](https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg)](https://github.com/alvarorichard/GoAnime/actions) ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
 
 # GoAnime 
