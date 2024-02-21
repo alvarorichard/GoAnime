@@ -16,6 +16,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"bufio"
+	"net"
+	"crypto/tls"
+	"time"
+	"context"
+
+	
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -58,8 +65,58 @@ func DownloadFolderFormatter(str string) string {
 	return ""
 }
 
+func IsDisallowedIP(hostIP string) bool {
+	ip := net.ParseIP(hostIP)
+	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()
+}
+
+func SafeTransport(timeout time.Duration) *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := net.DialTimeout(network, addr, timeout)
+			if err != nil {
+				return nil, err
+			}
+			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+			if IsDisallowedIP(ip) {
+				return nil, errors.New("ip address is not allowed")
+			}
+			return c, err
+		},
+		DialTLS: func(network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: timeout}
+			c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{})
+			if err != nil {
+				return nil, err
+			}
+
+			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+			if IsDisallowedIP(ip) {
+				return nil, errors.New("ip address is not allowed")
+			}
+
+			err = c.Handshake()
+			if err != nil {
+				return c, err
+			}
+
+			return c, c.Handshake()
+		},
+		TLSHandshakeTimeout: timeout,
+	}
+}
+
+func SafeGet(url string) (*http.Response, error) {
+	const clientConnectTimeout = time.Second * 10
+	httpClient := &http.Client{
+		Transport: SafeTransport(clientConnectTimeout),
+	}
+	return httpClient.Get(url)
+}
+
+
 func extractVideoURL(url string) (string, error) {
-	response, err := http.Get(url)
+	response, err := SafeGet(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %v", err)
 	}
@@ -84,39 +141,38 @@ func extractVideoURL(url string) (string, error) {
 }
 
 
-
 func extractActualVideoURL(videoSrc string) (string, error) {
-    response, err := http.Get(videoSrc)
-    if err != nil {
-        return "", fmt.Errorf("failed to fetch video source: %v", err)
-    }
-    defer response.Body.Close()
+	response, err := SafeGet(videoSrc)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch video source: %v", err)
+	}
+	defer response.Body.Close()
 
-    if response.StatusCode != http.StatusOK {
-        return "", fmt.Errorf("request failed with status: %s", response.Status)
-    }
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("request failed with status: %s", response.Status)
+	}
 
-    body, err := ioutil.ReadAll(response.Body)
-    if err != nil {
-        return "", fmt.Errorf("failed to read response body: %v", err)
-    }
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
 
-    var videoResponse VideoResponse
-    if err := json.Unmarshal(body, &videoResponse); err != nil {
-        return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
-    }
+	var videoResponse VideoResponse
+	if err := json.Unmarshal(body, &videoResponse); err != nil {
+		return "", fmt.Errorf("failed to unmarshal JSON response: %v", err)
+	}
 
-    if len(videoResponse.Data) == 0 {
-        return "", errors.New("no video data found in the response")
-    }
+	if len(videoResponse.Data) == 0 {
+		return "", errors.New("no video data found in the response")
+	}
 
-    // Function to compare video quality labels and return the highest quality video URL
-    highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
-    if highestQualityVideoURL == "" {
-        return "", errors.New("no suitable video quality found")
-    }
+	// Function to compare video quality labels and return the highest quality video URL
+	highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
+	if highestQualityVideoURL == "" {
+		return "", errors.New("no suitable video quality found")
+	}
 
-    return highestQualityVideoURL, nil
+	return highestQualityVideoURL, nil
 }
 
 // Assumes that the quality label contains resolution information (e.g., "1080p").
@@ -142,19 +198,81 @@ func isHigherQuality(quality1, quality2 string) bool {
 }
 
 
-func PlayVideo(videoURL string) error {
-	cmd := exec.Command("vlc", "-vvv", videoURL)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start video player: %v", err)
+func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("vlc", "-vvv", videoURL)
+		if err := cmd.Start(); err != nil {
+			fmt.Printf("Failed to start video player: %v\n", err)
+			return
+		}
+
+		if err := cmd.Wait(); err != nil {
+			fmt.Printf("Failed to play video: %v\n", err)
+		}
+	}()
+
+	// Command listener for navigating episodes
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+
+	for {
+		char, _, err := reader.ReadRune()
+		if err != nil {
+			fmt.Printf("Failed to read command: %v\n", err)
+			break
+		}
+
+		switch char {
+		case 'n':
+			if currentEpisodeIndex+1 < len(episodes) {
+				currentEpisodeIndex++
+				fmt.Printf("Switching to next episode: %s\n", episodes[currentEpisodeIndex].Number)
+				wg.Wait() // Wait for the current video to stop
+				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				if err != nil {
+					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+					continue
+				}
+				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+			} else {
+				fmt.Println("Already at the last episode.")
+			}
+		case 'p':
+			if currentEpisodeIndex > 0 {
+				currentEpisodeIndex--
+				fmt.Printf("Switching to previous episode: %s\n", episodes[currentEpisodeIndex].Number)
+				wg.Wait() // Wait for the current video to stop
+				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				if err != nil {
+					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+					continue
+				}
+				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+			} else {
+				fmt.Println("Already at the first episode.")
+			}
+		case 'q':
+			fmt.Println("Quitting video playback.")
+			return nil
+		}
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("failed to play video: %v", err)
-	}
-
+	wg.Wait()
 	return nil
 }
 
+func getVideoURLForEpisode(episodeURL string) (string, error) {
+	// Assuming extractVideoURL and extractActualVideoURL functions are defined elsewhere
+	videoURL, err := extractVideoURL(episodeURL)
+	if err != nil {
+		return "", err
+	}
+	return extractActualVideoURL(videoURL)
+}
 
 
 func selectWithGoFuzzyFinder(items []string) (string, error) {
@@ -210,11 +328,17 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
     // Ensure destPath is sanitized and validated to avoid directory traversal
     destPath = filepath.Clean(destPath)
 
-    resp, err := http.Head(url)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
+	const clientConnectTimeout = 10 * time.Second
+	httpClient := &http.Client{
+		Transport: SafeTransport(clientConnectTimeout),
+	}
+
+	resp, err := httpClient.Head(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 
     if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
         return fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
@@ -256,6 +380,7 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
             rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
             req.Header.Add("Range", rangeHeader)
 
+        
             client := &http.Client{}
             resp, err := client.Do(req)
             if err != nil {
@@ -465,20 +590,7 @@ func selectEpisode(episodes []Episode) (string, string) {
 }
 
 func main() {
-	cyan := "\033[38;5;50m"
-	reset := "\033[0m"
-
-	fmt.Println(cyan + `
-	$$$$$$\             $$$$$$\             $$\                         
-	$$  __$$\           $$  __$$\           \__|                        
-	$$ /  \__| $$$$$$\  $$ /  $$ |$$$$$$$\  $$\ $$$$$$\$$$$\   $$$$$$\  
-	$$ |$$$$\ $$  __$$\ $$$$$$$$ |$$  __$$\ $$ |$$  _$$  _$$\ $$  __$$\ 
-	$$ |\_$$ |$$ /  $$ |$$  __$$ |$$ |  $$ |$$ |$$ / $$ / $$ |$$$$$$$$ |
-	$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |$$   ____|
-	\$$$$$$  |\$$$$$$  |$$ |  $$ |$$ |  $$ |$$ |$$ | $$ | $$ |\$$$$$$$\ 
-	 \______/  \______/ \__|  \__|\__|  \__|\__|\__| \__| \__| \_______|
-	` + reset)
-
+	
 	animeName := getUserInput("Enter anime name")
 	animeURL, err := searchAnime(treatingAnimeName(animeName))
 
@@ -533,9 +645,9 @@ func main() {
 
 		//fix this and improve 
         if askForPlayOffline() {
-			PlayVideo(episodePath)
+			PlayVideo(episodePath, episodes, 0)
 		}
 	} else {
-		PlayVideo(videoURL)
+		PlayVideo(videoURL, episodes, 0)
 	}
-}
+} 
