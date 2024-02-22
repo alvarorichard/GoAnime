@@ -541,7 +541,9 @@ func askForPlayOffline() bool {
 }
 
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-	resp, err := http.Get(animeURL)
+
+
+	resp, err := SafeGet(animeURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anime details: %v", err)
 	}
