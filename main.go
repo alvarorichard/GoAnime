@@ -21,6 +21,8 @@ import (
 	"crypto/tls"
 	"time"
 	"context"
+	neturl "net/url"
+	
 
 	
 
@@ -51,6 +53,26 @@ type VideoData struct {
 	Src   string `json:"src"`
 	Label string `json:"label"`
 }
+
+func isValidURL(url string) bool {
+    // Parse the URL to check for validity and to extract the hostname
+    parsedURL, err := neturl.Parse(url)
+    if err != nil {
+        return false
+    }
+
+    // Check if the hostname is an IP address
+    ip := net.ParseIP(parsedURL.Hostname())
+    if ip != nil {
+        // If it's an IP address, check if it's disallowed
+        return !IsDisallowedIP(ip.String())
+    }
+
+    // If the hostname is not an IP address, it's considered valid for this example
+    // You might want to add additional checks here depending on your requirements
+    return true
+}
+
 
 // func databaseFormatter is unused (U1000)
 // Remove the unused function databaseFormatter
@@ -372,13 +394,18 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
         go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
 
-			//safe and secure request
-			req, err := http.NewRequest("GET", url, nil)
-            if err != nil {
-                log.Printf("Thread %d: error creating request: %v\n", part, err)
-                return
-            }
-            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+						if !isValidURL(url) {
+							log.Printf("invalid or unsafe URL: %s", url)
+							return
+						}
+
+						//safe and secure request
+						req, err := http.NewRequest("GET", url, nil)
+			            if err != nil {
+			                log.Printf("Thread %d: error creating request: %v\n", part, err)
+			                return
+			            }
+			            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
             req.Header.Add("Range", rangeHeader)
 
 			
