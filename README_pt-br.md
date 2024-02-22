@@ -93,5 +93,20 @@ Em seguida, o programa apresentará uma lista de episódios do anime selecionado
 
 O episódio selecionado será então reproduzido no VLC media player.
 
-# Obrigado
+# Agradecimento
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) por ajudar e melhorar essa aplicação
+
+
+# Alternativas
+
+Se você estiver procurando por mais opções, confira este projeto alternativo do meu amigo [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) chamado [Animatic-v2](https://github.com/KitsuneSemCalda/Animatic-v2), que foi inspirado no GoAnime.
+
+## Contribuindo
+
+Contribuições para melhorar ou aprimorar são sempre bem-vindas. Por favor, siga o processo padrão de pull request para contribuições.
+
+1. Faça um fork do projeto
+2. Crie sua branch de funcionalidade
+3. Faça commit das suas alterações
+4. Faça push para a sua branch
+5. Abra um pull request
