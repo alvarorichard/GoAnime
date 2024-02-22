@@ -54,7 +54,7 @@ To install GoAnime on Windows using the `install.ps1` PowerShell script, follow 
 
 1. Open PowerShell as Administrator
 
-2.Enable PowerShell Script Execution (if not already enabled):
+2. Enable PowerShell Script Execution (if not already enabled):
 
 
 In the PowerShell window, execute the following command to allow the execution of scripts:
@@ -63,7 +63,7 @@ In the PowerShell window, execute the following command to allow the execution o
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-3. Run the Install Script:
+3.Run the Install Script:
 
 Execute the `install.ps1` script:
 
