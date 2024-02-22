@@ -372,7 +372,8 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
         go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
 
-            req, err := http.NewRequest("GET", url, nil)
+			//safe and secure request
+			req, err := http.NewRequest("GET", url, nil)
             if err != nil {
                 log.Printf("Thread %d: error creating request: %v\n", part, err)
                 return
@@ -380,12 +381,26 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
             rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
             req.Header.Add("Range", rangeHeader)
 
+			
+			const clientConnectTimeout = 10 * time.Second
+            client := &http.Client{
+            Transport: SafeTransport(clientConnectTimeout),
+               }
+
         
-            client := &http.Client{}
-            resp, err := client.Do(req)
+            // client := &http.Client{}
+            // resp, err := client.Do(req)
+            // if err != nil {
+            //     log.Printf("Thread %d: error on request: %v\n", part, err)
+            //     return
+            // }
+            // defer resp.Body.Close()
+
+
+			resp, err := client.Do(req)
             if err != nil {
-                log.Printf("Thread %d: error on request: %v\n", part, err)
-                return
+           log.Printf("Thread %d: error on request: %v\n", part, err)
+              return
             }
             defer resp.Body.Close()
 
