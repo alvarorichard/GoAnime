@@ -394,28 +394,31 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
         go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
 
-						if !isValidURL(url) {
-							log.Printf("invalid or unsafe URL: %s", url)
-							return
-						}
+						    // Validate the URL before creating the HTTP request
+    if !isValidURL(url) {
+        log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
+        return
+    }
 
-						//safe and secure request
-						req, err := http.NewRequest("GET", url, nil)
-			            if err != nil {
-			                log.Printf("Thread %d: error creating request: %v\n", part, err)
-			                return
-			            }
-			            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
-            req.Header.Add("Range", rangeHeader)
+    // Safe and secure request
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil {
+        log.Printf("Thread %d: error creating request: %v\n", part, err)
+        return
+    }
 
-			
-			const clientConnectTimeout = 10 * time.Second
-            client := &http.Client{
-            Transport: SafeTransport(clientConnectTimeout),
-               }
 
-        
-            // client := &http.Client{}
+  
+
+    rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+    req.Header.Add("Range", rangeHeader)
+
+    const clientConnectTimeout = 10 * time.Second
+    client := &http.Client{
+        Transport: SafeTransport(clientConnectTimeout),
+    }
+
+	 // client := &http.Client{}
             // resp, err := client.Do(req)
             // if err != nil {
             //     log.Printf("Thread %d: error on request: %v\n", part, err)
@@ -423,13 +426,12 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
             // }
             // defer resp.Body.Close()
 
-
-			resp, err := client.Do(req)
-            if err != nil {
-           log.Printf("Thread %d: error on request: %v\n", part, err)
-              return
-            }
-            defer resp.Body.Close()
+    resp, err := client.Do(req)
+    if err != nil {
+        log.Printf("Thread %d: error on request: %v\n", part, err)
+        return
+    }
+    defer resp.Body.Close()
 
             // Generate a secure, unique filename for each part
             partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
