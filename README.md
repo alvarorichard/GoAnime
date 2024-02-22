@@ -115,3 +115,19 @@ The selected episode will then play in VLC media player.
 
 # Thanks 
 [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
+
+# Alternatives
+
+If you're looking for more options, check out this alternative project by my friend [@KitsuneSemCalda](https://github.com/KitsuneSemCalda) called [Animatic-v2 ](https://github.com/KitsuneSemCalda/Animatic-v2), which was inspired by GoAnime.
+
+## Contributing
+
+Contributions to improve or enhance are always welcome. Please adhere to the standard pull request process for contributions.
+
+
+1. Fork the Project
+2. Create your Feature Branch
+3. Commit your Changes
+4. Push to the Branch
+5. Open a Pull Request
+
