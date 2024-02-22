@@ -109,4 +109,4 @@ Contribuições para melhorar ou aprimorar são sempre bem-vindas. Por favor, si
 2. Crie sua branch de funcionalidade
 3. Faça commit das suas alterações
 4. Faça push para a sua branch
-5. Abra um pull request
+5. Abra um pull request.
