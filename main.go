@@ -299,27 +299,7 @@ func getVideoURLForEpisode(episodeURL string) (string, error) {
 }
 
 
-func selectWithGoFuzzyFinder(items []string) (string, error) {
-	if len(items) == 0 {
-		return "", errors.New("empty slice provided")
-	}
 
-	idx, err := fuzzyfinder.Find(
-		items,
-		func(i int) string {
-			return items[i]
-		},
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to select item with go-fuzzyfinder: %v", err)
-	}
-
-	if idx < 0 || idx >= len(items) {
-		return "", errors.New("index out of range")
-	}
-
-	return items[idx], nil
-}
 
 func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 	if len(animes) == 0 {
@@ -353,6 +333,8 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 func DownloadVideo(url string, destPath string, numThreads int) error {
     // Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
     destPath = filepath.Clean(destPath)
+
+
 
     // Crie um cliente HTTP seguro usando SafeTransport
     const clientConnectTimeout = 10 * time.Second
@@ -403,6 +385,12 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
         wg.Add(1)
         go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
+
+			if !isValidURL(url) {
+				log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
+				return
+			}
+
 
             // Crie uma solicitação GET com um cabeçalho Range
             req, err := http.NewRequest("GET", url, nil)
