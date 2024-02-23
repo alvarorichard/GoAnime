@@ -538,19 +538,30 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
 				return
 			}
 		
-			// Create a GET request with a Range header
+			// fix SSRF
+			// Create a new request with the desired range
+
+			//resp, err := httpClient.Get(url)
+
+			 // Create a secure HTTP client
+			 httpClient := &http.Client{
+				Transport: SafeTransport(10 * time.Second),
+			}
 			req, err := http.NewRequest("GET", url, nil)
+
+			//use SafeTransport for the request
+
+
+			
 			if err != nil {
 				log.Printf("Thread %d: error creating request: %v\n", part, err)
 				return
 			}
 			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
-			req.Header.Set("Range", rangeHeader)
+			req.Header.Add("Range", rangeHeader)
 		
 			// Create a secure HTTP client with SafeTransport
-			httpClient := &http.Client{
-				Transport: SafeTransport(10 * time.Second),
-			}
+			
 		
 			// Make the request using the secure HTTP client
 			resp, err := httpClient.Do(req)
