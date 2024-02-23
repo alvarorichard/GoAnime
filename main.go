@@ -108,7 +108,7 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		DialTLS: func(network, addr string) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: timeout}
             c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{
-         MinVersion: tls.VersionTLS13, // Set minimum TLS version to 1.3
+         MinVersion: tls.VersionTLS12, // Set minimum TLS version to 1.3 or 1.2 in case break download 
            })
         if err != nil {
          return nil, err
@@ -129,6 +129,9 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		TLSHandshakeTimeout: timeout,
 	}
 }
+
+
+
 
 func SafeGet(url string) (*http.Response, error) {
 	const clientConnectTimeout = time.Second * 10
