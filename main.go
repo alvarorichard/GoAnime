@@ -533,18 +533,31 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
         go func(from, to, part int, bar *pb.ProgressBar) {
             defer wg.Done()
 
-            req, err := http.NewRequest("GET", url, nil)
-            if err != nil {
-                log.Printf("Thread %d: error creating request: %v\n", part, err)
-                return
-            }
-            req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, to))
-
-            resp, err := httpClient.Do(req)
-            if err != nil {
-                log.Printf("Thread %d: error making request: %v\n", part, err)
-                return
-            }
+            if !isValidURL(url) { // Ensure isValidURL checks are adequate for SSRF prevention
+				log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
+				return
+			}
+		
+			// Create a GET request with a Range header
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				log.Printf("Thread %d: error creating request: %v\n", part, err)
+				return
+			}
+			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+			req.Header.Set("Range", rangeHeader)
+		
+			// Create a secure HTTP client with SafeTransport
+			httpClient := &http.Client{
+				Transport: SafeTransport(10 * time.Second),
+			}
+		
+			// Make the request using the secure HTTP client
+			resp, err := httpClient.Do(req)
+			if err != nil {
+				log.Printf("Thread %d: error making request: %v\n", part, err)
+				return
+			}
             defer resp.Body.Close()
 
             partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
