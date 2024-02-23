@@ -107,10 +107,12 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		},
 		DialTLS: func(network, addr string) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: timeout}
-			c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{})
-			if err != nil {
-				return nil, err
-			}
+            c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{
+         MinVersion: tls.VersionTLS13, // Set minimum TLS version to 1.3
+           })
+        if err != nil {
+         return nil, err
+        }
 
 			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 			if IsDisallowedIP(ip) {
