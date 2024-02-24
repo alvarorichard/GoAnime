@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -16,15 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"bufio"
-	"net"
-	"crypto/tls"
 	"time"
-	"context"
-	neturl "net/url"
-	
-
-	
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -55,24 +51,23 @@ type VideoData struct {
 }
 
 func isValidURL(url string) bool {
-    // Parse the URL to check for validity and to extract the hostname
-    parsedURL, err := neturl.Parse(url)
-    if err != nil {
-        return false
-    }
+	// Parse the URL to check for validity and to extract the hostname
+	parsedURL, err := neturl.Parse(url)
+	if err != nil {
+		return false
+	}
 
-    // Check if the hostname is an IP address
-    ip := net.ParseIP(parsedURL.Hostname())
-    if ip != nil {
-        // If it's an IP address, check if it's disallowed
-        return !IsDisallowedIP(ip.String())
-    }
+	// Check if the hostname is an IP address
+	ip := net.ParseIP(parsedURL.Hostname())
+	if ip != nil {
+		// If it's an IP address, check if it's disallowed
+		return !IsDisallowedIP(ip.String())
+	}
 
-    // If the hostname is not an IP address, it's considered valid for this example
-    // You might want to add additional checks here depending on your requirements
-    return true
+	// If the hostname is not an IP address, it's considered valid for this example
+	// You might want to add additional checks here depending on your requirements
+	return true
 }
-
 
 // func databaseFormatter is unused (U1000)
 // Remove the unused function databaseFormatter
@@ -107,12 +102,12 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		},
 		DialTLS: func(network, addr string) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: timeout}
-            c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{
-         MinVersion: tls.VersionTLS12, // Set minimum TLS version to 1.3 or 1.2 in case break download 
-           })
-        if err != nil {
-         return nil, err
-        }
+			c, err := tls.DialWithDialer(dialer, network, addr, &tls.Config{
+				MinVersion: tls.VersionTLS12, // Set minimum TLS version to 1.3 or 1.2 in case break download
+			})
+			if err != nil {
+				return nil, err
+			}
 
 			ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 			if IsDisallowedIP(ip) {
@@ -130,9 +125,6 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 	}
 }
 
-
-
-
 func SafeGet(url string) (*http.Response, error) {
 	const clientConnectTimeout = time.Second * 10
 	httpClient := &http.Client{
@@ -140,7 +132,6 @@ func SafeGet(url string) (*http.Response, error) {
 	}
 	return httpClient.Get(url)
 }
-
 
 func extractVideoURL(url string) (string, error) {
 	response, err := SafeGet(url)
@@ -167,7 +158,6 @@ func extractVideoURL(url string) (string, error) {
 	return videoSrc, nil
 }
 
-
 func extractActualVideoURL(videoSrc string) (string, error) {
 	response, err := SafeGet(videoSrc)
 	if err != nil {
@@ -179,7 +169,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
 
-	body, err := ioutil.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %v", err)
 	}
@@ -205,25 +195,24 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 // Assumes that the quality label contains resolution information (e.g., "1080p").
 // This function can be adapted based on the actual format of the quality labels.
 func selectHighestQualityVideo(videos []VideoData) string {
-    var highestQuality string
-    var highestQualityURL string
-    for _, video := range videos {
-        if isHigherQuality(video.Label, highestQuality) {
-            highestQuality = video.Label
-            highestQualityURL = video.Src
-        }
-    }
-    return highestQualityURL
+	var highestQuality string
+	var highestQualityURL string
+	for _, video := range videos {
+		if isHigherQuality(video.Label, highestQuality) {
+			highestQuality = video.Label
+			highestQualityURL = video.Src
+		}
+	}
+	return highestQualityURL
 }
 
 // Compares two quality labels and returns true if the first is of higher quality than the second.
 func isHigherQuality(quality1, quality2 string) bool {
-    // Extract numeric part of the quality labels (assuming format "720p", "1080p", etc.)
-    quality1Value, _ := strconv.Atoi(strings.TrimRight(quality1, "p"))
-    quality2Value, _ := strconv.Atoi(strings.TrimRight(quality2, "p"))
-    return quality1Value > quality2Value
+	// Extract numeric part of the quality labels (assuming format "720p", "1080p", etc.)
+	quality1Value, _ := strconv.Atoi(strings.TrimRight(quality1, "p"))
+	quality2Value, _ := strconv.Atoi(strings.TrimRight(quality2, "p"))
+	return quality1Value > quality2Value
 }
-
 
 func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
 	var wg sync.WaitGroup
@@ -301,9 +290,6 @@ func getVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-
-
-
 func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 	if len(animes) == 0 {
 		return "", errors.New("no anime provided")
@@ -331,154 +317,150 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 	return animes[idx].Name, nil
 }
 
-// 
+//
 
 func DownloadVideo(url string, destPath string, numThreads int) error {
-    // Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
-    destPath = filepath.Clean(destPath)
+	// Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
+	destPath = filepath.Clean(destPath)
 
+	// Crie um cliente HTTP seguro usando SafeTransport
+	const clientConnectTimeout = 10 * time.Second
+	httpClient := &http.Client{
+		Transport: SafeTransport(clientConnectTimeout),
+	}
 
+	// Faça uma solicitação HEAD para obter o tamanho do conteúdo
+	resp, err := httpClient.Head(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
-    // Crie um cliente HTTP seguro usando SafeTransport
-    const clientConnectTimeout = 10 * time.Second
-    httpClient := &http.Client{
-        Transport: SafeTransport(clientConnectTimeout),
-    }
+	// Verifique se o servidor suporta conteúdo parcial
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("o servidor não suporta conteúdo parcial: código de status %d", resp.StatusCode)
+	}
 
-    // Faça uma solicitação HEAD para obter o tamanho do conteúdo
-    resp, err := httpClient.Head(url)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
+	// Obtenha o tamanho do conteúdo
+	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if err != nil {
+		return err
+	}
 
-    // Verifique se o servidor suporta conteúdo parcial
-    if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-        return fmt.Errorf("o servidor não suporta conteúdo parcial: código de status %d", resp.StatusCode)
-    }
+	// Calcule o tamanho de cada parte
+	chunkSize := contentLength / numThreads
+	var wg sync.WaitGroup
 
-    // Obtenha o tamanho do conteúdo
-    contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-    if err != nil {
-        return err
-    }
+	// Crie barras de progresso para cada parte
+	bars := make([]*pb.ProgressBar, numThreads)
+	for i := range bars {
+		bars[i] = pb.Full.Start64(int64(chunkSize))
+	}
+	pool, err := pb.StartPool(bars...)
+	if err != nil {
+		return err
+	}
 
-    // Calcule o tamanho de cada parte
-    chunkSize := contentLength / numThreads
-    var wg sync.WaitGroup
+	// Faça o download de cada parte em uma goroutine separada
+	for i := 0; i < numThreads; i++ {
+		from := i * chunkSize
+		to := from + chunkSize - 1
+		if i == numThreads-1 {
+			to = contentLength - 1
+		}
 
-    // Crie barras de progresso para cada parte
-    bars := make([]*pb.ProgressBar, numThreads)
-    for i := range bars {
-        bars[i] = pb.Full.Start64(int64(chunkSize))
-    }
-    pool, err := pb.StartPool(bars...)
-    if err != nil {
-        return err
-    }
-
-    // Faça o download de cada parte em uma goroutine separada
-    for i := 0; i < numThreads; i++ {
-        from := i * chunkSize
-        to := from + chunkSize - 1
-        if i == numThreads-1 {
-            to = contentLength - 1
-        }
-
-        wg.Add(1)
-        go func(from, to, part int, bar *pb.ProgressBar) {
-            defer wg.Done()
+		wg.Add(1)
+		go func(from, to, part int, bar *pb.ProgressBar) {
+			defer wg.Done()
 
 			if !isValidURL(url) {
 				log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
 				return
 			}
 
+			// Crie uma solicitação GET com um cabeçalho Range
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				log.Printf("Thread %d: erro ao criar a solicitação: %v\n", part, err)
+				return
+			}
+			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+			req.Header.Add("Range", rangeHeader)
 
-            // Crie uma solicitação GET com um cabeçalho Range
-            req, err := http.NewRequest("GET", url, nil)
-            if err != nil {
-                log.Printf("Thread %d: erro ao criar a solicitação: %v\n", part, err)
-                return
-            }
-            rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
-            req.Header.Add("Range", rangeHeader)
+			// Faça a solicitação usando o cliente HTTP seguro
+			resp, err := httpClient.Do(req)
+			if err != nil {
+				log.Printf("Thread %d: erro na solicitação: %v\n", part, err)
+				return
+			}
+			defer resp.Body.Close()
 
-            // Faça a solicitação usando o cliente HTTP seguro
-            resp, err := httpClient.Do(req)
-            if err != nil {
-                log.Printf("Thread %d: erro na solicitação: %v\n", part, err)
-                return
-            }
-            defer resp.Body.Close()
+			// Crie um arquivo para a parte baixada
+			partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
+			partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+			file, err := os.Create(partFilePath)
+			if err != nil {
+				log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
+				return
+			}
 
-            // Crie um arquivo para a parte baixada
-            partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
-            partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
-            file, err := os.Create(partFilePath)
-            if err != nil {
-                log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
-                return
-            }
-            defer file.Close()
+			defer file.Close()
 
-            // Escreva os dados no arquivo e atualize a barra de progresso
-            buf := make([]byte, 1024)
-            for {
-                n, err := resp.Body.Read(buf)
-                if n > 0 {
-                    _, writeErr := file.Write(buf[:n])
-                    if writeErr != nil {
-                        log.Printf("Thread %d: erro ao escrever no arquivo: %v\n", part, writeErr)
-                        return
-                    }
-                    bar.Add(n)
-                }
-                if err == io.EOF {
-                    break
-                }
-                if err != nil {
-                    log.Printf("Thread %d: erro ao ler o corpo da resposta: %v\n", part, err)
-                    return
-                }
-            }
-            bar.Finish()
-        }(from, to, i, bars[i])
-    }
+			// Escreva os dados no arquivo e atualize a barra de progresso
+			buf := make([]byte, 1024)
+			for {
+				n, err := resp.Body.Read(buf)
+				if n > 0 {
+					_, writeErr := file.Write(buf[:n])
+					if writeErr != nil {
+						log.Printf("Thread %d: erro ao escrever no arquivo: %v\n", part, writeErr)
+						return
+					}
+					bar.Add(n)
+				}
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					log.Printf("Thread %d: erro ao ler o corpo da resposta: %v\n", part, err)
+					return
+				}
+			}
+			bar.Finish()
+		}(from, to, i, bars[i])
+	}
 
-    // Aguarde todas as goroutines terminarem
-    wg.Wait()
-    pool.Stop()
+	// Aguarde todas as goroutines terminarem
+	wg.Wait()
+	pool.Stop()
 
-    // Combine todas as partes em um único arquivo
-    outFile, err := os.Create(destPath)
-    if err != nil {
-        return err
-    }
-    defer outFile.Close()
+	// Combine todas as partes em um único arquivo
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
 
-    for i := 0; i < numThreads; i++ {
-        partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
-        partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+	for i := 0; i < numThreads; i++ {
+		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
+		partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 
-        partFile, err := os.Open(partFilePath)
-        if err != nil {
-            return err
-        }
+		partFile, err := os.Open(partFilePath)
+		if err != nil {
+			return err
+		}
 
-        _, err = io.Copy(outFile, partFile)
-        partFile.Close()
-        os.Remove(partFilePath)
+		_, err = io.Copy(outFile, partFile)
+		partFile.Close()
+		os.Remove(partFilePath)
 
-        if err != nil {
-            return err
-        }
-    }
+		if err != nil {
+			return err
+		}
+	}
 
-    return nil
+	return nil
 }
-
-
 
 func searchAnime(animeName string) (string, error) {
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
@@ -568,8 +550,6 @@ func askForPlayOffline() bool {
 }
 
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-
-
 	resp, err := SafeGet(animeURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anime details: %v", err)
@@ -619,10 +599,8 @@ func selectEpisode(episodes []Episode) (string, string) {
 }
 
 func main() {
-	
 	animeName := getUserInput("Enter anime name")
 	animeURL, err := searchAnime(treatingAnimeName(animeName))
-
 	if err != nil {
 		log.Fatalf("Failed to get anime episodes: %v", err)
 		os.Exit(1)
@@ -638,7 +616,6 @@ func main() {
 	selectedEpisodeURL, episodeNumber := selectEpisode(episodes)
 
 	videoURL, err := extractVideoURL(selectedEpisodeURL)
-
 	if err != nil {
 		log.Fatalf("Failed to extract video URL: %v", err)
 	}
@@ -672,13 +649,13 @@ func main() {
 			fmt.Println("Video downloaded successfully!")
 		}
 
-		//fix this and improve 
-        if askForPlayOffline() {
+		// fix this and improve
+		if askForPlayOffline() {
 			PlayVideo(episodePath, episodes, 0)
 		}
 	} else {
 		PlayVideo(videoURL, episodes, 0)
 	}
-} 
+}
 
 // teste github
