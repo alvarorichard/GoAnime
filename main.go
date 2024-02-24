@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -23,10 +22,6 @@ import (
 	"context"
 	neturl "net/url"
 	
-	
-
-	
-
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -180,7 +175,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return "", fmt.Errorf("request failed with status: %s", response.Status)
 	}
 
-	body, err := ioutil.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %v", err)
 	}
@@ -421,6 +416,7 @@ func DownloadVideo(url string, destPath string, numThreads int) error {
                 log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
                 return
             }
+			
             defer file.Close()
 
             // Escreva os dados no arquivo e atualize a barra de progresso
