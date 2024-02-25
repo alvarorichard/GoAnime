@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"sort"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -32,6 +33,7 @@ const baseSiteURL string = "https://animefire.plus/"
 
 type Episode struct {
 	Number string
+	Num int
 	URL    string
 }
 
@@ -214,72 +216,159 @@ func isHigherQuality(quality1, quality2 string) bool {
 	return quality1Value > quality2Value
 }
 
-func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
-	var wg sync.WaitGroup
-	wg.Add(1)
+// func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
+// 	var wg sync.WaitGroup
+// 	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("vlc", "-vvv", videoURL)
-		if err := cmd.Start(); err != nil {
-			fmt.Printf("Failed to start video player: %v\n", err)
-			return
-		}
+// 	go func() {
+// 		defer wg.Done()
+// 		cmd := exec.Command("vlc", "-vvv", videoURL)
+// 		if err := cmd.Start(); err != nil {
+// 			fmt.Printf("Failed to start video player: %v\n", err)
+// 			return
+// 		}
 
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("Failed to play video: %v\n", err)
-		}
-	}()
+// 		if err := cmd.Wait(); err != nil {
+// 			fmt.Printf("Failed to play video: %v\n", err)
+// 		}
+// 	}()
 
-	// Command listener for navigating episodes
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+// 	// Command listener for navigating episodes
+// 	reader := bufio.NewReader(os.Stdin)
+// 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
 
-	for {
-		char, _, err := reader.ReadRune()
-		if err != nil {
-			fmt.Printf("Failed to read command: %v\n", err)
-			break
-		}
+// 	for {
+// 		char, _, err := reader.ReadRune()
+// 		if err != nil {
+// 			fmt.Printf("Failed to read command: %v\n", err)
+// 			break
+// 		}
 
-		switch char {
-		case 'n':
-			if currentEpisodeIndex+1 < len(episodes) {
-				currentEpisodeIndex++
-				fmt.Printf("Switching to next episode: %s\n", episodes[currentEpisodeIndex].Number)
-				wg.Wait() // Wait for the current video to stop
-				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
-				if err != nil {
-					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
-					continue
-				}
-				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
-			} else {
-				fmt.Println("Already at the last episode.")
-			}
-		case 'p':
-			if currentEpisodeIndex > 0 {
-				currentEpisodeIndex--
-				fmt.Printf("Switching to previous episode: %s\n", episodes[currentEpisodeIndex].Number)
-				wg.Wait() // Wait for the current video to stop
-				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
-				if err != nil {
-					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
-					continue
-				}
-				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
-			} else {
-				fmt.Println("Already at the first episode.")
-			}
-		case 'q':
-			fmt.Println("Quitting video playback.")
-			return nil
-		}
-	}
+// 		switch char {
+// 		case 'n':
+// 			if currentEpisodeIndex+1 < len(episodes) {
+// 				currentEpisodeIndex++
+// 				fmt.Printf("Switching to next episode: %s\n", episodes[currentEpisodeIndex].Number)
+// 				wg.Wait() // Wait for the current video to stop
+// 				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+// 				if err != nil {
+// 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+// 					continue
+// 				}
+// 				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+// 			} else {
+// 				fmt.Println("Already at the last episode.")
+// 			}
+// 		case 'p':
+// 			if currentEpisodeIndex > 0 {
+// 				currentEpisodeIndex--
+// 				fmt.Printf("Switching to previous episode: %s\n", episodes[currentEpisodeIndex].Number)
+// 				wg.Wait() // Wait for the current video to stop
+// 				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+// 				if err != nil {
+// 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+// 					continue
+// 				}
+// 				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+// 			} else {
+// 				fmt.Println("Already at the first episode.")
+// 			}
+// 		case 'q':
+// 			fmt.Println("Quitting video playback.")
+// 			return nil
+// 		}
+// 	}
 
-	wg.Wait()
-	return nil
+// 	wg.Wait()
+// 	return nil
+// }
+
+
+func PlayVideo(videoURL string, episodes []Episode, currentEpisodeNum int) error {
+    var wg sync.WaitGroup
+    wg.Add(1)
+
+    go func() {
+        defer wg.Done()
+        cmd := exec.Command("vlc", "-vvv", videoURL)
+        if err := cmd.Start(); err != nil {
+            fmt.Printf("Failed to start video player: %v\n", err)
+            return
+        }
+
+        if err := cmd.Wait(); err != nil {
+            fmt.Printf("Failed to play video: %v\n", err)
+        }
+    }()
+
+    // Find the index of the current episode based on Num
+    currentEpisodeIndex := -1
+    for i, ep := range episodes {
+        if ep.Num == currentEpisodeNum {
+            currentEpisodeIndex = i
+            break
+        }
+    }
+
+    // If the current episode was not found, return an error or handle appropriately
+    if currentEpisodeIndex == -1 {
+        log.Printf("Current episode number %d not found", currentEpisodeNum)
+        return errors.New("current episode not found")
+    }
+
+    // Command listener for navigating episodes
+    reader := bufio.NewReader(os.Stdin)
+    fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+
+    for {
+        char, _, err := reader.ReadRune()
+        if err != nil {
+            fmt.Printf("Failed to read command: %v\n", err)
+            break
+        }
+
+        switch char {
+        case 'n':
+            if currentEpisodeIndex+1 < len(episodes) {
+                nextEpisode := episodes[currentEpisodeIndex+1]
+                fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
+                wg.Wait() // Wait for the current video to stop
+                nextVideoURL, err := getVideoURLForEpisode(nextEpisode.URL)
+                if err != nil {
+                    fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+                    continue
+                }
+                return PlayVideo(nextVideoURL, episodes, nextEpisode.Num)
+            } else {
+                fmt.Println("Already at the last episode.")
+            }
+        case 'p':
+            if currentEpisodeIndex > 0 {
+                prevEpisode := episodes[currentEpisodeIndex-1]
+                fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
+                wg.Wait() // Wait for the current video to stop
+                prevVideoURL, err := getVideoURLForEpisode(prevEpisode.URL)
+                if err != nil {
+                    fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+                    continue
+                }
+                return PlayVideo(prevVideoURL, episodes, prevEpisode.Num)
+            } else {
+                fmt.Println("Already at the first episode.")
+            }
+        case 'q':
+            fmt.Println("Quitting video playback.")
+            return nil
+        }
+    }
+
+    wg.Wait()
+    return nil
 }
+
+
+
+
 
 func getVideoURLForEpisode(episodeURL string) (string, error) {
 	// Assuming extractVideoURL and extractActualVideoURL functions are defined elsewhere
@@ -549,32 +638,76 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
+// func getAnimeEpisodes(animeURL string) ([]Episode, error) {
+// 	resp, err := SafeGet(animeURL)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to get anime details: %v", err)
+// 	}
+// 	defer resp.Body.Close()
+
+// 	doc, err := goquery.NewDocumentFromReader(resp.Body)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to parse anime details: %v", err)
+// 	}
+
+// 	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
+
+// 	var episodes []Episode
+// 	episodeContainer.Each(func(i int, s *goquery.Selection) {
+// 		episodeNum := s.Text()
+// 		episodeURL, _ := s.Attr("href")
+
+// 		episode := Episode{
+// 			Number: episodeNum,
+// 			URL:    episodeURL,
+// 		}
+// 		episodes = append(episodes, episode)
+// 	})
+// 	return episodes, nil
+// }
+
 func getAnimeEpisodes(animeURL string) ([]Episode, error) {
-	resp, err := SafeGet(animeURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get anime details: %v", err)
-	}
-	defer resp.Body.Close()
+    resp, err := SafeGet(animeURL)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get anime details: %v", err)
+    }
+    defer resp.Body.Close()
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse anime details: %v", err)
-	}
+    doc, err := goquery.NewDocumentFromReader(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("failed to parse anime details: %v", err)
+    }
 
-	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
+    episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
 
-	var episodes []Episode
-	episodeContainer.Each(func(i int, s *goquery.Selection) {
-		episodeNum := s.Text()
-		episodeURL, _ := s.Attr("href")
+    var episodes []Episode
+    episodeContainer.Each(func(i int, s *goquery.Selection) {
+        episodeNum := s.Text()
+        episodeURL, _ := s.Attr("href")
 
-		episode := Episode{
-			Number: episodeNum,
-			URL:    episodeURL,
-		}
-		episodes = append(episodes, episode)
-	})
-	return episodes, nil
+        // Parse episode number from episodeNum string
+        numRe := regexp.MustCompile(`\d+`)
+        numStr := numRe.FindString(episodeNum)
+        num, err := strconv.Atoi(numStr)
+        if err != nil {
+            log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
+            return
+        }
+
+        episode := Episode{
+            Number: episodeNum,
+            Num:    num,
+            URL:    episodeURL,
+        }
+        episodes = append(episodes, episode)
+    })
+
+    // Sort episodes by Num
+    sort.Slice(episodes, func(i, j int) bool {
+        return episodes[i].Num < episodes[j].Num
+    })
+
+    return episodes, nil
 }
 
 func selectEpisode(episodes []Episode) (string, string) {
@@ -598,64 +731,129 @@ func selectEpisode(episodes []Episode) (string, string) {
 	return episodes[index].URL, episodes[index].Number
 }
 
+// func main() {
+// 	animeName := getUserInput("Enter anime name")
+// 	animeURL, err := searchAnime(treatingAnimeName(animeName))
+// 	if err != nil {
+// 		log.Fatalf("Failed to get anime episodes: %v", err)
+// 		os.Exit(1)
+// 	}
+
+// 	episodes, err := getAnimeEpisodes(animeURL)
+
+// 	if err != nil || len(episodes) <= 0 {
+// 		log.Fatalln("Failed to fetch episodes from selected anime")
+// 		os.Exit(1)
+// 	}
+
+// 	selectedEpisodeURL, episodeNumber := selectEpisode(episodes)
+
+// 	videoURL, err := extractVideoURL(selectedEpisodeURL)
+// 	if err != nil {
+// 		log.Fatalf("Failed to extract video URL: %v", err)
+// 	}
+
+// 	videoURL, err = extractActualVideoURL(videoURL)
+
+// 	if err != nil {
+// 		log.Fatal("Failed to extract the api")
+// 	}
+
+// 	if askForDownload() {
+// 		currentUser, err := user.Current()
+// 		if err != nil {
+// 			log.Fatalf("Failed to get current user: %v", err)
+// 		}
+
+// 		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
+// 		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
+
+// 		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+// 			os.MkdirAll(downloadPath, os.ModePerm)
+// 		}
+// 		// teste
+// 		_, err = os.Stat(episodePath)
+// 		if os.IsNotExist(err) {
+// 			numThreads := 4 // Set the number of threads for downloading
+// 			err = DownloadVideo(videoURL, episodePath, numThreads)
+// 			if err != nil {
+// 				log.Fatalf("Failed to download video: %v", err)
+// 			}
+// 			fmt.Println("Video downloaded successfully!")
+// 		}
+
+// 		// fix this and improve
+// 		if askForPlayOffline() {
+// 			PlayVideo(episodePath, episodes, 0)
+// 		}
+// 	} else {
+// 		PlayVideo(videoURL, episodes, 0)
+// 	}
+// }
+
+
 func main() {
-	animeName := getUserInput("Enter anime name")
-	animeURL, err := searchAnime(treatingAnimeName(animeName))
-	if err != nil {
-		log.Fatalf("Failed to get anime episodes: %v", err)
-		os.Exit(1)
-	}
+    animeName := getUserInput("Enter anime name")
+    animeURL, err := searchAnime(treatingAnimeName(animeName))
+    if err != nil {
+        log.Fatalf("Failed to get anime episodes: %v", err)
+        os.Exit(1)
+    }
 
-	episodes, err := getAnimeEpisodes(animeURL)
+    episodes, err := getAnimeEpisodes(animeURL)
+    if err != nil || len(episodes) <= 0 {
+        log.Fatalln("Failed to fetch episodes from selected anime")
+        os.Exit(1)
+    }
 
-	if err != nil || len(episodes) <= 0 {
-		log.Fatalln("Failed to fetch episodes from selected anime")
-		os.Exit(1)
-	}
+    selectedEpisodeURL, episodeNumberStr := selectEpisode(episodes)
+    // Parse the selected episode's number from the episodeNumberStr
+    numRe := regexp.MustCompile(`\d+`)
+    numStr := numRe.FindString(episodeNumberStr)
+    selectedEpisodeNum, err := strconv.Atoi(numStr)
+    if err != nil {
+        log.Fatalf("Failed to parse selected episode number '%s': %v", episodeNumberStr, err)
+    }
 
-	selectedEpisodeURL, episodeNumber := selectEpisode(episodes)
+    videoURL, err := extractVideoURL(selectedEpisodeURL)
+    if err != nil {
+        log.Fatalf("Failed to extract video URL: %v", err)
+    }
 
-	videoURL, err := extractVideoURL(selectedEpisodeURL)
-	if err != nil {
-		log.Fatalf("Failed to extract video URL: %v", err)
-	}
+    videoURL, err = extractActualVideoURL(videoURL)
+    if err != nil {
+        log.Fatal("Failed to extract the api")
+    }
 
-	videoURL, err = extractActualVideoURL(videoURL)
+    if askForDownload() {
+        currentUser, err := user.Current()
+        if err != nil {
+            log.Fatalf("Failed to get current user: %v", err)
+        }
 
-	if err != nil {
-		log.Fatal("Failed to extract the api")
-	}
+        downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
+        episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
 
-	if askForDownload() {
-		currentUser, err := user.Current()
-		if err != nil {
-			log.Fatalf("Failed to get current user: %v", err)
-		}
+        if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+            os.MkdirAll(downloadPath, os.ModePerm)
+        }
+        
+        _, err = os.Stat(episodePath)
+        if os.IsNotExist(err) {
+            numThreads := 4 // Set the number of threads for downloading
+            err = DownloadVideo(videoURL, episodePath, numThreads)
+            if err != nil {
+                log.Fatalf("Failed to download video: %v", err)
+            }
+            fmt.Println("Video downloaded successfully!")
+        }
 
-		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
-		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
-
-		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-			os.MkdirAll(downloadPath, os.ModePerm)
-		}
-		// teste
-		_, err = os.Stat(episodePath)
-		if os.IsNotExist(err) {
-			numThreads := 4 // Set the number of threads for downloading
-			err = DownloadVideo(videoURL, episodePath, numThreads)
-			if err != nil {
-				log.Fatalf("Failed to download video: %v", err)
-			}
-			fmt.Println("Video downloaded successfully!")
-		}
-
-		// fix this and improve
-		if askForPlayOffline() {
-			PlayVideo(episodePath, episodes, 0)
-		}
-	} else {
-		PlayVideo(videoURL, episodes, 0)
-	}
+        if askForPlayOffline() {
+            PlayVideo(episodePath, episodes, selectedEpisodeNum) // Use the parsed episode number
+        }
+    } else {
+        PlayVideo(videoURL, episodes, selectedEpisodeNum) // Use the parsed episode number
+    }
 }
 
-// Path: go.mod 
+
