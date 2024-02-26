@@ -1,0 +1,26 @@
+language: go
+go:
+  - 1.22.0
+
+os:
+  - linux
+  - windows
+
+env:
+  global:
+    - VLC_VERSION=latest # Exemplo, ajuste conforme necessário
+
+branches:
+  only:
+    - main
+    - dev
+
+install:
+  - if [ "$TRAVIS_OS_NAME" = "linux" ]; then sudo apt-get update && sudo apt-get install -y vlc; fi
+  - if [ "$TRAVIS_OS_NAME" = "windows" ]; then choco install vlc; fi
+  - go get -v -t -d ./...
+
+script:
+  - go test -v ./...
+
+# Configuração para agendamento não está diretamente disponível como no GitHub Actions, mas pode ser configurado através de cron jobs no próprio Travis CI ou em um serviço externo que dispara builds via Travis CI API.

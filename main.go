@@ -17,6 +17,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +33,7 @@ const baseSiteURL string = "https://animefire.plus/"
 
 type Episode struct {
 	Number string
+	Num    int
 	URL    string
 }
 
@@ -214,7 +216,7 @@ func isHigherQuality(quality1, quality2 string) bool {
 	return quality1Value > quality2Value
 }
 
-func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) error {
+func PlayVideo(videoURL string, episodes []Episode, currentEpisodeNum int) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -231,6 +233,21 @@ func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) err
 		}
 	}()
 
+	// Find the index of the current episode based on Num
+	currentEpisodeIndex := -1
+	for i, ep := range episodes {
+		if ep.Num == currentEpisodeNum {
+			currentEpisodeIndex = i
+			break
+		}
+	}
+
+	// If the current episode was not found, return an error or handle appropriately
+	if currentEpisodeIndex == -1 {
+		log.Printf("Current episode number %d not found", currentEpisodeNum)
+		return errors.New("current episode not found")
+	}
+
 	// Command listener for navigating episodes
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
@@ -245,29 +262,29 @@ func PlayVideo(videoURL string, episodes []Episode, currentEpisodeIndex int) err
 		switch char {
 		case 'n':
 			if currentEpisodeIndex+1 < len(episodes) {
-				currentEpisodeIndex++
-				fmt.Printf("Switching to next episode: %s\n", episodes[currentEpisodeIndex].Number)
+				nextEpisode := episodes[currentEpisodeIndex+1]
+				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
 				wg.Wait() // Wait for the current video to stop
-				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				nextVideoURL, err := getVideoURLForEpisode(nextEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
 					continue
 				}
-				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+				return PlayVideo(nextVideoURL, episodes, nextEpisode.Num)
 			} else {
 				fmt.Println("Already at the last episode.")
 			}
 		case 'p':
 			if currentEpisodeIndex > 0 {
-				currentEpisodeIndex--
-				fmt.Printf("Switching to previous episode: %s\n", episodes[currentEpisodeIndex].Number)
+				prevEpisode := episodes[currentEpisodeIndex-1]
+				fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
 				wg.Wait() // Wait for the current video to stop
-				videoURL, err := getVideoURLForEpisode(episodes[currentEpisodeIndex].URL)
+				prevVideoURL, err := getVideoURLForEpisode(prevEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
 					continue
 				}
-				return PlayVideo(videoURL, episodes, currentEpisodeIndex)
+				return PlayVideo(prevVideoURL, episodes, prevEpisode.Num)
 			} else {
 				fmt.Println("Already at the first episode.")
 			}
@@ -316,8 +333,6 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 
 	return animes[idx].Name, nil
 }
-
-//
 
 func DownloadVideo(url string, destPath string, numThreads int) error {
 	// Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
@@ -568,12 +583,28 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 		episodeNum := s.Text()
 		episodeURL, _ := s.Attr("href")
 
+		// Parse episode number from episodeNum string
+		numRe := regexp.MustCompile(`\d+`)
+		numStr := numRe.FindString(episodeNum)
+		num, err := strconv.Atoi(numStr)
+		if err != nil {
+			log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
+			return
+		}
+
 		episode := Episode{
 			Number: episodeNum,
+			Num:    num,
 			URL:    episodeURL,
 		}
 		episodes = append(episodes, episode)
 	})
+
+	// Sort episodes by Num
+	sort.Slice(episodes, func(i, j int) bool {
+		return episodes[i].Num < episodes[j].Num
+	})
+
 	return episodes, nil
 }
 
@@ -607,13 +638,19 @@ func main() {
 	}
 
 	episodes, err := getAnimeEpisodes(animeURL)
-
 	if err != nil || len(episodes) <= 0 {
 		log.Fatalln("Failed to fetch episodes from selected anime")
 		os.Exit(1)
 	}
 
-	selectedEpisodeURL, episodeNumber := selectEpisode(episodes)
+	selectedEpisodeURL, episodeNumberStr := selectEpisode(episodes)
+	// Parse the selected episode's number from the episodeNumberStr
+	numRe := regexp.MustCompile(`\d+`)
+	numStr := numRe.FindString(episodeNumberStr)
+	selectedEpisodeNum, err := strconv.Atoi(numStr)
+	if err != nil {
+		log.Fatalf("Failed to parse selected episode number '%s': %v", episodeNumberStr, err)
+	}
 
 	videoURL, err := extractVideoURL(selectedEpisodeURL)
 	if err != nil {
@@ -621,7 +658,6 @@ func main() {
 	}
 
 	videoURL, err = extractActualVideoURL(videoURL)
-
 	if err != nil {
 		log.Fatal("Failed to extract the api")
 	}
@@ -633,12 +669,12 @@ func main() {
 		}
 
 		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
-		episodePath := filepath.Join(downloadPath, episodeNumber+".mp4")
+		episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
 
 		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 			os.MkdirAll(downloadPath, os.ModePerm)
 		}
-		// teste
+
 		_, err = os.Stat(episodePath)
 		if os.IsNotExist(err) {
 			numThreads := 4 // Set the number of threads for downloading
@@ -649,13 +685,10 @@ func main() {
 			fmt.Println("Video downloaded successfully!")
 		}
 
-		// fix this and improve
 		if askForPlayOffline() {
-			PlayVideo(episodePath, episodes, 0)
+			PlayVideo(episodePath, episodes, selectedEpisodeNum) // Use the parsed episode number
 		}
 	} else {
-		PlayVideo(videoURL, episodes, 0)
+		PlayVideo(videoURL, episodes, selectedEpisodeNum) // Use the parsed episode number
 	}
 }
-
-// Path: go.mod 
