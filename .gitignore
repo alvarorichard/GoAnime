@@ -1,2 +1,14 @@
 main.exe
 .main
+.idea
+
+# Compiled Object files
+
+*.slo
+*.lo
+
+# Compiled Dynamic libraries
+
+*.so
+*.dylib
+*.dll
