@@ -22,7 +22,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cheggaaa/pb/v3"
@@ -147,14 +146,13 @@ func isSeries(animeURL string) (bool, int, error) {
 }
 
 func extractEpisodeNumber(episodeStr string) string {
-    numRe := regexp.MustCompile(`\d+`)
-    numStr := numRe.FindString(episodeStr)
-    if numStr == "" {
-        return "1" // Retorna "1" para filmes/OVAs
-    }
-    return numStr
+	numRe := regexp.MustCompile(`\d+`)
+	numStr := numRe.FindString(episodeStr)
+	if numStr == "" {
+		return "1" // Retorna "1" para filmes/OVAs
+	}
+	return numStr
 }
-
 
 func extractVideoURL(url string) (string, error) {
 	response, err := SafeGet(url)
@@ -318,8 +316,6 @@ func PlayVideo(videoURL string, episodes []Episode, currentEpisodeNum int) error
 	wg.Wait()
 	return nil
 }
-
-
 
 func getVideoURLForEpisode(episodeURL string) (string, error) {
 	// Assuming extractVideoURL and extractActualVideoURL functions are defined elsewhere
@@ -609,6 +605,9 @@ func getAnimeEpisodes(animeURL string) ([]Episode, error) {
 		// Parse episode number from episodeNum string
 		numRe := regexp.MustCompile(`\d+`)
 		numStr := numRe.FindString(episodeNum)
+		if numStr == "" {
+			numStr = "1"
+		}
 		num, err := strconv.Atoi(numStr)
 		if err != nil {
 			log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
@@ -692,50 +691,50 @@ func handleDownloadAndPlay(videoURL string, episodes []Episode, selectedEpisodeN
 }
 
 func main() {
-    animeName := getUserInput("Enter anime name")
-    animeURL, err := searchAnime(treatingAnimeName(animeName))
-    if err != nil {
-        log.Fatalf("Failed to get anime episodes: %v", err)
-        os.Exit(1)
-    }
+	animeName := getUserInput("Enter anime name")
+	animeURL, err := searchAnime(treatingAnimeName(animeName))
+	if err != nil {
+		log.Fatalf("Failed to get anime episodes: %v", err)
+		os.Exit(1)
+	}
 
-    episodes, err := getAnimeEpisodes(animeURL)
-    if err != nil || len(episodes) == 0 {
-        log.Fatalln("Failed to fetch episodes from selected anime")
-        os.Exit(1)
-    }
+	episodes, err := getAnimeEpisodes(animeURL)
+	if err != nil || len(episodes) == 0 {
+		log.Fatalln("Failed to fetch episodes from selected anime")
+		os.Exit(1)
+	}
 
-    series, totalEpisodes, err := isSeries(animeURL)
-    if err != nil {
-        log.Fatalf("Erro ao verificar se o anime é uma série: %v", err)
-    }
+	series, totalEpisodes, err := isSeries(animeURL)
+	if err != nil {
+		log.Fatalf("Erro ao verificar se o anime é uma série: %v", err)
+	}
 
-    if series {
-        fmt.Printf("O anime selecionado é uma série com %d episódios.\n", totalEpisodes)
-        selectedEpisodeURL, episodeNumberStr := selectEpisode(episodes)
+	if series {
+		fmt.Printf("O anime selecionado é uma série com %d episódios.\n", totalEpisodes)
+		selectedEpisodeURL, episodeNumberStr := selectEpisode(episodes)
 
-        // A função extractEpisodeNumber não deve ser chamada para filmes/OVAs.
-        // Este ajuste é específico para quando sabemos que é uma série com base na verificação anterior.
-        selectedEpisodeNum, err := strconv.Atoi(extractEpisodeNumber(episodeNumberStr))
-        if err != nil {
-            log.Fatalf("Error parsing episode number: %v", err)
-        }
+		// A função extractEpisodeNumber não deve ser chamada para filmes/OVAs.
+		// Este ajuste é específico para quando sabemos que é uma série com base na verificação anterior.
+		selectedEpisodeNum, err := strconv.Atoi(extractEpisodeNumber(episodeNumberStr))
+		if err != nil {
+			log.Fatalf("Error parsing episode number: %v", err)
+		}
 
-        videoURL, err := getVideoURLForEpisode(selectedEpisodeURL)
-        if err != nil {
-            log.Fatalf("Failed to extract video URL: %v", err)
-        }
+		videoURL, err := getVideoURLForEpisode(selectedEpisodeURL)
+		if err != nil {
+			log.Fatalf("Failed to extract video URL: %v", err)
+		}
 
-        handleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr)
-    } else {
-        fmt.Println("O anime selecionado é um filme/OVA. Iniciando a reprodução direta...")
-        // Para filmes/OVAs, utilizamos o primeiro episódio diretamente sem tentar parsear um número de episódio.
-        videoURL, err := getVideoURLForEpisode(episodes[0].URL)
-        if err != nil {
-            log.Fatalf("Failed to extract video URL: %v", err)
-        }
+		handleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr)
+	} else {
+		fmt.Println("O anime selecionado é um filme/OVA. Iniciando a reprodução direta...")
+		// Para filmes/OVAs, utilizamos o primeiro episódio diretamente sem tentar parsear um número de episódio.
+		videoURL, err := getVideoURLForEpisode(episodes[0].URL)
+		if err != nil {
+			log.Fatalf("Failed to extract video URL: %v", err)
+		}
 
-        // Assume-se 1 como o número de episódio padrão para filmes/OVAs.
-        handleDownloadAndPlay(videoURL, episodes, 1, animeURL, episodes[0].Number)
-    }
+		// Assume-se 1 como o número de episódio padrão para filmes/OVAs.
+		handleDownloadAndPlay(videoURL, episodes, 1, animeURL, episodes[0].Number)
+	}
 }
