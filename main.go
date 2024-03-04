@@ -505,6 +505,12 @@ func searchAnime(animeName string) (string, error) {
 			return "", fmt.Errorf("failed to perform search request: %v", err)
 		}
 		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			if response.StatusCode == http.StatusForbidden {
+				return "", fmt.Errorf("Connection refused: You need be in Brazil or use a VPN to access the server.")
+			}
+			return "", fmt.Errorf("Search failed, the server returned the error: %s", response.Status)
+		}
 
 		doc, err := goquery.NewDocumentFromReader(response.Body)
 		if err != nil {
