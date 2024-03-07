@@ -96,7 +96,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, windows-latest, macOS-latest, freebsd-14.0 ] # Added macOS and FreeBSD as target operating systems
+        os: [ ubuntu-latest, windows-latest, macOS-latest ] # Added macOS target operating systems
         go-version: [ '1.22.0' ] # You can add more versions to test against multiple Go versions
     steps:
       - name: Set up Go
