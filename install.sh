@@ -4,13 +4,13 @@ GOOS=$(go env GOOS)
 GOARCH=$(go env GOARCH)
 
 function compile(){
-  GOOS=$GOOS GOARCH=$GOARCH go build main.go
+  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
   if [ "$(uname)" == "Darwin" ]; then
     # Se o sistema é macOS, ajuste GOOS e GOARCH conforme necessário
     GOOS=darwin
     GOARCH=amd64 # ou arm64 para Macs com chip M1
   fi
-  GOOS=$GOOS GOARCH=$GOARCH go build main.go
+  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
 }
 # add bin to path macOS only
 function install_macos(){
@@ -42,13 +42,13 @@ GOOS=$(go env GOOS)
 GOARCH=$(go env GOARCH)
 
 function compile(){
-  GOOS=$GOOS GOARCH=$GOARCH go build main.go
+  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
   if [ "$(uname)" == "Darwin" ]; then
     # Se o sistema é macOS, ajuste GOOS e GOARCH conforme necessário
     GOOS=darwin
     GOARCH=amd64 # ou arm64 para Macs com chip M1
   fi
-  GOOS=$GOOS GOARCH=$GOARCH go build main.go
+  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
 }
 # add bin to path macOS only
 function install_macos(){
