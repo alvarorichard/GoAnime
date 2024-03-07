@@ -5,7 +5,7 @@ $env:GOARCH = "amd64"
 # Function to compile the program
 Function Compile {
     Write-Host "Compiling for $($env:GOOS)-$($env:GOARCH)"
-    go build -o main.exe main.go
+    go build -o main.exe .
 }
 
 # Function to install the compiled binary for Windows
