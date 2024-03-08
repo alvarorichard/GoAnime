@@ -10,7 +10,6 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
