@@ -18,38 +18,44 @@ import (
 	"time"
 )
 
+var IsDebug bool
+
 const baseSiteURL = "https://animefire.plus/"
 
+// Anime represents an anime with its name, URL and a slice of Episode structs.
 type Anime struct {
 	Name     string
 	URL      string
 	Episodes []Episode
 }
+
+// Episode represents an episode with its number, URL and a parsed number.
 type Episode struct {
 	Number string
 	Num    int
 	URL    string
 }
 
+// SearchAnime performs a search on the site for the given anime name and returns the URL of the anime page.
 func SearchAnime(animeName string) (string, error) {
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
 
 	for {
 		response, err := http.Get(currentPageURL)
 		if err != nil {
-			return "", fmt.Errorf("failed to perform search request: %v", err)
+			return "", errors.New(fmt.Sprintf("failed to perform search request: %v", err))
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 			if response.StatusCode == http.StatusForbidden {
-				return "", fmt.Errorf("Connection refused: You need be in Brazil or use a VPN to access the server.")
+				return "", errors.New("Connection refused: You need be in Brazil or use a VPN to access the server.")
 			}
-			return "", fmt.Errorf("Search failed, the server returned the error: %s", response.Status)
+			return "", errors.New(fmt.Sprintf("Search failed, the server returned the error: %s", response.Status))
 		}
 
 		doc, err := goquery.NewDocumentFromReader(response.Body)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse response: %v", err)
+			return "", errors.New(fmt.Sprintf("failed to parse response: %v", err))
 		}
 
 		animes := make([]Anime, 0)
@@ -74,13 +80,14 @@ func SearchAnime(animeName string) (string, error) {
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
 		if !exists || nextPage == "" {
-			return "", fmt.Errorf("no anime found with the given name")
+			return "", errors.New("no anime found with the given name")
 		}
 
 		currentPageURL = baseSiteURL + nextPage
 	}
 }
 
+// treatingAnimeName removes special characters and spaces from the anime name.
 func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 	if len(animes) == 0 {
 		return "", errors.New("no anime provided")
@@ -98,7 +105,7 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to select anime with go-fuzzyfinder: %v", err)
+		return "", errors.New(fmt.Sprintf("failed to select anime with go-fuzzyfinder: %v", err))
 	}
 
 	if idx < 0 || idx >= len(animes) {
@@ -113,6 +120,7 @@ func IsDisallowedIP(hostIP string) bool {
 	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()
 }
 
+// SafeTransport returns a http.Transport with a custom DialContext and DialTLS functions that check if the remote IP is allowed.
 func SafeTransport(timeout time.Duration) *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -151,16 +159,17 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 	}
 }
 
+// GetAnimeEpisodes returns a slice of Episode structs containing the episode number and URL.
 func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 	resp, err := SafeGet(animeURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get anime details: %v", err)
+		return nil, errors.New(fmt.Sprintf("failed to get anime details: %v", err))
 	}
 	defer resp.Body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse anime details: %v", err)
+		return nil, errors.New(fmt.Sprintf("failed to parse anime details: %v", err))
 	}
 
 	episodeContainer := doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex")
@@ -198,6 +207,7 @@ func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 	return episodes, nil
 }
 
+// SafeGet performs a GET request with a timeout and returns the response.
 func SafeGet(url string) (*http.Response, error) {
 	const clientConnectTimeout = time.Second * 10
 	httpClient := &http.Client{
@@ -206,6 +216,7 @@ func SafeGet(url string) (*http.Response, error) {
 	return httpClient.Get(url)
 }
 
+// IsSeries checks if the given anime is a series or a movie/OVA.
 func IsSeries(animeURL string) (bool, int, error) {
 	episodes, err := GetAnimeEpisodes(animeURL)
 	if err != nil {

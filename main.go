@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/alvarorichard/Goanime/api"
 	"github.com/alvarorichard/Goanime/player"
@@ -12,6 +13,10 @@ import (
 )
 
 func main() {
+	debug := flag.Bool("debug", false, "enable debug mode")
+	flag.Parse()
+	api.IsDebug = *debug
+
 	animeName := getUserInput("Enter anime name")
 	animeURL, err := api.SearchAnime(treatingAnimeName(animeName))
 	if err != nil {
@@ -21,7 +26,7 @@ func main() {
 
 	episodes, err := api.GetAnimeEpisodes(animeURL)
 	if err != nil || len(episodes) == 0 {
-		log.Fatalln("Failed to fetch episodes from selected anime")
+		log.Fatalln("The selected anime has no episodes in the server.")
 		os.Exit(1)
 	}
 
