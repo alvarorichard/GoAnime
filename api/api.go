@@ -80,7 +80,7 @@ func SearchAnime(animeName string) (string, error) {
 
 		nextPage, exists := doc.Find(".pagination .next a").Attr("href")
 		if !exists || nextPage == "" {
-			return "", errors.New(fmt.Sprintf("no anime found with the given name"))
+			return "", errors.New("no anime found with the given name")
 		}
 
 		currentPageURL = baseSiteURL + nextPage

@@ -282,7 +282,7 @@ func ExtractEpisodeNumber(episodeStr string) string {
 func extractVideoURL(url string) (string, error) {
 	response, err := api.SafeGet(url)
 	if api.IsDebug {
-		log.Printf("Fetching URL: %s\n", url, err)
+		log.Printf("Fetching URL: %s - Error Status: %s\n", url, err)
 	}
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
@@ -291,7 +291,7 @@ func extractVideoURL(url string) (string, error) {
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if api.IsDebug {
-		log.Printf("Parsing HTML from URL: %s\n", url, err)
+		log.Printf("Parsing HTML from URL: %s - Error Status: %s\n", url, err)
 	}
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("failed to parse HTML: %+v", err))
