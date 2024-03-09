@@ -6,6 +6,7 @@ import (
 	"github.com/alvarorichard/Goanime/api"
 	"github.com/alvarorichard/Goanime/player"
 	"github.com/manifoldco/promptui"
+
 	"log"
 	"os"
 	"strconv"
@@ -37,7 +38,7 @@ func main() {
 
 	if series {
 		fmt.Printf("O anime selecionado é uma série com %d episódios.\n", totalEpisodes)
-		selectedEpisodeURL, episodeNumberStr := player.SelectEpisode(episodes)
+		selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 
 		// A função extractEpisodeNumber não deve ser chamada para filmes/OVAs.
 		// Este ajuste é específico para quando sabemos que é uma série com base na verificação anterior.

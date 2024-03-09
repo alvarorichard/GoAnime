@@ -1,11 +1,12 @@
 package api
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/ktr0731/go-fuzzyfinder"
+	"golang.org/x/net/context"
+	"io"
 
 	"github.com/pkg/errors"
 	"log"
@@ -45,7 +46,12 @@ func SearchAnime(animeName string) (string, error) {
 		if err != nil {
 			return "", errors.New(fmt.Sprintf("failed to perform search request: %v", err))
 		}
-		defer response.Body.Close()
+		defer func(Body io.ReadCloser) {
+			err := Body.Close()
+			if err != nil {
+				log.Printf("Failed to close response body: %v", err)
+			}
+		}(response.Body)
 		if response.StatusCode != http.StatusOK {
 			if response.StatusCode == http.StatusForbidden {
 				return "", errors.New("Connection refused: You need be in Brazil or use a VPN to access the server.")
@@ -165,7 +171,12 @@ func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("failed to get anime details: %v", err))
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}(resp.Body)
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {

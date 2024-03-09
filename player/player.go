@@ -7,6 +7,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/api"
 	pb "github.com/cheggaaa/pb/v3"
+	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 	"io"
@@ -92,7 +93,12 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}(resp.Body)
 
 	// Verifique se o servidor suporta conteúdo parcial
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -157,7 +163,12 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 				}
 				return
 			}
-			defer resp.Body.Close()
+			defer func(Body io.ReadCloser) {
+				err := Body.Close()
+				if err != nil {
+					log.Printf("Thread %d: erro ao fechar o corpo da resposta: %v\n", part, err)
+				}
+			}(resp.Body)
 
 			// Crie um arquivo para a parte baixada
 			partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
@@ -170,7 +181,12 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 				return
 			}
 
-			defer file.Close()
+			defer func(file *os.File) {
+				err := file.Close()
+				if err != nil {
+					log.Printf("Thread %d: erro ao fechar o arquivo: %v\n", part, err)
+				}
+			}(file)
 
 			// Escreva os dados no arquivo e atualize a barra de progresso
 			buf := make([]byte, 1024)
@@ -209,7 +225,12 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
+	defer func(outFile *os.File) {
+		err = outFile.Close()
+		if err != nil {
+			log.Printf("Erro ao fechar o arquivo de saída: %v\n", err)
+		}
+	}(outFile)
 
 	for i := 0; i < numThreads; i++ {
 		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
@@ -246,25 +267,48 @@ func askForPlayOffline() bool {
 }
 
 // SelectEpisode displays a prompt to the user to select an episode from a list
-func SelectEpisode(episodes []api.Episode) (string, string) {
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}",
-		Active:   "▶ {{ .Number | cyan }}",
-		Inactive: "  {{ .Number | white }}",
-		Selected: "▶ {{ .Number | cyan | underline }}",
+//func SelectEpisode(episodes []api.Episode) (string, string) {
+//	templates := &promptui.SelectTemplates{
+//		Label:    "{{ . }}",
+//		Active:   "▶ {{ .Number | cyan }}",
+//		Inactive: "  {{ .Number | white }}",
+//		Selected: "▶ {{ .Number | cyan | underline }}",
+//	}
+//
+//	prompt := promptui.Select{
+//		Label:     "Select the episode",
+//		Items:     episodes,
+//		Templates: templates,
+//	}
+//
+//	index, _, err := prompt.Run()
+//	if err != nil {
+//		log.Fatalf("Failed to select episode: %+v", err)
+//	}
+//	return episodes[index].URL, episodes[index].Number
+//}
+
+func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
+	if len(episodes) == 0 {
+		return "", "", errors.New("no episodes provided")
 	}
 
-	prompt := promptui.Select{
-		Label:     "Select the episode",
-		Items:     episodes,
-		Templates: templates,
-	}
-
-	index, _, err := prompt.Run()
+	idx, err := fuzzyfinder.Find(
+		episodes,
+		func(i int) string {
+			return episodes[i].Number
+		},
+		fuzzyfinder.WithPromptString("Select the episode"),
+	)
 	if err != nil {
-		log.Fatalf("Failed to select episode: %+v", err)
+		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
 	}
-	return episodes[index].URL, episodes[index].Number
+
+	if idx < 0 || idx >= len(episodes) {
+		return "", "", errors.New("invalid index returned by fuzzyfinder")
+	}
+
+	return episodes[idx].URL, episodes[idx].Number, nil
 }
 
 // ExtractEpisodeNumber extracts the episode number from the episode string
@@ -286,7 +330,12 @@ func extractVideoURL(url string) (string, error) {
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v\n", err)
+		}
+	}(response.Body)
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if api.IsDebug {
@@ -331,7 +380,12 @@ func fetchContent(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v\n", err)
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -346,6 +400,7 @@ func findBloggerLink(content string) (string, error) {
 	// Regex to match the link pattern
 	// Adjust according to the actual pattern and constraints of the link
 	pattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
+
 	re := regexp.MustCompile(pattern)
 	matches := re.FindStringSubmatch(content)
 
@@ -375,7 +430,12 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("failed to fetch video source: %+v", err))
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v\n", err)
+		}
+	}(response.Body)
 
 	if response.StatusCode != http.StatusOK {
 		return "", errors.New(fmt.Sprintf("request failed with status: %s", response.Status))
@@ -430,6 +490,7 @@ func downloadFolderFormatter(str string) string {
 }
 
 // HandleDownloadAndPlay handles the download and playback of the video
+// HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
 	if askForDownload() {
 		currentUser, err := user.Current()
@@ -448,9 +509,22 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 
 		if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 			fmt.Println("Downloading the video...")
-			numThreads := 4 // Define the number of threads for downloading
-			if err := downloadVideo(videoURL, episodePath, numThreads); err != nil {
-				log.Fatalf("Failed to download video: %+v", err)
+
+			// Verifique se o URL é do Blogger
+			if strings.Contains(videoURL, "blogger.com") {
+				// Use yt-dlp para baixar o vídeo do Blogger
+				fmt.Println("Using yt-dlp to download Blogger video...")
+				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
+				if err := cmd.Run(); err != nil {
+					log.Fatalf("Failed to download video using yt-dlp: %+v", err)
+				}
+			} else {
+				// Use o método de download padrão para outros URLs
+				fmt.Println("Using standard download method...")
+				numThreads := 4 // Define the number of threads for downloading
+				if err := downloadVideo(videoURL, episodePath, numThreads); err != nil {
+					log.Fatalf("Failed to download video: %+v", err)
+				}
 			}
 			fmt.Println("Video downloaded successfully!")
 		} else {
