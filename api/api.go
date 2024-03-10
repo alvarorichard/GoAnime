@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"golang.org/x/net/context"
 	"io"
@@ -38,6 +39,9 @@ type Episode struct {
 // SearchAnime performs a search on the site for the given anime name and returns the URL of the anime page.
 func SearchAnime(animeName string) (string, error) {
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
+	if util.IsDebug {
+		log.Printf("Searching for anime with URL: %s", currentPageURL)
+	}
 
 	for {
 		response, err := http.Get(currentPageURL)
