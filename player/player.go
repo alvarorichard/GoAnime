@@ -7,7 +7,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/api"
 	"github.com/alvarorichard/Goanime/util"
-	pb "github.com/cheggaaa/pb/v3"
+	"github.com/cheggaaa/pb/v3"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
@@ -219,7 +219,10 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 
 	// Aguarde todas as goroutines terminarem
 	wg.Wait()
-	pool.Stop()
+	err = pool.Stop()
+	if err != nil {
+		return err
+	}
 
 	// Combine todas as partes em um único arquivo
 	outFile, err := os.Create(destPath)
@@ -243,8 +246,14 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 		}
 
 		_, err = io.Copy(outFile, partFile)
-		partFile.Close()
-		os.Remove(partFilePath)
+		err = partFile.Close()
+		if err != nil {
+			return err
+		}
+		err = os.Remove(partFilePath)
+		if err != nil {
+			return err
+		}
 
 		if err != nil {
 			return err
@@ -480,7 +489,7 @@ func askForDownload() bool {
 
 // downloadFolderFormatter formats the anime URL to be used as the download folder name
 func downloadFolderFormatter(str string) string {
-	regex := regexp.MustCompile(`https:\/\/animefire\.plus\/video\/([^\/?]+)`)
+	regex := regexp.MustCompile(`https://animefire\.plus/video/([^/?]+)`)
 	match := regex.FindStringSubmatch(str)
 	if len(match) > 1 {
 		finalStep := match[1]
