@@ -19,8 +19,6 @@ import (
 	"time"
 )
 
-var IsDebug bool
-
 const baseSiteURL = "https://animefire.plus/"
 
 // Anime represents an anime with its name, URL and a slice of Episode structs.
