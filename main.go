@@ -11,7 +11,10 @@ import (
 
 func main() {
 
-	animeName := util.FlagParser()
+	animeName, err := util.FlagParser()
+	if err != nil {
+		log.Fatalln(util.ErrorHandler(err))
+	}
 	animeURL, err := api.SearchAnime(animeName)
 	if err != nil {
 		log.Fatalln("Failed to get anime episodes:", util.ErrorHandler(err))
@@ -33,6 +36,9 @@ func main() {
 	if series {
 		fmt.Printf("O anime selecionado é uma série com %d episódios.\n", totalEpisodes)
 		selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+		if err != nil {
+			log.Fatalln(util.ErrorHandler(err))
+		}
 
 		// A função extractEpisodeNumber não deve ser chamada para filmes/OVAs.
 		// Este ajuste é específico para quando sabemos que é uma série com base na verificação anterior.

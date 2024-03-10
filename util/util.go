@@ -1,10 +1,10 @@
 package util
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/manifoldco/promptui"
-	"log"
 	"os"
 	"strings"
 )
@@ -37,7 +37,7 @@ func Helper() {
 }
 
 // FlagParser parses the -flags and returns the anime name
-func FlagParser() string {
+func FlagParser() (string, error) {
 	// Define flags
 	debug := flag.Bool("debug", false, "enable debug mode")
 	help := flag.Bool("help", false, "show help message")
@@ -65,28 +65,32 @@ func FlagParser() string {
 		}
 		fmt.Println("Anime name:", animeName)
 		if len(animeName) < minNameLength {
-			log.Fatalf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
+			return "", errors.New(fmt.Sprintf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName))
 		}
 	} else {
-		animeName = getUserInput("Enter anime name")
+		animeName, err := getUserInput("Enter anime name")
+		if err != nil {
+			return animeName, err
+
+		}
 	}
-	return TreatingAnimeName(animeName)
+	return TreatingAnimeName(animeName), nil
 }
 
 // getUserInput prompts the user for input the anime name and returns it
-func getUserInput(label string) string {
+func getUserInput(label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 	}
 
 	animeName, err := prompt.Run()
 	if err != nil {
-		log.Fatalln("Error acquiring user input:", ErrorHandler(err))
+		return "", err
 	}
 	if len(animeName) < minNameLength {
-		log.Fatalf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
+		return "", errors.New(fmt.Sprintf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName))
 	}
-	return animeName
+	return animeName, nil
 }
 
 // TreatingAnimeName removes special characters and spaces from the anime name.
