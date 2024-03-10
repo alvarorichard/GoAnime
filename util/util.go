@@ -67,14 +67,10 @@ func FlagParser() (string, error) {
 		if len(animeName) < minNameLength {
 			return "", errors.New(fmt.Sprintf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName))
 		}
-	} else {
-		animeName, err := getUserInput("Enter anime name")
-		if err != nil {
-			return animeName, err
-
-		}
+		return TreatingAnimeName(animeName), nil
 	}
-	return TreatingAnimeName(animeName), nil
+	animeName, err := getUserInput("Enter anime name")
+	return TreatingAnimeName(animeName), err
 }
 
 // getUserInput prompts the user for input the anime name and returns it
