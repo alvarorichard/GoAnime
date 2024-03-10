@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/api"
+	"github.com/alvarorichard/Goanime/util"
 	pb "github.com/cheggaaa/pb/v3"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
@@ -138,7 +139,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 			defer wg.Done()
 
 			if !isValidURL(url) {
-				if api.IsDebug {
+				if util.IsDebug {
 					log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
 				}
 				return
@@ -147,7 +148,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 			// Crie uma solicitação GET com um cabeçalho Range
 			req, err := http.NewRequest("GET", url, nil)
 			if err != nil {
-				if api.IsDebug {
+				if util.IsDebug {
 					log.Printf("Thread %d: erro ao criar a solicitação: %v\n", part, err)
 				}
 				return
@@ -158,7 +159,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 			// Faça a solicitação usando o cliente HTTP seguro
 			resp, err := httpClient.Do(req)
 			if err != nil {
-				if api.IsDebug {
+				if util.IsDebug {
 					log.Printf("Thread %d: erro na solicitação: %v\n", part, err)
 				}
 				return
@@ -175,7 +176,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 			partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 			file, err := os.Create(partFilePath)
 			if err != nil {
-				if api.IsDebug {
+				if util.IsDebug {
 					log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
 				}
 				return
@@ -195,7 +196,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 				if n > 0 {
 					_, writeErr := file.Write(buf[:n])
 					if writeErr != nil {
-						if api.IsDebug {
+						if util.IsDebug {
 							log.Printf("Thread %d: erro ao escrever no arquivo: %v\n", part, writeErr)
 						}
 						return
@@ -206,7 +207,7 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 					break
 				}
 				if err != nil {
-					if api.IsDebug {
+					if util.IsDebug {
 						log.Printf("Thread %d: erro ao ler o corpo da resposta: %v\n", part, err)
 					}
 					return
@@ -261,7 +262,7 @@ func askForPlayOffline() bool {
 
 	_, result, err := prompt.Run()
 	if err != nil {
-		log.Fatalf("Error acquiring user input: %+v", err)
+		log.Fatalln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 	return strings.ToLower(result) == "yes"
 }
@@ -283,7 +284,7 @@ func askForPlayOffline() bool {
 //
 //	index, _, err := prompt.Run()
 //	if err != nil {
-//		log.Fatalf("Failed to select episode: %+v", err)
+//		log.Fatalln("Failed to select episode:", util.ErrorHandler(err))
 //	}
 //	return episodes[index].URL, episodes[index].Number
 //}
@@ -324,7 +325,7 @@ func ExtractEpisodeNumber(episodeStr string) string {
 // extractVideoURL extracts the video URL from the HTML of the episode page
 func extractVideoURL(url string) (string, error) {
 	response, err := api.SafeGet(url)
-	if api.IsDebug {
+	if util.IsDebug {
 		log.Printf("Fetching URL: %s - Error Status: %s\n", url, err)
 	}
 	if err != nil {
@@ -338,7 +339,7 @@ func extractVideoURL(url string) (string, error) {
 	}(response.Body)
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
-	if api.IsDebug {
+	if util.IsDebug {
 		log.Printf("Parsing HTML from URL: %s - Error Status: %s\n", url, err)
 	}
 	if err != nil {
@@ -349,7 +350,7 @@ func extractVideoURL(url string) (string, error) {
 	if videoElements.Length() == 0 {
 		videoElements = doc.Find("div")
 	}
-	if api.IsDebug {
+	if util.IsDebug {
 		log.Printf("Found %d video elements in the HTML\n", videoElements.Length())
 	}
 
@@ -368,7 +369,7 @@ func extractVideoURL(url string) (string, error) {
 			return "", err
 		}
 	}
-	if api.IsDebug {
+	if util.IsDebug {
 		log.Printf("Found video source URL: %s\n", videoSrc)
 	}
 	return videoSrc, nil
@@ -398,7 +399,6 @@ func fetchContent(url string) (string, error) {
 // findBloggerLink extracts the video link for Blogger uploaded videos
 func findBloggerLink(content string) (string, error) {
 	// Regex to match the link pattern
-	// Adjust according to the actual pattern and constraints of the link
 	pattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
 
 	re := regexp.MustCompile(pattern)
@@ -473,7 +473,7 @@ func askForDownload() bool {
 
 	_, result, err := prompt.Run()
 	if err != nil {
-		log.Fatalf("Error acquiring user input: %+v", err)
+		log.Fatalln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 	return strings.ToLower(result) == "yes"
 }
@@ -490,12 +490,11 @@ func downloadFolderFormatter(str string) string {
 }
 
 // HandleDownloadAndPlay handles the download and playback of the video
-// HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
 	if askForDownload() {
 		currentUser, err := user.Current()
 		if err != nil {
-			log.Fatalf("Failed to get current user: %+v", err)
+			log.Fatalln("Failed to get current user:", util.ErrorHandler(err))
 		}
 
 		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", downloadFolderFormatter(animeURL))
@@ -503,27 +502,27 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 
 		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 			if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-				log.Fatalf("Failed to create download directory: %+v", err)
+				log.Fatalln("Failed to create download directory:", util.ErrorHandler(err))
 			}
 		}
 
 		if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 			fmt.Println("Downloading the video...")
 
-			// Verifique se o URL é do Blogger
+			// Check if the video URL is from Blogger
 			if strings.Contains(videoURL, "blogger.com") {
 				// Use yt-dlp para baixar o vídeo do Blogger
 				fmt.Println("Using yt-dlp to download Blogger video...")
 				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
 				if err := cmd.Run(); err != nil {
-					log.Fatalf("Failed to download video using yt-dlp: %+v", err)
+					log.Fatalln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
 				}
 			} else {
-				// Use o método de download padrão para outros URLs
+				// Use the standard download method for other video sources
 				fmt.Println("Using standard download method...")
 				numThreads := 4 // Define the number of threads for downloading
 				if err := downloadVideo(videoURL, episodePath, numThreads); err != nil {
-					log.Fatalf("Failed to download video: %+v", err)
+					log.Fatalln("Failed to download video:", util.ErrorHandler(err))
 				}
 			}
 			fmt.Println("Video downloaded successfully!")
@@ -533,12 +532,12 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 
 		if askForPlayOffline() {
 			if err := playVideo(episodePath, episodes, selectedEpisodeNum); err != nil {
-				log.Fatalf("Failed to play video: %+v", err)
+				log.Fatalln("Failed to play video:", util.ErrorHandler(err))
 			}
 		}
 	} else {
 		if err := playVideo(videoURL, episodes, selectedEpisodeNum); err != nil {
-			log.Fatalf("Failed to play video: %+v", err)
+			log.Fatalln("Failed to play video:", util.ErrorHandler(err))
 		}
 	}
 }
@@ -572,7 +571,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 
 	// If the current episode was not found, return an error or handle appropriately
 	if currentEpisodeIndex == -1 {
-		if api.IsDebug {
+		if util.IsDebug {
 			log.Printf("Current episode number %d not found", currentEpisodeNum)
 		}
 		return errors.New("current episode not found")
