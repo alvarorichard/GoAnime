@@ -262,7 +262,7 @@ func askForPlayOffline() bool {
 
 	_, result, err := prompt.Run()
 	if err != nil {
-		log.Fatalln("Error acquiring user input:", util.ErrorHandler(err))
+		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 	return strings.ToLower(result) == "yes"
 }
@@ -284,7 +284,7 @@ func askForPlayOffline() bool {
 //
 //	index, _, err := prompt.Run()
 //	if err != nil {
-//		log.Fatalln("Failed to select episode:", util.ErrorHandler(err))
+//		log.Panicln()("Failed to select episode:", util.ErrorHandler(err))
 //	}
 //	return episodes[index].URL, episodes[index].Number
 //}
@@ -473,7 +473,7 @@ func askForDownload() bool {
 
 	_, result, err := prompt.Run()
 	if err != nil {
-		log.Fatalln("Error acquiring user input:", util.ErrorHandler(err))
+		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 	return strings.ToLower(result) == "yes"
 }
@@ -494,7 +494,7 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 	if askForDownload() {
 		currentUser, err := user.Current()
 		if err != nil {
-			log.Fatalln("Failed to get current user:", util.ErrorHandler(err))
+			log.Panicln("Failed to get current user:", util.ErrorHandler(err))
 		}
 
 		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", downloadFolderFormatter(animeURL))
@@ -502,7 +502,7 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 
 		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 			if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-				log.Fatalln("Failed to create download directory:", util.ErrorHandler(err))
+				log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
 			}
 		}
 
@@ -515,14 +515,14 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 				fmt.Println("Using yt-dlp to download Blogger video...")
 				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
 				if err := cmd.Run(); err != nil {
-					log.Fatalln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
+					log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
 				}
 			} else {
 				// Use the standard download method for other video sources
 				fmt.Println("Using standard download method...")
 				numThreads := 4 // Define the number of threads for downloading
 				if err := downloadVideo(videoURL, episodePath, numThreads); err != nil {
-					log.Fatalln("Failed to download video:", util.ErrorHandler(err))
+					log.Panicln("Failed to download video:", util.ErrorHandler(err))
 				}
 			}
 			fmt.Println("Video downloaded successfully!")
@@ -532,12 +532,12 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 
 		if askForPlayOffline() {
 			if err := playVideo(episodePath, episodes, selectedEpisodeNum); err != nil {
-				log.Fatalln("Failed to play video:", util.ErrorHandler(err))
+				log.Panicln("Failed to play video:", util.ErrorHandler(err))
 			}
 		}
 	} else {
 		if err := playVideo(videoURL, episodes, selectedEpisodeNum); err != nil {
-			log.Fatalln("Failed to play video:", util.ErrorHandler(err))
+			log.Panicln("Failed to play video:", util.ErrorHandler(err))
 		}
 	}
 }
