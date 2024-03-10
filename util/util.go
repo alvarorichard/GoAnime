@@ -1,7 +1,6 @@
 package util
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"github.com/manifoldco/promptui"
@@ -55,7 +54,7 @@ func FlagParser() (string, error) {
 	if *debug {
 		fmt.Println("--- Debug mode is enabled ---")
 	}
-	//If the user has provided an anime name as an argument, we use it.
+	// If the user has provided an anime name as an argument, we use it.
 	var animeName string
 	if len(flag.Args()) > 0 {
 		animeName = strings.Join(flag.Args(), " ")
@@ -65,7 +64,7 @@ func FlagParser() (string, error) {
 		}
 		fmt.Println("Anime name:", animeName)
 		if len(animeName) < minNameLength {
-			return "", errors.New(fmt.Sprintf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName))
+			return "", fmt.Errorf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 		}
 		return TreatingAnimeName(animeName), nil
 	}
@@ -84,7 +83,7 @@ func getUserInput(label string) (string, error) {
 		return "", err
 	}
 	if len(animeName) < minNameLength {
-		return "", errors.New(fmt.Sprintf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName))
+		return "", fmt.Errorf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 	}
 	return animeName, nil
 }
