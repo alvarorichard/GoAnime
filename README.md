@@ -18,7 +18,9 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 ## Prerequisites
 
 * Go (at latest version)
-*  VLC Media Player
+* Mpv(at latest version)
+* yt-dlp(at latest version)
+
 
 
 ## Dependencies
@@ -71,22 +73,15 @@ Execute the `install.ps1` script:
 ```
 
 
+Rember add mpv to path
 
-
-
-
-
-
-
-Rember add vlc to path
-
-use this command to add vlc to path
+use this command to add mpv to path
 ```shell
 set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
 ```
-or follow this tutorial for add vlc to path 
+or follow this tutorial for add mpv to path 
 
-[How to add vlc to path](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
+[How to add mpv to path](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
 
 
 
@@ -109,11 +104,11 @@ The program will prompt you to input the name of an anime. Enter the name of the
 
 The program will then present a list of episodes for the selected anime. Again, navigate the list using the arrow keys and press enter to select an episode.
 
-The selected episode will then play in VLC media player.
+The selected episode will then play in mpv media player.
 
 
 # Thanks 
-[@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
+[@KitsuneSemCalda](https://github.com/KitsuneSemCalda)   and [@the-eduardo](https://github.com/the-eduardo) for help and improve this application
 
 # Alternatives
 
