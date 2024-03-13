@@ -77,11 +77,11 @@ Rember add mpv to path
 
 use this command to add mpv to path
 ```shell
-set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
+set PATH=%PATH%;C:\Program Files\mpv
 ```
 or follow this tutorial for add mpv to path 
 
-[How to add mpv to path](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
+[How to add mpv to path](https://thewiki.moe/tutorials/mpv/)
 
 
 
