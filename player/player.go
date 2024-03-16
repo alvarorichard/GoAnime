@@ -276,27 +276,7 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-// SelectEpisode displays a prompt to the user to select an episode from a list
-//func SelectEpisode(episodes []api.Episode) (string, string) {
-//	templates := &promptui.SelectTemplates{
-//		Label:    "{{ . }}",
-//		Active:   "▶ {{ .Number | cyan }}",
-//		Inactive: "  {{ .Number | white }}",
-//		Selected: "▶ {{ .Number | cyan | underline }}",
-//	}
-//
-//	prompt := promptui.Select{
-//		Label:     "Select the episode",
-//		Items:     episodes,
-//		Templates: templates,
-//	}
-//
-//	index, _, err := prompt.Run()
-//	if err != nil {
-//		log.Panicln()("Failed to select episode:", util.ErrorHandler(err))
-//	}
-//	return episodes[index].URL, episodes[index].Number
-//}
+
 
 func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
 	if len(episodes) == 0 {
