@@ -13,7 +13,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/fatih/color v1.16.0 // indirect
-	github.com/gdamore/encoding v1.0.0 // indirect
+	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.7.4 // indirect
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
 	github.com/ktr0731/go-fuzzyfinder v0.8.0 // indirect
