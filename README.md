@@ -30,7 +30,6 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 * yt-dlp(at latest version)
 
 
-
 ## Dependencies
 * PuerkitoBio/goquery
 * manifoldco/promptui

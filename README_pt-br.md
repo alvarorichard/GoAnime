@@ -18,12 +18,14 @@
 ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) 
 [![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
+
+
 # GoAnime
-GoAnime é uma interface de linha de comando (CLI) simples, desenvolvida em Go, que permite aos usuários procurar um anime e reproduzir ou baixar episódios diretamente no VLC. Ele coleta dados de sites para fornecer uma seleção de animes e episódios ao usuário, com um foco e objetivo especial em oferecer animes que são legendados e dublados em português
+GoAnime é uma interface de linha de comando (CLI) simples, desenvolvida em Go, que permite aos usuários procurar um anime e reproduzir ou baixar episódios diretamente no MPV. Ele coleta dados de sites para fornecer uma seleção de animes e episódios ao usuário, com um foco e objetivo especial em oferecer animes que são legendados e dublados em português
 ## Pré-requisitos
 
 * Go (na versão mais recente)
-* VLC Media Player
+* mpv (na versão mais recente)
 
 ## Dependências
 * PuerkitoBio/goquery
@@ -70,15 +72,15 @@ Execute o script install.ps1:
 
 
 
-Lembre-se de adicionar o vlc ao caminho
+Lembre-se de adicionar o mpv ao caminho
 
-Use o comando para adicionar o vlc a path:
+Use o comando para adicionar o mpv a path:
 ```shell
-set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
+set PATH=%PATH%;C:\Program Files\mpv
 ```
-ou siga este tutorial para adicionar o vlc a path
+ou siga este tutorial para adicionar o mpv a path
 
-[Como adicionar o VLC ao PATH](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
+[Como adicionar o MPV ao PATH](https://thewiki.moe/tutorials/mpv/)
 
 ## Uso no Linux e macOS
 
@@ -98,10 +100,10 @@ O programa apresentará uma lista de animes que correspondem à sua entrada. Nav
 
 Em seguida, o programa apresentará uma lista de episódios do anime selecionado. Novamente, navegue pela lista usando as setas do teclado e pressione enter para selecionar um episódio.
 
-O episódio selecionado será então reproduzido no VLC media player.
+O episódio selecionado será então reproduzido no MPV
 
 # Agradecimento
-[@KitsuneSemCalda](https://github.com/KitsuneSemCalda) por ajudar e melhorar essa aplicação
+[@KitsuneSemCalda](https://github.com/KitsuneSemCalda)  e [@the-eduardo](https://github.com/the-eduardo) por ajudar e melhorar essa aplicação
 
 
 # Alternativas
