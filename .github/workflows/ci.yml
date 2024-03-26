@@ -1,5 +1,4 @@
 
-
 name: GoAnime CI
 
 on:
@@ -35,7 +34,8 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install mpv yt-dlp
+          choco install mpv
+          choco install yt-dlp
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'

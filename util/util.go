@@ -64,7 +64,7 @@ func FlagParser() (string, error) {
 		}
 		fmt.Println("Anime name:", animeName)
 		if len(animeName) < minNameLength {
-			return "", fmt.Errorf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
+			return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 		}
 		return TreatingAnimeName(animeName), nil
 	}
@@ -83,7 +83,7 @@ func getUserInput(label string) (string, error) {
 		return "", err
 	}
 	if len(animeName) < minNameLength {
-		return "", fmt.Errorf("Anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
+		return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 	}
 	return animeName, nil
 }
