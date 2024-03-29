@@ -1,4 +1,4 @@
-
+[
 <h4 align="center">
     <p>
         <b>English</b> |
@@ -103,6 +103,14 @@ go-anime
 goanime
 ```
 
+
+### Advanced Usage
+You can also use parameters to search for and play anime directly. Here are some examples:
+
+* To search for and play an anime directly, use the following command:
+```shell
+goanime  "anime name"
+```
 
 
 The program will prompt you to input the name of an anime. Enter the name of the anime you wish to watch.
