@@ -111,6 +111,10 @@ You can also use parameters to search for and play anime directly. Here are some
 ```shell
 goanime  "anime name"
 ```
+You can use the `-h` or `--help` option to display help information about how to use the `goanime` command.
+```shell
+goanime -h
+```
 
 
 The program will prompt you to input the name of an anime. Enter the name of the anime you wish to watch.
