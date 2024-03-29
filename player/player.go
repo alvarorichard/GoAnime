@@ -7,6 +7,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/api"
 	"github.com/alvarorichard/Goanime/util"
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
@@ -26,6 +29,74 @@ import (
 	"sync"
 	"time"
 )
+
+type progressMsg struct {
+	part     int
+	progress float64 // Ou qualquer outra unidade de medida de progresso que você esteja usando
+}
+
+const (
+	padding  = 2
+	maxWidth = 80
+)
+
+var helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render
+
+type tickMsg time.Time
+
+type model struct {
+	progress progress.Model
+}
+
+func (m model) Init() tea.Cmd {
+	return tickCmd()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m, tea.Quit
+
+	case tea.WindowSizeMsg:
+		m.progress.Width = msg.Width - padding*2 - 4
+		if m.progress.Width > maxWidth {
+			m.progress.Width = maxWidth
+		}
+		return m, nil
+
+	case tickMsg:
+		if m.progress.Percent() == 1.0 {
+			return m, tea.Quit
+		}
+
+		// Note that you can also use progress.Model.SetPercent to set the
+		// percentage value explicitly, too.
+		cmd := m.progress.IncrPercent(0.25)
+		return m, tea.Batch(tickCmd(), cmd)
+
+	// FrameMsg is sent when the progress bar wants to animate itself
+	case progress.FrameMsg:
+		progressModel, cmd := m.progress.Update(msg)
+		m.progress = progressModel.(progress.Model)
+		return m, cmd
+
+	default:
+		return m, nil
+	}
+}
+
+func (m model) View() string {
+	pad := strings.Repeat(" ", padding)
+	return "\n" +
+		pad + m.progress.View() + "\n\n" +
+		pad + helpStyle("Press any key to quit")
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(time.Second*1, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // VideoData represents the video data structure, with a source URL and a label
 type VideoData struct {
@@ -82,7 +153,7 @@ func isValidURL(url string) bool {
 func downloadVideo(url string, destPath string, numThreads int) error {
 	// Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
 	destPath = filepath.Clean(destPath)
-
+	var pool *pb.Pool
 	// Crie um cliente HTTP seguro usando api.SafeTransport
 	const clientConnectTimeout = 10 * time.Second
 	httpClient := &http.Client{
@@ -117,13 +188,22 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 	var wg sync.WaitGroup
 
 	// Crie barras de progresso para cada parte
-	bars := make([]*pb.ProgressBar, numThreads)
-	for i := range bars {
-		bars[i] = pb.Full.Start64(int64(chunkSize))
+	//bars := make([]*pb.ProgressBar, numThreads)
+	//for i := range bars {
+	//	bars[i] = pb.Full.Start64(int64(chunkSize))
+	//}
+	//pool, err := pb.StartPool(bars...)
+	//if err != nil {
+	//	return err
+	//}
+
+	m := model{
+		progress: progress.New(progress.WithDefaultGradient()),
 	}
-	pool, err := pb.StartPool(bars...)
-	if err != nil {
-		return err
+
+	if _, err := tea.NewProgram(m).Run(); err != nil {
+		fmt.Println("Oh no!", err)
+		os.Exit(1)
 	}
 
 	// Faça o download de cada parte em uma goroutine separada
@@ -214,7 +294,16 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 				}
 			}
 			bar.Finish()
-		}(from, to, i, bars[i])
+			//finish with bubbletea
+
+			if bar != nil {
+				bar.Add64(1) // Ou bar.Add64(n), dependendo da sua necessidade
+			} else {
+				log.Println("Tentativa de atualizar uma barra de progresso nula.")
+			}
+
+		}(from, to, i, nil)
+
 	}
 
 	// Aguarde todas as goroutines terminarem
@@ -275,8 +364,6 @@ func askForPlayOffline() bool {
 	}
 	return strings.ToLower(result) == "yes"
 }
-
-
 
 func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
 	if len(episodes) == 0 {
