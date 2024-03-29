@@ -1,4 +1,4 @@
-[
+
 <h4 align="center">
     <p>
         <b>English</b> |
