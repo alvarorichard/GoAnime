@@ -94,6 +94,21 @@ go-anime
 goanime
 ```
 
+### Uso Avançado
+Você também pode usar parâmetros para procurar e reproduzir anime diretamente. Aqui estão alguns exemplos:
+
+* Para procurar e reproduzir um anime diretamente, use o seguinte comando:
+```shell
+goanime  "nome do anime"
+```
+Você pode usar a opção `-h` ou `--help` para exibir informações de ajuda sobre como usar o comando goanime.
+
+```shell
+goanime -h
+```
+
+
+
 O programa solicitará que você insira o nome de um anime. Digite o nome do anime que deseja assistir.
 
 O programa apresentará uma lista de animes que correspondem à sua entrada. Navegue pela lista usando as setas do teclado e pressione enter para selecionar um anime.
