@@ -24,9 +24,6 @@
 GoAnime is a simple command-line interface (CLI) built in Go, allowing users to search for anime and either play or download episodes directly in Mpv. It scrapes data from websites to provide a selection of anime and episodes to the user, with a special focus and objective on offering animes that are both subtitled and dubbed in Portuguese.
 
 
-# Demo 
-https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048-c80082119836
-
 
 
 ## Prerequisites
