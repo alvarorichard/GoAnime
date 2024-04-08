@@ -51,6 +51,20 @@ git clone https://github.com/alvarorichard/GoAnime.git
 cd GoAnime
 sudo bash install.sh
 ```
+## Instalação no Arch Linux (AUR)
+
+Para usuários do Arch Linux, o GoAnime está disponível no AUR. Você pode instalá-lo usando um auxiliar de AUR como `paru` ou `yay`:
+
+Usando `paru`:
+
+  ```shell
+  paru -S goanime
+  ```
+Usando `yay`:
+
+  ```shell
+  yay -S goanime
+  ```
 
 
 ## Instalação somente para Windows
