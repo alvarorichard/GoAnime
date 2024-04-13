@@ -101,6 +101,25 @@ Execute the `install.ps1` script:
 .\install.ps1
 ```
 
+### Additional Recommendations for Users
+
+For a smoother setup experience, it's recommended to install `mpv` and `yt-dlp` using Scoop as it automatically adds them to your system's PATH. Follow these steps to install these tools:
+
+1. Install Scoop (if not installed):
+
+Open PowerShell and execute:
+
+```powershell
+iwr -useb get.scoop.sh | iex
+```
+
+2. Install `mpv` and `yt-dlp` using Scoop:
+
+```powershell
+scoop install mpv yt-dlp
+```
+This method ensures that mpv and yt-dlp are added to your PATH automatically, eliminating the need for manual configuration.
+
 
 Rember add mpv to path
 
