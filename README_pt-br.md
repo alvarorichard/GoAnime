@@ -22,6 +22,9 @@
 
 # GoAnime
 GoAnime é uma interface de linha de comando (CLI) simples, desenvolvida em Go, que permite aos usuários procurar um anime e reproduzir ou baixar episódios diretamente no MPV. Ele coleta dados de sites para fornecer uma seleção de animes e episódios ao usuário, com um foco e objetivo especial em oferecer animes que são legendados e dublados em português
+
+
+
 ## Pré-requisitos
 
 * Go (na versão mais recente)
@@ -48,39 +51,58 @@ git clone https://github.com/alvarorichard/GoAnime.git
 cd GoAnime
 sudo bash install.sh
 ```
+## Instalação no Arch Linux (AUR)
+
+Para usuários do Arch Linux, o GoAnime está disponível no AUR. Você pode instalá-lo usando um auxiliar de AUR como `paru` ou `yay`:
+
+Usando `paru`:
+
+  ```shell
+  paru -S goanime
+  ```
+Usando `yay`:
+
+  ```shell
+  yay -S goanime
+  ```
 
 
-## Instalação somente para Windows
+# Instalação apenas para Windows
+Para instalar o GoAnime no Windows usando o script PowerShell `install.ps1`, siga estes passos:
 
-Para instalar o GoAnime no Windows usando o script PowerShell install.ps1, siga estes passos:
-
-1. Abra o PowerShell como Administrador
-2.Habilite a Execução de Scripts no PowerShell (se ainda não estiver habilitada):
-
-No PowerShell, execute o seguinte comando para permitir a execução de scripts:
-
-```powershell
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-3. Execute o Script de Instalação:
-
-Execute o script install.ps1:
-
-```powershell
-.\install.ps1
-```
-
-
-
-Lembre-se de adicionar o mpv ao caminho
-
-Use o comando para adicionar o mpv a path:
+1. Abra o PowerShell como Administrador.
+2. Habilite a Execução de Scripts no PowerShell (se ainda não estiver habilitada):
 ```shell
-set PATH=%PATH%;C:\Program Files\mpv
+   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
-ou siga este tutorial para adicionar o mpv a path
 
-[Como adicionar o MPV ao PATH](https://thewiki.moe/tutorials/mpv/)
+3. Execute o Script de Instalação:
+```shell
+   .\install.ps1
+```
+### Recomendações Adicionais para os Usuários
+
+Para uma experiência de configuração mais suave, é recomendado instalar `mpv` e `yt-dlp` usando o Scoop, pois isso os adiciona automaticamente ao PATH do seu sistema. Siga estes passos para instalar essas ferramentas:
+
+ Instale o Scoop (se não estiver instalado):
+  ```shell
+  Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+  ```
+ Instale `mpv` e `yt-dlp` usando o Scoop:
+   ```shell
+   scoop install mpv yt-dlp
+   ``` 
+Este método garante que mpv e yt-dlp sejam adicionados ao seu PATH automaticamente, eliminando a necessidade de configuração manual.
+
+Lembre-se de adicionar mpv ao PATH usando este comando:
+   
+   ```shell
+   set PATH=%PATH%;C:\Program Files\mpv
+   ```
+Ou siga este tutorial para adicionar mpv ao PATH:
+
+[Como adicionar mpv ao PATH](https://thewiki.moe/tutorials/mpv/)
+
 
 ## Uso no Linux e macOS
 
@@ -93,6 +115,21 @@ go-anime
 ```go
 goanime
 ```
+
+### Uso Avançado
+Você também pode usar parâmetros para procurar e reproduzir anime diretamente. Aqui estão alguns exemplos:
+
+* Para procurar e reproduzir um anime diretamente, use o seguinte comando:
+```shell
+goanime  "nome do anime"
+```
+Você pode usar a opção `-h` ou `--help` para exibir informações de ajuda sobre como usar o comando goanime.
+
+```shell
+goanime -h
+```
+
+
 
 O programa solicitará que você insira o nome de um anime. Digite o nome do anime que deseja assistir.
 

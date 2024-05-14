@@ -1,4 +1,4 @@
-[
+
 <h4 align="center">
     <p>
         <b>English</b> |
@@ -23,9 +23,15 @@
 # GoAnime 
 GoAnime is a simple command-line interface (CLI) built in Go, allowing users to search for anime and either play or download episodes directly in Mpv. It scrapes data from websites to provide a selection of anime and episodes to the user, with a special focus and objective on offering animes that are both subtitled and dubbed in Portuguese.
 
+
+
+
 ## Prerequisites
 
 * Go (at latest version)
+
+
+
 * Mpv(at latest version)
 * yt-dlp(at latest version)
 
@@ -54,6 +60,22 @@ cd GoAnime
 sudo bash install.sh
 ```
 
+## Arch Linux Install (AUR)
+
+For Arch Linux users, GoAnime is available in the AUR. You can install it using an AUR helper like `paru` or `yay`:
+  
+Using `paru`:
+
+  ```shell
+  paru -S goanime
+  ```
+Using `yay`:
+
+  ```shell
+  yay -S goanime
+  ```
+
+
 
 
 
@@ -78,6 +100,25 @@ Execute the `install.ps1` script:
 ```powershell
 .\install.ps1
 ```
+
+### Additional Recommendations for Users
+
+For a smoother setup experience, it's recommended to install `mpv` and `yt-dlp` using Scoop as it automatically adds them to your system's PATH. Follow these steps to install these tools:
+
+1. Install Scoop (if not installed):
+
+Open PowerShell and execute:
+
+```powershell
+iwr -useb get.scoop.sh | iex
+```
+
+2. Install `mpv` and `yt-dlp` using Scoop:
+
+```powershell
+scoop install mpv yt-dlp
+```
+This method ensures that mpv and yt-dlp are added to your PATH automatically, eliminating the need for manual configuration.
 
 
 Rember add mpv to path
