@@ -4,13 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/api"
-	"github.com/alvarorichard/Goanime/util"
-	"github.com/cheggaaa/pb/v3"
-	"github.com/ktr0731/go-fuzzyfinder"
-	"github.com/manifoldco/promptui"
-	"github.com/pkg/errors"
 	"io"
 	"log"
 	"net"
@@ -25,6 +18,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/api"
+	"github.com/alvarorichard/Goanime/util"
+	"github.com/cheggaaa/pb/v3"
+	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/manifoldco/promptui"
+	"github.com/pkg/errors"
 )
 
 // VideoData represents the video data structure, with a source URL and a label
@@ -79,160 +80,277 @@ func isValidURL(url string) bool {
 }
 
 // downloadVideo downloads a video from a URL to a destination path using multiple threads
-func downloadVideo(url string, destPath string, numThreads int) error {
-	// Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
-	destPath = filepath.Clean(destPath)
+// func downloadVideo(url string, destPath string, numThreads int) error {
+// 	// Certifique-se de que o caminho de destino é validado para evitar a travessia de diretório
+// 	destPath = filepath.Clean(destPath)
 
-	// Crie um cliente HTTP seguro usando api.SafeTransport
-	const clientConnectTimeout = 10 * time.Second
-	httpClient := &http.Client{
-		Transport: api.SafeTransport(clientConnectTimeout),
+// 	// Crie um cliente HTTP seguro usando api.SafeTransport
+// 	const clientConnectTimeout = 10 * time.Second
+// 	httpClient := &http.Client{
+// 		Transport: api.SafeTransport(clientConnectTimeout),
+// 	}
+
+// 	// Faça uma solicitação HEAD para obter o tamanho do conteúdo
+// 	resp, err := httpClient.Head(url)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer func(Body io.ReadCloser) {
+// 		err := Body.Close()
+// 		if err != nil {
+// 			log.Printf("Failed to close response body: %v", err)
+// 		}
+// 	}(resp.Body)
+
+// 	// Verifique se o servidor suporta conteúdo parcial
+// 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+// 		return errors.New(fmt.Sprintf("o servidor não suporta conteúdo parcial: código de status %d", resp.StatusCode))
+// 	}
+
+// 	// Obtenha o tamanho do conteúdo
+// 	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Calcule o tamanho de cada parte
+// 	chunkSize := contentLength / numThreads
+// 	var wg sync.WaitGroup
+
+// 	// Crie barras de progresso para cada parte
+// 	bars := make([]*pb.ProgressBar, numThreads)
+// 	for i := range bars {
+// 		bars[i] = pb.Full.Start64(int64(chunkSize))
+// 	}
+// 	pool, err := pb.StartPool(bars...)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Faça o download de cada parte em uma goroutine separada
+// 	for i := 0; i < numThreads; i++ {
+// 		from := i * chunkSize
+// 		to := from + chunkSize - 1
+// 		if i == numThreads-1 {
+// 			to = contentLength - 1
+// 		}
+
+// 		wg.Add(1)
+// 		go func(from, to, part int, bar *pb.ProgressBar) {
+// 			defer wg.Done()
+
+// 			if !isValidURL(url) {
+// 				if util.IsDebug {
+// 					log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
+// 				}
+// 				return
+// 			}
+
+// 			// Crie uma solicitação GET com um cabeçalho Range
+// 			req, err := http.NewRequest("GET", url, nil)
+// 			if err != nil {
+// 				if util.IsDebug {
+// 					log.Printf("Thread %d: erro ao criar a solicitação: %v\n", part, err)
+// 				}
+// 				return
+// 			}
+// 			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
+// 			req.Header.Add("Range", rangeHeader)
+
+// 			// Faça a solicitação usando o cliente HTTP seguro
+// 			resp, err := httpClient.Do(req)
+// 			if err != nil {
+// 				if util.IsDebug {
+// 					log.Printf("Thread %d: erro na solicitação: %v\n", part, err)
+// 				}
+// 				return
+// 			}
+// 			defer func(Body io.ReadCloser) {
+// 				err := Body.Close()
+// 				if err != nil {
+// 					log.Printf("Thread %d: erro ao fechar o corpo da resposta: %v\n", part, err)
+// 				}
+// 			}(resp.Body)
+
+// 			// Crie um arquivo para a parte baixada
+// 			partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
+// 			partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+// 			file, err := os.Create(partFilePath)
+// 			if err != nil {
+// 				if util.IsDebug {
+// 					log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
+// 				}
+// 				return
+// 			}
+
+// 			defer func(file *os.File) {
+// 				err := file.Close()
+// 				if err != nil {
+// 					log.Printf("Thread %d: erro ao fechar o arquivo: %v\n", part, err)
+// 				}
+// 			}(file)
+
+// 			// Escreva os dados no arquivo e atualize a barra de progresso
+// 			buf := make([]byte, 1024)
+// 			for {
+// 				n, err := resp.Body.Read(buf)
+// 				if n > 0 {
+// 					_, writeErr := file.Write(buf[:n])
+// 					if writeErr != nil {
+// 						if util.IsDebug {
+// 							log.Printf("Thread %d: erro ao escrever no arquivo: %v\n", part, writeErr)
+// 						}
+// 						return
+// 					}
+// 					bar.Add(n)
+// 				}
+// 				if err == io.EOF {
+// 					break
+// 				}
+// 				if err != nil {
+// 					if util.IsDebug {
+// 						log.Printf("Thread %d: erro ao ler o corpo da resposta: %v\n", part, err)
+// 					}
+// 					return
+// 				}
+// 			}
+// 			bar.Finish()
+// 		}(from, to, i, bars[i])
+// 	}
+
+// 	// Aguarde todas as goroutines terminarem
+// 	wg.Wait()
+// 	err = pool.Stop()
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Combine todas as partes em um único arquivo
+// 	outFile, err := os.Create(destPath)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer func(outFile *os.File) {
+// 		err = outFile.Close()
+// 		if err != nil {
+// 			log.Printf("Erro ao fechar o arquivo de saída: %v\n", err)
+// 		}
+// 	}(outFile)
+
+// 	for i := 0; i < numThreads; i++ {
+// 		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
+// 		partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+
+// 		partFile, err := os.Open(partFilePath)
+// 		if err != nil {
+// 			return err
+// 		}
+
+// 		_, err = io.Copy(outFile, partFile)
+// 		err = partFile.Close()
+// 		if err != nil {
+// 			return err
+// 		}
+// 		err = os.Remove(partFilePath)
+// 		if err != nil {
+// 			return err
+// 		}
+
+// 		if err != nil {
+// 			return err
+// 		}
+// 	}
+
+// 	return nil
+// }
+
+func getContentLength(url string, client *http.Client) (int, error) {
+	resp, err := client.Head(url)
+	if err != nil {
+		return 0, err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return 0, errors.New(fmt.Sprintf("server does not support partial content: status code %d", resp.StatusCode))
 	}
 
-	// Faça uma solicitação HEAD para obter o tamanho do conteúdo
-	resp, err := httpClient.Head(url)
+	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if err != nil {
+		return 0, err
+	}
+
+	return contentLength, nil
+}
+
+// downloadPart downloads a part of the video file
+func downloadPart(url string, from, to, part int, client *http.Client, bar *pb.ProgressBar, destPath string) error {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v", err)
+
 		}
 	}(resp.Body)
 
-	// Verifique se o servidor suporta conteúdo parcial
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return errors.New(fmt.Sprintf("o servidor não suporta conteúdo parcial: código de status %d", resp.StatusCode))
-	}
-
-	// Obtenha o tamanho do conteúdo
-	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
+	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+	file, err := os.Create(partFilePath)
 	if err != nil {
 		return err
 	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
 
-	// Calcule o tamanho de cada parte
-	chunkSize := contentLength / numThreads
-	var wg sync.WaitGroup
-
-	// Crie barras de progresso para cada parte
-	bars := make([]*pb.ProgressBar, numThreads)
-	for i := range bars {
-		bars[i] = pb.Full.Start64(int64(chunkSize))
-	}
-	pool, err := pb.StartPool(bars...)
-	if err != nil {
-		return err
-	}
-
-	// Faça o download de cada parte em uma goroutine separada
-	for i := 0; i < numThreads; i++ {
-		from := i * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
 		}
+	}(file)
 
-		wg.Add(1)
-		go func(from, to, part int, bar *pb.ProgressBar) {
-			defer wg.Done()
-
-			if !isValidURL(url) {
-				if util.IsDebug {
-					log.Printf("Thread %d: unsafe URL detected, aborting request\n", part)
-				}
-				return
+	buf := make([]byte, 1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, err := file.Write(buf[:n]); err != nil {
+				return err
 			}
-
-			// Crie uma solicitação GET com um cabeçalho Range
-			req, err := http.NewRequest("GET", url, nil)
-			if err != nil {
-				if util.IsDebug {
-					log.Printf("Thread %d: erro ao criar a solicitação: %v\n", part, err)
-				}
-				return
-			}
-			rangeHeader := fmt.Sprintf("bytes=%d-%d", from, to)
-			req.Header.Add("Range", rangeHeader)
-
-			// Faça a solicitação usando o cliente HTTP seguro
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				if util.IsDebug {
-					log.Printf("Thread %d: erro na solicitação: %v\n", part, err)
-				}
-				return
-			}
-			defer func(Body io.ReadCloser) {
-				err := Body.Close()
-				if err != nil {
-					log.Printf("Thread %d: erro ao fechar o corpo da resposta: %v\n", part, err)
-				}
-			}(resp.Body)
-
-			// Crie um arquivo para a parte baixada
-			partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
-			partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
-			file, err := os.Create(partFilePath)
-			if err != nil {
-				if util.IsDebug {
-					log.Printf("Thread %d: erro ao criar o arquivo: %v\n", part, err)
-				}
-				return
-			}
-
-			defer func(file *os.File) {
-				err := file.Close()
-				if err != nil {
-					log.Printf("Thread %d: erro ao fechar o arquivo: %v\n", part, err)
-				}
-			}(file)
-
-			// Escreva os dados no arquivo e atualize a barra de progresso
-			buf := make([]byte, 1024)
-			for {
-				n, err := resp.Body.Read(buf)
-				if n > 0 {
-					_, writeErr := file.Write(buf[:n])
-					if writeErr != nil {
-						if util.IsDebug {
-							log.Printf("Thread %d: erro ao escrever no arquivo: %v\n", part, writeErr)
-						}
-						return
-					}
-					bar.Add(n)
-				}
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					if util.IsDebug {
-						log.Printf("Thread %d: erro ao ler o corpo da resposta: %v\n", part, err)
-					}
-					return
-				}
-			}
-			bar.Finish()
-		}(from, to, i, bars[i])
+			bar.Add(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
 	}
 
-	// Aguarde todas as goroutines terminarem
-	wg.Wait()
-	err = pool.Stop()
-	if err != nil {
-		return err
-	}
+	bar.Finish()
+	return nil
+}
 
-	// Combine todas as partes em um único arquivo
+// combineParts combines downloaded parts into a single file
+func combineParts(destPath string, numThreads int) error {
 	outFile, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
 	defer func(outFile *os.File) {
-		err = outFile.Close()
+		err := outFile.Close()
 		if err != nil {
-			log.Printf("Erro ao fechar o arquivo de saída: %v\n", err)
+
 		}
 	}(outFile)
 
@@ -245,22 +363,76 @@ func downloadVideo(url string, destPath string, numThreads int) error {
 			return err
 		}
 
-		_, err = io.Copy(outFile, partFile)
+		if _, err := io.Copy(outFile, partFile); err != nil {
+			err := partFile.Close()
+			if err != nil {
+				return err
+			}
+			return err
+		}
 		err = partFile.Close()
 		if err != nil {
 			return err
 		}
-		err = os.Remove(partFilePath)
-		if err != nil {
-			return err
-		}
 
-		if err != nil {
+		if err := os.Remove(partFilePath); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// downloadVideo downloads a video using multiple threads
+func downloadVideo(url, destPath string, numThreads int) error {
+	// Ensure the destination path is validated to prevent directory traversal
+	destPath = filepath.Clean(destPath)
+
+	// Create an HTTP client with a safe transport
+	const clientConnectTimeout = 10 * time.Second
+	httpClient := &http.Client{
+		Transport: api.SafeTransport(clientConnectTimeout),
+	}
+
+	contentLength, err := getContentLength(url, httpClient)
+	if err != nil {
+		return err
+	}
+
+	chunkSize := contentLength / numThreads
+	var wg sync.WaitGroup
+
+	bars := make([]*pb.ProgressBar, numThreads)
+	for i := range bars {
+		bars[i] = pb.Full.Start64(int64(chunkSize))
+	}
+	pool, err := pb.StartPool(bars...)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < numThreads; i++ {
+		from := i * chunkSize
+		to := from + chunkSize - 1
+		if i == numThreads-1 {
+			to = contentLength - 1
+		}
+
+		wg.Add(1)
+		go func(from, to, part int, bar *pb.ProgressBar) {
+			defer wg.Done()
+			if err := downloadPart(url, from, to, part, httpClient, bar, destPath); err != nil {
+				log.Printf("Thread %d: download part failed: %v\n", part, err)
+			}
+		}(from, to, i, bars[i])
+	}
+
+	wg.Wait()
+	if err := pool.Stop(); err != nil {
+		return err
+	}
+
+	return combineParts(destPath, numThreads)
 }
 
 func askForPlayOffline() bool {
@@ -275,8 +447,6 @@ func askForPlayOffline() bool {
 	}
 	return strings.ToLower(result) == "yes"
 }
-
-
 
 func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
 	if len(episodes) == 0 {
