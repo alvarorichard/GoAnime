@@ -270,6 +270,7 @@ func getContentLength(url string, client *http.Client) (int, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
+			log.Printf("Failed to close response body: %v\n", err)
 
 		}
 	}(resp.Body)
@@ -301,6 +302,7 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *pb.P
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
+			log.Printf("Failed to close response body: %v\n", err)
 
 		}
 	}(resp.Body)
@@ -314,6 +316,7 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *pb.P
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
+			log.Printf("Failed to close file: %v\n", err)
 
 		}
 	}(file)
@@ -348,6 +351,7 @@ func combineParts(destPath string, numThreads int) error {
 	defer func(outFile *os.File) {
 		err := outFile.Close()
 		if err != nil {
+			log.Printf("Failed to close output file: %v\n", err)
 
 		}
 	}(outFile)
