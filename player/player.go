@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
-	neturl "net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -60,24 +58,24 @@ func isHigherQuality(quality1, quality2 string) bool {
 	return quality1Value > quality2Value
 }
 
-func isValidURL(url string) bool {
-	// Parse the URL to check for validity and to extract the hostname
-	parsedURL, err := neturl.Parse(url)
-	if err != nil {
-		return false
-	}
-
-	// Check if the hostname is an IP address
-	ip := net.ParseIP(parsedURL.Hostname())
-	if ip != nil {
-		// If it's an IP address, check if it's disallowed
-		return !api.IsDisallowedIP(ip.String())
-	}
-
-	// If the hostname is not an IP address, it's considered valid for this example
-	// You might want to add additional checks here depending on your requirements
-	return true
-}
+//func isValidURL(url string) bool {
+////	// Parse the URL to check for validity and to extract the hostname
+////	parsedURL, err := neturl.Parse(url)
+////	if err != nil {
+////		return false
+////	}
+////
+////	// Check if the hostname is an IP address
+////	ip := net.ParseIP(parsedURL.Hostname())
+////	if ip != nil {
+////		// If it's an IP address, check if it's disallowed
+////		return !api.IsDisallowedIP(ip.String())
+////	}
+////
+////	// If the hostname is not an IP address, it's considered valid for this example
+////	// You might want to add additional checks here depending on your requirements
+////	return true
+////}
 
 // downloadVideo downloads a video from a URL to a destination path using multiple threads
 // func downloadVideo(url string, destPath string, numThreads int) error {
