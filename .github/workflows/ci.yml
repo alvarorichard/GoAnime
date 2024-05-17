@@ -1,49 +1,11 @@
-# name: GoAnime CI
-
-# on:
-#   push:
-#     # branch dev 
-#     branches: [ main, dev]
-#   pull_request:
-#     branches: [ main,dev ]
-#   schedule:
-#     - cron: '0 0 * * *'
-
-# jobs:
-#   build:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Set up Go
-#         uses: actions/setup-go@v3
-#         with:
-#           go-version: '1.22.0' # Set the Go version to the latest stable version.
-
-#       - name: Check out code
-#         uses: actions/checkout@v3
-
-     
-
-#       - name: Install VLC
-#         run: |
-#           sudo apt update
-#           sudo apt install -y vlc
-
-#       - name: Get dependencies
-#         run: go get -v -t -d ./...
-
-#       - name: Run tests
-#         run: go test -v ./...
-
-#       # Add additional steps if needed
-
 
 name: GoAnime CI
 
 on:
   push:
-    branches: [ main, dev]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, dev]
+    branches: [ main, dev ]
   schedule:
     - cron: '0 0 * * *'
 
@@ -52,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, windows-latest ] # Specify both Windows and Linux as target operating systems
+        os: [ ubuntu-latest, windows-latest, macOS-latest ] # Added macOS target operating systems
         go-version: [ '1.22.0' ] # You can add more versions to test against multiple Go versions
     steps:
       - name: Set up Go
@@ -67,12 +29,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt update
-          sudo apt install -y vlc
+          sudo apt install -y mpv yt-dlp
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install vlc
+          choco install mpv
+          choco install yt-dlp
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install mpv yt-dlp
 
       - name: Get dependencies
         run: go get -v -t -d ./...

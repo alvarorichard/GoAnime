@@ -2,14 +2,14 @@
 FROM ubuntu:latest
 
 # Install necessary packages for adding repositories and downloading software
-RUN apt-get update && \
-    apt-get install -y software-properties-common wget gnupg2 git sudo
+RUN apt update && \
+    apt install -y software-properties-common wget gnupg2 git sudo
 
 # Add Golang's latest repository
 RUN add-apt-repository ppa:longsleep/golang-backports
 
 # Update and install Golang and other essentials
-RUN apt-get update && apt-get install -y golang-go vlc fzf
+RUN apt update && apt install -y golang-go mpv yt-dlp
 
 # Install fzf
 RUN git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf && \

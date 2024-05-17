@@ -10,15 +10,30 @@
   <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="Imagem logo" />
 </p>
 
-[![GitHub license](https://img.shields.io/github/license/alvarorichard/GoAnime)](alvarorichard/GoAnime/blob/master/LICENSE) ![GitHub stars](https://img.shields.io/github/stars/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/last-commit/alvarorichard/GoAnime) ![GitHub stars](https://img.shields.io/github/forks/alvarorichard/GoAnime?style=social) [![Build Status](https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg)](https://github.com/alvarorichard/GoAnime/actions) ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) [![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
+[![GitHub license](https://img.shields.io/github/license/alvarorichard/GoAnime)
+](alvarorichard/GoAnime/blob/master/LICENSE) 
+![GitHub stars](https://img.shields.io/github/stars/alvarorichard/GoAnime) 
+![GitHub stars](https://img.shields.io/github/last-commit/alvarorichard/GoAnime)
+![GitHub stars](https://img.shields.io/github/forks/alvarorichard/GoAnime?style=social)
+[![Build Status](https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg)](https://github.com/alvarorichard/GoAnime/actions) 
+![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) 
+[![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
 
 # GoAnime 
-GoAnime is a simple command-line interface (CLI) built in Go, allowing users to search for anime and either play or download episodes directly in VLC. It scrapes data from websites to provide a selection of anime and episodes to the user, with a special focus and objective on offering animes that are both subtitled and dubbed in Portuguese.
+GoAnime is a simple command-line interface (CLI) built in Go, allowing users to search for anime and either play or download episodes directly in Mpv. It scrapes data from websites to provide a selection of anime and episodes to the user, with a special focus and objective on offering animes that are both subtitled and dubbed in Portuguese.
+
+
+
 
 ## Prerequisites
 
 * Go (at latest version)
-*  VLC Media Player
+
+
+
+* Mpv(at latest version)
+* yt-dlp(at latest version)
 
 
 ## Dependencies
@@ -45,6 +60,22 @@ cd GoAnime
 sudo bash install.sh
 ```
 
+## Arch Linux Install (AUR)
+
+For Arch Linux users, GoAnime is available in the AUR. You can install it using an AUR helper like `paru` or `yay`:
+  
+Using `paru`:
+
+  ```shell
+  paru -S goanime
+  ```
+Using `yay`:
+
+  ```shell
+  yay -S goanime
+  ```
+
+
 
 
 
@@ -70,23 +101,35 @@ Execute the `install.ps1` script:
 .\install.ps1
 ```
 
+### Additional Recommendations for Users
 
+For a smoother setup experience, it's recommended to install `mpv` and `yt-dlp` using Scoop as it automatically adds them to your system's PATH. Follow these steps to install these tools:
 
+1. Install Scoop (if not installed):
 
+Open PowerShell and execute:
 
-
-
-
-
-Rember add vlc to path
-
-use this command to add vlc to path
-```shell
-set PATH=%PATH%;C:\Program Files\VideoLAN\VLC
+```powershell
+iwr -useb get.scoop.sh | iex
 ```
-or follow this tutorial for add vlc to path 
 
-[How to add vlc to path](https://www.vlchelp.com/add-vlc-command-prompt-windows/)
+2. Install `mpv` and `yt-dlp` using Scoop:
+
+```powershell
+scoop install mpv yt-dlp
+```
+This method ensures that mpv and yt-dlp are added to your PATH automatically, eliminating the need for manual configuration.
+
+
+Rember add mpv to path
+
+use this command to add mpv to path
+```shell
+set PATH=%PATH%;C:\Program Files\mpv
+```
+or follow this tutorial for add mpv to path 
+
+[How to add mpv to path](https://thewiki.moe/tutorials/mpv/)
 
 
 
@@ -102,6 +145,18 @@ goanime
 ```
 
 
+### Advanced Usage
+You can also use parameters to search for and play anime directly. Here are some examples:
+
+* To search for and play an anime directly, use the following command:
+```shell
+goanime  "anime name"
+```
+You can use the `-h` or `--help` option to display help information about how to use the `goanime` command.
+```shell
+goanime -h
+```
+
 
 The program will prompt you to input the name of an anime. Enter the name of the anime you wish to watch.
 
@@ -109,11 +164,11 @@ The program will prompt you to input the name of an anime. Enter the name of the
 
 The program will then present a list of episodes for the selected anime. Again, navigate the list using the arrow keys and press enter to select an episode.
 
-The selected episode will then play in VLC media player.
+The selected episode will then play in mpv media player.
 
 
 # Thanks 
-[@KitsuneSemCalda](https://github.com/KitsuneSemCalda) for help and improve this application
+[@KitsuneSemCalda](https://github.com/KitsuneSemCalda)   and [@the-eduardo](https://github.com/the-eduardo) for help and improve this application
 
 # Alternatives
 
