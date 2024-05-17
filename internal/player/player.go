@@ -537,7 +537,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 
 	go func() {
 		defer wg.Done()
-		cmd := exec.Command("mpv", "--force-window", "--no-terminal", videoURL)
+		cmd := exec.Command("mpv", "--fs", "--force-window", "--no-terminal", videoURL)
 		if err := cmd.Start(); err != nil {
 			fmt.Printf("Failed to start video player: %v\n", err)
 			return
