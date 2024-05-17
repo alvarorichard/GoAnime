@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/api"
-	"github.com/alvarorichard/Goanime/util"
+	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/cheggaaa/pb/v3"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
@@ -271,7 +271,6 @@ func getContentLength(url string, client *http.Client) (int, error) {
 		err := Body.Close()
 		if err != nil {
 			log.Printf("Failed to close response body: %v\n", err)
-
 		}
 	}(resp.Body)
 
@@ -303,7 +302,6 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *pb.P
 		err := Body.Close()
 		if err != nil {
 			log.Printf("Failed to close response body: %v\n", err)
-
 		}
 	}(resp.Body)
 
@@ -317,7 +315,6 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *pb.P
 		err := file.Close()
 		if err != nil {
 			log.Printf("Failed to close file: %v\n", err)
-
 		}
 	}(file)
 
@@ -352,7 +349,6 @@ func combineParts(destPath string, numThreads int) error {
 		err := outFile.Close()
 		if err != nil {
 			log.Printf("Failed to close output file: %v\n", err)
-
 		}
 	}(outFile)
 
@@ -710,7 +706,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 
 	go func() {
 		defer wg.Done()
-		cmd := exec.Command("mpv", "--force-window", "--no-terminal", videoURL)
+		cmd := exec.Command("mpv", "--fs", "--force-window", "--no-terminal", videoURL)
 		if err := cmd.Start(); err != nil {
 			fmt.Printf("Failed to start video player: %v\n", err)
 			return

@@ -3,13 +3,7 @@ package api
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/util"
-	"github.com/ktr0731/go-fuzzyfinder"
-	"golang.org/x/net/context"
 	"io"
-
-	"github.com/pkg/errors"
 	"log"
 	"net"
 	"net/http"
@@ -18,6 +12,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
+	"golang.org/x/net/context"
+
+	"github.com/pkg/errors"
 )
 
 const baseSiteURL = "https://animefire.plus/"
