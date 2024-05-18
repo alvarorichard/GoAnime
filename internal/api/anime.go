@@ -6,6 +6,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -51,7 +52,12 @@ func searchAnimeOnPage(url string) (string, string, error) {
 	if err != nil {
 		return "", "", errors.Wrap(err, "failed to perform search request")
 	}
-	defer response.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}(response.Body)
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusForbidden {
 			return "", "", errors.New("Connection refused: You need be in Brazil or use a VPN to access the server.")
