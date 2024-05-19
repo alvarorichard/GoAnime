@@ -727,7 +727,9 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 }
 
 // downloadPart downloads a part of the video file.
-func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, p *tea.Program) error {
+//
+
+func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, p *tea.Program, m *model) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return err
@@ -765,6 +767,10 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 			if _, err := file.Write(buf[:n]); err != nil {
 				return err
 			}
+			// Atualizar o progresso recebido
+			m.mu.Lock()
+			m.received += int64(n)
+			m.mu.Unlock()
 			p.Send(tickMsg(time.Now())) // Notify progress
 		}
 		if err == io.EOF {
@@ -862,7 +868,7 @@ func DownloadVideo(url, destPath string, numThreads int) error {
 		wg.Add(1)
 		go func(from, to int64, part int) {
 			defer wg.Done()
-			err := downloadPart(url, from, to, part, httpClient, destPath, p)
+			err := downloadPart(url, from, to, part, httpClient, destPath, p, &m)
 			if err != nil {
 				log.Printf("Thread %d: download part failed: %v\n", part, err)
 			}
