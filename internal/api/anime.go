@@ -2,14 +2,16 @@ package api
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"sort"
+	"strings"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
-	"io"
-	"log"
-	"net/http"
-	"strings"
 )
 
 const baseSiteURL = "https://animefire.plus/"
@@ -91,6 +93,14 @@ func searchAnimeOnPage(url string) (string, string, error) {
 	return "", nextPage, nil
 }
 
+func sortAnimes(animeList []Anime) []Anime {
+	sort.Slice(animeList, func(i, j int) bool {
+		return animeList[i].Name < animeList[j].Name
+	})
+
+	return animeList
+}
+
 func parseAnimes(doc *goquery.Document) []Anime {
 	var animes []Anime
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
@@ -108,7 +118,7 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 	}
 
 	animeNames := make([]string, len(animes))
-	for i, anime := range animes {
+	for i, anime := range sortAnimes(animes) {
 		animeNames[i] = anime.Name
 	}
 
