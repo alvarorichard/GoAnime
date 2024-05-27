@@ -32,10 +32,11 @@ func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 	episodes := parseEpisodes(doc)
 	sortEpisodesByNum(episodes)
 
-	return episodes, nil
+  slicedEpisode, _ := episodes.ToSlice(arrays.FULL_COPY)
+	return slicedEpisode, nil
 }
 
-func parseEpisodes(doc *goquery.Document) []Episode {
+func parseEpisodes(doc *goquery.Document) arrays.Array[Episode] {
 	episodes := arrays.New[Episode]()
 	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
 		episodeNum := s.Text()
@@ -54,8 +55,7 @@ func parseEpisodes(doc *goquery.Document) []Episode {
 		})
 	})
 
-	slicedEpisode, _ := episodes.ToSlice(arrays.FULL_COPY)
-	return slicedEpisode
+	return episodes
 }
 
 func parseEpisodeNumber(episodeNum string) (int, error) {
@@ -67,7 +67,9 @@ func parseEpisodeNumber(episodeNum string) (int, error) {
 	return strconv.Atoi(numStr)
 }
 
-func sortEpisodesByNum(episodes []Episode) {
+func sortEpisodesByNum(episodeList arrays.Array[Episode]) {
+  episodes, _ := episodeList.ToSlice(arrays.FULL_COPY)
+
 	sort.Slice(episodes, func(i, j int) bool {
 		return episodes[i].Num < episodes[j].Num
 	})
