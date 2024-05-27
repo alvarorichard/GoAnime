@@ -89,7 +89,7 @@ func getContentLength(url string, client *http.Client) (int, error) {
 // downloadPart downloads a part of the video file
 
 func downloadPart(url string, from, to, part int, client *http.Client, bar *progressbar.ProgressBar, destPath string) error {
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return err
 	}
