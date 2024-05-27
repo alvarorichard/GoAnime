@@ -12,6 +12,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
+	"github.com/w1tchCrafter/arrays/pkg/arrays"
 )
 
 const baseSiteURL = "https://animefire.plus/"
@@ -102,14 +103,17 @@ func sortAnimes(animeList []Anime) []Anime {
 }
 
 func parseAnimes(doc *goquery.Document) []Anime {
-	var animes []Anime
+	animes := arrays.New[Anime]()
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
-		animes = append(animes, Anime{
+		animes.Push(Anime{
 			Name: strings.TrimSpace(s.Text()),
 			URL:  s.AttrOr("href", ""),
 		})
 	})
-	return animes
+
+	sliceAnimes, _ := animes.ToSlice(arrays.FULL_COPY)
+
+	return sliceAnimes
 }
 
 func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
@@ -117,15 +121,18 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
 		return "", errors.New("no anime provided")
 	}
 
-	animeNames := make([]string, len(animes))
-	for i, anime := range sortAnimes(animes) {
-		animeNames[i] = anime.Name
+	animeNames := arrays.New[string]()
+	for _, anime := range sortAnimes(animes) {
+		animeNames.Push(anime.Name)
 	}
 
+	slicedAnimeName, _ := animeNames.ToSlice(arrays.FULL_COPY)
+
 	idx, err := fuzzyfinder.Find(
-		animeNames,
+		slicedAnimeName,
 		func(i int) string {
-			return animeNames[i]
+			selected, _ := animeNames.At(i)
+			return selected
 		},
 	)
 	if err != nil {
