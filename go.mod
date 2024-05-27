@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime
 
-go 1.20
+go 1.22.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.1
@@ -9,6 +9,7 @@ require (
 	github.com/ktr0731/go-fuzzyfinder v0.8.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1
+	github.com/w1tchCrafter/arrays v0.0.0-20240527015046-e59691f6f282
 	golang.org/x/net v0.24.0
 )
 
