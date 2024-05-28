@@ -1,7 +1,8 @@
+// code with bubbletea progress bar animated download
+
 package player
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,51 +19,93 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+
+	"bufio"
+
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
-	"github.com/schollz/progressbar/v3"
 )
 
-// VideoData represents the video data structure, with a source URL and a label
+const (
+	padding = 2
+)
 
-type VideoData struct {
-	Src   string `json:"src"`
-	Label string `json:"label"`
+// tickMsg is a message for the tick command
+type tickMsg time.Time
+
+// model represents the Bubble Tea model for the progress bar
+type model struct {
+	progress   progress.Model
+	totalBytes int64
+	received   int64
+	done       bool
+	mu         sync.Mutex
 }
 
-// VideoResponse represents the video response structure with a slice of VideoData
-
-type VideoResponse struct {
-	Data []VideoData `json:"data"`
+// Init initializes the Bubble Tea model
+func (m *model) Init() tea.Cmd {
+	return tickCmd()
 }
 
-// selectHighestQualityVideo Assumes that the quality label contains resolution information (e.g., "1080p").  This function can be adapted based on the actual format of the quality labels.
+// Update handles updates to the Bubble Tea model
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-func selectHighestQualityVideo(videos []VideoData) string {
-	var highestQuality string
-	var highestQualityURL string
-	for _, video := range videos {
-		if isHigherQuality(video.Label, highestQuality) {
-			highestQuality = video.Label
-			highestQualityURL = video.Src
+	//cmds := []tea.Cmd{}
+	var cmds []tea.Cmd
+	switch msg := msg.(type) {
+	case tickMsg:
+		if m.done {
+			return m, tea.Quit
 		}
+		cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case progress.FrameMsg:
+		progressModel, cmd := m.progress.Update(msg)
+		m.progress = progressModel.(progress.Model)
+		return m, cmd
+
+	default:
+		return m, nil
 	}
-	return highestQualityURL
 }
 
-// isHigherQuality Compares two quality labels and returns true if the first is of higher quality than the second.
-
-func isHigherQuality(quality1, quality2 string) bool {
-	// Extract numeric part of the quality labels (assuming format "720p", "1080p", etc.)
-	quality1Value, _ := strconv.Atoi(strings.TrimRight(quality1, "p"))
-	quality2Value, _ := strconv.Atoi(strings.TrimRight(quality2, "p"))
-	return quality1Value > quality2Value
+// View renders the Bubble Tea model
+func (m *model) View() string {
+	pad := strings.Repeat(" ", padding)
+	return "\n" +
+		pad + m.progress.View() + "\n\n" +
+		pad + "Press any key to quit"
 }
 
-func getContentLength(url string, client *http.Client) (int, error) {
+// tickCmd returns a command to tick every second
+func tickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+// DownloadFolderFormatter formats the anime URL to be used as the download folder name
+func DownloadFolderFormatter(str string) string {
+	regex := regexp.MustCompile(`https://animefire\.plus/video/([^/?]+)`)
+	match := regex.FindStringSubmatch(str)
+	if len(match) > 1 {
+		finalStep := match[1]
+		return finalStep
+	}
+	return ""
+}
+
+// getContentLength gets the content length of the URL.
+func getContentLength(url string, client *http.Client) (int64, error) {
 	resp, err := client.Head(url)
 	if err != nil {
 		return 0, err
@@ -75,10 +118,10 @@ func getContentLength(url string, client *http.Client) (int, error) {
 	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return 0, errors.New(fmt.Sprintf("server does not support partial content: status code %d", resp.StatusCode))
+		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
 	}
 
-	contentLength, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	contentLength, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
 	if err != nil {
 		return 0, err
 	}
@@ -86,22 +129,19 @@ func getContentLength(url string, client *http.Client) (int, error) {
 	return contentLength, nil
 }
 
-// downloadPart downloads a part of the video file
+// downloadPart downloads a part of the video file.
+//
 
-func downloadPart(url string, from, to, part int, client *http.Client, bar *progressbar.ProgressBar, destPath string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	req, err := http.NewRequest("GET", url, http.NoBody)
+func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, p *tea.Program, m *model) error {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Printf("Failed to create request: %v\n", err)
-		return
+		return err
 	}
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("Failed to do request: %v\n", err)
-		return
+		return err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -114,13 +154,12 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *prog
 	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 	file, err := os.Create(partFilePath)
 	if err != nil {
-		log.Printf("Failed to create part file: %v\n", err)
-		return
+		return err
 	}
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Printf("Failed to close part file: %v\n", err)
+			log.Printf("Failed to close file: %v\n", err)
 		}
 	}(file)
 
@@ -129,27 +168,26 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *prog
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			if _, err := file.Write(buf[:n]); err != nil {
-				log.Printf("Failed to write to part file: %v\n", err)
-				return
+				return err
 			}
-			err := bar.Add(n)
-			if err != nil {
-				log.Printf("Failed to update progress bar: %v\n", err)
-				return
-			}
+			// Atualizar o progresso recebido
+			m.mu.Lock()
+			m.received += int64(n)
+			m.mu.Unlock()
+			p.Send(tickMsg(time.Now())) // Notify progress
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			fmt.Println("Error reading response body:", err)
-			return
+			return err
 		}
 	}
+
+	return nil
 }
 
-// combineParts combines downloaded parts into a single file
-
+// combineParts combines downloaded parts into a single file.
 func combineParts(destPath string, numThreads int) error {
 	outFile, err := os.Create(destPath)
 	if err != nil {
@@ -191,16 +229,12 @@ func combineParts(destPath string, numThreads int) error {
 	return nil
 }
 
-// downloadVideo downloads a video using multiple threads
-
-func downloadVideo(url, destPath string, numThreads int) error {
-	// Ensure the destination path is validated to prevent directory traversal
+// DownloadVideo downloads a video using multiple threads.
+func DownloadVideo(url, destPath string, numThreads int) error {
 	destPath = filepath.Clean(destPath)
 
-	// Create an HTTP client with a safe transport
-	const clientConnectTimeout = 10 * time.Second
 	httpClient := &http.Client{
-		Transport: api.SafeTransport(clientConnectTimeout),
+		Transport: api.SafeTransport(10 * time.Second),
 	}
 
 	contentLength, err := getContentLength(url, httpClient)
@@ -208,38 +242,120 @@ func downloadVideo(url, destPath string, numThreads int) error {
 		return err
 	}
 
-	chunkSize := contentLength / numThreads
+	chunkSize := contentLength / int64(numThreads)
 	var wg sync.WaitGroup
 
-	bar := progressbar.NewOptions(contentLength,
-		progressbar.OptionSetDescription("Downloading"),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(10),
-		progressbar.OptionThrottle(65*time.Millisecond),
-		progressbar.OptionSetPredictTime(true),
-		progressbar.OptionShowCount(),
-		progressbar.OptionClearOnFinish(),
-	)
+	m := model{
+		progress:   progress.New(progress.WithDefaultGradient()),
+		totalBytes: contentLength,
+		received:   0,
+		done:       false,
+	}
+
+	p := tea.NewProgram(&m)
+
+	// Run the Bubble Tea program in a separate goroutine
+	go func() {
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("error running progress bar: %v", err)
+		}
+	}()
 
 	for i := 0; i < numThreads; i++ {
-		from := i * chunkSize
+		from := int64(i) * chunkSize
 		to := from + chunkSize - 1
 		if i == numThreads-1 {
 			to = contentLength - 1
 		}
 
 		wg.Add(1)
-		go downloadPart(url, from, to, i, httpClient, bar, destPath, &wg)
+		go func(from, to int64, part int) {
+			defer wg.Done()
+			err := downloadPart(url, from, to, part, httpClient, destPath, p, &m)
+			if err != nil {
+				log.Printf("Thread %d: download part failed: %v\n", part, err)
+			}
+		}(from, to, i)
 	}
 
 	wg.Wait()
-	err = bar.Close()
+	m.mu.Lock()
+	m.done = true
+	m.mu.Unlock()
+	p.Send(tickMsg(time.Now())) // Final progress update
+
+	err = combineParts(destPath, numThreads)
 	if err != nil {
-		fmt.Println("Failed to close progress bar:", err)
-		return err
+		return fmt.Errorf("failed to combine parts: %v", err)
 	}
 
-	return combineParts(destPath, numThreads)
+	return nil
+}
+
+// HandleDownloadAndPlay handles the download and playback of the video
+func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
+	if askForDownload() {
+		currentUser, err := user.Current()
+		if err != nil {
+			log.Panicln("Failed to get current user:", util.ErrorHandler(err))
+		}
+
+		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
+		episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
+
+		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
+				log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
+			}
+		}
+
+		if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+			fmt.Println("Downloading the video...")
+
+			// Check if the video URL is from Blogger
+			if strings.Contains(videoURL, "blogger.com") {
+				// Use yt-dlp para baixar o vídeo do Blogger
+				fmt.Println("Using yt-dlp to download Blogger video...")
+				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
+				if err := cmd.Run(); err != nil {
+					log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
+				}
+			} else {
+				// Use the standard download method for other video sources
+				fmt.Println("Using standard download method...")
+				numThreads := 4 // Define the number of threads for downloading
+				if err := DownloadVideo(videoURL, episodePath, numThreads); err != nil {
+					log.Panicln("Failed to download video:", util.ErrorHandler(err))
+				}
+			}
+			fmt.Println("Video downloaded successfully!")
+		} else {
+			fmt.Println("Video already downloaded.")
+		}
+
+		if askForPlayOffline() {
+			if err := playVideo(episodePath, episodes, selectedEpisodeNum); err != nil {
+				log.Panicln("Failed to play video:", util.ErrorHandler(err))
+			}
+		}
+	} else {
+		if err := playVideo(videoURL, episodes, selectedEpisodeNum); err != nil {
+			log.Panicln("Failed to play video:", util.ErrorHandler(err))
+		}
+	}
+}
+
+func askForDownload() bool {
+	prompt := promptui.Select{
+		Label: "Do you want to download the episode? If not, it will be played online.",
+		Items: []string{"Yes", "No"},
+	}
+
+	_, result, err := prompt.Run()
+	if err != nil {
+		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
+	}
+	return strings.ToLower(result) == "yes"
 }
 
 func askForPlayOffline() bool {
@@ -278,18 +394,22 @@ func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error
 	return episodes[idx].URL, episodes[idx].Number, nil
 }
 
-// ExtractEpisodeNumber extracts the episode number from the episode string
-
 func ExtractEpisodeNumber(episodeStr string) string {
 	numRe := regexp.MustCompile(`\d+`)
 	numStr := numRe.FindString(episodeStr)
 	if numStr == "" {
-		return "1" // Retorna "1" para filmes/OVAs
+		return "1"
 	}
 	return numStr
 }
 
-// extractVideoURL extracts the video URL from the HTML of the episode page
+func GetVideoURLForEpisode(episodeURL string) (string, error) {
+	videoURL, err := extractVideoURL(episodeURL)
+	if err != nil {
+		return "", err
+	}
+	return extractActualVideoURL(videoURL)
+}
 
 func extractVideoURL(url string) (string, error) {
 	response, err := api.SafeGet(url)
@@ -327,7 +447,7 @@ func extractVideoURL(url string) (string, error) {
 	}
 
 	videoSrc, _ := videoElements.Attr("data-video-src")
-	if videoSrc == "" { // If the data-video-src attribute is not found, try to find the video source URL in the Blogger video player
+	if videoSrc == "" {
 		urlBody, err := fetchContent(url)
 		if err != nil {
 			return "", err
@@ -343,8 +463,6 @@ func extractVideoURL(url string) (string, error) {
 	return videoSrc, nil
 }
 
-// fetchContent fetches the content to send it to the findBloggerLink function
-
 func fetchContent(url string) (string, error) {
 	resp, err := api.SafeGet(url)
 	if err != nil {
@@ -353,7 +471,7 @@ func fetchContent(url string) (string, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
+
 		}
 	}(resp.Body)
 
@@ -365,32 +483,17 @@ func fetchContent(url string) (string, error) {
 	return string(body), nil
 }
 
-// findBloggerLink extracts the video link for Blogger uploaded videos
-
 func findBloggerLink(content string) (string, error) {
-	// Regex to match the link pattern
 	pattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
 
 	re := regexp.MustCompile(pattern)
 	matches := re.FindStringSubmatch(content)
 
 	if len(matches) > 0 {
-		// matches[0] would contain the whole matched string
 		return matches[0], nil
 	} else {
 		return "", errors.New("no blogger video link found in the content")
 	}
-}
-
-// GetVideoURLForEpisode extracts the actual video URL from the video source URL
-
-func GetVideoURLForEpisode(episodeURL string) (string, error) {
-	// Assuming extractVideoURL and extractActualVideoURL functions are defined elsewhere
-	videoURL, err := extractVideoURL(episodeURL)
-	if err != nil {
-		return "", err
-	}
-	return extractActualVideoURL(videoURL)
 }
 
 func extractActualVideoURL(videoSrc string) (string, error) {
@@ -426,7 +529,6 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return "", errors.New("no video data found in the response")
 	}
 
-	// Function to compare video quality labels and return the highest quality video URL
 	highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
 	if highestQualityVideoURL == "" {
 		return "", errors.New("no suitable video quality found")
@@ -435,88 +537,36 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	return highestQualityVideoURL, nil
 }
 
-// askForDownload asks the user if they want to download the episode or play it online
-
-func askForDownload() bool {
-	prompt := promptui.Select{
-		Label: "Do you want to download the episode? If not, it will be played online.",
-		Items: []string{"Yes", "No"},
-	}
-
-	_, result, err := prompt.Run()
-	if err != nil {
-		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
-	}
-	return strings.ToLower(result) == "yes"
+// VideoData represents the video data structure, with a source URL and a label
+type VideoData struct {
+	Src   string `json:"src"`
+	Label string `json:"label"`
 }
 
-// downloadFolderFormatter formats the anime URL to be used as the download folder name
-
-func downloadFolderFormatter(str string) string {
-	regex := regexp.MustCompile(`https://animefire\.plus/video/([^/?]+)`)
-	match := regex.FindStringSubmatch(str)
-	if len(match) > 1 {
-		finalStep := match[1]
-		return finalStep
-	}
-	return ""
+// VideoResponse represents the video response structure with a slice of VideoData
+type VideoResponse struct {
+	Data []VideoData `json:"data"`
 }
 
-// HandleDownloadAndPlay handles the download and playback of the video
-
-func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
-	if askForDownload() {
-		currentUser, err := user.Current()
-		if err != nil {
-			log.Panicln("Failed to get current user:", util.ErrorHandler(err))
-		}
-
-		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", downloadFolderFormatter(animeURL))
-		episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
-
-		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-				log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
-			}
-		}
-
-		if _, err := os.Stat(episodePath); os.IsNotExist(err) {
-			fmt.Println("Downloading the video...")
-
-			// Check if the video URL is from Blogger
-			if strings.Contains(videoURL, "blogger.com") {
-				// Use yt-dlp para baixar o vídeo do Blogger
-				fmt.Println("Using yt-dlp to download Blogger video...")
-				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
-				if err := cmd.Run(); err != nil {
-					log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
-				}
-			} else {
-				// Use the standard download method for other video sources
-				fmt.Println("Using standard download method...")
-				numThreads := 4 // Define the number of threads for downloading
-				if err := downloadVideo(videoURL, episodePath, numThreads); err != nil {
-					log.Panicln("Failed to download video:", util.ErrorHandler(err))
-				}
-			}
-			fmt.Println("Video downloaded successfully!")
-		} else {
-			fmt.Println("Video already downloaded.")
-		}
-
-		if askForPlayOffline() {
-			if err := playVideo(episodePath, episodes, selectedEpisodeNum); err != nil {
-				log.Panicln("Failed to play video:", util.ErrorHandler(err))
-			}
-		}
-	} else {
-		if err := playVideo(videoURL, episodes, selectedEpisodeNum); err != nil {
-			log.Panicln("Failed to play video:", util.ErrorHandler(err))
+// selectHighestQualityVideo Assumes that the quality label contains resolution information (e.g., "1080p").  This function can be adapted based on the actual format of the quality labels.
+func selectHighestQualityVideo(videos []VideoData) string {
+	var highestQuality string
+	var highestQualityURL string
+	for _, video := range videos {
+		if isHigherQuality(video.Label, highestQuality) {
+			highestQuality = video.Label
+			highestQualityURL = video.Src
 		}
 	}
+	return highestQualityURL
 }
 
-// playVideo plays the video using the VLC player and allows the user to navigate between episodes
+// isHigherQuality Compares two quality labels and returns true if the first is of higher quality than the second.
+func isHigherQuality(quality1, quality2 string) bool {
+	quality1Value, _ := strconv.Atoi(strings.TrimRight(quality1, "p"))
+	quality2Value, _ := strconv.Atoi(strings.TrimRight(quality2, "p"))
+	return quality1Value > quality2Value
+}
 
 func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) error {
 	var wg sync.WaitGroup
@@ -535,7 +585,6 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 		}
 	}()
 
-	// Find the index of the current episode based on Num
 	currentEpisodeIndex := -1
 	for i, ep := range episodes {
 		if ep.Num == currentEpisodeNum {
@@ -544,7 +593,6 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 		}
 	}
 
-	// If the current episode was not found, return an error or handle appropriately
 	if currentEpisodeIndex == -1 {
 		if util.IsDebug {
 			log.Printf("Current episode number %d not found", currentEpisodeNum)
@@ -552,7 +600,6 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 		return errors.New("current episode not found")
 	}
 
-	// Command listener for navigating episodes
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
 
@@ -568,7 +615,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 			if currentEpisodeIndex+1 < len(episodes) {
 				nextEpisode := episodes[currentEpisodeIndex+1]
 				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
-				wg.Wait() // Wait for the current video to stop
+				wg.Wait()
 				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
@@ -582,7 +629,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 			if currentEpisodeIndex > 0 {
 				prevEpisode := episodes[currentEpisodeIndex-1]
 				fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
-				wg.Wait() // Wait for the current video to stop
+				wg.Wait()
 				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
