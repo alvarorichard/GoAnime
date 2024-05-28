@@ -88,16 +88,20 @@ func getContentLength(url string, client *http.Client) (int, error) {
 
 // downloadPart downloads a part of the video file
 
-func downloadPart(url string, from, to, part int, client *http.Client, bar *progressbar.ProgressBar, destPath string) error {
+func downloadPart(url string, from, to, part int, client *http.Client, bar *progressbar.ProgressBar, destPath string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
-		return err
+		log.Printf("Failed to create request: %v\n", err)
+		return
 	}
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		log.Printf("Failed to do request: %v\n", err)
+		return
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -110,12 +114,13 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *prog
 	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 	file, err := os.Create(partFilePath)
 	if err != nil {
-		return err
+		log.Printf("Failed to create part file: %v\n", err)
+		return
 	}
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Printf("Failed to close file: %v\n", err)
+			log.Printf("Failed to close part file: %v\n", err)
 		}
 	}(file)
 
@@ -124,11 +129,13 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *prog
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			if _, err := file.Write(buf[:n]); err != nil {
-				return err
+				log.Printf("Failed to write to part file: %v\n", err)
+				return
 			}
 			err := bar.Add(n)
 			if err != nil {
-				return err
+				log.Printf("Failed to update progress bar: %v\n", err)
+				return
 			}
 		}
 		if err == io.EOF {
@@ -136,11 +143,9 @@ func downloadPart(url string, from, to, part int, client *http.Client, bar *prog
 		}
 		if err != nil {
 			fmt.Println("Error reading response body:", err)
-			return err
+			return
 		}
 	}
-
-	return nil
 }
 
 // combineParts combines downloaded parts into a single file
@@ -206,23 +211,15 @@ func downloadVideo(url, destPath string, numThreads int) error {
 	chunkSize := contentLength / numThreads
 	var wg sync.WaitGroup
 
-	bars := make([]*progressbar.ProgressBar, numThreads)
-	for i := range bars {
-		from := i * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
-		bars[i] = progressbar.NewOptions(to-from+1,
-			progressbar.OptionSetDescription(fmt.Sprintf("Downloading part %d", i)),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetWidth(10),
-			progressbar.OptionThrottle(65*time.Millisecond),
-			progressbar.OptionSetPredictTime(true),
-			progressbar.OptionShowCount(),
-			progressbar.OptionClearOnFinish(),
-		)
-	}
+	bar := progressbar.NewOptions(contentLength,
+		progressbar.OptionSetDescription("Downloading"),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(10),
+		progressbar.OptionThrottle(65*time.Millisecond),
+		progressbar.OptionSetPredictTime(true),
+		progressbar.OptionShowCount(),
+		progressbar.OptionClearOnFinish(),
+	)
 
 	for i := 0; i < numThreads; i++ {
 		from := i * chunkSize
@@ -232,21 +229,14 @@ func downloadVideo(url, destPath string, numThreads int) error {
 		}
 
 		wg.Add(1)
-		go func(from, to, part int, bar *progressbar.ProgressBar) {
-			defer wg.Done()
-			if err := downloadPart(url, from, to, part, httpClient, bar, destPath); err != nil {
-				log.Printf("Thread %d: download part failed: %v\n", part, err)
-			}
-		}(from, to, i, bars[i])
+		go downloadPart(url, from, to, i, httpClient, bar, destPath, &wg)
 	}
 
 	wg.Wait()
-	for _, bar := range bars {
-		err := bar.Close()
-		if err != nil {
-			fmt.Println("Failed to close progress bar:", err)
-			return err
-		}
+	err = bar.Close()
+	if err != nil {
+		fmt.Println("Failed to close progress bar:", err)
+		return err
 	}
 
 	return combineParts(destPath, numThreads)
