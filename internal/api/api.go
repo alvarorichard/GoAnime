@@ -21,6 +21,7 @@ func checkDisallowedIP(conn net.Conn) error {
 	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 	if IsDisallowedIP(ip) {
 		conn.Close()
+
 		return errors.New("ip address is not allowed")
 	}
 	return nil
