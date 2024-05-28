@@ -2,15 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/alvarorichard/Goanime/api"
-	"github.com/alvarorichard/Goanime/player"
-	"github.com/alvarorichard/Goanime/util"
 	"log"
 	"strconv"
+
+	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 func main() {
-
 	animeName, err := util.FlagParser()
 	if err != nil {
 		log.Fatalln(util.ErrorHandler(err))
