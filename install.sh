@@ -19,8 +19,8 @@ function install_macos(){
 }
 
 function install_others(){
-  mv main /usr/bin/goanime
-  ln -sf /usr/bin/goanime /usr/bin/go-anime
+  mv main /usr/local/bin/goanime
+  ln -f /usr/local/bin/goanime /usr/local/bin/go-anime
 }
 
 
