@@ -416,6 +416,9 @@ func ExtractEpisodeNumber(episodeStr string) string {
 	return numStr
 }
 
+// Given an Anime Fire URL, this funcion will extract the correct video
+// provider and return the URL (*string*) of the `.mp4` **OR** the Blogger
+// link with the Youtube video.
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
