@@ -1,5 +1,3 @@
-// code with bubbletea progress bar animated download
-
 package player
 
 import (
@@ -18,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-
 	"bufio"
+	"github.com/PuerkitoBio/goquery"
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -45,6 +43,11 @@ type model struct {
 	received   int64
 	done       bool
 	mu         sync.Mutex
+	keys       keyMap
+}
+
+type keyMap struct {
+	quit key.Binding
 }
 
 // Init initializes the Bubble Tea model
@@ -57,7 +60,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	//cmds := []tea.Cmd{}
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tickMsg:
@@ -73,6 +75,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress = progressModel.(progress.Model)
 		return m, cmd
 
+	case tea.KeyMsg:
+		if key.Matches(msg, m.keys.quit) {
+			m.done = true
+			return m, tea.Quit
+		}
+		return m, nil
+
 	default:
 		return m, nil
 	}
@@ -83,7 +92,7 @@ func (m *model) View() string {
 	pad := strings.Repeat(" ", padding)
 	return "\n" +
 		pad + m.progress.View() + "\n\n" +
-		pad + "Press any key to quit"
+		pad + "Press Ctrl+C to quit"
 }
 
 // tickCmd returns a command to tick every second
@@ -130,8 +139,6 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 }
 
 // downloadPart downloads a part of the video file.
-//
-
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, p *tea.Program, m *model) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -250,6 +257,12 @@ func DownloadVideo(url, destPath string, numThreads int) error {
 		totalBytes: contentLength,
 		received:   0,
 		done:       false,
+		keys: keyMap{
+			quit: key.NewBinding(
+				key.WithKeys("ctrl+c"),
+				key.WithHelp("ctrl+c", "quit"),
+			),
+		},
 	}
 
 	p := tea.NewProgram(&m)
