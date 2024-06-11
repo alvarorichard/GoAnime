@@ -1,0 +1,30 @@
+version: 2.1
+
+orbs:
+  codecov: codecov/codecov@4.0.1
+
+jobs:
+  checkout:
+    docker:
+      - image: circleci/golang:1.22
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            sudo apt update
+            sudo apt install -y mpv yt-dlp
+      - run:
+          name: Get dependencies
+          command: go get -v -t -d ./...
+      - run:
+          name: Run tests
+          command: go test -v ./...
+      - codecov/upload:
+          token: ${{CODECOV_TOKEN}}
+
+workflows:
+  upload-to-codecov:
+    jobs:
+      - checkout
+#
