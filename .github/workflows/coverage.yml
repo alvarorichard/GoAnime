@@ -16,18 +16,13 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macOS-latest ]
         go-version: [ '1.22.0' ]
     steps:
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20'
-
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4  # Updated to the latest version which uses Node.js 20
         with:
           go-version: ${{ matrix.go-version }}
 
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to the latest version which uses Node.js 20
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -44,7 +39,8 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install mpv yt-dlp
+          brew install --cask mpv
+          brew install yt-dlp
 
       - name: Get dependencies
         run: go get -v -t -d ./...
