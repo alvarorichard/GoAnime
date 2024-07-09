@@ -17,12 +17,25 @@ jobs:
         go-version: [ '1.22.0' ]
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v4  # Updated to the latest version which uses Node.js 20
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ matrix.go-version }}
 
       - name: Check out code
-        uses: actions/checkout@v4  # Updated to the latest version which uses Node.js 20
+        uses: actions/checkout@v3
+
+      - name: Ensure go.sum exists
+        run: go mod tidy
+
+      - name: Cache Go modules
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cache/go-build
+            /go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -39,8 +52,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install --cask mpv
-          brew install yt-dlp
+          brew install mpv yt-dlp
 
       - name: Get dependencies
         run: go get -v -t -d ./...
