@@ -2,6 +2,8 @@ package util_test
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +31,11 @@ func TestSearchAnime(t *testing.T) {
 		</body>
 		</html>
 		`
-		w.Write([]byte(page))
+		_, err := w.Write([]byte(page))
+		if err != nil {
+			t.Fatalf("Failed to write response: %v", err)
+			return
+		}
 	})
 
 	server := httptest.NewServer(handler)
@@ -69,7 +75,13 @@ func searchAnimeOnPage(currentPageURL, baseURL string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			// Log the error but don't return it
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode != 200 {
 		return "", "", errors.New("failed to fetch page")
