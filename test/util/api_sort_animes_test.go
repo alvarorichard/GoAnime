@@ -1,7 +1,6 @@
 package util_test
 
 import (
-	"sort"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -9,12 +8,6 @@ import (
 )
 
 // sortAnimes is a helper function to sort animes
-func sortAnime(animeList []api.Anime) []api.Anime {
-	sort.Slice(animeList, func(i, j int) bool {
-		return animeList[i].Name < animeList[j].Name
-	})
-	return animeList
-}
 
 func TestSortAnimes(t *testing.T) {
 	tests := []struct {
