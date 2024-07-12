@@ -72,7 +72,7 @@ func searchAnimeOnPage(url string) (string, string, error) {
 		return "", "", errors.Wrap(err, "failed to parse response")
 	}
 
-	animes := parseAnimes(doc)
+	animes := ParseAnimes(doc)
 	if len(animes) > 0 {
 		selectedAnimeName, err := selectAnimeWithGoFuzzyFinder(animes)
 		if err != nil {
@@ -101,7 +101,7 @@ func sortAnimes(animeList []Anime) []Anime {
 	return animeList
 }
 
-func parseAnimes(doc *goquery.Document) []Anime {
+func ParseAnimes(doc *goquery.Document) []Anime {
 	var animes []Anime
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 		animes = append(animes, Anime{
