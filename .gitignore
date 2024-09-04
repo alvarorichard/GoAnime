@@ -13,3 +13,8 @@ main
 *.so
 *.dylib
 *.dll
+
+# gomodule cache and binary
+vendor/
+# nix result path
+result
