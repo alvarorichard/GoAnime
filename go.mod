@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime
 
-go 1.23.1
+go 1.23.2
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.0
