@@ -23,7 +23,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss" // For styling
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
@@ -334,38 +334,38 @@ func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpi
 		}
 		m.totalBytes = contentLength
 
-		// Run the Bubble Tea program in a separate goroutine
+		// Start the download in a separate goroutine
 		go func() {
-			if _, err := p.Run(); err != nil {
-				log.Fatalf("error running progress bar: %v", err)
+			// Update status
+			p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
+
+			// Check if the video URL is from Blogger
+			if strings.Contains(videoURL, "blogger.com") {
+				// Use yt-dlp to download the video from Blogger
+				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s with yt-dlp...", episodeNumberStr)))
+				cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
+				if err := cmd.Run(); err != nil {
+					log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
+				}
+			} else {
+				// Use the standard download method for other video sources
+				if err := DownloadVideo(videoURL, episodePath, numThreads, m, p); err != nil {
+					log.Panicln("Failed to download video:", util.ErrorHandler(err))
+				}
 			}
+
+			m.mu.Lock()
+			m.done = true
+			m.mu.Unlock()
+
+			// Final status update
+			p.Send(statusMsg("Download completed!"))
 		}()
 
-		// Update status
-		p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
-
-		// Check if the video URL is from Blogger
-		if strings.Contains(videoURL, "blogger.com") {
-			// Use yt-dlp to download the video from Blogger
-			p.Send(statusMsg(fmt.Sprintf("Downloading episode %s with yt-dlp...", episodeNumberStr)))
-			cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
-			if err := cmd.Run(); err != nil {
-				log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
-			}
-		} else {
-			// Use the standard download method for other video sources
-			if err := DownloadVideo(videoURL, episodePath, numThreads, m, p); err != nil {
-				log.Panicln("Failed to download video:", util.ErrorHandler(err))
-			}
+		// Run the Bubble Tea program in the main goroutine
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("error running progress bar: %v", err)
 		}
-
-		m.mu.Lock()
-		m.done = true
-		m.mu.Unlock()
-
-		// Final status update
-		p.Send(statusMsg("Download completed!"))
-
 	} else {
 		fmt.Println("Video already downloaded.")
 	}
@@ -497,98 +497,99 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 		m.totalBytes += contentLength
 	}
 
-	// Run the Bubble Tea program in a separate goroutine
+	// Start the download in a separate goroutine
 	go func() {
-		if _, err := p.Run(); err != nil {
-			log.Fatalf("error running progress bar: %v", err)
-		}
-	}()
+		var overallWg sync.WaitGroup
 
-	var overallWg sync.WaitGroup
-
-	// Now start downloads
-	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
-		// Find the episode in the 'episodes' slice
-		var episode api.Episode
-		found := false
-		for _, ep := range episodes {
-			// Extract numeric part from ep.Number
-			epNumStr := ExtractEpisodeNumber(ep.Number)
-			epNum, err := strconv.Atoi(epNumStr)
-			if err != nil {
+		// Now start downloads
+		for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
+			// Find the episode in the 'episodes' slice
+			var episode api.Episode
+			found := false
+			for _, ep := range episodes {
+				// Extract numeric part from ep.Number
+				epNumStr := ExtractEpisodeNumber(ep.Number)
+				epNum, err := strconv.Atoi(epNumStr)
+				if err != nil {
+					continue
+				}
+				if epNum == episodeNum {
+					episode = ep
+					found = true
+					break
+				}
+			}
+			if !found {
+				log.Printf("Episode %d not found\n", episodeNum)
 				continue
 			}
-			if epNum == episodeNum {
-				episode = ep
-				found = true
-				break
+
+			// Get video URL
+			videoURL, err := GetVideoURLForEpisode(episode.URL)
+			if err != nil {
+				log.Printf("Failed to get video URL for episode %d: %v\n", episodeNum, err)
+				continue
 			}
-		}
-		if !found {
-			log.Printf("Episode %d not found\n", episodeNum)
-			continue
-		}
 
-		// Get video URL
-		videoURL, err := GetVideoURLForEpisode(episode.URL)
-		if err != nil {
-			log.Printf("Failed to get video URL for episode %d: %v\n", episodeNum, err)
-			continue
-		}
-
-		// Build download path
-		currentUser, err := user.Current()
-		if err != nil {
-			log.Panicln("Failed to get current user:", util.ErrorHandler(err))
-		}
-
-		downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
-		episodeNumberStr := strconv.Itoa(episodeNum)
-		episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
-
-		if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-				log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
+			// Build download path
+			currentUser, err := user.Current()
+			if err != nil {
+				log.Panicln("Failed to get current user:", util.ErrorHandler(err))
 			}
-		}
 
-		if _, err := os.Stat(episodePath); os.IsNotExist(err) {
-			numThreads := 4 // Define the number of threads for downloading
+			downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
+			episodeNumberStr := strconv.Itoa(episodeNum)
+			episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
 
-			overallWg.Add(1)
-			go func(videoURL, episodePath, episodeNumberStr string) {
-				defer overallWg.Done()
-
-				// Update status
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
-
-				// Check if the video URL is from Blogger
-				if strings.Contains(videoURL, "blogger.com") {
-					// Use yt-dlp to download the video from Blogger
-					p.Send(statusMsg(fmt.Sprintf("Downloading episode %s with yt-dlp...", episodeNumberStr)))
-					cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
-					if err := cmd.Run(); err != nil {
-						log.Printf("Failed to download video using yt-dlp: %v\n", err)
-					}
-				} else {
-					// Use the standard download method for other video sources
-					if err := DownloadVideo(videoURL, episodePath, numThreads, m, p); err != nil {
-						log.Printf("Failed to download episode %s: %v\n", episodeNumberStr, err)
-					}
+			if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
+				if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
+					log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
 				}
-			}(videoURL, episodePath, episodeNumberStr)
-		} else {
-			log.Printf("Episode %d already downloaded.\n", episodeNum)
+			}
+
+			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+				numThreads := 4 // Define the number of threads for downloading
+
+				overallWg.Add(1)
+				go func(videoURL, episodePath, episodeNumberStr string) {
+					defer overallWg.Done()
+
+					// Update status
+					p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
+
+					// Check if the video URL is from Blogger
+					if strings.Contains(videoURL, "blogger.com") {
+						// Use yt-dlp to download the video from Blogger
+						p.Send(statusMsg(fmt.Sprintf("Downloading episode %s with yt-dlp...", episodeNumberStr)))
+						cmd := exec.Command("yt-dlp", "-o", episodePath, videoURL)
+						if err := cmd.Run(); err != nil {
+							log.Printf("Failed to download video using yt-dlp: %v\n", err)
+						}
+					} else {
+						// Use the standard download method for other video sources
+						if err := DownloadVideo(videoURL, episodePath, numThreads, m, p); err != nil {
+							log.Printf("Failed to download episode %s: %v\n", episodeNumberStr, err)
+						}
+					}
+				}(videoURL, episodePath, episodeNumberStr)
+			} else {
+				log.Printf("Episode %d already downloaded.\n", episodeNum)
+			}
 		}
+
+		overallWg.Wait()
+		m.mu.Lock()
+		m.done = true
+		m.mu.Unlock()
+
+		// Final status update
+		p.Send(statusMsg("All videos downloaded successfully!"))
+	}()
+
+	// Run the Bubble Tea program in the main goroutine
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("error running progress bar: %v", err)
 	}
-
-	overallWg.Wait()
-	m.mu.Lock()
-	m.done = true
-	m.mu.Unlock()
-
-	// Final status update
-	p.Send(statusMsg("All videos downloaded successfully!"))
 
 	return nil
 }
