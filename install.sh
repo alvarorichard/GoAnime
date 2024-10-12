@@ -36,20 +36,21 @@ esac
 # URL do binário do GoAnime
 VERSION="v1.0.5"
 BINARY="goanime"
-URL="https://github.com/alvarorichard/GoAnime/releases/download/${VERSION}/${BINARY}-${OS}-${ARCH}"
+FILENAME="${BINARY}-${VERSION}-${OS}-${ARCH}"
+URL="https://github.com/alvarorichard/GoAnime/releases/download/${VERSION}/${FILENAME}"
 
 # Baixa o binário
 echo "Baixando o GoAnime ${VERSION} para ${OS}/${ARCH}..."
-curl -L "${URL}" -o "${BINARY}"
-chmod +x "${BINARY}"
+curl -L "${URL}" -o "${FILENAME}"
+chmod +x "${FILENAME}"
 
 # Move o binário para /usr/local/bin
 echo "Instalando o GoAnime..."
 if [ "$(id -u)" -ne 0 ]; then
-  sudo mv "${BINARY}" /usr/local/bin/goanime
+  sudo mv "${FILENAME}" /usr/local/bin/goanime
   sudo ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
 else
-  mv "${BINARY}" /usr/local/bin/goanime
+  mv "${FILENAME}" /usr/local/bin/goanime
   ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
 fi
 
