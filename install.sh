@@ -1,40 +1,56 @@
-#!/bin/bash
+#!/bin/sh
 
-GOOS=$(go env GOOS)
-GOARCH=$(go env GOARCH)
+set -e
 
-function compile(){
-  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
-  if [ "$(uname)" == "Darwin" ]; then
-    # Se o sistema é macOS, ajuste GOOS e GOARCH conforme necessário
-    GOOS=darwin
-    GOARCH=amd64 # ou arm64 para Macs com chip M1
-  fi
-  GOOS=$GOOS GOARCH=$GOARCH go build -o main .
-}
-# add bin to path macOS only
-function install_macos(){
-  mv main /usr/local/bin/goanime
-  ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
-}
+# Determina o sistema operacional e arquitetura
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 
-function install_others(){
-  mv main /usr/local/bin/goanime
-  ln -f /usr/local/bin/goanime /usr/local/bin/go-anime
-}
+# Mapeia o sistema operacional e arquitetura para os nomes usados nos binários
+case "$OS" in
+  Darwin)
+    OS='darwin'
+    ;;
+  Linux)
+    OS='linux'
+    ;;
+  *)
+    echo "Sistema operacional não suportado: $OS"
+    exit 1
+    ;;
+esac
 
+case "$ARCH" in
+  x86_64|amd64)
+    ARCH='amd64'
+    ;;
+  arm64|aarch64)
+    ARCH='arm64'
+    ;;
+  *)
+    echo "Arquitetura não suportada: $ARCH"
+    exit 1
+    ;;
+esac
 
-function start(){
-  compile
-  if [ "$(uname)" == "Darwin" ]; then
-    install_macos
-  else
-    install_others
-  fi
-}
+# URL do binário do GoAnime
+VERSION="v1.0.5"
+BINARY="goanime"
+URL="https://github.com/alvarorichard/GoAnime/releases/download/${VERSION}/${BINARY}-${OS}-${ARCH}"
 
-if [ "$EUID" -eq 0 ]; then
-  start
+# Baixa o binário
+echo "Baixando o GoAnime ${VERSION} para ${OS}/${ARCH}..."
+curl -L "${URL}" -o "${BINARY}"
+chmod +x "${BINARY}"
+
+# Move o binário para /usr/local/bin
+echo "Instalando o GoAnime..."
+if [ "$(id -u)" -ne 0 ]; then
+  sudo mv "${BINARY}" /usr/local/bin/goanime
+  sudo ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
 else
-  echo "Este programa deve ser rodado como sudo"
+  mv "${BINARY}" /usr/local/bin/goanime
+  ln -sf /usr/local/bin/goanime /usr/local/bin/go-anime
 fi
+
+echo "GoAnime instalado com sucesso!"
