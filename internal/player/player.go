@@ -59,7 +59,33 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), m.progress.Init())
 }
 
-// Update handles updates to the Bubble Tea model
+// Update handles updates to the Bubble Tea model.
+//
+// This function processes incoming messages (`tea.Msg`) and updates the model's state accordingly.
+// It locks the model's mutex to ensure thread safety, especially when modifying shared data like
+// `m.received`, `m.totalBytes`, and other stateful properties.
+//
+// The function processes different message types, including:
+//
+// 1. `tickMsg`: A periodic message that triggers the progress update. If the download is complete
+// (`m.done` is `true`), the program quits. Otherwise, it calculates the percentage of bytes received
+// and updates the progress bar. It then schedules the next tick.
+//
+// 2. `statusMsg`: Updates the status string in the model, which can be used to display custom messages
+// to the user, such as "Downloading..." or "Download complete".
+//
+// 3. `progress.FrameMsg`: Handles frame updates for the progress bar. It delegates the update to the
+// internal `progress.Model` and returns any commands necessary to refresh the UI.
+//
+// 4. `tea.KeyMsg`: Responds to key events, such as quitting the program when "Ctrl+C" is pressed.
+// If the user requests to quit, the program sets `m.done` to `true` and returns the quit command.
+//
+// For unhandled message types, it returns the model unchanged.
+//
+// Returns:
+// - Updated `tea.Model` representing the current state of the model.
+// - A `tea.Cmd` that specifies the next action the program should perform.
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -99,16 +125,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the Bubble Tea model
+// View renders the user interface for the Bubble Tea model.
+//
+// This function generates the visual output that is displayed to the user. It includes the status message,
+// the progress bar, and a quit instruction. The layout is formatted with padding for proper alignment.
+//
+// Steps:
+// 1. Adds padding to each line using spaces.
+// 2. Styles the status message (m.status) with an orange color (#FFA500).
+// 3. Displays the progress bar using the progress model.
+// 4. Shows a message instructing the user to press "Ctrl+C" to quit.
+//
+// Returns:
+// - A formatted string that represents the UI for the current state of the model.
 func (m *model) View() string {
+	// Creates padding spaces for consistent layout
 	pad := strings.Repeat(" ", padding)
+
+	// Styles the status message with an orange color
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
+
+	// Returns the UI layout: status message, progress bar, and quit instruction
 	return "\n" +
-		pad + statusStyle.Render(m.status) + "\n\n" +
-		pad + m.progress.View() + "\n\n" +
-		pad + "Press Ctrl+C to quit"
+		pad + statusStyle.Render(m.status) + "\n\n" + // Render the styled status message
+		pad + m.progress.View() + "\n\n" + // Render the progress bar
+		pad + "Press Ctrl+C to quit" // Show quit instruction
 }
 
-// tickCmd returns a command to tick every 100 milliseconds
+// tickCmd returns a command that triggers a "tick" every 100 milliseconds.
+//
+// This function sets up a recurring event (tick) that fires every 100 milliseconds.
+// Each tick sends a `tickMsg` with the current time (`t`) as a message, which can be
+// handled by the update function to trigger actions like updating the progress bar.
+//
+// Returns:
+// - A `tea.Cmd` that schedules a tick every 100 milliseconds and sends a `tickMsg`.
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -117,72 +168,130 @@ func tickCmd() tea.Cmd {
 
 // statusUpdateCmd returns a command to update the status
 
-// DownloadFolderFormatter formats the anime URL to be used as the download folder name
+// DownloadFolderFormatter formats the anime URL to create a download folder name.
+//
+// This function extracts a specific part of the anime video URL to use it as the name
+// for the download folder. It uses a regular expression to capture the part of the URL
+// after "/video/", which is often unique and suitable as a folder name.
+//
+// Steps:
+// 1. Compiles a regular expression that matches URLs of the form "https://<domain>/video/<unique-part>".
+// 2. Extracts the "<unique-part>" from the URL.
+// 3. If the match is successful, it returns the extracted part as the folder name.
+// 4. If no match is found, it returns an empty string.
+//
+// Parameters:
+// - str: The anime video URL as a string.
+//
+// Returns:
+// - A string representing the formatted folder name, or an empty string if no match is found.
 func DownloadFolderFormatter(str string) string {
+	// Regular expression to capture the unique part after "/video/"
 	regex := regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
+
+	// Apply the regex to the input URL
 	match := regex.FindStringSubmatch(str)
+
+	// If a match is found, return the captured group (folder name)
 	if len(match) > 1 {
 		finalStep := match[1]
 		return finalStep
 	}
+
+	// If no match, return an empty string
 	return ""
 }
 
-// getContentLength gets the content length of the URL.
+// getContentLength retrieves the content length of the given URL.
 func getContentLength(url string, client *http.Client) (int64, error) {
-	// Attempt to use HEAD request
+	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
+		// Returns 0 and the error if the request creation fails.
 		return 0, err
 	}
 
+	// Sends the HEAD request to the server.
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
-		// Fallback to GET request if HEAD is not allowed
+		// If the HEAD request fails or is not supported, fall back to a GET request.
 		req.Method = "GET"
-		req.Header.Set("Range", "bytes=0-0")
-		resp, err = client.Do(req)
+		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
+		resp, err = client.Do(req)           // Sends the modified GET request.
 		if err != nil {
+			// Returns 0 and the error if the GET request fails.
 			return 0, err
 		}
 	}
 
+	// Ensures that the response body is closed after it is used to avoid resource leaks.
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
+			// Logs a warning if closing the response body fails.
 			log.Printf("Failed to close response body: %v\n", err)
 		}
 	}(resp.Body)
 
+	// Checks if the server responded with a 200 OK or 206 Partial Content status.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		// Returns an error if the server does not support partial content (required for ranged requests).
 		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
 	}
 
+	// Retrieves the "Content-Length" header from the response.
 	contentLengthHeader := resp.Header.Get("Content-Length")
 	if contentLengthHeader == "" {
+		// Returns an error if the "Content-Length" header is missing.
 		return 0, fmt.Errorf("Content-Length header is missing")
 	}
 
+	// Converts the "Content-Length" header from a string to an int64.
 	contentLength, err := strconv.ParseInt(contentLengthHeader, 10, 64)
 	if err != nil {
+		// Returns 0 and an error if the conversion fails.
 		return 0, err
 	}
 
+	// Returns the content length in bytes.
 	return contentLength, nil
 }
 
 // downloadPart downloads a part of the video file.
+//
+// This function downloads a specific part (or chunk) of a video file using HTTP ranged requests.
+// It saves the downloaded part as a temporary file and updates the progress state as data is received.
+//
+// Parameters:
+// - url: The URL of the video file to download.
+// - from: The starting byte of the file part to download.
+// - to: The ending byte of the file part to download.
+// - part: The part number, used to name the temporary file.
+// - client: The HTTP client used to make the request.
+// - destPath: The destination path where the downloaded file part will be saved.
+// - m: The model containing the progress and state information.
+//
+// Returns:
+// - An error if the download fails, or nil if it succeeds.
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
+	// Creates a new HTTP GET request for the specified URL.
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		// Returns the error if the request creation fails.
 		return err
 	}
+
+	// Adds a "Range" header to specify the byte range to download (from 'from' to 'to').
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
 
+	// Sends the HTTP request using the provided client.
 	resp, err := client.Do(req)
 	if err != nil {
+		// Returns the error if the request fails.
 		return err
 	}
+
+	// Ensures that the response body is closed after the function finishes to avoid resource leaks.
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
@@ -190,12 +299,18 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 		}
 	}(resp.Body)
 
+	// Constructs the file name and path for the current part (e.g., video.mp4.part0).
 	partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
 	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+
+	// Creates a new file to store the downloaded part.
 	file, err := os.Create(partFilePath)
 	if err != nil {
+		// Returns the error if file creation fails.
 		return err
 	}
+
+	// Ensures that the file is closed properly after writing the data.
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
@@ -203,125 +318,194 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 		}
 	}(file)
 
+	// Creates a buffer of 32 KB to read the response data in chunks.
 	buf := make([]byte, 32*1024) // 32KB buffer
 	for {
+		// Reads data from the response body into the buffer.
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			// If data is read, write it to the file.
 			if _, err := file.Write(buf[:n]); err != nil {
+				// Returns the error if writing to the file fails.
 				return err
 			}
-			// Update received progress
+
+			// Updates the received byte count in the model.
 			m.mu.Lock()
-			m.received += int64(n)
+			m.received += int64(n) // Updates the progress with the number of bytes received.
 			m.mu.Unlock()
 		}
+
+		// If EOF is reached (end of file), the download for this part is complete.
 		if err == io.EOF {
 			break
 		}
+
+		// If another error occurs during reading, return the error.
 		if err != nil {
 			return err
 		}
 	}
 
+	// Returns nil if the download part completes successfully.
 	return nil
 }
 
 // combineParts combines downloaded parts into a single file.
+//
+// This function merges multiple downloaded parts of a file into one complete file. Each part is saved
+// as a temporary file (e.g., video.mp4.part0, video.mp4.part1) and is combined sequentially into the
+// final destination file. After merging, the temporary part files are deleted.
+//
+// Parameters:
+// - destPath: The path where the final combined file will be saved.
+// - numThreads: The number of parts (or threads) that were used to download the file.
+//
+// Returns:
+// - An error if the merging process fails, or nil if successful.
 func combineParts(destPath string, numThreads int) error {
+	// Creates the final output file where all parts will be merged.
 	outFile, err := os.Create(destPath)
 	if err != nil {
+		// Returns an error if the final file cannot be created.
 		return err
 	}
+
+	// Ensures that the output file is closed after all parts are written.
 	defer func(outFile *os.File) {
 		err := outFile.Close()
 		if err != nil {
+			// Logs an error if closing the output file fails.
 			log.Printf("Failed to close output file: %v\n", err)
 		}
 	}(outFile)
 
+	// Loops through each part that was downloaded.
 	for i := 0; i < numThreads; i++ {
+		// Constructs the file name for the current part (e.g., video.mp4.part0).
 		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
+		// Builds the full path to the part file.
 		partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 
+		// Opens the part file for reading.
 		partFile, err := os.Open(partFilePath)
 		if err != nil {
+			// Logs an error and returns it if the part file cannot be opened.
 			fmt.Println("Failed to open part file:", err)
 			return err
 		}
 
+		// Copies the contents of the part file into the final output file.
 		if _, err := io.Copy(outFile, partFile); err != nil {
+			// If copying fails, ensures the part file is closed before returning an error.
 			err := partFile.Close()
 			if err != nil {
 				fmt.Printf("Failed to close part file: %v\n", err)
 				return err
-
 			}
+			// Returns the error if the copy operation fails.
 			return err
 		}
-		err = partFile.Close()
 
+		// Closes the part file after it has been copied to the final file.
+		err = partFile.Close()
 		if err != nil {
+			// Logs an error if closing the part file fails.
 			fmt.Printf("Failed to close part file: %v\n", err)
 			return err
 		}
 
+		// Deletes the part file after it has been successfully copied and closed.
 		if err := os.Remove(partFilePath); err != nil {
+			// Returns an error if the part file cannot be deleted.
 			return err
 		}
 	}
 
+	// Returns nil to indicate success after all parts are combined and deleted.
 	return nil
 }
 
 // DownloadVideo downloads a video using multiple threads.
+//
+// This function downloads a video file in parallel using multiple threads. It divides the file
+// into chunks, downloads each chunk concurrently, and then combines the parts into a single file
+// at the destination path.
+//
+// Parameters:
+// - url: The URL of the video file to download.
+// - destPath: The destination path where the video file will be saved.
+// - numThreads: The number of threads (or parts) to use for downloading the video.
+// - m: The model used to track the progress and status of the download.
+//
+// Returns:
+// - An error if the download or combination of parts fails, or nil if successful.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
+	// Cleans the destination path to ensure it is valid and well-formed.
 	destPath = filepath.Clean(destPath)
 
+	// Creates an HTTP client with a custom transport that includes a 10-second timeout.
 	httpClient := &http.Client{
 		Transport: api.SafeTransport(10 * time.Second),
 	}
 
-	chunkSize := int64(0)
-	var contentLength int64
+	chunkSize := int64(0)   // Variable to store the size of each download chunk.
+	var contentLength int64 // Variable to store the total content length of the file.
 
-	// Get content length
+	// Retrieves the content length of the file from the URL.
 	contentLength, err := getContentLength(url, httpClient)
 	if err != nil {
+		// Returns an error if the content length cannot be determined.
 		return err
 	}
 
+	// Returns an error if the content length is zero, indicating an invalid or empty file.
 	if contentLength == 0 {
 		return fmt.Errorf("content length is zero")
 	}
 
+	// Calculates the size of each chunk based on the total content length and the number of threads.
 	chunkSize = contentLength / int64(numThreads)
 
-	var downloadWg sync.WaitGroup
+	var downloadWg sync.WaitGroup // WaitGroup to synchronize the completion of all download threads.
 
+	// Loops over the number of threads to create a concurrent download for each chunk.
 	for i := 0; i < numThreads; i++ {
-		from := int64(i) * chunkSize
-		to := from + chunkSize - 1
+		from := int64(i) * chunkSize // Starting byte for the current chunk.
+		to := from + chunkSize - 1   // Ending byte for the current chunk.
+
+		// For the last chunk, ensure that the 'to' value covers the remainder of the file.
 		if i == numThreads-1 {
 			to = contentLength - 1
 		}
 
+		// Adds one to the WaitGroup to track this download thread.
 		downloadWg.Add(1)
+
+		// Starts a new goroutine for each chunk download.
 		go func(from, to int64, part int) {
-			defer downloadWg.Done()
+			defer downloadWg.Done() // Marks the thread as done when it finishes.
+
+			// Downloads the part of the file corresponding to the byte range (from, to).
 			err := downloadPart(url, from, to, part, httpClient, destPath, m)
 			if err != nil {
+				// Logs an error if the download of this part fails.
 				log.Printf("Thread %d: download part failed: %v\n", part, err)
 			}
-		}(from, to, i)
+		}(from, to, i) // Passes the byte range and part number to the goroutine.
 	}
 
+	// Waits for all download threads to complete before proceeding.
 	downloadWg.Wait()
 
+	// Combines all the downloaded parts into a single file.
 	err = combineParts(destPath, numThreads)
 	if err != nil {
+		// Returns an error if combining the parts fails.
 		return fmt.Errorf("failed to combine parts: %v", err)
 	}
 
+	// Returns nil to indicate that the download and combination were successful.
 	return nil
 }
 
@@ -428,22 +612,41 @@ func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpi
 	}
 }
 
+// askForDownload presents a prompt for the user to choose a download option.
+//
+// This function displays a menu with options for downloading a single episode,
+// downloading a range of episodes, or skipping the download and playing online.
+// Based on the user's selection, it returns a corresponding integer code.
+//
+// Returns:
+// - 1 if the user selects "Download this episode".
+// - 2 if the user selects "Download episodes in a range".
+// - 3 if the user selects "No download (play online)" or an invalid option.
 func askForDownload() int {
+	// Creates a prompt using the promptui.Select widget with a label and three options.
 	prompt := promptui.Select{
-		Label: "Choose an option",
-		Items: []string{"Download this episode", "Download episodes in a range", "No download (play online)"},
+		Label: "Choose an option",                                                                             // The label displayed at the top of the menu.
+		Items: []string{"Download this episode", "Download episodes in a range", "No download (play online)"}, // The menu items to select from.
 	}
+	//
 
+	// Runs the prompt and captures the selected result and any potential error.
 	_, result, err := prompt.Run()
 	if err != nil {
+		// If an error occurs while acquiring user input, it logs the error and terminates the program using Panic.
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
+
+	// Converts the user's input to lowercase and determines the selected option.
 	switch strings.ToLower(result) {
 	case "download this episode":
+		// Returns 1 if the user selected "Download this episode".
 		return 1
 	case "download episodes in a range":
+		// Returns 2 if the user selected "Download episodes in a range".
 		return 2
 	default:
+		// Returns 3 for any other selection, including "No download (play online)".
 		return 3
 	}
 }
