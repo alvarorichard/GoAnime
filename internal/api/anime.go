@@ -1,14 +1,12 @@
 package api
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"sort"
 	"strings"
 
@@ -33,7 +31,6 @@ type Episode struct {
 	URL    string
 }
 
-// SearchAnime searches for an anime and downloads its cover image upon selection.
 func SearchAnime(animeName string) (*Anime, error) {
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, url.PathEscape(animeName))
 
@@ -48,7 +45,7 @@ func SearchAnime(animeName string) (*Anime, error) {
 		}
 		if selectedAnime != nil {
 			// After selecting the anime, fetch its details to get the image URL
-			err := fetchAnimeDetails(selectedAnime)
+			err := FetchAnimeDetails(selectedAnime) // Use FetchAnimeDetails
 			if err != nil {
 				if util.IsDebug {
 					log.Printf("Failed to fetch anime details: %v", err)
@@ -134,85 +131,142 @@ func ParseAnimes(doc *goquery.Document) []Anime {
 	return animes
 }
 
-func fetchAnimeDetails(anime *Anime) error {
-	if util.IsDebug {
-		log.Printf("Fetching details for anime: %s, URL: %s", anime.Name, anime.URL)
-	}
+//func fetchAnimeDetails(anime *Anime) error {
+//	if util.IsDebug {
+//		log.Printf("Fetching details for anime: %s, URL: %s", anime.Name, anime.URL)
+//	}
+//
+//	response, err := getHTTPResponse(anime.URL)
+//	if err != nil {
+//		return errors.Wrap(err, "failed to get anime details page")
+//	}
+//	defer response.Body.Close()
+//
+//	if response.StatusCode != http.StatusOK {
+//		return errors.Errorf("Failed to get anime details page: %s", response.Status)
+//	}
+//
+//	bodyBytes, err := io.ReadAll(response.Body)
+//	if err != nil {
+//		return errors.Wrap(err, "failed to read response body")
+//	}
+//
+//	if util.IsDebug {
+//		log.Printf("Anime detail page HTML:\n%s", string(bodyBytes))
+//	}
+//
+//	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(bodyBytes))
+//	if err != nil {
+//		return errors.Wrap(err, "failed to parse anime details page")
+//	}
+//
+//	// Try using meta tag
+//	metaImage := doc.Find(`meta[property="og:image"]`)
+//	if metaImage.Length() > 0 {
+//		imageURL, exists := metaImage.Attr("content")
+//		if exists && imageURL != "" {
+//			imageURL = resolveURL(baseSiteURL, imageURL)
+//			anime.ImageURL = imageURL
+//			if util.IsDebug {
+//				log.Printf("Cover image URL from meta tag: %s", anime.ImageURL)
+//			}
+//			// Proceed to download the image
+//			err = downloadMedia(anime.ImageURL, "cover")
+//			if err != nil {
+//				return errors.Wrap(err, "failed to download cover image")
+//			}
+//			return nil
+//		}
+//	}
+//
+//	// Fallback to previous method with adjusted selector
+//	imageSelection := doc.Find(".anime-poster img") // Adjust this selector
+//
+//	if imageSelection.Length() == 0 {
+//		if util.IsDebug {
+//			log.Printf("Cover image element not found in anime details page.")
+//		}
+//		return errors.New("cover image element not found")
+//	}
+//
+//	imageURL, exists := imageSelection.Attr("src")
+//	if !exists || imageURL == "" {
+//		return errors.New("cover image URL not found")
+//	}
+//
+//	imageURL = resolveURL(baseSiteURL, imageURL)
+//	anime.ImageURL = imageURL
+//
+//	if util.IsDebug {
+//		log.Printf("Cover image URL: %s", anime.ImageURL)
+//	}
+//
+//	// Now download the image
+//	err = downloadMedia(anime.ImageURL, "cover")
+//	if err != nil {
+//		return errors.Wrap(err, "failed to download cover image")
+//	}
+//
+//	return nil
+//}
 
-	response, err := getHTTPResponse(anime.URL)
+func FetchAnimeDetails(anime *Anime) error {
+	response, err := http.Get(anime.URL)
 	if err != nil {
 		return errors.Wrap(err, "failed to get anime details page")
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return errors.Errorf("Failed to get anime details page: %s", response.Status)
+		return fmt.Errorf("failed to get anime details page: %s", response.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		return errors.Wrap(err, "failed to read response body")
-	}
-
-	if util.IsDebug {
-		log.Printf("Anime detail page HTML:\n%s", string(bodyBytes))
-	}
-
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(bodyBytes))
+	// Parse the HTML to find the cover image URL
+	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse anime details page")
 	}
 
-	// Try using meta tag
-	metaImage := doc.Find(`meta[property="og:image"]`)
-	if metaImage.Length() > 0 {
-		imageURL, exists := metaImage.Attr("content")
-		if exists && imageURL != "" {
-			imageURL = resolveURL(baseSiteURL, imageURL)
-			anime.ImageURL = imageURL
-			if util.IsDebug {
-				log.Printf("Cover image URL from meta tag: %s", anime.ImageURL)
-			}
-			// Proceed to download the image
-			err = downloadMedia(anime.ImageURL, "cover")
-			if err != nil {
-				return errors.Wrap(err, "failed to download cover image")
-			}
-			return nil
-		}
-	}
-
-	// Fallback to previous method with adjusted selector
-	imageSelection := doc.Find(".anime-poster img") // Adjust this selector
-
-	if imageSelection.Length() == 0 {
-		if util.IsDebug {
-			log.Printf("Cover image element not found in anime details page.")
-		}
-		return errors.New("cover image element not found")
-	}
-
-	imageURL, exists := imageSelection.Attr("src")
+	// Try to find the cover image from a meta tag or another selector
+	imageURL, exists := doc.Find(`meta[property="og:image"]`).Attr("content")
 	if !exists || imageURL == "" {
 		return errors.New("cover image URL not found")
 	}
 
-	imageURL = resolveURL(baseSiteURL, imageURL)
-	anime.ImageURL = imageURL
+	anime.ImageURL = imageURL // Store the cover image URL in the Anime struct
 
-	if util.IsDebug {
-		log.Printf("Cover image URL: %s", anime.ImageURL)
-	}
-
-	// Now download the image
-	err = downloadMedia(anime.ImageURL, "cover")
+	// Optionally, download the cover image
+	err = downloadMedia(imageURL, "cover")
 	if err != nil {
 		return errors.Wrap(err, "failed to download cover image")
 	}
 
+	log.Printf("Cover image URL set for anime: %s", anime.Name)
 	return nil
 }
 
+// downloadMedia downloads the media from a URL and saves it as cover.webp
+func downloadMedia(mediaURL, filename string) error {
+	resp, err := http.Get(mediaURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to download media")
+	}
+	defer resp.Body.Close()
+
+	out, err := os.Create(fmt.Sprintf("%s.webp", filename))
+	if err != nil {
+		return errors.Wrap(err, "failed to create media file")
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return errors.Wrap(err, "failed to save media to file")
+	}
+
+	log.Printf("Media saved as: %s.webp", filename)
+	return nil
+}
 func selectAnimeWithGoFuzzyFinder(animes []Anime) (*Anime, error) {
 	if len(animes) == 0 {
 		return nil, errors.New("no anime provided")
@@ -243,43 +297,43 @@ func sortAnimes(animeList []Anime) []Anime {
 	return animeList
 }
 
-// downloadMedia downloads a media file from the given URL and saves it to the specified file path.
-func downloadMedia(mediaURL, filename string) error {
-	if mediaURL == "" {
-		return errors.New("media URL is empty")
-	}
-
-	resp, err := getHTTPResponse(mediaURL)
-	if err != nil {
-		return errors.Wrap(err, "failed to download media")
-	}
-	defer resp.Body.Close()
-
-	// Determine the file extension
-	u, err := url.Parse(mediaURL)
-	if err != nil {
-		return errors.Wrap(err, "invalid media URL")
-	}
-	ext := path.Ext(u.Path)
-	filepath := filename + ext
-
-	out, err := os.Create(filepath)
-	if err != nil {
-		return errors.Wrap(err, "failed to create media file")
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return errors.Wrap(err, "failed to save media to file")
-	}
-
-	if util.IsDebug {
-		log.Printf("Media saved to: %s", filepath)
-	}
-
-	return nil
-}
+//// downloadMedia downloads a media file from the given URL and saves it to the specified file path.
+//func downloadMedia(mediaURL, filename string) error {
+//	if mediaURL == "" {
+//		return errors.New("media URL is empty")
+//	}
+//
+//	resp, err := getHTTPResponse(mediaURL)
+//	if err != nil {
+//		return errors.Wrap(err, "failed to download media")
+//	}
+//	defer resp.Body.Close()
+//
+//	// Determine the file extension
+//	u, err := url.Parse(mediaURL)
+//	if err != nil {
+//		return errors.Wrap(err, "invalid media URL")
+//	}
+//	ext := path.Ext(u.Path)
+//	filepath := filename + ext
+//
+//	out, err := os.Create(filepath)
+//	if err != nil {
+//		return errors.Wrap(err, "failed to create media file")
+//	}
+//	defer out.Close()
+//
+//	_, err = io.Copy(out, resp.Body)
+//	if err != nil {
+//		return errors.Wrap(err, "failed to save media to file")
+//	}
+//
+//	if util.IsDebug {
+//		log.Printf("Media saved to: %s", filepath)
+//	}
+//
+//	return nil
+//}
 
 // resolveURL resolves relative URLs to absolute URLs based on the base URL.
 func resolveURL(base, ref string) string {
