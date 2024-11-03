@@ -15,33 +15,32 @@ func main() {
 	if err != nil {
 		log.Fatalln(util.ErrorHandler(err))
 	}
-	animeURL, err := api.SearchAnime(animeName)
+
+	anime, err := api.SearchAnime(animeName)
 	if err != nil {
-		log.Fatalln("Failed to get anime episodes:", util.ErrorHandler(err))
+		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
 	}
 
-	episodes, err := api.GetAnimeEpisodes(animeURL)
+	episodes, err := api.GetAnimeEpisodes(anime.URL)
 	if err != nil || len(episodes) == 0 {
 		if util.IsDebug {
-			log.Fatalln("The selected anime has no episodes in the server:", util.ErrorHandler(err))
+			log.Fatalln("The selected anime has no episodes on the server:", util.ErrorHandler(err))
 		}
-		log.Fatalln("The selected anime has no episodes in the server.")
+		log.Fatalln("The selected anime has no episodes on the server.")
 	}
 
-	series, totalEpisodes, err := api.IsSeries(animeURL)
+	series, totalEpisodes, err := api.IsSeries(anime.URL)
 	if err != nil {
-		log.Fatalln("Erro ao verificar se o anime é uma série:", util.ErrorHandler(err))
+		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
 	}
 
 	if series {
-		fmt.Printf("O anime selecionado é uma série com %d episódios.\n", totalEpisodes)
+		fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
 		selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 		if err != nil {
 			log.Fatalln(util.ErrorHandler(err))
 		}
 
-		// A função extractEpisodeNumber não deve ser chamada para filmes/OVAs.
-		// Este ajuste é específico para quando sabemos que é uma série com base na verificação anterior.
 		selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
 		if err != nil {
 			log.Fatalln("Error parsing episode number:", util.ErrorHandler(err))
@@ -52,16 +51,14 @@ func main() {
 			log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 		}
 
-		player.HandleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr)
+		player.HandleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, anime.URL, episodeNumberStr)
 	} else {
-		fmt.Println("O anime selecionado é um filme/OVA. Iniciando a reprodução direta...")
-		// Para filmes/OVAs, utilizamos o primeiro episódio diretamente sem tentar parsear um número de episódio.
+		fmt.Println("The selected anime is a movie/OVA. Starting direct playback...")
 		videoURL, err := player.GetVideoURLForEpisode(episodes[0].URL)
 		if err != nil {
 			log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 		}
 
-		// Assume-se 1 como o número de episódio padrão para filmes/OVAs.
-		player.HandleDownloadAndPlay(videoURL, episodes, 1, animeURL, episodes[0].Number)
+		player.HandleDownloadAndPlay(videoURL, episodes, 1, anime.URL, episodes[0].Number)
 	}
 }
