@@ -122,6 +122,7 @@ func DiscordPresence(clientId string, anime Anime, isPaused bool) error {
 	activity := client.Activity{
 			Details: anime.Name,
 			LargeImage: anime.ImageURL,	
+			LargeText: anime.Name,
 			State:   state,
 			Buttons: []*client.Button{
 				{
