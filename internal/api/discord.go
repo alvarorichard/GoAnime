@@ -65,16 +65,16 @@ func DiscordPresence(clientId string, anime Anime, isPaused bool) error {
 	activity := client.Activity{
 		Details:    anime.Name,
 		State:      state + " | Ver capa no link abaixo",
-		LargeImage: "anime_placeholder", // Use uma imagem genérica pré-carregada
+		LargeImage: "anime_placeholder",
 		LargeText:  anime.Name,
 		Buttons: []*client.Button{
 			{
 				Label: "Ver capa do anime",
-				Url:   anime.ImageURL, // Link para a capa do anime
+				Url:   anime.ImageURL,
 			},
 			{
 				Label: "Ver no site",
-				Url:   anime.URL, // Link para a página do anime
+				Url:   anime.URL,
 			},
 		},
 	}
