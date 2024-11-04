@@ -1203,13 +1203,6 @@ func FetchAnimeDetails(anime *Anime) error {
 		return errors.New("cover image URL not found")
 	}
 
-	anime.ImageURL = imageURL
-	err = downloadMedia(imageURL, "cover")
-	if err != nil {
-		return errors.Wrap(err, "failed to download cover image")
-	}
-
-	log.Printf("Cover image URL set for anime: %s", anime.Name)
 	return nil
 }
 
