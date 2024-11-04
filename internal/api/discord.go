@@ -43,6 +43,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/hugolgst/rich-go/client"
 	"log"
 )
@@ -84,7 +85,11 @@ func DiscordPresence(clientId string, anime Anime, isPaused bool) error {
 		return fmt.Errorf("failed to set Discord activity: %w", err)
 	}
 
-	log.Println("Discord Rich Presence updated successfully with cover link.")
+	if util.IsDebug {
+		log.Println("Discord Rich Presence updated successfully with cover link.")
+		//return nil
+	}
+
 	return nil
 }
 
