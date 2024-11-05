@@ -59,6 +59,95 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), m.progress.Init())
 }
 
+
+const discordClientID = "1302721937717334128" // Your Discord Client ID
+
+// NewRichPresenceUpdater initializes a new RichPresenceUpdater.
+func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration) *RichPresenceUpdater {
+	return &RichPresenceUpdater{
+		anime:      anime,
+		isPaused:   isPaused,
+		animeMutex: animeMutex,
+		updateFreq: updateFreq,
+		done:       make(chan bool),
+	}
+}
+
+// RichPresenceUpdater manages periodic updates to Discord Rich Presence.
+type RichPresenceUpdater struct {
+	anime      *api.Anime
+	isPaused   *bool
+	animeMutex *sync.Mutex
+	updateFreq time.Duration
+	done       chan bool
+	wg         sync.WaitGroup
+}
+
+// Start begins the periodic Rich Presence updates.
+func (rpu *RichPresenceUpdater) Start() {
+	rpu.wg.Add(1)
+	go func() {
+		defer rpu.wg.Done()
+		ticker := time.NewTicker(rpu.updateFreq)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				rpu.updateDiscordPresence()
+			case <-rpu.done:
+				log.Println("Rich Presence updater received stop signal.")
+				return
+			}
+		}
+	}()
+	log.Println("Rich Presence updater started.")
+}
+
+// Stop signals the updater to stop and waits for the goroutine to finish.
+func (rpu *RichPresenceUpdater) Stop() {
+	close(rpu.done)
+	rpu.wg.Wait()
+	log.Println("Rich Presence updater stopped.")
+}
+
+// updateDiscordPresence fetches the latest episode details and updates Discord Rich Presence.
+func (rpu *RichPresenceUpdater) updateDiscordPresence() {
+	rpu.animeMutex.Lock()
+	defer rpu.animeMutex.Unlock()
+
+	if len(rpu.anime.Episodes) == 0 {
+		log.Println("No episodes available to update Rich Presence.")
+		return
+	}
+
+	currentEpisode := rpu.anime.Episodes[0] // Assuming the first element is the current episode
+	log.Printf("Current Episode in Updater: %+v", currentEpisode)
+
+	animeTitle := rpu.anime.Details.Title.Romaji
+	episodeTitle := currentEpisode.Number // e.g., "Black Clover - Episódio 2 - A Promessa dos Meninos"
+	combinedTitle := fmt.Sprintf("%s | %s", animeTitle, episodeTitle)
+
+	// Log the update details
+	log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
+
+	// Create a copy to avoid mutating the original anime struct
+	copiedAnime := *rpu.anime
+	copiedAnime.Details.Title.Romaji = combinedTitle
+
+	// Log the data being sent
+	log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
+
+	// Update Rich Presence
+	err := api.DiscordPresence(discordClientID, copiedAnime, *rpu.isPaused, time.Now().Unix())
+	if err != nil {
+		log.Println("Error updating Discord Rich Presence:", err)
+	} else {
+		log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
+	}
+}
+
+
 // Update handles updates to the Bubble Tea model.
 //
 // This function processes incoming messages (`tea.Msg`) and updates the model's state accordingly.
@@ -510,12 +599,12 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 }
 
 // HandleDownloadAndPlay handles the download and playback of the video
-func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
+func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
 	downloadOption := askForDownload()
 	switch downloadOption {
 	case 1:
 		// Download the current episode
-		downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr)
+		downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr, updater)
 	case 2:
 		// Download episodes in a range
 		if err := HandleBatchDownload(episodes, animeURL); err != nil {
@@ -523,13 +612,13 @@ func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpis
 		}
 	default:
 		// Play online
-		if err := playVideo(videoURL, episodes, selectedEpisodeNum); err != nil {
+		if err := playVideo(videoURL, episodes, selectedEpisodeNum, updater); err != nil {
 			log.Panicln("Failed to play video:", util.ErrorHandler(err))
 		}
 	}
 }
 
-func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string) {
+func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
 	currentUser, err := user.Current()
 	if err != nil {
 		log.Panicln("Failed to get current user:", util.ErrorHandler(err))
@@ -606,7 +695,7 @@ func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpi
 	}
 
 	if askForPlayOffline() {
-		if err := playVideo(episodePath, episodes, selectedEpisodeNum); err != nil {
+		if err := playVideo(episodePath, episodes, selectedEpisodeNum, updater); err != nil {
 			log.Panicln("Failed to play video:", util.ErrorHandler(err))
 		}
 	}
@@ -1144,9 +1233,11 @@ func selectHighestQualityVideo(videos []VideoData) string {
 	return highestQualityURL
 }
 
-func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) error {
+func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, updater *RichPresenceUpdater) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
+
+	updater.Start()
 
 	go func() {
 		defer wg.Done()
@@ -1196,13 +1287,17 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 			if currentEpisodeIndex+1 < len(episodes) {
 				nextEpisode := episodes[currentEpisodeIndex+1]
 				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
+                updater.Stop()
 				wg.Wait()
 				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
 					continue
 				}
-				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1)
+                newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq)
+				newUpdater.anime.Episodes[0].Number = ExtractEpisodeNumber(nextEpisode.Number)
+                newUpdater.anime.Episodes[0].Num++
+                return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
 			} else {
 				fmt.Println("Already at the last episode.")
 			}
@@ -1216,7 +1311,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int) e
 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
 					continue
 				}
-				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1)
+				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, updater)
 			} else {
 				fmt.Println("Already at the first episode.")
 			}
