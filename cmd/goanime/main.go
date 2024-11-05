@@ -338,90 +338,6 @@ import (
 
 const discordClientID = "1302721937717334128" // Your Discord Client ID
 
-// RichPresenceUpdater manages periodic updates to Discord Rich Presence.
-type RichPresenceUpdater struct {
-	anime      *api.Anime
-	isPaused   *bool
-	animeMutex *sync.Mutex
-	updateFreq time.Duration
-	done       chan bool
-	wg         sync.WaitGroup
-}
-
-// NewRichPresenceUpdater initializes a new RichPresenceUpdater.
-func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration) *RichPresenceUpdater {
-	return &RichPresenceUpdater{
-		anime:      anime,
-		isPaused:   isPaused,
-		animeMutex: animeMutex,
-		updateFreq: updateFreq,
-		done:       make(chan bool),
-	}
-}
-
-// Start begins the periodic Rich Presence updates.
-func (rpu *RichPresenceUpdater) Start() {
-	rpu.wg.Add(1)
-	go func() {
-		defer rpu.wg.Done()
-		ticker := time.NewTicker(rpu.updateFreq)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				rpu.updateDiscordPresence()
-			case <-rpu.done:
-				log.Println("Rich Presence updater received stop signal.")
-				return
-			}
-		}
-	}()
-	log.Println("Rich Presence updater started.")
-}
-
-// Stop signals the updater to stop and waits for the goroutine to finish.
-func (rpu *RichPresenceUpdater) Stop() {
-	close(rpu.done)
-	rpu.wg.Wait()
-	log.Println("Rich Presence updater stopped.")
-}
-
-// updateDiscordPresence fetches the latest episode details and updates Discord Rich Presence.
-func (rpu *RichPresenceUpdater) updateDiscordPresence() {
-	rpu.animeMutex.Lock()
-	defer rpu.animeMutex.Unlock()
-
-	if len(rpu.anime.Episodes) == 0 {
-		log.Println("No episodes available to update Rich Presence.")
-		return
-	}
-
-	currentEpisode := rpu.anime.Episodes[0] // Assuming the first element is the current episode
-	log.Printf("Current Episode in Updater: %+v", currentEpisode)
-
-	animeTitle := rpu.anime.Details.Title.Romaji
-	episodeTitle := currentEpisode.Number // e.g., "Black Clover - Episódio 2 - A Promessa dos Meninos"
-	combinedTitle := fmt.Sprintf("%s | %s", animeTitle, episodeTitle)
-
-	// Log the update details
-	log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
-
-	// Create a copy to avoid mutating the original anime struct
-	copiedAnime := *rpu.anime
-	copiedAnime.Details.Title.Romaji = combinedTitle
-
-	// Log the data being sent
-	log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
-
-	// Update Rich Presence
-	err := api.DiscordPresence(discordClientID, copiedAnime, *rpu.isPaused, time.Now().Unix())
-	if err != nil {
-		log.Println("Error updating Discord Rich Presence:", err)
-	} else {
-		log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
-	}
-}
 
 func main() {
 	var animeMutex sync.Mutex
@@ -478,8 +394,8 @@ func main() {
 	// Define a flag to track whether the playback is paused
 	isPaused := false
 
-	// Initialize the RichPresenceUpdater
-	updater := NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second)
+	// Initialize the player.RichPresenceUpdater
+	updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second)
 	defer updater.Stop() // Ensure that the updater is stopped on exit
 
 	if series {
@@ -528,7 +444,7 @@ func main() {
 			}
 
 			// Handle download and play, updating the paused state as necessary
-			player.HandleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, anime.URL, episodeNumberStr) // Corrected to use anime.URL
+			player.HandleDownloadAndPlay(videoURL, episodes, selectedEpisodeNum, anime.URL, episodeNumberStr, updater) // Corrected to use anime.URL
 
 			// The updater will automatically pick up the latest episode details during the next tick
 
@@ -568,7 +484,7 @@ func main() {
 		}
 
 		// Start the Rich Presence updater
-		updater.Start()
+		// updater.Start()
 
 		// Get the video URL for the movie/OVA
 		videoURL, err := player.GetVideoURLForEpisode(episodes[0].URL)
@@ -577,7 +493,7 @@ func main() {
 		}
 
 		// Handle download and play, updating the paused state as necessary
-		player.HandleDownloadAndPlay(videoURL, episodes, 1, anime.URL, episodes[0].Number) // Corrected to use anime.URL
+		player.HandleDownloadAndPlay(videoURL, episodes, 1, anime.URL, episodes[0].Number, updater) // Corrected to use anime.URL
 	}
 
 	// The deferred updater.Stop() will ensure that the updater is stopped before exiting
