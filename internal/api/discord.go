@@ -103,7 +103,7 @@ import (
 )
 
 // DiscordPresence updates Discord Rich Presence with anime details and cover link
-func DiscordPresence(clientId string, anime Anime, isPaused bool) error {
+func DiscordPresence(clientId string, anime Anime, isPaused bool, timestamp int64) error {
 	// Login to Discord
 	err := client.Login(clientId)
 	if err != nil {
@@ -120,21 +120,21 @@ func DiscordPresence(clientId string, anime Anime, isPaused bool) error {
 
 	// Set up the activity for Discord Rich Presence without a LargeImage key
 	activity := client.Activity{
-			Details: anime.Name,
-			LargeImage: anime.ImageURL,	
-			LargeText: anime.Name,
-			State:   state,
-			Buttons: []*client.Button{
-				{
-					Label: "View on AniList",
-					Url:   fmt.Sprintf("https://anilist.co/anime/%d", anime.AnilistID),
-				},
-				{
-					Label: "View on MAL", // Button label
-					Url:   fmt.Sprintf("https://myanimelist.net/anime/%d", anime.MalID), // Button link
-				},
+		Details:    anime.Name,
+		LargeImage: anime.ImageURL,
+		LargeText:  anime.Name,
+		State:      state,
+		Buttons: []*client.Button{
+			{
+				Label: "View on AniList",
+				Url:   fmt.Sprintf("https://anilist.co/anime/%d", anime.AnilistID),
 			},
-		}
+			{
+				Label: "View on MAL",                                                // Button label
+				Url:   fmt.Sprintf("https://myanimelist.net/anime/%d", anime.MalID), // Button link
+			},
+		},
+	}
 
 	// Set the activity
 	err = client.SetActivity(activity)
