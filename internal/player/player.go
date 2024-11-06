@@ -59,7 +59,6 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), m.progress.Init())
 }
 
-
 const discordClientID = "1302721937717334128" // Your Discord Client ID
 
 // NewRichPresenceUpdater initializes a new RichPresenceUpdater.
@@ -96,19 +95,30 @@ func (rpu *RichPresenceUpdater) Start() {
 			case <-ticker.C:
 				rpu.updateDiscordPresence()
 			case <-rpu.done:
-				log.Println("Rich Presence updater received stop signal.")
+				if util.IsDebug {
+					log.Println("Rich Presence updater received stop signal.")
+
+				}
+
 				return
 			}
 		}
 	}()
-	log.Println("Rich Presence updater started.")
+	if util.IsDebug {
+		log.Println("Rich Presence updater started.")
+
+	}
+
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish.
 func (rpu *RichPresenceUpdater) Stop() {
 	close(rpu.done)
 	rpu.wg.Wait()
-	log.Println("Rich Presence updater stopped.")
+	if util.IsDebug {
+		log.Println("Rich Presence updater stopped.")
+
+	}
 }
 
 // updateDiscordPresence fetches the latest episode details and updates Discord Rich Presence.
@@ -117,36 +127,51 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	defer rpu.animeMutex.Unlock()
 
 	if len(rpu.anime.Episodes) == 0 {
-		log.Println("No episodes available to update Rich Presence.")
+		if util.IsDebug {
+			log.Println("No episodes available to update Rich Presence.")
+
+		}
+
 		return
 	}
 
 	currentEpisode := rpu.anime.Episodes[0] // Assuming the first element is the current episode
-	log.Printf("Current Episode in Updater: %+v", currentEpisode)
+	if util.IsDebug {
+		log.Printf("Current Episode in Updater: %+v", currentEpisode)
+
+	}
 
 	animeTitle := rpu.anime.Details.Title.Romaji
 	episodeTitle := currentEpisode.Number // e.g., "Black Clover - Episódio 2 - A Promessa dos Meninos"
 	combinedTitle := fmt.Sprintf("%s | %s", animeTitle, episodeTitle)
 
 	// Log the update details
-	log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
+	if util.IsDebug {
+		log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
+
+	}
 
 	// Create a copy to avoid mutating the original anime struct
 	copiedAnime := *rpu.anime
 	copiedAnime.Details.Title.Romaji = combinedTitle
 
 	// Log the data being sent
-	log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
+	if util.IsDebug {
+		log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
+
+	}
 
 	// Update Rich Presence
 	err := api.DiscordPresence(discordClientID, copiedAnime, *rpu.isPaused, time.Now().Unix())
 	if err != nil {
 		log.Println("Error updating Discord Rich Presence:", err)
 	} else {
-		log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
+		if util.IsDebug {
+			log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
+
+		}
 	}
 }
-
 
 // Update handles updates to the Bubble Tea model.
 //
@@ -1287,17 +1312,17 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 			if currentEpisodeIndex+1 < len(episodes) {
 				nextEpisode := episodes[currentEpisodeIndex+1]
 				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
-                updater.Stop()
+				updater.Stop()
 				wg.Wait()
 				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
 					continue
 				}
-                newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq)
+				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq)
 				newUpdater.anime.Episodes[0].Number = ExtractEpisodeNumber(nextEpisode.Number)
-                newUpdater.anime.Episodes[0].Num++
-                return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
+				newUpdater.anime.Episodes[0].Num++
+				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
 			} else {
 				fmt.Println("Already at the last episode.")
 			}
