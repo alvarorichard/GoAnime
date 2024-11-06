@@ -2,15 +2,14 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"strconv"
-	"sync"
-	"time"
-
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/hugolgst/rich-go/client"
+	"log"
+	"strconv"
+	"sync"
+	"time"
 )
 
 const discordClientID = "1302721937717334128" // Your Discord Client ID
@@ -76,8 +75,22 @@ func main() {
 	isPaused := false
 
 	// Initialize the player.RichPresenceUpdater
-	updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second)
-	defer updater.Stop() // Ensure that the updater is stopped on exit
+	//updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second)
+	//defer updater.Stop() // Ensure that the updater is stopped on exit
+
+	// Fetch episode duration in seconds (ensure api.GetEpisodeData includes duration data)
+	episodeDuration := time.Duration(anime.Episodes[0].Duration) * time.Second
+
+	// Initialize RichPresenceUpdater with start time and duration
+	//updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second, episodeDuration)
+	socketPath := "/tmp/mpvsocket" // Adjust this to the actual socket path
+	updateFreq := 1 * time.Second  // Update every second
+	//updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, 15*time.Second, episodeDuration, socketPath)
+	//updater := player.NewRichPresenceUpdater(anime, &animeMutex, updateFreq, episodeDuration, socketPath)
+	//isPaused := false // Define isPaused as a bool
+	updater := player.NewRichPresenceUpdater(anime, &isPaused, &animeMutex, updateFreq, episodeDuration, socketPath)
+
+	defer updater.Stop()
 
 	if series {
 		fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)

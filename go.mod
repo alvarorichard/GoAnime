@@ -3,6 +3,7 @@ module github.com/alvarorichard/Goanime
 go 1.23.2
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.10.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.1.1

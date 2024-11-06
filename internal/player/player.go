@@ -2,16 +2,20 @@ package player
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/hugolgst/rich-go/client"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,28 +64,86 @@ func (m *model) Init() tea.Cmd {
 }
 
 const discordClientID = "1302721937717334128" // Your Discord Client ID
+//
+//// NewRichPresenceUpdater initializes a new RichPresenceUpdater.
+//func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration) *RichPresenceUpdater {
+//	return &RichPresenceUpdater{
+//		anime:      anime,
+//		isPaused:   isPaused,
+//		animeMutex: animeMutex,
+//		updateFreq: updateFreq,
+//		done:       make(chan bool),
+//	}
+//}
 
-// NewRichPresenceUpdater initializes a new RichPresenceUpdater.
-func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration) *RichPresenceUpdater {
+type RichPresenceUpdater struct {
+	anime           *api.Anime
+	isPaused        *bool
+	animeMutex      *sync.Mutex
+	updateFreq      time.Duration
+	done            chan bool
+	wg              sync.WaitGroup
+	startTime       time.Time     // Start time of playback
+	episodeDuration time.Duration // Total duration of the episode
+	socketPath      string        // Path to mpv IPC socket
+}
+
+//
+//// In player package, update NewRichPresenceUpdater to take a socketPath argument
+//func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
+//	return &RichPresenceUpdater{
+//		anime:           anime,
+//		isPaused:        isPaused,
+//		animeMutex:      animeMutex,
+//		updateFreq:      updateFreq,
+//		done:            make(chan bool),
+//		startTime:       time.Now(),
+//		episodeDuration: episodeDuration,
+//		socketPath:      socketPath, // New field to store the socket path
+//	}
+//}
+
+func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
 	return &RichPresenceUpdater{
-		anime:      anime,
-		isPaused:   isPaused,
-		animeMutex: animeMutex,
-		updateFreq: updateFreq,
-		done:       make(chan bool),
+		anime:           anime,
+		isPaused:        isPaused,
+		animeMutex:      animeMutex,
+		updateFreq:      updateFreq, // Make sure updateFreq is actually used in the struct
+		done:            make(chan bool),
+		startTime:       time.Now(),
+		episodeDuration: episodeDuration,
+		socketPath:      socketPath,
 	}
 }
 
-// RichPresenceUpdater manages periodic updates to Discord Rich Presence.
-type RichPresenceUpdater struct {
-	anime      *api.Anime
-	isPaused   *bool
-	animeMutex *sync.Mutex
-	updateFreq time.Duration
-	done       chan bool
-	wg         sync.WaitGroup
+func (rpu *RichPresenceUpdater) getCurrentPlaybackPosition() (time.Duration, error) {
+	position, err := mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
+	if err != nil {
+		return 0, err
+	}
+
+	// Convert position to float64 and then to time.Duration
+	posSeconds, ok := position.(float64)
+	if !ok {
+		return 0, fmt.Errorf("failed to parse playback position")
+	}
+
+	return time.Duration(posSeconds) * time.Second, nil
 }
 
+//func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration) *RichPresenceUpdater {
+//	return &RichPresenceUpdater{
+//		anime:           anime,
+//		isPaused:        isPaused,
+//		animeMutex:      animeMutex,
+//		updateFreq:      updateFreq,
+//		done:            make(chan bool),
+//		startTime:       time.Now(),
+//		episodeDuration: episodeDuration,
+//	}
+//}
+
+// Start begins the periodic Rich Presence updates.
 // Start begins the periodic Rich Presence updates.
 func (rpu *RichPresenceUpdater) Start() {
 	rpu.wg.Add(1)
@@ -93,22 +155,18 @@ func (rpu *RichPresenceUpdater) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				rpu.updateDiscordPresence()
+				go rpu.updateDiscordPresence() // Run update asynchronously
 			case <-rpu.done:
 				if util.IsDebug {
 					log.Println("Rich Presence updater received stop signal.")
-
 				}
-
 				return
 			}
 		}
 	}()
 	if util.IsDebug {
 		log.Println("Rich Presence updater started.")
-
 	}
-
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish.
@@ -122,54 +180,221 @@ func (rpu *RichPresenceUpdater) Stop() {
 }
 
 // updateDiscordPresence fetches the latest episode details and updates Discord Rich Presence.
+//func (rpu *RichPresenceUpdater) updateDiscordPresence() {
+//	rpu.animeMutex.Lock()
+//	defer rpu.animeMutex.Unlock()
+//
+//	if len(rpu.anime.Episodes) == 0 {
+//		if util.IsDebug {
+//			log.Println("No episodes available to update Rich Presence.")
+//
+//		}
+//
+//		return
+//	}
+//
+//	currentEpisode := rpu.anime.Episodes[0] // Assuming the first element is the current episode
+//	if util.IsDebug {
+//		log.Printf("Current Episode in Updater: %+v", currentEpisode)
+//
+//	}
+//
+//	animeTitle := rpu.anime.Details.Title.Romaji
+//	episodeTitle := currentEpisode.Number // e.g., "Black Clover - Episódio 2 - A Promessa dos Meninos"
+//	combinedTitle := fmt.Sprintf("%s | %s", animeTitle, episodeTitle)
+//
+//	// Log the update details
+//	if util.IsDebug {
+//		log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
+//
+//	}
+//
+//	// Create a copy to avoid mutating the original anime struct
+//	copiedAnime := *rpu.anime
+//	copiedAnime.Details.Title.Romaji = combinedTitle
+//
+//	// Log the data being sent
+//	if util.IsDebug {
+//		log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
+//
+//	}
+//
+//	// Update Rich Presence
+//	err := api.DiscordPresence(discordClientID, copiedAnime, *rpu.isPaused, time.Now().Unix())
+//	if err != nil {
+//		log.Println("Error updating Discord Rich Presence:", err)
+//	} else {
+//		if util.IsDebug {
+//			log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
+//
+//		}
+//	}
+//}
+
+//func (rpu *RichPresenceUpdater) updateDiscordPresence() {
+//	rpu.animeMutex.Lock()
+//	defer rpu.animeMutex.Unlock()
+//
+//	if len(rpu.anime.Episodes) == 0 {
+//		return
+//	}
+//
+//	currentTime, err := getMPVTimePos(rpu.socketPath)
+//	if err != nil {
+//		log.Printf("Failed to get current playback position: %v\n", err)
+//		return
+//	}
+//
+//	animeTitle := rpu.anime.Details.Title.Romaji
+//	timeInfo := fmt.Sprintf("%02d:%02d / %02d:%02d",
+//		int(currentTime.Minutes()), int(currentTime.Seconds())%60,
+//		int(rpu.episodeDuration.Minutes()), int(rpu.episodeDuration.Seconds())%60,
+//	)
+//	combinedTitle := fmt.Sprintf("%s | %s (%s)", animeTitle, rpu.anime.Episodes[0].Number, timeInfo)
+//
+//	activity := client.Activity{
+//		Details:    combinedTitle,
+//		State:      "Watching",
+//		LargeImage: rpu.anime.ImageURL,
+//		LargeText:  animeTitle,
+//		Buttons: []*client.Button{
+//			{
+//				Label: "View on AniList",
+//				Url:   fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID),
+//			},
+//			{
+//				Label: "View on MAL",
+//				Url:   fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID),
+//			},
+//		},
+//	}
+//
+//	err = client.SetActivity(activity)
+//	if err != nil {
+//		log.Printf("Error updating Discord Rich Presence: %v\n", err)
+//	}
+//}
+
+// updateDiscordPresence retrieves the current playback position from MPV and updates Discord Rich Presence.
 func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	rpu.animeMutex.Lock()
 	defer rpu.animeMutex.Unlock()
 
-	if len(rpu.anime.Episodes) == 0 {
-		if util.IsDebug {
-			log.Println("No episodes available to update Rich Presence.")
-
-		}
-
+	currentPosition, err := rpu.getCurrentPlaybackPosition()
+	if err != nil {
+		log.Printf("Error fetching playback position: %v\n", err)
 		return
 	}
 
-	currentEpisode := rpu.anime.Episodes[0] // Assuming the first element is the current episode
-	if util.IsDebug {
-		log.Printf("Current Episode in Updater: %+v", currentEpisode)
+	timeInfo := fmt.Sprintf("%02d:%02d / %02d:%02d",
+		int(currentPosition.Minutes()), int(currentPosition.Seconds())%60,
+		int(rpu.episodeDuration.Minutes()), int(rpu.episodeDuration.Seconds())%60,
+	)
 
+	activity := client.Activity{
+		Details:    fmt.Sprintf("%s | %s (%s)", rpu.anime.Details.Title.Romaji, rpu.anime.Episodes[0].Number, timeInfo),
+		State:      "Watching",
+		LargeImage: rpu.anime.ImageURL,
+		LargeText:  rpu.anime.Details.Title.Romaji,
+		Buttons: []*client.Button{
+			{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)},
+			{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)},
+		},
 	}
 
-	animeTitle := rpu.anime.Details.Title.Romaji
-	episodeTitle := currentEpisode.Number // e.g., "Black Clover - Episódio 2 - A Promessa dos Meninos"
-	combinedTitle := fmt.Sprintf("%s | %s", animeTitle, episodeTitle)
-
-	// Log the update details
-	if util.IsDebug {
-		log.Printf("Updating Rich Presence with anime title: %s\n", combinedTitle)
-
-	}
-
-	// Create a copy to avoid mutating the original anime struct
-	copiedAnime := *rpu.anime
-	copiedAnime.Details.Title.Romaji = combinedTitle
-
-	// Log the data being sent
-	if util.IsDebug {
-		log.Printf("Sending Rich Presence: %+v\n", copiedAnime)
-
-	}
-
-	// Update Rich Presence
-	err := api.DiscordPresence(discordClientID, copiedAnime, *rpu.isPaused, time.Now().Unix())
-	if err != nil {
-		log.Println("Error updating Discord Rich Presence:", err)
+	if err := client.SetActivity(activity); err != nil {
+		log.Printf("Error updating Discord Rich Presence: %v\n", err)
 	} else {
-		if util.IsDebug {
-			log.Printf("Discord Rich Presence updated for episode: %s\n", episodeTitle)
+		log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
+	}
+}
 
-		}
+// StartVideo opens mpv with a socket for IPC
+func StartVideo(link string, args []string) (string, error) {
+	randomBytes := make([]byte, 4)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random number: %w", err)
+	}
+	randomNumber := fmt.Sprintf("%x", randomBytes)
+
+	var socketPath string
+	if runtime.GOOS == "windows" {
+		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
+	} else {
+		socketPath = fmt.Sprintf("/tmp/goanime_mpvsocket_%s", randomNumber)
+	}
+
+	mpvArgs := append([]string{"--no-terminal", "--quiet", fmt.Sprintf("--input-ipc-server=%s", socketPath), link}, args...)
+	cmd := exec.Command("mpv", mpvArgs...)
+	err = cmd.Start()
+	if err != nil {
+		return "", fmt.Errorf("failed to start mpv: %w", err)
+	}
+
+	return socketPath, nil
+}
+
+// getMPVTimePos retrieves the current playback position from mpv via IPC
+func getMPVTimePos(socketPath string) (time.Duration, error) {
+	response, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+	if err != nil {
+		return 0, err
+	}
+	seconds, ok := response.(float64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected response type for time-pos")
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+// mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
+// mpvSendCommand sends a JSON command to mpv via a socket and reads the response.
+func mpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
+	conn, err := dialMPVSocket(socketPath)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	commandJSON, err := json.Marshal(map[string]interface{}{
+		"command": command,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = conn.Write(append(commandJSON, '\n'))
+	if err != nil {
+		return nil, err
+	}
+
+	buffer := make([]byte, 4096)
+	n, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	var response map[string]interface{}
+	err = json.Unmarshal(buffer[:n], &response)
+	if err != nil {
+		return nil, err
+	}
+
+	if data, exists := response["data"]; exists {
+		return data, nil
+	}
+	return nil, errors.New("no data field in mpv response")
+}
+
+// dialMPVSocket creates a connection to mpv's socket.
+func dialMPVSocket(socketPath string) (net.Conn, error) {
+	if runtime.GOOS == "windows" {
+		// Attempt named pipe on Windows
+		return net.Dial("unix", socketPath)
+	} else {
+		// Unix-like system uses Unix sockets
+		return net.Dial("unix", socketPath)
 	}
 }
 
@@ -1258,43 +1483,215 @@ func selectHighestQualityVideo(videos []VideoData) string {
 	return highestQualityURL
 }
 
+//func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, updater *RichPresenceUpdater) error {
+//	var wg sync.WaitGroup
+//	wg.Add(1)
+//
+//	updater.Start()
+//
+//	go func() {
+//		defer wg.Done()
+//		cmd := exec.Command("mpv", "--fs", "--force-window", "--no-terminal", videoURL)
+//		if err := cmd.Start(); err != nil {
+//			fmt.Printf("Failed to start video player: %v\n", err)
+//			return
+//		}
+//
+//		if err := cmd.Wait(); err != nil {
+//			fmt.Printf("Failed to play video: %v\n", err)
+//		}
+//	}()
+//
+//	currentEpisodeIndex := -1
+//	for i, ep := range episodes {
+//		epNumStr := ExtractEpisodeNumber(ep.Number)
+//		epNum, err := strconv.Atoi(epNumStr)
+//		if err != nil {
+//			continue
+//		}
+//		if epNum == currentEpisodeNum {
+//			currentEpisodeIndex = i
+//			break
+//		}
+//	}
+//
+//	if currentEpisodeIndex == -1 {
+//		if util.IsDebug {
+//			log.Printf("Current episode number %d not found", currentEpisodeNum)
+//		}
+//		return errors.New("current episode not found")
+//	}
+//
+//	reader := bufio.NewReader(os.Stdin)
+//	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+//
+//	for {
+//		char, _, err := reader.ReadRune()
+//		if err != nil {
+//			fmt.Printf("Failed to read command: %v\n", err)
+//			break
+//		}
+//
+//		switch char {
+//		case 'n':
+//			if currentEpisodeIndex+1 < len(episodes) {
+//				nextEpisode := episodes[currentEpisodeIndex+1]
+//				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
+//				updater.Stop()
+//				wg.Wait()
+//				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
+//				if err != nil {
+//					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+//					continue
+//				}
+//				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq)
+//				newUpdater.anime.Episodes[0].Number = ExtractEpisodeNumber(nextEpisode.Number)
+//				newUpdater.anime.Episodes[0].Num++
+//				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
+//			} else {
+//				fmt.Println("Already at the last episode.")
+//			}
+//		case 'p':
+//			if currentEpisodeIndex > 0 {
+//				prevEpisode := episodes[currentEpisodeIndex-1]
+//				fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
+//				wg.Wait()
+//				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
+//				if err != nil {
+//					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+//					continue
+//				}
+//				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, updater)
+//			} else {
+//				fmt.Println("Already at the first episode.")
+//			}
+//		case 'q':
+//			fmt.Println("Quitting video playback.")
+//			return nil
+//		}
+//	}
+//
+//	wg.Wait()
+//	return nil
+//}
+
+//func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, updater *RichPresenceUpdater) error {
+//	var wg sync.WaitGroup
+//	wg.Add(4)
+//
+//	updater.Start()
+//
+//	go func() {
+//		defer wg.Done()
+//		cmd := exec.Command("mpv", "--fs", "--force-window", "--no-terminal", videoURL)
+//		if err := cmd.Start(); err != nil {
+//			fmt.Printf("Failed to start video player: %v\n", err)
+//			return
+//		}
+//
+//		if err := cmd.Wait(); err != nil {
+//			fmt.Printf("Failed to play video: %v\n", err)
+//		}
+//	}()
+//
+//	currentEpisodeIndex := -1
+//	for i, ep := range episodes {
+//		epNumStr := ExtractEpisodeNumber(ep.Number)
+//		epNum, err := strconv.Atoi(epNumStr)
+//		if err != nil {
+//			continue
+//		}
+//		if epNum == currentEpisodeNum {
+//			currentEpisodeIndex = i
+//			break
+//		}
+//	}
+//
+//	if currentEpisodeIndex == -1 {
+//		if util.IsDebug {
+//			log.Printf("Current episode number %d not found", currentEpisodeNum)
+//		}
+//		return errors.New("current episode not found")
+//	}
+//
+//	reader := bufio.NewReader(os.Stdin)
+//	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit:")
+//
+//	for {
+//		char, _, err := reader.ReadRune()
+//		if err != nil {
+//			fmt.Printf("Failed to read command: %v\n", err)
+//			break
+//		}
+//
+//		switch char {
+//		case 'n':
+//			if currentEpisodeIndex+1 < len(episodes) {
+//				nextEpisode := episodes[currentEpisodeIndex+1]
+//				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
+//				updater.Stop()
+//				wg.Wait()
+//				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
+//				if err != nil {
+//					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+//					continue
+//				}
+//				// Get the duration for the next episode and pass it to NewRichPresenceUpdater
+//				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
+//				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq, nextEpisodeDuration)
+//				newUpdater.anime.Episodes[0].Number = ExtractEpisodeNumber(nextEpisode.Number)
+//				newUpdater.anime.Episodes[0].Num++
+//				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
+//			} else {
+//				fmt.Println("Already at the last episode.")
+//			}
+//		case 'p':
+//			if currentEpisodeIndex > 0 {
+//				prevEpisode := episodes[currentEpisodeIndex-1]
+//				fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
+//				wg.Wait()
+//				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
+//				if err != nil {
+//					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+//					continue
+//				}
+//				// Get the duration for the previous episode and pass it to NewRichPresenceUpdater
+//				prevEpisodeDuration := time.Duration(prevEpisode.Duration) * time.Second
+//				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq, prevEpisodeDuration)
+//				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, newUpdater)
+//			} else {
+//				fmt.Println("Already at the first episode.")
+//			}
+//		case 'q':
+//			fmt.Println("Quitting video playback.")
+//			return nil
+//		}
+//	}
+//
+//	wg.Wait()
+//	return nil
+//}
+
+// playVideo now uses IPC for mpv playback control and updates Rich Presence.
 func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, updater *RichPresenceUpdater) error {
-	var wg sync.WaitGroup
-	wg.Add(1)
+	socketPath, err := StartVideo(videoURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to start video with IPC: %w", err)
+	}
 
+	updater.socketPath = socketPath
 	updater.Start()
-
-	go func() {
-		defer wg.Done()
-		cmd := exec.Command("mpv", "--fs", "--force-window", "--no-terminal", videoURL)
-		if err := cmd.Start(); err != nil {
-			fmt.Printf("Failed to start video player: %v\n", err)
-			return
-		}
-
-		if err := cmd.Wait(); err != nil {
-			fmt.Printf("Failed to play video: %v\n", err)
-		}
-	}()
+	defer updater.Stop()
 
 	currentEpisodeIndex := -1
 	for i, ep := range episodes {
-		epNumStr := ExtractEpisodeNumber(ep.Number)
-		epNum, err := strconv.Atoi(epNumStr)
-		if err != nil {
-			continue
-		}
-		if epNum == currentEpisodeNum {
+		if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(currentEpisodeNum) {
 			currentEpisodeIndex = i
 			break
 		}
 	}
-
 	if currentEpisodeIndex == -1 {
-		if util.IsDebug {
-			log.Printf("Current episode number %d not found", currentEpisodeNum)
-		}
-		return errors.New("current episode not found")
+		return fmt.Errorf("current episode number %d not found", currentEpisodeNum)
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -1311,17 +1708,14 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 		case 'n':
 			if currentEpisodeIndex+1 < len(episodes) {
 				nextEpisode := episodes[currentEpisodeIndex+1]
-				fmt.Printf("Switching to next episode: %s\n", nextEpisode.Number)
 				updater.Stop()
-				wg.Wait()
 				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
 					continue
 				}
-				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq)
-				newUpdater.anime.Episodes[0].Number = ExtractEpisodeNumber(nextEpisode.Number)
-				newUpdater.anime.Episodes[0].Num++
+				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
+				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq, nextEpisodeDuration, "")
 				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
 			} else {
 				fmt.Println("Already at the last episode.")
@@ -1329,14 +1723,15 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 		case 'p':
 			if currentEpisodeIndex > 0 {
 				prevEpisode := episodes[currentEpisodeIndex-1]
-				fmt.Printf("Switching to previous episode: %s\n", prevEpisode.Number)
-				wg.Wait()
+				updater.Stop()
 				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
 				if err != nil {
 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
 					continue
 				}
-				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, updater)
+				prevEpisodeDuration := time.Duration(prevEpisode.Duration) * time.Second
+				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq, prevEpisodeDuration, "")
+				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, newUpdater)
 			} else {
 				fmt.Println("Already at the first episode.")
 			}
@@ -1346,6 +1741,5 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 		}
 	}
 
-	wg.Wait()
 	return nil
 }
