@@ -30,15 +30,16 @@ type Anime struct {
 }
 
 type Episode struct {
-	Number   string
-	Num      int
-	URL      string
-	Title    TitleDetails
-	Aired    string
-	Duration int
-	IsFiller bool
-	IsRecap  bool
-	Synopsis string
+	Number    string
+	Num       int
+	URL       string
+	Title     TitleDetails
+	Aired     string
+	Duration  int
+	IsFiller  bool
+	IsRecap   bool
+	Synopsis  string
+	SkipTimes SkipTimes // Skip times for OP and ED
 }
 
 type TitleDetails struct {
