@@ -312,6 +312,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"io"
 	"math"
 	"net/http"
@@ -351,11 +352,8 @@ type skipInterval struct {
 // GetAniSkipData fetches skip times data for a given anime ID and episode
 func GetAniSkipData(animeMalId int, episode int) (string, error) {
 	baseURL := "https://api.aniskip.com/v1/skip-times"
+
 	url := fmt.Sprintf("%s/%d/%d?types=op&types=ed", baseURL, animeMalId, episode)
-
-	// Print the request URL for debugging
-	fmt.Println("AniSkip Request URL:", url)
-
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -396,8 +394,10 @@ func ParseAniSkipResponse(responseText string, episode *Episode, timePrecision i
 		return fmt.Errorf("error unmarshalling response: %w", err)
 	}
 
-	// Log the raw response for debugging
-	fmt.Printf("AniSkip Raw Response: %s\n", responseText)
+	if util.IsDebug {
+		// Log the raw response for debugging
+		fmt.Printf("AniSkip Raw Response: %s\n", responseText)
+	}
 
 	if !data.Found {
 		return fmt.Errorf("no skip times found")

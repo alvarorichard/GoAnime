@@ -282,7 +282,9 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	currentPosition, err := rpu.getCurrentPlaybackPosition()
 	if err != nil {
-		log.Printf("Error fetching playback position: %v\n", err)
+		if util.IsDebug {
+			log.Printf("Error fetching playback position: %v\n", err)
+		}
 		return
 	}
 
@@ -303,9 +305,12 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	}
 
 	if err := client.SetActivity(activity); err != nil {
-		log.Printf("Error updating Discord Rich Presence: %v\n", err)
-	} else {
-		log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
+		if util.IsDebug {
+			log.Printf("Error updating Discord Rich Presence: %v\n", err)
+		} else {
+
+			log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
+		}
 	}
 }
 
@@ -1336,6 +1341,10 @@ func ExtractEpisodeNumber(episodeStr string) string {
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
+
+	if util.IsDebug {
+		log.Printf("Tentando extrair URL de vídeo para o episódio: %s", episodeURL)
+	}
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
 		return "", err
@@ -1344,6 +1353,11 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 }
 
 func extractVideoURL(url string) (string, error) {
+
+	if util.IsDebug {
+		log.Printf("Extraindo URL de vídeo da página: %s", url)
+	}
+
 	response, err := api.SafeGet(url)
 	if err != nil {
 		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
@@ -1942,6 +1956,11 @@ func selectHighestQualityVideo(videos []VideoData) string {
 
 func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, updater *RichPresenceUpdater) error {
 	// Fetch AniSkip data for the current episode
+
+	if util.IsDebug {
+		log.Printf("URL do vídeo capturado: %s", videoURL)
+	}
+
 	currentEpisode := &episodes[currentEpisodeNum]
 	err := api.GetAndParseAniSkipData(updater.anime.MalID, currentEpisodeNum, currentEpisode)
 	if err != nil {
