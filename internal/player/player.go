@@ -72,6 +72,7 @@ type RichPresenceUpdater struct {
 	wg              sync.WaitGroup
 	startTime       time.Time     // Start time of playback
 	episodeDuration time.Duration // Total duration of the episode
+	episodeStarted  bool          // Whether the episode has started
 	socketPath      string        // Path to mpv IPC socket
 }
 
@@ -84,6 +85,7 @@ func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.M
 		done:            make(chan bool),
 		startTime:       time.Now(),
 		episodeDuration: episodeDuration,
+		episodeStarted:  false,
 		socketPath:      socketPath,
 	}
 }
@@ -1379,6 +1381,51 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 		return fmt.Errorf("failed to start video with IPC: %w", err)
 	}
 
+	// Check if the episode has started
+	go func() {
+		for {
+			// Get current playback time
+			timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+			if err != nil {
+				log.Printf("Error getting playback time: %v", err)
+			}
+
+			// Convert timePos to integer
+			if timePos != nil {
+				if !updater.episodeStarted {
+					updater.episodeStarted = true
+					// Exit when the episode starts
+					break
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	// Get video duration
+	go func() {
+		for {
+			if updater.episodeStarted {
+				if updater.episodeDuration == 0 {
+					// Get video duration
+					durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+					if err != nil {
+						log.Printf("Error getting video duration: %v", err)
+					} else if durationPos != nil {
+						if duration, ok := durationPos.(float64); ok {
+							updater.episodeDuration = time.Duration(duration + 0.5) // Round to nearest integer
+							log.Printf("Video duration: %d seconds", updater.episodeDuration)
+						} else {
+							log.Printf("Error: duration is not a float64")
+						}
+					}
+					break
+				}
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
 	// Assign socket path to updater and start it
 	updater.socketPath = socketPath
 	updater.Start()
@@ -1420,6 +1467,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 				// Update for next episode
 				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
 				newUpdater := NewRichPresenceUpdater(updater.anime, updater.isPaused, updater.animeMutex, updater.updateFreq, nextEpisodeDuration, "")
+				updater.episodeStarted = false
 				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, newUpdater)
 			} else {
 				fmt.Println("Already at the last episode.")
