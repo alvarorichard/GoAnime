@@ -116,24 +116,6 @@ func SearchAnime(animeName string) (*Anime, error) {
 
 			}
 
-			// Busca de dados do primeiro episódio na Jikan API, se o MAL ID estiver disponível
-			if selectedAnime.MalID > 0 {
-				err = GetEpisodeData(selectedAnime.MalID, 1, selectedAnime)
-				if err != nil {
-					log.Printf("Error fetching episode data from Jikan API: %v", err)
-				} else if util.IsDebug && len(selectedAnime.Episodes) > 0 {
-					firstEpisode := selectedAnime.Episodes[0]
-					log.Printf("Jikan Episode Data - Title: %s, Aired: %s, Duration: %d, Filler: %t, Synopsis: %s",
-						firstEpisode.Title.English,
-						firstEpisode.Aired,
-						firstEpisode.Duration,
-						firstEpisode.IsFiller,
-						firstEpisode.Synopsis)
-				}
-			} else {
-				log.Printf("No MAL ID found for anime: %s. Unable to fetch episode data from Jikan API.", selectedAnime.Name)
-			}
-
 			return selectedAnime, nil
 		}
 
@@ -196,6 +178,60 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 
 	return nil
 }
+
+// GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
+func GetMovieData(animeID int, anime *Anime) error {
+
+	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+
+	response, err := makeGetRequest(url, nil)
+	if err != nil {
+		return fmt.Errorf("error fetching data from Jikan (MyAnimeList) API: %w", err)
+	}
+
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
+	}
+
+	// Helper functions to safely get values
+	getStringValue := func(field string) string {
+		if value, ok := data[field].(string); ok {
+			return value
+		}
+		return ""
+	}
+
+	getIntValue := func(field string) int {
+		if value, ok := data[field].(float64); ok {
+			return int(value)
+		}
+		return 0
+	}
+
+	getBoolValue := func(field string) bool {
+		if value, ok := data[field].(bool); ok {
+			return value
+		}
+		return false
+	}
+
+	// Assign values to the Anime struct
+	if len(anime.Episodes) == 0 {
+		anime.Episodes = make([]Episode, 1) // Ensure there is at least one episode slot
+	}
+	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
+	anime.Episodes[0].Title.English = getStringValue("title")
+	anime.Episodes[0].Title.Japanese = getStringValue("title_japanese")
+	anime.Episodes[0].Aired = getStringValue("aired")
+	anime.Episodes[0].Duration = getIntValue("duration")
+	anime.Episodes[0].IsFiller = getBoolValue("filler")
+	anime.Episodes[0].IsRecap = getBoolValue("recap")
+	anime.Episodes[0].Synopsis = getStringValue("synopsis")
+
+	return nil
+}
+
 
 // searchAnimeOnPage searches for anime on a given page and returns the selected anime
 func searchAnimeOnPage(pageURL string) (*Anime, string, error) {

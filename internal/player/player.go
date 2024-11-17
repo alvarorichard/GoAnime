@@ -1363,7 +1363,7 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 		log.Printf("Video URL: %s", videoURL)
 	}
 
-	currentEpisode := &episodes[currentEpisodeNum]
+	currentEpisode := &episodes[currentEpisodeNum-1]
 	err := api.GetAndParseAniSkipData(updater.anime.MalID, currentEpisodeNum, currentEpisode)
 	if err != nil {
 		log.Printf("AniSkip data not available for episode %d: %v\n", currentEpisodeNum, err)

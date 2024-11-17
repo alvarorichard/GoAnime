@@ -328,9 +328,9 @@ func main() {
 		anime.Episodes = []api.Episode{episodes[0]}
 		animeMutex.Unlock()
 
-		// Fetch details and AniSkip data for the episode
-		if err = api.GetEpisodeData(anime.MalID, 1, anime); err != nil {
-			log.Printf("Error fetching episode data: %v", err)
+		// Fetch details and AniSkip data for the movie/OVA
+		if err = api.GetMovieData(anime.MalID, anime); err != nil {
+			log.Printf("Error fetching movie/OVA data: %v", err)
 		}
 
 		// Get the video URL for the movie/OVA
