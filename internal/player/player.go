@@ -153,7 +153,10 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	}
 
 	// Debug log to check episode duration
-	log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
+	if util.IsDebug {
+		log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
+
+	}
 
 	// Convert episode duration to minutes and seconds format
 	totalMinutes := int(rpu.episodeDuration.Minutes())
@@ -1394,7 +1397,10 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 			// Get current playback time
 			timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
 			if err != nil {
-				log.Printf("Error getting playback time: %v", err)
+				if util.IsDebug {
+					log.Printf("Error getting playback time: %v", err)
+
+				}
 			}
 
 			// Check if playback has started
@@ -1420,7 +1426,10 @@ func playVideo(videoURL string, episodes []api.Episode, currentEpisodeNum int, u
 					if duration, ok := durationPos.(float64); ok {
 						// Set episodeDuration correctly in seconds
 						updater.episodeDuration = time.Duration(duration * float64(time.Second))
-						log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
+						if util.IsDebug {
+							log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
+
+						}
 
 						// Validate duration
 						if updater.episodeDuration < time.Second {
