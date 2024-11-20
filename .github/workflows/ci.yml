@@ -4,7 +4,7 @@ name: GoAnime CI
 
 on:
   push:
-    branches: [ main, dev, pc ]
+    branches: [ main, dev, ipc ]
   pull_request:
     branches: [ main, dev, ipc ]
   schedule:
