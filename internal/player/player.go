@@ -271,6 +271,26 @@ func dialMPVSocket(socketPath string) (net.Conn, error) {
 	}
 }
 
+// WINDOWS RELEASE
+
+//func dialMPVSocket(socketPath string) (net.Conn, error) {
+//	if runtime.GOOS == "windows" {
+//		//Attempt to connect using named pipe on Windows
+//		conn, err := winio.DialPipe(socketPath, nil)
+//		if err != nil {
+//			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
+//		}
+//		return conn, nil
+//	} else {
+//		// Unix-like system uses Unix sockets
+//		conn, err := net.Dial("unix", socketPath)
+//		if err != nil {
+//			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
+//		}
+//		return conn, nil
+//	}
+//}
+
 // Update handles updates to the Bubble Tea model.
 //
 // This function processes incoming messages (`tea.Msg`) and updates the model's state accordingly.
