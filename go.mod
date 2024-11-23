@@ -3,25 +3,25 @@ module github.com/alvarorichard/Goanime
 go 1.23.3
 
 require (
-	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.10.0
 	github.com/charmbracelet/bubbles v0.20.0
-	github.com/charmbracelet/bubbletea v1.2.0
+	github.com/charmbracelet/bubbletea v1.2.3
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/hugolgst/rich-go v0.0.0-20240715122152-74618cc1ace2
 	github.com/ktr0731/go-fuzzyfinder v0.8.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1
-	github.com/stretchr/testify v1.9.0
-	golang.org/x/net v0.30.0
+	github.com/stretchr/testify v1.10.0
+	golang.org/x/net v0.31.0
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
-	github.com/charmbracelet/x/ansi v0.4.5 // indirect
-	github.com/charmbracelet/x/term v0.2.0 // indirect
+	github.com/charmbracelet/x/ansi v0.5.2 // indirect
+	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
