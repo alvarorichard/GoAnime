@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -14,212 +17,516 @@ import (
 	"github.com/pkg/errors"
 )
 
-const baseSiteURL = "https://animefire.plus/"
+const baseSiteURL = "https://animefire.plus"
 
 type Anime struct {
-	Name     string
-	URL      string
-	Episodes []Episode
+	Name      string
+	URL       string
+	ImageURL  string
+	Episodes  []Episode
+	AnilistID int
+	MalID     int // Adicionado para armazenar o ID do MAL
+	Details   AniListDetails
 }
 
 type Episode struct {
-	Number string
-	Num    int
-	URL    string
+	Number    string
+	Num       int
+	URL       string
+	Title     TitleDetails
+	Aired     string
+	Duration  int
+	IsFiller  bool
+	IsRecap   bool
+	Synopsis  string
+	SkipTimes SkipTimes // Skip times for OP and ED
 }
 
-// SearchAnime searches for an anime on a specific site based on the provided name.
-// If the anime is found, it returns the URL of the anime's page. Otherwise, it returns an error.
-//
-// Parameters:
-// - animeName: the name of the anime to search for.
-//
-// Returns:
-// - string: the URL of the found anime's page.
-// - error: an error if the anime is not found or if there is an issue during the search.
-func SearchAnime(animeName string) (string, error) {
-	// Construct the URL for the search page using the provided anime name.
-	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, animeName)
+type TitleDetails struct {
+	Romaji   string
+	English  string
+	Japanese string
+}
 
-	// Loop through the search results pages until the anime is found or no more pages are left.
+type AniListResponse struct {
+	Data struct {
+		Media AniListDetails `json:"Media"`
+	} `json:"data"`
+}
+
+type AniListDetails struct {
+	ID           int         `json:"id"`
+	IDMal        int         `json:"idMal"` // ID do MAL para integração com Jikan
+	Title        Title       `json:"title"`
+	Description  string      `json:"description"`
+	Genres       []string    `json:"genres"`
+	AverageScore int         `json:"averageScore"`
+	Episodes     int         `json:"episodes"`
+	Status       string      `json:"status"`
+	CoverImage   CoverImages `json:"coverImage"`
+}
+
+type CoverImages struct {
+	Large  string `json:"large"`
+	Medium string `json:"medium"`
+}
+
+type Title struct {
+	Romaji  string `json:"romaji"`
+	English string `json:"english"`
+}
+
+func SearchAnime(animeName string) (*Anime, error) {
+	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, url.PathEscape(animeName))
+
 	if util.IsDebug {
 		log.Printf("Searching for anime with URL: %s", currentPageURL)
 	}
 
 	for {
-		// Perform the search on the current page and get the anime URL (if found) or the URL for the next page.
-		animeURL, nextPageURL, err := searchAnimeOnPage(currentPageURL)
+		selectedAnime, nextPageURL, err := searchAnimeOnPage(currentPageURL)
 		if err != nil {
-			// Return an error if there is an issue with the search.
-			return "", err
+			return nil, err
 		}
-		// If an anime URL is found, return this URL.
-		if animeURL != "" {
-			return animeURL, nil
+		if selectedAnime != nil {
+			// Busca de detalhes adicionais pela AniList API, incluindo a imagem de capa
+			aniListInfo, err := FetchAnimeFromAniList(selectedAnime.Name)
+			if err != nil {
+				log.Printf("Error fetching additional data from AniList: %v", err)
+			} else {
+				selectedAnime.AnilistID = aniListInfo.Data.Media.ID
+				selectedAnime.MalID = aniListInfo.Data.Media.IDMal
+				selectedAnime.Details = aniListInfo.Data.Media
+
+				// Definindo a imagem de capa do AniList
+				if aniListInfo.Data.Media.CoverImage.Large != "" {
+					selectedAnime.ImageURL = aniListInfo.Data.Media.CoverImage.Large
+					if util.IsDebug {
+						log.Printf("Cover image URL retrieved from AniList: %s", selectedAnime.ImageURL)
+					}
+				} else {
+					log.Printf("Cover image URL not found in AniList response for anime: %s", selectedAnime.Name)
+				}
+				if util.IsDebug {
+					log.Printf("AniList ID: %d, MAL ID: %d, Title: %s, Score: %d, Cover Image URL: %s",
+						aniListInfo.Data.Media.ID, aniListInfo.Data.Media.IDMal,
+						aniListInfo.Data.Media.Title.Romaji, aniListInfo.Data.Media.AverageScore,
+						selectedAnime.ImageURL)
+				}
+
+			}
+
+			return selectedAnime, nil
 		}
 
-		// If there are no more pages to search, return an error indicating that the anime was not found.
 		if nextPageURL == "" {
-			return "", errors.New("no anime found with the given name")
+			return nil, errors.New("no anime found with the given name")
 		}
-		// Update the current page URL to the next page of search results.
 		currentPageURL = baseSiteURL + nextPageURL
 	}
 }
 
-// searchAnimeOnPage performs the search for an anime on a given page URL.
-// It parses the page to find the anime and returns the anime's URL if found, the URL of the next page if available,
-// or an error if something goes wrong.
-//
-// Parameters:
-// - url: the URL of the search results page to be queried.
-//
-// Returns:
-// - string: the URL of the found anime.
-// - string: the URL of the next page of search results, if available.
-// - error: an error if the search fails or if there is an issue processing the page.
-func searchAnimeOnPage(url string) (string, string, error) {
-	// Send an HTTP GET request to the specified URL.
-	response, err := http.Get(url)
+// GetEpisodeData fetches episode data for a given anime ID and episode number from Jikan API
+func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
+
+	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/episodes/%d", animeID, episodeNo)
+
+	response, err := makeGetRequest(url, nil)
 	if err != nil {
-		return "", "", errors.Wrap(err, "failed to perform search request")
+		return fmt.Errorf("error fetching data from Jikan (MyAnimeList) API: %w", err)
 	}
-	// Ensure the response body is closed after the function finishes, and log an error if closing fails.
+
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
+	}
+
+	// Helper functions to safely get values
+	getStringValue := func(field string) string {
+		if value, ok := data[field].(string); ok {
+			return value
+		}
+		return ""
+	}
+
+	getIntValue := func(field string) int {
+		if value, ok := data[field].(float64); ok {
+			return int(value)
+		}
+		return 0
+	}
+
+	getBoolValue := func(field string) bool {
+		if value, ok := data[field].(bool); ok {
+			return value
+		}
+		return false
+	}
+
+	// Assign values to the Anime struct
+	if len(anime.Episodes) == 0 {
+		anime.Episodes = make([]Episode, 1) // Ensure there is at least one episode slot
+	}
+	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
+	anime.Episodes[0].Title.English = getStringValue("title")
+	anime.Episodes[0].Title.Japanese = getStringValue("title_japanese")
+	anime.Episodes[0].Aired = getStringValue("aired")
+	anime.Episodes[0].Duration = getIntValue("duration")
+	anime.Episodes[0].IsFiller = getBoolValue("filler")
+	anime.Episodes[0].IsRecap = getBoolValue("recap")
+	anime.Episodes[0].Synopsis = getStringValue("synopsis")
+
+	return nil
+}
+
+// GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
+func GetMovieData(animeID int, anime *Anime) error {
+
+	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+
+	response, err := makeGetRequest(url, nil)
+	if err != nil {
+		return fmt.Errorf("error fetching data from Jikan (MyAnimeList) API: %w", err)
+	}
+
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
+	}
+
+	// Helper functions to safely get values
+	getStringValue := func(field string) string {
+		if value, ok := data[field].(string); ok {
+			return value
+		}
+		return ""
+	}
+
+	getIntValue := func(field string) int {
+		if value, ok := data[field].(float64); ok {
+			return int(value)
+		}
+		return 0
+	}
+
+	getBoolValue := func(field string) bool {
+		if value, ok := data[field].(bool); ok {
+			return value
+		}
+		return false
+	}
+
+	// Assign values to the Anime struct
+	if len(anime.Episodes) == 0 {
+		anime.Episodes = make([]Episode, 1) // Ensure there is at least one episode slot
+	}
+	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
+	anime.Episodes[0].Title.English = getStringValue("title")
+	anime.Episodes[0].Title.Japanese = getStringValue("title_japanese")
+	anime.Episodes[0].Aired = getStringValue("aired")
+	anime.Episodes[0].Duration = getIntValue("duration")
+	anime.Episodes[0].IsFiller = getBoolValue("filler")
+	anime.Episodes[0].IsRecap = getBoolValue("recap")
+	anime.Episodes[0].Synopsis = getStringValue("synopsis")
+
+	return nil
+}
+
+
+// searchAnimeOnPage searches for anime on a given page and returns the selected anime
+func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
+	response, err := getHTTPResponse(pageURL)
+	if err != nil {
+		return nil, "", errors.Wrap(err, "failed to perform search request")
+	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v", err)
+
 		}
 	}(response.Body)
 
-	// Check if the request was successful (status code 200 OK).
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusForbidden {
-			// If the server responds with 403 Forbidden, provide a specific error message.
-			return "", "", errors.New("Connection refused: You need to be in Brazil or use a VPN to access the server.")
+			return nil, "", errors.New("connection refused: you need to be in Brazil or use a VPN to access the server")
 		}
-		// Return an error if the status code is anything other than 200 OK.
-		return "", "", errors.Errorf("Search failed, the server returned the error: %s", response.Status)
+		return nil, "", errors.Errorf("search failed, server returned: %s", response.Status)
 	}
 
-	// Parse the HTML response using goquery.
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
-		return "", "", errors.Wrap(err, "failed to parse response")
+		return nil, "", errors.Wrap(err, "failed to parse response")
 	}
 
-	// Extract the list of animes from the parsed HTML document.
 	animes := ParseAnimes(doc)
-	if len(animes) > 0 {
-		// If animes are found, prompt the user to select one using go-fuzzyfinder.
-		selectedAnimeName, err := selectAnimeWithGoFuzzyFinder(animes)
-		if err != nil {
-			return "", "", err
-		}
-		// Return the URL of the selected anime if found.
-		for _, anime := range animes {
-			if anime.Name == selectedAnimeName {
-				return anime.URL, "", nil
-			}
-		}
+	if util.IsDebug {
+		log.Printf("Number of animes found: %d", len(animes))
 	}
 
-	// Check if there is a next page of search results.
+	if len(animes) > 0 {
+		selectedAnime, err := selectAnimeWithGoFuzzyFinder(animes)
+		if err != nil {
+			return nil, "", err
+		}
+		return selectedAnime, "", nil
+	}
+
 	nextPage, exists := doc.Find(".pagination .next a").Attr("href")
 	if !exists {
-		// If no next page is found, return nil for the nextPage URL.
-		return "", "", nil
+		return nil, "", nil
 	}
 
-	// Return an empty string for anime URL and the next page URL for further searching.
-	return "", nextPage, nil
+	return nil, nextPage, nil
 }
 
-// sortAnimes sorts a list of Anime structs alphabetically by their Name field.
-// It returns the sorted slice of Anime.
-//
-// Parameters:
-// - animeList: a slice of Anime structs to be sorted.
-//
-// Returns:
-// - []Anime: the sorted slice of Anime structs.
-func sortAnimes(animeList []Anime) []Anime {
-	// Sort the slice of Anime structs in place using the sort.Slice function.
-	// The sorting is done based on the Name field of each Anime struct in alphabetical order.
-	sort.Slice(animeList, func(i, j int) bool {
-		return animeList[i].Name < animeList[j].Name
-	})
-
-	// Return the sorted slice.
-	return animeList
-}
-
-// ParseAnimes extracts a list of Anime structs from the given goquery.Document.
-// It looks for specific HTML elements that contain anime information and returns a slice of Anime structs.
-//
-// Parameters:
-// - doc: a pointer to a goquery.Document which represents the parsed HTML content.
-//
-// Returns:
-// - []Anime: a slice of Anime structs extracted from the HTML document.
+// ParseAnimes extracts a list of Anime structs from the search results page.
 func ParseAnimes(doc *goquery.Document) []Anime {
-	// Initialize an empty slice to hold the Anime structs.
 	var animes []Anime
 
-	// Find all anchor elements within the specified CSS selector and iterate over them.
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
-		// Extract the text (name of the anime) and the href attribute (URL) from each anchor element,
-		// trim any surrounding whitespace, and create an Anime struct which is appended to the slice.
+		urlPath, exists := s.Attr("href")
+		if !exists {
+			return
+		}
+		url := resolveURL(baseSiteURL, urlPath)
+
+		name := strings.TrimSpace(s.Text())
+
+		if util.IsDebug {
+			log.Printf("Parsed Anime - Name: %s, URL: %s", name, url)
+		}
+
 		animes = append(animes, Anime{
-			Name: strings.TrimSpace(s.Text()),
-			URL:  s.AttrOr("href", ""),
+			Name: name,
+			URL:  url,
 		})
 	})
 
-	// Return the slice of Anime structs.
 	return animes
 }
 
-// selectAnimeWithGoFuzzyFinder allows the user to select an anime from a list using a fuzzy finder interface.
-// It returns the name of the selected anime or an error if the selection fails.
-//
-// Parameters:
-// - animes: a slice of Anime structs from which the user can choose.
-//
-// Returns:
-// - string: the name of the selected anime.
-// - error: an error if no animes are provided, the selection fails, or the selection index is invalid.
-func selectAnimeWithGoFuzzyFinder(animes []Anime) (string, error) {
-	// Check if the anime list is empty. If so, return an error.
+// FetchAnimeDetails retrieves additional information for the selected anime
+func FetchAnimeDetails(anime *Anime) error {
+	response, err := http.Get(anime.URL)
+	if err != nil {
+		return errors.Wrap(err, "failed to get anime details page")
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Printf("error get details")
+
+		}
+	}(response.Body)
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to get anime details page: %s", response.Status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(response.Body)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse anime details page")
+	}
+
+	imageURL, exists := doc.Find(`meta[property="og:image"]`).Attr("content")
+	if !exists || imageURL == "" {
+		return errors.New("cover image URL not found")
+	}
+
+	return nil
+}
+
+func FetchAnimeFromAniList(animeName string) (*AniListResponse, error) {
+	cleanedName := CleanTitle(animeName)
+	if util.IsDebug {
+		log.Printf("Attempting AniList search with title: %s", cleanedName)
+
+	}
+
+	query := `
+    query ($search: String) {
+        Media(search: $search, type: ANIME) {
+            id
+            title { romaji english }
+            description
+            genres
+            averageScore
+            episodes
+            status
+            idMal
+            coverImage { large medium }
+        }
+    }`
+
+	variables := map[string]interface{}{
+		"search": cleanedName,
+	}
+
+	requestBody := map[string]interface{}{
+		"query":     query,
+		"variables": variables,
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", "https://graphql.anilist.co", strings.NewReader(string(jsonData)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch data from AniList API: %v", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("AniList API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result AniListResponse
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read AniList API response: %v", err)
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse AniList API response: %v", err)
+	}
+
+	if result.Data.Media.ID == 0 {
+		log.Printf("No results found on AniList for anime: %s", cleanedName)
+		return nil, fmt.Errorf("no results found on AniList for anime: %s", cleanedName)
+	}
+
+	if util.IsDebug {
+		log.Printf("AniList ID: %d, MAL ID: %d, Title: %s, Score: %d, Cover Image URL: %s",
+			result.Data.Media.ID, result.Data.Media.IDMal,
+			result.Data.Media.Title.Romaji, result.Data.Media.AverageScore,
+			result.Data.Media.CoverImage.Large)
+	}
+
+	return &result, nil
+}
+
+// selectAnimeWithGoFuzzyFinder allows the user to select an anime from a list using fuzzy search
+func selectAnimeWithGoFuzzyFinder(animes []Anime) (*Anime, error) {
 	if len(animes) == 0 {
-		return "", errors.New("no anime provided")
+		return nil, errors.New("no anime provided")
 	}
 
-	// Create a slice to hold the names of the animes for display in the fuzzy finder.
-	animeNames := make([]string, len(animes))
-
-	// Sort the animes alphabetically by name and populate the animeNames slice.
-	for i, anime := range sortAnimes(animes) {
-		animeNames[i] = anime.Name
-	}
-
-	// Use the fuzzyfinder library to allow the user to select an anime by name.
+	sortedAnimes := sortAnimes(animes)
 	idx, err := fuzzyfinder.Find(
-		animeNames,
+		sortedAnimes,
 		func(i int) string {
-			return animeNames[i]
+			return sortedAnimes[i].Name
 		},
 	)
 	if err != nil {
-		// Return an error if the fuzzy finder fails.
-		return "", errors.Wrap(err, "failed to select anime with go-fuzzyfinder")
+		return nil, errors.Wrap(err, "failed to select anime with go-fuzzyfinder")
 	}
 
-	// Check if the selected index is out of bounds. If so, return an error.
-	if idx < 0 || idx >= len(animes) {
-		return "", errors.New("invalid index returned by fuzzyfinder")
+	if idx < 0 || idx >= len(sortedAnimes) {
+		return nil, errors.New("invalid index returned by fuzzyfinder")
 	}
 
-	// Return the name of the selected anime.
-	return animes[idx].Name, nil
+	return &sortedAnimes[idx], nil
+}
+
+// sortAnimes sorts a list of Anime structs alphabetically by name
+func sortAnimes(animeList []Anime) []Anime {
+	sort.Slice(animeList, func(i, j int) bool {
+		return animeList[i].Name < animeList[j].Name
+	})
+	return animeList
+}
+
+// resolveURL resolves relative URLs to absolute URLs based on the base URL.
+func resolveURL(base, ref string) string {
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return ""
+	}
+	return baseURL.ResolveReference(refURL).String()
+}
+
+// CleanTitle removes unwanted words, numbers, and ratings for better API search results
+func CleanTitle(title string) string {
+	re := regexp.MustCompile(`(?i)(dublado|legendado|todos os episodios)`)
+	title = re.ReplaceAllString(title, "")
+
+	re = regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+$`)
+	title = re.ReplaceAllString(title, "")
+
+	title = strings.TrimSpace(title)
+	return title
+}
+
+func makeGetRequest(url string, headers map[string]string) (map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GET request: %w", err)
+	}
+
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send GET request: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	var responseData map[string]interface{}
+	err = json.Unmarshal(body, &responseData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return responseData, nil
+}
+
+func getHTTPResponse(url string) (*http.Response, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
