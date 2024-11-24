@@ -1,3 +1,5 @@
+
+
 #!/bin/bash
 
 # Sai imediatamente se um comando falhar
@@ -7,7 +9,9 @@ set -e
 OUTPUT_DIR="../build"        # Diretório de saída para o binário e checksum
 BINARY_NAME="goanime.exe"    # Nome do binário para Windows
 BINARY_PATH="$OUTPUT_DIR/$BINARY_NAME"
-CHECKSUM_FILE="$OUTPUT_DIR/$BINARY_NAME.sha256"
+ZIP_NAME="goanime-windows.zip"
+ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+CHECKSUM_FILE="$ZIP_PATH.sha256"
 MAIN_PACKAGE="../cmd/goanime"
 
 # Detecta a arquitetura
@@ -38,14 +42,21 @@ else
     echo "UPX não encontrado. Pulando compressão."
 fi
 
-# Gera o checksum SHA256
-echo "Gerando checksum SHA256..."
+# Cria arquivo ZIP
+echo "Criando arquivo ZIP..."
+zip -j "$ZIP_PATH" "$BINARY_PATH"
+echo "Arquivo ZIP criado: $ZIP_PATH"
+
+# Gera o checksum SHA256 para o arquivo ZIP
+echo "Gerando checksum SHA256 para o arquivo ZIP..."
 if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$BINARY_PATH" > "$CHECKSUM_FILE"
+    sha256sum "$ZIP_PATH" > "$CHECKSUM_FILE"
 elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$BINARY_PATH" > "$CHECKSUM_FILE"
+    shasum -a 256 "$ZIP_PATH" > "$CHECKSUM_FILE"
+elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$ZIP_PATH" | awk '{print $2}' > "$CHECKSUM_FILE"
 else
-    echo "Nem sha256sum nem shasum estão disponíveis. Não é possível gerar o checksum."
+    echo "Nem sha256sum, shasum ou openssl estão disponíveis. Não é possível gerar o checksum."
     exit 1
 fi
 echo "Checksum gerado: $CHECKSUM_FILE"

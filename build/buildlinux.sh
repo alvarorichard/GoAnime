@@ -1,3 +1,6 @@
+
+
+
 #!/bin/bash
 
 # Exit immediately if a command exits with a non-zero status
@@ -5,9 +8,11 @@ set -e
 
 # Variables
 OUTPUT_DIR="../build"  # Adjusted to place the binary in the build directory
-BINARY_NAME="goanime"
+BINARY_NAME="goanime-linux"
 BINARY_PATH="$OUTPUT_DIR/$BINARY_NAME"
-CHECKSUM_FILE="$OUTPUT_DIR/$BINARY_NAME.sha256"
+TARBALL_NAME="$BINARY_NAME.tar.gz"
+TARBALL_PATH="$OUTPUT_DIR/$TARBALL_NAME"
+CHECKSUM_FILE="$TARBALL_PATH.sha256"
 MAIN_PACKAGE="../cmd/goanime"
 
 # Create the output directory if it doesn't exist
@@ -27,13 +32,18 @@ else
     echo "UPX not found. Skipping compression."
 fi
 
-# Generate SHA256 checksum
-echo "Generating SHA256 checksum..."
+# Create tarball
+echo "Creating tarball..."
+tar -czf "$TARBALL_PATH" -C "$OUTPUT_DIR" "$BINARY_NAME"
+echo "Tarball created: $TARBALL_PATH"
+
+# Generate SHA256 checksum for the tarball
+echo "Generating SHA256 checksum for the tarball..."
 # Check if sha256sum exists, else use shasum
 if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$BINARY_PATH" > "$CHECKSUM_FILE"
+    sha256sum "$TARBALL_PATH" > "$CHECKSUM_FILE"
 elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$BINARY_PATH" > "$CHECKSUM_FILE"
+    shasum -a 256 "$TARBALL_PATH" > "$CHECKSUM_FILE"
 else
     echo "Neither sha256sum nor shasum is available. Cannot generate checksum."
     exit 1

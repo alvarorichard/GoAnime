@@ -1,44 +1,53 @@
+
+
+
+
 #!/bin/bash
 
-# Sai imediatamente se um comando falhar
+# Exit immediately if a command exits with a non-zero status
 set -e
 
-# Variáveis
-OUTPUT_DIR="../build"
-BINARY_NAME="goanime"
+# Variables
+OUTPUT_DIR="../build"  # Adjusted to place the binary in the build directory
+BINARY_NAME="goanime-apple-darwin"
 BINARY_PATH="$OUTPUT_DIR/$BINARY_NAME"
-CHECKSUM_FILE="$OUTPUT_DIR/$BINARY_NAME.sha256"
+TARBALL_NAME="$BINARY_NAME.tar.gz"
+TARBALL_PATH="$OUTPUT_DIR/$TARBALL_NAME"
+CHECKSUM_FILE="$TARBALL_PATH.sha256"
 MAIN_PACKAGE="../cmd/goanime"
 
-# Detecta a arquitetura
-ARCH=$(uname -m)
-if [ "$ARCH" == "x86_64" ]; then
-    GOARCH=amd64
-elif [ "$ARCH" == "arm64" ]; then
-    GOARCH=arm64
-else
-    echo "Arquitetura não suportada: $ARCH"
-    exit 1
-fi
-
-# Cria o diretório de saída se não existir
+# Create the output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
-echo "Compilando o binário goanime para macOS ($GOARCH)..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=$GOARCH go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
+echo "Building the goanime binary for macOS..."
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
 
-echo "Compilação concluída: $BINARY_PATH"
+echo "Build completed: $BINARY_PATH"
 
-# Gera o checksum SHA256
-echo "Gerando checksum SHA256..."
-if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$BINARY_PATH" > "$CHECKSUM_FILE"
-elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$BINARY_PATH" > "$CHECKSUM_FILE"
+# Check if UPX is installed
+if command -v upx >/dev/null 2>&1; then
+    echo "Compressing the binary with UPX..."
+    upx --best --ultra-brute "$BINARY_PATH"
+    echo "Compression completed."
 else
-    echo "Nem sha256sum nem shasum estão disponíveis. Não é possível gerar o checksum."
+    echo "UPX not found. Skipping compression."
+fi
+
+# Create tarball
+echo "Creating tarball..."
+tar -czf "$TARBALL_PATH" -C "$OUTPUT_DIR" "$BINARY_NAME"
+echo "Tarball created: $TARBALL_PATH"
+
+# Generate SHA256 checksum for the tarball
+echo "Generating SHA256 checksum for the tarball..."
+if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$TARBALL_PATH" > "$CHECKSUM_FILE"
+elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$TARBALL_PATH" | awk '{print $2}' > "$CHECKSUM_FILE"
+else
+    echo "Neither shasum nor openssl is available. Cannot generate checksum."
     exit 1
 fi
-echo "Checksum gerado: $CHECKSUM_FILE"
+echo "Checksum generated: $CHECKSUM_FILE"
 
-echo "Script de build concluído com sucesso."
+echo "Build script completed successfully."
