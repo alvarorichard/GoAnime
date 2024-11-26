@@ -172,7 +172,7 @@ The selected episode will then play in mpv media player.
 
 
 # Thanks 
-[@KitsuneSemCalda](https://github.com/KitsuneSemCalda)   and [@the-eduardo](https://github.com/the-eduardo) for help and improve this application
+[@KitsuneSemCalda](https://github.com/KitsuneSemCalda),[@RushikeshGaikwad](https://github.com/Wraient) and [@the-eduardo](https://github.com/the-eduardo) for help and improve this application
 
 # Alternatives
 
