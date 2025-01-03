@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"github.com/hugolgst/rich-go/client"
 	"io"
 	"log"
 	"net"
@@ -14,21 +13,17 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 )
@@ -63,133 +58,6 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), m.progress.Init())
 }
 
-type RichPresenceUpdater struct {
-	anime           *api.Anime
-	isPaused        *bool
-	animeMutex      *sync.Mutex
-	updateFreq      time.Duration
-	done            chan bool
-	wg              sync.WaitGroup
-	startTime       time.Time     // Start time of playback
-	episodeDuration time.Duration // Total duration of the episode
-	episodeStarted  bool          // Whether the episode has started
-	socketPath      string        // Path to mpv IPC socket
-}
-
-func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
-	return &RichPresenceUpdater{
-		anime:           anime,
-		isPaused:        isPaused,
-		animeMutex:      animeMutex,
-		updateFreq:      updateFreq, // Make sure updateFreq is actually used in the struct
-		done:            make(chan bool),
-		startTime:       time.Now(),
-		episodeDuration: episodeDuration,
-		episodeStarted:  false,
-		socketPath:      socketPath,
-	}
-}
-
-func (rpu *RichPresenceUpdater) getCurrentPlaybackPosition() (time.Duration, error) {
-	position, err := mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
-	if err != nil {
-		return 0, err
-	}
-
-	// Convert position to float64 and then to time.Duration
-	posSeconds, ok := position.(float64)
-	if !ok {
-		return 0, fmt.Errorf("failed to parse playback position")
-	}
-
-	return time.Duration(posSeconds) * time.Second, nil
-}
-
-// Start begins the periodic Rich Presence updates.
-func (rpu *RichPresenceUpdater) Start() {
-	rpu.wg.Add(1)
-	go func() {
-		defer rpu.wg.Done()
-		ticker := time.NewTicker(rpu.updateFreq)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				go rpu.updateDiscordPresence() // Run update asynchronously
-			case <-rpu.done:
-				if util.IsDebug {
-					log.Println("Rich Presence updater received stop signal.")
-				}
-				return
-			}
-		}
-	}()
-	if util.IsDebug {
-		log.Println("Rich Presence updater started.")
-	}
-}
-
-// Stop signals the updater to stop and waits for the goroutine to finish.
-func (rpu *RichPresenceUpdater) Stop() {
-	close(rpu.done)
-	rpu.wg.Wait()
-	if util.IsDebug {
-		log.Println("Rich Presence updater stopped.")
-
-	}
-}
-
-func (rpu *RichPresenceUpdater) updateDiscordPresence() {
-	rpu.animeMutex.Lock()
-	defer rpu.animeMutex.Unlock()
-
-	currentPosition, err := rpu.getCurrentPlaybackPosition()
-	if err != nil {
-		if util.IsDebug {
-			log.Printf("Error fetching playback position: %v\n", err)
-		}
-		return
-	}
-
-	// Debug log to check episode duration
-	if util.IsDebug {
-		log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
-
-	}
-
-	// Convert episode duration to minutes and seconds format
-	totalMinutes := int(rpu.episodeDuration.Minutes())
-	totalSeconds := int(rpu.episodeDuration.Seconds()) % 60 // Remaining seconds after full minutes
-
-	// Format the current playback position as minutes and seconds
-	timeInfo := fmt.Sprintf("%02d:%02d / %02d:%02d",
-		int(currentPosition.Minutes()), int(currentPosition.Seconds())%60,
-		totalMinutes, totalSeconds,
-	)
-
-	// Create the activity with updated Details
-	activity := client.Activity{
-		Details:    fmt.Sprintf("%s | Episode %s | %s / %d min", rpu.anime.Details.Title.Romaji, rpu.anime.Episodes[0].Number, timeInfo, totalMinutes),
-		State:      "Watching",
-		LargeImage: rpu.anime.ImageURL,
-		LargeText:  rpu.anime.Details.Title.Romaji,
-		Buttons: []*client.Button{
-			{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)},
-			{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)},
-		},
-	}
-
-	// Set the activity in Discord Rich Presence
-	if err := client.SetActivity(activity); err != nil {
-		if util.IsDebug {
-			log.Printf("Error updating Discord Rich Presence: %v\n", err)
-		} else {
-			log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
-		}
-	}
-}
-
 // StartVideo opens mpv with a socket for IPC
 func StartVideo(link string, args []string) (string, error) {
 	randomBytes := make([]byte, 4)
@@ -217,7 +85,6 @@ func StartVideo(link string, args []string) (string, error) {
 }
 
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
-// mpvSendCommand sends a JSON command to mpv via a socket and reads the response.
 func mpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
 	conn, err := dialMPVSocket(socketPath)
 	if err != nil {
@@ -269,224 +136,6 @@ func dialMPVSocket(socketPath string) (net.Conn, error) {
 		// Unix-like system uses Unix sockets
 		return net.Dial("unix", socketPath)
 	}
-}
-
-// WINDOWS RELEASE
-
-//func dialMPVSocket(socketPath string) (net.Conn, error) {
-//	if runtime.GOOS == "windows" {
-//		//Attempt to connect using named pipe on Windows
-//		conn, err := winio.DialPipe(socketPath, nil)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
-//		}
-//		return conn, nil
-//	} else {
-//		// Unix-like system uses Unix sockets
-//		conn, err := net.Dial("unix", socketPath)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
-//		}
-//		return conn, nil
-//	}
-//}
-
-// Update handles updates to the Bubble Tea model.
-//
-// This function processes incoming messages (`tea.Msg`) and updates the model's state accordingly.
-// It locks the model's mutex to ensure thread safety, especially when modifying shared data like
-// `m.received`, `m.totalBytes`, and other stateful properties.
-//
-// The function processes different message types, including:
-//
-// 1. `tickMsg`: A periodic message that triggers the progress update. If the download is complete
-// (`m.done` is `true`), the program quits. Otherwise, it calculates the percentage of bytes received
-// and updates the progress bar. It then schedules the next tick.
-//
-// 2. `statusMsg`: Updates the status string in the model, which can be used to display custom messages
-// to the user, such as "Downloading..." or "Download complete".
-//
-// 3. `progress.FrameMsg`: Handles frame updates for the progress bar. It delegates the update to the
-// internal `progress.Model` and returns any commands necessary to refresh the UI.
-//
-// 4. `tea.KeyMsg`: Responds to key events, such as quitting the program when "Ctrl+C" is pressed.
-// If the user requests to quit, the program sets `m.done` to `true` and returns the quit command.
-//
-// For unhandled message types, it returns the model unchanged.
-//
-// Returns:
-// - Updated `tea.Model` representing the current state of the model.
-// - A `tea.Cmd` that specifies the next action the program should perform.
-
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	switch msg := msg.(type) {
-	case tickMsg:
-		if m.done {
-			return m, tea.Quit
-		}
-		if m.totalBytes > 0 {
-			cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
-			return m, tea.Batch(cmd, tickCmd())
-		}
-		return m, tickCmd()
-
-	case statusMsg:
-		m.status = string(msg)
-		return m, nil
-
-	case progress.FrameMsg:
-		var cmd tea.Cmd
-		var newModel tea.Model
-		newModel, cmd = m.progress.Update(msg)
-		m.progress = newModel.(progress.Model)
-		return m, cmd
-
-	case tea.KeyMsg:
-		if key.Matches(msg, m.keys.quit) {
-			m.done = true
-			return m, tea.Quit
-		}
-		return m, nil
-
-	default:
-		return m, nil
-	}
-}
-
-// View renders the Bubble Tea model
-// View renders the user interface for the Bubble Tea model.
-//
-// This function generates the visual output that is displayed to the user. It includes the status message,
-// the progress bar, and a quit instruction. The layout is formatted with padding for proper alignment.
-//
-// Steps:
-// 1. Adds padding to each line using spaces.
-// 2. Styles the status message (m.status) with an orange color (#FFA500).
-// 3. Displays the progress bar using the progress model.
-// 4. Shows a message instructing the user to press "Ctrl+C" to quit.
-//
-// Returns:
-// - A formatted string that represents the UI for the current state of the model.
-func (m *model) View() string {
-	// Creates padding spaces for consistent layout
-	pad := strings.Repeat(" ", padding)
-
-	// Styles the status message with an orange color
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
-
-	// Returns the UI layout: status message, progress bar, and quit instruction
-	return "\n" +
-		pad + statusStyle.Render(m.status) + "\n\n" + // Render the styled status message
-		pad + m.progress.View() + "\n\n" + // Render the progress bar
-		pad + "Press Ctrl+C to quit" // Show quit instruction
-}
-
-// tickCmd returns a command that triggers a "tick" every 100 milliseconds.
-//
-// This function sets up a recurring event (tick) that fires every 100 milliseconds.
-// Each tick sends a `tickMsg` with the current time (`t`) as a message, which can be
-// handled by the update function to trigger actions like updating the progress bar.
-//
-// Returns:
-// - A `tea.Cmd` that schedules a tick every 100 milliseconds and sends a `tickMsg`.
-func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
-}
-
-// statusUpdateCmd returns a command to update the status
-
-// DownloadFolderFormatter formats the anime URL to create a download folder name.
-//
-// This function extracts a specific part of the anime video URL to use it as the name
-// for the download folder. It uses a regular expression to capture the part of the URL
-// after "/video/", which is often unique and suitable as a folder name.
-//
-// Steps:
-// 1. Compiles a regular expression that matches URLs of the form "https://<domain>/video/<unique-part>".
-// 2. Extracts the "<unique-part>" from the URL.
-// 3. If the match is successful, it returns the extracted part as the folder name.
-// 4. If no match is found, it returns an empty string.
-//
-// Parameters:
-// - str: The anime video URL as a string.
-//
-// Returns:
-// - A string representing the formatted folder name, or an empty string if no match is found.
-func DownloadFolderFormatter(str string) string {
-	// Regular expression to capture the unique part after "/video/"
-	regex := regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-
-	// Apply the regex to the input URL
-	match := regex.FindStringSubmatch(str)
-
-	// If a match is found, return the captured group (folder name)
-	if len(match) > 1 {
-		finalStep := match[1]
-		return finalStep
-	}
-
-	// If no match, return an empty string
-	return ""
-}
-
-// getContentLength retrieves the content length of the given URL.
-func getContentLength(url string, client *http.Client) (int64, error) {
-	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
-	req, err := http.NewRequest("HEAD", url, nil)
-	if err != nil {
-		// Returns 0 and the error if the request creation fails.
-		return 0, err
-	}
-
-	// Sends the HEAD request to the server.
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
-		// If the HEAD request fails or is not supported, fall back to a GET request.
-		req.Method = "GET"
-		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
-		resp, err = client.Do(req)           // Sends the modified GET request.
-		if err != nil {
-			// Returns 0 and the error if the GET request fails.
-			return 0, err
-		}
-	}
-
-	// Ensures that the response body is closed after it is used to avoid resource leaks.
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			// Logs a warning if closing the response body fails.
-			log.Printf("Failed to close response body: %v\n", err)
-		}
-	}(resp.Body)
-
-	// Checks if the server responded with a 200 OK or 206 Partial Content status.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		// Returns an error if the server does not support partial content (required for ranged requests).
-		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
-	}
-
-	// Retrieves the "Content-Length" header from the response.
-	contentLengthHeader := resp.Header.Get("Content-Length")
-	if contentLengthHeader == "" {
-		// Returns an error if the "Content-Length" header is missing.
-		return 0, fmt.Errorf("Content-Length header is missing")
-	}
-
-	// Converts the "Content-Length" header from a string to an int64.
-	contentLength, err := strconv.ParseInt(contentLengthHeader, 10, 64)
-	if err != nil {
-		// Returns 0 and an error if the conversion fails.
-		return 0, err
-	}
-
-	// Returns the content length in bytes.
-	return contentLength, nil
 }
 
 // downloadPart downloads a part of the video file.
@@ -676,7 +325,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	// Cleans the destination path to ensure it is valid and well-formed.
 	destPath = filepath.Clean(destPath)
 
-	// Creates an HTTP client with a custom transport that includes a 10-second timeout.
+	// Creates an HTTP client with custom transport that includes a 10-second timeout.
 	httpClient := &http.Client{
 		Transport: api.SafeTransport(10 * time.Second),
 	}
@@ -762,8 +411,6 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 //}
 
 // HandleDownloadAndPlay handles the download and playback of the video
-
-// HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(
 	videoURL string,
 	episodes []api.Episode,
@@ -804,89 +451,6 @@ func HandleDownloadAndPlay(
 		}
 	}
 }
-
-//func downloadAndPlayEpisode(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
-//	currentUser, err := user.Current()
-//	if err != nil {
-//		log.Panicln("Failed to get current user:", util.ErrorHandler(err))
-//	}
-//
-//	downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
-//	episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
-//
-//	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-//		if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-//			log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
-//		}
-//	}
-//
-//	if _, err := os.Stat(episodePath); os.IsNotExist(err) {
-//		numThreads := 4 // Define the number of threads for downloading
-//
-//		// Check if the video URL is from Blogger
-//		if strings.Contains(videoURL, "blogger.com") {
-//			// Use yt-dlp to download the video from Blogger
-//			fmt.Printf("Downloading episode %s with yt-dlp...\n", episodeNumberStr)
-//			cmd := exec.Command("yt-dlp", "--no-progress", "-o", episodePath, videoURL)
-//			if err := cmd.Run(); err != nil {
-//				log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
-//			}
-//			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
-//		} else {
-//			// Initialize progress model
-//			m := &model{
-//				progress: progress.New(progress.WithDefaultGradient()),
-//				keys: keyMap{
-//					quit: key.NewBinding(
-//						key.WithKeys("ctrl+c"),
-//						key.WithHelp("ctrl+c", "quit"),
-//					),
-//				},
-//			}
-//			p := tea.NewProgram(m)
-//
-//			// Get content length
-//			httpClient := &http.Client{
-//				Transport: api.SafeTransport(10 * time.Second),
-//			}
-//			contentLength, err := getContentLength(videoURL, httpClient)
-//			if err != nil {
-//				log.Panicln("Failed to get content length:", util.ErrorHandler(err))
-//			}
-//			m.totalBytes = contentLength
-//
-//			// Start the download in a separate goroutine
-//			go func() {
-//				// Update status
-//				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
-//
-//				if err := DownloadVideo(videoURL, episodePath, numThreads, m); err != nil {
-//					log.Panicln("Failed to download video:", util.ErrorHandler(err))
-//				}
-//
-//				m.mu.Lock()
-//				m.done = true
-//				m.mu.Unlock()
-//
-//				// Final status update
-//				p.Send(statusMsg("Download completed!"))
-//			}()
-//
-//			// Run the Bubble Tea program in the main goroutine
-//			if _, err := p.Run(); err != nil {
-//				log.Fatalf("error running progress bar: %v", err)
-//			}
-//		}
-//	} else {
-//		fmt.Println("Video already downloaded.")
-//	}
-//
-//	if askForPlayOffline() {
-//		if err := playVideo(episodePath, episodes, selectedEpisodeNum, updater); err != nil {
-//			log.Panicln("Failed to play video:", util.ErrorHandler(err))
-//		}
-//	}
-//}
 
 func downloadAndPlayEpisode(
 	videoURL string,
@@ -1326,198 +890,6 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 	}
 
 	return nil
-}
-
-// SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
-func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
-	if len(episodes) == 0 {
-		return "", "", errors.New("no episodes provided")
-	}
-
-	idx, err := fuzzyfinder.Find(
-		episodes,
-		func(i int) string {
-			return episodes[i].Number
-		},
-		fuzzyfinder.WithPromptString("Select the episode"),
-	)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
-	}
-
-	if idx < 0 || idx >= len(episodes) {
-		return "", "", errors.New("invalid index returned by fuzzyfinder")
-	}
-
-	return episodes[idx].URL, episodes[idx].Number, nil
-}
-
-// ExtractEpisodeNumber extracts the numeric part of an episode string
-func ExtractEpisodeNumber(episodeStr string) string {
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeStr)
-	if numStr == "" {
-		return "1"
-	}
-	return numStr
-}
-
-// GetVideoURLForEpisode gets the video URL for a given episode URL
-func GetVideoURLForEpisode(episodeURL string) (string, error) {
-
-	if util.IsDebug {
-		log.Printf("Tentando extrair URL de vídeo para o episódio: %s", episodeURL)
-	}
-	videoURL, err := extractVideoURL(episodeURL)
-	if err != nil {
-		return "", err
-	}
-	return extractActualVideoURL(videoURL)
-}
-
-func extractVideoURL(url string) (string, error) {
-
-	if util.IsDebug {
-		log.Printf("Extraindo URL de vídeo da página: %s", url)
-	}
-
-	response, err := api.SafeGet(url)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
-		}
-	}(response.Body)
-
-	doc, err := goquery.NewDocumentFromReader(response.Body)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to parse HTML: %+v", err))
-	}
-
-	videoElements := doc.Find("video")
-	if videoElements.Length() == 0 {
-		videoElements = doc.Find("div")
-	}
-
-	if videoElements.Length() == 0 {
-		return "", errors.New("no video elements found in the HTML")
-	}
-
-	videoSrc, exists := videoElements.Attr("data-video-src")
-	if !exists || videoSrc == "" {
-		urlBody, err := fetchContent(url)
-		if err != nil {
-			return "", err
-		}
-		videoSrc, err = findBloggerLink(urlBody)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return videoSrc, nil
-}
-
-func fetchContent(url string) (string, error) {
-	resp, err := api.SafeGet(url)
-	if err != nil {
-		return "", err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
-		}
-	}(resp.Body)
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(body), nil
-}
-
-func findBloggerLink(content string) (string, error) {
-	pattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
-
-	re := regexp.MustCompile(pattern)
-	matches := re.FindStringSubmatch(content)
-
-	if len(matches) > 0 {
-		return matches[0], nil
-	} else {
-		return "", errors.New("no blogger video link found in the content")
-	}
-}
-
-func extractActualVideoURL(videoSrc string) (string, error) {
-	if strings.Contains(videoSrc, "blogger.com") {
-		return videoSrc, nil
-	}
-	response, err := api.SafeGet(videoSrc)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to fetch video source: %+v", err))
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
-		}
-	}(response.Body)
-
-	if response.StatusCode != http.StatusOK {
-		return "", errors.New(fmt.Sprintf("request failed with status: %s", response.Status))
-	}
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to read response body: %+v", err))
-	}
-
-	var videoResponse VideoResponse
-	if err := json.Unmarshal(body, &videoResponse); err != nil {
-		return "", errors.New(fmt.Sprintf("failed to unmarshal JSON response: %+v", err))
-	}
-
-	if len(videoResponse.Data) == 0 {
-		return "", errors.New("no video data found in the response")
-	}
-
-	highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
-	if highestQualityVideoURL == "" {
-		return "", errors.New("no suitable video quality found")
-	}
-
-	return highestQualityVideoURL, nil
-}
-
-// VideoData represents the video data structure, with a source URL and a label
-type VideoData struct {
-	Src   string `json:"src"`
-	Label string `json:"label"`
-}
-
-// VideoResponse represents the video response structure with a slice of VideoData
-type VideoResponse struct {
-	Data []VideoData `json:"data"`
-}
-
-// selectHighestQualityVideo selects the highest quality video available
-func selectHighestQualityVideo(videos []VideoData) string {
-	var highestQuality int
-	var highestQualityURL string
-	for _, video := range videos {
-		qualityValue, _ := strconv.Atoi(strings.TrimRight(video.Label, "p"))
-		if qualityValue > highestQuality {
-			highestQuality = qualityValue
-			highestQualityURL = video.Src
-		}
-	}
-	return highestQualityURL
 }
 
 // playVideo handles the online playback of a video and user interaction.
