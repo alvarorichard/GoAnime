@@ -37,7 +37,7 @@ func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.M
 	}
 }
 
-func (rpu *RichPresenceUpdater) getCurrentPlaybackPosition() (time.Duration, error) {
+func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, error) {
 	position, err := mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
 	if err != nil {
 		return 0, err
@@ -91,7 +91,7 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	rpu.animeMutex.Lock()
 	defer rpu.animeMutex.Unlock()
 
-	currentPosition, err := rpu.getCurrentPlaybackPosition()
+	currentPosition, err := rpu.GetCurrentPlaybackPosition()
 	if err != nil {
 		if util.IsDebug {
 			log.Printf("Error fetching playback position: %v\n", err)
