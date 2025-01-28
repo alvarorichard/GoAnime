@@ -126,6 +126,52 @@ func SearchAnime(animeName string) (*Anime, error) {
 	}
 }
 
+// searchAnimeOnPage searches for anime on a given page and returns the selected anime
+func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
+	response, err := getHTTPResponse(pageURL)
+	if err != nil {
+		return nil, "", errors.Wrap(err, "failed to perform search request")
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+
+		}
+	}(response.Body)
+
+	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusForbidden {
+			return nil, "", errors.New("connection refused: you need to be in Brazil or use a VPN to access the server")
+		}
+		return nil, "", errors.Errorf("search failed, server returned: %s", response.Status)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(response.Body)
+	if err != nil {
+		return nil, "", errors.Wrap(err, "failed to parse response")
+	}
+
+	animes := ParseAnimes(doc)
+	if util.IsDebug {
+		log.Printf("Number of animes found: %d", len(animes))
+	}
+
+	if len(animes) > 0 {
+		selectedAnime, err := selectAnimeWithGoFuzzyFinder(animes)
+		if err != nil {
+			return nil, "", err
+		}
+		return selectedAnime, "", nil
+	}
+
+	nextPage, exists := doc.Find(".pagination .next a").Attr("href")
+	if !exists {
+		return nil, "", nil
+	}
+
+	return nil, nextPage, nil
+}
+
 // GetEpisodeData fetches episode data for a given anime ID and episode number from Jikan API
 func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 
@@ -230,53 +276,6 @@ func GetMovieData(animeID int, anime *Anime) error {
 	anime.Episodes[0].Synopsis = getStringValue("synopsis")
 
 	return nil
-}
-
-
-// searchAnimeOnPage searches for anime on a given page and returns the selected anime
-func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
-	response, err := getHTTPResponse(pageURL)
-	if err != nil {
-		return nil, "", errors.Wrap(err, "failed to perform search request")
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-
-		}
-	}(response.Body)
-
-	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusForbidden {
-			return nil, "", errors.New("connection refused: you need to be in Brazil or use a VPN to access the server")
-		}
-		return nil, "", errors.Errorf("search failed, server returned: %s", response.Status)
-	}
-
-	doc, err := goquery.NewDocumentFromReader(response.Body)
-	if err != nil {
-		return nil, "", errors.Wrap(err, "failed to parse response")
-	}
-
-	animes := ParseAnimes(doc)
-	if util.IsDebug {
-		log.Printf("Number of animes found: %d", len(animes))
-	}
-
-	if len(animes) > 0 {
-		selectedAnime, err := selectAnimeWithGoFuzzyFinder(animes)
-		if err != nil {
-			return nil, "", err
-		}
-		return selectedAnime, "", nil
-	}
-
-	nextPage, exists := doc.Find(".pagination .next a").Attr("href")
-	if !exists {
-		return nil, "", nil
-	}
-
-	return nil, nextPage, nil
 }
 
 // ParseAnimes extracts a list of Anime structs from the search results page.
