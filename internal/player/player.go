@@ -2,7 +2,6 @@ package player
 
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,12 +59,8 @@ func (m *model) Init() tea.Cmd {
 
 // StartVideo opens mpv with a socket for IPC
 func StartVideo(link string, args []string) (string, error) {
-	randomBytes := make([]byte, 4)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random number: %w", err)
-	}
-	randomNumber := fmt.Sprintf("%x", randomBytes)
+	// Use a more efficient random number generation
+	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
 
 	var socketPath string
 	if runtime.GOOS == "windows" {
@@ -74,10 +69,25 @@ func StartVideo(link string, args []string) (string, error) {
 		socketPath = fmt.Sprintf("/tmp/goanime_mpvsocket_%s", randomNumber)
 	}
 
-	mpvArgs := append([]string{"--no-terminal", "--quiet", fmt.Sprintf("--input-ipc-server=%s", socketPath), link}, args...)
+	// Pre-allocate the args slice with the correct capacity
+	mpvArgs := make([]string, 0, len(args)+4)
+
+	// Add essential arguments first
+	mpvArgs = append(mpvArgs, "--no-terminal", "--quiet", fmt.Sprintf("--input-ipc-server=%s", socketPath))
+
+	// Add any additional arguments passed to the function
+	mpvArgs = append(mpvArgs, args...)
+
+	// Add the video URL last
+	mpvArgs = append(mpvArgs, link)
+
+	// Debug output
+	if util.IsDebug {
+		fmt.Printf("Starting mpv with arguments: %v\n", mpvArgs)
+	}
+
 	cmd := exec.Command("mpv", mpvArgs...)
-	err = cmd.Start()
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start mpv: %w", err)
 	}
 
@@ -897,9 +907,12 @@ func playVideo(
 	videoURL string,
 	episodes []api.Episode,
 	currentEpisodeNum int,
-	animeMalID int, // Added animeMalID parameter
+	animeMalID int,
 	updater *RichPresenceUpdater,
 ) error {
+	// Initialize mpv arguments
+	mpvArgs := make([]string, 0)
+
 	// Fetch AniSkip data for the current episode
 	if util.IsDebug {
 		log.Printf("Video URL: %s", videoURL)
@@ -913,8 +926,7 @@ func playVideo(
 		log.Printf("AniSkip data for episode %d: %+v\n", currentEpisodeNum, currentEpisode.SkipTimes)
 	}
 
-	// Prepare mpv arguments to automatically skip OP and ED if available
-	var mpvArgs []string
+	// Add skip times to mpv arguments if available
 	if currentEpisode.SkipTimes.Op.Start > 0 || currentEpisode.SkipTimes.Op.End > 0 {
 		opStart, opEnd := currentEpisode.SkipTimes.Op.Start, currentEpisode.SkipTimes.Op.End
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_op=%d-%d", opStart, opEnd))
@@ -1088,4 +1100,48 @@ func playVideo(
 	}
 
 	return nil
+}
+
+// ToggleSubtitle toggles subtitle visibility
+func ToggleSubtitle(socketPath string) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"cycle",
+		"sub-visibility",
+	})
+	return err
+}
+
+// GetPlaybackStats returns current playback statistics
+func GetPlaybackStats(socketPath string) (map[string]interface{}, error) {
+	stats := make(map[string]interface{})
+
+	// Get various playback properties
+	properties := []string{
+		"time-pos",
+		"duration",
+		"speed",
+		"volume",
+		"pause",
+		"filename",
+	}
+
+	for _, prop := range properties {
+		value, err := mpvSendCommand(socketPath, []interface{}{"get_property", prop})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get %s: %w", prop, err)
+		}
+		stats[prop] = value
+	}
+
+	return stats, nil
+}
+
+// SetPlaybackSpeed sets the video playback speed
+func SetPlaybackSpeed(socketPath string, speed float64) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"speed",
+		speed,
+	})
+	return err
 }

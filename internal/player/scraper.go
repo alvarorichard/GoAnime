@@ -3,17 +3,18 @@ package player
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
-	"github.com/pkg/errors"
 	"io"
 	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/pkg/errors"
 )
 
 // WINDOWS RELEASE
@@ -173,7 +174,6 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 }
 
 func extractVideoURL(url string) (string, error) {
-
 	if util.IsDebug {
 		log.Printf("Extraindo URL de vídeo da página: %s", url)
 	}
@@ -194,28 +194,80 @@ func extractVideoURL(url string) (string, error) {
 		return "", errors.New(fmt.Sprintf("failed to parse HTML: %+v", err))
 	}
 
-	videoElements := doc.Find("video")
-	if videoElements.Length() == 0 {
-		videoElements = doc.Find("div")
+	// Try different selectors for video elements
+	selectors := []string{
+		"video",
+		"div[data-video-src]",
+		"div[data-src]",
+		"div[data-url]",
+		"div[data-video]",
+		"div[data-player]",
+		"iframe[src*='video']",
+		"iframe[src*='player']",
 	}
 
-	if videoElements.Length() == 0 {
-		return "", errors.New("no video elements found in the HTML")
-	}
+	var videoSrc string
+	var exists bool
 
-	videoSrc, exists := videoElements.Attr("data-video-src")
-	if !exists || videoSrc == "" {
-		urlBody, err := fetchContent(url)
-		if err != nil {
-			return "", err
+	for _, selector := range selectors {
+		elements := doc.Find(selector)
+		if elements.Length() > 0 {
+			if util.IsDebug {
+				log.Printf("Found elements with selector: %s", selector)
+			}
+
+			// Try different attribute names
+			attributes := []string{
+				"data-video-src",
+				"data-src",
+				"data-url",
+				"data-video",
+				"src",
+			}
+
+			for _, attr := range attributes {
+				videoSrc, exists = elements.Attr(attr)
+				if exists && videoSrc != "" {
+					if util.IsDebug {
+						log.Printf("Found video URL in attribute %s: %s", attr, videoSrc)
+					}
+					return videoSrc, nil
+				}
+			}
 		}
-		videoSrc, err = findBloggerLink(urlBody)
-		if err != nil {
-			return "", err
-		}
 	}
 
-	return videoSrc, nil
+	// If no video element found, try to find in page content
+	if util.IsDebug {
+		log.Printf("No video elements found, searching in page content")
+	}
+
+	urlBody, err := fetchContent(url)
+	if err != nil {
+		return "", err
+	}
+
+	// Try to find blogger link
+	videoSrc, err = findBloggerLink(urlBody)
+	if err == nil && videoSrc != "" {
+		if util.IsDebug {
+			log.Printf("Found blogger link: %s", videoSrc)
+		}
+		return videoSrc, nil
+	}
+
+	// Try to find direct video URL in content
+	videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
+	re := regexp.MustCompile(videoURLPattern)
+	matches := re.FindString(urlBody)
+	if matches != "" {
+		if util.IsDebug {
+			log.Printf("Found direct video URL: %s", matches)
+		}
+		return matches, nil
+	}
+
+	return "", errors.New("no video source found in the page")
 }
 
 func fetchContent(url string) (string, error) {
@@ -251,45 +303,147 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
+// selectVideoQuality allows the user to select a video quality
+func selectVideoQuality(videos []VideoData) (string, error) {
+	if len(videos) == 0 {
+		return "", errors.New("no video qualities available")
+	}
+
+	// Create a list of quality options
+	var options []string
+	for _, video := range videos {
+		options = append(options, video.Label)
+	}
+
+	if util.IsDebug {
+		log.Printf("Available qualities: %v", options)
+	}
+
+	// Use fuzzy finder to select quality
+	idx, err := fuzzyfinder.Find(
+		options,
+		func(i int) string {
+			return options[i]
+		},
+		fuzzyfinder.WithPromptString("Select video quality"),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to select quality: %w", err)
+	}
+
+	if idx < 0 || idx >= len(videos) {
+		return "", errors.New("invalid quality selection")
+	}
+
+	selectedQuality := videos[idx]
+	if util.IsDebug {
+		log.Printf("Selected quality: %s -> %s", selectedQuality.Label, selectedQuality.Src)
+	}
+
+	// Ensure the URL matches the selected quality
+	url := selectedQuality.Src
+	qualityPattern := regexp.MustCompile(`/(\d+)p\.mp4`)
+	matches := qualityPattern.FindStringSubmatch(url)
+	if len(matches) > 1 {
+		// Replace the quality in the URL with the selected one
+		url = qualityPattern.ReplaceAllString(url, fmt.Sprintf("/%sp.mp4", selectedQuality.Label))
+		if util.IsDebug {
+			log.Printf("Adjusted URL to match selected quality: %s", url)
+		}
+	}
+
+	return url, nil
+}
+
 func extractActualVideoURL(videoSrc string) (string, error) {
+	if util.IsDebug {
+		log.Printf("Processing video source: %s", videoSrc)
+	}
+
 	if strings.Contains(videoSrc, "blogger.com") {
 		return videoSrc, nil
 	}
-	response, err := api.SafeGet(videoSrc)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to fetch video source: %+v", err))
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
+
+	// If the URL is from animefire.plus, we need to fetch it first
+	if strings.Contains(videoSrc, "animefire.plus/video/") {
+		if util.IsDebug {
+			log.Printf("Found animefire.plus video URL, fetching content...")
 		}
-	}(response.Body)
 
-	if response.StatusCode != http.StatusOK {
-		return "", errors.New(fmt.Sprintf("request failed with status: %s", response.Status))
+		// Fetch the video page
+		response, err := api.SafeGet(videoSrc)
+		if err != nil {
+			return "", fmt.Errorf("failed to fetch video page: %w", err)
+		}
+		defer response.Body.Close()
+
+		// Read the response body
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to read video page: %w", err)
+		}
+
+		// Try to parse as JSON first
+		var videoResponse VideoResponse
+		err = json.Unmarshal(body, &videoResponse)
+		if err == nil && len(videoResponse.Data) > 0 {
+			if util.IsDebug {
+				log.Printf("Found video data with %d qualities", len(videoResponse.Data))
+				for _, v := range videoResponse.Data {
+					log.Printf("Available quality: %s -> %s", v.Label, v.Src)
+				}
+			}
+			// If we have multiple qualities, let the user select
+			if len(videoResponse.Data) > 1 {
+				return selectVideoQuality(videoResponse.Data)
+			}
+			// If only one quality, use it
+			return videoResponse.Data[0].Src, nil
+		}
+
+		// Try to find a direct video URL in the content
+		videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
+		re := regexp.MustCompile(videoURLPattern)
+		matches := re.FindString(string(body))
+		if matches != "" {
+			if util.IsDebug {
+				log.Printf("Found direct video URL: %s", matches)
+			}
+			return matches, nil
+		}
+
+		// Try to find a blogger link
+		videoSrc, err = findBloggerLink(string(body))
+		if err == nil && videoSrc != "" {
+			if util.IsDebug {
+				log.Printf("Found blogger link: %s", videoSrc)
+			}
+			return videoSrc, nil
+		}
 	}
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to read response body: %+v", err))
-	}
-
+	// Try to parse as JSON first
 	var videoResponse VideoResponse
-	if err := json.Unmarshal(body, &videoResponse); err != nil {
-		return "", errors.New(fmt.Sprintf("failed to unmarshal JSON response: %+v", err))
+	err := json.Unmarshal([]byte(videoSrc), &videoResponse)
+	if err == nil && len(videoResponse.Data) > 0 {
+		// If we have multiple qualities, let the user select
+		if len(videoResponse.Data) > 1 {
+			return selectVideoQuality(videoResponse.Data)
+		}
+		// If only one quality, use it
+		return videoResponse.Data[0].Src, nil
 	}
 
-	if len(videoResponse.Data) == 0 {
-		return "", errors.New("no video data found in the response")
+	// If not JSON, try to find a direct video URL
+	videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
+	re := regexp.MustCompile(videoURLPattern)
+	matches := re.FindString(videoSrc)
+
+	if matches == "" {
+		return "", errors.New("no valid video URL found")
 	}
 
-	highestQualityVideoURL := selectHighestQualityVideo(videoResponse.Data)
-	if highestQualityVideoURL == "" {
-		return "", errors.New("no suitable video quality found")
-	}
-
-	return highestQualityVideoURL, nil
+	return matches, nil
 }
 
 // VideoData represents the video data structure, with a source URL and a label
@@ -304,15 +458,15 @@ type VideoResponse struct {
 }
 
 // selectHighestQualityVideo selects the highest quality video available
-func selectHighestQualityVideo(videos []VideoData) string {
-	var highestQuality int
-	var highestQualityURL string
-	for _, video := range videos {
-		qualityValue, _ := strconv.Atoi(strings.TrimRight(video.Label, "p"))
-		if qualityValue > highestQuality {
-			highestQuality = qualityValue
-			highestQualityURL = video.Src
-		}
-	}
-	return highestQualityURL
-}
+// func selectHighestQualityVideo(videos []VideoData) string {
+// 	var highestQuality int
+// 	var highestQualityURL string
+// 	for _, video := range videos {
+// 		qualityValue, _ := strconv.Atoi(strings.TrimRight(video.Label, "p"))
+// 		if qualityValue > highestQuality {
+// 			highestQuality = qualityValue
+// 			highestQualityURL = video.Src
+// 		}
+// 	}
+// 	return highestQualityURL
+// }
