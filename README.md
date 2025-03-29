@@ -104,6 +104,26 @@ Execute the `install.ps1` script:
 ```powershell
 .\install.ps1
 ```
+# NixOS install (Flakes)
+
+## Temporary Run
+
+```shell
+nix github:alvarorichard/GoAnime
+```
+## Install
+Add in your `flake.nix`:
+```nix
+ inputs.goanime.url = "github:alvarorichard/GoAnime";
+```
+Pass inputs to your modules using ``specialArgs`` and Then in ``configuration.nix``:
+
+```nix
+environment.systemPackages = [
+  inputs.goanime.packages.${pkgs.system}.GoAnime
+];
+```
+
 
 ### Additional Recommendations for Users
 
