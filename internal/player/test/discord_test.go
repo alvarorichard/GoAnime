@@ -65,7 +65,7 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 	// This test demonstrates how we would mock the mpvSendCommand if it was injectable
 	t.Run("Should return current playback position", func(t *testing.T) {
 		// Create a mock implementation to simulate the behavior we want to test
-		mockCurrentPosition := func(socketPath string) (time.Duration, error) {
+		mockCurrentPosition := func(_ string) (time.Duration, error) {
 			// Simulate fetching position data from mpv
 			// Return 10 minutes and 30 seconds playback position
 			return 10*time.Minute + 30*time.Second, nil
