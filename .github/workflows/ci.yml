@@ -16,15 +16,15 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest, macOS-latest ] # Added macOS target operating systems
-        go-version: [ '1.22.0' ] # You can add more versions to test against multiple Go versions
+        go-version: [ '1.24.1' ] # You can add more versions to test against multiple Go versions
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go-version }}
 
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
