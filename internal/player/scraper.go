@@ -457,16 +457,4 @@ type VideoResponse struct {
 	Data []VideoData `json:"data"`
 }
 
-// selectHighestQualityVideo selects the highest quality video available
-// func selectHighestQualityVideo(videos []VideoData) string {
-// 	var highestQuality int
-// 	var highestQualityURL string
-// 	for _, video := range videos {
-// 		qualityValue, _ := strconv.Atoi(strings.TrimRight(video.Label, "p"))
-// 		if qualityValue > highestQuality {
-// 			highestQuality = qualityValue
-// 			highestQualityURL = video.Src
-// 		}
-// 	}
-// 	return highestQualityURL
-// }
+

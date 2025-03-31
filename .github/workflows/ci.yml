@@ -61,6 +61,9 @@ jobs:
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./internal/player/test/helper_test.go
+          flags: -v
+          name: player-tests
 
 
 
