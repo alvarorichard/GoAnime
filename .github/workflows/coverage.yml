@@ -24,11 +24,8 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Ensure go.sum exists
-        run: go mod tidy
-
       - name: Cache Go modules
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
