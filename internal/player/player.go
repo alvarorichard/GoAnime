@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -66,7 +67,12 @@ func StartVideo(link string, args []string) (string, error) {
 	if runtime.GOOS == "windows" {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
-		socketPath = fmt.Sprintf("/tmp/goanime_mpvsocket_%s", randomNumber)
+		// Ensure /tmp directory exists and is writable
+		tmpDir := "/tmp"
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			return "", fmt.Errorf("failed to create tmp directory: %w", err)
+		}
+		socketPath = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
 	}
 
 	// Pre-allocate the args slice with the correct capacity
@@ -87,11 +93,38 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	cmd := exec.Command("mpv", mpvArgs...)
+
+	// Set up proper process group for better cleanup
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start mpv: %w", err)
 	}
 
-	return socketPath, nil
+	// Wait for the socket to be created with a timeout
+	maxAttempts := 10
+	for i := 0; i < maxAttempts; i++ {
+		if runtime.GOOS != "windows" {
+			if _, err := os.Stat(socketPath); err == nil {
+				// Socket exists, wait a bit more to ensure it's ready
+				time.Sleep(100 * time.Millisecond)
+				return socketPath, nil
+			}
+		} else {
+			// On Windows, try to connect to verify the pipe exists
+			if conn, err := net.Dial("unix", socketPath); err == nil {
+				conn.Close()
+				return socketPath, nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// If we get here, the socket wasn't created in time
+	cmd.Process.Kill()
+	return "", fmt.Errorf("timeout waiting for mpv socket to be created")
 }
 
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
@@ -912,6 +945,11 @@ func playVideo(
 ) error {
 	// Initialize mpv arguments
 	mpvArgs := make([]string, 0)
+
+	// Fix the URL if it has a double 'p' in the quality suffix
+	if strings.Contains(videoURL, "720pp.mp4") {
+		videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
+	}
 
 	// Fetch AniSkip data for the current episode
 	if util.IsDebug {
