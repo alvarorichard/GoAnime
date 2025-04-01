@@ -947,9 +947,7 @@ func playVideo(
 	mpvArgs := make([]string, 0)
 
 	// Fix the URL if it has a double 'p' in the quality suffix
-	if strings.Contains(videoURL, "720pp.mp4") {
-		videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
-	}
+	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
 
 	// Fetch AniSkip data for the current episode
 	if util.IsDebug {
