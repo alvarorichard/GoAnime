@@ -2,6 +2,7 @@ package player
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -59,15 +59,19 @@ func (m *model) Init() tea.Cmd {
 }
 
 // StartVideo opens mpv with a socket for IPC
+// Modify the StartVideo function in player.go
 func StartVideo(link string, args []string) (string, error) {
-	// Use a more efficient random number generation
-	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
+	// Verify MPV is installed
+	if _, err := exec.LookPath("mpv"); err != nil {
+		return "", fmt.Errorf("mpv not found in PATH. Please install mpv: https://mpv.io/installation/")
+	}
 
+	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
 	var socketPath string
+
 	if runtime.GOOS == "windows" {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
-		// Ensure /tmp directory exists and is writable
 		tmpDir := "/tmp"
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			return "", fmt.Errorf("failed to create tmp directory: %w", err)
@@ -75,56 +79,55 @@ func StartVideo(link string, args []string) (string, error) {
 		socketPath = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
 	}
 
-	// Pre-allocate the args slice with the correct capacity
-	mpvArgs := make([]string, 0, len(args)+4)
-
-	// Add essential arguments first
-	mpvArgs = append(mpvArgs, "--no-terminal", "--quiet", fmt.Sprintf("--input-ipc-server=%s", socketPath))
-
-	// Add any additional arguments passed to the function
+	mpvArgs := []string{
+		"--no-terminal",
+		"--quiet",
+		fmt.Sprintf("--input-ipc-server=%s", socketPath),
+	}
 	mpvArgs = append(mpvArgs, args...)
-
-	// Add the video URL last
 	mpvArgs = append(mpvArgs, link)
 
-	// Debug output
 	if util.IsDebug {
 		fmt.Printf("Starting mpv with arguments: %v\n", mpvArgs)
 	}
 
 	cmd := exec.Command("mpv", mpvArgs...)
+	setProcessGroup(cmd) // Handle OS-specific process groups
 
-	// Set up proper process group for better cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	// Capture stderr for better error reporting
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start mpv: %w", err)
+		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
 	}
 
-	// Wait for the socket to be created with a timeout
-	maxAttempts := 10
+	// Wait for socket creation with longer timeout
+	maxAttempts := 30 // 3 seconds total
 	for i := 0; i < maxAttempts; i++ {
-		if runtime.GOOS != "windows" {
-			if _, err := os.Stat(socketPath); err == nil {
-				// Socket exists, wait a bit more to ensure it's ready
-				time.Sleep(100 * time.Millisecond)
+		if runtime.GOOS == "windows" {
+			// Special handling for Windows named pipes
+			_, err := os.Stat(`\\.\pipe\` + strings.TrimPrefix(socketPath, `\\.\pipe\`))
+			if err == nil {
 				return socketPath, nil
 			}
 		} else {
-			// On Windows, try to connect to verify the pipe exists
-			if conn, err := net.Dial("unix", socketPath); err == nil {
-				conn.Close()
+			if _, err := os.Stat(socketPath); err == nil {
 				return socketPath, nil
 			}
 		}
+
+		// Check if MPV process is still running
+		if cmd.Process == nil || cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			return "", fmt.Errorf("mpv process exited prematurely: %s", stderr.String())
+		}
+
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// If we get here, the socket wasn't created in time
+	// Cleanup if timeout occurs
 	cmd.Process.Kill()
-	return "", fmt.Errorf("timeout waiting for mpv socket to be created")
+	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
 }
 
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
@@ -1181,3 +1184,6 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 	})
 	return err
 }
+
+
+

@@ -5,37 +5,41 @@ import (
 	"fmt"
 	"io"
 	"log"
+	
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	
+
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
+	
 )
 
 // WINDOWS RELEASE
 
-//func dialMPVSocket(socketPath string) (net.Conn, error) {
-//	if runtime.GOOS == "windows" {
-//		//Attempt to connect using named pipe on Windows
-//		conn, err := winio.DialPipe(socketPath, nil)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
-//		}
-//		return conn, nil
-//	} else {
-//		// Unix-like system uses Unix sockets
-//		conn, err := net.Dial("unix", socketPath)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
-//		}
-//		return conn, nil
-//	}
-//}
+// func dialMPVSocket(socketPath string) (net.Conn, error) {
+// 	if runtime.GOOS == "windows" {
+// 		//Attempt to connect using named pipe on Windows
+// 		conn, err := winio.DialPipe(socketPath, nil)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
+// 		}
+// 		return conn, nil
+// } else {
+// 		// Unix-like system uses Unix sockets
+// 		conn, err := net.Dial("unix", socketPath)
+// 		if err != nil {
+// 			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
+// 		}
+// 		return conn, nil
+// 	}
+// }
 
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
