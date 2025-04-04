@@ -1,5 +1,3 @@
-
-
 #!/bin/bash
 
 # Sai imediatamente se um comando falhar

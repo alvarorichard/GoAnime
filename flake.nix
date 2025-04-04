@@ -1,38 +1,29 @@
-{ description = "Go Anime Nix Flake";
+{
+  description = "A basic gomod2nix flake";
 
-  inputs = {
-    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2405.*.tar.gz";
-    nixos-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
-  };
-  outputs = { self, nixpkgs, nixos-unstable }:
-    let
-      allSystems = [
-        "x86_64-linux" 
-        "aarch64-linux" 
-        "x86_64-darwin" 
-        "aarch64-darwin" 
-      ];
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.gomod2nix.url = "github:nix-community/gomod2nix";
+  inputs.gomod2nix.inputs.nixpkgs.follows = "nixpkgs";
+  inputs.gomod2nix.inputs.flake-utils.follows = "flake-utils";
 
-      
-      forAllSystems = f: nixpkgs.lib.genAttrs allSystems (system: f {
-        
-        pkgs = import nixos-unstable { inherit system; };
-      });
-    in
-    {
-      packages = forAllSystems ({ pkgs }: {
-        default = pkgs.buildGoModule {
-          name = "GoAnime";
-          go = pkgs.go_1_23; 
-          src = self;
-          vendorHash = "sha256-dqfgiBMcEhq5hr524BKIbP0ulByWJa7gkoxSy4598v8=";
-          subPackages = [ "cmd/goanime" ];
-          propagatedBuildInputs = with pkgs;[ mpv yt-dlp ]; 
-        };
-      });
-      devShell = forAllSystems ({ pkgs }: pkgs.mkShell {
-        buildInputs = with pkgs;[ mpv yt-dlp];
-      });
-    };
+  outputs = { self, nixpkgs, flake-utils, gomod2nix }:
+    (flake-utils.lib.eachDefaultSystem
+      (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+
+          # The current default sdk for macOS fails to compile go projects, so we use a newer one for now.
+          # This has no effect on other platforms.
+          callPackage = pkgs.darwin.apple_sdk_11_0.callPackage or pkgs.callPackage;
+        in
+        {
+          packages.default = callPackage ./. {
+            inherit (gomod2nix.legacyPackages.${system}) buildGoApplication;
+          };
+          devShells.default = callPackage ./shell.nix {
+            inherit (gomod2nix.legacyPackages.${system}) mkGoEnv gomod2nix;
+          };
+        })
+    );
 }
-

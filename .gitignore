@@ -13,3 +13,4 @@ main
 *.so
 *.dylib
 *.dll
+result
