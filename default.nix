@@ -15,6 +15,7 @@
 buildGoApplication {
   pname = "GoAnime";
   version = "1.0.9";
+  go = pkgs.go;
   pwd = ./.;
   src = ./.;
   modules = ./gomod2nix.toml;
