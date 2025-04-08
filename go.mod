@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime
 
-go 1.24.2
+go 1.24
 
 require (
 	//github.com/Microsoft/go-winio v0.6.2
@@ -13,7 +13,7 @@ require (
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.39.0
 )
 
 require (
@@ -44,10 +44,10 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/sync v0.13.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/term v0.31.0 // indirect
+	golang.org/x/text v0.24.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
