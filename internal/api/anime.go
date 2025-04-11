@@ -25,7 +25,7 @@ type Anime struct {
 	ImageURL  string
 	Episodes  []Episode
 	AnilistID int
-	MalID     int // Adicionado para armazenar o ID do MAL
+	MalID     int 
 	Details   AniListDetails
 }
 
@@ -39,7 +39,7 @@ type Episode struct {
 	IsFiller  bool
 	IsRecap   bool
 	Synopsis  string
-	SkipTimes SkipTimes // Skip times for OP and ED
+	SkipTimes SkipTimes 
 }
 
 type TitleDetails struct {
@@ -56,7 +56,7 @@ type AniListResponse struct {
 
 type AniListDetails struct {
 	ID           int         `json:"id"`
-	IDMal        int         `json:"idMal"` // ID do MAL para integração com Jikan
+	IDMal        int         `json:"idMal"` 
 	Title        Title       `json:"title"`
 	Description  string      `json:"description"`
 	Genres       []string    `json:"genres"`
@@ -89,7 +89,7 @@ func SearchAnime(animeName string) (*Anime, error) {
 			return nil, err
 		}
 		if selectedAnime != nil {
-			// Busca de detalhes adicionais pela AniList API, incluindo a imagem de capa
+			
 			aniListInfo, err := FetchAnimeFromAniList(selectedAnime.Name)
 			if err != nil {
 				log.Printf("Error fetching additional data from AniList: %v", err)
@@ -98,7 +98,7 @@ func SearchAnime(animeName string) (*Anime, error) {
 				selectedAnime.MalID = aniListInfo.Data.Media.IDMal
 				selectedAnime.Details = aniListInfo.Data.Media
 
-				// Definindo a imagem de capa do AniList
+				
 				if aniListInfo.Data.Media.CoverImage.Large != "" {
 					selectedAnime.ImageURL = aniListInfo.Data.Media.CoverImage.Large
 					if util.IsDebug {
@@ -126,7 +126,7 @@ func SearchAnime(animeName string) (*Anime, error) {
 	}
 }
 
-// searchAnimeOnPage searches for anime on a given page and returns the selected anime
+
 func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
 	response, err := getHTTPResponse(pageURL)
 	if err != nil {
@@ -172,7 +172,7 @@ func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
 	return nil, nextPage, nil
 }
 
-// GetEpisodeData fetches episode data for a given anime ID and episode number from Jikan API
+
 func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 
 	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/episodes/%d", animeID, episodeNo)
@@ -187,7 +187,7 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
 	}
 
-	// Helper functions to safely get values
+	
 	getStringValue := func(field string) string {
 		if value, ok := data[field].(string); ok {
 			return value
@@ -209,9 +209,9 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 		return false
 	}
 
-	// Assign values to the Anime struct
+
 	if len(anime.Episodes) == 0 {
-		anime.Episodes = make([]Episode, 1) // Ensure there is at least one episode slot
+		anime.Episodes = make([]Episode, 1)
 	}
 	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
 	anime.Episodes[0].Title.English = getStringValue("title")
@@ -264,7 +264,7 @@ func GetMovieData(animeID int, anime *Anime) error {
 
 	// Assign values to the Anime struct
 	if len(anime.Episodes) == 0 {
-		anime.Episodes = make([]Episode, 1) // Ensure there is at least one episode slot
+		anime.Episodes = make([]Episode, 1) 
 	}
 	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
 	anime.Episodes[0].Title.English = getStringValue("title")

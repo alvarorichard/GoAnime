@@ -13,8 +13,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, windows-latest, macOS-latest ] # Added macOS target operating systems
-        go-version: [ '1.24.1' ] # Using current stable Go version
+        os: [ ubuntu-latest, windows-latest, macOS-latest ]
+        go-version: [ '1.24.1' ] 
     steps:
       - name: Set up Go
         uses: actions/setup-go@v4

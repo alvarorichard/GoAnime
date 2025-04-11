@@ -127,6 +127,7 @@ func main() {
 				episodeNumberStr,
 				anime.MalID, // Pass the animeMalID here
 				updater,
+
 			)
 
 			// Prompt user for next action

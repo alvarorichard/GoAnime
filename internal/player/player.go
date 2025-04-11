@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"context"
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -26,6 +27,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
+     "github.com/lrstanley/go-ytdlp"
 )
 
 const (
@@ -528,11 +530,23 @@ func downloadAndPlayEpisode(
 		if strings.Contains(videoURL, "blogger.com") {
 			// Use yt-dlp to download the video from Blogger
 			fmt.Printf("Downloading episode %s with yt-dlp...\n", episodeNumberStr)
-			cmd := exec.Command("yt-dlp", "--no-progress", "-o", episodePath, videoURL)
-			if err := cmd.Run(); err != nil {
-				log.Panicln("Failed to download video using yt-dlp:", util.ErrorHandler(err))
+			
+			// Ensure yt-dlp is installed
+			ytdlp.MustInstall(context.Background(), nil)
+			
+			// Configure downloader
+			dl := ytdlp.New().
+				//Quiet(true).          // --no-progress
+				Output(episodePath)   // -o <episodePath>
+
+			// Execute download
+			if _, err := dl.Run(context.Background(), videoURL); err != nil {
+				log.Printf("Failed to download video using yt-dlp: %v\n", err)
 			}
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
+
+
+
 		} else {
 			// Initialize progress model
 			m := &model{
@@ -1184,6 +1198,5 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 	})
 	return err
 }
-
 
 
