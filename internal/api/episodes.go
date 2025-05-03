@@ -92,17 +92,15 @@ func parseEpisodes(doc *goquery.Document) []Episode {
 // Returns:
 // - int: the parsed episode number.
 // - error: an error if the string cannot be converted to an integer.
-func parseEpisodeNumber(episodeNum string) (int, error) {
-	// Regular expression to find the first sequence of digits in the episode number string.
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeNum)
-	// If no digits are found, default to "1".
-	if numStr == "" {
-		numStr = "1"
+func parseEpisodeNumber(episodeStr string) (int, error) {
+	re := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+	matches := re.FindStringSubmatch(episodeStr)
+	if len(matches) >= 2 {
+		return strconv.Atoi(matches[1])
 	}
-	// Convert the string to an integer and return it.
-	return strconv.Atoi(numStr)
+	return 1, nil
 }
+
 
 // sortEpisodesByNum sorts a slice of Episode structs in ascending order by the episode number.
 //

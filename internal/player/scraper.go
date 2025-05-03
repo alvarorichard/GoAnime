@@ -156,12 +156,13 @@ func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
 func ExtractEpisodeNumber(episodeStr string) string {
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeStr)
-	if numStr == "" {
-		return "1"
+	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+	matches := numRe.FindStringSubmatch(episodeStr)
+
+	if len(matches) >= 2 {
+		return matches[1]
 	}
-	return numStr
+	return "1"
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
