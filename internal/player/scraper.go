@@ -5,20 +5,18 @@ import (
 	"fmt"
 	"io"
 	"log"
-	
+
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	
-
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
-	
 )
 
 // WINDOWS RELEASE
@@ -131,7 +129,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 }
 
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
-func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
+func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -461,5 +459,3 @@ type VideoData struct {
 type VideoResponse struct {
 	Data []VideoData `json:"data"`
 }
-
-

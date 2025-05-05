@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -26,17 +26,17 @@ func (m *MockMPVClient) MockMPVSendCommand(socketPath string, args []interface{}
 // TestNewRichPresenceUpdater tests the constructor function
 func TestNewRichPresenceUpdater(t *testing.T) {
 	// Arrange
-	anime := &api.Anime{
+	anime := &models.Anime{
 		Name:     "Test Anime",
 		URL:      "https://example.com/anime/test",
 		ImageURL: "https://example.com/image.jpg",
-		Episodes: []api.Episode{
+		Episodes: []models.Episode{
 			{Number: "1"},
 		},
 		AnilistID: 123,
 		MalID:     456,
-		Details: api.AniListDetails{
-			Title: api.Title{
+		Details: models.AniListDetails{
+			Title: models.Title{
 				Romaji:  "Test Anime",
 				English: "Test Anime English",
 			},
@@ -85,17 +85,17 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 // TestStartAndStop tests the start and stop functionality
 func TestStartAndStop(t *testing.T) {
 	// Arrange
-	anime := &api.Anime{
+	anime := &models.Anime{
 		Name:     "Test Anime",
 		URL:      "https://example.com/anime/test",
 		ImageURL: "https://example.com/image.jpg",
-		Episodes: []api.Episode{
+		Episodes: []models.Episode{
 			{Number: "1"},
 		},
 		AnilistID: 123,
 		MalID:     456,
-		Details: api.AniListDetails{
-			Title: api.Title{
+		Details: models.AniListDetails{
+			Title: models.Title{
 				Romaji:  "Test Anime",
 				English: "Test Anime English",
 			},

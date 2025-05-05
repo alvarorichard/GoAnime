@@ -12,72 +12,14 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
 )
 
-const baseSiteURL = "https://animefire.plus"
-
-type Anime struct {
-	Name      string
-	URL       string
-	ImageURL  string
-	Episodes  []Episode
-	AnilistID int
-	MalID     int 
-	Details   AniListDetails
-}
-
-type Episode struct {
-	Number    string
-	Num       int
-	URL       string
-	Title     TitleDetails
-	Aired     string
-	Duration  int
-	IsFiller  bool
-	IsRecap   bool
-	Synopsis  string
-	SkipTimes SkipTimes 
-}
-
-type TitleDetails struct {
-	Romaji   string
-	English  string
-	Japanese string
-}
-
-type AniListResponse struct {
-	Data struct {
-		Media AniListDetails `json:"Media"`
-	} `json:"data"`
-}
-
-type AniListDetails struct {
-	ID           int         `json:"id"`
-	IDMal        int         `json:"idMal"` 
-	Title        Title       `json:"title"`
-	Description  string      `json:"description"`
-	Genres       []string    `json:"genres"`
-	AverageScore int         `json:"averageScore"`
-	Episodes     int         `json:"episodes"`
-	Status       string      `json:"status"`
-	CoverImage   CoverImages `json:"coverImage"`
-}
-
-type CoverImages struct {
-	Large  string `json:"large"`
-	Medium string `json:"medium"`
-}
-
-type Title struct {
-	Romaji  string `json:"romaji"`
-	English string `json:"english"`
-}
-
-func SearchAnime(animeName string) (*Anime, error) {
-	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", baseSiteURL, url.PathEscape(animeName))
+func SearchAnime(animeName string) (*models.Anime, error) {
+	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, url.PathEscape(animeName))
 
 	if util.IsDebug {
 		log.Printf("Searching for anime with URL: %s", currentPageURL)
@@ -89,7 +31,7 @@ func SearchAnime(animeName string) (*Anime, error) {
 			return nil, err
 		}
 		if selectedAnime != nil {
-			
+
 			aniListInfo, err := FetchAnimeFromAniList(selectedAnime.Name)
 			if err != nil {
 				log.Printf("Error fetching additional data from AniList: %v", err)
@@ -98,7 +40,6 @@ func SearchAnime(animeName string) (*Anime, error) {
 				selectedAnime.MalID = aniListInfo.Data.Media.IDMal
 				selectedAnime.Details = aniListInfo.Data.Media
 
-				
 				if aniListInfo.Data.Media.CoverImage.Large != "" {
 					selectedAnime.ImageURL = aniListInfo.Data.Media.CoverImage.Large
 					if util.IsDebug {
@@ -122,12 +63,11 @@ func SearchAnime(animeName string) (*Anime, error) {
 		if nextPageURL == "" {
 			return nil, errors.New("no anime found with the given name")
 		}
-		currentPageURL = baseSiteURL + nextPageURL
+		currentPageURL = models.AnimeFireURL + nextPageURL
 	}
 }
 
-
-func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
+func searchAnimeOnPage(pageURL string) (*models.Anime, string, error) {
 	response, err := getHTTPResponse(pageURL)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to perform search request")
@@ -172,8 +112,7 @@ func searchAnimeOnPage(pageURL string) (*Anime, string, error) {
 	return nil, nextPage, nil
 }
 
-
-func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
+func GetEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
 
 	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/episodes/%d", animeID, episodeNo)
 
@@ -187,7 +126,6 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
 	}
 
-	
 	getStringValue := func(field string) string {
 		if value, ok := data[field].(string); ok {
 			return value
@@ -209,9 +147,8 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 		return false
 	}
 
-
 	if len(anime.Episodes) == 0 {
-		anime.Episodes = make([]Episode, 1)
+		anime.Episodes = make([]models.Episode, 1)
 	}
 	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
 	anime.Episodes[0].Title.English = getStringValue("title")
@@ -226,7 +163,7 @@ func GetEpisodeData(animeID int, episodeNo int, anime *Anime) error {
 }
 
 // GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
-func GetMovieData(animeID int, anime *Anime) error {
+func GetMovieData(animeID int, anime *models.Anime) error {
 
 	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
 
@@ -264,7 +201,7 @@ func GetMovieData(animeID int, anime *Anime) error {
 
 	// Assign values to the Anime struct
 	if len(anime.Episodes) == 0 {
-		anime.Episodes = make([]Episode, 1) 
+		anime.Episodes = make([]models.Episode, 1)
 	}
 	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
 	anime.Episodes[0].Title.English = getStringValue("title")
@@ -279,15 +216,15 @@ func GetMovieData(animeID int, anime *Anime) error {
 }
 
 // ParseAnimes extracts a list of Anime structs from the search results page.
-func ParseAnimes(doc *goquery.Document) []Anime {
-	var animes []Anime
+func ParseAnimes(doc *goquery.Document) []models.Anime {
+	var animes []models.Anime
 
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 		urlPath, exists := s.Attr("href")
 		if !exists {
 			return
 		}
-		url := resolveURL(baseSiteURL, urlPath)
+		url := resolveURL(models.AnimeFireURL, urlPath)
 
 		name := strings.TrimSpace(s.Text())
 
@@ -295,7 +232,7 @@ func ParseAnimes(doc *goquery.Document) []Anime {
 			log.Printf("Parsed Anime - Name: %s, URL: %s", name, url)
 		}
 
-		animes = append(animes, Anime{
+		animes = append(animes, models.Anime{
 			Name: name,
 			URL:  url,
 		})
@@ -305,7 +242,7 @@ func ParseAnimes(doc *goquery.Document) []Anime {
 }
 
 // FetchAnimeDetails retrieves additional information for the selected anime
-func FetchAnimeDetails(anime *Anime) error {
+func FetchAnimeDetails(anime *models.Anime) error {
 	response, err := http.Get(anime.URL)
 	if err != nil {
 		return errors.Wrap(err, "failed to get anime details page")
@@ -335,7 +272,7 @@ func FetchAnimeDetails(anime *Anime) error {
 	return nil
 }
 
-func FetchAnimeFromAniList(animeName string) (*AniListResponse, error) {
+func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	cleanedName := CleanTitle(animeName)
 	if util.IsDebug {
 		log.Printf("Attempting AniList search with title: %s", cleanedName)
@@ -394,7 +331,7 @@ func FetchAnimeFromAniList(animeName string) (*AniListResponse, error) {
 		return nil, fmt.Errorf("AniList API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result AniListResponse
+	var result models.AniListResponse
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read AniList API response: %v", err)
@@ -420,7 +357,7 @@ func FetchAnimeFromAniList(animeName string) (*AniListResponse, error) {
 }
 
 // selectAnimeWithGoFuzzyFinder allows the user to select an anime from a list using fuzzy search
-func selectAnimeWithGoFuzzyFinder(animes []Anime) (*Anime, error) {
+func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) {
 	if len(animes) == 0 {
 		return nil, errors.New("no anime provided")
 	}
@@ -444,7 +381,7 @@ func selectAnimeWithGoFuzzyFinder(animes []Anime) (*Anime, error) {
 }
 
 // sortAnimes sorts a list of Anime structs alphabetically by name
-func sortAnimes(animeList []Anime) []Anime {
+func sortAnimes(animeList []models.Anime) []models.Anime {
 	sort.Slice(animeList, func(i, j int) bool {
 		return animeList[i].Name < animeList[j].Name
 	})
