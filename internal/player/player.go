@@ -3,6 +3,7 @@ package player
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,16 +19,16 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"context"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/lrstanley/go-ytdlp"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
-     "github.com/lrstanley/go-ytdlp"
 )
 
 const (
@@ -439,7 +440,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 }
 
 //// HandleDownloadAndPlay handles the download and playback of the video
-//func HandleDownloadAndPlay(videoURL string, episodes []api.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
+//func HandleDownloadAndPlay(videoURL string, episodes []models.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
 //	downloadOption := askForDownload()
 //	switch downloadOption {
 //	case 1:
@@ -461,7 +462,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 // HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(
 	videoURL string,
-	episodes []api.Episode,
+	episodes []models.Episode,
 	selectedEpisodeNum int,
 	animeURL string,
 	episodeNumberStr string,
@@ -502,7 +503,7 @@ func HandleDownloadAndPlay(
 
 func downloadAndPlayEpisode(
 	videoURL string,
-	episodes []api.Episode,
+	episodes []models.Episode,
 	selectedEpisodeNum int,
 	animeURL string,
 	episodeNumberStr string,
@@ -530,22 +531,20 @@ func downloadAndPlayEpisode(
 		if strings.Contains(videoURL, "blogger.com") {
 			// Use yt-dlp to download the video from Blogger
 			fmt.Printf("Downloading episode %s with yt-dlp...\n", episodeNumberStr)
-			
+
 			// Ensure yt-dlp is installed
 			ytdlp.MustInstall(context.Background(), nil)
-			
+
 			// Configure downloader
 			dl := ytdlp.New().
 				//Quiet(true).          // --no-progress
-				Output(episodePath)   // -o <episodePath>
+				Output(episodePath) // -o <episodePath>
 
 			// Execute download
 			if _, err := dl.Run(context.Background(), videoURL); err != nil {
 				log.Printf("Failed to download video using yt-dlp: %v\n", err)
 			}
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
-
-
 
 		} else {
 			// Initialize progress model
@@ -655,7 +654,7 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
+func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	// Get the start and end episode numbers from the user
 	prompt := promptui.Prompt{
 		Label: "Enter the start episode number",
@@ -711,7 +710,7 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 	// Calculate total content length
 	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
 		// Find the episode in the 'episodes' slice
-		var episode api.Episode
+		var episode models.Episode
 		found := false
 		for _, ep := range episodes {
 			// Extract numeric part from ep.Number
@@ -766,7 +765,7 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 			// Now start downloads
 			for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
 				// Find the episode in the 'episodes' slice
-				var episode api.Episode
+				var episode models.Episode
 				found := false
 				for _, ep := range episodes {
 					// Extract numeric part from ep.Number
@@ -871,7 +870,7 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 
 		for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
 			// Find the episode in the 'episodes' slice
-			var episode api.Episode
+			var episode models.Episode
 			found := false
 			for _, ep := range episodes {
 				// Extract numeric part from ep.Number
@@ -955,7 +954,7 @@ func HandleBatchDownload(episodes []api.Episode, animeURL string) error {
 // playVideo handles the online playback of a video and user interaction.
 func playVideo(
 	videoURL string,
-	episodes []api.Episode,
+	episodes []models.Episode,
 	currentEpisodeNum int,
 	animeMalID int,
 	updater *RichPresenceUpdater,
@@ -1198,5 +1197,3 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 	})
 	return err
 }
-
-

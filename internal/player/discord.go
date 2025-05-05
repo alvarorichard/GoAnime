@@ -2,16 +2,17 @@ package player
 
 import (
 	"fmt"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/hugolgst/rich-go/client"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/hugolgst/rich-go/client"
 )
 
 type RichPresenceUpdater struct {
-	anime           *api.Anime
+	anime           *models.Anime
 	isPaused        *bool
 	animeMutex      *sync.Mutex
 	updateFreq      time.Duration
@@ -23,7 +24,7 @@ type RichPresenceUpdater struct {
 	socketPath      string        // Path to mpv IPC socket
 }
 
-func NewRichPresenceUpdater(anime *api.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
+func NewRichPresenceUpdater(anime *models.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
 	return &RichPresenceUpdater{
 		anime:           anime,
 		isPaused:        isPaused,

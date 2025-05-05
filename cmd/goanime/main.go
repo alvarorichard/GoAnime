@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/hugolgst/rich-go/client"
@@ -82,7 +83,7 @@ func main() {
 
 			// Lock anime struct and update with selected episode
 			animeMutex.Lock()
-			anime.Episodes = []api.Episode{
+			anime.Episodes = []models.Episode{
 				{
 					Number: episodeNumberStr,
 					Num:    selectedEpisodeNum,
@@ -127,7 +128,6 @@ func main() {
 				episodeNumberStr,
 				anime.MalID, // Pass the animeMalID here
 				updater,
-
 			)
 
 			// Prompt user for next action
@@ -149,7 +149,7 @@ func main() {
 
 		// Lock anime struct and update with the first episode
 		animeMutex.Lock()
-		anime.Episodes = []api.Episode{episodes[0]}
+		anime.Episodes = []models.Episode{episodes[0]}
 		animeMutex.Unlock()
 
 		// Fetch details and AniSkip data for the movie/OVA

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -26,7 +26,7 @@ func (m *MockFuzzyFinder) Find(slice interface{}, itemFunc func(i int) string) (
 }
 
 // sortAnimes is a helper function to sort animes
-func sortAnimes(animeList []api.Anime) []api.Anime {
+func sortAnimes(animeList []models.Anime) []models.Anime {
 	sort.Slice(animeList, func(i, j int) bool {
 		return animeList[i].Name < animeList[j].Name
 	})
@@ -34,7 +34,7 @@ func sortAnimes(animeList []api.Anime) []api.Anime {
 }
 
 // selectAnimeWithGoFuzzyFinder is a modified version of the original function for testing
-func selectAnimeWithGoFuzzyFinder(finder FuzzyFinder, animes []api.Anime) (string, error) {
+func selectAnimeWithGoFuzzyFinder(finder FuzzyFinder, animes []models.Anime) (string, error) {
 	if len(animes) == 0 {
 		return "", errors.New("no anime provided")
 	}
@@ -65,7 +65,7 @@ func selectAnimeWithGoFuzzyFinder(finder FuzzyFinder, animes []api.Anime) (strin
 func TestSelectAnimeWithGoFuzzyFinder(t *testing.T) {
 	tests := []struct {
 		name        string
-		animes      []api.Anime
+		animes      []models.Anime
 		findResult  int
 		findError   error
 		expected    string
@@ -73,7 +73,7 @@ func TestSelectAnimeWithGoFuzzyFinder(t *testing.T) {
 	}{
 		{
 			name: "Single anime selection",
-			animes: []api.Anime{
+			animes: []models.Anime{
 				{Name: "Anime One"},
 				{Name: "Anime Three"},
 				{Name: "Anime Two"},
@@ -85,7 +85,7 @@ func TestSelectAnimeWithGoFuzzyFinder(t *testing.T) {
 		},
 		{
 			name:        "No anime provided",
-			animes:      []api.Anime{},
+			animes:      []models.Anime{},
 			findResult:  0,
 			findError:   nil,
 			expected:    "",
@@ -93,7 +93,7 @@ func TestSelectAnimeWithGoFuzzyFinder(t *testing.T) {
 		},
 		{
 			name: "Find function error",
-			animes: []api.Anime{
+			animes: []models.Anime{
 				{Name: "Anime One"},
 				{Name: "Anime Three"},
 				{Name: "Anime Two"},

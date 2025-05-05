@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/pkg/errors"
 )
 
@@ -18,9 +19,9 @@ import (
 // - animeURL: the URL of the anime's page.
 //
 // Returns:
-// - []Episode: a slice of Episode structs, sorted by episode number.
+// - []models.Episode: a slice of Episode structs, sorted by episode number.
 // - error: an error if the process fails at any step.
-func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
+func GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 	// Send an HTTP GET request to retrieve the anime details.
 	resp, err := SafeGet(animeURL)
 	if err != nil {
@@ -56,9 +57,9 @@ func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 // - doc: a pointer to a goquery.Document which represents the parsed HTML content.
 //
 // Returns:
-// - []Episode: a slice of Episode structs extracted from the HTML document.
-func parseEpisodes(doc *goquery.Document) []Episode {
-	var episodes []Episode
+// - []models.Episode: a slice of Episode structs extracted from the HTML document.
+func parseEpisodes(doc *goquery.Document) []models.Episode {
+	var episodes []models.Episode
 
 	// Find all anchor elements within the specified CSS selector that represent episodes and iterate over them.
 	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
@@ -74,7 +75,7 @@ func parseEpisodes(doc *goquery.Document) []Episode {
 		}
 
 		// Append the parsed episode information to the episodes slice.
-		episodes = append(episodes, Episode{
+		episodes = append(episodes, models.Episode{
 			Number: episodeNum,
 			Num:    num,
 			URL:    episodeURL,
@@ -101,12 +102,11 @@ func parseEpisodeNumber(episodeStr string) (int, error) {
 	return 1, nil
 }
 
-
 // sortEpisodesByNum sorts a slice of Episode structs in ascending order by the episode number.
 //
 // Parameters:
 // - episodes: a slice of Episode structs to be sorted.
-func sortEpisodesByNum(episodes []Episode) {
+func sortEpisodesByNum(episodes []models.Episode) {
 	// Sort the episodes slice in place using the sort.Slice function.
 	// The sorting is done based on the Num field of each Episode struct.
 	sort.Slice(episodes, func(i, j int) bool {
