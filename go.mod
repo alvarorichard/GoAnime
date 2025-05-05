@@ -16,6 +16,8 @@ require (
 	golang.org/x/net v0.39.0
 )
 
+require github.com/lrstanley/go-ytdlp v0.0.0-20250401014907-da1707e4fb85
+
 require (
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
@@ -33,7 +35,6 @@ require (
 	github.com/gdamore/tcell/v2 v2.8.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
-	github.com/lrstanley/go-ytdlp v0.0.0-20250401014907-da1707e4fb85 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
