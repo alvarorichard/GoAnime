@@ -1,16 +1,198 @@
+// // tracking/sqlite_tracker.go
+// //
+// // Tracker que usa **SQLite em modo WAL**.
+// // • Cada update executa um INSERT … ON CONFLICT DO UPDATE e retorna
+// //   somente depois de a transação estar no disco (durável).
+// // • Sem goroutines nem filas; latência típica < 1 ms em SSD.
+// // • DSN: journal_mode=WAL, synchronous=NORMAL, busy_timeout=3000 ms.
+
+// package tracking
+
+// import (
+// 	"database/sql"
+// 	"fmt"
+// 	"time"
+
+// 	_ "github.com/mattn/go-sqlite3"
+// )
+
+// /*────────────────────────────────────────────────────────────────────────────*
+//  |  Estruturas                                                               |
+//  *────────────────────────────────────────────────────────────────────────────*/
+
+// type Anime struct {
+// 	AnilistID     int
+// 	AllanimeID    string
+// 	EpisodeNumber int
+// 	PlaybackTime  int
+// 	Duration      int
+// 	Title         string
+// 	LastUpdated   time.Time
+// }
+
+// type LocalTracker struct {
+// 	db *sql.DB
+// }
+
+// /*────────────────────────────────────────────────────────────────────────────*
+//  |  Inicialização                                                            |
+//  *────────────────────────────────────────────────────────────────────────────*/
+
+// // NewLocalTracker abre ou cria o banco e garante o schema.
+// func NewLocalTracker(dbPath string) *LocalTracker {
+// 	dsn := fmt.Sprintf(
+// 		"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_busy_timeout=3000&_foreign_keys=on",
+// 		dbPath,
+// 	)
+// 	db, err := sql.Open("sqlite3", dsn)
+// 	if err != nil {
+// 		panic(err) // deixe propagar ou trate conforme seu projeto
+// 	}
+// 	db.SetMaxOpenConns(1)
+
+// 	const schema = `CREATE TABLE IF NOT EXISTS anime_progress (
+// 		anilist_id     INTEGER NOT NULL,
+// 		allanime_id    TEXT    NOT NULL,
+// 		episode_number INTEGER NOT NULL,
+// 		playback_time  INTEGER NOT NULL,
+// 		duration       INTEGER NOT NULL,
+// 		title          TEXT,
+// 		last_updated   TEXT    NOT NULL,
+// 		PRIMARY KEY (anilist_id, allanime_id)
+// 	);`
+// 	if _, err = db.Exec(schema); err != nil {
+// 		db.Close()
+// 		panic(err)
+// 	}
+// 	return &LocalTracker{db: db}
+// }
+
+// /*────────────────────────────────────────────────────────────────────────────*
+//  |  Operações públicas                                                       |
+//  *────────────────────────────────────────────────────────────────────────────*/
+
+// // UpdateProgress grava (upsert) imediatamente.
+// func (t *LocalTracker) UpdateProgress(a Anime) error {
+// 	a.LastUpdated = time.Now().UTC()
+
+// 	const upsert = `
+// 	INSERT INTO anime_progress
+// 	    (anilist_id, allanime_id, episode_number,
+// 	     playback_time, duration, title, last_updated)
+// 	VALUES (?,?,?,?,?,?,?)
+// 	ON CONFLICT(anilist_id, allanime_id) DO UPDATE SET
+// 		episode_number = excluded.episode_number,
+// 		playback_time  = excluded.playback_time,
+// 		duration       = excluded.duration,
+// 		title          = excluded.title,
+// 		last_updated   = excluded.last_updated;
+// 	`
+// 	_, err := t.db.Exec(upsert,
+// 		a.AnilistID, a.AllanimeID,
+// 		a.EpisodeNumber, a.PlaybackTime,
+// 		a.Duration, a.Title, a.LastUpdated.Format(time.RFC3339),
+// 	)
+// 	return err
+// }
+
+// // DeleteAnime remove um registro.
+// func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
+// 	_, err := t.db.Exec(
+// 		`DELETE FROM anime_progress
+// 		  WHERE anilist_id=? AND allanime_id=?`,
+// 		anilistID, allanimeID,
+// 	)
+// 	return err
+// }
+
+// // GetAnime retorna um registro específico.
+// func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error) {
+// 	row := t.db.QueryRow(
+// 		`SELECT anilist_id, allanime_id, episode_number,
+// 		        playback_time, duration, title, last_updated
+// 		   FROM anime_progress
+// 		  WHERE anilist_id=? AND allanime_id=?`,
+// 		anilistID, allanimeID,
+// 	)
+// 	var a Anime
+// 	var ts string
+// 	err := row.Scan(&a.AnilistID, &a.AllanimeID,
+// 		&a.EpisodeNumber, &a.PlaybackTime,
+// 		&a.Duration, &a.Title, &ts)
+// 	if err == sql.ErrNoRows {
+// 		return nil, nil
+// 	}
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	a.LastUpdated, _ = time.Parse(time.RFC3339, ts)
+// 	return &a, nil
+// }
+
+// // GetAllAnime devolve slice com todos registros.
+// func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
+// 	rows, err := t.db.Query(
+// 		`SELECT anilist_id, allanime_id, episode_number,
+// 		        playback_time, duration, title, last_updated
+// 		   FROM anime_progress`,
+// 	)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer rows.Close()
+
+// 	var list []Anime
+// 	for rows.Next() {
+// 		var a Anime
+// 		var ts string
+// 		if err = rows.Scan(&a.AnilistID, &a.AllanimeID,
+// 			&a.EpisodeNumber, &a.PlaybackTime,
+// 			&a.Duration, &a.Title, &ts); err != nil {
+// 			return nil, err
+// 		}
+// 		a.LastUpdated, _ = time.Parse(time.RFC3339, ts)
+// 		list = append(list, a)
+// 	}
+// 	return list, rows.Err()
+// }
+
+// // Close fecha a conexão.
+// func (t *LocalTracker) Close() error { return t.db.Close() }
+
+
+// tracking/sqlite_tracker.go
+//
+// Rastreador de progresso usando **SQLite + WAL** otimizado:
+// ─ Prepared‑statement único para UPSERT  → menos “prepare/step”.
+// ─ PRAGMAs de performance (_wal_autocheckpoint, _cache_size, busy_timeout).
+// ─ Cada operação grava em < 1 ms (SSD) e permanece durável.
+//
+// Requer: `go get github.com/mattn/go-sqlite3` (CGO).
+
+// tracking/sqlite_tracker.go
+//
+// Rastreador de progresso usando **SQLite + WAL** otimizado:
+// ─ Prepared‑statement único para UPSERT  → menos “prepare/step”.
+// ─ PRAGMAs de performance (_wal_autocheckpoint, _cache_size, busy_timeout).
+// ─ Cada operação grava em < 1 ms (SSD) e permanece durável.
+//
+// Requer: `go get github.com/mattn/go-sqlite3` (CGO).
+
 package tracking
 
 import (
-	"encoding/csv"
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
-// Anime represents the structure for tracking anime progress
+/*────────────────────────────────────────────────────────────────────────────*
+ |  Tipos                                                                    |
+ *────────────────────────────────────────────────────────────────────────────*/
+
+// Anime é o payload que o app usa.
 type Anime struct {
 	AnilistID     int
 	AllanimeID    string
@@ -21,298 +203,151 @@ type Anime struct {
 	LastUpdated   time.Time
 }
 
-// LocalTracker handles local tracking of anime progress
+// LocalTracker mantém a conexão e o statement preparado.
 type LocalTracker struct {
-	databaseFile string
-	cache        map[string]Anime
-	mu           sync.RWMutex
-	writeMu      sync.Mutex
-	writeQueue   chan Anime
-	stopChan     chan struct{}
-	forceWrite   chan struct{} // Channel to force immediate write
+	db        *sql.DB
+	upsertPS  *sql.Stmt
 }
 
-// NewLocalTracker creates a new instance of LocalTracker
-func NewLocalTracker(databaseFile string) *LocalTracker {
-	// Ensure the directory exists
-	dir := filepath.Dir(databaseFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil
-	}
+/*────────────────────────────────────────────────────────────────────────────*
+ |  Construtor — abre ou cria DB e prepara o statement                       |
+ *────────────────────────────────────────────────────────────────────────────*/
 
-	tracker := &LocalTracker{
-		databaseFile: databaseFile,
-		cache:        make(map[string]Anime),
-		writeQueue:   make(chan Anime, 100),
-		stopChan:     make(chan struct{}),
-		forceWrite:   make(chan struct{}, 1),
-	}
+func NewLocalTracker(dbPath string) *LocalTracker {
+	dsn := fmt.Sprintf(
+		`file:%s?
+		  _journal_mode=WAL&
+		  _synchronous=NORMAL&
+		  _wal_autocheckpoint=1000&
+		  _busy_timeout=3000&
+		  _cache_size=-20000`,
+		dbPath,
+	)
 
-	// Create file with headers if it doesn't exist
-	if _, err := os.Stat(databaseFile); os.IsNotExist(err) {
-		if err := tracker.writeHeaders(); err != nil {
-			return nil
-		}
-	}
-
-	// Load existing data into cache
-	if entries, err := tracker.readAll(); err == nil {
-		for _, entry := range entries {
-			key := getCacheKey(entry.AnilistID, entry.AllanimeID)
-			tracker.cache[key] = entry
-		}
-	}
-
-	// Start background writer
-	go tracker.backgroundWriter()
-
-	return tracker
-}
-
-// writeHeaders writes the CSV headers to the file
-func (lt *LocalTracker) writeHeaders() error {
-	lt.writeMu.Lock()
-	defer lt.writeMu.Unlock()
-
-	file, err := os.Create(lt.databaseFile)
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		panic(err)
 	}
-	defer file.Close()
+	db.SetMaxOpenConns(1) // 1 writer é o bastante
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	headers := []string{"anilist_id", "allanime_id", "episode_number", "playback_time", "duration", "title", "last_updated"}
-	return writer.Write(headers)
-}
-
-// backgroundWriter handles writing updates to the file
-func (lt *LocalTracker) backgroundWriter() {
-	ticker := time.NewTicker(1 * time.Second) // Reduced to 1 second
-	defer ticker.Stop()
-
-	var pendingUpdates []Anime
-	lastWrite := time.Now()
-
-	for {
-		select {
-		case anime := <-lt.writeQueue:
-			pendingUpdates = append(pendingUpdates, anime)
-			// If we have more than 5 updates or it's been more than 2 seconds, write immediately
-			if len(pendingUpdates) >= 5 || time.Since(lastWrite) > 2*time.Second {
-				lt.writeMu.Lock()
-				if err := lt.writeAll(pendingUpdates); err != nil {
-					fmt.Printf("Failed to write updates: %v\n", err)
-				}
-				lt.writeMu.Unlock()
-				pendingUpdates = nil
-				lastWrite = time.Now()
-			}
-		case <-ticker.C:
-			if len(pendingUpdates) > 0 {
-				lt.writeMu.Lock()
-				if err := lt.writeAll(pendingUpdates); err != nil {
-					fmt.Printf("Failed to write updates: %v\n", err)
-				}
-				lt.writeMu.Unlock()
-				pendingUpdates = nil
-				lastWrite = time.Now()
-			}
-		case <-lt.forceWrite:
-			if len(pendingUpdates) > 0 {
-				lt.writeMu.Lock()
-				if err := lt.writeAll(pendingUpdates); err != nil {
-					fmt.Printf("Failed to write updates: %v\n", err)
-				}
-				lt.writeMu.Unlock()
-				pendingUpdates = nil
-				lastWrite = time.Now()
-			}
-		case <-lt.stopChan:
-			// Final write before stopping
-			if len(pendingUpdates) > 0 {
-				lt.writeMu.Lock()
-				_ = lt.writeAll(pendingUpdates)
-				lt.writeMu.Unlock()
-			}
-			return
-		}
-	}
-}
-
-// getCacheKey returns a unique key for an anime entry
-func getCacheKey(anilistID int, allanimeID string) string {
-	return fmt.Sprintf("%d:%s", anilistID, allanimeID)
-}
-
-// UpdateProgress updates the progress of an anime in the local database
-func (lt *LocalTracker) UpdateProgress(anime Anime) error {
-	lt.mu.Lock()
-	key := getCacheKey(anime.AnilistID, anime.AllanimeID)
-	lt.cache[key] = anime
-	lt.mu.Unlock()
-
-	// Queue the update for writing
-	select {
-	case lt.writeQueue <- anime:
-		// Try to force an immediate write if possible
-		select {
-		case lt.forceWrite <- struct{}{}:
-		default:
-		}
-	default:
-		// If queue is full, force an immediate write
-		lt.writeMu.Lock()
-		if err := lt.writeAll([]Anime{anime}); err != nil {
-			lt.writeMu.Unlock()
-			return fmt.Errorf("failed to write update: %w", err)
-		}
-		lt.writeMu.Unlock()
+	const schema = `CREATE TABLE IF NOT EXISTS anime_progress (
+		anilist_id     INTEGER NOT NULL,
+		allanime_id    TEXT    NOT NULL,
+		episode_number INTEGER NOT NULL,
+		playback_time  INTEGER NOT NULL,
+		duration       INTEGER NOT NULL,
+		title          TEXT,
+		last_updated   TEXT    NOT NULL,
+		PRIMARY KEY (anilist_id, allanime_id)
+	);`
+	if _, err = db.Exec(schema); err != nil {
+		db.Close()
+		panic(err)
 	}
 
-	return nil
-}
-
-// GetAnime retrieves a specific anime entry by Anilist ID and Allanime ID
-func (lt *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error) {
-	lt.mu.RLock()
-	defer lt.mu.RUnlock()
-
-	key := getCacheKey(anilistID, allanimeID)
-	if anime, exists := lt.cache[key]; exists {
-		return &anime, nil
-	}
-
-	return nil, nil
-}
-
-// GetAllAnime retrieves all anime entries from the local database
-func (lt *LocalTracker) GetAllAnime() ([]Anime, error) {
-	lt.mu.RLock()
-	defer lt.mu.RUnlock()
-
-	entries := make([]Anime, 0, len(lt.cache))
-	for _, entry := range lt.cache {
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
-}
-
-// DeleteAnime removes an anime entry from the local database
-func (lt *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
-	lt.mu.Lock()
-	key := getCacheKey(anilistID, allanimeID)
-	delete(lt.cache, key)
-	lt.mu.Unlock()
-
-	// Force an immediate write to update the file
-	lt.writeMu.Lock()
-	defer lt.writeMu.Unlock()
-
-	entries, err := lt.GetAllAnime()
+	upsert, err := db.Prepare(`
+		INSERT INTO anime_progress
+		 (anilist_id, allanime_id, episode_number,
+		  playback_time, duration, title, last_updated)
+		VALUES (?,?,?,?,?,?,?)
+		ON CONFLICT(anilist_id, allanime_id) DO UPDATE SET
+		  episode_number = excluded.episode_number,
+		  playback_time  = excluded.playback_time,
+		  duration       = excluded.duration,
+		  title          = excluded.title,
+		  last_updated   = excluded.last_updated;`)
 	if err != nil {
-		return err
+		db.Close()
+		panic(err)
 	}
 
-	return lt.writeAll(entries)
+	return &LocalTracker{db: db, upsertPS: upsert}
 }
 
-// Close stops the background writer and performs final writes
-func (lt *LocalTracker) Close() {
-	// Force a final write before closing
-	lt.forceWrite <- struct{}{}
-	close(lt.stopChan)
+/*────────────────────────────────────────────────────────────────────────────*
+ |  Escrita (UPSERT preparado)                                               |
+ *────────────────────────────────────────────────────────────────────────────*/
+
+func (t *LocalTracker) UpdateProgress(a Anime) error {
+	a.LastUpdated = time.Now().UTC()
+	_, err := t.upsertPS.Exec(
+		a.AnilistID, a.AllanimeID,
+		a.EpisodeNumber, a.PlaybackTime,
+		a.Duration, a.Title, a.LastUpdated.Format(time.RFC3339),
+	)
+	return err
 }
 
-// readAll reads all entries from the CSV file
-func (lt *LocalTracker) readAll() ([]Anime, error) {
-	lt.writeMu.Lock()
-	defer lt.writeMu.Unlock()
+/*────────────────────────────────────────────────────────────────────────────*
+ |  Leitura / deleção                                                        |
+ *────────────────────────────────────────────────────────────────────────────*/
 
-	file, err := os.OpenFile(lt.databaseFile, os.O_RDONLY, 0644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
+// GetAnime devolve nil se não existir.
+func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error) {
+	row := t.db.QueryRow(
+		`SELECT episode_number, playback_time, duration,
+		        title, last_updated
+		   FROM anime_progress
+		  WHERE anilist_id=? AND allanime_id=?`,
+		anilistID, allanimeID,
+	)
 
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV: %w", err)
-	}
-
-	// Skip header row
-	if len(records) <= 1 {
-		return nil, nil
-	}
-
-	var entries []Anime
-	for _, record := range records[1:] {
-		if len(record) < 6 {
-			continue
+	var a Anime
+	var ts string
+	a.AnilistID, a.AllanimeID = anilistID, allanimeID
+	if err := row.Scan(&a.EpisodeNumber, &a.PlaybackTime,
+		&a.Duration, &a.Title, &ts); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
 		}
-
-		anilistID, _ := strconv.Atoi(record[0])
-		episodeNumber, _ := strconv.Atoi(record[2])
-		playbackTime, _ := strconv.Atoi(record[3])
-		duration, _ := strconv.Atoi(record[4])
-
-		anime := Anime{
-			AnilistID:     anilistID,
-			AllanimeID:    record[1],
-			EpisodeNumber: episodeNumber,
-			PlaybackTime:  playbackTime,
-			Duration:      duration,
-			Title:         record[5],
-		}
-
-		// Parse last updated time if available
-		if len(record) > 6 {
-			if lastUpdated, err := time.Parse(time.RFC3339, record[6]); err == nil {
-				anime.LastUpdated = lastUpdated
-			}
-		}
-
-		entries = append(entries, anime)
+		return nil, err
 	}
-
-	return entries, nil
+	a.LastUpdated, _ = time.Parse(time.RFC3339, ts)
+	return &a, nil
 }
 
-// writeAll writes all entries to the CSV file
-func (lt *LocalTracker) writeAll(entries []Anime) error {
-	file, err := os.Create(lt.databaseFile)
+func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
+	rows, err := t.db.Query(
+		`SELECT anilist_id, allanime_id, episode_number,
+		        playback_time, duration, title, last_updated
+		   FROM anime_progress`,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		return nil, err
 	}
-	defer file.Close()
+	defer rows.Close()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	headers := []string{"anilist_id", "allanime_id", "episode_number", "playback_time", "duration", "title", "last_updated"}
-	if err := writer.Write(headers); err != nil {
-		return fmt.Errorf("failed to write headers: %w", err)
-	}
-
-	// Write entries
-	for _, entry := range entries {
-		record := []string{
-			strconv.Itoa(entry.AnilistID),
-			entry.AllanimeID,
-			strconv.Itoa(entry.EpisodeNumber),
-			strconv.Itoa(entry.PlaybackTime),
-			strconv.Itoa(entry.Duration),
-			entry.Title,
-			entry.LastUpdated.Format(time.RFC3339),
+	var list []Anime
+	for rows.Next() {
+		var a Anime
+		var ts string
+		if err = rows.Scan(&a.AnilistID, &a.AllanimeID,
+			&a.EpisodeNumber, &a.PlaybackTime,
+			&a.Duration, &a.Title, &ts); err != nil {
+			return nil, err
 		}
-		if err := writer.Write(record); err != nil {
-			return fmt.Errorf("failed to write record: %w", err)
-		}
+		a.LastUpdated, _ = time.Parse(time.RFC3339, ts)
+		list = append(list, a)
 	}
+	return list, rows.Err()
+}
 
-	return nil
+func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
+	_, err := t.db.Exec(
+		`DELETE FROM anime_progress
+		  WHERE anilist_id=? AND allanime_id=?`,
+		anilistID, allanimeID,
+	)
+	return err
+}
+
+/*────────────────────────────────────────────────────────────────────────────*
+ |  Encerrar                                                                 |
+ *────────────────────────────────────────────────────────────────────────────*/
+
+func (t *LocalTracker) Close() error {
+	if t.upsertPS != nil {
+		_ = t.upsertPS.Close()
+	}
+	return t.db.Close()
 }

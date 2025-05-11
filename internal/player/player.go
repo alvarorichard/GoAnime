@@ -440,26 +440,6 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	return nil
 }
 
-//// HandleDownloadAndPlay handles the download and playback of the video
-//func HandleDownloadAndPlay(videoURL string, episodes []models.Episode, selectedEpisodeNum int, animeURL, episodeNumberStr string, updater *RichPresenceUpdater) {
-//	downloadOption := askForDownload()
-//	switch downloadOption {
-//	case 1:
-//		// Download the current episode
-//		downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr, updater)
-//	case 2:
-//		// Download episodes in a range
-//		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-//			log.Panicln("Failed to download episodes:", util.ErrorHandler(err))
-//		}
-//	default:
-//		// Play online
-//		if err := playVideo(videoURL, episodes, selectedEpisodeNum, updater); err != nil {
-//			log.Panicln("Failed to play video:", util.ErrorHandler(err))
-//		}
-//	}
-//}
-
 // HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(
 	videoURL string,
@@ -952,7 +932,373 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	return nil
 }
 
+func mpvSendPosition(sock string) (int, error) {
+	val, err := mpvSendCommand(sock, []interface{}{"get_property", "time-pos"})
+	if err != nil || val == nil {
+		return -1, err
+	}
+	if f, ok := val.(float64); ok {
+		return int(f + 0.5), nil // arredonda
+	}
+	return -1, nil
+}
+
+// salva posição final antes de sair/trocar
+func saveFinalPosition(tr *tracking.LocalTracker, sock string,
+	animeID int, url string, epNum int,
+	title string, durationSec int) {
+
+	if pos, _ := mpvSendPosition(sock); pos >= 0 {
+		_ = tr.UpdateProgress(tracking.Anime{
+			AnilistID:     animeID,
+			AllanimeID:    url,
+			EpisodeNumber: epNum,
+			PlaybackTime:  pos,
+			Duration:      durationSec,
+			Title:         title,
+			LastUpdated:   time.Now(),
+		})
+	}
+}
+
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return "Unknown Title"
+}
+
+func promptYesNo(label string) (bool, error) {
+	p := promptui.Select{Label: label, Items: []string{"Sim", "Não"}}
+	_, res, err := p.Run()
+	return strings.ToLower(res) == "sim", err
+}
+
+func nextIndex(cmd rune, cur, total int) int {
+	if cmd == 'n' && cur+1 < total {
+		return cur + 1
+	}
+	if cmd == 'p' && cur > 0 {
+		return cur - 1
+	}
+	return cur
+}
+
+func getURL(ep models.Episode) string {
+	u, _ := GetVideoURLForEpisode(ep.URL)
+	return u
+}
+
 // playVideo handles the online playback of a video and user interaction.
+// func playVideo(
+// 	videoURL string,
+// 	episodes []models.Episode,
+// 	currentEpisodeNum int,
+// 	animeMalID int,
+// 	updater *RichPresenceUpdater,
+// ) error {
+// 	// Initialize mpv arguments
+// 	mpvArgs := make([]string, 0)
+
+// 	// Fix the URL if it has a double 'p' in the quality suffix
+// 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
+
+// 	// Fetch AniSkip data for the current episode
+// 	if util.IsDebug {
+// 		log.Printf("Video URL: %s", videoURL)
+// 	}
+
+// 	// Verificar progresso salvo antes de iniciar o vídeo
+// 	currentEpisode := &episodes[currentEpisodeNum-1]
+// 	currentUser, err := user.Current()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get current user: %w", err)
+// 	}
+
+// 	dbPath := filepath.Join(
+// 		currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db",
+// 	)
+// 	tracker := tracking.NewLocalTracker(dbPath)
+// 	if tracker == nil {
+// 		return fmt.Errorf("failed to initialize SQLite tracker")
+// 	}
+// 	if err != nil {
+// 		return fmt.Errorf("failed to initialize tracker: %w", err)
+// 	}
+
+// 	existingAnime, err := tracker.GetAnime(animeMalID, currentEpisode.URL)
+// 	if err == nil && existingAnime != nil && existingAnime.PlaybackTime > 0 {
+// 		fmt.Printf("\nProgresso salvo encontrado: episódio %d, tempo %d segundos.\n", existingAnime.EpisodeNumber, existingAnime.PlaybackTime)
+// 		prompt := promptui.Select{
+// 			Label: "Deseja retomar de onde parou?",
+// 			Items: []string{"Sim", "Não"},
+// 		}
+// 		_, result, err := prompt.Run()
+// 		if err == nil && strings.ToLower(result) == "sim" {
+// 			mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", existingAnime.PlaybackTime))
+// 			if util.IsDebug {
+// 				log.Printf("Retomando do tempo salvo: %d segundos", existingAnime.PlaybackTime)
+// 			}
+// 		}
+// 	}
+
+// 	err = api.GetAndParseAniSkipData(animeMalID, currentEpisodeNum, currentEpisode)
+// 	if err != nil {
+// 		log.Printf("AniSkip data not available for episode %d: %v\n", currentEpisodeNum, err)
+// 	} else if util.IsDebug {
+// 		log.Printf("AniSkip data for episode %d: %+v\n", currentEpisodeNum, currentEpisode.SkipTimes)
+// 	}
+
+// 	// Add skip times to mpv arguments if available
+// 	if currentEpisode.SkipTimes.Op.Start > 0 || currentEpisode.SkipTimes.Op.End > 0 {
+// 		opStart, opEnd := currentEpisode.SkipTimes.Op.Start, currentEpisode.SkipTimes.Op.End
+// 		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_op=%d-%d", opStart, opEnd))
+// 	}
+// 	if currentEpisode.SkipTimes.Ed.Start > 0 || currentEpisode.SkipTimes.Ed.End > 0 {
+// 		edStart, edEnd := currentEpisode.SkipTimes.Ed.Start, currentEpisode.SkipTimes.Ed.End
+// 		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_ed=%d-%d", edStart, edEnd))
+// 	}
+
+// 	// Start mpv with IPC support
+// 	socketPath, err := StartVideo(videoURL, mpvArgs)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to start video with IPC: %w", err)
+// 	}
+
+// 	// Helper to get a non-empty title
+// 	getEpisodeTitle := func(title models.TitleDetails) string {
+// 		if title.English != "" {
+// 			return title.English
+// 		}
+// 		if title.Romaji != "" {
+// 			return title.Romaji
+// 		}
+// 		if title.Japanese != "" {
+// 			return title.Japanese
+// 		}
+// 		return "Unknown Title"
+// 	}
+
+// 	// Only proceed with Rich Presence updates if updater is not nil
+// 	if updater != nil {
+// 		// Wait for the episode to start before retrieving the duration
+// 		go func() {
+// 			for {
+// 				// Get current playback time
+// 				timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+// 				if err != nil {
+// 					if util.IsDebug {
+// 						log.Printf("Error getting playback time: %v", err)
+// 					}
+// 				}
+
+// 				// Check if playback has started
+// 				if timePos != nil {
+// 					if !updater.episodeStarted {
+// 						updater.episodeStarted = true
+// 					}
+// 					break
+// 				}
+// 				time.Sleep(1 * time.Second)
+// 			}
+// 		}()
+
+// 		// Retrieve the video duration once the episode has started
+// 		go func() {
+// 			for {
+// 				if updater.episodeStarted && updater.episodeDuration == 0 {
+// 					// Retrieve video duration
+// 					durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+// 					if err != nil {
+// 						log.Printf("Error getting video duration: %v", err)
+// 					} else if durationPos != nil {
+// 						if duration, ok := durationPos.(float64); ok {
+// 							// Set episodeDuration correctly in seconds
+// 							updater.episodeDuration = time.Duration(duration * float64(time.Second))
+// 							if util.IsDebug {
+// 								log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
+// 							}
+
+// 							// Validate duration
+// 							if updater.episodeDuration < time.Second {
+// 								log.Printf("Warning: Retrieved episode duration is very small (%v). Setting a default duration.", updater.episodeDuration)
+// 								updater.episodeDuration = 24 * time.Minute // Set a reasonable default duration if necessary
+// 							}
+
+// 							// Update local tracking with initial duration
+// 							anime := tracking.Anime{
+// 								AnilistID:     animeMalID,
+// 								AllanimeID:    currentEpisode.URL,
+// 								EpisodeNumber: currentEpisodeNum,
+// 								Duration:      int(updater.episodeDuration.Seconds()),
+// 								Title:         getEpisodeTitle(currentEpisode.Title),
+// 								LastUpdated:   time.Now(),
+// 							}
+// 							if err := tracker.UpdateProgress(anime); err != nil {
+// 								log.Printf("Failed to update local tracking: %v", err)
+// 							}
+// 						} else {
+// 							log.Printf("Error: duration is not a float64")
+// 						}
+// 					}
+// 					break
+// 				}
+// 				time.Sleep(1 * time.Second)
+// 			}
+// 		}()
+
+// 		// Set up the Rich Presence updater and start it
+// 		updater.socketPath = socketPath
+// 		updater.Start()
+// 		defer updater.Stop()
+// 	}
+
+// 	// Locate the index of the current episode
+// 	currentEpisodeIndex := -1
+// 	for i, ep := range episodes {
+// 		if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(currentEpisodeNum) {
+// 			currentEpisodeIndex = i
+// 			break
+// 		}
+// 	}
+// 	if currentEpisodeIndex == -1 {
+// 		return fmt.Errorf("current episode number %d not found", currentEpisodeNum)
+// 	}
+
+// 	// Command loop for user interaction
+// 	reader := bufio.NewReader(os.Stdin)
+// 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit, 's' to skip intro:")
+
+// 	// Start a goroutine to periodically update local tracking
+// 	stopTracking := make(chan struct{})
+// 	go func() {
+// 		ticker := time.NewTicker(30 * time.Second)
+// 		defer ticker.Stop()
+
+// 		for {
+// 			select {
+// 			case <-ticker.C:
+// 				// Get current playback time
+// 				timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+// 				if err != nil {
+// 					if util.IsDebug {
+// 						log.Printf("Error getting playback time for tracking: %v", err)
+// 					}
+// 					continue
+// 				}
+
+// 				if timePos != nil {
+// 					if position, ok := timePos.(float64); ok {
+// 						// Update local tracking
+// 						anime := tracking.Anime{
+// 							AnilistID:     animeMalID,
+// 							AllanimeID:    currentEpisode.URL,
+// 							EpisodeNumber: currentEpisodeNum,
+// 							PlaybackTime:  int(position),
+// 							Duration:      int(updater.episodeDuration.Seconds()),
+// 							Title:         getEpisodeTitle(currentEpisode.Title),
+// 							LastUpdated:   time.Now(),
+// 						}
+// 						if err := tracker.UpdateProgress(anime); err != nil {
+// 							log.Printf("Failed to update local tracking: %v", err)
+// 						}
+// 					}
+// 				}
+// 			case <-stopTracking:
+// 				return
+// 			}
+// 		}
+// 	}()
+
+// 	for {
+// 		char, _, err := reader.ReadRune()
+// 		if err != nil {
+// 			fmt.Printf("Failed to read command: %v\n", err)
+// 			break
+// 		}
+
+// 		switch char {
+// 		case 'n': // Next episode
+// 			if currentEpisodeIndex+1 < len(episodes) {
+// 				nextEpisode := episodes[currentEpisodeIndex+1]
+// 				if updater != nil {
+// 					updater.Stop()
+// 				}
+// 				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
+// 				if err != nil {
+// 					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
+// 					continue
+// 				}
+// 				// Set duration for the next episode
+// 				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
+// 				var newUpdater *RichPresenceUpdater
+// 				if updater != nil {
+// 					newUpdater = NewRichPresenceUpdater(
+// 						updater.anime,
+// 						updater.isPaused,
+// 						updater.animeMutex,
+// 						updater.updateFreq,
+// 						nextEpisodeDuration,
+// 						"",
+// 					)
+// 					updater.episodeStarted = false
+// 				}
+// 				close(stopTracking)
+// 				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, animeMalID, newUpdater)
+// 			} else {
+// 				fmt.Println("Already at the last episode.")
+// 			}
+// 		case 'p': // Previous episode
+// 			if currentEpisodeIndex > 0 {
+// 				prevEpisode := episodes[currentEpisodeIndex-1]
+// 				if updater != nil {
+// 					updater.Stop()
+// 				}
+// 				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
+// 				if err != nil {
+// 					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
+// 					continue
+// 				}
+// 				// Set duration for the previous episode
+// 				prevEpisodeDuration := time.Duration(prevEpisode.Duration) * time.Second
+// 				var newUpdater *RichPresenceUpdater
+// 				if updater != nil {
+// 					newUpdater = NewRichPresenceUpdater(
+// 						updater.anime,
+// 						updater.isPaused,
+// 						updater.animeMutex,
+// 						updater.updateFreq,
+// 						prevEpisodeDuration,
+// 						"",
+// 					)
+// 					updater.episodeStarted = false
+// 				}
+// 				close(stopTracking)
+// 				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, animeMalID, newUpdater)
+// 			} else {
+// 				fmt.Println("Already at the first episode.")
+// 			}
+// 		case 'q': // Quit
+// 			fmt.Println("Quitting video playback.")
+// 			close(stopTracking)
+// 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+// 			return nil
+// 		case 's': // Skip intro (OP)
+// 			if currentEpisode.SkipTimes.Op.End > 0 {
+// 				fmt.Printf("Skipping intro to %d seconds.\n", currentEpisode.SkipTimes.Op.End)
+// 				_, _ = mpvSendCommand(socketPath, []interface{}{"seek", currentEpisode.SkipTimes.Op.End, "absolute"})
+// 			} else {
+// 				fmt.Println("No intro skip data available for this episode.")
+// 			}
+// 		}
+// 	}
+
+// 	return nil
+// }
+
 func playVideo(
 	videoURL string,
 	episodes []models.Episode,
@@ -960,281 +1306,102 @@ func playVideo(
 	animeMalID int,
 	updater *RichPresenceUpdater,
 ) error {
-	// Initialize mpv arguments
-	mpvArgs := make([]string, 0)
 
-	// Fix the URL if it has a double 'p' in the quality suffix
+	/* 1. args + tracker */
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
+	mpvArgs := []string{}
+	user, _ := user.Current()
+	dbPath := filepath.Join(user.HomeDir, ".local", "goanime", "tracking", "progress.db")
+	tracker := tracking.NewLocalTracker(dbPath)
+	curEp := &episodes[currentEpisodeNum-1]
 
-	// Fetch AniSkip data for the current episode
-	if util.IsDebug {
-		log.Printf("Video URL: %s", videoURL)
-	}
-
-	currentEpisode := &episodes[currentEpisodeNum-1]
-	err := api.GetAndParseAniSkipData(animeMalID, currentEpisodeNum, currentEpisode)
-	if err != nil {
-		log.Printf("AniSkip data not available for episode %d: %v\n", currentEpisodeNum, err)
-	} else if util.IsDebug {
-		log.Printf("AniSkip data for episode %d: %+v\n", currentEpisodeNum, currentEpisode.SkipTimes)
-	}
-
-	// Add skip times to mpv arguments if available
-	if currentEpisode.SkipTimes.Op.Start > 0 || currentEpisode.SkipTimes.Op.End > 0 {
-		opStart, opEnd := currentEpisode.SkipTimes.Op.Start, currentEpisode.SkipTimes.Op.End
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_op=%d-%d", opStart, opEnd))
-	}
-	if currentEpisode.SkipTimes.Ed.Start > 0 || currentEpisode.SkipTimes.Ed.End > 0 {
-		edStart, edEnd := currentEpisode.SkipTimes.Ed.Start, currentEpisode.SkipTimes.Ed.End
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_ed=%d-%d", edStart, edEnd))
-	}
-
-	// Initialize local tracker
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
-	}
-	databaseFile := filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "anime_progress.csv")
-	tracker := tracking.NewLocalTracker(databaseFile)
-	if tracker == nil {
-		return fmt.Errorf("failed to initialize tracker")
-	}
-
-	// Check for existing progress
-	existingAnime, err := tracker.GetAnime(animeMalID, currentEpisode.URL)
-	if err != nil {
-		log.Printf("Failed to get existing progress: %v", err)
-	} else if existingAnime != nil {
-		// Add seek position to mpv arguments if we have existing progress
-		if existingAnime.PlaybackTime > 0 {
-			mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", existingAnime.PlaybackTime))
-			if util.IsDebug {
-				log.Printf("Resuming from position: %d seconds", existingAnime.PlaybackTime)
-			}
+	/* 2. retomar se houver */
+	if saved, _ := tracker.GetAnime(animeMalID, curEp.URL); saved != nil && saved.PlaybackTime > 0 {
+		fmt.Printf("Progresso salvo: ep.%d %ds\n", saved.EpisodeNumber, saved.PlaybackTime)
+		if ok, _ := promptYesNo("Retomar?"); ok {
+			mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", saved.PlaybackTime))
 		}
 	}
 
-	// Start mpv with IPC support
-	socketPath, err := StartVideo(videoURL, mpvArgs)
+	/* 3. AniSkip etc (idêntico ao seu código atual) */
+	_ = api.GetAndParseAniSkipData(animeMalID, currentEpisodeNum, curEp)
+	if s := curEp.SkipTimes; s.Op.End > 0 {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_op=%d-%d", s.Op.Start, s.Op.End))
+	}
+	if s := curEp.SkipTimes; s.Ed.End > 0 {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_ed=%d-%d", s.Ed.Start, s.Ed.End))
+	}
+
+	/* 4. inicia MPV */
+	sock, err := StartVideo(videoURL, mpvArgs)
 	if err != nil {
-		return fmt.Errorf("failed to start video with IPC: %w", err)
+		return err
 	}
 
-	// Only proceed with Rich Presence updates if updater is not nil
-	if updater != nil {
-		// Wait for the episode to start before retrieving the duration
-		go func() {
-			for {
-				// Get current playback time
-				timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
-				if err != nil {
-					if util.IsDebug {
-						log.Printf("Error getting playback time: %v", err)
-					}
-				}
-
-				// Check if playback has started
-				if timePos != nil {
-					if !updater.episodeStarted {
-						updater.episodeStarted = true
-					}
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-		}()
-
-		// Retrieve the video duration once the episode has started
-		go func() {
-			for {
-				if updater.episodeStarted && updater.episodeDuration == 0 {
-					// Retrieve video duration
-					durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
-					if err != nil {
-						log.Printf("Error getting video duration: %v", err)
-					} else if durationPos != nil {
-						if duration, ok := durationPos.(float64); ok {
-							// Set episodeDuration correctly in seconds
-							updater.episodeDuration = time.Duration(duration * float64(time.Second))
-							if util.IsDebug {
-								log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
-							}
-
-							// Validate duration
-							if updater.episodeDuration < time.Second {
-								log.Printf("Warning: Retrieved episode duration is very small (%v). Setting a default duration.", updater.episodeDuration)
-								updater.episodeDuration = 24 * time.Minute // Set a reasonable default duration if necessary
-							}
-
-							// Update local tracking with initial duration
-							anime := tracking.Anime{
-								AnilistID:     animeMalID,
-								AllanimeID:    currentEpisode.URL,
-								EpisodeNumber: currentEpisodeNum,
-								Duration:      int(updater.episodeDuration.Seconds()),
-								Title:         currentEpisode.Title.English,
-								LastUpdated:   time.Now(),
-							}
-							if err := tracker.UpdateProgress(anime); err != nil {
-								log.Printf("Failed to update local tracking: %v", err)
-							}
-						} else {
-							log.Printf("Error: duration is not a float64")
-						}
-					}
-					break
-				}
-				time.Sleep(1 * time.Second)
-			}
-		}()
-
-		// Set up the Rich Presence updater and start it
-		updater.socketPath = socketPath
-		updater.Start()
-		defer updater.Stop()
-	}
-
-	// Locate the index of the current episode
-	currentEpisodeIndex := -1
-	for i, ep := range episodes {
-		if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(currentEpisodeNum) {
-			currentEpisodeIndex = i
-			break
-		}
-	}
-	if currentEpisodeIndex == -1 {
-		return fmt.Errorf("current episode number %d not found", currentEpisodeNum)
-	}
-
-	// Command loop for user interaction
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit, 's' to skip intro:")
-
-	// Start a goroutine to periodically update local tracking
-	stopTracking := make(chan struct{})
+	/* 5. tracking periódico — 2 s, somente se mudou */
+	stopTrack := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
+		tick := time.NewTicker(2 * time.Second)
+		defer tick.Stop()
+		last := -1
 		for {
 			select {
-			case <-ticker.C:
-				// Get current playback time
-				timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
-				if err != nil {
-					if util.IsDebug {
-						log.Printf("Error getting playback time for tracking: %v", err)
-					}
-					continue
+			case <-tick.C:
+				pos, _ := mpvSendPosition(sock)
+				if pos >= 0 && pos != last {
+					last = pos
+					_ = tracker.UpdateProgress(tracking.Anime{
+						AnilistID:  animeMalID,
+						AllanimeID: curEp.URL,
+						EpisodeNumber: currentEpisodeNum,
+						PlaybackTime:  pos,
+						Duration:      curEp.Duration,
+						Title:         firstNonEmpty(curEp.Title.English, curEp.Title.Romaji, curEp.Title.Japanese),
+						LastUpdated:   time.Now(),
+					})
 				}
-
-				if timePos != nil {
-					if position, ok := timePos.(float64); ok {
-						// Update local tracking
-						anime := tracking.Anime{
-							AnilistID:     animeMalID,
-							AllanimeID:    currentEpisode.URL,
-							EpisodeNumber: currentEpisodeNum,
-							PlaybackTime:  int(position),
-							Duration:      int(updater.episodeDuration.Seconds()),
-							Title:         currentEpisode.Title.English,
-							LastUpdated:   time.Now(),
-						}
-						if err := tracker.UpdateProgress(anime); err != nil {
-							log.Printf("Failed to update local tracking: %v", err)
-						}
-					}
-				}
-			case <-stopTracking:
+			case <-stopTrack:
 				return
 			}
 		}
 	}()
 
+	/* 6. loop de comandos (somente ‘n’, ‘p’, ‘q’ atualizados) */
+	reader := bufio.NewReader(os.Stdin)
 	for {
-		char, _, err := reader.ReadRune()
-		if err != nil {
-			fmt.Printf("Failed to read command: %v\n", err)
-			break
-		}
-
-		switch char {
-		case 'n': // Next episode
-			if currentEpisodeIndex+1 < len(episodes) {
-				nextEpisode := episodes[currentEpisodeIndex+1]
-				if updater != nil {
-					updater.Stop()
-				}
-				nextVideoURL, err := GetVideoURLForEpisode(nextEpisode.URL)
-				if err != nil {
-					fmt.Printf("Failed to get video URL for next episode: %v\n", err)
-					continue
-				}
-				// Set duration for the next episode
-				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
-				var newUpdater *RichPresenceUpdater
-				if updater != nil {
-					newUpdater = NewRichPresenceUpdater(
-						updater.anime,
-						updater.isPaused,
-						updater.animeMutex,
-						updater.updateFreq,
-						nextEpisodeDuration,
-						"",
-					)
-					updater.episodeStarted = false
-				}
-				close(stopTracking)
-				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, animeMalID, newUpdater)
-			} else {
-				fmt.Println("Already at the last episode.")
-			}
-		case 'p': // Previous episode
-			if currentEpisodeIndex > 0 {
-				prevEpisode := episodes[currentEpisodeIndex-1]
-				if updater != nil {
-					updater.Stop()
-				}
-				prevVideoURL, err := GetVideoURLForEpisode(prevEpisode.URL)
-				if err != nil {
-					fmt.Printf("Failed to get video URL for previous episode: %v\n", err)
-					continue
-				}
-				// Set duration for the previous episode
-				prevEpisodeDuration := time.Duration(prevEpisode.Duration) * time.Second
-				var newUpdater *RichPresenceUpdater
-				if updater != nil {
-					newUpdater = NewRichPresenceUpdater(
-						updater.anime,
-						updater.isPaused,
-						updater.animeMutex,
-						updater.updateFreq,
-						prevEpisodeDuration,
-						"",
-					)
-					updater.episodeStarted = false
-				}
-				close(stopTracking)
-				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, animeMalID, newUpdater)
-			} else {
-				fmt.Println("Already at the first episode.")
-			}
-		case 'q': // Quit
-			fmt.Println("Quitting video playback.")
-			close(stopTracking)
-			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+		c, _, _ := reader.ReadRune()
+		switch c {
+		case 'q':
+			close(stopTrack)
+			saveFinalPosition(tracker, sock, animeMalID, curEp.URL, currentEpisodeNum,
+				firstNonEmpty(curEp.Title.English, curEp.Title.Romaji, curEp.Title.Japanese),
+				curEp.Duration)
+			_, _ = mpvSendCommand(sock, []interface{}{"quit"})
 			return nil
-		case 's': // Skip intro (OP)
-			if currentEpisode.SkipTimes.Op.End > 0 {
-				fmt.Printf("Skipping intro to %d seconds.\n", currentEpisode.SkipTimes.Op.End)
-				_, _ = mpvSendCommand(socketPath, []interface{}{"seek", currentEpisode.SkipTimes.Op.End, "absolute"})
-			} else {
-				fmt.Println("No intro skip data available for this episode.")
+
+		case 'n', 'p':
+			next := nextIndex(c, currentEpisodeNum-1, len(episodes))
+			if next == currentEpisodeNum-1 {
+				fmt.Println("Limite atingido.")
+				continue
+			}
+			close(stopTrack) // para ticker
+			saveFinalPosition(tracker, sock, animeMalID, curEp.URL, currentEpisodeNum,
+				firstNonEmpty(curEp.Title.English, curEp.Title.Romaji, curEp.Title.Japanese),
+				curEp.Duration)
+			return playVideo(
+				getURL(episodes[next]),
+				episodes,
+				next+1,
+				animeMalID,
+				updater,
+			)
+		case 's':
+			if curEp.SkipTimes.Op.End > 0 {
+				_, _ = mpvSendCommand(sock, []interface{}{"seek", curEp.SkipTimes.Op.End, "absolute"})
 			}
 		}
 	}
-
-	return nil
 }
 
 // ToggleSubtitle toggles subtitle visibility

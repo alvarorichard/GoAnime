@@ -24,6 +24,14 @@ type RichPresenceUpdater struct {
 	socketPath      string        // Path to mpv IPC socket
 }
 
+func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
+	panic("unimplemented")
+}
+
+func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
+	panic("unimplemented")
+}
+
 func NewRichPresenceUpdater(anime *models.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
 	return &RichPresenceUpdater{
 		anime:           anime,
