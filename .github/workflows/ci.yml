@@ -5,8 +5,6 @@ on:
     branches: [ main, dev, ipc ]
   pull_request:
     branches: [ main, dev, ipc ]
-  schedule:
-    - cron: '0 0 * * *'
 
 jobs:
   build:
@@ -64,7 +62,3 @@ jobs:
           file: ./internal/player/test/helper_test.go
           flags: -v
           name: player-tests
-
-
-
-
