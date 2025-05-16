@@ -396,9 +396,18 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 					log.Printf("Available quality: %s -> %s", v.Label, v.Src)
 				}
 			}
-			// If we have multiple qualities, let the user select
+			// If we have multiple qualities, pick the highest automatically
 			if len(videoResponse.Data) > 1 {
-				return selectVideoQuality(videoResponse.Data)
+				best := videoResponse.Data[0]
+				bestQ, _ := strconv.Atoi(best.Label)
+				for _, v := range videoResponse.Data {
+					q, _ := strconv.Atoi(v.Label)
+					if q > bestQ {
+						best = v
+						bestQ = q
+					}
+				}
+				return best.Src, nil
 			}
 			// If only one quality, use it
 			return videoResponse.Data[0].Src, nil
@@ -429,9 +438,18 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	var videoResponse VideoResponse
 	err := json.Unmarshal([]byte(videoSrc), &videoResponse)
 	if err == nil && len(videoResponse.Data) > 0 {
-		// If we have multiple qualities, let the user select
+		// If we have multiple qualities, pick the highest automatically
 		if len(videoResponse.Data) > 1 {
-			return selectVideoQuality(videoResponse.Data)
+			best := videoResponse.Data[0]
+			bestQ, _ := strconv.Atoi(best.Label)
+			for _, v := range videoResponse.Data {
+				q, _ := strconv.Atoi(v.Label)
+				if q > bestQ {
+					best = v
+					bestQ = q
+				}
+			}
+			return best.Src, nil
 		}
 		// If only one quality, use it
 		return videoResponse.Data[0].Src, nil

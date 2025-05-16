@@ -25,6 +25,13 @@ func playVideo(
 	animeMalID int,
 	updater *RichPresenceUpdater,
 ) error {
+	// Prompt for quality selection if multiple are available (streaming)
+	if strings.HasPrefix(videoURL, "http") {
+		if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil {
+			videoURL = url
+		}
+	}
+
 	// Initialize mpv arguments
 	mpvArgs := make([]string, 0)
 
