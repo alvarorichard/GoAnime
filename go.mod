@@ -16,10 +16,7 @@ require (
 	golang.org/x/net v0.40.0
 )
 
-require (
-	github.com/Microsoft/go-winio v0.6.2
-	github.com/lrstanley/go-ytdlp v0.0.0-20250501010938-80d02fe36936
-)
+require github.com/lrstanley/go-ytdlp v0.0.0-20250501010938-80d02fe36936
 
 require github.com/kr/pretty v0.3.1 // indirect
 

@@ -89,7 +89,7 @@ func StartVideo(link string, args []string) (string, error) {
 	mpvArgs = append(mpvArgs, link)
 
 	if util.IsDebug {
-		fmt.Printf("Starting mpv with arguments: %v\n", mpvArgs)
+		fmt.Printf("[DEBUG] Iniciando mpv com argumentos: %v\n", mpvArgs)
 	}
 
 	cmd := exec.Command("mpv", mpvArgs...)
@@ -99,21 +99,35 @@ func StartVideo(link string, args []string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
+	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
+	}
+
+	if util.IsDebug {
+		fmt.Printf("[DEBUG] mpv iniciado, aguardando criação do socket: %s\n", socketPath)
 	}
 
 	// Wait for socket creation with longer timeout
 	maxAttempts := 30 // 3 seconds total
 	for i := 0; i < maxAttempts; i++ {
+		if util.IsDebug {
+			fmt.Printf("[DEBUG] Tentativa %d/%d: verificando existência do socket...\n", i+1, maxAttempts)
+		}
 		if runtime.GOOS == "windows" {
 			// Special handling for Windows named pipes
 			_, err := os.Stat(`\\.\pipe\` + strings.TrimPrefix(socketPath, `\\.\pipe\`))
 			if err == nil {
+				if util.IsDebug {
+					fmt.Printf("[DEBUG] Socket encontrado após %.2fs\n", time.Since(startTime).Seconds())
+				}
 				return socketPath, nil
 			}
 		} else {
 			if _, err := os.Stat(socketPath); err == nil {
+				if util.IsDebug {
+					fmt.Printf("[DEBUG] Socket encontrado após %.2fs\n", time.Since(startTime).Seconds())
+				}
 				return socketPath, nil
 			}
 		}
@@ -126,6 +140,9 @@ func StartVideo(link string, args []string) (string, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	if util.IsDebug {
+		fmt.Printf("[DEBUG] Timeout após %.2fs esperando o socket do mpv\n", time.Since(startTime).Seconds())
+	}
 	// Cleanup if timeout occurs
 	cmd.Process.Kill()
 	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
@@ -162,18 +179,39 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 		return nil, err
 	}
 
-	var response map[string]interface{}
-	err = json.Unmarshal(buffer[:n], &response)
-	if err != nil {
-		return nil, err
+	if util.IsDebug {
+		fmt.Printf("[DEBUG] Resposta bruta do mpv: %s\n", string(buffer[:n]))
 	}
 
-	if data, exists := response["data"]; exists {
-		return data, nil
+	// Tratar múltiplos JSONs na mesma resposta
+	responses := bytes.Split(buffer[:n], []byte("\n"))
+	for _, resp := range responses {
+		if len(bytes.TrimSpace(resp)) == 0 {
+			continue
+		}
+		var response map[string]interface{}
+		err = json.Unmarshal(resp, &response)
+		if err != nil {
+			if util.IsDebug {
+				fmt.Printf("[DEBUG] Erro ao fazer unmarshal: %v\n", err)
+			}
+			continue
+		}
+		if errStr, ok := response["error"].(string); ok && errStr == "property unavailable" {
+			// Propriedade ainda não disponível, ignore sem erro
+			if util.IsDebug {
+				fmt.Println("[DEBUG] Propriedade ainda não disponível, ignorando...")
+			}
+			continue
+		}
+		if data, exists := response["data"]; exists {
+			return data, nil
+		}
 	}
 	return nil, errors.New("no data field in mpv response")
 }
 
+// windows 
 // dialMPVSocket creates a connection to mpv's socket.
 //func dialMPVSocket(socketPath string) (net.Conn, error) {
 //	if runtime.GOOS == "windows" {
@@ -184,6 +222,17 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 //		return net.Dial("unix", socketPath)
 //	}
 //}
+
+// dialMPVSocket creates a connection to mpv's socket.
+func dialMPVSocket(socketPath string) (net.Conn, error) {
+	if runtime.GOOS == "windows" {
+		// Attempt named pipe on Windows (not implemented, fallback to unix socket)
+		return net.Dial("unix", socketPath)
+	} else {
+		// Unix-like system uses Unix sockets
+		return net.Dial("unix", socketPath)
+	}
+}
 
 // mpvSendPosition retorna a posição atual do vídeo no mpv (em segundos inteiros)
 func mpvSendPosition(sock string) (int, error) {
