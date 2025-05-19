@@ -17,6 +17,10 @@ import (
 const discordClientID = "1302721937717334128" // Your Discord Client ID
 
 func main() {
+	startAll := time.Now()
+	if util.IsDebug {
+		log.Printf("[PERF] Início do programa")
+	}
 	var animeMutex sync.Mutex
 
 	// Parse flags to get the anime name
@@ -25,33 +29,49 @@ func main() {
 		log.Fatalln(util.ErrorHandler(err))
 	}
 
+	discordStart := time.Now()
 	// Initialize Discord Rich Presence
 	discordEnabled := true
 	if err := client.Login(discordClientID); err != nil {
 		if util.IsDebug {
 			log.Println("Failed to initialize Discord Rich Presence:", err)
-
 		}
 		discordEnabled = false
 	} else {
+		if util.IsDebug {
+			log.Printf("[PERF] Discord pronto em %v", time.Since(discordStart))
+		}
 		defer client.Logout() // Ensure logout on exit
 	}
 
+	searchStart := time.Now()
 	// Search for the anime
 	anime, err := api.SearchAnime(animeName)
 	if err != nil {
 		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
 	}
+	if util.IsDebug {
+		log.Printf("[PERF] Busca de anime em %v", time.Since(searchStart))
+	}
 
+	detailsStart := time.Now()
 	// Fetch anime details, including cover image URL
 	if err = api.FetchAnimeDetails(anime); err != nil {
 		log.Println("Failed to fetch anime details:", err)
 	}
+	if util.IsDebug {
+		log.Printf("[PERF] Busca de detalhes em %v", time.Since(detailsStart))
+	}
 
+	episodesStart := time.Now()
 	// Fetch episodes for the anime
 	episodes, err := api.GetAnimeEpisodes(anime.URL)
 	if err != nil || len(episodes) == 0 {
 		log.Fatalln("The selected anime does not have episodes on the server.")
+	}
+	if util.IsDebug {
+		log.Printf("[PERF] Busca de episódios em %v", time.Since(episodesStart))
+		log.Printf("[PERF] Inicialização total em %v", time.Since(startAll))
 	}
 
 	// Check if the anime is a series or a movie/OVA

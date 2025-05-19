@@ -175,15 +175,15 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 }
 
 // dialMPVSocket creates a connection to mpv's socket.
-func dialMPVSocket(socketPath string) (net.Conn, error) {
-	if runtime.GOOS == "windows" {
+//func dialMPVSocket(socketPath string) (net.Conn, error) {
+//	if runtime.GOOS == "windows" {
 		// Attempt named pipe on Windows
-		return net.Dial("unix", socketPath)
-	} else {
+//		return net.Dial("unix", socketPath)
+//	} else {
 		// Unix-like system uses Unix sockets
-		return net.Dial("unix", socketPath)
-	}
-}
+//		return net.Dial("unix", socketPath)
+//	}
+//}
 
 // mpvSendPosition retorna a posição atual do vídeo no mpv (em segundos inteiros)
 func mpvSendPosition(sock string) (int, error) {

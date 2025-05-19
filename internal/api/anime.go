@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -19,6 +20,13 @@ import (
 )
 
 func SearchAnime(animeName string) (*models.Anime, error) {
+	start := time.Now()
+	if util.IsDebug {
+		log.Printf("[PERF] SearchAnime iniciado para %s", animeName)
+	}
+
+	
+
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, url.PathEscape(animeName))
 
 	if util.IsDebug {
@@ -28,6 +36,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 	for {
 		selectedAnime, nextPageURL, err := searchAnimeOnPage(currentPageURL)
 		if err != nil {
+			log.Printf("[PERF] SearchAnime falhou para %s em %v", animeName, time.Since(start))
 			return nil, err
 		}
 		if selectedAnime != nil {
@@ -56,11 +65,21 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 				}
 
 			}
+			if util.IsDebug {
+			 log.Printf("[PERF] SearchAnime finalizado para %s em %v", animeName, time.Since(start))
+
+
+			}
 
 			return selectedAnime, nil
 		}
 
 		if nextPageURL == "" {
+			if util.IsDebug {
+				log.Printf("[PERF] SearchAnime não encontrou resultados para %s em %v", animeName, time.Since(start))
+				
+			}
+		
 			return nil, errors.New("no anime found with the given name")
 		}
 		currentPageURL = models.AnimeFireURL + nextPageURL
