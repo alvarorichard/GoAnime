@@ -25,8 +25,6 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 		log.Printf("[PERF] SearchAnime iniciado para %s", animeName)
 	}
 
-	
-
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, url.PathEscape(animeName))
 
 	if util.IsDebug {
@@ -66,8 +64,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 
 			}
 			if util.IsDebug {
-			 log.Printf("[PERF] SearchAnime finalizado para %s em %v", animeName, time.Since(start))
-
+				log.Printf("[PERF] SearchAnime finalizado para %s em %v", animeName, time.Since(start))
 
 			}
 
@@ -77,9 +74,9 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 		if nextPageURL == "" {
 			if util.IsDebug {
 				log.Printf("[PERF] SearchAnime não encontrou resultados para %s em %v", animeName, time.Since(start))
-				
+
 			}
-		
+
 			return nil, errors.New("no anime found with the given name")
 		}
 		currentPageURL = models.AnimeFireURL + nextPageURL

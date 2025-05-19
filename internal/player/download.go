@@ -95,8 +95,8 @@ func combineParts(destPath string, numThreads int) error {
 // DownloadVideo baixa um vídeo usando múltiplas threads.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
-	if util.IsDebug{
-			log.Printf("[PERF] DownloadVideo iniciado para %s", url)
+	if util.IsDebug {
+		log.Printf("[PERF] DownloadVideo iniciado para %s", url)
 
 	}
 	destPath = filepath.Clean(destPath)
@@ -134,8 +134,8 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if err != nil {
 		return fmt.Errorf("failed to combine parts: %v", err)
 	}
-	if util.IsDebug{
-	log.Printf("[PERF] DownloadVideo finalizado para %s em %v", url, time.Since(start))
+	if util.IsDebug {
+		log.Printf("[PERF] DownloadVideo finalizado para %s em %v", url, time.Since(start))
 
 	}
 	return nil
@@ -286,8 +286,8 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 // HandleBatchDownload faz o download em lote de episódios.
 func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	start := time.Now()
-	if util.IsDebug{
-			log.Printf("[PERF] HandleBatchDownload iniciado para %s", animeURL)
+	if util.IsDebug {
+		log.Printf("[PERF] HandleBatchDownload iniciado para %s", animeURL)
 
 	}
 	startNum, endNum, err := getEpisodeRange()
@@ -387,9 +387,8 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 		return err
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
-	if util.IsDebug{
-			log.Printf("[PERF] HandleBatchDownload finalizado para %s em %v", animeURL, time.Since(start))
-
+	if util.IsDebug {
+		log.Printf("[PERF] HandleBatchDownload finalizado para %s em %v", animeURL, time.Since(start))
 
 	}
 	return nil

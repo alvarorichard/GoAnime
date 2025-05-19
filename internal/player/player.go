@@ -211,14 +211,14 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 	return nil, errors.New("no data field in mpv response")
 }
 
-// windows 
+// windows
 // dialMPVSocket creates a connection to mpv's socket.
 //func dialMPVSocket(socketPath string) (net.Conn, error) {
 //	if runtime.GOOS == "windows" {
-		// Attempt named pipe on Windows
+// Attempt named pipe on Windows
 //		return net.Dial("unix", socketPath)
 //	} else {
-		// Unix-like system uses Unix sockets
+// Unix-like system uses Unix sockets
 //		return net.Dial("unix", socketPath)
 //	}
 //}
