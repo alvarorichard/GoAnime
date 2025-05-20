@@ -230,4 +230,3 @@ func TestLocalTracker_DeleteAnime(t *testing.T) {
 		t.Error("Anime was not deleted")
 	}
 }
-

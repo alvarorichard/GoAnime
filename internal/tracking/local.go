@@ -12,22 +12,26 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Constantes de Configuração                                                │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 const (
-	defaultCacheSize    = -20000    // 20MB
-	mmapSize            = 268435456 // 256MB
-	busyTimeout         = 5000      // 5 segundos
-	walAutoCheckpoint   = 1000      // páginas
-	maxOpenConns        = 5         // conexões simultâneas
-	maxIdleConns        = 2         // conexões inativas
-	avgAnimePerUser     = 100       // pré-alocação de slices
+	defaultCacheSize  = -20000    // 20MB
+	mmapSize          = 268435456 // 256MB
+	busyTimeout       = 5000      // 5 segundos
+	walAutoCheckpoint = 1000      // páginas
+	maxOpenConns      = 5         // conexões simultâneas
+	maxIdleConns      = 2         // conexões inativas
+	avgAnimePerUser   = 100       // pré-alocação de slices
 )
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Tipos e Estruturas                                                        │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 type Anime struct {
 	AnilistID     int       `json:"anilist_id"`
 	AllanimeID    string    `json:"allanime_id"`
@@ -46,9 +50,11 @@ type LocalTracker struct {
 	deletePS *sql.Stmt
 }
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Construtor e Inicialização                                                │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 func NewLocalTracker(dbPath string) *LocalTracker {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		panic(fmt.Errorf("failed to create data directory: %w", err))
@@ -92,9 +98,11 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 	}
 }
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Inicialização do Banco de Dados                                           │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 func initializeDatabase(db *sql.DB) error {
 	schema := `CREATE TABLE IF NOT EXISTS anime_progress (
 		anilist_id     INTEGER NOT NULL,
@@ -137,9 +145,11 @@ func initializeDatabase(db *sql.DB) error {
 	return nil
 }
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Preparação de Statements                                                  │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 type preparedStatements struct {
 	upsert *sql.Stmt
 	get    *sql.Stmt
@@ -210,9 +220,11 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 	}, nil
 }
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Operações Principais                                                      │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 func (t *LocalTracker) UpdateProgress(a Anime) error {
 	_, err := t.upsertPS.Exec(
 		a.AnilistID,
@@ -289,9 +301,11 @@ func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
 	return err
 }
 
-/*────────────────────────────────────────────────────────────────────────────*
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Finalização                                                               │
-*────────────────────────────────────────────────────────────────────────────*/
+*────────────────────────────────────────────────────────────────────────────
+*/
 func (t *LocalTracker) Close() error {
 	var finalErr error
 
