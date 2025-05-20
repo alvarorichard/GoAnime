@@ -52,6 +52,9 @@ jobs:
       - name: Get dependencies
         run: go get -v -t -d ./...
 
+      - name: Run tracking/local_test.go only
+        run: go test -v ./internal/tracking/local_test.go
+
       - name: Run tests
         run: go test -v ./...
 
