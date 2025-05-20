@@ -11,6 +11,7 @@ package tracking
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,7 +77,11 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 		PRIMARY KEY (anilist_id, allanime_id)
 	);`
 	if _, err = db.Exec(schema); err != nil {
-		db.Close()
+		err := db.Close()
+		if err != nil {
+			fmt.Println("Error closing database:", err)
+			return nil
+		}
 		panic(err)
 	}
 
@@ -92,7 +97,11 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 		  title          = excluded.title,
 		  last_updated   = excluded.last_updated;`)
 	if err != nil {
-		db.Close()
+		err := db.Close()
+		if err != nil {
+			fmt.Println("Error closing database:", err)
+			return nil
+		}
 		panic(err)
 	}
 
@@ -132,7 +141,7 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 	a.AnilistID, a.AllanimeID = anilistID, allanimeID
 	if err := row.Scan(&a.EpisodeNumber, &a.PlaybackTime,
 		&a.Duration, &a.Title, &ts); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -150,7 +159,12 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			fmt.Println("Error closing rows:", err)
+		}
+	}(rows)
 
 	var list []Anime
 	for rows.Next() {
