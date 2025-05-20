@@ -27,59 +27,57 @@ func TestNewLocalTracker(t *testing.T) {
 	}
 }
 
-
-
 func TestLocalTracker_UpdateProgress(t *testing.T) {
-    // Configuração inicial
-    tmpDir := t.TempDir()
-    dbPath := filepath.Join(tmpDir, "test.db")
-    tracker := NewLocalTracker(dbPath)
-    defer tracker.Close()
+	// Configuração inicial
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	tracker := NewLocalTracker(dbPath)
+	defer tracker.Close()
 
-    // Dados de teste atualizados
-    testAnime := Anime{
-        AnilistID:     1,
-        AllanimeID:    "allanime123",
-        EpisodeNumber: 5,
-        PlaybackTime:  120,
-        Duration:      1500,
-        Title:         "Test Anime",
-        LastUpdated:   time.Now().UTC(), // Garante timestamp atual
-    }
+	// Dados de teste atualizados
+	testAnime := Anime{
+		AnilistID:     1,
+		AllanimeID:    "allanime123",
+		EpisodeNumber: 5,
+		PlaybackTime:  120,
+		Duration:      1500,
+		Title:         "Test Anime",
+		LastUpdated:   time.Now().UTC(), // Garante timestamp atual
+	}
 
-    // Teste de criação
-    if err := tracker.UpdateProgress(testAnime); err != nil {
-        t.Fatalf("Update failed: %v", err)
-    }
+	// Teste de criação
+	if err := tracker.UpdateProgress(testAnime); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
 
-    // Verificação corrigida
-    retrieved, err := tracker.GetAnime(testAnime.AnilistID, testAnime.AllanimeID)
-    if err != nil {
-        t.Fatalf("Get failed: %v", err)
-    }
+	// Verificação corrigida
+	retrieved, err := tracker.GetAnime(testAnime.AnilistID, testAnime.AllanimeID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
 
-    if retrieved == nil {
-        t.Fatal("Anime not found after update")
-    }
+	if retrieved == nil {
+		t.Fatal("Anime not found after update")
+	}
 
-    // Verifica todos os campos
-    if retrieved.EpisodeNumber != testAnime.EpisodeNumber {
-        t.Errorf("EpisodeNumber mismatch: got %d, want %d", retrieved.EpisodeNumber, testAnime.EpisodeNumber)
-    }
+	// Verifica todos os campos
+	if retrieved.EpisodeNumber != testAnime.EpisodeNumber {
+		t.Errorf("EpisodeNumber mismatch: got %d, want %d", retrieved.EpisodeNumber, testAnime.EpisodeNumber)
+	}
 
-    if retrieved.PlaybackTime != testAnime.PlaybackTime {
-        t.Errorf("PlaybackTime mismatch: got %d, want %d", retrieved.PlaybackTime, testAnime.PlaybackTime)
-    }
+	if retrieved.PlaybackTime != testAnime.PlaybackTime {
+		t.Errorf("PlaybackTime mismatch: got %d, want %d", retrieved.PlaybackTime, testAnime.PlaybackTime)
+	}
 
-    if retrieved.Title != testAnime.Title {
-        t.Errorf("Title mismatch: got %s, want %s", retrieved.Title, testAnime.Title)
-    }
+	if retrieved.Title != testAnime.Title {
+		t.Errorf("Title mismatch: got %s, want %s", retrieved.Title, testAnime.Title)
+	}
 
-    // Verificação de timestamp tolerante (±2 segundos)
-    now := time.Now().UTC()
-    if retrieved.LastUpdated.After(now) || retrieved.LastUpdated.Before(now.Add(-2*time.Second)) {
-        t.Errorf("LastUpdated out of range: got %v, expected ~%v", retrieved.LastUpdated, now)
-    }
+	// Verificação de timestamp tolerante (±2 segundos)
+	now := time.Now().UTC()
+	if retrieved.LastUpdated.After(now) || retrieved.LastUpdated.Before(now.Add(-2*time.Second)) {
+		t.Errorf("LastUpdated out of range: got %v, expected ~%v", retrieved.LastUpdated, now)
+	}
 }
 
 func TestLocalTracker_GetAnime(t *testing.T) {
@@ -242,5 +240,3 @@ func TestLocalTracker_DeleteAnime(t *testing.T) {
 		t.Error("Anime was not deleted")
 	}
 }
-
-
