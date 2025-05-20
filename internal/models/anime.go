@@ -10,6 +10,8 @@ type Anime struct {
 	Details   AniListDetails
 }
 
+// Episode represents a single episode of an anime series, containing details such as episode number,
+// URL, title information, air date, duration, filler/recap status, synopsis, and skip times.
 type Episode struct {
 	Number    string
 	Num       int

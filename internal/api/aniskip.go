@@ -25,7 +25,12 @@ func GetAniSkipData(animeMalId int, episode int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error fetching data from AniSkip API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Println("Error closing response body:", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("AniSkip API request failed with status %d", resp.StatusCode)

@@ -22,7 +22,7 @@ func playVideo(
 	videoURL string,
 	episodes []models.Episode,
 	currentEpisodeNum int,
-	animeMalID int,
+	anilistID int,
 	updater *RichPresenceUpdater,
 ) error {
 	// Prompt for quality selection if multiple are available (streaming)
@@ -31,9 +31,6 @@ func playVideo(
 			videoURL = url
 		}
 	}
-
-	// Initialize mpv arguments
-	mpvArgs := make([]string, 0)
 
 	// Fix the URL if it has a double 'p' in the quality suffix
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
@@ -59,18 +56,26 @@ func playVideo(
 	}
 
 	// Local tracking: ask to resume if progress exists
-	existingAnime, err := tracker.GetAnime(animeMalID, currentEpisode.URL)
-	if err == nil && existingAnime != nil && existingAnime.PlaybackTime > 0 {
-		fmt.Printf("\nProgresso salvo encontrado: episódio %d, tempo %d segundos.\n", existingAnime.EpisodeNumber, existingAnime.PlaybackTime)
+	// Use AnilistID and episode URL as keys for tracking
+	progress, err := tracker.GetAnime(anilistID, currentEpisode.URL)
+	var resumeTime int
+	if err == nil && progress != nil && progress.EpisodeNumber == currentEpisodeNum && progress.PlaybackTime > 0 {
+		fmt.Printf("\nProgresso salvo encontrado: episódio %d, tempo %d segundos.\n", progress.EpisodeNumber, progress.PlaybackTime)
 		if ok, _ := promptYesNo("Deseja retomar de onde parou?"); ok {
-			mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", existingAnime.PlaybackTime))
+			resumeTime = progress.PlaybackTime
 			if util.IsDebug {
-				log.Printf("Retomando do tempo salvo: %d segundos", existingAnime.PlaybackTime)
+				log.Printf("Retomando do tempo salvo: %d segundos", resumeTime)
 			}
 		}
 	}
 
-	err = api.GetAndParseAniSkipData(animeMalID, currentEpisodeNum, currentEpisode)
+	// Inicializa argumentos do mpv
+	mpvArgs := make([]string, 0)
+	if resumeTime > 0 {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
+	}
+
+	err = api.GetAndParseAniSkipData(anilistID, currentEpisodeNum, currentEpisode)
 	if err != nil {
 		log.Printf("AniSkip data not available for episode %d: %v\n", currentEpisodeNum, err)
 	} else if util.IsDebug {
@@ -146,7 +151,7 @@ func playVideo(
 								updater.episodeDuration = 24 * time.Minute
 							}
 							anime := tracking.Anime{
-								AnilistID:     animeMalID,
+								AnilistID:     anilistID,
 								AllanimeID:    currentEpisode.URL,
 								EpisodeNumber: currentEpisodeNum,
 								Duration:      int(updater.episodeDuration.Seconds()),
@@ -204,7 +209,7 @@ func playVideo(
 				if timePos != nil {
 					if position, ok := timePos.(float64); ok {
 						anime := tracking.Anime{
-							AnilistID:     animeMalID,
+							AnilistID:     anilistID,
 							AllanimeID:    currentEpisode.URL,
 							EpisodeNumber: currentEpisodeNum,
 							PlaybackTime:  int(position),
@@ -255,7 +260,7 @@ func playVideo(
 					updater.episodeStarted = false
 				}
 				close(stopTracking)
-				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, animeMalID, newUpdater)
+				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, anilistID, newUpdater)
 			} else {
 				fmt.Println("Already at the last episode.")
 			}
@@ -284,7 +289,7 @@ func playVideo(
 					updater.episodeStarted = false
 				}
 				close(stopTracking)
-				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, animeMalID, newUpdater)
+				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, anilistID, newUpdater)
 			} else {
 				fmt.Println("Already at the first episode.")
 			}
