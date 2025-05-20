@@ -144,7 +144,11 @@ func StartVideo(link string, args []string) (string, error) {
 		fmt.Printf("[DEBUG] Timeout após %.2fs esperando o socket do mpv\n", time.Since(startTime).Seconds())
 	}
 	// Cleanup if timeout occurs
-	cmd.Process.Kill()
+	err := cmd.Process.Kill()
+	if err != nil {
+
+		return "", err
+	}
 	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
 }
 
