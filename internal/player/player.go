@@ -462,6 +462,14 @@ func saveFinalPosition(tr *tracking.LocalTracker, sock string,
 	animeID int, url string, epNum int,
 	title string, durationSec int) {
 
+	// Skip if tracker is nil (CGO disabled)
+	if tr == nil {
+		if util.IsDebug {
+			log.Println("Skipping final position save: tracker not initialized")
+		}
+		return
+	}
+
 	if pos, _ := mpvSendPosition(sock); pos >= 0 {
 		_ = tr.UpdateProgress(tracking.Anime{
 			AnilistID:     animeID,

@@ -12,6 +12,15 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// IsCgoEnabled indicates whether CGO is enabled for SQLite support
+var IsCgoEnabled = true
+
+// Error constants
+var (
+	ErrCgoDisabled      = errors.New("CGO disabled: sqlite tracking not available")
+	ErrTrackerNotInited = errors.New("tracker not initialized")
+)
+
 /*
 ────────────────────────────────────────────────────────────────────────────*
 │  Constantes de Configuração                                                │
@@ -56,8 +65,15 @@ type LocalTracker struct {
 *────────────────────────────────────────────────────────────────────────────
 */
 func NewLocalTracker(dbPath string) *LocalTracker {
+	// Check if CGO is disabled (SQLite not available)
+	if !IsCgoEnabled {
+		fmt.Println("Warning: CGO is disabled, anime progress tracking will be unavailable")
+		return nil
+	}
+
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		panic(fmt.Errorf("failed to create data directory: %w", err))
+		fmt.Printf("Error creating data directory: %v\n", err)
+		return nil
 	}
 
 	dsn := fmt.Sprintf(
@@ -72,7 +88,8 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
-		panic(fmt.Errorf("database opening failed: %w", err))
+		fmt.Printf("Error opening database: %v\n", err)
+		return nil
 	}
 
 	db.SetMaxOpenConns(maxOpenConns)
@@ -80,13 +97,15 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 
 	if err := initializeDatabase(db); err != nil {
 		db.Close()
-		panic(fmt.Errorf("database initialization failed: %w", err))
+		fmt.Printf("Error initializing database: %v\n", err)
+		return nil
 	}
 
 	statements, err := prepareStatements(db)
 	if err != nil {
 		db.Close()
-		panic(fmt.Errorf("statement preparation failed: %w", err))
+		fmt.Printf("Error preparing statements: %v\n", err)
+		return nil
 	}
 
 	return &LocalTracker{
@@ -226,6 +245,11 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 *────────────────────────────────────────────────────────────────────────────
 */
 func (t *LocalTracker) UpdateProgress(a Anime) error {
+	// Safety check for when tracker is not initialized
+	if t == nil || t.db == nil || t.upsertPS == nil {
+		return ErrTrackerNotInited
+	}
+
 	_, err := t.upsertPS.Exec(
 		a.AnilistID,
 		a.AllanimeID,
@@ -239,6 +263,11 @@ func (t *LocalTracker) UpdateProgress(a Anime) error {
 }
 
 func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error) {
+	// Safety check for when tracker is not initialized
+	if t == nil || t.db == nil || t.getPS == nil {
+		return nil, ErrTrackerNotInited
+	}
+
 	var a Anime
 	var ts int64
 
@@ -264,6 +293,11 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 }
 
 func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
+	// Safety check for when tracker is not initialized
+	if t == nil || t.db == nil || t.allPS == nil {
+		return nil, ErrTrackerNotInited
+	}
+
 	rows, err := t.allPS.Query()
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
@@ -328,3 +362,12 @@ func (t *LocalTracker) Close() error {
 
 	return finalErr
 }
+
+func init() {
+	// This will be replaced at build time with false if CGO is disabled
+	// When using CGO_ENABLED=0
+	IsCgoEnabled = isCgoEnabled()
+}
+
+// The implementation of isCgoEnabled is defined in local_cgo.go and local_nocgo.go
+// based on build tags. We don't define it here to avoid duplicate declarations.

@@ -47,30 +47,37 @@ func playVideo(
 		return fmt.Errorf("failed to get current user: %w", err)
 	}
 
-	dbPath := filepath.Join(
-		currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db",
-	)
-	tracker := tracking.NewLocalTracker(dbPath)
-	if tracker == nil {
-		return fmt.Errorf("failed to initialize SQLite tracker")
-	}
-
-	// Local tracking: ask to resume if progress exists
-	// Use AnilistID and episode URL as keys for tracking
-	progress, err := tracker.GetAnime(anilistID, currentEpisode.URL)
+	// Initialize mpv arguments
+	mpvArgs := make([]string, 0)
+	var tracker *tracking.LocalTracker
 	var resumeTime int
-	if err == nil && progress != nil && progress.EpisodeNumber == currentEpisodeNum && progress.PlaybackTime > 0 {
-		fmt.Printf("\nProgresso salvo encontrado: episódio %d, tempo %d segundos.\n", progress.EpisodeNumber, progress.PlaybackTime)
-		if ok, _ := promptYesNo("Deseja retomar de onde parou?"); ok {
-			resumeTime = progress.PlaybackTime
-			if util.IsDebug {
-				log.Printf("Retomando do tempo salvo: %d segundos", resumeTime)
+
+	// Try to initialize tracking system if CGO is enabled
+	if tracking.IsCgoEnabled {
+		dbPath := filepath.Join(
+			currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db",
+		)
+		tracker = tracking.NewLocalTracker(dbPath)
+
+		// Local tracking: ask to resume if progress exists and tracker initialized
+		if tracker != nil {
+			if progress, err := tracker.GetAnime(anilistID, currentEpisode.URL); err == nil &&
+				progress != nil && progress.EpisodeNumber == currentEpisodeNum && progress.PlaybackTime > 0 {
+				fmt.Printf("\nProgresso salvo encontrado: episódio %d, tempo %d segundos.\n",
+					progress.EpisodeNumber, progress.PlaybackTime)
+				if ok, _ := promptYesNo("Deseja retomar de onde parou?"); ok {
+					resumeTime = progress.PlaybackTime
+					if util.IsDebug {
+						log.Printf("Retomando do tempo salvo: %d segundos", resumeTime)
+					}
+				}
 			}
 		}
+	} else if util.IsDebug {
+		log.Println("Tracking disabled: CGO not available")
 	}
 
-	// Inicializa argumentos do mpv
-	mpvArgs := make([]string, 0)
+	// Add resume time to mpv arguments if available
 	if resumeTime > 0 {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}
@@ -193,40 +200,44 @@ func playVideo(
 
 	// Start a goroutine to periodically update local tracking
 	stopTracking := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(2 * time.Second) // was 5s, now 2s for more responsive tracking
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
-				if err != nil {
-					if util.IsDebug {
-						log.Printf("Error getting playback time for tracking: %v", err)
-					}
-					continue
-				}
-				if timePos != nil {
-					if position, ok := timePos.(float64); ok {
-						anime := tracking.Anime{
-							AnilistID:     anilistID,
-							AllanimeID:    currentEpisode.URL,
-							EpisodeNumber: currentEpisodeNum,
-							PlaybackTime:  int(position),
-							Duration:      int(updater.episodeDuration.Seconds()),
-							Title:         getEpisodeTitle(currentEpisode.Title),
-							LastUpdated:   time.Now(),
+	if tracker != nil {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second) // was 5s, now 2s for more responsive tracking
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+					if err != nil {
+						if util.IsDebug {
+							log.Printf("Error getting playback time for tracking: %v", err)
 						}
-						if err := tracker.UpdateProgress(anime); err != nil {
-							log.Printf("Failed to update local tracking: %v", err)
+						continue
+					}
+					if timePos != nil {
+						if position, ok := timePos.(float64); ok {
+							anime := tracking.Anime{
+								AnilistID:     anilistID,
+								AllanimeID:    currentEpisode.URL,
+								EpisodeNumber: currentEpisodeNum,
+								PlaybackTime:  int(position),
+								Duration:      int(updater.episodeDuration.Seconds()),
+								Title:         getEpisodeTitle(currentEpisode.Title),
+								LastUpdated:   time.Now(),
+							}
+							if err := tracker.UpdateProgress(anime); err != nil {
+								log.Printf("Failed to update local tracking: %v", err)
+							}
 						}
 					}
+				case <-stopTracking:
+					return
 				}
-			case <-stopTracking:
-				return
 			}
-		}
-	}()
+		}()
+	} else if util.IsDebug {
+		log.Println("Skipping tracking: tracker not initialized")
+	}
 
 	for {
 		char, _, err := reader.ReadRune()
