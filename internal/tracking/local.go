@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -75,16 +77,31 @@ func NewLocalTracker(dbPath string) *LocalTracker {
 		fmt.Printf("Error creating data directory: %v\n", err)
 		return nil
 	}
-
-	dsn := fmt.Sprintf(
-		"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_wal_autocheckpoint=%d&"+
-			"_busy_timeout=%d&_cache_size=%d&_mmap_size=%d",
-		dbPath,
-		walAutoCheckpoint,
-		busyTimeout,
-		defaultCacheSize,
-		mmapSize,
-	)
+	// No Windows, os caminhos precisam ser tratados de forma especial para o SQLite
+	var dsn string
+	if runtime.GOOS == "windows" {
+		// Usar URI format com escape para Windows
+		escapedPath := strings.ReplaceAll(dbPath, "\\", "/")
+		dsn = fmt.Sprintf(
+			"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_wal_autocheckpoint=%d&"+
+				"_busy_timeout=%d&_cache_size=%d&_mmap_size=%d&_mode=rwc",
+			escapedPath,
+			walAutoCheckpoint,
+			busyTimeout,
+			defaultCacheSize,
+			mmapSize,
+		)
+	} else {
+		dsn = fmt.Sprintf(
+			"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_wal_autocheckpoint=%d&"+
+				"_busy_timeout=%d&_cache_size=%d&_mmap_size=%d",
+			dbPath,
+			walAutoCheckpoint,
+			busyTimeout,
+			defaultCacheSize,
+			mmapSize,
+		)
+	}
 
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
@@ -248,6 +265,16 @@ func (t *LocalTracker) UpdateProgress(a Anime) error {
 	// Safety check for when tracker is not initialized
 	if t == nil || t.db == nil || t.upsertPS == nil {
 		return ErrTrackerNotInited
+	}
+
+	// Validate duration to prevent constraint errors
+	if a.Duration <= 0 {
+		return fmt.Errorf("invalid duration value (%d): must be greater than 0", a.Duration)
+	}
+
+	// Validate playback time (shouldn't be negative)
+	if a.PlaybackTime < 0 {
+		a.PlaybackTime = 0
 	}
 
 	_, err := t.upsertPS.Exec(

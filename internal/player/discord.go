@@ -88,11 +88,18 @@ func (rpu *RichPresenceUpdater) Start() {
 
 // Stop signals the updater to stop and waits for the goroutine to finish.
 func (rpu *RichPresenceUpdater) Stop() {
-	close(rpu.done)
-	rpu.wg.Wait()
-	if util.IsDebug {
-		log.Println("Rich Presence updater stopped.")
-
+	// Evita fechar o canal múltiplas vezes
+	if rpu != nil {
+		select {
+		case <-rpu.done:
+			// Canal já fechado
+		default:
+			close(rpu.done)
+		}
+		rpu.wg.Wait()
+		if util.IsDebug {
+			log.Println("Rich Presence updater stopped.")
+		}
 	}
 }
 

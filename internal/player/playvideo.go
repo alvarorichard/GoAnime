@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -51,12 +52,18 @@ func playVideo(
 	mpvArgs := make([]string, 0)
 	var tracker *tracking.LocalTracker
 	var resumeTime int
-
 	// Try to initialize tracking system if CGO is enabled
 	if tracking.IsCgoEnabled {
-		dbPath := filepath.Join(
-			currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db",
-		)
+		var dbPath string
+		if runtime.GOOS == "windows" {
+			// Use %LOCALAPPDATA% on Windows
+			dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+		} else {
+			// Use ~/.local/goanime on Unix systems
+			dbPath = filepath.Join(
+				currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db",
+			)
+		}
 		tracker = tracking.NewLocalTracker(dbPath)
 
 		// Local tracking: ask to resume if progress exists and tracker initialized
@@ -153,20 +160,26 @@ func playVideo(
 							if util.IsDebug {
 								log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
 							}
+
+							// Ensure we have a valid duration for database storage (minimum 1 second)
 							if updater.episodeDuration < time.Second {
 								log.Printf("Warning: Retrieved episode duration is very small (%v). Setting a default duration.", updater.episodeDuration)
 								updater.episodeDuration = 24 * time.Minute
 							}
-							anime := tracking.Anime{
-								AnilistID:     anilistID,
-								AllanimeID:    currentEpisode.URL,
-								EpisodeNumber: currentEpisodeNum,
-								Duration:      int(updater.episodeDuration.Seconds()),
-								Title:         getEpisodeTitle(currentEpisode.Title),
-								LastUpdated:   time.Now(),
-							}
-							if err := tracker.UpdateProgress(anime); err != nil {
-								log.Printf("Failed to update local tracking: %v", err)
+
+							// Only update if we have a tracker and the duration is positive
+							if tracker != nil && int(updater.episodeDuration.Seconds()) > 0 {
+								anime := tracking.Anime{
+									AnilistID:     anilistID,
+									AllanimeID:    currentEpisode.URL,
+									EpisodeNumber: currentEpisodeNum,
+									Duration:      int(updater.episodeDuration.Seconds()),
+									Title:         getEpisodeTitle(currentEpisode.Title),
+									LastUpdated:   time.Now(),
+								}
+								if err := tracker.UpdateProgress(anime); err != nil {
+									log.Printf("Failed to update local tracking: %v", err)
+								}
 							}
 						} else {
 							log.Printf("Error: duration is not a float64")
@@ -197,7 +210,6 @@ func playVideo(
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit, 's' to skip intro:")
-
 	// Start a goroutine to periodically update local tracking
 	stopTracking := make(chan struct{})
 	if tracker != nil {
@@ -216,12 +228,19 @@ func playVideo(
 					}
 					if timePos != nil {
 						if position, ok := timePos.(float64); ok {
+							// Ensure we have a valid duration (at least 1 second)
+							duration := int(updater.episodeDuration.Seconds())
+							if duration <= 0 {
+								// Use a default duration if the real one isn't available yet
+								duration = 1440 // 24 minutes in seconds as a safe default
+							}
+
 							anime := tracking.Anime{
 								AnilistID:     anilistID,
 								AllanimeID:    currentEpisode.URL,
 								EpisodeNumber: currentEpisodeNum,
 								PlaybackTime:  int(position),
-								Duration:      int(updater.episodeDuration.Seconds()),
+								Duration:      duration,
 								Title:         getEpisodeTitle(currentEpisode.Title),
 								LastUpdated:   time.Now(),
 							}

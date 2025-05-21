@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -104,9 +105,13 @@ func main() {
 	if err != nil {
 		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
 	}
-
 	isPaused := false
-	socketPath := "/tmp/mpvsocket"
+	var socketPath string
+	if runtime.GOOS == "windows" {
+		socketPath = `\\.\pipe\goanime_mpvsocket`
+	} else {
+		socketPath = "/tmp/mpvsocket"
+	}
 	updateFreq := 1 * time.Second
 	episodeDuration := time.Duration(episodes[0].Duration) * time.Second
 
