@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Microsoft/go-winio"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tracking"
@@ -227,24 +226,6 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 //		return net.Dial("unix", socketPath)
 //	}
 //}
-
-// dialMPVSocket creates a connection to mpv's socket.
-func dialMPVSocket(socketPath string) (net.Conn, error) {
-	if runtime.GOOS == "windows" {
-		// Windows uses named pipes format
-		// Named pipes in Windows need to be in the format \\.\pipe\PIPENAME
-		if !strings.HasPrefix(socketPath, `\\.\pipe\`) {
-			socketPath = `\\.\pipe\` + filepath.Base(socketPath)
-		}
-
-		// Use winio to connect to Windows named pipe
-		timeout := 5 * time.Second
-		return winio.DialPipe(socketPath, &timeout)
-	} else {
-		// Unix-like system uses Unix sockets
-		return net.Dial("unix", socketPath)
-	}
-}
 
 // mpvSendPosition retorna a posição atual do vídeo no mpv (em segundos inteiros)
 func mpvSendPosition(sock string) (int, error) {

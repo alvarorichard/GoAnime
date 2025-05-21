@@ -3,7 +3,7 @@ module github.com/alvarorichard/Goanime
 go 1.24
 
 require (
-	//github.com/Microsoft/go-winio v0.6.2
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.5
@@ -19,7 +19,6 @@ require (
 require github.com/lrstanley/go-ytdlp v0.0.0-20250501010938-80d02fe36936
 
 require (
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 )
 

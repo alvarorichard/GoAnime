@@ -36,7 +36,9 @@ if ! pkg-config --exists sqlite3 2>/dev/null; then
     fi
 fi
 
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
+# For Linux we don't need go-winio, but we need SQLite with CGO enabled
+# Using !windows tag to ensure go-winio dependencies are excluded
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath -tags="!windows" "$MAIN_PACKAGE"
 
 echo "Build completed: $BINARY_PATH"
 
