@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -10,23 +12,52 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/hugolgst/rich-go/client"
 )
 
-const discordClientID = "1302721937717334128"
+// Version information
+const (
+	version         = "0.1.0"
+	discordClientID = "1302721937717334128"
+)
 
 func main() {
-	startAll := time.Now()
-	if util.IsDebug {
-		log.Printf("[PERF] Início do programa")
-	}
-	var animeMutex sync.Mutex
+	// Add version flag
+	versionFlag := flag.Bool("version", false, "show version information")
 
+	startAll := time.Now()
+
+	// Display version and build info if requested
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		showVersion()
+		return
+	}
+
+	// Parse flags normally through util.FlagParser()
 	animeName, err := util.FlagParser()
 	if err != nil {
 		log.Fatalln(util.ErrorHandler(err))
 	}
+
+	// Check for version flag after regular parsing
+	if *versionFlag {
+		showVersion()
+		return
+	}
+
+	// Check tracking status
+	if !tracking.IsCgoEnabled {
+		fmt.Println("Notice: Anime progress tracking disabled (CGO not available)")
+		fmt.Println("Episode progress and resume features will not be available.")
+		fmt.Println()
+	}
+
+	if util.IsDebug {
+		log.Printf("[PERF] Início do programa")
+	}
+	var animeMutex sync.Mutex
 
 	discordStart := time.Now()
 	discordEnabled := true
@@ -203,6 +234,16 @@ func main() {
 		if updater != nil {
 			updater.Stop()
 		}
+	}
+}
+
+// showVersion displays the version and build information
+func showVersion() {
+	fmt.Printf("GoAnime v%s", version)
+	if tracking.IsCgoEnabled {
+		fmt.Println(" (with SQLite tracking)")
+	} else {
+		fmt.Println(" (without SQLite tracking)")
 	}
 }
 
