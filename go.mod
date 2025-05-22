@@ -18,9 +18,7 @@ require (
 
 require github.com/lrstanley/go-ytdlp v0.0.0-20250501010938-80d02fe36936
 
-require (
-	github.com/kr/pretty v0.3.1 // indirect
-)
+require github.com/kr/pretty v0.3.1 // indirect
 
 require (
 	github.com/ProtonMail/go-crypto v1.2.0 // indirect

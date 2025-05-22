@@ -229,7 +229,10 @@ func playVideo(
 					if timePos != nil {
 						if position, ok := timePos.(float64); ok {
 							// Ensure we have a valid duration (at least 1 second)
-							duration := int(updater.episodeDuration.Seconds())
+							var duration int
+							if updater != nil {
+								duration = int(updater.episodeDuration.Seconds())
+							}
 							if duration <= 0 {
 								// Use a default duration if the real one isn't available yet
 								duration = 1440 // 24 minutes in seconds as a safe default
