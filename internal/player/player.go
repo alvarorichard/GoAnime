@@ -89,7 +89,7 @@ func StartVideo(link string, args []string) (string, error) {
 	mpvArgs = append(mpvArgs, link)
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] Iniciando mpv com argumentos: %v\n", mpvArgs)
+		fmt.Printf("[DEBUG] Starting mpv with arguments: %v\n", mpvArgs)
 	}
 
 	cmd := exec.Command("mpv", mpvArgs...)
@@ -105,28 +105,28 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] mpv iniciado, aguardando criação do socket: %s\n", socketPath)
+		fmt.Printf("[DEBUG]mpv started, waiting for socket creation: %s\n", socketPath)
 	}
 
 	// Wait for socket creation with longer timeout
 	maxAttempts := 30 // 3 seconds total
 	for i := 0; i < maxAttempts; i++ {
 		if util.IsDebug {
-			fmt.Printf("[DEBUG] Tentativa %d/%d: verificando existência do socket...\n", i+1, maxAttempts)
+			fmt.Printf("[DEBUG] Try %d/%d: checking existence of socket...\n", i+1, maxAttempts)
 		}
 		if runtime.GOOS == "windows" {
 			// Special handling for Windows named pipes
 			_, err := os.Stat(`\\.\pipe\` + strings.TrimPrefix(socketPath, `\\.\pipe\`))
 			if err == nil {
 				if util.IsDebug {
-					fmt.Printf("[DEBUG] Socket encontrado após %.2fs\n", time.Since(startTime).Seconds())
+					fmt.Printf("[DEBUG] Socket found after %.2fs\n", time.Since(startTime).Seconds())
 				}
 				return socketPath, nil
 			}
 		} else {
 			if _, err := os.Stat(socketPath); err == nil {
 				if util.IsDebug {
-					fmt.Printf("[DEBUG] Socket encontrado após %.2fs\n", time.Since(startTime).Seconds())
+					fmt.Printf("[DEBUG] Socket found after %.2fs\n", time.Since(startTime).Seconds())
 				}
 				return socketPath, nil
 			}
@@ -141,7 +141,7 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] Timeout após %.2fs esperando o socket do mpv\n", time.Since(startTime).Seconds())
+		fmt.Printf("[DEBUG] Timeout after %.2fs waiting  socket of mpv\n", time.Since(startTime).Seconds())
 	}
 	// Cleanup if timeout occurs
 	err := cmd.Process.Kill()
@@ -184,7 +184,7 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 	}
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] Resposta bruta do mpv: %s\n", string(buffer[:n]))
+		fmt.Printf("[DEBUG]Raw response from mpv: %s\n", string(buffer[:n]))
 	}
 
 	// Tratar múltiplos JSONs na mesma resposta
@@ -197,14 +197,14 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 		err = json.Unmarshal(resp, &response)
 		if err != nil {
 			if util.IsDebug {
-				fmt.Printf("[DEBUG] Erro ao fazer unmarshal: %v\n", err)
+				fmt.Printf("[DEBUG]Error when unmarshaling: %v\n", err)
 			}
 			continue
 		}
 		if errStr, ok := response["error"].(string); ok && errStr == "property unavailable" {
 			// Propriedade ainda não disponível, ignore sem erro
 			if util.IsDebug {
-				fmt.Println("[DEBUG] Propriedade ainda não disponível, ignorando...")
+				fmt.Println("[DEBUG] Property not yet available, ignoring...")
 			}
 			continue
 		}

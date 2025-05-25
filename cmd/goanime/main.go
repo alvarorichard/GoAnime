@@ -20,7 +20,7 @@ import (
 
 // Version information
 const (
-	version         = "0.1.0"
+	version         = "1.1.0"
 	discordClientID = "1302721937717334128"
 )
 
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	if util.IsDebug {
-		log.Printf("[PERF] Início do programa")
+		log.Printf("[PERF] starting Goanime v%s", version)
 	}
 	var animeMutex sync.Mutex
 
@@ -69,7 +69,7 @@ func main() {
 		discordEnabled = false
 	} else {
 		if util.IsDebug {
-			log.Printf("[PERF] Discord pronto em %v", time.Since(discordStart))
+			log.Printf("[PERF] Discord Ready in %v", time.Since(discordStart))
 		}
 		defer client.Logout()
 	}
@@ -88,7 +88,7 @@ func main() {
 		log.Println("Failed to fetch anime details:", err)
 	}
 	if util.IsDebug {
-		log.Printf("[PERF] Busca de detalhes em %v", time.Since(detailsStart))
+		log.Printf("[PERF] Search in details %v", time.Since(detailsStart))
 	}
 
 	episodesStart := time.Now()
@@ -97,8 +97,8 @@ func main() {
 		log.Fatalln("The selected anime does not have episodes on the server.")
 	}
 	if util.IsDebug {
-		log.Printf("[PERF] Busca de episódios em %v", time.Since(episodesStart))
-		log.Printf("[PERF] Inicialização total em %v", time.Since(startAll))
+		log.Printf("[PERF] Search Episode in %v", time.Since(episodesStart))
+		log.Printf("[PERF] Full boot in %v", time.Since(startAll))
 	}
 
 	series, totalEpisodes, err := api.IsSeries(anime.URL)
