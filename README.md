@@ -46,17 +46,11 @@ https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048
 
 * Go (at latest version)
 
-
-
 * Mpv(at latest version)
-* yt-dlp(at latest version)
 
 
-## Dependencies
-* PuerkitoBio/goquery
-* manifoldco/promptui
-* cavaliergopher/grab/v3
-* ktr0731/go-fuzzyfinder
+
+
 
 ## how to install and run
 
@@ -73,7 +67,7 @@ git clone https://github.com/alvarorichard/GoAnime.git
 cd GoAnime
 ```
 ```shell
-sudo bash install.sh
+go run cmd/goanime/main.go
 ```
 
 ## Arch Linux Install (AUR)
@@ -93,10 +87,8 @@ Using `yay`:
 
 
 
-
-
 # Windows install only
-To install GoAnime on Windows using the `install.ps1` PowerShell script, follow these steps:
+To install GoAnime on Windows, follow these steps:
 
 1. Open PowerShell as Administrator
 
@@ -109,13 +101,6 @@ In the PowerShell window, execute the following command to allow the execution o
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-3.Run the Install Script:
-
-Execute the `install.ps1` script:
-
-```powershell
-.\install.ps1
-```
 # NixOS install (Flakes)
 
 ## Temporary Run
@@ -149,10 +134,10 @@ Open PowerShell and execute:
 iwr -useb get.scoop.sh | iex
 ```
 
-2. Install `mpv` and `yt-dlp` using Scoop:
+2. Install `mpv`using Scoop:
 
 ```powershell
-scoop install mpv yt-dlp
+scoop install mpv 
 ```
 This method ensures that mpv and yt-dlp are added to your PATH automatically, eliminating the need for manual configuration.
 
