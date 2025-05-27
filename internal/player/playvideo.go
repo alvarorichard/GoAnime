@@ -23,7 +23,7 @@ import (
 // Note: This relies on mpv's ability to update script-opts dynamically via set_property,
 // or a script that interprets these options.
 func applySkipTimes(socketPath string, episode *models.Episode) {
-    var opts []string // <-- Estilo preferido para slices vazios
+	var opts []string // <-- Estilo preferido para slices vazios
 	if episode.SkipTimes.Op.Start > 0 || episode.SkipTimes.Op.End > 0 {
 		opts = append(opts, fmt.Sprintf("skip_op=%d-%d", episode.SkipTimes.Op.Start, episode.SkipTimes.Op.End))
 	}
