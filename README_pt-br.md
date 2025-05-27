@@ -34,12 +34,6 @@ https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048
 * Go (na versão mais recente)
 * mpv (na versão mais recente)
 
-## Dependências
-* PuerkitoBio/goquery
-* manifoldco/promptui
-* cavaliergopher/grab/v3
-* ktr0731/go-fuzzyfinder
-
 
 ### Instalação Universal (Só precisa do go instalado e recomendado para a maioria dos usuarios)
 ```shell
@@ -52,8 +46,7 @@ go install github.com/alvarorichard/Goanime/cmd/goanime@latest
 git clone https://github.com/alvarorichard/GoAnime.git
 ```
 ```shell
-cd GoAnime
-sudo bash install.sh
+go run cmd/goanime/main.go
 ```
 ## Instalação no Arch Linux (AUR)
 
@@ -72,7 +65,7 @@ Usando `yay`:
 
 
 # Instalação apenas para Windows
-Para instalar o GoAnime no Windows usando o script PowerShell `install.ps1`, siga estes passos:
+Para instalar o GoAnime no Windows  siga estes passos:
 
 1. Abra o PowerShell como Administrador.
 2. Habilite a Execução de Scripts no PowerShell (se ainda não estiver habilitada):
@@ -80,10 +73,6 @@ Para instalar o GoAnime no Windows usando o script PowerShell `install.ps1`, sig
    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-3. Execute o Script de Instalação:
-```shell
-   .\install.ps1
-```
 ### Recomendações Adicionais para os Usuários
 
 Para uma experiência de configuração mais suave, é recomendado instalar `mpv` e `yt-dlp` usando o Scoop, pois isso os adiciona automaticamente ao PATH do seu sistema. Siga estes passos para instalar essas ferramentas:
@@ -92,9 +81,9 @@ Para uma experiência de configuração mais suave, é recomendado instalar `mpv
   ```shell
   Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
   ```
- Instale `mpv` e `yt-dlp` usando o Scoop:
+ Instale `mpv` usando o Scoop:
    ```shell
-   scoop install mpv yt-dlp
+   scoop install mpv
    ``` 
 Este método garante que mpv e yt-dlp sejam adicionados ao seu PATH automaticamente, eliminando a necessidade de configuração manual.
 
