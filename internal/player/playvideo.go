@@ -23,7 +23,7 @@ import (
 // Note: This relies on mpv's ability to update script-opts dynamically via set_property,
 // or a script that interprets these options.
 func applySkipTimes(socketPath string, episode *models.Episode) {
-	opts := []string{}
+    var opts []string // <-- Estilo preferido para slices vazios
 	if episode.SkipTimes.Op.Start > 0 || episode.SkipTimes.Op.End > 0 {
 		opts = append(opts, fmt.Sprintf("skip_op=%d-%d", episode.SkipTimes.Op.Start, episode.SkipTimes.Op.End))
 	}
@@ -147,10 +147,10 @@ func playVideo(
 	// Fetch AniSkip data concurrently.
 	// currentEpisode is a pointer and will be populated by GetAndParseAniSkipData.
 	go func() {
-		var aniskipErr error
+		//var aniskipErr error
 		// GetAndParseAniSkipData should handle anilistID <= 0 gracefully (e.g., return nil error and no skip times).
 		// If anilistID is 0, currentEpisode.SkipTimes will remain empty.
-		aniskipErr = api.GetAndParseAniSkipData(anilistID, currentEpisodeNum, currentEpisode)
+		aniskipErr := api.GetAndParseAniSkipData(anilistID, currentEpisodeNum, currentEpisode)
 		skipDataChan <- aniskipErr
 	}()
 
