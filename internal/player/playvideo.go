@@ -18,6 +18,36 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// applySkipTimes attempts to set the skip times (OP and ED) on a running mpv instance
+// by setting the "script-opts" property.
+// Note: This relies on mpv's ability to update script-opts dynamically via set_property,
+// or a script that interprets these options.
+func applySkipTimes(socketPath string, episode *models.Episode) {
+	opts := []string{}
+	if episode.SkipTimes.Op.Start > 0 || episode.SkipTimes.Op.End > 0 {
+		opts = append(opts, fmt.Sprintf("skip_op=%d-%d", episode.SkipTimes.Op.Start, episode.SkipTimes.Op.End))
+	}
+	if episode.SkipTimes.Ed.Start > 0 || episode.SkipTimes.Ed.End > 0 {
+		opts = append(opts, fmt.Sprintf("skip_ed=%d-%d", episode.SkipTimes.Ed.Start, episode.SkipTimes.Ed.End))
+	}
+
+	if len(opts) > 0 {
+		combinedOpts := strings.Join(opts, ",")
+		_, cmdErr := mpvSendCommand(socketPath, []interface{}{"set_property", "script-opts", combinedOpts})
+		if cmdErr != nil {
+			if util.IsDebug {
+				log.Printf("Failed to apply skip times to mpv via set_property script-opts: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
+			}
+		} else {
+			if util.IsDebug {
+				log.Printf("Successfully applied skip times to mpv: %s", combinedOpts)
+			}
+		}
+	} else if util.IsDebug {
+		log.Printf("No skip times to apply for episode %s", episode.Number)
+	}
+}
+
 // playVideo handles the online playback of a video and user interaction.
 func playVideo(
 	videoURL string,
@@ -26,12 +56,16 @@ func playVideo(
 	anilistID int,
 	updater *RichPresenceUpdater,
 ) error {
-	// Prompt for quality selection if multiple are available (streaming)
-	if strings.HasPrefix(videoURL, "http") {
-		if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil {
-			videoURL = url
+	// The videoURL should already be processed by the caller (e.g., HandleDownloadAndPlay or GetVideoURLForEpisode)
+	// to be a direct media link after any necessary quality selection.
+	/*
+		// Prompt for quality selection if multiple are available (streaming)
+		if strings.HasPrefix(videoURL, "http") {
+			if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil {
+				videoURL = url
+			}
 		}
-	}
+	*/
 
 	// Fix the URL if it has a double 'p' in the quality suffix
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
@@ -49,7 +83,25 @@ func playVideo(
 	}
 
 	// Initialize mpv arguments
-	mpvArgs := make([]string, 0)
+	// mpvArgs := []string{
+	// 	"--hwdec=auto",             // Enable hardware decoding
+	// 	"--vo=gpu",                 // Use GPU output
+	// 	"--no-config",              // Skip loading config files
+	// 	"--cache=yes",              // Enable caching
+	// 	"--demuxer-max-bytes=500M", // Increase cache size
+	// }
+	mpvArgs := []string{
+		"--hwdec=auto-safe",           // Hardware decoding com fallback seguro
+		"--vo=gpu",                    // GPU rendering
+		"--profile=fast",              // Perfil de performance
+		"--cache=yes",                 // Habilita cache
+		"--demuxer-max-bytes=300M",    // Tamanho do buffer de rede
+		"--demuxer-readahead-secs=20", // Pré-carregamento em segundos
+		"--no-config",                 // Ignora arquivos de configuração locais
+		//"--input-ipc-server=auto", // Socket IPC automático (evita conflitos)
+		"--video-latency-hacks=yes",
+		"--audio-display=no",
+	}
 	var tracker *tracking.LocalTracker
 	var resumeTime int
 	// Try to initialize tracking system if CGO is enabled
@@ -89,27 +141,46 @@ func playVideo(
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}
 
-	err = api.GetAndParseAniSkipData(anilistID, currentEpisodeNum, currentEpisode)
-	if err != nil {
-		log.Printf("AniSkip data not available for episode %d: %v\n", currentEpisodeNum, err)
-	} else if util.IsDebug {
-		log.Printf("AniSkip data for episode %d: %+v\n", currentEpisodeNum, currentEpisode.SkipTimes)
-	}
+	// Channel to receive AniSkip results
+	skipDataChan := make(chan error, 1)
 
-	// Add skip times to mpv arguments if available
-	if currentEpisode.SkipTimes.Op.Start > 0 || currentEpisode.SkipTimes.Op.End > 0 {
-		opStart, opEnd := currentEpisode.SkipTimes.Op.Start, currentEpisode.SkipTimes.Op.End
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_op=%d-%d", opStart, opEnd))
-	}
-	if currentEpisode.SkipTimes.Ed.Start > 0 || currentEpisode.SkipTimes.Ed.End > 0 {
-		edStart, edEnd := currentEpisode.SkipTimes.Ed.Start, currentEpisode.SkipTimes.Ed.End
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--script-opts=skip_ed=%d-%d", edStart, edEnd))
-	}
+	// Fetch AniSkip data concurrently.
+	// currentEpisode is a pointer and will be populated by GetAndParseAniSkipData.
+	go func() {
+		var aniskipErr error
+		// GetAndParseAniSkipData should handle anilistID <= 0 gracefully (e.g., return nil error and no skip times).
+		// If anilistID is 0, currentEpisode.SkipTimes will remain empty.
+		aniskipErr = api.GetAndParseAniSkipData(anilistID, currentEpisodeNum, currentEpisode)
+		skipDataChan <- aniskipErr
+	}()
 
 	// Start mpv with IPC support
 	socketPath, err := StartVideo(videoURL, mpvArgs)
 	if err != nil {
 		return fmt.Errorf("failed to start video with IPC: %w", err)
+	}
+
+	// Wait for AniSkip data or timeout
+	select {
+	case errAniskip := <-skipDataChan:
+		if errAniskip != nil {
+			log.Printf("AniSkip data not available or failed to fetch for episode %d: %v", currentEpisodeNum, errAniskip)
+		} else {
+			// Successfully fetched (or anilistID was invalid and GetAndParseAniSkipData handled it gracefully by returning nil error)
+			if util.IsDebug {
+				if currentEpisode.SkipTimes.Op.Start > 0 || currentEpisode.SkipTimes.Ed.Start > 0 {
+					log.Printf("AniSkip data fetched for episode %d: %+v", currentEpisodeNum, currentEpisode.SkipTimes)
+				} else if anilistID > 0 { // anilistID was valid, but no skip times found in the data
+					log.Printf("AniSkip data fetched for episode %d, but no skip intervals were found in the data.", currentEpisodeNum)
+				} else { // anilistID was <= 0
+					log.Println("AniSkip data fetch skipped or no data due to invalid/missing anilistID.")
+				}
+			}
+			// applySkipTimes will check if SkipTimes has actual values.
+			applySkipTimes(socketPath, currentEpisode)
+		}
+	case <-time.After(3 * time.Second):
+		log.Printf("Timeout waiting for AniSkip data for episode %d. Continuing without applying skip times dynamically.", currentEpisodeNum)
 	}
 
 	// Helper to get a non-empty title
@@ -196,20 +267,39 @@ func playVideo(
 		defer updater.Stop()
 	}
 
-	// Locate the index of the current episode
-	currentEpisodeIndex := -1
-	for i, ep := range episodes {
-		if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(currentEpisodeNum) {
-			currentEpisodeIndex = i
-			break
+	// Optimize Episode Index Lookup
+	// Assume episodes are ordered sequentially and try direct indexing first.
+	currentEpisodeIndex := currentEpisodeNum - 1
+	if currentEpisodeIndex < 0 || currentEpisodeIndex >= len(episodes) || ExtractEpisodeNumber(episodes[currentEpisodeIndex].Number) != strconv.Itoa(currentEpisodeNum) {
+		// Fallback to search if assumption fails or direct index is out of bounds
+		currentEpisodeIndex = -1 // Reset before searching
+		for i, ep := range episodes {
+			if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(currentEpisodeNum) {
+				currentEpisodeIndex = i
+				break
+			}
 		}
 	}
+
 	if currentEpisodeIndex == -1 {
-		return fmt.Errorf("current episode number %d not found", currentEpisodeNum)
+		return fmt.Errorf("current episode number %d not found in episodes list", currentEpisodeNum)
 	}
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit, 's' to skip intro:")
+
+	// Preload next episode in background
+	if currentEpisodeIndex+1 < len(episodes) {
+		go func() {
+			nextEpisode := episodes[currentEpisodeIndex+1]
+			// The result is intentionally ignored; this is for pre-caching/pre-resolving.
+			_, err := GetVideoURLForEpisode(nextEpisode.URL)
+			if err != nil && util.IsDebug {
+				log.Printf("Error preloading next episode %s: %v", nextEpisode.Number, err)
+			}
+		}()
+	}
+
 	// Start a goroutine to periodically update local tracking
 	stopTracking := make(chan struct{})
 	if tracker != nil {

@@ -16,12 +16,12 @@ require (
 	golang.org/x/net v0.40.0
 )
 
-require github.com/lrstanley/go-ytdlp v0.0.0-20250501010938-80d02fe36936
+require github.com/lrstanley/go-ytdlp v0.0.0-20250522151933-92513d6ff802
 
 require github.com/kr/pretty v0.3.1 // indirect
 
 require (
-	github.com/ProtonMail/go-crypto v1.2.0 // indirect
+	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
