@@ -66,7 +66,9 @@ type LocalTracker struct {
 │  Construtor e Inicialização                                                │
 *────────────────────────────────────────────────────────────────────────────
 */
-func NewLocalTracker(dbPath string) *LocalTracker {
+var NewLocalTracker func(dbPath string) *LocalTracker
+
+func newLocalTrackerImpl(dbPath string) *LocalTracker {
 	// Check if CGO is disabled (SQLite not available)
 	if !IsCgoEnabled {
 		fmt.Println("Warning: CGO is disabled, anime progress tracking will be unavailable")
@@ -394,6 +396,7 @@ func init() {
 	// This will be replaced at build time with false if CGO is disabled
 	// When using CGO_ENABLED=0
 	IsCgoEnabled = isCgoEnabled()
+	NewLocalTracker = newLocalTrackerImpl // Initialize the public variable
 }
 
 // The implementation of isCgoEnabled is defined in local_cgo.go and local_nocgo.go
