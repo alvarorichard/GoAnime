@@ -19,7 +19,6 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
@@ -226,18 +225,6 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 //		return net.Dial("unix", socketPath)
 //	}
 //}
-
-// mpvSendPosition retorna a posição atual do vídeo no mpv (em segundos inteiros)
-func mpvSendPosition(sock string) (int, error) {
-	val, err := mpvSendCommand(sock, []interface{}{"get_property", "time-pos"})
-	if err != nil || val == nil {
-		return -1, err
-	}
-	if f, ok := val.(float64); ok {
-		return int(f + 0.5), nil // arredonda
-	}
-	return -1, nil
-}
 
 // Funções de download extraídas de player.go
 // downloadPart, combineParts, DownloadVideo, downloadWithYtDlp, ExtractVideoSources, getBestQualityURL, ExtractVideoSourcesWithPrompt, HandleBatchDownload, getEpisodeRange, findEpisode, createEpisodePath, fileExists
@@ -446,60 +433,10 @@ func askForPlayOffline() bool {
 	return strings.ToLower(result) == "yes"
 }
 
-// salva posição final antes de sair/trocar
-func saveFinalPosition(tr *tracking.LocalTracker, sock string,
-	animeID int, url string, epNum int,
-	title string, durationSec int) {
-
-	// Skip if tracker is nil (CGO disabled)
-	if tr == nil {
-		if util.IsDebug {
-			log.Println("Skipping final position save: tracker not initialized")
-		}
-		return
-	}
-
-	if pos, _ := mpvSendPosition(sock); pos >= 0 {
-		_ = tr.UpdateProgress(tracking.Anime{
-			AnilistID:     animeID,
-			AllanimeID:    url,
-			EpisodeNumber: epNum,
-			PlaybackTime:  pos,
-			Duration:      durationSec,
-			Title:         title,
-			LastUpdated:   time.Now(),
-		})
-	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return "Unknown Title"
-}
-
 func promptYesNo(label string) (bool, error) {
 	p := promptui.Select{Label: label, Items: []string{"Sim", "Não"}}
 	_, res, err := p.Run()
 	return strings.ToLower(res) == "sim", err
-}
-
-func nextIndex(cmd rune, cur, total int) int {
-	if cmd == 'n' && cur+1 < total {
-		return cur + 1
-	}
-	if cmd == 'p' && cur > 0 {
-		return cur - 1
-	}
-	return cur
-}
-
-func getURL(ep models.Episode) string {
-	u, _ := GetVideoURLForEpisode(ep.URL)
-	return u
 }
 
 // playVideo has been moved to playvideo.go

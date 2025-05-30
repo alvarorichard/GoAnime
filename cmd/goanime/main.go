@@ -154,7 +154,6 @@ func main() {
 					if err != nil {
 						log.Fatalln("Error converting re-selected episode number:", util.ErrorHandler(err))
 					}
-					justSelectedWithFuzzyFinder = true // Use these newly selected values directly
 				}
 			}
 			// Values for selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum are now set.

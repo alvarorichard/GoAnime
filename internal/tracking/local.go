@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -115,14 +116,18 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 	db.SetMaxIdleConns(maxIdleConns)
 
 	if err := initializeDatabase(db); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			fmt.Printf("Error closing database: %v\n", closeErr)
+		}
 		fmt.Printf("Error initializing database: %v\n", err)
 		return nil
 	}
 
 	statements, err := prepareStatements(db)
 	if err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			fmt.Printf("Error closing database: %v\n", closeErr)
+		}
 		fmt.Printf("Error preparing statements: %v\n", err)
 		return nil
 	}
@@ -331,7 +336,11 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+	}()
 
 	list := make([]Anime, 0, avgAnimePerUser)
 	for rows.Next() {

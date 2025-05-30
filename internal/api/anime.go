@@ -91,7 +91,7 @@ func searchAnimeOnPage(pageURL string) (*models.Anime, string, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-
+			log.Printf("Error closing response body: %v", err)
 		}
 	}(response.Body)
 
@@ -338,7 +338,7 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-
+			log.Printf("Error closing AniList response body: %v", err)
 		}
 	}(resp.Body)
 

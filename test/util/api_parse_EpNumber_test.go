@@ -1,9 +1,6 @@
 package test_util
 
 import (
-	"github.com/pkg/errors"
-	"regexp"
-	"strconv"
 	"testing"
 )
 
@@ -33,14 +30,4 @@ func TestParseEpisodeNumber(t *testing.T) {
 			t.Errorf("parseEpisodeNumber(%q) = %d, expected %d", test.input, result, test.expected)
 		}
 	}
-}
-
-// Função a ser testada (copiada do código original para garantir que o teste funciona de forma independente)
-func parseEpisodenumber(episodeNum string) (int, error) {
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeNum)
-	if numStr == "" {
-		return 0, errors.New("no episode number found")
-	}
-	return strconv.Atoi(numStr)
 }

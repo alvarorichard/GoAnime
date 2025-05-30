@@ -32,7 +32,11 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	tracker := NewLocalTracker(dbPath)
-	defer tracker.Close()
+	defer func() {
+		if err := tracker.Close(); err != nil {
+			t.Logf("Error closing tracker: %v", err)
+		}
+	}()
 
 	// Dados de teste atualizados
 	testAnime := Anime{

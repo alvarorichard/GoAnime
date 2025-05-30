@@ -37,14 +37,22 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}()
 	partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
 	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
 	file, err := os.Create(partFilePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("Error closing file: %v", err)
+		}
+	}()
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := resp.Body.Read(buf)
@@ -72,7 +80,11 @@ func combineParts(destPath string, numThreads int) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
+	defer func() {
+		if err := outFile.Close(); err != nil {
+			log.Printf("Error closing output file: %v", err)
+		}
+	}()
 	for i := 0; i < numThreads; i++ {
 		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
 		partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
@@ -81,10 +93,14 @@ func combineParts(destPath string, numThreads int) error {
 			return err
 		}
 		if _, err := io.Copy(outFile, partFile); err != nil {
-			partFile.Close()
+			if closeErr := partFile.Close(); closeErr != nil {
+				log.Printf("Error closing part file: %v", closeErr)
+			}
 			return err
 		}
-		partFile.Close()
+		if err := partFile.Close(); err != nil {
+			log.Printf("Error closing part file: %v", err)
+		}
 		if err := os.Remove(partFilePath); err != nil {
 			return err
 		}
@@ -164,7 +180,11 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("Error closing response body: %v", err)
+			}
+		}()
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, err
