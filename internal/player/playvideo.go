@@ -286,7 +286,7 @@ func playVideo(
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'q' to quit, 's' to skip intro:")
+	fmt.Println("Press 'n' for next episode, 'p' for previous episode, 'e' to select episode, 'q' to quit, 's' to skip intro:")
 
 	// Preload next episode in background
 	if currentEpisodeIndex+1 < len(episodes) {
@@ -421,6 +421,45 @@ func playVideo(
 			close(stopTracking)
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return nil
+		case 'e': // Select episode
+			if updater != nil {
+				updater.Stop()
+			}
+			selectedEpisodeURL, selectedEpisodeNumberStr, err := SelectEpisodeWithFuzzyFinder(episodes)
+			if err != nil {
+				fmt.Printf("Failed to select episode: %v\n", err)
+				continue
+			}
+			selectedVideoURL, err := GetVideoURLForEpisode(selectedEpisodeURL)
+			if err != nil {
+				fmt.Printf("Failed to get video URL for selected episode: %v\n", err)
+				continue
+			}
+			selectedEpisodeNum, _ := strconv.Atoi(ExtractEpisodeNumber(selectedEpisodeNumberStr))
+
+			// Find the selected episode to get its duration
+			var selectedEpisodeDuration time.Duration
+			for _, ep := range episodes {
+				if ExtractEpisodeNumber(ep.Number) == strconv.Itoa(selectedEpisodeNum) {
+					selectedEpisodeDuration = time.Duration(ep.Duration) * time.Second
+					break
+				}
+			}
+
+			var newUpdater *RichPresenceUpdater
+			if updater != nil {
+				newUpdater = NewRichPresenceUpdater(
+					updater.anime,
+					updater.isPaused,
+					updater.animeMutex,
+					updater.updateFreq,
+					selectedEpisodeDuration,
+					"",
+				)
+				updater.episodeStarted = false
+			}
+			close(stopTracking)
+			return playVideo(selectedVideoURL, episodes, selectedEpisodeNum, anilistID, newUpdater)
 		case 's': // Skip intro (OP)
 			if currentEpisode.SkipTimes.Op.End > 0 {
 				fmt.Printf("Skipping intro to %d seconds.\n", currentEpisode.SkipTimes.Op.End)

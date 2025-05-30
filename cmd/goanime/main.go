@@ -118,16 +118,48 @@ func main() {
 	if series {
 		fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
 
-		for {
-			selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
-			if err != nil {
-				log.Fatalln(util.ErrorHandler(err))
-			}
+		// Initial episode selection
+		selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+		if err != nil {
+			log.Fatalln(util.ErrorHandler(err))
+		}
 
-			selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
-			if err != nil {
-				log.Fatalln("Error converting episode number:", util.ErrorHandler(err))
+		selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+		if err != nil {
+			log.Fatalln("Error converting episode number:", util.ErrorHandler(err))
+		}
+		justSelectedWithFuzzyFinder := true // Treat initial selection like a fuzzy finder selection
+
+		for {
+			if !justSelectedWithFuzzyFinder {
+				// Find the episode data for the selected episode number (e.g., after 'n' or 'p')
+				var episodeFoundInList = false
+				for _, ep := range episodes {
+					if epNum, innerErr := strconv.Atoi(player.ExtractEpisodeNumber(ep.Number)); innerErr == nil && epNum == selectedEpisodeNum {
+						selectedEpisodeURL = ep.URL
+						episodeNumberStr = ep.Number
+						// TODO: Consider updating episodeDuration here if it varies:
+						// episodeDuration = time.Duration(ep.Duration) * time.Second
+						episodeFoundInList = true
+						break
+					}
+				}
+				if !episodeFoundInList {
+					log.Printf("Warning: Episode number %d not found in the episode list. Please re-select.", selectedEpisodeNum)
+					selectedEpisodeURL, episodeNumberStr, err = player.SelectEpisodeWithFuzzyFinder(episodes)
+					if err != nil {
+						log.Fatalln("Failed to re-select episode:", util.ErrorHandler(err))
+					}
+					selectedEpisodeNum, err = strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+					if err != nil {
+						log.Fatalln("Error converting re-selected episode number:", util.ErrorHandler(err))
+					}
+					justSelectedWithFuzzyFinder = true // Use these newly selected values directly
+				}
 			}
+			// Values for selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum are now set.
+			// Reset the flag for the next iteration's logic.
+			justSelectedWithFuzzyFinder = false
 
 			animeMutex.Lock()
 			anime.Episodes = []models.Episode{
@@ -176,7 +208,7 @@ func main() {
 			}
 
 			var userInput string
-			fmt.Print("Press 'n' for next episode, 'p' for previous episode, 'q' to quit: ")
+			fmt.Print("Press 'n' for next episode, 'p' for previous episode, 'e' to select episode, 'q' to quit: ")
 			_, err = fmt.Scanln(&userInput)
 			if err != nil {
 				// Handle different error types
@@ -192,12 +224,35 @@ func main() {
 			if userInput == "q" {
 				log.Println("Quitting application as per user request.")
 				break
+			} else if userInput == "e" {
+				// Allow user to manually select episode
+				selectedEpisodeURL, episodeNumberStr, err = player.SelectEpisodeWithFuzzyFinder(episodes)
+				if err != nil {
+					log.Fatalln(util.ErrorHandler(err))
+				}
+				selectedEpisodeNum, err = strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+				if err != nil {
+					log.Fatalln("Error converting episode number:", util.ErrorHandler(err))
+				}
+				if err == nil { // If fuzzy selection and number conversion succeeded
+					justSelectedWithFuzzyFinder = true // Indicate that the next iteration should use these fresh values
+				}
 			} else if userInput == "p" {
-				// Handle previous episode logic
-				selectedEpisodeNum = m(1, selectedEpisodeNum-1)
+				// Handle previous episode logic (with inlined clamping)
+				prev := selectedEpisodeNum - 1
+				if prev < 1 {
+					selectedEpisodeNum = 1
+				} else {
+					selectedEpisodeNum = prev
+				}
 			} else {
-				// Default to next episode
-				selectedEpisodeNum = i(totalEpisodes, selectedEpisodeNum+1)
+				// Default to next episode (with inlined clamping)
+				next := selectedEpisodeNum + 1
+				if next > totalEpisodes {
+					selectedEpisodeNum = totalEpisodes
+				} else {
+					selectedEpisodeNum = next
+				}
 			}
 		}
 	} else {
@@ -250,18 +305,4 @@ func showVersion() {
 	} else {
 		fmt.Println(" (without SQLite tracking)")
 	}
-}
-
-func m(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func i(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
