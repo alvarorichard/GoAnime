@@ -30,6 +30,7 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 - Browse episodes
 - Play online with quality selection
 - Download single episodes
+- Discord RPC about the anime
 - Batch download multiple episodes
 - Resume playback from where you left off (in builds with SQLite support)
 - Track watched episodes (in builds with SQLite support)
@@ -47,9 +48,6 @@ https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048
 * Go (at latest version)
 
 * Mpv(at latest version)
-
-
-
 
 
 ## how to install and run
