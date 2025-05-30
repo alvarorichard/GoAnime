@@ -28,6 +28,7 @@ GoAnime is a simple command-line interface (CLI) built in Go, allowing users to 
 
 - Search for anime by name
 - Browse episodes
+- Skip anime Intro 
 - Play online with quality selection
 - Download single episodes
 - Discord RPC about the anime
