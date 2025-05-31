@@ -16,6 +16,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
+	// Importa o pacote de notice para registrar avisos de tracking
 )
 
 const (
@@ -37,7 +38,7 @@ func main() {
 		log.Fatalln(util.ErrorHandler(err))
 	}
 
-	handleTrackingNotice()
+	tracking.HandleTrackingNotice()
 	if util.IsDebug {
 		log.Printf("[PERF] starting Goanime v%s", version)
 	}
@@ -81,14 +82,6 @@ func showVersion() {
 		fmt.Println(" (with SQLite tracking)")
 	} else {
 		fmt.Println(" (without SQLite tracking)")
-	}
-}
-
-func handleTrackingNotice() {
-	if !tracking.IsCgoEnabled {
-		fmt.Println("Notice: Anime progress tracking disabled (CGO not available)")
-		fmt.Println("Episode progress and resume features will not be available.")
-		fmt.Println()
 	}
 }
 
