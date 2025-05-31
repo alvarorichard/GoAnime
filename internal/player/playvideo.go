@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -54,7 +55,7 @@ func playVideo(
 	episodes []models.Episode,
 	currentEpisodeNum int,
 	anilistID int,
-	updater *RichPresenceUpdater,
+	updater *discord.RichPresenceUpdater,
 ) error {
 	// The videoURL should already be processed by the caller (e.g., HandleDownloadAndPlay or GetVideoURLForEpisode)
 	// to be a direct media link after any necessary quality selection.
@@ -209,8 +210,8 @@ func playVideo(
 					}
 				}
 				if timePos != nil {
-					if !updater.episodeStarted {
-						updater.episodeStarted = true
+					if !updater.IsEpisodeStarted() {
+						updater.SetEpisodeStarted(true)
 					}
 					break
 				}
@@ -221,30 +222,30 @@ func playVideo(
 		// Retrieve the video duration once the episode has started
 		go func() {
 			for {
-				if updater.episodeStarted && updater.episodeDuration == 0 {
+				if updater.IsEpisodeStarted() && updater.GetEpisodeDuration() == 0 {
 					durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
 					if err != nil {
 						log.Printf("Error getting video duration: %v", err)
 					} else if durationPos != nil {
 						if duration, ok := durationPos.(float64); ok {
-							updater.episodeDuration = time.Duration(duration * float64(time.Second))
+							updater.SetEpisodeDuration(time.Duration(duration * float64(time.Second)))
 							if util.IsDebug {
-								log.Printf("Retrieved Video duration: %v seconds", updater.episodeDuration.Seconds())
+								log.Printf("Retrieved Video duration: %v seconds", updater.GetEpisodeDuration().Seconds())
 							}
 
 							// Ensure we have a valid duration for database storage (minimum 1 second)
-							if updater.episodeDuration < time.Second {
-								log.Printf("Warning: Retrieved episode duration is very small (%v). Setting a default duration.", updater.episodeDuration)
-								updater.episodeDuration = 24 * time.Minute
+							if updater.GetEpisodeDuration() < time.Second {
+								log.Printf("Warning: Retrieved episode duration is very small (%v). Setting a default duration.", updater.GetEpisodeDuration())
+								updater.SetEpisodeDuration(24 * time.Minute)
 							}
 
 							// Only update if we have a tracker and the duration is positive
-							if tracker != nil && int(updater.episodeDuration.Seconds()) > 0 {
+							if tracker != nil && int(updater.GetEpisodeDuration().Seconds()) > 0 {
 								anime := tracking.Anime{
 									AnilistID:     anilistID,
 									AllanimeID:    currentEpisode.URL,
 									EpisodeNumber: currentEpisodeNum,
-									Duration:      int(updater.episodeDuration.Seconds()),
+									Duration:      int(updater.GetEpisodeDuration().Seconds()),
 									Title:         getEpisodeTitle(currentEpisode.Title),
 									LastUpdated:   time.Now(),
 								}
@@ -262,7 +263,7 @@ func playVideo(
 			}
 		}()
 
-		updater.socketPath = socketPath
+		updater.SetSocketPath(socketPath)
 		updater.Start()
 		defer updater.Stop()
 	}
@@ -321,7 +322,7 @@ func playVideo(
 							// Ensure we have a valid duration (at least 1 second)
 							var duration int
 							if updater != nil {
-								duration = int(updater.episodeDuration.Seconds())
+								duration = int(updater.GetEpisodeDuration().Seconds())
 							}
 							if duration <= 0 {
 								// Use a default duration if the real one isn't available yet
@@ -370,17 +371,18 @@ func playVideo(
 					continue
 				}
 				nextEpisodeDuration := time.Duration(nextEpisode.Duration) * time.Second
-				var newUpdater *RichPresenceUpdater
+				var newUpdater *discord.RichPresenceUpdater
 				if updater != nil {
-					newUpdater = NewRichPresenceUpdater(
-						updater.anime,
-						updater.isPaused,
-						updater.animeMutex,
-						updater.updateFreq,
+					newUpdater = discord.NewRichPresenceUpdater(
+						updater.GetAnime(),
+						updater.GetIsPaused(),
+						updater.GetAnimeMutex(),
+						updater.GetUpdateFreq(),
 						nextEpisodeDuration,
 						"",
+						MpvSendCommand,
 					)
-					updater.episodeStarted = false
+					updater.SetEpisodeStarted(false)
 				}
 				close(stopTracking)
 				return playVideo(nextVideoURL, episodes, currentEpisodeNum+1, anilistID, newUpdater)
@@ -399,17 +401,18 @@ func playVideo(
 					continue
 				}
 				prevEpisodeDuration := time.Duration(prevEpisode.Duration) * time.Second
-				var newUpdater *RichPresenceUpdater
+				var newUpdater *discord.RichPresenceUpdater
 				if updater != nil {
-					newUpdater = NewRichPresenceUpdater(
-						updater.anime,
-						updater.isPaused,
-						updater.animeMutex,
-						updater.updateFreq,
+					newUpdater = discord.NewRichPresenceUpdater(
+						updater.GetAnime(),
+						updater.GetIsPaused(),
+						updater.GetAnimeMutex(),
+						updater.GetUpdateFreq(),
 						prevEpisodeDuration,
 						"",
+						MpvSendCommand,
 					)
-					updater.episodeStarted = false
+					updater.SetEpisodeStarted(false)
 				}
 				close(stopTracking)
 				return playVideo(prevVideoURL, episodes, currentEpisodeNum-1, anilistID, newUpdater)
@@ -446,17 +449,18 @@ func playVideo(
 				}
 			}
 
-			var newUpdater *RichPresenceUpdater
+			var newUpdater *discord.RichPresenceUpdater
 			if updater != nil {
-				newUpdater = NewRichPresenceUpdater(
-					updater.anime,
-					updater.isPaused,
-					updater.animeMutex,
-					updater.updateFreq,
+				newUpdater = discord.NewRichPresenceUpdater(
+					updater.GetAnime(),
+					updater.GetIsPaused(),
+					updater.GetAnimeMutex(),
+					updater.GetUpdateFreq(),
 					selectedEpisodeDuration,
 					"",
+					MpvSendCommand,
 				)
-				updater.episodeStarted = false
+				updater.SetEpisodeStarted(false)
 			}
 			close(stopTracking)
 			return playVideo(selectedVideoURL, episodes, selectedEpisodeNum, anilistID, newUpdater)

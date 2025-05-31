@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
@@ -151,6 +152,11 @@ func StartVideo(link string, args []string) (string, error) {
 	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
 }
 
+// MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages
+func MpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
+	return mpvSendCommand(socketPath, command)
+}
+
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
 func mpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
 	conn, err := dialMPVSocket(socketPath)
@@ -238,7 +244,7 @@ func HandleDownloadAndPlay(
 	animeURL string,
 	episodeNumberStr string,
 	animeMalID int,
-	updater *RichPresenceUpdater,
+	updater *discord.RichPresenceUpdater,
 ) {
 	downloadOption := askForDownload()
 	switch downloadOption {
@@ -296,7 +302,7 @@ func downloadAndPlayEpisode(
 	animeURL string,
 	episodeNumberStr string,
 	animeMalID int, // Added animeMalID parameter
-	updater *RichPresenceUpdater,
+	updater *discord.RichPresenceUpdater,
 ) {
 	currentUser, err := user.Current()
 	if err != nil {

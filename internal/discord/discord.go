@@ -1,4 +1,4 @@
-package player
+package discord
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/rich-go/client"
 )
 
+// RichPresenceUpdater gerencia as atualizações do Discord Rich Presence
 type RichPresenceUpdater struct {
 	anime           *models.Anime
 	isPaused        *bool
@@ -18,36 +19,40 @@ type RichPresenceUpdater struct {
 	updateFreq      time.Duration
 	done            chan bool
 	wg              sync.WaitGroup
-	startTime       time.Time     // Start time of playback
-	episodeDuration time.Duration // Total duration of the episode
-	episodeStarted  bool          // Whether the episode has started
-	socketPath      string        // Path to mpv IPC socket
+	startTime       time.Time                                        // Start time of playback
+	episodeDuration time.Duration                                    // Total duration of the episode
+	episodeStarted  bool                                             // Whether the episode has started
+	socketPath      string                                           // Path to mpv IPC socket
+	mpvSendCommand  func(string, []interface{}) (interface{}, error) // Função para enviar comandos ao MPV
 }
 
-func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
-	panic("unimplemented")
-}
-
-func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
-	panic("unimplemented")
-}
-
-func NewRichPresenceUpdater(anime *models.Anime, isPaused *bool, animeMutex *sync.Mutex, updateFreq time.Duration, episodeDuration time.Duration, socketPath string) *RichPresenceUpdater {
+// NewRichPresenceUpdater cria uma nova instância do atualizador de Rich Presence
+func NewRichPresenceUpdater(
+	anime *models.Anime,
+	isPaused *bool,
+	animeMutex *sync.Mutex,
+	updateFreq time.Duration,
+	episodeDuration time.Duration,
+	socketPath string,
+	mpvSendCommand func(string, []interface{}) (interface{}, error),
+) *RichPresenceUpdater {
 	return &RichPresenceUpdater{
 		anime:           anime,
 		isPaused:        isPaused,
 		animeMutex:      animeMutex,
-		updateFreq:      updateFreq, // Make sure updateFreq is actually used in the struct
+		updateFreq:      updateFreq,
 		done:            make(chan bool),
 		startTime:       time.Now(),
 		episodeDuration: episodeDuration,
 		episodeStarted:  false,
 		socketPath:      socketPath,
+		mpvSendCommand:  mpvSendCommand,
 	}
 }
 
+// GetCurrentPlaybackPosition obtém a posição atual de reprodução do MPV
 func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, error) {
-	position, err := mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
+	position, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
 	if err != nil {
 		return 0, err
 	}
@@ -61,7 +66,57 @@ func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, err
 	return time.Duration(posSeconds) * time.Second, nil
 }
 
-// Start begins the periodic Rich Presence updates.
+// SetSocketPath define o caminho do socket MPV
+func (rpu *RichPresenceUpdater) SetSocketPath(socketPath string) {
+	rpu.socketPath = socketPath
+}
+
+// GetSocketPath retorna o caminho do socket MPV
+func (rpu *RichPresenceUpdater) GetSocketPath() string {
+	return rpu.socketPath
+}
+
+// SetEpisodeStarted define se o episódio foi iniciado
+func (rpu *RichPresenceUpdater) SetEpisodeStarted(started bool) {
+	rpu.episodeStarted = started
+}
+
+// IsEpisodeStarted retorna se o episódio foi iniciado
+func (rpu *RichPresenceUpdater) IsEpisodeStarted() bool {
+	return rpu.episodeStarted
+}
+
+// SetEpisodeDuration define a duração do episódio
+func (rpu *RichPresenceUpdater) SetEpisodeDuration(duration time.Duration) {
+	rpu.episodeDuration = duration
+}
+
+// GetEpisodeDuration retorna a duração do episódio
+func (rpu *RichPresenceUpdater) GetEpisodeDuration() time.Duration {
+	return rpu.episodeDuration
+}
+
+// GetAnime retorna o anime associado
+func (rpu *RichPresenceUpdater) GetAnime() *models.Anime {
+	return rpu.anime
+}
+
+// GetIsPaused retorna o ponteiro para o estado de pausa
+func (rpu *RichPresenceUpdater) GetIsPaused() *bool {
+	return rpu.isPaused
+}
+
+// GetAnimeMutex retorna o mutex do anime
+func (rpu *RichPresenceUpdater) GetAnimeMutex() *sync.Mutex {
+	return rpu.animeMutex
+}
+
+// GetUpdateFreq retorna a frequência de atualização
+func (rpu *RichPresenceUpdater) GetUpdateFreq() time.Duration {
+	return rpu.updateFreq
+}
+
+// Start inicia as atualizações periódicas do Rich Presence
 func (rpu *RichPresenceUpdater) Start() {
 	rpu.wg.Add(1)
 	go func() {
@@ -86,7 +141,7 @@ func (rpu *RichPresenceUpdater) Start() {
 	}
 }
 
-// Stop signals the updater to stop and waits for the goroutine to finish.
+// Stop sinaliza para o atualizador parar e aguarda a goroutine terminar
 func (rpu *RichPresenceUpdater) Stop() {
 	// Evita fechar o canal múltiplas vezes
 	if rpu != nil {
@@ -103,6 +158,7 @@ func (rpu *RichPresenceUpdater) Stop() {
 	}
 }
 
+// updateDiscordPresence atualiza o status do Discord Rich Presence
 func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	rpu.animeMutex.Lock()
 	defer rpu.animeMutex.Unlock()
@@ -118,7 +174,6 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	// Debug log to check episode duration
 	if util.IsDebug {
 		log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
-
 	}
 
 	// Convert episode duration to minutes and seconds format
@@ -147,8 +202,22 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	if err := client.SetActivity(activity); err != nil {
 		if util.IsDebug {
 			log.Printf("Error updating Discord Rich Presence: %v\n", err)
-		} else {
+		}
+	} else {
+		if util.IsDebug {
 			log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
 		}
 	}
+}
+
+// FetchDuration busca a duração do episódio (funcionalidade futura)
+func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
+	// TODO: Implementar busca de duração do episódio
+	panic("unimplemented")
+}
+
+// WaitEpisodeStart aguarda o início do episódio (funcionalidade futura)
+func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
+	// TODO: Implementar espera pelo início do episódio
+	panic("unimplemented")
 }

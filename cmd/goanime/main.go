@@ -11,17 +11,16 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/rich-go/client"
 )
 
 // Version information
 const (
-	version         = "1.1.0"
-	discordClientID = "1302721937717334128"
+	version = "1.1.0"
 )
 
 func main() {
@@ -60,18 +59,14 @@ func main() {
 	}
 	var animeMutex sync.Mutex
 
-	discordStart := time.Now()
-	discordEnabled := true
-	if err := client.Login(discordClientID); err != nil {
+	// Inicializar Discord Rich Presence
+	discordManager := discord.NewManager()
+	if err := discordManager.Initialize(); err != nil {
 		if util.IsDebug {
 			log.Println("Failed to initialize Discord Rich Presence:", err)
 		}
-		discordEnabled = false
 	} else {
-		if util.IsDebug {
-			log.Printf("[PERF] Discord Ready in %v", time.Since(discordStart))
-		}
-		defer client.Logout()
+		defer discordManager.Shutdown()
 	}
 
 	searchStart := time.Now()
@@ -179,15 +174,16 @@ func main() {
 				log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 			}
 
-			var updater *player.RichPresenceUpdater
-			if discordEnabled {
-				updater = player.NewRichPresenceUpdater(
+			var updater *discord.RichPresenceUpdater
+			if discordManager.IsEnabled() {
+				updater = discord.NewRichPresenceUpdater(
 					anime,
 					&isPaused,
 					&animeMutex,
 					updateFreq,
 					episodeDuration,
 					socketPath,
+					player.MpvSendCommand,
 				)
 			}
 
@@ -268,15 +264,16 @@ func main() {
 			log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 		}
 
-		var updater *player.RichPresenceUpdater
-		if discordEnabled {
-			updater = player.NewRichPresenceUpdater(
+		var updater *discord.RichPresenceUpdater
+		if discordManager.IsEnabled() {
+			updater = discord.NewRichPresenceUpdater(
 				anime,
 				&isPaused,
 				&animeMutex,
 				updateFreq,
 				episodeDuration,
 				socketPath,
+				player.MpvSendCommand,
 			)
 		}
 
