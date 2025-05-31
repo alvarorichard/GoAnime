@@ -1,6 +1,6 @@
 runtimes:
     - python@3.11.11
 tools:
-    - trivy@0.59.1
     - semgrep@1.78.0
     - lizard@1.17.19
+    - trivy@0.59.1

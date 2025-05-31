@@ -15,7 +15,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/hugolgst/rich-go/client"
+	"github.com/alvarorichard/rich-go/client"
 )
 
 // Version information

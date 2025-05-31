@@ -5,10 +5,10 @@ go 1.24
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/alvarorichard/rich-go v0.0.0-20250531060310-d14b9a86fb85
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.5
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/hugolgst/rich-go v0.0.0-20240715122152-74618cc1ace2
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1

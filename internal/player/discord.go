@@ -8,7 +8,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/hugolgst/rich-go/client"
+	"github.com/alvarorichard/rich-go/client"
 )
 
 type RichPresenceUpdater struct {
