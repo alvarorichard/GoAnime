@@ -125,7 +125,6 @@ func GetMovieData(animeID int, anime *models.Anime) error {
 	return nil
 }
 
-
 // FetchAnimeDetails retrieves additional information for the selected anime
 func FetchAnimeDetails(anime *models.Anime) error {
 	response, err := http.Get(anime.URL)
@@ -156,8 +155,6 @@ func FetchAnimeDetails(anime *models.Anime) error {
 
 	return nil
 }
-
-
 
 func SearchAnime(animeName string) (*models.Anime, error) {
 	start := time.Now()
