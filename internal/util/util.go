@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	IsDebug           bool
-	minNameLength     = 4
-	ErrHelpRequested  = errors.New("help requested") // Custom error for help
+	IsDebug          bool
+	minNameLength    = 4
+	ErrHelpRequested = errors.New("help requested") // Custom error for help
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
