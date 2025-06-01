@@ -177,6 +177,7 @@ nix github:alvarorichard/GoAnime
 
 ## Instalação
 
+
 Adicione no seu `flake.nix`:
 
 ```nix
