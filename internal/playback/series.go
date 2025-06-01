@@ -1,16 +1,15 @@
 package playback
 
 import (
-	"log"
-	"sync"
 	"fmt"
+	"log"
 	"strconv"
-	
+	"sync"
+
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/api"
-	
 )
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) {

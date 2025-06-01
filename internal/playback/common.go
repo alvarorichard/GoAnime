@@ -2,10 +2,9 @@ package playback
 
 import (
 	"log"
+	"strconv"
 	"sync"
 	"time"
-	"strconv"
-	
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -79,5 +78,3 @@ func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, in
 	log.Printf("Warning: Episode number %d not found. Re-selecting.", num)
 	return SelectEpisodeWithFuzzy(episodes)
 }
-
-

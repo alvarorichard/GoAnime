@@ -8,9 +8,9 @@ package player
 import (
 	"net"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
-	"runtime"
 
 	"github.com/Microsoft/go-winio"
 )
