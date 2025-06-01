@@ -245,12 +245,12 @@ func HandleDownloadAndPlay(
 	episodeNumberStr string,
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
-) {
+) error {
 	downloadOption := askForDownload()
 	switch downloadOption {
 	case 1:
 		// Download the current episode
-		downloadAndPlayEpisode(
+		if err := downloadAndPlayEpisode(
 			videoURL,
 			episodes,
 			selectedEpisodeNum,
@@ -258,7 +258,9 @@ func HandleDownloadAndPlay(
 			episodeNumberStr,
 			animeMalID,
 			updater,
-		)
+		); err != nil {
+			return err
+		}
 	case 2:
 		// Download episodes in a range
 		if err := HandleBatchDownload(episodes, animeURL); err != nil {
@@ -290,9 +292,10 @@ func HandleDownloadAndPlay(
 			animeMalID,
 			updater,
 		); err != nil {
-			log.Panicln("Failed to play video:", util.ErrorHandler(err))
+			return err
 		}
 	}
+	return nil
 }
 
 func downloadAndPlayEpisode(
@@ -303,7 +306,7 @@ func downloadAndPlayEpisode(
 	episodeNumberStr string,
 	animeMalID int, // Added animeMalID parameter
 	updater *discord.RichPresenceUpdater,
-) {
+) error {
 	currentUser, err := user.Current()
 	if err != nil {
 		log.Panicln("Failed to get current user:", util.ErrorHandler(err))
@@ -391,62 +394,53 @@ func downloadAndPlayEpisode(
 
 	if askForPlayOffline() {
 		if err := playVideo(episodePath, episodes, selectedEpisodeNum, animeMalID, updater); err != nil {
-			log.Panicln("Failed to play video:", util.ErrorHandler(err))
+			return err
 		}
 	}
+	return nil
 }
 
 // askForDownload presents a prompt for the user to choose a download option.
 func askForDownload() int {
-	// Create styled prompt header
-	header := headerStyle.Render("📥 Download Options")
-	fmt.Println(boxStyle.Render(header))
-
-	// Use the cross-platform selection prompt from util package
-	items := []string{
-		"📥 Download this episode",
-		"📦 Download episodes in a range",
-		"🌐 No download (play online)",
+	// Creates a prompt using the promptui.Select widget with a label and three options.
+	prompt := promptui.Select{
+		Label: "Choose an option",                                                                             // The label displayed at the top of the menu.
+		Items: []string{"Download this episode", "Download episodes in a range", "No download (play online)"}, // The menu items to select from.
 	}
+	//
 
-	_, result, err := util.SelectMenuItem("💾 Choose your action", items)
+	// Runs the prompt and captures the selected result and any potential error.
+	_, result, err := prompt.Run()
 	if err != nil {
-		// If an error occurs while acquiring user input, display enhanced error message
-		fmt.Println(errorStyle.Render("❌ Error acquiring user input"))
+		// If an error occurs while acquiring user input, it logs the error and terminates the program using Panic.
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 
 	// Converts the user's input to lowercase and determines the selected option.
-	switch {
-	case strings.Contains(strings.ToLower(result), "download this episode"):
+	switch strings.ToLower(result) {
+	case "download this episode":
+		// Returns 1 if the user selected "Download this episode".
 		return 1
-	case strings.Contains(strings.ToLower(result), "download episodes in a range"):
+	case "download episodes in a range":
+		// Returns 2 if the user selected "Download episodes in a range".
 		return 2
 	default:
+		// Returns 3 for any other selection, including "No download (play online)".
 		return 3
 	}
 }
 
 func askForPlayOffline() bool {
-	// Create styled prompt header
-	header := headerStyle.Render("🎬 Playback Options")
-	fmt.Println(boxStyle.Render(header))
-
 	prompt := promptui.Select{
-		Label: promptStyle.Render("🎮 Play downloaded episode offline?"),
-		Items: []string{"✅ Yes, play offline", "🌐 No, skip playback"},
+		Label: "Do you want to play the downloaded version offline?",
+		Items: []string{"Yes", "No"},
 	}
 
 	_, result, err := prompt.Run()
 	if err != nil {
-		fmt.Println(errorStyle.Render("❌ Error acquiring user input"))
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
-
-	// Display user choice with beautiful feedback
-	fmt.Println(successStyle.Render("✓ Selected: " + result))
-
-	return strings.Contains(strings.ToLower(result), "yes")
+	return strings.ToLower(result) == "yes"
 }
 
 // playVideo has been moved to playvideo.go

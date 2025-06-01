@@ -11,7 +11,7 @@ import (
 // DiscordClientID é o ID do cliente Discord para Rich Presence
 const DiscordClientID = "1302721937717334128"
 
-// Manager gerencia o estado global do Discord Rich Presence
+// Manager manages the global Discord Rich Presence state
 type Manager struct {
 	isEnabled     bool
 	clientID      string
@@ -19,7 +19,7 @@ type Manager struct {
 	isInitialized bool
 }
 
-// NewManager cria uma nova instância do gerenciador Discord
+// NewManager creates a new instance of the Discord manager
 func NewManager() *Manager {
 	return &Manager{
 		isEnabled:     false,
@@ -69,22 +69,22 @@ func (m *Manager) Shutdown() {
 	}
 }
 
-// IsEnabled retorna se o Discord Rich Presence está habilitado
+// IsEnabled returns whether Discord Rich Presence is enabled
 func (m *Manager) IsEnabled() bool {
 	return m.isEnabled
 }
 
-// IsInitialized retorna se o Discord Rich Presence foi inicializado
+// IsInitialized returns whether Discord Rich Presence was initialized
 func (m *Manager) IsInitialized() bool {
 	return m.isInitialized
 }
 
-// GetClientID retorna o ID do cliente Discord
+// GetClientID returns the Discord client ID
 func (m *Manager) GetClientID() string {
 	return m.clientID
 }
 
-// SetClientID define um novo ID do cliente Discord (deve ser chamado antes de Initialize)
+// SetClientID sets a new Discord client ID (must be called before Initialize)
 func (m *Manager) SetClientID(clientID string) {
 	if !m.isInitialized {
 		m.clientID = clientID
@@ -93,7 +93,7 @@ func (m *Manager) SetClientID(clientID string) {
 	}
 }
 
-// GetInitializationTime retorna o tempo de inicialização
+// GetInitializationTime returns the initialization time
 func (m *Manager) GetInitializationTime() time.Duration {
 	if m.isInitialized {
 		return time.Since(m.initTime)

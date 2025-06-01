@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"log"
 	"runtime"
 	"sync"
@@ -34,7 +35,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 	episodeDuration := time.Duration(episodes[0].Duration) * time.Second
 	updater := createUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
 
-	player.HandleDownloadAndPlay(
+	err = player.HandleDownloadAndPlay(
 		videoURL,
 		episodes,
 		1,
@@ -46,6 +47,11 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 
 	if updater != nil {
 		updater.Stop()
+	}
+
+	// For movies, we don't need to handle ErrUserQuit specially since there's no loop
+	if err != nil && !errors.Is(err, player.ErrUserQuit) {
+		log.Printf("Error during movie playback: %v", err)
 	}
 }
 

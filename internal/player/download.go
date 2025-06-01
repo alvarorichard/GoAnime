@@ -24,9 +24,7 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
-// Funções de download extraídas de player.go
-
-// downloadPart baixa um pedaço do arquivo de vídeo usando HTTP Range Requests.
+// downloadPart downloads a part of the video file using HTTP Range Requests.
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -74,7 +72,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 	return nil
 }
 
-// combineParts combina partes baixadas em um único arquivo final.
+// combineParts combines downloaded parts into a single final file.
 func combineParts(destPath string, numThreads int) error {
 	outFile, err := os.Create(destPath)
 	if err != nil {
@@ -108,7 +106,7 @@ func combineParts(destPath string, numThreads int) error {
 	return nil
 }
 
-// DownloadVideo baixa um vídeo usando múltiplas threads.
+// DownloadVideo downloads a video using multiple threads.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
 	if util.IsDebug {
@@ -157,7 +155,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	return nil
 }
 
-// downloadWithYtDlp baixa um vídeo usando yt-dlp.
+// downloadWithYtDlp downloads a video using yt-dlp.
 func downloadWithYtDlp(url, path string) error {
 	cmd := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", path, url)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -166,7 +164,7 @@ func downloadWithYtDlp(url, path string) error {
 	return nil
 }
 
-// ExtractVideoSources retorna as fontes de vídeo disponíveis para um episódio.
+// ExtractVideoSources returns the available video sources for an episode.
 func ExtractVideoSources(episodeURL string) ([]struct {
 	Quality int
 	URL     string
@@ -253,7 +251,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 	}{{Quality: 0, URL: videoSrc}}, nil
 }
 
-// getBestQualityURL retorna a melhor qualidade disponível para um episódio.
+// getBestQualityURL returns the best available quality for an episode.
 func getBestQualityURL(episodeURL string) (string, error) {
 	sources, err := ExtractVideoSources(episodeURL)
 	if err != nil {
@@ -271,7 +269,7 @@ func getBestQualityURL(episodeURL string) (string, error) {
 	return best.URL, nil
 }
 
-// ExtractVideoSourcesWithPrompt permite ao usuário escolher a qualidade do vídeo.
+// ExtractVideoSourcesWithPrompt allows the user to choose video quality.
 func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 	sources, err := ExtractVideoSources(episodeURL)
 	if err != nil {
@@ -303,7 +301,7 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 	return sources[0].URL, nil
 }
 
-// HandleBatchDownload faz o download em lote de episódios.
+// HandleBatchDownload performs batch download of episodes.
 func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	start := time.Now()
 	if util.IsDebug {
@@ -414,7 +412,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	return nil
 }
 
-// getEpisodeRange pede ao usuário o intervalo de episódios para download.
+// getEpisodeRange asks the user for the episode range for download.
 func getEpisodeRange() (startNum, endNum int, err error) {
 	prompt := promptui.Prompt{Label: "Enter start episode number"}
 	startStr, err := prompt.Run()
@@ -434,7 +432,7 @@ func getEpisodeRange() (startNum, endNum int, err error) {
 	return startNum, endNum, nil
 }
 
-// findEpisode retorna o struct do episódio pelo número.
+// findEpisode returns the episode struct by number.
 func findEpisode(episodes []models.Episode, episodeNum int) (models.Episode, bool) {
 	for _, ep := range episodes {
 		if ep.Num == episodeNum {
@@ -444,7 +442,7 @@ func findEpisode(episodes []models.Episode, episodeNum int) (models.Episode, boo
 	return models.Episode{}, false
 }
 
-// createEpisodePath cria o caminho do arquivo para o episódio baixado.
+// createEpisodePath creates the file path for the downloaded episode.
 func createEpisodePath(animeURL string, epNum int) (string, error) {
 	userHome, err := os.UserHomeDir()
 	if err != nil {

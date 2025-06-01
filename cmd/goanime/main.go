@@ -16,13 +16,7 @@ import (
 
 func main() {
 	startAll := time.Now()
-
-	// Define all flags in one place
 	versionFlag := flag.Bool("version", false, "show version information")
-	debugFlag := flag.Bool("debug", false, "enable debug mode")
-	helpFlag := flag.Bool("help", false, "show help message")
-	altHelpFlag := flag.Bool("h", false, "show help message")
-
 	flag.Parse()
 
 	if *versionFlag || version.HasVersionArg() {
@@ -30,18 +24,7 @@ func main() {
 		return
 	}
 
-	if *helpFlag || *altHelpFlag {
-		util.Helper()
-		return
-	}
-
-	// Set debug mode
-	util.SetDebugMode(*debugFlag)
-	if *debugFlag {
-		log.Println("--- Debug mode is enabled ---")
-	}
-
-	animeName, err := util.GetAnimeName()
+	animeName, err := util.FlagParser()
 	if err != nil {
 		log.Fatalln(util.ErrorHandler(err))
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestHandleMovie testa a função HandleMovie com dados de teste
+// TestHandleMovie tests the HandleMovie function with test data
 func TestHandleMovie(t *testing.T) {
 	t.Skip("Skipping integration test - requires external dependencies (MPV, network)")
 
@@ -47,7 +47,7 @@ func TestHandleMovie(t *testing.T) {
 	// playback.HandleMovie(anime, episodes, false)
 }
 
-// TestMovieDurationCalculation testa o cálculo de duração do filme
+// TestMovieDurationCalculation tests movie duration calculation
 func TestMovieDurationCalculation(t *testing.T) {
 	// Arrange
 	episode := models.Episode{
@@ -62,7 +62,7 @@ func TestMovieDurationCalculation(t *testing.T) {
 	assert.Equal(t, 7200*time.Second, duration)
 }
 
-// TestMovieMetadata testa a estrutura de metadados do filme
+// TestMovieMetadata tests the movie metadata structure
 func TestMovieMetadata(t *testing.T) {
 	// Arrange
 	anime := &models.Anime{

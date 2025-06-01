@@ -171,7 +171,7 @@ func ExtractEpisodeNumber(episodeStr string) string {
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 	if util.IsDebug {
-		log.Printf("Tentando extrair URL de vídeo para o episódio: %s", episodeURL)
+		log.Printf("Attempting to extract video URL for episode: %s", episodeURL)
 	}
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
@@ -182,7 +182,7 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 func extractVideoURL(url string) (string, error) {
 	if util.IsDebug {
-		log.Printf("Extraindo URL de vídeo da página: %s", url)
+		log.Printf("Extracting video URL from page: %s", url)
 	}
 
 	response, err := api.SafeGet(url)

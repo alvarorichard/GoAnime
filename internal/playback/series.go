@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -10,45 +11,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	// Style definitions for beautiful series UI
-	seriesTitleStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FF6B6B")).
-				Bold(true).
-				Underline(true)
-
-	seriesInfoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#4ECDC4")).
-			Bold(true)
-
-	seriesSuccessStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00FF00")).
-				Bold(true)
-
-	// seriesWarningStyle = lipgloss.NewStyle().
-	// 			Foreground(lipgloss.Color("#FFD700")).
-	// 			Bold(true)
-
-	seriesBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#626262")).
-			Padding(1, 2)
 )
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) {
-	// Create beautiful series header
-	seriesHeader := seriesTitleStyle.Render(fmt.Sprintf("📺 %s", anime.Details.Title.Romaji))
-	seriesInfo := seriesInfoStyle.Render(fmt.Sprintf("🎬 Series • %d Episodes Available", totalEpisodes))
-
-	headerBox := seriesBoxStyle.Render(
-		seriesHeader + "\n" +
-			seriesInfo,
-	)
-	fmt.Println("\n" + headerBox)
-
+	fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
@@ -58,7 +24,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	}
 
 	for {
-		PlayEpisode(
+		err := PlayEpisode(
 			anime,
 			episodes,
 			selectedEpisodeNum,
@@ -69,11 +35,20 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			&animeMutex,
 		)
 
+		// Check if user quit during video playback
+		if errors.Is(err, player.ErrUserQuit) {
+			log.Println("Quitting application as per user request.")
+			break
+		}
+
+		// Handle other errors
+		if err != nil {
+			log.Printf("Error during episode playback: %v", err)
+		}
+
 		userInput := GetUserInput()
 		if userInput == "q" {
-			// Display beautiful goodbye message
-			goodbyeMsg := seriesSuccessStyle.Render("🚪 ✨ Thanks for watching! Goodbye!")
-			fmt.Println("\n" + goodbyeMsg)
+			log.Println("Quitting application as per user request.")
 			break
 		}
 

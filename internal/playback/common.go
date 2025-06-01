@@ -21,7 +21,7 @@ func PlayEpisode(
 	discordEnabled bool,
 	isPaused *bool,
 	animeMutex *sync.Mutex,
-) {
+) error {
 	animeMutex.Lock()
 	anime.Episodes = []models.Episode{{
 		Number: episodeNumberStr,
@@ -42,7 +42,7 @@ func PlayEpisode(
 	episodeDuration := time.Duration(episodes[0].Duration) * time.Second
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
-	player.HandleDownloadAndPlay(
+	err = player.HandleDownloadAndPlay(
 		videoURL,
 		episodes,
 		episodeNum,
@@ -55,6 +55,7 @@ func PlayEpisode(
 	if updater != nil {
 		updater.Stop()
 	}
+	return err
 }
 
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {

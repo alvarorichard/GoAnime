@@ -38,7 +38,7 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 		}
 	}()
 
-	// Dados de teste atualizados
+	// Updated test data
 	testAnime := Anime{
 		AnilistID:     1,
 		AllanimeID:    "allanime123",
@@ -46,7 +46,7 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 		PlaybackTime:  120,
 		Duration:      1500,
 		Title:         "Test Anime",
-		LastUpdated:   time.Now().UTC(), // Garante timestamp atual
+		LastUpdated:   time.Now().UTC(), // Ensures current timestamp
 	}
 
 	// Teste de criação
@@ -54,7 +54,7 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	// Verificação corrigida
+	// Corrected verification
 	retrieved, err := tracker.GetAnime(testAnime.AnilistID, testAnime.AllanimeID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
@@ -77,7 +77,7 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 		t.Errorf("Title mismatch: got %s, want %s", retrieved.Title, testAnime.Title)
 	}
 
-	// Verificação de timestamp tolerante (±2 segundos)
+	// Tolerant timestamp verification (±2 seconds)
 	now := time.Now().UTC()
 	if retrieved.LastUpdated.After(now) || retrieved.LastUpdated.Before(now.Add(-2*time.Second)) {
 		t.Errorf("LastUpdated out of range: got %v, expected ~%v", retrieved.LastUpdated, now)

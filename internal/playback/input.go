@@ -8,14 +8,18 @@ import (
 )
 
 func GetUserInput() string {
-	fmt.Print("Press 'n' for next episode, 'p' for previous episode, 'e' to select episode, 'q' to quit: ")
+	// Display basic prompt
+	fmt.Println("Playback Control")
+	fmt.Print("'n' next | 'p' previous | 'e' select episode | 'q' quit > ")
+
 	var input string
 	_, err := fmt.Scanln(&input)
 	if err != nil {
 		if err.Error() == "unexpected newline" {
-			log.Println("No input detected, continuing playback")
+			fmt.Println("No input detected, continuing to next episode")
 			return "n"
 		}
+		fmt.Println("Error reading input - defaulting to continue")
 		log.Printf("Error reading input: %v - defaulting to continue", util.ErrorHandler(err))
 		return "n"
 	}

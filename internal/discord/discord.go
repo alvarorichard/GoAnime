@@ -66,52 +66,52 @@ func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, err
 	return time.Duration(posSeconds) * time.Second, nil
 }
 
-// SetSocketPath define o caminho do socket MPV
+// SetSocketPath sets the MPV socket path
 func (rpu *RichPresenceUpdater) SetSocketPath(socketPath string) {
 	rpu.socketPath = socketPath
 }
 
-// GetSocketPath retorna o caminho do socket MPV
+// GetSocketPath returns the MPV socket path
 func (rpu *RichPresenceUpdater) GetSocketPath() string {
 	return rpu.socketPath
 }
 
-// SetEpisodeStarted define se o episódio foi iniciado
+// SetEpisodeStarted sets whether the episode has started
 func (rpu *RichPresenceUpdater) SetEpisodeStarted(started bool) {
 	rpu.episodeStarted = started
 }
 
-// IsEpisodeStarted retorna se o episódio foi iniciado
+// IsEpisodeStarted returns whether the episode has started
 func (rpu *RichPresenceUpdater) IsEpisodeStarted() bool {
 	return rpu.episodeStarted
 }
 
-// SetEpisodeDuration define a duração do episódio
+// SetEpisodeDuration sets the episode duration
 func (rpu *RichPresenceUpdater) SetEpisodeDuration(duration time.Duration) {
 	rpu.episodeDuration = duration
 }
 
-// GetEpisodeDuration retorna a duração do episódio
+// GetEpisodeDuration returns the episode duration
 func (rpu *RichPresenceUpdater) GetEpisodeDuration() time.Duration {
 	return rpu.episodeDuration
 }
 
-// GetAnime retorna o anime associado
+// GetAnime returns the associated anime
 func (rpu *RichPresenceUpdater) GetAnime() *models.Anime {
 	return rpu.anime
 }
 
-// GetIsPaused retorna o ponteiro para o estado de pausa
+// GetIsPaused returns the pointer to the pause state
 func (rpu *RichPresenceUpdater) GetIsPaused() *bool {
 	return rpu.isPaused
 }
 
-// GetAnimeMutex retorna o mutex do anime
+// GetAnimeMutex returns the anime mutex
 func (rpu *RichPresenceUpdater) GetAnimeMutex() *sync.Mutex {
 	return rpu.animeMutex
 }
 
-// GetUpdateFreq retorna a frequência de atualização
+// GetUpdateFreq returns the update frequency
 func (rpu *RichPresenceUpdater) GetUpdateFreq() time.Duration {
 	return rpu.updateFreq
 }
@@ -141,7 +141,7 @@ func (rpu *RichPresenceUpdater) Start() {
 	}
 }
 
-// Stop sinaliza para o atualizador parar e aguarda a goroutine terminar
+// Stop signals the updater to stop and waits for the goroutine to finish
 func (rpu *RichPresenceUpdater) Stop() {
 	// Evita fechar o canal múltiplas vezes
 	if rpu != nil {
@@ -210,14 +210,14 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	}
 }
 
-// FetchDuration busca a duração do episódio (funcionalidade futura)
+// FetchDuration fetches the episode duration (future feature)
 func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
-	// TODO: Implementar busca de duração do episódio
+	// TODO: Implement episode duration fetching
 	panic("unimplemented")
 }
 
-// WaitEpisodeStart aguarda o início do episódio (funcionalidade futura)
+// WaitEpisodeStart waits for episode start (future feature)
 func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
-	// TODO: Implementar espera pelo início do episódio
+	// TODO: Implement waiting for episode start
 	panic("unimplemented")
 }

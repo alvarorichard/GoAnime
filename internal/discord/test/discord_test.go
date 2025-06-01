@@ -32,7 +32,7 @@ func mockMPVSendCommand(socketPath string, args []interface{}) (interface{}, err
 	return nil, fmt.Errorf("mock: unsupported command")
 }
 
-// TestNewRichPresenceUpdater testa a função construtora
+// TestNewRichPresenceUpdater tests the constructor function
 func TestNewRichPresenceUpdater(t *testing.T) {
 	// Arrange
 	anime := &models.Anime{
@@ -64,7 +64,7 @@ func TestNewRichPresenceUpdater(t *testing.T) {
 	assert.NotNil(t, updater, "RichPresenceUpdater should not be nil")
 }
 
-// TestGetCurrentPlaybackPosition testa a recuperação da posição de reprodução
+// TestGetCurrentPlaybackPosition tests the retrieval of playback position
 func TestGetCurrentPlaybackPosition(t *testing.T) {
 	t.Run("Should return current playback position", func(t *testing.T) {
 		// Arrange
@@ -123,7 +123,7 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 	})
 }
 
-// TestStartAndStop testa a funcionalidade de start e stop
+// TestStartAndStop tests the start and stop functionality
 func TestStartAndStop(t *testing.T) {
 	// Arrange
 	anime := &models.Anime{
@@ -155,20 +155,20 @@ func TestStartAndStop(t *testing.T) {
 		completed := make(chan bool)
 
 		go func() {
-			// Inicia o updater em uma goroutine
+			// Starts the updater in a goroutine
 			updater.Start()
 
-			// Deixa rodar por um tempo curto
+			// Let it run for a short time
 			time.Sleep(200 * time.Millisecond)
 
-			// Para
+			// Stop
 			updater.Stop()
 
-			// Sinaliza conclusão
+			// Signals completion
 			completed <- true
 		}()
 
-		// Aguarda conclusão ou timeout
+		// Awaits completion or timeout
 		select {
 		case <-completed:
 			// Teste passou se chegamos aqui
@@ -178,14 +178,14 @@ func TestStartAndStop(t *testing.T) {
 	})
 }
 
-// TestUpdateDiscordPresence testa a funcionalidade de atualização do Discord presence
+// TestUpdateDiscordPresence tests the Discord presence update functionality
 func TestUpdateDiscordPresence(t *testing.T) {
 	t.Run("Should format time correctly", func(t *testing.T) {
-		// Testa a lógica de formatação de tempo usada em updateDiscordPresence
+		// Tests the time formatting logic used in updateDiscordPresence
 		currentPosition := 5*time.Minute + 30*time.Second
 		episodeDuration := 24*time.Minute + 15*time.Second
 
-		// Converte a duração do episódio para formato de minutos e segundos
+		// Converts episode duration to minutes and seconds format
 		totalMinutes := int(episodeDuration.Minutes())
 		totalSeconds := int(episodeDuration.Seconds()) % 60
 
@@ -206,7 +206,7 @@ func formatTime(currentMinutes, currentSeconds, totalMinutes, totalSeconds int) 
 	)
 }
 
-// TestDiscordManager testa o gerenciador Discord
+// TestDiscordManager tests the Discord manager
 func TestDiscordManager(t *testing.T) {
 	t.Run("Should create new manager", func(t *testing.T) {
 		manager := discord.NewManager()
@@ -225,17 +225,17 @@ func TestDiscordManager(t *testing.T) {
 
 	t.Run("Should handle shutdown gracefully", func(t *testing.T) {
 		manager := discord.NewManager()
-		// Deve ser seguro chamar Shutdown mesmo sem inicializar
+		// Should be safe to call Shutdown even without initialization
 		manager.Shutdown()
 		assert.False(t, manager.IsEnabled())
 		assert.False(t, manager.IsInitialized())
 	})
 }
 
-// TestRichPresenceIntegration testa a integração geral do RichPresenceUpdater
+// TestRichPresenceIntegration tests the overall RichPresenceUpdater integration
 func TestRichPresenceIntegration(t *testing.T) {
 	t.Skip("Skipping integration test as it requires Discord and MPV to be running")
 
-	// Em uma aplicação real, você implementaria um teste de integração mais abrangente
-	// que usa instâncias reais ou mock dos sistemas externos
+	// In a real application, you would implement a more comprehensive integration test
+	// that uses real instances or mocks of external systems
 }

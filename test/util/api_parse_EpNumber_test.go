@@ -13,9 +13,9 @@ func TestParseEpisodeNumber(t *testing.T) {
 		{"Episode 1", 1, false},
 		{"Episode 2", 2, false},
 		{"Episode 10", 10, false},
-		{"No Episode Number", 0, true}, // Deve retornar erro porque não encontra número
+		{"No Episode Number", 0, true}, // Should return error because it doesn't find number
 		{"Special 45 Episode", 45, false},
-		{"", 0, true}, // Deve retornar erro porque não encontra número
+		{"", 0, true}, // Should return error because it doesn't find number
 		{"123", 123, false},
 		{"Episode-15", 15, false},
 		{"15th Episode", 15, false},
