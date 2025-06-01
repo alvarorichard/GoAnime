@@ -238,10 +238,19 @@ If you're looking for more options, check out this alternative project by my fri
 
 ## Contributing
 
-Contributions to improve or enhance are always welcome. Please adhere to the standard pull request process for contributions.
+Contributions to improve or enhance are always welcome. Before contributing, please read our comprehensive development guide for detailed information about our workflow, coding standards, and project structure.
+
+📖 **[Development Guide](docs/Development.md)** - Essential reading for contributors
+
+**Quick Start for Contributors:**
 
 1. Fork the Project
-2. Create your Feature Branch
-3. Commit your Changes
-4. Push to the Branch
-5. Open a Pull Request.
+2. Read the [Development Guide](docs/Development.md) thoroughly
+3. Create your Feature Branch from `dev` (never from `main`)
+4. Follow our coding standards (use `go fmt`, add meaningful comments)
+5. Ensure all tests pass and add tests for new features
+6. Commit your Changes using conventional commit format
+7. Push to the Branch
+8. Open a Pull Request to the `dev` branch
+
+**Important:** Never commit directly to the `main` branch. All changes must go through the `dev` branch first.
