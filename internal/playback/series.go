@@ -10,10 +10,45 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var (
+	// Style definitions for beautiful series UI
+	seriesTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FF6B6B")).
+				Bold(true).
+				Underline(true)
+
+	seriesInfoStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4ECDC4")).
+			Bold(true)
+
+	seriesSuccessStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00FF00")).
+				Bold(true)
+
+	// seriesWarningStyle = lipgloss.NewStyle().
+	// 			Foreground(lipgloss.Color("#FFD700")).
+	// 			Bold(true)
+
+	seriesBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#626262")).
+			Padding(1, 2)
 )
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) {
-	fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
+	// Create beautiful series header
+	seriesHeader := seriesTitleStyle.Render(fmt.Sprintf("📺 %s", anime.Details.Title.Romaji))
+	seriesInfo := seriesInfoStyle.Render(fmt.Sprintf("🎬 Series • %d Episodes Available", totalEpisodes))
+
+	headerBox := seriesBoxStyle.Render(
+		seriesHeader + "\n" +
+			seriesInfo,
+	)
+	fmt.Println("\n" + headerBox)
+
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
@@ -36,7 +71,9 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 		userInput := GetUserInput()
 		if userInput == "q" {
-			log.Println("Quitting application as per user request.")
+			// Display beautiful goodbye message
+			goodbyeMsg := seriesSuccessStyle.Render("🚪 ✨ Thanks for watching! Goodbye!")
+			fmt.Println("\n" + goodbyeMsg)
 			break
 		}
 

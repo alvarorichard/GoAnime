@@ -398,51 +398,62 @@ func downloadAndPlayEpisode(
 
 // askForDownload presents a prompt for the user to choose a download option.
 func askForDownload() int {
-	// Creates a prompt using the promptui.Select widget with a label and three options.
+	// Create styled prompt header
+	header := headerStyle.Render("📥 Download Options")
+	fmt.Println(boxStyle.Render(header))
+
+	// Creates a prompt using the promptui.Select widget with enhanced styling and icons
 	prompt := promptui.Select{
-		Label: "Choose an option",                                                                             // The label displayed at the top of the menu.
-		Items: []string{"Download this episode", "Download episodes in a range", "No download (play online)"}, // The menu items to select from.
+		Label: promptStyle.Render("💾 Choose your action"),
+		Items: []string{
+			"📥 Download this episode",
+			"📦 Download episodes in a range",
+			"🌐 No download (play online)",
+		},
 	}
-	//
 
 	// Runs the prompt and captures the selected result and any potential error.
 	_, result, err := prompt.Run()
 	if err != nil {
-		// If an error occurs while acquiring user input, it logs the error and terminates the program using Panic.
+		// If an error occurs while acquiring user input, display enhanced error message
+		fmt.Println(errorStyle.Render("❌ Error acquiring user input"))
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
 
+	// Display user choice with beautiful feedback
+	fmt.Println(successStyle.Render("✓ Selected: " + result))
+
 	// Converts the user's input to lowercase and determines the selected option.
-	switch strings.ToLower(result) {
-	case "download this episode":
-		// Returns 1 if the user selected "Download this episode".
+	switch {
+	case strings.Contains(strings.ToLower(result), "download this episode"):
 		return 1
-	case "download episodes in a range":
-		// Returns 2 if the user selected "Download episodes in a range".
+	case strings.Contains(strings.ToLower(result), "download episodes in a range"):
 		return 2
 	default:
-		// Returns 3 for any other selection, including "No download (play online)".
 		return 3
 	}
 }
 
 func askForPlayOffline() bool {
+	// Create styled prompt header
+	header := headerStyle.Render("🎬 Playback Options")
+	fmt.Println(boxStyle.Render(header))
+
 	prompt := promptui.Select{
-		Label: "Do you want to play the downloaded version offline?",
-		Items: []string{"Yes", "No"},
+		Label: promptStyle.Render("🎮 Play downloaded episode offline?"),
+		Items: []string{"✅ Yes, play offline", "🌐 No, skip playback"},
 	}
 
 	_, result, err := prompt.Run()
 	if err != nil {
+		fmt.Println(errorStyle.Render("❌ Error acquiring user input"))
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
-	return strings.ToLower(result) == "yes"
-}
 
-func promptYesNo(label string) (bool, error) {
-	p := promptui.Select{Label: label, Items: []string{"Sim", "Não"}}
-	_, res, err := p.Run()
-	return strings.ToLower(res) == "sim", err
+	// Display user choice with beautiful feedback
+	fmt.Println(successStyle.Render("✓ Selected: " + result))
+
+	return strings.Contains(strings.ToLower(result), "yes")
 }
 
 // playVideo has been moved to playvideo.go
