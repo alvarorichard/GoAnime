@@ -5,14 +5,10 @@ import (
 	"log"
 	"sync"
 	"time"
-	
-	
-	
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/rich-go/client"
-	
 )
 
 // RichPresenceUpdater gerencia as atualizações do Discord Rich Presence
@@ -69,8 +65,6 @@ func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, err
 
 	return time.Duration(posSeconds) * time.Second, nil
 }
-
-
 
 // SetSocketPath define o caminho do socket MPV
 func (rpu *RichPresenceUpdater) SetSocketPath(socketPath string) {
@@ -227,4 +221,3 @@ func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
 	// TODO: Implementar espera pelo início do episódio
 	panic("unimplemented")
 }
-

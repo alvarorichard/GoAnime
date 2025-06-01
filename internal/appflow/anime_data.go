@@ -1,17 +1,14 @@
 package appflow
 
 import (
-	
 	"log"
 	"time"
-	
-	
+
 	"github.com/alvarorichard/Goanime/internal/api"
-	
+
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
-
 
 func SearchAnime(name string) *models.Anime {
 	searchStart := time.Now()
@@ -46,9 +43,3 @@ func GetAnimeEpisodes(url string) []models.Episode {
 	}
 	return episodes
 }
-
-
-
-
-
-
