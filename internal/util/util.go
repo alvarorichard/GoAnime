@@ -1,8 +1,11 @@
 package util
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -159,7 +162,12 @@ func Helper() {
 
 // getUserInput prompts the user for input the anime name and returns it
 func getUserInput(label string) (string, error) {
-	// Create styled prompt
+	// Use simpler input method on Windows to avoid readline ANSI issues
+	if runtime.GOOS == "windows" {
+		return getSimpleInput(label)
+	}
+
+	// Create styled prompt for non-Windows systems
 	styledLabel := promptStyle.Render("🎮 " + label)
 
 	prompt := promptui.Prompt{
@@ -179,6 +187,96 @@ func getUserInput(label string) (string, error) {
 	fmt.Println(successMsg)
 
 	return animeName, nil
+}
+
+// getSimpleInput provides a fallback input method for Windows
+func getSimpleInput(label string) (string, error) {
+	// Display styled prompt
+	styledLabel := promptStyle.Render("🎮 " + label + ": ")
+	fmt.Print(styledLabel)
+
+	// Use simple buffered reader
+	reader := bufio.NewReader(os.Stdin)
+	animeName, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	// Clean up the input
+	animeName = strings.TrimSpace(animeName)
+	if len(animeName) < minNameLength {
+		return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
+	}
+
+	// Display success message
+	successMsg := successStyle.Render("✓ Anime name received: " + animeName)
+	fmt.Println(successMsg)
+
+	return animeName, nil
+}
+
+// SelectMenuItem provides a cross-platform way to select from a menu
+// Windows-compatible alternative to promptui.Select
+func SelectMenuItem(label string, items []string) (int, string, error) {
+	// Use simpler input method on Windows to avoid readline ANSI issues
+	if runtime.GOOS == "windows" {
+		return simpleSelectMenu(label, items)
+	}
+
+	// Create styled prompt for non-Windows systems
+	styledLabel := promptStyle.Render(label)
+	prompt := promptui.Select{
+		Label: styledLabel,
+		Items: items,
+	}
+
+	index, result, err := prompt.Run()
+	if err != nil {
+		return -1, "", err
+	}
+
+	// Display success message
+	successMsg := successStyle.Render("✓ Selected: " + result)
+	fmt.Println(successMsg)
+
+	return index, result, nil
+}
+
+// simpleSelectMenu provides a simple menu selection for Windows systems
+func simpleSelectMenu(label string, items []string) (int, string, error) {
+	// Display styled prompt and menu options
+	styledLabel := promptStyle.Render(label)
+	fmt.Println(styledLabel)
+
+	// Display all options with numbers
+	for i, item := range items {
+		fmt.Printf("%d. %s\n", i+1, item)
+	}
+
+	// Get user input
+	fmt.Print(promptStyle.Render("Enter selection (1-" + fmt.Sprintf("%d", len(items)) + "): "))
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return -1, "", err
+	}
+
+	// Parse selection
+	input = strings.TrimSpace(input)
+	var selection int
+	_, err = fmt.Sscanf(input, "%d", &selection)
+	if err != nil || selection < 1 || selection > len(items) {
+		return -1, "", fmt.Errorf("invalid selection: %s", input)
+	}
+
+	// Adjust for 0-based index
+	selection--
+
+	// Display success message
+	successMsg := successStyle.Render("✓ Selected: " + items[selection])
+	fmt.Println(successMsg)
+
+	return selection, items[selection], nil
 }
 
 // TreatingAnimeName removes special characters and spaces from the anime name.

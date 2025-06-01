@@ -402,26 +402,19 @@ func askForDownload() int {
 	header := headerStyle.Render("📥 Download Options")
 	fmt.Println(boxStyle.Render(header))
 
-	// Creates a prompt using the promptui.Select widget with enhanced styling and icons
-	prompt := promptui.Select{
-		Label: promptStyle.Render("💾 Choose your action"),
-		Items: []string{
-			"📥 Download this episode",
-			"📦 Download episodes in a range",
-			"🌐 No download (play online)",
-		},
+	// Use the cross-platform selection prompt from util package
+	items := []string{
+		"📥 Download this episode",
+		"📦 Download episodes in a range",
+		"🌐 No download (play online)",
 	}
 
-	// Runs the prompt and captures the selected result and any potential error.
-	_, result, err := prompt.Run()
+	_, result, err := util.SelectMenuItem("💾 Choose your action", items)
 	if err != nil {
 		// If an error occurs while acquiring user input, display enhanced error message
 		fmt.Println(errorStyle.Render("❌ Error acquiring user input"))
 		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
 	}
-
-	// Display user choice with beautiful feedback
-	fmt.Println(successStyle.Render("✓ Selected: " + result))
 
 	// Converts the user's input to lowercase and determines the selected option.
 	switch {
