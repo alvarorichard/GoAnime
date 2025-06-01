@@ -1,6 +1,6 @@
 [Setup]
 AppName=GoAnime Installer
-AppVersion=1.0.8
+AppVersion=1.1.0
 DefaultDirName={pf}\GoAnime
 DefaultGroupName=GoAnime
 AllowNoIcons=yes
@@ -18,7 +18,7 @@ Source: "C:\Users\krone\Documents\GoAnime\build\goanime.exe"; DestDir: "{app}"; 
 
 ; Copia os binários de mpv e yt-dlp para a pasta bin dentro do diretório de instalação
 Source: "C:\Users\krone\Documents\GoAnime\build\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "C:\Users\krone\Documents\GoAnime\build\yt-dlp.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+;Source: "C:\Users\krone\Documents\GoAnime\build\yt-dlp.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Icons]
 ; Cria o atalho no Menu Iniciar
