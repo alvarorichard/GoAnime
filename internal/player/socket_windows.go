@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"runtime"
 
 	"github.com/Microsoft/go-winio"
 )
@@ -27,4 +28,11 @@ func dialMPVSocket(socketPath string) (net.Conn, error) {
 	// Use winio to connect to Windows named pipe
 	timeout := 5 * time.Second
 	return winio.DialPipe(socketPath, &timeout)
+}
+
+func getSocketPath() string {
+	if runtime.GOOS == "windows" {
+		return `\\.\pipe\goanime_mpvsocket`
+	}
+	return "/tmp/mpvsocket"
 }
