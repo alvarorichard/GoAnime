@@ -42,6 +42,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install mpv -y
+          choco install golangci-lint -y 
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -51,7 +52,8 @@ jobs:
       - name: Get dependencies
         run: go get -v -t -d ./...
 
-      - name: Install golangci-lint
+      - name: Install golangci-lint (Non-Windows)
+        if: runner.os != 'Windows'
         run: |
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.1.6
 
