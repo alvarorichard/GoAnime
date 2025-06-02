@@ -5,7 +5,7 @@ set -e
 
 # Variables
 OUTPUT_DIR="../build"
-BINARY_NAME="goanime-linux-with-sqlite"
+BINARY_NAME="goanime-linux"
 BINARY_PATH="$OUTPUT_DIR/$BINARY_NAME"
 TARBALL_NAME="$BINARY_NAME.tar.gz"
 TARBALL_PATH="$OUTPUT_DIR/$TARBALL_NAME"
