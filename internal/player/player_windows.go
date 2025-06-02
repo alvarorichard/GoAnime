@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 
-
 	"github.com/alvarorichard/Goanime/internal/util"
-
-
 )
 
 func setProcessGroup(cmd *exec.Cmd) {
@@ -17,5 +14,5 @@ func setProcessGroup(cmd *exec.Cmd) {
 	if util.IsDebug {
 		fmt.Println("Setting process group for command:", cmd.String())
 	}
-		
+
 }

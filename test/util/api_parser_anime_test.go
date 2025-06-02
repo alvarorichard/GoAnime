@@ -1,12 +1,14 @@
 package test_util_test
 
 import (
-	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/stretchr/testify/assert"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseAnimes(t *testing.T) {
@@ -25,7 +27,7 @@ func TestParseAnimes(t *testing.T) {
 	// Set the base URL for absolute URL resolution
 	doc.Url, _ = url.Parse("https://animefire.plus")
 
-	expectedAnimes := []api.Anime{
+	expectedAnimes := []models.Anime{
 		{Name: "Anime One", URL: "https://animefire.plus/anime/1"},
 		{Name: "Anime Two", URL: "https://animefire.plus/anime/2"},
 		{Name: "Anime Three", URL: "https://animefire.plus/anime/3"},

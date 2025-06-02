@@ -5,41 +5,43 @@ import (
 	"fmt"
 	"io"
 	"log"
-	
+
+	//"net"
+	//"runtime"
+
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
-	
 
-
+	//"github.com/Microsoft/go-winio"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
-	
 )
 
 // WINDOWS RELEASE
 
-// func dialMPVSocket(socketPath string) (net.Conn, error) {
-// 	if runtime.GOOS == "windows" {
-// 		//Attempt to connect using named pipe on Windows
-// 		conn, err := winio.DialPipe(socketPath, nil)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
-// 		}
-// 		return conn, nil
-// } else {
-// 		// Unix-like system uses Unix sockets
-// 		conn, err := net.Dial("unix", socketPath)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
-// 		}
-// 		return conn, nil
-// 	}
-// }
+//  func dialMPVSocket(socketPath string) (net.Conn, error) {
+//  	if runtime.GOOS == "windows" {
+// // 		//Attempt to connect using named pipe on Windows
+//  		conn, err := winio.DialPipe(socketPath, nil)
+//  		if err != nil {
+//  			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
+//  		}
+//  		return conn, nil
+//  } else {
+//  		// Unix-like system uses Unix sockets
+//  		conn, err := net.Dial("unix", socketPath)
+//  		if err != nil {
+//  			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
+//  		}
+//  		return conn, nil
+//  	}
+//  }
 
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
@@ -131,7 +133,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 }
 
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
-func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error) {
+func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -156,19 +158,20 @@ func SelectEpisodeWithFuzzyFinder(episodes []api.Episode) (string, string, error
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
 func ExtractEpisodeNumber(episodeStr string) string {
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeStr)
-	if numStr == "" {
-		return "1"
+	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+	matches := numRe.FindStringSubmatch(episodeStr)
+
+	if len(matches) >= 2 {
+		return matches[1]
 	}
-	return numStr
+	return "1"
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 	if util.IsDebug {
-		log.Printf("Tentando extrair URL de vídeo para o episódio: %s", episodeURL)
+		log.Printf("Attempting to extract video URL for episode: %s", episodeURL)
 	}
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
@@ -179,7 +182,7 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 func extractVideoURL(url string) (string, error) {
 	if util.IsDebug {
-		log.Printf("Extraindo URL de vídeo da página: %s", url)
+		log.Printf("Extracting video URL from page: %s", url)
 	}
 
 	response, err := api.SafeGet(url)
@@ -307,58 +310,6 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
-// selectVideoQuality allows the user to select a video quality
-func selectVideoQuality(videos []VideoData) (string, error) {
-	if len(videos) == 0 {
-		return "", errors.New("no video qualities available")
-	}
-
-	// Create a list of quality options
-	var options []string
-	for _, video := range videos {
-		options = append(options, video.Label)
-	}
-
-	if util.IsDebug {
-		log.Printf("Available qualities: %v", options)
-	}
-
-	// Use fuzzy finder to select quality
-	idx, err := fuzzyfinder.Find(
-		options,
-		func(i int) string {
-			return options[i]
-		},
-		fuzzyfinder.WithPromptString("Select video quality"),
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to select quality: %w", err)
-	}
-
-	if idx < 0 || idx >= len(videos) {
-		return "", errors.New("invalid quality selection")
-	}
-
-	selectedQuality := videos[idx]
-	if util.IsDebug {
-		log.Printf("Selected quality: %s -> %s", selectedQuality.Label, selectedQuality.Src)
-	}
-
-	// Ensure the URL matches the selected quality
-	url := selectedQuality.Src
-	qualityPattern := regexp.MustCompile(`/(\d+)p\.mp4`)
-	matches := qualityPattern.FindStringSubmatch(url)
-	if len(matches) > 1 {
-		// Replace the quality in the URL with the selected one
-		url = qualityPattern.ReplaceAllString(url, fmt.Sprintf("/%sp.mp4", selectedQuality.Label))
-		if util.IsDebug {
-			log.Printf("Adjusted URL to match selected quality: %s", url)
-		}
-	}
-
-	return url, nil
-}
-
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
 		log.Printf("Processing video source: %s", videoSrc)
@@ -379,7 +330,11 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch video page: %w", err)
 		}
-		defer response.Body.Close()
+		defer func() {
+			if err := response.Body.Close(); err != nil {
+				log.Printf("Error closing response body: %v", err)
+			}
+		}()
 
 		// Read the response body
 		body, err := io.ReadAll(response.Body)
@@ -397,9 +352,18 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 					log.Printf("Available quality: %s -> %s", v.Label, v.Src)
 				}
 			}
-			// If we have multiple qualities, let the user select
+			// If we have multiple qualities, pick the highest automatically
 			if len(videoResponse.Data) > 1 {
-				return selectVideoQuality(videoResponse.Data)
+				best := videoResponse.Data[0]
+				bestQ, _ := strconv.Atoi(best.Label)
+				for _, v := range videoResponse.Data {
+					q, _ := strconv.Atoi(v.Label)
+					if q > bestQ {
+						best = v
+						bestQ = q
+					}
+				}
+				return best.Src, nil
 			}
 			// If only one quality, use it
 			return videoResponse.Data[0].Src, nil
@@ -430,9 +394,18 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	var videoResponse VideoResponse
 	err := json.Unmarshal([]byte(videoSrc), &videoResponse)
 	if err == nil && len(videoResponse.Data) > 0 {
-		// If we have multiple qualities, let the user select
+		// If we have multiple qualities, pick the highest automatically
 		if len(videoResponse.Data) > 1 {
-			return selectVideoQuality(videoResponse.Data)
+			best := videoResponse.Data[0]
+			bestQ, _ := strconv.Atoi(best.Label)
+			for _, v := range videoResponse.Data {
+				q, _ := strconv.Atoi(v.Label)
+				if q > bestQ {
+					best = v
+					bestQ = q
+				}
+			}
+			return best.Src, nil
 		}
 		// If only one quality, use it
 		return videoResponse.Data[0].Src, nil
@@ -460,5 +433,3 @@ type VideoData struct {
 type VideoResponse struct {
 	Data []VideoData `json:"data"`
 }
-
-

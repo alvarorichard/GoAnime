@@ -27,7 +27,9 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 echo "Compilando o binário goanime para Windows ($GOARCH)..."
-CGO_ENABLED=0 GOOS=windows GOARCH=$GOARCH go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
+# Para Windows, precisamos garantir que o go-winio esteja disponível
+# Mas com CGO_ENABLED=0, o SQLite será compilado sem suporte nativo
+CGO_ENABLED=0 GOOS=windows GOARCH=$GOARCH go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath -tags="windows" "$MAIN_PACKAGE"
 
 echo "Compilação concluída: $BINARY_PATH"
 

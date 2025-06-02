@@ -1,12 +1,13 @@
 package test_util
 
 import (
-	"github.com/pkg/errors"
 	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/pkg/errors"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -49,12 +50,6 @@ func TestParseEpisodes(t *testing.T) {
 }
 
 // Helper functions for parseEpisodes test
-
-type episode struct {
-	Number string
-	Num    int
-	URL    string
-}
 
 func ParseEpisodes(doc *goquery.Document) []Episode {
 	var episodes []Episode

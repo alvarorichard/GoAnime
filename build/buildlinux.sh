@@ -16,7 +16,9 @@ MAIN_PACKAGE="../cmd/goanime"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Building the goanime binary for Linux..."
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
+# For Linux we don't need go-winio, using !windows tag to ensure it's excluded
+# With CGO_ENABLED=0, SQLite will be compiled without native support
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath -tags="!windows" "$MAIN_PACKAGE"
 
 echo "Build completed: $BINARY_PATH"
 

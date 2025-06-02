@@ -23,11 +23,21 @@ echo "Build completed: $BINARY_PATH"
 # Check if UPX is installed
 if command -v upx >/dev/null 2>&1; then
     echo "Compressing the binary with UPX..."
-    upx --best --ultra-brute "$BINARY_PATH"
-    echo "Compression completed."
+    if upx --best --ultra-brute --force-macos "$BINARY_PATH" 2>/dev/null; then
+        echo "Compression completed."
+    else
+        echo "UPX compression failed for macOS binary. Continuing without compression."
+    fi
 else
     echo "UPX not found. Skipping compression."
 fi
+
+# Check if the binary was built successfully
+if [ ! -f "$BINARY_PATH" ]; then
+    echo "Error: Binary not found at $BINARY_PATH. Build may have failed."
+    exit 1
+fi
+
 
 # Create tarball
 echo "Creating tarball..."

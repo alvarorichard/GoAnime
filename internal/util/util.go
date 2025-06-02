@@ -1,16 +1,17 @@
 package util
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/manifoldco/promptui"
-	"os"
 	"strings"
 )
 
 var (
-	IsDebug       bool
-	minNameLength = 4
+	IsDebug          bool
+	minNameLength    = 4
+	ErrHelpRequested = errors.New("help requested") // Custom error for help
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
@@ -45,15 +46,18 @@ func FlagParser() (string, error) {
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
 
+	// Set debug mode based on flag (set unconditionally for consistency)
+	IsDebug = *debug
+
 	if *help || *altHelp {
 		Helper()
-		os.Exit(0)
+		return "", ErrHelpRequested // Signal help instead of exiting
 	}
 
-	IsDebug = *debug
 	if *debug {
 		fmt.Println("--- Debug mode is enabled ---")
 	}
+
 	// If the user has provided an anime name as an argument, we use it.
 	var animeName string
 	if len(flag.Args()) > 0 {

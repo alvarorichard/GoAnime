@@ -2,19 +2,17 @@ name: GoAnime CI
 
 on:
   push:
-    branches: [ main, dev, ipc ]
+    branches: [main, dev, ipc]
   pull_request:
-    branches: [ main, dev, ipc ]
-  schedule:
-    - cron: '0 0 * * *'
+    branches: [main, dev, ipc]
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, windows-latest, macOS-latest ] # Added macOS target operating systems
-        go-version: [ '1.24.1' ] # Using current stable Go version
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+        go-version: ['1.24.1']
     steps:
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -38,33 +36,35 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt update
-          sudo apt install -y mpv yt-dlp
+          sudo apt install -y mpv
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install mpv
-          choco install yt-dlp
+          choco install mpv -y
+          choco install golangci-lint -y 
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install mpv yt-dlp
+          brew install mpv
 
       - name: Get dependencies
         run: go get -v -t -d ./...
 
+      - name: Install golangci-lint (Non-Windows)
+        if: runner.os != 'Windows'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.1.6
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
       - name: Run tests
-        run: go test -v ./...
+        run: go test -v -coverprofile="coverage.out" ./...
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./internal/player/test/helper_test.go
-          flags: -v
-          name: player-tests
-
-
-
-
+          file: coverage.out

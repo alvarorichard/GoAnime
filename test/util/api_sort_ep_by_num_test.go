@@ -2,7 +2,6 @@ package test_util
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 )
 
@@ -11,13 +10,6 @@ type EPisode struct {
 	Number string
 	Num    int
 	URL    string
-}
-
-// Function to be tested
-func sortepisodesByNum(episodes []episode) {
-	sort.Slice(episodes, func(i, j int) bool {
-		return episodes[i].Num < episodes[j].Num
-	})
 }
 
 // Test function for sortEpisodesByNum
