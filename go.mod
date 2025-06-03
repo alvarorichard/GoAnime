@@ -16,9 +16,19 @@ require (
 	golang.org/x/net v0.40.0
 )
 
-require github.com/lrstanley/go-ytdlp v0.0.0-20250522151933-92513d6ff802
+require (
+	github.com/charmbracelet/huh v0.7.0
+	github.com/lrstanley/go-ytdlp v0.0.0-20250522151933-92513d6ff802
+)
 
-require github.com/kr/pretty v0.3.1 // indirect
+require (
+	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/catppuccin/go v0.3.0 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
+	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
+)
 
 require (
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
@@ -52,7 +62,7 @@ require (
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/sync v0.14.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/term v0.32.0
+	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
