@@ -18,10 +18,49 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application
 var ErrUserQuit = errors.New("user requested to quit application")
+
+// Lipgloss style definitions for the dialog
+var (
+	// Colors
+	highlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
+	subtle    = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
+
+	// Dialog box style
+	dialogBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(highlight).
+			Padding(1, 2).
+			BorderTop(true).
+			BorderLeft(true).
+			BorderRight(true).
+			BorderBottom(true)
+
+	// Button styles
+	buttonStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFF7DB")).
+			Background(lipgloss.Color("#888B7E")).
+			Padding(0, 3).
+			MarginTop(1).
+			MarginRight(2)
+
+	activeButtonStyle = buttonStyle.
+				Foreground(lipgloss.Color("#FFF7DB")).
+				Background(highlight).
+				Underline(true)
+
+	// Question style
+	questionStyle = lipgloss.NewStyle().
+			Width(50).
+			Align(lipgloss.Center).
+			Bold(true).
+			Foreground(lipgloss.Color("#FAFAFA"))
+)
 
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
@@ -48,16 +87,54 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 	}
 }
 
-// promptYesNo requests user confirmation
-func promptYesNo(question string) (bool, error) {
-	fmt.Printf("%s (y/n): ", question)
+// showResumeDialog displays a beautiful dialog asking if user wants to resume playback
+func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
+	// Get terminal dimensions
+	width, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		width, height = 80, 24 // fallback dimensions
+	}
+
+	// Create buttons
+	yesButton := activeButtonStyle.Render("  Yes  ")
+	noButton := buttonStyle.Render("  No  ")
+
+	// Create question text
+	question := questionStyle.Render(fmt.Sprintf("Resume episode %d from %d seconds?", episodeNum, timeSeconds))
+
+	// Arrange buttons horizontally
+	buttons := lipgloss.JoinHorizontal(lipgloss.Top, yesButton, noButton)
+
+	// Arrange question and buttons vertically
+	ui := lipgloss.JoinVertical(lipgloss.Center, question, buttons)
+
+	// Create the dialog box with center placement
+	dialog := lipgloss.Place(width, height,
+		lipgloss.Center, lipgloss.Center,
+		dialogBoxStyle.Render(ui),
+		lipgloss.WithWhitespaceChars("•"),
+		lipgloss.WithWhitespaceForeground(subtle),
+	)
+
+	// Clear screen and show dialog
+	fmt.Print("\033[H\033[2J") // Clear screen
+	fmt.Print(dialog)
+	fmt.Print("\n\nPress Y for Yes, N for No: ")
+
+	// Read user input
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		return false, fmt.Errorf("error reading input: %w", err)
 	}
+
 	input = strings.TrimSpace(strings.ToLower(input))
-	return input == "y" || input == "yes", nil
+	result := input == "y" || input == "yes"
+
+	// Clear screen after choice
+	fmt.Print("\033[H\033[2J")
+
+	return result, nil
 }
 
 // playVideo plays the video and manages interactions
@@ -172,10 +249,8 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		return tracker, 0
 	}
 
-	fmt.Printf("\nSaved progress found: episode %d, time %d seconds.\n",
-		progress.EpisodeNumber, progress.PlaybackTime)
-
-	if ok, _ := promptYesNo("Do you want to resume from where you left off?"); ok {
+	// Use the beautiful dialog to ask for resume
+	if ok, _ := showResumeDialog(progress.EpisodeNumber, progress.PlaybackTime); ok {
 		if util.IsDebug {
 			log.Printf("Resuming from saved time: %d seconds", progress.PlaybackTime)
 		}
