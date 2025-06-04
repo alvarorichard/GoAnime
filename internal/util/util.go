@@ -25,17 +25,9 @@ func ErrorHandler(err error) string {
 	}
 }
 
-// Helper prints the help message
+// Helper prints the beautiful help message
 func Helper() {
-	fmt.Print(`	Usage:
-	goanime 
-	goanime [options]
-	goanime [options] [anime name] (don't use - in the anime name, use spaces instead, e.g: "one piece" instead of "one-piece")
-
-	Options:
-	   -debug: run the program in debug mode, which will show more details about errors and other information.
-	   -help; -h; show this help message.
-	`)
+	ShowBeautifulHelp()
 }
 
 // FlagParser parses the -flags and returns the anime name
