@@ -1,6 +1,8 @@
 # Developer's Guide
 
-Welcome to the GoAnime development guide! This document outlines the development workflow, coding standards, and best practices for contributing to the GoAnime project.
+Welcome to the GoAnime development guide! This document outlines the development
+workflow, coding standards, and best practices for contributing to the GoAnime
+project.
 
 ## Table of Contents
 
@@ -17,8 +19,10 @@ Welcome to the GoAnime development guide! This document outlines the development
 ### Branch Structure
 
 - **`main`**: Production-ready code. This branch should always be stable and deployable.
-- **`dev`**: Development branch where all features are integrated before merging to main.
-- **`feature/*`**: Feature branches for new functionality (e.g., `feature/anime-search`, `feature/discord-integration`).
+- **`dev`**: Development branch where all features are integrated before merging
+  to main.
+- **`feature/*`**: Feature branches for new functionality (e.g.,
+  `feature/anime-search`, `feature/discord-integration`).
 - **`bugfix/*`**: Bug fix branches (e.g., `bugfix/player-crash`, `bugfix/episode-loading`).
 - **`hotfix/*`**: Critical fixes that need to go directly to main.
 
@@ -100,7 +104,8 @@ go fmt internal/player/player.go
 
 ### Code Documentation (Recommended)
 
-While not mandatory, it's **highly recommended** to document your code with meaningful comments:
+While not mandatory, it's **highly recommended** to document your code with
+meaningful comments:
 
 ```go
 // Good: Descriptive comment explaining the purpose
@@ -307,7 +312,7 @@ Use the provided build scripts:
 
 Use conventional commit format:
 
-```
+```bash
 type(scope): description
 
 [optional body]
@@ -327,7 +332,7 @@ Types:
 
 Examples:
 
-```
+```bash
 feat(player): add video quality selection
 fix(api): handle network timeout errors
 docs(readme): update installation instructions
@@ -352,30 +357,42 @@ docs(readme): update installation instructions
 
 ### Project Structure
 
-Understanding the GoAnime project structure will help you navigate and contribute effectively:
+Understanding the GoAnime project structure will help you navigate and contribute
+effectively:
 
 **Key Directories Explained:**
 
-- **`cmd/`**: Contains the main application entry points. In Go projects, this is where executable commands live.
-- **`internal/`**: Private application code that cannot be imported by external packages. This ensures encapsulation.
-- **`internal/api/`**: Handles all external API communications (anime databases, streaming services, skip times)
-- **`internal/player/`**: Core video player functionality with platform-specific implementations (Unix/Windows)
-- **`internal/models/`**: Data structures used throughout the application (anime, skip times, URLs)
-- **`internal/tracking/`**: Manages watch history, progress tracking with CGO/no-CGO variants
-- **`internal/discord/`**: Discord Rich Presence integration for showing what you're watching
-- **`internal/playback/`**: Media playback logic for different content types (movies, series)
+- **`cmd/`**: Contains the main application entry points. In Go projects, this is
+  where executable commands live.
+- **`internal/`**: Private application code that cannot be imported by external
+  packages. This ensures encapsulation.
+- **`internal/api/`**: Handles all external API communications (anime databases,
+  streaming services, skip times)
+- **`internal/player/`**: Core video player functionality with platform-specific
+  implementations (Unix/Windows)
+- **`internal/models/`**: Data structures used throughout the application
+  (anime, skip times, URLs)
+- **`internal/tracking/`**: Manages watch history, progress tracking with
+  CGO/no-CGO variants
+- **`internal/discord/`**: Discord Rich Presence integration for showing what
+  you're watching
+- **`internal/playback/`**: Media playback logic for different content types
+  (movies, series)
 - **`internal/appflow/`**: Application workflow and data flow management
 - **`build/`**: Platform-specific build scripts for Linux, macOS, and Windows
 - **`test/`**: Comprehensive test suite organized by functionality
-- **Nix files**: Development environment configuration (`flake.nix`, `shell.nix`, etc.)
+- **Nix files**: Development environment configuration (`flake.nix`, `shell.nix`,
+  etc.)
 
 **Development Flow:**
 
 1. **API Layer** (`internal/api/`) fetches anime data and episode information
-2. **Models** (`internal/models/`) structure the data (anime info, skip times, URLs)
+2. **Models** (`internal/models/`) structure the data (anime info, skip times,
+   URLs)
 3. **Appflow** (`internal/appflow/`) manages data flow through the application
 4. **Playback** (`internal/playback/`) handles media logic based on content type
-5. **Player** (`internal/player/`) manages video playback with platform-specific code
+5. **Player** (`internal/player/`) manages video playback with platform-specific
+   code
 6. **Tracking** (`internal/tracking/`) records user progress and watch history
 7. **Discord** (`internal/discord/`) updates Rich Presence status
 
@@ -410,7 +427,8 @@ Create `.vscode/settings.json`:
 - **Discussions**: Use GitHub Discussions for questions
 - **Code Review**: Don't hesitate to ask for help during review
 
-Remember: Good code is written for humans to read, and only incidentally for computers to execute!
+Remember: Good code is written for humans to read, and only incidentally for
+computers to execute!
 
 ---
 

@@ -101,6 +101,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--debug", "Enable debug mode for detailed error information and performance metrics.")
 	addOption(&helpContent, "--help / -h", "Display this beautiful help message with detailed usage information.")
 	addOption(&helpContent, "--version", "Show version information and build details.")
+	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -127,6 +128,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime", "Start interactive mode")
 	addExample(&helpContent, "goanime \"attack on titan\"", "Search directly for Attack on Titan")
 	addExample(&helpContent, "goanime --debug \"naruto\"", "Search with debug information")
+	addExample(&helpContent, "goanime --update", "Check for updates and update automatically")
 	addExample(&helpContent, "goanime --version", "Show version information")
 	helpContent.WriteString("\n")
 
@@ -138,6 +140,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(subtitleStyle.Render("Made with love for anime lovers everywhere"))
 	helpContent.WriteString("\n\n")
 
+	// Print the complete help content
 	fmt.Print(helpContent.String())
 }
 

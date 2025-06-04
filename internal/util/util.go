@@ -30,6 +30,11 @@ func Helper() {
 	ShowBeautifulHelp()
 }
 
+// Custom error types for different exit conditions
+var (
+	ErrUpdateRequested = errors.New("update requested")
+)
+
 // FlagParser parses the -flags and returns the anime name
 func FlagParser() (string, error) {
 	// Define flags
@@ -37,6 +42,7 @@ func FlagParser() (string, error) {
 	help := flag.Bool("help", false, "show help message")
 	altHelp := flag.Bool("h", false, "show help message")
 	versionFlag := flag.Bool("version", false, "show version information")
+	updateFlag := flag.Bool("update", false, "check for updates and update if available")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -52,6 +58,10 @@ func FlagParser() (string, error) {
 	if *help || *altHelp {
 		Helper()
 		return "", ErrHelpRequested // Signal help instead of exiting
+	}
+
+	if *updateFlag {
+		return "", ErrUpdateRequested // Signal update request
 	}
 
 	if *debug {
