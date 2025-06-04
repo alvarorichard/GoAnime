@@ -4,8 +4,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/manifoldco/promptui"
 	"strings"
+
+	"github.com/alvarorichard/Goanime/internal/version"
+	"github.com/manifoldco/promptui"
 )
 
 var (
@@ -42,12 +44,18 @@ func FlagParser() (string, error) {
 	debug := flag.Bool("debug", false, "enable debug mode")
 	help := flag.Bool("help", false, "show help message")
 	altHelp := flag.Bool("h", false, "show help message")
+	versionFlag := flag.Bool("version", false, "show version information")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
 
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
+
+	if *versionFlag || version.HasVersionArg() {
+		version.ShowVersion()
+		return "", ErrHelpRequested // Signal version instead of exiting
+	}
 
 	if *help || *altHelp {
 		Helper()

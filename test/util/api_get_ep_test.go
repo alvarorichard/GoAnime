@@ -2,7 +2,6 @@ package test_util
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -12,6 +11,8 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/pkg/errors"
+
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // Mock SafeGet function for testing
@@ -78,7 +79,7 @@ func GetAnimeEpisodes(animeURL string) ([]Episode, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v", err)
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(resp.Body)
 
@@ -101,7 +102,7 @@ func parseEpisodes(doc *goquery.Document) []Episode {
 
 		num, err := parseEpisodeNumber(episodeNum)
 		if err != nil {
-			log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
+			util.Debugf("Error parsing episode number '%s': %v", episodeNum, err)
 			return
 		}
 

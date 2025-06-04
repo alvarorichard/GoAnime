@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"time"
 
@@ -16,29 +15,21 @@ import (
 
 func main() {
 	startAll := time.Now()
-	versionFlag := flag.Bool("version", false, "show version information")
-	flag.Parse()
-
-	if *versionFlag || version.HasVersionArg() {
-		version.ShowVersion()
-		return
-	}
 
 	animeName, err := util.FlagParser()
 	if err != nil {
 		log.Fatalln(util.ErrorHandler(err))
 	}
 
+	// Initialize the beautiful logger
+	util.InitLogger()
+
 	tracking.HandleTrackingNotice()
-	if util.IsDebug {
-		log.Printf("[PERF] starting Goanime v%s", version.Version)
-	}
+	util.Debugf("[PERF] starting Goanime v%s", version.Version)
 
 	discordManager := discord.NewManager()
 	if err := discordManager.Initialize(); err != nil {
-		if util.IsDebug {
-			log.Println("Failed to initialize Discord Rich Presence:", err)
-		}
+		util.Debug("Failed to initialize Discord Rich Presence:", "error", err)
 	} else {
 		defer discordManager.Shutdown()
 	}
@@ -47,9 +38,7 @@ func main() {
 	appflow.FetchAnimeDetails(anime)
 	episodes := appflow.GetAnimeEpisodes(anime.URL)
 
-	if util.IsDebug {
-		log.Printf("[PERF] Full boot in %v", time.Since(startAll))
-	}
+	util.Debugf("[PERF] Full boot in %v", time.Since(startAll))
 
 	series, totalEpisodes := playback.CheckIfSeries(anime.URL)
 	if series {

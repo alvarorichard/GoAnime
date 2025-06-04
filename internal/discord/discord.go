@@ -2,7 +2,6 @@ package discord
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -129,16 +128,12 @@ func (rpu *RichPresenceUpdater) Start() {
 			case <-ticker.C:
 				go rpu.updateDiscordPresence() // Run update asynchronously
 			case <-rpu.done:
-				if util.IsDebug {
-					log.Println("Rich Presence updater received stop signal.")
-				}
+				util.Debug("Rich Presence updater received stop signal.")
 				return
 			}
 		}
 	}()
-	if util.IsDebug {
-		log.Println("Rich Presence updater started.")
-	}
+	util.Debug("Rich Presence updater started.")
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish
@@ -152,9 +147,7 @@ func (rpu *RichPresenceUpdater) Stop() {
 			close(rpu.done)
 		}
 		rpu.wg.Wait()
-		if util.IsDebug {
-			log.Println("Rich Presence updater stopped.")
-		}
+		util.Debug("Rich Presence updater stopped.")
 	}
 }
 
@@ -165,16 +158,12 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	currentPosition, err := rpu.GetCurrentPlaybackPosition()
 	if err != nil {
-		if util.IsDebug {
-			log.Printf("Error fetching playback position: %v\n", err)
-		}
+		util.Debugf("Error fetching playback position: %v", err)
 		return
 	}
 
 	// Debug log to check episode duration
-	if util.IsDebug {
-		log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
-	}
+	util.Debugf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
 
 	// Convert episode duration to minutes and seconds format
 	totalMinutes := int(rpu.episodeDuration.Minutes())
@@ -200,13 +189,9 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	// Set the activity in Discord Rich Presence
 	if err := client.SetActivity(activity); err != nil {
-		if util.IsDebug {
-			log.Printf("Error updating Discord Rich Presence: %v\n", err)
-		}
+		util.Debugf("Error updating Discord Rich Presence: %v", err)
 	} else {
-		if util.IsDebug {
-			log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
-		}
+		util.Debugf("Discord Rich Presence updated with elapsed time: %s", timeInfo)
 	}
 }
 

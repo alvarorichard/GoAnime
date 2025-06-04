@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -38,14 +37,12 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 		combinedOpts := strings.Join(opts, ",")
 		_, cmdErr := mpvSendCommand(socketPath, []interface{}{"set_property", "script-opts", combinedOpts})
 		if cmdErr != nil {
-			if util.IsDebug {
-				log.Printf("Failed to apply skip times: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
-			}
-		} else if util.IsDebug {
-			log.Printf("Skip times applied successfully: %s", combinedOpts)
+			util.Debugf("Failed to apply skip times: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
+		} else {
+			util.Debugf("Skip times applied successfully: %s", combinedOpts)
 		}
-	} else if util.IsDebug {
-		log.Printf("No skip times available for episode %s", episode.Number)
+	} else {
+		util.Debugf("No skip times available for episode %s", episode.Number)
 	}
 }
 
@@ -87,9 +84,7 @@ func playVideo(
 	updater *discord.RichPresenceUpdater,
 ) error {
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
-	if util.IsDebug {
-		log.Printf("Video URL: %s", videoURL)
-	}
+	util.Debugf("Video URL: %s", videoURL)
 
 	currentEpisode, err := getCurrentEpisode(episodes, currentEpisodeNum)
 	if err != nil {
@@ -162,14 +157,14 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
 		if util.IsDebug {
-			log.Println("Tracking disabled: CGO not available")
+			util.Debug("Tracking disabled: CGO not available")
 		}
 		return nil, 0
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		log.Printf("Failed to get current user: %v", err)
+		util.Errorf("Failed to get current user: %v", err)
 		return nil, 0
 	}
 
@@ -192,9 +187,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 
 	// Use the beautiful dialog to ask for resume
 	if ok, _ := showResumeDialog(progress.EpisodeNumber, progress.PlaybackTime); ok {
-		if util.IsDebug {
-			log.Printf("Resuming from saved time: %d seconds", progress.PlaybackTime)
-		}
+		util.Debugf("Resuming from saved time: %d seconds", progress.PlaybackTime)
 		return tracker, progress.PlaybackTime
 	}
 
@@ -217,13 +210,11 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 	case err := <-ch:
 		if err == nil {
 			applySkipTimes(socketPath, episode)
-		} else if util.IsDebug {
-			log.Printf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
+		} else {
+			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 		}
 	case <-time.After(3 * time.Second):
-		if util.IsDebug {
-			log.Printf("Timeout fetching AniSkip data for episode %d", episodeNum)
-		}
+		util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
 	}
 }
 
@@ -284,8 +275,8 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 				Title:         getEpisodeTitle(episode.Title),
 				LastUpdated:   time.Now(),
 			}
-			if err := tracker.UpdateProgress(anime); err != nil && util.IsDebug {
-				log.Printf("Failed to update tracking: %v", err)
+			if err := tracker.UpdateProgress(anime); err != nil {
+				util.Errorf("Failed to update tracking: %v", err)
 			}
 		}
 		break
@@ -325,8 +316,8 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 
 	go func() {
 		_, err := GetVideoURLForEpisode(episodes[currentIndex+1].URL)
-		if err != nil && util.IsDebug {
-			log.Printf("Preloading error: %v", err)
+		if err != nil {
+			util.Debugf("Preloading error: %v", err)
 		}
 	}()
 }
@@ -382,8 +373,8 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		LastUpdated:   time.Now(),
 	}
 
-	if err := tracker.UpdateProgress(anime); err != nil && util.IsDebug {
-		log.Printf("Error updating tracking: %v", err)
+	if err := tracker.UpdateProgress(anime); err != nil {
+		util.Errorf("Error updating tracking: %v", err)
 	}
 }
 

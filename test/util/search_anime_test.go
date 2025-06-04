@@ -3,7 +3,6 @@ package test_util_test
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // Define a variable for the base site URL for testing purposes
@@ -79,7 +80,7 @@ func searchAnimeOnPage(currentPageURL, baseURL string) (string, string, error) {
 		err := Body.Close()
 		if err != nil {
 			// Log the error but don't return it
-			log.Printf("Failed to close response body: %v", err)
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(resp.Body)
 
