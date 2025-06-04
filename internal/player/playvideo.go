@@ -1,7 +1,6 @@
 package player
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -131,9 +130,7 @@ func playVideo(
 	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
 	defer close(stopTracking)
 
-	reader := bufio.NewReader(os.Stdin)
 	return handleUserInput(
-		reader,
 		socketPath,
 		episodes,
 		currentEpisodeIndex,
@@ -408,7 +405,6 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 
 // handleUserInput manages user input
 func handleUserInput(
-	reader *bufio.Reader,
 	socketPath string,
 	episodes []models.Episode,
 	currentIndex int,

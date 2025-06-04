@@ -1,27 +1,28 @@
 package playback
 
 import (
-	"fmt"
-	"log"
-
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 )
 
 func GetUserInput() string {
-	// Display basic prompt
-	fmt.Println("Playback Control")
-	fmt.Print("'n' next | 'p' previous | 'e' select episode | 'q' quit > ")
+	var choice string
 
-	var input string
-	_, err := fmt.Scanln(&input)
-	if err != nil {
-		if err.Error() == "unexpected newline" {
-			fmt.Println("No input detected, continuing to next episode")
-			return "n"
-		}
-		fmt.Println("Error reading input - defaulting to continue")
-		log.Printf("Error reading input: %v - defaulting to continue", util.ErrorHandler(err))
-		return "n"
+	menu := huh.NewSelect[string]().
+		Title("Playback Control").
+		Description("What would you like to do next?").
+		Options(
+			huh.NewOption("Next episode", "n"),
+			huh.NewOption("Previous episode", "p"),
+			huh.NewOption("Select episode", "e"),
+			huh.NewOption("Quit", "q"),
+		).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		util.Errorf("Error showing menu: %v", err)
+		return "n" // Default to next episode on error
 	}
-	return input
+
+	return choice
 }
