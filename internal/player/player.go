@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -24,8 +23,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/lrstanley/go-ytdlp"
-	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 )
 
@@ -264,7 +263,7 @@ func HandleDownloadAndPlay(
 	case 2:
 		// Download episodes in a range
 		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-			log.Panicln("Failed to download episodes:", util.ErrorHandler(err))
+			util.Fatal("Failed to download episodes:", err)
 		}
 	default:
 		// Play online
@@ -309,7 +308,7 @@ func downloadAndPlayEpisode(
 ) error {
 	currentUser, err := user.Current()
 	if err != nil {
-		log.Panicln("Failed to get current user:", util.ErrorHandler(err))
+		util.Fatal("Failed to get current user:", err)
 	}
 
 	downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
@@ -317,7 +316,7 @@ func downloadAndPlayEpisode(
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
-			log.Panicln("Failed to create download directory:", util.ErrorHandler(err))
+			util.Fatal("Failed to create download directory:", err)
 		}
 	}
 
@@ -339,7 +338,7 @@ func downloadAndPlayEpisode(
 
 			// Execute download
 			if _, err := dl.Run(context.Background(), videoURL); err != nil {
-				log.Printf("Failed to download video using yt-dlp: %v\n", err)
+				util.Error("Failed to download video using yt-dlp:", err)
 			}
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 
@@ -362,7 +361,7 @@ func downloadAndPlayEpisode(
 			}
 			contentLength, err := getContentLength(videoURL, httpClient)
 			if err != nil {
-				log.Panicln("Failed to get content length:", util.ErrorHandler(err))
+				util.Fatal("Failed to get content length:", err)
 			}
 			m.totalBytes = contentLength
 
@@ -372,7 +371,7 @@ func downloadAndPlayEpisode(
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 
 				if err := DownloadVideo(videoURL, episodePath, numThreads, m); err != nil {
-					log.Panicln("Failed to download video:", util.ErrorHandler(err))
+					util.Fatal("Failed to download video:", err)
 				}
 
 				m.mu.Lock()
@@ -385,7 +384,7 @@ func downloadAndPlayEpisode(
 
 			// Run the Bubble Tea program in the main goroutine
 			if _, err := p.Run(); err != nil {
-				log.Fatalf("error running progress bar: %v", err)
+				util.Fatal("Error running progress bar:", err)
 			}
 		}
 	} else {
@@ -402,45 +401,52 @@ func downloadAndPlayEpisode(
 
 // askForDownload presents a prompt for the user to choose a download option.
 func askForDownload() int {
-	// Creates a prompt using the promptui.Select widget with a label and three options.
-	prompt := promptui.Select{
-		Label: "Choose an option",                                                                             // The label displayed at the top of the menu.
-		Items: []string{"Download this episode", "Download episodes in a range", "No download (play online)"}, // The menu items to select from.
-	}
-	//
+	var choice string
 
-	// Runs the prompt and captures the selected result and any potential error.
-	_, result, err := prompt.Run()
-	if err != nil {
-		// If an error occurs while acquiring user input, it logs the error and terminates the program using Panic.
-		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
+	menu := huh.NewSelect[string]().
+		Title("Download Options").
+		Description("Choose how you want to proceed:").
+		Options(
+			huh.NewOption("Download this episode", "download_single"),
+			huh.NewOption("Download episodes in a range", "download_range"),
+			huh.NewOption("No download (play online)", "play_online"),
+		).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		util.Errorf("Error showing download menu: %v", err)
+		return 3 // Default to play online on error
 	}
 
-	// Converts the user's input to lowercase and determines the selected option.
-	switch strings.ToLower(result) {
-	case "download this episode":
-		// Returns 1 if the user selected "Download this episode".
+	// Determines the selected option based on the choice value
+	switch choice {
+	case "download_single":
 		return 1
-	case "download episodes in a range":
-		// Returns 2 if the user selected "Download episodes in a range".
+	case "download_range":
 		return 2
 	default:
-		// Returns 3 for any other selection, including "No download (play online)".
 		return 3
 	}
 }
 
 func askForPlayOffline() bool {
-	prompt := promptui.Select{
-		Label: "Do you want to play the downloaded version offline?",
-		Items: []string{"Yes", "No"},
+	var choice string
+
+	menu := huh.NewSelect[string]().
+		Title("Offline Playback").
+		Description("Do you want to play the downloaded version offline?").
+		Options(
+			huh.NewOption("Yes", "yes"),
+			huh.NewOption("No", "no"),
+		).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		util.Errorf("Error showing offline playback menu: %v", err)
+		return false // Default to no on error
 	}
 
-	_, result, err := prompt.Run()
-	if err != nil {
-		log.Panicln("Error acquiring user input:", util.ErrorHandler(err))
-	}
-	return strings.ToLower(result) == "yes"
+	return choice == "yes"
 }
 
 // playVideo has been moved to playvideo.go
