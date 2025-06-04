@@ -378,6 +378,34 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 	}
 }
 
+// showPlayerMenu displays an interactive menu using huh.Select
+func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+	var choice string
+
+	title := "GoAnime Player Controls"
+	if animeName != "" {
+		title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
+	}
+
+	menu := huh.NewSelect[string]().
+		Title(title).
+		Description("Choose an action:").
+		Options(
+			huh.NewOption("Next episode", "next"),
+			huh.NewOption("Previous episode", "previous"),
+			huh.NewOption("Select episode", "select"),
+			huh.NewOption("Skip intro", "skip"),
+			huh.NewOption("Exit", "quit"),
+		).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		return "", fmt.Errorf("error showing menu: %w", err)
+	}
+
+	return choice, nil
+}
+
 // handleUserInput manages user input
 func handleUserInput(
 	reader *bufio.Reader,
@@ -390,38 +418,30 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Display anime name and episode number if available
+	// Get anime name for display
+	var animeName string
 	if updater != nil && updater.GetAnime() != nil {
-		fmt.Printf("\nNow playing: %s - Episode %d\n", updater.GetAnime().Name, currentEpisodeNum)
+		animeName = updater.GetAnime().Name
 	}
 
-	fmt.Println("\nAvailable commands:")
-	fmt.Println("  n - Next episode")
-	fmt.Println("  p - Previous episode")
-	fmt.Println("  e - Select episode")
-	fmt.Println("  q - Exit")
-	fmt.Println("  s - Skip intro")
-
 	for {
-		char, _, err := reader.ReadRune()
+		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
 		if err != nil {
-			return fmt.Errorf("error reading input: %w", err)
+			return fmt.Errorf("error showing menu: %w", err)
 		}
 
-		switch char {
-		case 'n':
+		switch choice {
+		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
-		case 'p':
+		case "previous":
 			return playPreviousEpisode(currentIndex-1, episodes, anilistID, updater, stopTracking, socketPath)
-		case 'q':
+		case "quit":
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return ErrUserQuit
-		case 'e':
+		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
-		case 's':
+		case "skip":
 			skipIntro(socketPath, currentEpisode)
-		default:
-			fmt.Println("Invalid command. Use: n, p, e, q or s")
 		}
 	}
 }
