@@ -18,19 +18,19 @@ require (
 
 require (
 	github.com/charmbracelet/huh v0.7.0
+	github.com/charmbracelet/log v0.4.2
 	github.com/lrstanley/go-ytdlp v0.0.0-20250522151933-92513d6ff802
 )
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/log v0.4.2 // indirect
-	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
-	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
+	golang.org/x/exp v0.0.0-20250531010427-b6e5de432a8b // indirect
 )
 
 require (
@@ -56,7 +56,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/muesli/termenv v0.16.0
 	github.com/nsf/termbox-go v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

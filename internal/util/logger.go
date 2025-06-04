@@ -4,11 +4,23 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 	"github.com/muesli/termenv"
 )
 
 var Logger *log.Logger
+
+// getColoredPrefix returns a styled prefix with colors
+func getColoredPrefix() string {
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#6366F1")).
+		Bold(true).
+		Padding(0, 1).
+		MarginRight(1)
+	return style.Render("GoAnime")
+}
 
 // InitLogger initializes the beautiful charmbracelet logger
 func InitLogger() {
@@ -16,7 +28,7 @@ func InitLogger() {
 		ReportCaller:    IsDebug,
 		ReportTimestamp: IsDebug,
 		TimeFormat:      "15:04:05",
-		Prefix:          "GoAnime 🍿",
+		Prefix:          getColoredPrefix(),
 	})
 
 	// Set the appropriate log level based on debug mode
