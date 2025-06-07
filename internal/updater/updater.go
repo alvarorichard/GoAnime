@@ -233,34 +233,49 @@ func isVersionNewer(latest, current string) (bool, error) {
 	return false, nil // Versions are equal
 }
 
-func findAssetForPlatform(release *GitHubRelease) (string, string, error) {
-	platform := runtime.GOOS
-	arch := runtime.GOARCH
+// PlatformInfo holds platform-specific information
+type PlatformInfo struct {
+	OS   string
+	Arch string
+}
 
+// GetCurrentPlatform returns the current platform information
+func GetCurrentPlatform() PlatformInfo {
+	return PlatformInfo{
+		OS:   runtime.GOOS,
+		Arch: runtime.GOARCH,
+	}
+}
+
+func findAssetForPlatform(release *GitHubRelease) (string, string, error) {
+	return findAssetForPlatformWithInfo(release, GetCurrentPlatform())
+}
+
+func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo) (string, string, error) {
 	// Map platform names to expected asset names
 	var expectedNames []string
-	switch platform {
+	switch platform.OS {
 	case "windows":
 		expectedNames = []string{
-			fmt.Sprintf("goanime-windows-%s.exe", arch),
+			fmt.Sprintf("goanime-windows-%s.exe", platform.Arch),
 			"goanime-windows.exe",
 			"goanime.exe",
 		}
 	case "darwin":
 		expectedNames = []string{
-			fmt.Sprintf("goanime-darwin-%s", arch),
-			fmt.Sprintf("goanime-macos-%s", arch),
+			fmt.Sprintf("goanime-darwin-%s", platform.Arch),
+			fmt.Sprintf("goanime-macos-%s", platform.Arch),
 			"goanime-darwin",
 			"goanime-macos",
 		}
 	case "linux":
 		expectedNames = []string{
-			fmt.Sprintf("goanime-linux-%s", arch),
+			fmt.Sprintf("goanime-linux-%s", platform.Arch),
 			"goanime-linux",
 			"goanime",
 		}
 	default:
-		return "", "", fmt.Errorf("unsupported platform: %s", platform)
+		return "", "", fmt.Errorf("unsupported platform: %s", platform.OS)
 	}
 
 	// Find matching asset
@@ -272,7 +287,7 @@ func findAssetForPlatform(release *GitHubRelease) (string, string, error) {
 		}
 	}
 
-	return "", "", fmt.Errorf("no compatible asset found for %s/%s", platform, arch)
+	return "", "", fmt.Errorf("no compatible asset found for %s/%s", platform.OS, platform.Arch)
 }
 
 func downloadAsset(url, filename string) (string, error) {
