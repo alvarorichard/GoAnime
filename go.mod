@@ -19,13 +19,13 @@ require (
 require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/log v0.4.2
-	github.com/lrstanley/go-ytdlp v0.0.0-20250522151933-92513d6ff802
+	github.com/lrstanley/go-ytdlp v0.0.0-20250610000944-a2284ab714d8
 )
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/x/exp/strings v0.0.0-20250606192012-6931dbeeced5 // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20250609102027-b60490452b30 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
