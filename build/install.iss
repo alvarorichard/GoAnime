@@ -1,6 +1,6 @@
 [Setup]
 AppName=GoAnime Installer
-AppVersion=1.1.0
+AppVersion=1.2
 DefaultDirName={pf}\GoAnime
 DefaultGroupName=GoAnime
 AllowNoIcons=yes
