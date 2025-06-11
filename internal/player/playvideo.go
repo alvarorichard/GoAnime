@@ -241,7 +241,7 @@ func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdate
 // updateEpisodeDuration updates the episode duration
 func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdater, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
 	for {
-		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() > 0 {
+		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -355,9 +355,17 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		return
 	}
 
-	duration := 1440
+	duration := 1440 // Default duration in seconds (24 minutes)
 	if updater != nil {
-		duration = int(updater.GetEpisodeDuration().Seconds())
+		episodeDur := updater.GetEpisodeDuration()
+		if episodeDur > 0 {
+			duration = int(episodeDur.Seconds())
+		}
+	}
+
+	// Ensure duration is valid before updating tracking
+	if duration <= 0 {
+		duration = 1440 // Fallback to default
 	}
 
 	anime := tracking.Anime{
