@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -19,12 +20,16 @@ func main() {
 	if err != nil {
 		// Check if error is update request
 		if err == util.ErrUpdateRequested {
-			handleUpdateRequest()
+			if updateErr := handleUpdateRequest(); updateErr != nil {
+				log.Fatalln(util.ErrorHandler(updateErr))
+			}
 			return
 		}
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
-			handleDownloadRequest()
+			if downloadErr := handleDownloadRequest(); downloadErr != nil {
+				log.Fatalln(util.ErrorHandler(downloadErr))
+			}
 			return
 		}
 		// For help and version requests, just exit silently
@@ -39,27 +44,29 @@ func main() {
 }
 
 // handleUpdateRequest processes update requests
-func handleUpdateRequest() {
+func handleUpdateRequest() error {
 	// Initialize logger for update process
 	util.InitLogger()
 	util.Info("Checking for updates...")
 	if updateErr := updater.CheckAndPromptUpdate(); updateErr != nil {
-		log.Fatalln("Update failed:", util.ErrorHandler(updateErr))
+		return fmt.Errorf("update failed: %w", updateErr)
 	}
+	return nil
 }
 
 // handleDownloadRequest processes download requests
-func handleDownloadRequest() {
+func handleDownloadRequest() error {
 	// Initialize logger for download process
 	util.InitLogger()
 
 	if util.GlobalDownloadRequest == nil {
-		log.Fatalln("Download request is nil")
+		return fmt.Errorf("download request is nil")
 	}
 
 	if err := download.HandleDownloadRequest(util.GlobalDownloadRequest); err != nil {
-		log.Fatalln("Download failed:", util.ErrorHandler(err))
+		return fmt.Errorf("download failed: %w", err)
 	}
+	return nil
 }
 
 // handlePlaybackMode processes normal anime playback
