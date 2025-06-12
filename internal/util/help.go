@@ -97,11 +97,12 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString("\n")
 	helpContent.WriteString(sectionTitleStyle.Render("Options:"))
 	helpContent.WriteString("\n")
-
 	addOption(&helpContent, "--debug", "Enable debug mode for detailed error information and performance metrics.")
 	addOption(&helpContent, "--help / -h", "Display this beautiful help message with detailed usage information.")
 	addOption(&helpContent, "--version", "Show version information and build details.")
 	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
+	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
+	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d).")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -124,12 +125,13 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString("\n")
 	helpContent.WriteString(sectionTitleStyle.Render("Examples:"))
 	helpContent.WriteString("\n")
-
 	addExample(&helpContent, "goanime", "Start interactive mode")
 	addExample(&helpContent, "goanime \"attack on titan\"", "Search directly for Attack on Titan")
 	addExample(&helpContent, "goanime --debug \"naruto\"", "Search with debug information")
 	addExample(&helpContent, "goanime --update", "Check for updates and update automatically")
 	addExample(&helpContent, "goanime --version", "Show version information")
+	addExample(&helpContent, "goanime -d \"one piece\" 1", "Download episode 1 of One Piece")
+	addExample(&helpContent, "goanime -d -r \"naruto\" 1-5", "Download episodes 1-5 of Naruto")
 	helpContent.WriteString("\n")
 
 	// Footer
