@@ -162,6 +162,16 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 		return
 	}
 
+	// Se a duração do episódio não estiver definida ou for 0, buscar do MPV
+	if rpu.episodeDuration == 0 {
+		durationResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
+		if err == nil && durationResponse != nil {
+			if durationSeconds, ok := durationResponse.(float64); ok && durationSeconds > 0 {
+				rpu.episodeDuration = time.Duration(durationSeconds) * time.Second
+			}
+		}
+	}
+
 	// Debug log to check episode duration
 	util.Debugf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
 
@@ -195,10 +205,41 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	}
 }
 
-// FetchDuration fetches the episode duration (future feature)
+// FetchDuration fetches the episode duration from MPV and calls the callback with duration in seconds
 func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
-	// TODO: Implement episode duration fetching
-	panic("unimplemented")
+	// Use the provided socketPath or fall back to the instance's socketPath
+	path := socketPath
+	if path == "" {
+		path = rpu.socketPath
+	}
+
+	// Send command to MPV to get the duration property
+	durationResponse, err := rpu.mpvSendCommand(path, []interface{}{"get_property", "duration"})
+	if err != nil {
+		util.Debugf("Error fetching duration from MPV: %v", err)
+		return
+	}
+
+	// Check if we got a valid response
+	if durationResponse == nil {
+		util.Debug("Duration property not available from MPV")
+		return
+	}
+
+	// Convert the response to float64 (MPV returns duration in seconds as a float)
+	durationSeconds, ok := durationResponse.(float64)
+	if !ok {
+		util.Debugf("Failed to parse duration response: %v", durationResponse)
+		return
+	}
+
+	// Convert to int seconds and call the callback
+	durSec := int(durationSeconds)
+	if durSec > 0 {
+		f(durSec)
+	} else {
+		util.Debug("Duration is zero or negative, skipping callback")
+	}
 }
 
 // WaitEpisodeStart waits for episode start (future feature)
