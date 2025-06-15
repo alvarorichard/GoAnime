@@ -165,6 +165,44 @@ Opção 2: Executável independente
 
 </details>
 
+## macOS
+
+<details>
+<summary>Instalação no macOS</summary>
+
+Primeiro, instale o mpv usando o Homebrew:
+
+```bash
+# Instale o Homebrew se você ainda não tiver
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Instale o mpv
+brew install mpv
+
+# Baixe e instale o GoAnime
+curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-apple-darwin
+
+chmod +x goanime
+sudo mv goanime /usr/local/bin/
+goanime
+```
+
+Instalação alternativa usando MacPorts:
+
+```bash
+# Instale o mpv usando MacPorts
+sudo port install mpv
+
+# Baixe e instale o GoAnime
+curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-apple-darwin
+
+chmod +x goanime
+sudo mv goanime /usr/local/bin/
+goanime
+```
+
+</details>
+
 ### Passos de Configuração Adicionais
 
 # Instalação no NixOS (Flakes)
@@ -176,7 +214,6 @@ nix github:alvarorichard/GoAnime
 ```
 
 ## Instalação
-
 
 Adicione no seu `flake.nix`:
 
@@ -213,6 +250,14 @@ Você também pode usar parâmetros para procurar e reproduzir anime diretamente
 ```shell
 goanime  "nome do anime"
 ```
+
+- Para atualizar o GoAnime para a versão mais recente, use a flag de atualização:
+
+```shell
+goanime --update
+```
+
+Este comando irá automaticamente baixar e instalar a versão mais recente do GoAnime usando o mecanismo de atualização integrado do Go.
 
 Você pode usar a opção `-h` ou `--help` para exibir informações de ajuda sobre como usar o comando `goanime`.
 
