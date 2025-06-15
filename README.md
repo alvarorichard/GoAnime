@@ -252,6 +252,14 @@ You can also use parameters to search for and play anime directly. Here are some
 goanime  "anime name"
 ```
 
+- To update GoAnime to the latest version, use the update flag:
+
+```shell
+goanime --update
+```
+
+This command will automatically download and install the latest version of GoAnime using Go's built-in update mechanism.
+
 You can use the `-h` or `--help` option to display help information about how to use the `goanime` command.
 
 ```shell
