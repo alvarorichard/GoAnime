@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +20,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/manifoldco/promptui"
 )
 
@@ -37,7 +37,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Error closing response body: %v", err)
+			util.Logger.Warn("Error closing response body", "error", err)
 		}
 	}()
 	partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
@@ -48,7 +48,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
-			log.Printf("Error closing file: %v", err)
+			util.Logger.Warn("Error closing file", "error", err)
 		}
 	}()
 	buf := make([]byte, 32*1024)
@@ -80,7 +80,7 @@ func combineParts(destPath string, numThreads int) error {
 	}
 	defer func() {
 		if err := outFile.Close(); err != nil {
-			log.Printf("Error closing output file: %v", err)
+			util.Logger.Warn("Error closing output file", "error", err)
 		}
 	}()
 	for i := 0; i < numThreads; i++ {
@@ -92,12 +92,12 @@ func combineParts(destPath string, numThreads int) error {
 		}
 		if _, err := io.Copy(outFile, partFile); err != nil {
 			if closeErr := partFile.Close(); closeErr != nil {
-				log.Printf("Error closing part file: %v", closeErr)
+				util.Logger.Warn("Error closing part file", "error", closeErr)
 			}
 			return err
 		}
 		if err := partFile.Close(); err != nil {
-			log.Printf("Error closing part file: %v", err)
+			util.Logger.Warn("Error closing part file", "error", err)
 		}
 		if err := os.Remove(partFilePath); err != nil {
 			return err
@@ -110,8 +110,7 @@ func combineParts(destPath string, numThreads int) error {
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
 	if util.IsDebug {
-		log.Printf("[PERF] DownloadVideo iniciado para %s", url)
-
+		util.Logger.Debug("DownloadVideo started", "url", url)
 	}
 	destPath = filepath.Clean(destPath)
 	httpClient := &http.Client{
@@ -139,7 +138,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 			defer downloadWg.Done()
 			err := downloadPart(url, from, to, part, httpClient, destPath, m)
 			if err != nil {
-				log.Printf("Thread %d: download part failed: %v\n", part, err)
+				util.Logger.Error("Download part failed", "thread", part, "error", err)
 			}
 		}(from, to, i, httpClient)
 	}
@@ -149,8 +148,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 		return fmt.Errorf("failed to combine parts: %v", err)
 	}
 	if util.IsDebug {
-		log.Printf("[PERF] DownloadVideo finalizado para %s em %v", url, time.Since(start))
-
+		util.Logger.Debug("DownloadVideo completed", "url", url, "duration", time.Since(start))
 	}
 	return nil
 }
@@ -180,7 +178,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 		}
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				log.Printf("Error closing response body: %v", err)
+				util.Logger.Warn("Error closing response body", "error", err)
 			}
 		}()
 		body, err := io.ReadAll(resp.Body)
@@ -305,8 +303,7 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	start := time.Now()
 	if util.IsDebug {
-		log.Printf("[PERF] HandleBatchDownload iniciado para %s", animeURL)
-
+		util.Logger.Debug("HandleBatchDownload started", "animeURL", animeURL)
 	}
 	startNum, endNum, err := getEpisodeRange()
 	if err != nil {
@@ -319,16 +316,34 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 		httpClient = &http.Client{
 			Transport: api.SafeTransport(10 * time.Second),
 		}
+		episodesToDownload []int
 	)
+
+	// First pass: check which episodes need downloading and calculate total bytes
 	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
 		episode, found := findEpisode(episodes, episodeNum)
 		if !found {
-			log.Printf("Episode %d not found\n", episodeNum)
+			util.Logger.Warn("Episode not found", "episode", episodeNum)
 			continue
 		}
+
+		// Check if episode already exists
+		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		if err != nil {
+			util.Logger.Error("Episode path error", "episode", episodeNum, "error", err)
+			continue
+		}
+		if fileExists(episodePath) {
+			util.Logger.Info("Episode already exists", "episode", episodeNum)
+			continue
+		}
+
+		// Episode needs downloading
+		episodesToDownload = append(episodesToDownload, episodeNum)
+
 		videoURL, err := getBestQualityURL(episode.URL)
 		if err != nil {
-			log.Printf("Skipping episode %d: %v\n", episodeNum, err)
+			util.Logger.Warn("Skipping episode", "episode", episodeNum, "error", err)
 			continue
 		}
 		contentLength, err := getContentLength(videoURL, httpClient)
@@ -336,6 +351,15 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 			totalBytes += contentLength
 		}
 	}
+
+	// Check if any episodes need downloading
+	if len(episodesToDownload) == 0 {
+		// All episodes in range already exist, offer to play one of them
+		return handleExistingEpisodes(episodes, animeURL, startNum, endNum)
+	}
+
+	fmt.Printf("Found %d episode(s) to download...\n", len(episodesToDownload))
+
 	if totalBytes > 0 {
 		m = &model{
 			progress: progress.New(progress.WithDefaultGradient()),
@@ -353,7 +377,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	go func() {
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, 4)
-		for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
+		for _, epNum := range episodesToDownload {
 			sem <- struct{}{}
 			wg.Add(1)
 			go func(epNum int) {
@@ -363,23 +387,28 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				}()
 				episode, found := findEpisode(episodes, epNum)
 				if !found {
-					log.Printf("Episode %d not found\n", epNum)
+					util.Logger.Warn("Episode not found in batch", "episode", epNum)
 					return
 				}
 				videoURL, err := getBestQualityURL(episode.URL)
 				if err != nil {
-					log.Printf("Skipping episode %d: %v\n", epNum, err)
+					util.Logger.Warn("Skipping episode in batch", "episode", epNum, "error", err)
 					return
 				}
 				episodePath, err := createEpisodePath(animeURL, epNum)
 				if err != nil {
-					log.Printf("Episode %d path error: %v\n", epNum, err)
+					util.Logger.Error("Episode path error", "episode", epNum, "error", err)
 					return
 				}
+
+				// Double-check if file still doesn't exist (race condition protection)
 				if fileExists(episodePath) {
-					log.Printf("Episode %d already exists\n", epNum)
+					if p != nil {
+						p.Send(statusMsg(fmt.Sprintf("Episode %d already exists, skipping...", epNum)))
+					}
 					return
 				}
+
 				if p != nil {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
@@ -389,11 +418,25 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 					err = DownloadVideo(videoURL, episodePath, 4, m)
 				}
 				if err != nil {
-					log.Printf("Failed episode %d: %v\n", epNum, err)
+					util.Logger.Error("Failed episode download", "episode", epNum, "error", err)
 				}
-			}(episodeNum)
+			}(epNum)
 		}
 		wg.Wait()
+		// Signal that all downloads are complete
+		if m != nil {
+			// Send final completion message first
+			if p != nil {
+				p.Send(statusMsg("All downloads completed!"))
+			}
+			// Small delay to ensure the user sees the completion message
+			time.Sleep(500 * time.Millisecond)
+
+			m.mu.Lock()
+			m.done = true
+			m.mu.Unlock()
+		}
+
 		downloadErrChan <- nil
 	}()
 	if p != nil {
@@ -406,10 +449,11 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
 	if util.IsDebug {
-		log.Printf("[PERF] HandleBatchDownload finalizado para %s em %v", animeURL, time.Since(start))
-
+		util.Logger.Debug("HandleBatchDownload completed", "animeURL", animeURL, "duration", time.Since(start))
 	}
-	return nil
+
+	// Ask user which episode from the downloaded range they want to play
+	return askAndPlayDownloadedEpisode(episodes, animeURL, startNum, endNum)
 }
 
 // getEpisodeRange asks the user for the episode range for download.
@@ -460,4 +504,170 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
+}
+
+// handleExistingEpisodes handles the case when all episodes in the requested range already exist
+func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum, endNum int) error {
+	fmt.Printf("All episodes in range %d-%d already exist!\n\n", startNum, endNum)
+
+	// Collect existing episodes in the range
+	var existingEpisodes []models.Episode
+	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
+		episode, found := findEpisode(episodes, episodeNum)
+		if !found {
+			continue
+		}
+
+		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		if err != nil {
+			continue
+		}
+
+		if fileExists(episodePath) {
+			existingEpisodes = append(existingEpisodes, episode)
+		}
+	}
+
+	if len(existingEpisodes) == 0 {
+		fmt.Println("No downloaded episodes found in the specified range.")
+		return nil
+	}
+
+	// Create options for the interactive menu
+	var options []huh.Option[string]
+	for _, ep := range existingEpisodes {
+		title := fmt.Sprintf("Episode %d", ep.Num)
+		if ep.Title.English != "" {
+			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
+		} else if ep.Title.Romaji != "" {
+			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
+		}
+		options = append(options, huh.NewOption(title, strconv.Itoa(ep.Num)))
+	}
+
+	// Add option to not watch anything
+	options = append(options, huh.NewOption("Don't watch anything", "exit"))
+
+	var selectedEpisode string
+	err := huh.NewSelect[string]().
+		Title("Which episode would you like to watch?").
+		Options(options...).
+		Value(&selectedEpisode).
+		Run()
+
+	if err != nil {
+		return fmt.Errorf("episode selection error: %w", err)
+	}
+
+	if selectedEpisode == "exit" {
+		fmt.Println("No episode selected.")
+		return nil
+	}
+
+	// Find and play the selected episode
+	episodeNum, err := strconv.Atoi(selectedEpisode)
+	if err != nil {
+		return fmt.Errorf("invalid episode number: %w", err)
+	}
+
+	// Verify the episode exists in our list
+	_, found := findEpisode(existingEpisodes, episodeNum)
+	if !found {
+		return fmt.Errorf("selected episode not found")
+	}
+
+	fmt.Printf("Playing Episode %d...\n", episodeNum)
+
+	// Get the episode path and play it
+	episodePath, err := createEpisodePath(animeURL, episodeNum)
+	if err != nil {
+		return fmt.Errorf("failed to get episode path: %w", err)
+	}
+
+	// Play the episode using the existing player logic
+	// Note: We use the local file path as the video URL since it's already downloaded
+	// anilistID set to 0 since we don't have that context here, updater set to nil
+	return playVideo(episodePath, episodes, episodeNum, 0, nil)
+}
+
+// askAndPlayDownloadedEpisode asks the user which episode from the downloaded range they want to play
+func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, startNum, endNum int) error {
+	// Collect downloaded episodes in the range
+	var downloadedEpisodes []models.Episode
+	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
+		episode, found := findEpisode(episodes, episodeNum)
+		if !found {
+			continue
+		}
+
+		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		if err != nil {
+			continue
+		}
+
+		if fileExists(episodePath) {
+			downloadedEpisodes = append(downloadedEpisodes, episode)
+		}
+	}
+
+	if len(downloadedEpisodes) == 0 {
+		fmt.Println("No downloaded episodes found in the specified range.")
+		return nil
+	}
+
+	// Create options for the interactive menu
+	var options []huh.Option[string]
+	for _, ep := range downloadedEpisodes {
+		title := fmt.Sprintf("Episode %d", ep.Num)
+		if ep.Title.English != "" {
+			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
+		} else if ep.Title.Romaji != "" {
+			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
+		}
+		options = append(options, huh.NewOption(title, strconv.Itoa(ep.Num)))
+	}
+
+	// Add option to not watch anything
+	options = append(options, huh.NewOption("Don't watch anything", "exit"))
+
+	var selectedEpisode string
+	err := huh.NewSelect[string]().
+		Title("Which episode would you like to watch?").
+		Options(options...).
+		Value(&selectedEpisode).
+		Run()
+
+	if err != nil {
+		return fmt.Errorf("episode selection error: %w", err)
+	}
+
+	if selectedEpisode == "exit" {
+		fmt.Println("No episode selected.")
+		return nil
+	}
+
+	// Find and play the selected episode
+	episodeNum, err := strconv.Atoi(selectedEpisode)
+	if err != nil {
+		return fmt.Errorf("invalid episode number: %w", err)
+	}
+
+	// Verify the episode exists in our list
+	_, found := findEpisode(downloadedEpisodes, episodeNum)
+	if !found {
+		return fmt.Errorf("selected episode not found")
+	}
+
+	fmt.Printf("Playing Episode %d...\n", episodeNum)
+
+	// Get the episode path and play it
+	episodePath, err := createEpisodePath(animeURL, episodeNum)
+	if err != nil {
+		return fmt.Errorf("failed to get episode path: %w", err)
+	}
+
+	// Play the episode using the existing player logic
+	// Note: We use the local file path as the video URL since it's already downloaded
+	// anilistID set to 0 since we don't have that context here, updater set to nil
+	return playVideo(episodePath, episodes, episodeNum, 0, nil)
 }

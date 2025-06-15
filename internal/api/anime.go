@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -158,32 +157,26 @@ func FetchAnimeDetails(anime *models.Anime) error {
 
 func SearchAnime(animeName string) (*models.Anime, error) {
 	start := time.Now()
-	if util.IsDebug {
-		log.Printf("[PERF] SearchAnime started for %s", animeName)
-	}
+	util.Debugf("[PERF] SearchAnime started for %s", animeName)
 
 	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, url.PathEscape(animeName))
 
 	for {
 		selectedAnime, nextPageURL, err := searchAnimeOnPage(currentPageURL)
 		if err != nil {
-			log.Printf("[PERF] SearchAnime failed for %s after %v", animeName, time.Since(start))
+			util.Debugf("[PERF] SearchAnime failed for %s after %v", animeName, time.Since(start))
 			return nil, err
 		}
 		if selectedAnime != nil {
-			if err := enrichAnimeData(selectedAnime); err != nil && util.IsDebug {
-				log.Printf("Error enriching anime data: %v", err)
+			if err := enrichAnimeData(selectedAnime); err != nil {
+				util.Errorf("Error enriching anime data: %v", err)
 			}
-			if util.IsDebug {
-				log.Printf("[PERF] SearchAnime completed for %s in %v", animeName, time.Since(start))
-			}
+			util.Debugf("[PERF] SearchAnime completed for %s in %v", animeName, time.Since(start))
 			return selectedAnime, nil
 		}
 
 		if nextPageURL == "" {
-			if util.IsDebug {
-				log.Printf("[PERF] No results found for %s after %v", animeName, time.Since(start))
-			}
+			util.Debugf("[PERF] No results found for %s after %v", animeName, time.Since(start))
 			return nil, errors.New("no anime found with the given name")
 		}
 		currentPageURL = models.AnimeFireURL + nextPageURL
@@ -257,16 +250,14 @@ func enrichAnimeData(anime *models.Anime) error {
 
 	if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
 		anime.ImageURL = cover
-	} else if util.IsDebug {
-		log.Printf("Cover image not found for: %s", anime.Name)
+	} else {
+		util.Debugf("Cover image not found for: %s", anime.Name)
 	}
 
-	if util.IsDebug {
-		log.Printf("AniList Data: ID:%d, MAL:%d, Title:%s",
-			aniListInfo.Data.Media.ID,
-			aniListInfo.Data.Media.IDMal,
-			aniListInfo.Data.Media.Title.Romaji)
-	}
+	util.Debugf("AniList Data: ID:%d, MAL:%d, Title:%s",
+		aniListInfo.Data.Media.ID,
+		aniListInfo.Data.Media.IDMal,
+		aniListInfo.Data.Media.Title.Romaji)
 	return nil
 }
 
@@ -290,9 +281,7 @@ func searchAnimeOnPage(pageURL string) (*models.Anime, string, error) {
 	}
 
 	animes := ParseAnimes(doc)
-	if util.IsDebug {
-		log.Printf("Found %d anime(s)", len(animes))
-	}
+	util.Debugf("Found %d anime(s)", len(animes))
 
 	if len(animes) > 0 {
 		selectedAnime, err := selectAnimeWithGoFuzzyFinder(animes)
@@ -315,9 +304,7 @@ func ParseAnimes(doc *goquery.Document) []models.Anime {
 				Name: name,
 				URL:  resolveURL(models.AnimeFireURL, urlPath),
 			})
-			if util.IsDebug {
-				log.Printf("Parsed: %s", name)
-			}
+			util.Debugf("Parsed: %s", name)
 		}
 	})
 	return animes
@@ -325,9 +312,7 @@ func ParseAnimes(doc *goquery.Document) []models.Anime {
 
 func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	cleanedName := CleanTitle(animeName)
-	if util.IsDebug {
-		log.Printf("Querying AniList for: %s", cleanedName)
-	}
+	util.Debugf("Querying AniList for: %s", cleanedName)
 
 	query := `query ($search: String) {
         Media(search: $search, type: ANIME) {
@@ -454,7 +439,7 @@ func CleanTitle(title string) string {
 }
 
 func safeClose(closer io.Closer, name string) {
-	if err := closer.Close(); err != nil && util.IsDebug {
-		log.Printf("Error closing %s: %v", name, err)
+	if err := closer.Close(); err != nil {
+		util.Debugf("Error closing %s: %v", name, err)
 	}
 }

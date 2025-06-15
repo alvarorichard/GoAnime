@@ -239,3 +239,148 @@ func TestRichPresenceIntegration(t *testing.T) {
 	// In a real application, you would implement a more comprehensive integration test
 	// that uses real instances or mocks of external systems
 }
+
+// TestFetchDuration tests the FetchDuration function
+func TestFetchDuration(t *testing.T) {
+	t.Run("Should fetch duration successfully", func(t *testing.T) {
+		// Arrange
+		mockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+			if len(args) >= 2 && args[0] == "get_property" && args[1] == "duration" {
+				return 1440.0, nil // 24 minutes in seconds
+			}
+			return nil, fmt.Errorf("mock: unsupported command")
+		}
+
+		anime := &models.Anime{
+			Name:     "Test Anime",
+			Episodes: []models.Episode{{Number: "1"}},
+			Details: models.AniListDetails{
+				Title: models.Title{Romaji: "Test Anime"},
+			},
+		}
+		isPaused := false
+		animeMutex := &sync.Mutex{}
+		updateFreq := 5 * time.Second
+		episodeDuration := 24 * time.Minute
+		socketPath := "/tmp/mpvsocket"
+
+		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockFunc)
+
+		// Variable to capture the callback result
+		var receivedDuration int
+		callback := func(durSec int) {
+			receivedDuration = durSec
+		}
+
+		// Act
+		updater.FetchDuration(socketPath, callback)
+
+		// Assert
+		assert.Equal(t, 1440, receivedDuration) // 24 minutes = 1440 seconds
+	})
+
+	t.Run("Should handle MPV error gracefully", func(t *testing.T) {
+		// Arrange
+		errorMockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+			return nil, fmt.Errorf("connection failed")
+		}
+
+		anime := &models.Anime{
+			Name:     "Test Anime",
+			Episodes: []models.Episode{{Number: "1"}},
+			Details: models.AniListDetails{
+				Title: models.Title{Romaji: "Test Anime"},
+			},
+		}
+		isPaused := false
+		animeMutex := &sync.Mutex{}
+		updateFreq := 5 * time.Second
+		episodeDuration := 24 * time.Minute
+		socketPath := "/tmp/mpvsocket"
+
+		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, errorMockFunc)
+
+		// Variable to capture the callback result
+		var callbackCalled bool
+		callback := func(durSec int) {
+			callbackCalled = true
+		}
+
+		// Act
+		updater.FetchDuration(socketPath, callback)
+
+		// Assert
+		assert.False(t, callbackCalled) // Callback should not be called on error
+	})
+
+	t.Run("Should handle nil duration response", func(t *testing.T) {
+		// Arrange
+		nilMockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+			return nil, nil // Simulate nil response
+		}
+
+		anime := &models.Anime{
+			Name:     "Test Anime",
+			Episodes: []models.Episode{{Number: "1"}},
+			Details: models.AniListDetails{
+				Title: models.Title{Romaji: "Test Anime"},
+			},
+		}
+		isPaused := false
+		animeMutex := &sync.Mutex{}
+		updateFreq := 5 * time.Second
+		episodeDuration := 24 * time.Minute
+		socketPath := "/tmp/mpvsocket"
+
+		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, nilMockFunc)
+
+		// Variable to capture the callback result
+		var callbackCalled bool
+		callback := func(durSec int) {
+			callbackCalled = true
+		}
+
+		// Act
+		updater.FetchDuration(socketPath, callback)
+
+		// Assert
+		assert.False(t, callbackCalled) // Callback should not be called on nil response
+	})
+
+	t.Run("Should use instance socket path when parameter is empty", func(t *testing.T) {
+		// Arrange
+		mockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+			if len(args) >= 2 && args[0] == "get_property" && args[1] == "duration" {
+				return 600.0, nil // 10 minutes in seconds
+			}
+			return nil, fmt.Errorf("mock: unsupported command")
+		}
+
+		anime := &models.Anime{
+			Name:     "Test Anime",
+			Episodes: []models.Episode{{Number: "1"}},
+			Details: models.AniListDetails{
+				Title: models.Title{Romaji: "Test Anime"},
+			},
+		}
+		isPaused := false
+		animeMutex := &sync.Mutex{}
+		updateFreq := 5 * time.Second
+		episodeDuration := 24 * time.Minute
+		socketPath := "/tmp/mpvsocket"
+
+		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockFunc)
+
+		// Variable to capture the callback result
+		var receivedDuration int
+		callback := func(durSec int) {
+			receivedDuration = durSec
+		}
+
+		// Act - pass empty string to test fallback to instance socket path
+		updater.FetchDuration("", callback)
+
+		// Assert
+		assert.Equal(t, 600, receivedDuration) // 10 minutes = 600 seconds
+	})
+}

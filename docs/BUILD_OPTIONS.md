@@ -1,10 +1,12 @@
 # Build Options
 
-GoAnime can be built with or without SQLite support for tracking anime progress. Here's how to choose the right build for your needs:
+GoAnime can be built with or without SQLite support for tracking anime progress.
+Here's how to choose the right build for your needs:
 
 ## Standard Build (No SQLite)
 
-The standard build is compiled without CGO and doesn't include SQLite tracking features. This build:
+The standard build is compiled without CGO and doesn't include SQLite tracking
+features. This build:
 
 - Has smaller binary size
 - Works on all platforms without dependencies
@@ -52,14 +54,16 @@ For builds with SQLite support, you'll need:
 
 If you get an error like:
 
-```
-panic: database initialization failed: schema creation failed: Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
+```text
+panic: database initialization failed: schema creation failed: Binary was 
+compiled with 'CGO_ENABLED=0', go-sqlite3 requires cgo to work. This is a stub
 ```
 
 It means you're using a standard build without SQLite support. You have two options:
 
 1. Build with SQLite support using the instructions above
-2. Continue using the standard build - anime progress tracking will be disabled, but all other features will work
+2. Continue using the standard build - anime progress tracking will be disabled,
+   but all other features will work
 
 ## How to Check Your Build
 

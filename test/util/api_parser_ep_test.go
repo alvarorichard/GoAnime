@@ -1,7 +1,6 @@
 package test_util
 
 import (
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,6 +9,8 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/PuerkitoBio/goquery"
+
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 func TestParseEpisodes(t *testing.T) {
@@ -59,7 +60,7 @@ func ParseEpisodes(doc *goquery.Document) []Episode {
 
 		num, err := parseEpisodeNumber(episodeNum)
 		if err != nil {
-			log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
+			util.Debugf("Error parsing episode number '%s': %v", episodeNum, err)
 			return
 		}
 

@@ -1,10 +1,8 @@
 package player
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -18,6 +16,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application
@@ -37,27 +36,42 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 		combinedOpts := strings.Join(opts, ",")
 		_, cmdErr := mpvSendCommand(socketPath, []interface{}{"set_property", "script-opts", combinedOpts})
 		if cmdErr != nil {
-			if util.IsDebug {
-				log.Printf("Failed to apply skip times: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
-			}
-		} else if util.IsDebug {
-			log.Printf("Skip times applied successfully: %s", combinedOpts)
+			util.Debugf("Failed to apply skip times: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
+		} else {
+			util.Debugf("Skip times applied successfully: %s", combinedOpts)
 		}
-	} else if util.IsDebug {
-		log.Printf("No skip times available for episode %s", episode.Number)
+	} else {
+		util.Debugf("No skip times available for episode %s", episode.Number)
 	}
 }
 
-// promptYesNo requests user confirmation
-func promptYesNo(question string) (bool, error) {
-	fmt.Printf("%s (y/n): ", question)
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return false, fmt.Errorf("error reading input: %w", err)
+// showResumeDialog displays a compact dialog asking if user wants to resume playback
+func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
+	var resume bool
+
+	// Convert seconds to minutes and seconds for better readability
+	minutes := timeSeconds / 60
+	seconds := timeSeconds % 60
+
+	var timeStr string
+	if minutes > 0 {
+		timeStr = fmt.Sprintf("%dm %ds", minutes, seconds)
+	} else {
+		timeStr = fmt.Sprintf("%ds", seconds)
 	}
-	input = strings.TrimSpace(strings.ToLower(input))
-	return input == "y" || input == "yes", nil
+
+	confirm := huh.NewConfirm().
+		Title(fmt.Sprintf("Resume episode %d from %s?", episodeNum, timeStr)).
+		Description("You can continue watching from where you left off.").
+		Affirmative("Yes, resume").
+		Negative("No, start from beginning").
+		Value(&resume)
+
+	if err := confirm.Run(); err != nil {
+		return false, fmt.Errorf("error showing dialog: %w", err)
+	}
+
+	return resume, nil
 }
 
 // playVideo plays the video and manages interactions
@@ -69,9 +83,7 @@ func playVideo(
 	updater *discord.RichPresenceUpdater,
 ) error {
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
-	if util.IsDebug {
-		log.Printf("Video URL: %s", videoURL)
-	}
+	util.Debugf("Video URL: %s", videoURL)
 
 	currentEpisode, err := getCurrentEpisode(episodes, currentEpisodeNum)
 	if err != nil {
@@ -118,9 +130,7 @@ func playVideo(
 	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
 	defer close(stopTracking)
 
-	reader := bufio.NewReader(os.Stdin)
 	return handleUserInput(
-		reader,
 		socketPath,
 		episodes,
 		currentEpisodeIndex,
@@ -144,14 +154,14 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
 		if util.IsDebug {
-			log.Println("Tracking disabled: CGO not available")
+			util.Debug("Tracking disabled: CGO not available")
 		}
 		return nil, 0
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		log.Printf("Failed to get current user: %v", err)
+		util.Errorf("Failed to get current user: %v", err)
 		return nil, 0
 	}
 
@@ -172,13 +182,9 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		return tracker, 0
 	}
 
-	fmt.Printf("\nSaved progress found: episode %d, time %d seconds.\n",
-		progress.EpisodeNumber, progress.PlaybackTime)
-
-	if ok, _ := promptYesNo("Do you want to resume from where you left off?"); ok {
-		if util.IsDebug {
-			log.Printf("Resuming from saved time: %d seconds", progress.PlaybackTime)
-		}
+	// Use the beautiful dialog to ask for resume
+	if ok, _ := showResumeDialog(progress.EpisodeNumber, progress.PlaybackTime); ok {
+		util.Debugf("Resuming from saved time: %d seconds", progress.PlaybackTime)
 		return tracker, progress.PlaybackTime
 	}
 
@@ -201,13 +207,11 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 	case err := <-ch:
 		if err == nil {
 			applySkipTimes(socketPath, episode)
-		} else if util.IsDebug {
-			log.Printf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
+		} else {
+			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 		}
 	case <-time.After(3 * time.Second):
-		if util.IsDebug {
-			log.Printf("Timeout fetching AniSkip data for episode %d", episodeNum)
-		}
+		util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
 	}
 }
 
@@ -237,7 +241,7 @@ func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdate
 // updateEpisodeDuration updates the episode duration
 func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdater, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
 	for {
-		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() > 0 {
+		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -268,8 +272,8 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 				Title:         getEpisodeTitle(episode.Title),
 				LastUpdated:   time.Now(),
 			}
-			if err := tracker.UpdateProgress(anime); err != nil && util.IsDebug {
-				log.Printf("Failed to update tracking: %v", err)
+			if err := tracker.UpdateProgress(anime); err != nil {
+				util.Errorf("Failed to update tracking: %v", err)
 			}
 		}
 		break
@@ -309,8 +313,8 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 
 	go func() {
 		_, err := GetVideoURLForEpisode(episodes[currentIndex+1].URL)
-		if err != nil && util.IsDebug {
-			log.Printf("Preloading error: %v", err)
+		if err != nil {
+			util.Debugf("Preloading error: %v", err)
 		}
 	}()
 }
@@ -351,9 +355,17 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		return
 	}
 
-	duration := 1440
+	duration := 1440 // Default duration in seconds (24 minutes)
 	if updater != nil {
-		duration = int(updater.GetEpisodeDuration().Seconds())
+		episodeDur := updater.GetEpisodeDuration()
+		if episodeDur > 0 {
+			duration = int(episodeDur.Seconds())
+		}
+	}
+
+	// Ensure duration is valid before updating tracking
+	if duration <= 0 {
+		duration = 1440 // Fallback to default
 	}
 
 	anime := tracking.Anime{
@@ -366,14 +378,41 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		LastUpdated:   time.Now(),
 	}
 
-	if err := tracker.UpdateProgress(anime); err != nil && util.IsDebug {
-		log.Printf("Error updating tracking: %v", err)
+	if err := tracker.UpdateProgress(anime); err != nil {
+		util.Errorf("Error updating tracking: %v", err)
 	}
+}
+
+// showPlayerMenu displays an interactive menu using huh.Select
+func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+	var choice string
+
+	title := "GoAnime Player Controls"
+	if animeName != "" {
+		title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
+	}
+
+	menu := huh.NewSelect[string]().
+		Title(title).
+		Description("Choose an action:").
+		Options(
+			huh.NewOption("Next episode", "next"),
+			huh.NewOption("Previous episode", "previous"),
+			huh.NewOption("Select episode", "select"),
+			huh.NewOption("Skip intro", "skip"),
+			huh.NewOption("Exit", "quit"),
+		).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		return "", fmt.Errorf("error showing menu: %w", err)
+	}
+
+	return choice, nil
 }
 
 // handleUserInput manages user input
 func handleUserInput(
-	reader *bufio.Reader,
 	socketPath string,
 	episodes []models.Episode,
 	currentIndex int,
@@ -383,38 +422,30 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Display anime name and episode number if available
+	// Get anime name for display
+	var animeName string
 	if updater != nil && updater.GetAnime() != nil {
-		fmt.Printf("\nNow playing: %s - Episode %d\n", updater.GetAnime().Name, currentEpisodeNum)
+		animeName = updater.GetAnime().Name
 	}
 
-	fmt.Println("\nAvailable commands:")
-	fmt.Println("  n - Next episode")
-	fmt.Println("  p - Previous episode")
-	fmt.Println("  e - Select episode")
-	fmt.Println("  q - Exit")
-	fmt.Println("  s - Skip intro")
-
 	for {
-		char, _, err := reader.ReadRune()
+		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
 		if err != nil {
-			return fmt.Errorf("error reading input: %w", err)
+			return fmt.Errorf("error showing menu: %w", err)
 		}
 
-		switch char {
-		case 'n':
+		switch choice {
+		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
-		case 'p':
+		case "previous":
 			return playPreviousEpisode(currentIndex-1, episodes, anilistID, updater, stopTracking, socketPath)
-		case 'q':
+		case "quit":
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return ErrUserQuit
-		case 'e':
+		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
-		case 's':
+		case "skip":
 			skipIntro(socketPath, currentEpisode)
-		default:
-			fmt.Println("Invalid command. Use: n, p, e, q or s")
 		}
 	}
 }

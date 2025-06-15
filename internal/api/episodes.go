@@ -2,13 +2,13 @@ package api
 
 import (
 	"io"
-	"log"
 	"regexp"
 	"sort"
 	"strconv"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/pkg/errors"
 )
 
@@ -31,7 +31,7 @@ func GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v", err)
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(resp.Body)
 
@@ -70,7 +70,7 @@ func parseEpisodes(doc *goquery.Document) []models.Episode {
 		// Parse the episode number as an integer.
 		num, err := parseEpisodeNumber(episodeNum)
 		if err != nil {
-			log.Printf("Error parsing episode number '%s': %v", episodeNum, err)
+			util.Debugf("Error parsing episode number '%s': %v", episodeNum, err)
 			return
 		}
 

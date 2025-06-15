@@ -2,7 +2,6 @@ package discord
 
 import (
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -129,16 +128,12 @@ func (rpu *RichPresenceUpdater) Start() {
 			case <-ticker.C:
 				go rpu.updateDiscordPresence() // Run update asynchronously
 			case <-rpu.done:
-				if util.IsDebug {
-					log.Println("Rich Presence updater received stop signal.")
-				}
+				util.Debug("Rich Presence updater received stop signal.")
 				return
 			}
 		}
 	}()
-	if util.IsDebug {
-		log.Println("Rich Presence updater started.")
-	}
+	util.Debug("Rich Presence updater started.")
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish
@@ -152,9 +147,7 @@ func (rpu *RichPresenceUpdater) Stop() {
 			close(rpu.done)
 		}
 		rpu.wg.Wait()
-		if util.IsDebug {
-			log.Println("Rich Presence updater stopped.")
-		}
+		util.Debug("Rich Presence updater stopped.")
 	}
 }
 
@@ -165,16 +158,22 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	currentPosition, err := rpu.GetCurrentPlaybackPosition()
 	if err != nil {
-		if util.IsDebug {
-			log.Printf("Error fetching playback position: %v\n", err)
-		}
+		util.Debugf("Error fetching playback position: %v", err)
 		return
 	}
 
-	// Debug log to check episode duration
-	if util.IsDebug {
-		log.Printf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)\n", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
+	// Se a duração do episódio não estiver definida ou for 0, buscar do MPV
+	if rpu.episodeDuration == 0 {
+		durationResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
+		if err == nil && durationResponse != nil {
+			if durationSeconds, ok := durationResponse.(float64); ok && durationSeconds > 0 {
+				rpu.episodeDuration = time.Duration(durationSeconds) * time.Second
+			}
+		}
 	}
+
+	// Debug log to check episode duration
+	util.Debugf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
 
 	// Convert episode duration to minutes and seconds format
 	totalMinutes := int(rpu.episodeDuration.Minutes())
@@ -200,20 +199,47 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	// Set the activity in Discord Rich Presence
 	if err := client.SetActivity(activity); err != nil {
-		if util.IsDebug {
-			log.Printf("Error updating Discord Rich Presence: %v\n", err)
-		}
+		util.Debugf("Error updating Discord Rich Presence: %v", err)
 	} else {
-		if util.IsDebug {
-			log.Printf("Discord Rich Presence updated with elapsed time: %s\n", timeInfo)
-		}
+		util.Debugf("Discord Rich Presence updated with elapsed time: %s", timeInfo)
 	}
 }
 
-// FetchDuration fetches the episode duration (future feature)
+// FetchDuration fetches the episode duration from MPV and calls the callback with duration in seconds
 func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
-	// TODO: Implement episode duration fetching
-	panic("unimplemented")
+	// Use the provided socketPath or fall back to the instance's socketPath
+	path := socketPath
+	if path == "" {
+		path = rpu.socketPath
+	}
+
+	// Send command to MPV to get the duration property
+	durationResponse, err := rpu.mpvSendCommand(path, []interface{}{"get_property", "duration"})
+	if err != nil {
+		util.Debugf("Error fetching duration from MPV: %v", err)
+		return
+	}
+
+	// Check if we got a valid response
+	if durationResponse == nil {
+		util.Debug("Duration property not available from MPV")
+		return
+	}
+
+	// Convert the response to float64 (MPV returns duration in seconds as a float)
+	durationSeconds, ok := durationResponse.(float64)
+	if !ok {
+		util.Debugf("Failed to parse duration response: %v", durationResponse)
+		return
+	}
+
+	// Convert to int seconds and call the callback
+	durSec := int(durationSeconds)
+	if durSec > 0 {
+		f(durSec)
+	} else {
+		util.Debug("Duration is zero or negative, skipping callback")
+	}
 }
 
 // WaitEpisodeStart waits for episode start (future feature)

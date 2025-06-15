@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 
 	//"net"
 	//"runtime"
@@ -104,7 +103,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		err := Body.Close()
 		if err != nil {
 			// Logs a warning if closing the response body fails.
-			log.Printf("Failed to close response body: %v\n", err)
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(resp.Body)
 
@@ -171,7 +170,7 @@ func ExtractEpisodeNumber(episodeStr string) string {
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 	if util.IsDebug {
-		log.Printf("Attempting to extract video URL for episode: %s", episodeURL)
+		util.Debugf("Attempting to extract video URL for episode: %s", episodeURL)
 	}
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
@@ -182,7 +181,7 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 func extractVideoURL(url string) (string, error) {
 	if util.IsDebug {
-		log.Printf("Extracting video URL from page: %s", url)
+		util.Debugf("Extracting video URL from page: %s", url)
 	}
 
 	response, err := api.SafeGet(url)
@@ -192,7 +191,7 @@ func extractVideoURL(url string) (string, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
+			util.Debugf("Failed to close response body: %v\n", err)
 		}
 	}(response.Body)
 
@@ -220,7 +219,7 @@ func extractVideoURL(url string) (string, error) {
 		elements := doc.Find(selector)
 		if elements.Length() > 0 {
 			if util.IsDebug {
-				log.Printf("Found elements with selector: %s", selector)
+				util.Debugf("Found elements with selector: %s", selector)
 			}
 
 			// Try different attribute names
@@ -236,7 +235,7 @@ func extractVideoURL(url string) (string, error) {
 				videoSrc, exists = elements.Attr(attr)
 				if exists && videoSrc != "" {
 					if util.IsDebug {
-						log.Printf("Found video URL in attribute %s: %s", attr, videoSrc)
+						util.Debugf("Found video URL in attribute %s: %s", attr, videoSrc)
 					}
 					return videoSrc, nil
 				}
@@ -246,7 +245,7 @@ func extractVideoURL(url string) (string, error) {
 
 	// If no video element found, try to find in page content
 	if util.IsDebug {
-		log.Printf("No video elements found, searching in page content")
+		util.Debugf("No video elements found, searching in page content")
 	}
 
 	urlBody, err := fetchContent(url)
@@ -258,7 +257,7 @@ func extractVideoURL(url string) (string, error) {
 	videoSrc, err = findBloggerLink(urlBody)
 	if err == nil && videoSrc != "" {
 		if util.IsDebug {
-			log.Printf("Found blogger link: %s", videoSrc)
+			util.Debugf("Found blogger link: %s", videoSrc)
 		}
 		return videoSrc, nil
 	}
@@ -269,7 +268,7 @@ func extractVideoURL(url string) (string, error) {
 	matches := re.FindString(urlBody)
 	if matches != "" {
 		if util.IsDebug {
-			log.Printf("Found direct video URL: %s", matches)
+			util.Debugf("Found direct video URL: %s", matches)
 		}
 		return matches, nil
 	}
@@ -285,7 +284,7 @@ func fetchContent(url string) (string, error) {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Printf("Failed to close response body: %v\n", err)
+			util.Debugf("Failed to close response body: %v\n", err)
 		}
 	}(resp.Body)
 
@@ -312,7 +311,7 @@ func findBloggerLink(content string) (string, error) {
 
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
-		log.Printf("Processing video source: %s", videoSrc)
+		util.Debugf("Processing video source: %s", videoSrc)
 	}
 
 	if strings.Contains(videoSrc, "blogger.com") {
@@ -322,7 +321,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	// If the URL is from animefire.plus, we need to fetch it first
 	if strings.Contains(videoSrc, "animefire.plus/video/") {
 		if util.IsDebug {
-			log.Printf("Found animefire.plus video URL, fetching content...")
+			util.Debugf("Found animefire.plus video URL, fetching content...")
 		}
 
 		// Fetch the video page
@@ -332,7 +331,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 		defer func() {
 			if err := response.Body.Close(); err != nil {
-				log.Printf("Error closing response body: %v", err)
+				util.Debugf("Error closing response body: %v", err)
 			}
 		}()
 
@@ -347,9 +346,9 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		err = json.Unmarshal(body, &videoResponse)
 		if err == nil && len(videoResponse.Data) > 0 {
 			if util.IsDebug {
-				log.Printf("Found video data with %d qualities", len(videoResponse.Data))
+				util.Debugf("Found video data with %d qualities", len(videoResponse.Data))
 				for _, v := range videoResponse.Data {
-					log.Printf("Available quality: %s -> %s", v.Label, v.Src)
+					util.Debugf("Available quality: %s -> %s", v.Label, v.Src)
 				}
 			}
 			// If we have multiple qualities, pick the highest automatically
@@ -375,7 +374,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		matches := re.FindString(string(body))
 		if matches != "" {
 			if util.IsDebug {
-				log.Printf("Found direct video URL: %s", matches)
+				util.Debugf("Found direct video URL: %s", matches)
 			}
 			return matches, nil
 		}
@@ -384,7 +383,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		videoSrc, err = findBloggerLink(string(body))
 		if err == nil && videoSrc != "" {
 			if util.IsDebug {
-				log.Printf("Found blogger link: %s", videoSrc)
+				util.Debugf("Found blogger link: %s", videoSrc)
 			}
 			return videoSrc, nil
 		}

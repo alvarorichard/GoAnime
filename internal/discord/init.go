@@ -1,7 +1,6 @@
 package discord
 
 import (
-	"log"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -31,18 +30,14 @@ func NewManager() *Manager {
 // Initialize inicializa o Discord Rich Presence
 func (m *Manager) Initialize() error {
 	if m.isInitialized {
-		if util.IsDebug {
-			log.Println("Discord Rich Presence already initialized")
-		}
+		util.Debug("Discord Rich Presence already initialized")
 		return nil
 	}
 
 	m.initTime = time.Now()
 
 	if err := client.Login(m.clientID); err != nil {
-		if util.IsDebug {
-			log.Printf("Failed to initialize Discord Rich Presence: %v", err)
-		}
+		util.Errorf("Failed to initialize Discord Rich Presence: %v", err)
 		m.isEnabled = false
 		return err
 	}
@@ -50,9 +45,7 @@ func (m *Manager) Initialize() error {
 	m.isEnabled = true
 	m.isInitialized = true
 
-	if util.IsDebug {
-		log.Printf("[PERF] Discord Rich Presence initialized in %v", time.Since(m.initTime))
-	}
+	util.Debugf("[PERF] Discord Rich Presence initialized in %v", time.Since(m.initTime))
 
 	return nil
 }
@@ -63,9 +56,7 @@ func (m *Manager) Shutdown() {
 		client.Logout()
 		m.isEnabled = false
 		m.isInitialized = false
-		if util.IsDebug {
-			log.Println("Discord Rich Presence shutdown completed")
-		}
+		util.Debug("Discord Rich Presence shutdown completed")
 	}
 }
 
@@ -88,8 +79,8 @@ func (m *Manager) GetClientID() string {
 func (m *Manager) SetClientID(clientID string) {
 	if !m.isInitialized {
 		m.clientID = clientID
-	} else if util.IsDebug {
-		log.Println("Cannot change client ID after initialization")
+	} else {
+		util.Debug("Cannot change client ID after initialization")
 	}
 }
 
