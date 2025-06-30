@@ -19,18 +19,18 @@ require (
 require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/log v0.4.2
-	github.com/lrstanley/go-ytdlp v0.0.0-20250610000944-a2284ab714d8
+	github.com/lrstanley/go-ytdlp v0.0.0-20250626003057-250a0ba9f4c5
 )
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/x/exp/strings v0.0.0-20250611152503-f53cdd7e01ef // indirect
+	github.com/charmbracelet/x/exp/strings v0.0.0-20250629123816-066ae234febc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
-	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476 // indirect
+	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 )
 
 require (
@@ -39,7 +39,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.3.1 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
-	github.com/charmbracelet/x/ansi v0.9.2 // indirect; indirectn
+	github.com/charmbracelet/x/ansi v0.9.3 // indirect; indirectn
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
