@@ -13,7 +13,7 @@
 }:
 
 buildGoApplication {
-  pname = "GoAnime";
+  pname = "goanime";
   version = "1.0.9";
   go = pkgs.go;
   pwd = ./.;
