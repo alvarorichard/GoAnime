@@ -41,6 +41,40 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			break
 		}
 
+		// Check if user requested to change anime during video playback
+		if errors.Is(err, player.ErrChangeAnime) {
+			newAnime, newEpisodes, err := ChangeAnime()
+			if err != nil {
+				log.Printf("Error changing anime: %v", err)
+				continue // Stay with current anime if change fails
+			}
+
+			// Update anime and episodes
+			anime = newAnime
+			episodes = newEpisodes
+
+			// Check if new anime is a series and get new total episodes
+			series, newTotalEpisodes := CheckIfSeries(anime.URL)
+			totalEpisodes = newTotalEpisodes
+
+			if !series {
+				// If new anime is a movie, handle it differently
+				log.Println("Switched to a movie/OVA, handling as single episode.")
+				HandleMovie(anime, episodes, discordEnabled)
+				break
+			}
+
+			// Select initial episode for the new anime
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode for new anime: %v", err)
+				continue
+			}
+
+			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
+			continue // Skip normal navigation and start playing the new anime
+		}
+
 		// Handle other errors
 		if err != nil {
 			log.Printf("Error during episode playback: %v", err)
@@ -50,6 +84,40 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 		if userInput == "q" {
 			log.Println("Quitting application as per user request.")
 			break
+		}
+
+		// Handle anime change
+		if userInput == "c" {
+			newAnime, newEpisodes, err := ChangeAnime()
+			if err != nil {
+				log.Printf("Error changing anime: %v", err)
+				continue // Stay with current anime if change fails
+			}
+
+			// Update anime and episodes
+			anime = newAnime
+			episodes = newEpisodes
+
+			// Check if new anime is a series and get new total episodes
+			series, newTotalEpisodes := CheckIfSeries(anime.URL)
+			totalEpisodes = newTotalEpisodes
+
+			if !series {
+				// If new anime is a movie, handle it differently
+				log.Println("Switched to a movie/OVA, handling as single episode.")
+				HandleMovie(anime, episodes, discordEnabled)
+				break
+			}
+
+			// Select initial episode for the new anime
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode for new anime: %v", err)
+				continue
+			}
+
+			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
+			continue // Skip normal navigation and start playing the new anime
 		}
 
 		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigation(

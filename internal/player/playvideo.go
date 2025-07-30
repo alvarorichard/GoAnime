@@ -22,6 +22,9 @@ import (
 // ErrUserQuit is returned when the user chooses to quit the application
 var ErrUserQuit = errors.New("user requested to quit application")
 
+// ErrChangeAnime is returned when the user chooses to change anime
+var ErrChangeAnime = errors.New("user requested to change anime")
+
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
 	var opts []string
@@ -399,6 +402,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
 			huh.NewOption("Select episode", "select"),
+			huh.NewOption("Change anime", "change"),
 			huh.NewOption("Skip intro", "skip"),
 			huh.NewOption("Exit", "quit"),
 		).
@@ -442,6 +446,9 @@ func handleUserInput(
 		case "quit":
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return ErrUserQuit
+		case "change":
+			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			return ErrChangeAnime
 		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
 		case "skip":
