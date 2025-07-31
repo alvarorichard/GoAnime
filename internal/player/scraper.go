@@ -212,7 +212,7 @@ func extractVideoURL(url string) (string, error) {
 
 	response, err := api.SafeGet(url)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
+		return "", fmt.Errorf("failed to fetch URL: %+v", err)
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()

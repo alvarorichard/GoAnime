@@ -266,24 +266,54 @@ func HandleDownloadAndPlay(
 			util.Fatal("Failed to download episodes:", err)
 		}
 	default:
-		// Play online
+		// Play online - determine the best approach based on URL type
 		videoURLToPlay := ""
-		// Always use the episode page URL for streaming, so the user can select quality
-		if len(episodes) > 0 && selectedEpisodeNum > 0 {
-			// Find the selected episode struct
-			selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-			if found {
-				if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil {
+
+		// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
+		if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
+			strings.Contains(videoURL, "dropbox.com") ||
+			strings.Contains(videoURL, "wixmp.com") ||
+			strings.HasSuffix(videoURL, ".mp4") ||
+			strings.HasSuffix(videoURL, ".m3u8")) {
+			// Use direct stream URL
+			videoURLToPlay = videoURL
+			if util.IsDebug {
+				util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+			}
+		} else {
+			// Try to extract video URL from episode page
+			if len(episodes) > 0 && selectedEpisodeNum > 0 {
+				selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
+				if found {
+					if util.IsDebug {
+						util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+					}
+					if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+						videoURLToPlay = url
+					}
+				}
+			}
+			// Fallback: try to extract from original videoURL
+			if videoURLToPlay == "" && videoURL != "" {
+				if util.IsDebug {
+					util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
+				}
+				if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
 					videoURLToPlay = url
 				}
 			}
 		}
+
+		// Final validation
 		if videoURLToPlay == "" {
-			// fallback: try original videoURL
-			if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil {
-				videoURLToPlay = url
-			}
+			util.Debugf("❌ No valid video URL found")
+			return fmt.Errorf("no valid video URL found")
 		}
+
+		if util.IsDebug {
+			util.Debugf("✅ Final video URL: %s", videoURLToPlay)
+		}
+
 		if err := playVideo(
 			videoURLToPlay,
 			episodes,
