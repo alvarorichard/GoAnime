@@ -42,46 +42,58 @@ func NewScraperManager() *ScraperManager {
 	return manager
 }
 
-// SearchAnime searches across all available scrapers
+// SearchAnime searches across all available scrapers with enhanced Portuguese messaging
 func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([]*models.Anime, error) {
 	var allResults []*models.Anime
 
 	if scraperType != nil {
 		// Search using specific scraper
 		if scraper, exists := sm.scrapers[*scraperType]; exists {
+			fmt.Printf("🔍 Buscando em %s...\n", sm.getScraperDisplayName(*scraperType))
+
 			results, err := scraper.SearchAnime(query)
 			if err != nil {
-				return nil, fmt.Errorf("search failed on %v: %w", *scraperType, err)
+				return nil, fmt.Errorf("busca falhou em %s: %w", sm.getScraperDisplayName(*scraperType), err)
 			}
 
 			// Add source tags even for specific searches
 			for _, anime := range results {
 				sourceName := sm.getScraperDisplayName(*scraperType)
-				if !strings.Contains(anime.Name, fmt.Sprintf("[%s]", sourceName)) {
-					anime.Name = fmt.Sprintf("[%s] %s", sourceName, anime.Name)
+				sourceTag := sm.getSourceTag(*scraperType)
+
+				if !strings.Contains(anime.Name, fmt.Sprintf("[%s]", sourceName)) && !strings.Contains(anime.Name, sourceTag) {
+					anime.Name = fmt.Sprintf("%s %s", sourceTag, anime.Name)
 				}
 				// Add metadata to identify the source
 				anime.Source = sourceName
 			}
 
+			if len(results) > 0 {
+				fmt.Printf("✅ Encontrados %d resultados em %s\n", len(results), sm.getScraperDisplayName(*scraperType))
+			}
+
 			return results, nil
 		}
-		return nil, fmt.Errorf("scraper type %v not found", *scraperType)
+		return nil, fmt.Errorf("tipo de scraper %v não encontrado", *scraperType)
 	}
 
-	// Search across all scrapers
+	// Search across all scrapers simultaneously
+	fmt.Printf("🌐 Iniciando busca simultânea em todas as fontes para: '%s'\n", query)
+
 	for scraperType, scraper := range sm.scrapers {
-		fmt.Printf("🔍 Buscando em %s...\n", sm.getScraperDisplayName(scraperType))
+		fmt.Printf("  � Buscando em %s...\n", sm.getScraperDisplayName(scraperType))
 
 		results, err := scraper.SearchAnime(query)
 		if err != nil {
 			// Log error but continue with other scrapers
-			fmt.Printf("⚠️  Erro ao buscar em %s: %v\n", sm.getScraperDisplayName(scraperType), err)
+			fmt.Printf("  ⚠️  Erro ao buscar em %s: %v\n", sm.getScraperDisplayName(scraperType), err)
 			continue
 		}
 
 		if len(results) > 0 {
-			fmt.Printf("✅ Encontrados %d resultados em %s\n", len(results), sm.getScraperDisplayName(scraperType))
+			fmt.Printf("  ✅ Encontrados %d resultados em %s\n", len(results), sm.getScraperDisplayName(scraperType))
+		} else {
+			fmt.Printf("  ❌ Nenhum resultado em %s\n", sm.getScraperDisplayName(scraperType))
 		}
 
 		// Add source information to results with enhanced formatting
@@ -101,10 +113,30 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	}
 
 	if len(allResults) == 0 {
+		fmt.Printf("❌ Nenhum anime encontrado com o nome: '%s'\n", query)
+		fmt.Printf("💡 Dicas: \n")
+		fmt.Printf("   - Verifique a ortografia do nome\n")
+		fmt.Printf("   - Tente usar apenas parte do nome\n")
+		fmt.Printf("   - Use o nome em inglês ou japonês\n")
 		return nil, fmt.Errorf("nenhum anime encontrado com o nome: %s", query)
 	}
 
-	fmt.Printf("📊 Total de resultados encontrados: %d\n", len(allResults))
+	// Count results by source for summary
+	animefireCount := 0
+	allanimeCount := 0
+	for _, anime := range allResults {
+		if strings.Contains(anime.Source, "AnimeFire") {
+			animefireCount++
+		} else if anime.Source == "AllAnime" {
+			allanimeCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Resumo da busca:\n")
+	fmt.Printf("🔥 AnimeFire.plus: %d resultados\n", animefireCount)
+	fmt.Printf("🌐 AllAnime: %d resultados\n", allanimeCount)
+	fmt.Printf("📈 Total: %d resultados encontrados\n", len(allResults))
+
 	return allResults, nil
 }
 
@@ -158,13 +190,8 @@ type AllAnimeAdapter struct {
 }
 
 func (a *AllAnimeAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
-	mode := "sub" // default
-	if len(options) > 0 {
-		if m, ok := options[0].(string); ok {
-			mode = m
-		}
-	}
-	return a.client.SearchAnime(query, mode)
+	// mode is now hardcoded in the new implementation
+	return a.client.SearchAnime(query)
 }
 
 func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {

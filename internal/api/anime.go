@@ -434,8 +434,31 @@ func resolveURL(base, ref string) string {
 }
 
 func CleanTitle(title string) string {
-	re := regexp.MustCompile(`(?i)(dublado|legendado|todos os episodios)|\s+\d+(\.\d+)?\s+A\d+$`)
-	return strings.TrimSpace(re.ReplaceAllString(title, ""))
+	// Remove common AnimeFire suffixes and patterns
+	re := regexp.MustCompile(`(?i)(dublado|legendado|todos os episodios)|\s+\d+(\.\d+)?\s+A\d+$|\s+\d+(\.\d+)?$`)
+	cleaned := strings.TrimSpace(re.ReplaceAllString(title, ""))
+
+	// Remove anything in parentheses if it contains "dublado", "legendado", etc.
+	re2 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
+	cleaned = strings.TrimSpace(re2.ReplaceAllString(cleaned, ""))
+
+	// Remove source tags like 🔥[AnimeFire] or 🌐[AllAnime]
+	re3 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime)\]\s*`)
+	cleaned = strings.TrimSpace(re3.ReplaceAllString(cleaned, ""))
+
+	// Remove AllAnime specific patterns like "(171 episodes)" or "(1 episodes)"
+	re4 := regexp.MustCompile(`\s*\(\d+\s+episodes?\)`)
+	cleaned = strings.TrimSpace(re4.ReplaceAllString(cleaned, ""))
+
+	// Remove special titles and common additions
+	re5 := regexp.MustCompile(`(?i):\s*(Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)
+	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
+
+	// Additional cleanup for colons and extra spaces
+	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+	cleaned = strings.TrimSpace(cleaned)
+
+	return cleaned
 }
 
 func safeClose(closer io.Closer, name string) {

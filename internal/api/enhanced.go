@@ -11,210 +11,293 @@ import (
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
-// Enhanced search that supports multiple sources
+// Enhanced search that supports multiple sources - always searches both animefire.plus and allanime simultaneously
 func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
 
 	var scraperType *scraper.ScraperType
-	switch strings.ToLower(source) {
-	case "allanime":
+
+	// If a specific source is requested, honor it
+	if strings.ToLower(source) == "allanime" {
 		t := scraper.AllAnimeType
 		scraperType = &t
-	case "animefire":
+	} else if strings.ToLower(source) == "animefire" {
 		t := scraper.AnimefireType
 		scraperType = &t
-	default:
-		scraperType = nil // Search all sources
+	} else {
+		// Default behavior: search both sources simultaneously
+		scraperType = nil
 	}
 
+	// Perform the search - this will search both sources if scraperType is nil
+	fmt.Printf("🔍 Buscando '%s' em todas as fontes disponíveis...\n", name)
 	animes, err := scraperManager.SearchAnime(name, scraperType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search anime: %w", err)
 	}
 
 	if len(animes) == 0 {
-		return nil, fmt.Errorf("no anime found with name: %s", name)
+		return nil, fmt.Errorf("nenhum anime encontrado com o nome: %s", name)
 	}
 
-	// Add source tags to anime names for clarity
+	// Enhance source identification and tagging
 	for _, anime := range animes {
-		// Check source field first, then fallback to URL analysis
-		if anime.Source != "" {
-			// Source already identified by scraper
-			continue
+		// Ensure proper source identification
+		if anime.Source == "" {
+			// Fallback source identification by URL analysis
+			if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
+				anime.Source = "AllAnime"
+			} else if strings.Contains(anime.URL, "animefire") {
+				anime.Source = "AnimeFire.plus"
+			}
 		}
 
-		// Fallback source identification by URL analysis
-		if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
-			// Convert short ID to full AllAnime URL
-			anime.URL = "https://allanime.to/anime/" + anime.URL
-			if !strings.Contains(anime.Name, "AllAnime") {
-				anime.Name = "🌐[AllAnime] " + anime.Name
-				anime.Source = "AllAnime"
-			}
-		} else if strings.Contains(anime.URL, "animefire") && !strings.Contains(anime.Name, "AnimeFire") {
-			anime.Name = "🔥[AnimeFire] " + anime.Name
-			anime.Source = "AnimeFire.plus"
+		// Ensure name has proper source tag (unified scraper already adds them)
+		if anime.Source == "AllAnime" && !strings.Contains(anime.Name, "AllAnime") {
+			anime.Name = "🌐[AllAnime] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "🌐[AllAnime]", ""))
+		} else if anime.Source == "AnimeFire.plus" && !strings.Contains(anime.Name, "AnimeFire") {
+			anime.Name = "🔥[AnimeFire] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "🔥[AnimeFire]", ""))
 		}
 	}
 
-	// If only one result, return it
+	fmt.Printf("📊 Total de animes encontrados: %d\n", len(animes))
+
+	// Show sources breakdown
+	animefireCount := 0
+	allanimeCount := 0
+	for _, anime := range animes {
+		if strings.Contains(anime.Source, "AnimeFire") {
+			animefireCount++
+		} else if anime.Source == "AllAnime" {
+			allanimeCount++
+		}
+	}
+
+	if animefireCount > 0 {
+		fmt.Printf("🔥 AnimeFire.plus: %d resultados\n", animefireCount)
+	}
+	if allanimeCount > 0 {
+		fmt.Printf("🌐 AllAnime: %d resultados\n", allanimeCount)
+	}
+
+	// If only one result, return it directly
 	if len(animes) == 1 {
+		fmt.Printf("✅ Selecionando automaticamente: %s\n", animes[0].Name)
+
+		// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
+		if err := enrichAnimeData(animes[0]); err != nil {
+			util.Errorf("Error enriching anime data: %v", err)
+		}
+
 		return animes[0], nil
 	}
 
-	// Use fuzzy finder to let user select
+	// Use fuzzy finder to let user select with enhanced preview
 	idx, err := fuzzyfinder.Find(
 		animes,
 		func(i int) string {
 			return animes[i].Name
 		},
-		fuzzyfinder.WithPromptString("Select anime: "),
+		fuzzyfinder.WithPromptString("Selecione o anime desejado: "),
 		fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
 			if i >= 0 && i < len(animes) {
-				return fmt.Sprintf("URL: %s\nImage: %s", animes[i].URL, animes[i].ImageURL)
+				anime := animes[i]
+				preview := fmt.Sprintf("Fonte: %s\nURL: %s", anime.Source, anime.URL)
+				if anime.ImageURL != "" {
+					preview += fmt.Sprintf("\nImagem: %s", anime.ImageURL)
+				}
+				return preview
 			}
 			return ""
 		}),
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("anime selection cancelled: %w", err)
+		return nil, fmt.Errorf("seleção de anime cancelada: %w", err)
 	}
 
-	return animes[idx], nil
+	selectedAnime := animes[idx]
+	fmt.Printf("✅ Anime selecionado: %s (Fonte: %s)\n", selectedAnime.Name, selectedAnime.Source)
+
+	// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
+	if err := enrichAnimeData(selectedAnime); err != nil {
+		util.Errorf("Error enriching anime data: %v", err)
+	}
+
+	return selectedAnime, nil
 }
 
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
-	scraperManager := scraper.NewScraperManager()
-
-	// Determine source type from multiple indicators
-	var scraperType scraper.ScraperType
+	// Determine source type from multiple indicators with enhanced logic
 	var sourceName string
 
+	// Priority 1: Check the Source field (most reliable)
 	if anime.Source == "AllAnime" {
-		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
 	} else if strings.Contains(anime.Source, "AnimeFire") {
-		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
-	} else if strings.Contains(anime.Name, "AllAnime") {
-		scraperType = scraper.AllAnimeType
+	} else if strings.Contains(anime.Name, "🌐[AllAnime]") || strings.Contains(anime.Name, "[AllAnime]") {
+		// Priority 2: Check name tags
 		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "AnimeFire") {
-		scraperType = scraper.AnimefireType
+		anime.Source = "AllAnime" // Update source field
+	} else if strings.Contains(anime.Name, "🔥[AnimeFire]") || strings.Contains(anime.Name, "[AnimeFire]") {
 		sourceName = "AnimeFire.plus"
-	} else if strings.Contains(anime.URL, "allanime") {
-		scraperType = scraper.AllAnimeType
+		anime.Source = "AnimeFire.plus" // Update source field
+	} else if strings.Contains(anime.URL, "allanime") || (len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http")) {
+		// Priority 3: URL analysis for AllAnime (short IDs or allanime URLs)
 		sourceName = "AllAnime"
+		anime.Source = "AllAnime" // Update source field
 	} else if strings.Contains(anime.URL, "animefire") {
-		scraperType = scraper.AnimefireType
+		// Priority 4: URL analysis for AnimeFire
 		sourceName = "AnimeFire.plus"
+		anime.Source = "AnimeFire.plus" // Update source field
 	} else {
 		// Default to AllAnime for unknown sources
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime (default)"
+		sourceName = "AllAnime (padrão)"
+		anime.Source = "AllAnime"
 	}
 
-	fmt.Printf("📺 Obtendo episódios de %s...\n", sourceName)
+	fmt.Printf("📺 Obtendo episódios de %s para: %s\n", sourceName, strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "🌐[AllAnime]", ""), "🔥[AnimeFire]", "")))
 
-	scraperInstance, err := scraperManager.GetScraper(scraperType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get scraper: %w", err)
+	var episodes []models.Episode
+	var err error
+
+	// Use different approaches based on source
+	if strings.Contains(sourceName, "AllAnime") {
+		// For AllAnime, use the scraper directly with AniSkip support
+		scraperManager := scraper.NewScraperManager()
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.AllAnimeType)
+		if scErr != nil {
+			return nil, fmt.Errorf("falha ao obter scraper AllAnime: %w", scErr)
+		}
+
+		// Cast to AllAnime client to access enhanced features
+		if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
+			// Use AniSkip enhanced version like Curd does
+			episodes, err = allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
+			fmt.Printf("🎯 AniSkip integration enabled for MAL ID: %d\n", anime.MalID)
+		} else {
+			// Fallback to regular episodes
+			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
+		}
+	} else {
+		// For AnimeFire and others, use the original API function
+		episodes, err = GetAnimeEpisodes(anime.URL)
 	}
 
-	episodes, err := scraperInstance.GetAnimeEpisodes(anime.URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get episodes: %w", err)
+		return nil, fmt.Errorf("falha ao obter episódios de %s: %w", sourceName, err)
 	}
 
 	if len(episodes) > 0 {
 		fmt.Printf("✅ Encontrados %d episódios em %s\n", len(episodes), sourceName)
+
+		// Provide additional info for user based on source
+		if strings.Contains(sourceName, "AllAnime") {
+			fmt.Printf("🌐 Fonte: AllAnime - Episódios em alta qualidade disponíveis\n")
+		} else {
+			fmt.Printf("🔥 Fonte: AnimeFire.plus - Episódios dublados/legendados disponíveis\n")
+		}
+	} else {
+		fmt.Printf("⚠️  Nenhum episódio encontrado em %s\n", sourceName)
 	}
 
 	return episodes, nil
 }
 
-// Enhanced episode URL fetching
+// Enhanced episode URL fetching with improved source detection
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	scraperManager := scraper.NewScraperManager()
 
-	// Determine source type with better logic
+	// Determine source type with enhanced logic
 	var scraperType scraper.ScraperType
 	var sourceName string
 
-	// Priority 1: Check the Source field
+	// Priority 1: Check the Source field (most reliable)
 	if anime.Source == "AllAnime" {
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
 	} else if strings.Contains(anime.Source, "AnimeFire") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
-	} else if strings.Contains(anime.Name, "AllAnime") {
+	} else if strings.Contains(anime.Name, "🌐[AllAnime]") || strings.Contains(anime.Name, "[AllAnime]") {
 		// Priority 2: Check name tags
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "AnimeFire") {
+	} else if strings.Contains(anime.Name, "🔥[AnimeFire]") || strings.Contains(anime.Name, "[AnimeFire]") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
 	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
-		// Priority 3: URL analysis
+		// Priority 3: URL analysis for AllAnime (short IDs)
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
 	} else if strings.Contains(anime.URL, "animefire") {
+		// Priority 4: URL analysis for AnimeFire
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
+	} else if strings.Contains(anime.URL, "allanime") {
+		// Priority 5: AllAnime full URLs
+		scraperType = scraper.AllAnimeType
+		sourceName = "AllAnime"
 	} else {
 		// Default to AllAnime
 		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime (default)"
+		sourceName = "AllAnime (padrão)"
 	}
 
-	fmt.Printf("🎯 Fonte identificada: %s\n", sourceName)
-	fmt.Printf("DEBUG: ScraperType: %v, AnimeURL: %s, EpisodeURL: %s, EpisodeNumber: %s\n",
-		scraperType, anime.URL, episode.URL, episode.Number)
+	fmt.Printf("🎯 Obtendo URL de stream de %s para episódio %s\n", sourceName, episode.Number)
 
 	if util.IsDebug {
-		util.Debugf("Using scraper type: %v for anime: %s", scraperType, anime.Name)
+		util.Debugf("Detalhes da fonte:")
+		util.Debugf("  ScraperType: %v", scraperType)
+		util.Debugf("  AnimeURL: %s", anime.URL)
+		util.Debugf("  EpisodeURL: %s", episode.URL)
+		util.Debugf("  EpisodeNumber: %s", episode.Number)
+		util.Debugf("  Quality: %s", quality)
 	}
 
 	scraperInstance, err := scraperManager.GetScraper(scraperType)
 	if err != nil {
-		return "", fmt.Errorf("failed to get scraper: %w", err)
+		return "", fmt.Errorf("falha ao obter scraper para %s: %w", sourceName, err)
 	}
 
 	if quality == "" {
 		quality = "best"
 	}
 
-	// For AllAnime, we need to pass the anime ID and episode number separately
+	var streamURL string
+	var streamErr error
+
+	// Handle different scraper types with appropriate parameters
 	if scraperType == scraper.AllAnimeType {
+		fmt.Printf("🌐 Processando através do AllAnime...\n")
 		if util.IsDebug {
-			util.Debugf("AllAnime: Getting stream URL for anime ID: %s, episode: %s", anime.URL, episode.Number)
+			util.Debugf("AllAnime: Obtendo URL de stream para anime ID: %s, episódio: %s", anime.URL, episode.Number)
 		}
-		streamURL, _, err := scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
-		if err != nil {
-			return "", fmt.Errorf("failed to get stream URL from AllAnime: %w", err)
-		}
-		if util.IsDebug {
-			util.Debugf("AllAnime returned stream URL: %s", streamURL)
-		}
-		return streamURL, nil
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
 	} else {
-		// For other scrapers, use the episode URL directly
+		fmt.Printf("🔥 Processando através do AnimeFire.plus...\n")
 		if util.IsDebug {
-			util.Debugf("Other scraper: Getting stream URL for episode URL: %s", episode.URL)
+			util.Debugf("AnimeFire: Obtendo URL de stream para episódio URL: %s", episode.URL)
 		}
-		streamURL, _, err := scraperInstance.GetStreamURL(episode.URL, quality)
-		if err != nil {
-			return "", fmt.Errorf("failed to get stream URL: %w", err)
-		}
-		if util.IsDebug {
-			util.Debugf("Other scraper returned stream URL: %s", streamURL)
-		}
-		return streamURL, nil
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
 	}
+
+	if streamErr != nil {
+		return "", fmt.Errorf("falha ao obter URL de stream de %s: %w", sourceName, streamErr)
+	}
+
+	if streamURL == "" {
+		return "", fmt.Errorf("URL de stream vazia retornada de %s", sourceName)
+	}
+
+	fmt.Printf("✅ URL de stream obtida com sucesso de %s\n", sourceName)
+	if util.IsDebug {
+		util.Debugf("Stream URL obtida: %s", streamURL)
+	}
+
+	return streamURL, nil
 }
 
 // Enhanced download support

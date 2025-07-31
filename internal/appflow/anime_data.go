@@ -41,16 +41,35 @@ func SearchAnimeEnhanced(name string) *models.Anime {
 func FetchAnimeDetails(anime *models.Anime) {
 	detailsStart := time.Now()
 
-	// For AllAnime animes with short IDs, we can skip detailed fetching
-	// since we already have the essential information
+	// SEMPRE enriquecer com dados do AniList para qualquer fonte
+	// Isso é essencial para a integração com Discord, AniSkip, etc.
+	// O sistema original SEMPRE usa imagens do AniList
+
+	// Usar a função de enriquecimento que já existe no sistema original
+	aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
+	if err != nil {
+		util.Debugf("Failed to fetch from AniList: %v", err)
+	} else {
+		// Enriquecer o anime com dados do AniList
+		anime.AnilistID = aniListInfo.Data.Media.ID
+		anime.MalID = aniListInfo.Data.Media.IDMal
+		anime.Details = aniListInfo.Data.Media
+
+		// SEMPRE usar imagem do AniList (como no sistema original)
+		if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+			anime.ImageURL = cover
+		} else {
+			util.Debugf("Cover image not found for: %s", anime.Name)
+		}
+
+		util.Debugf("Anime enriched successfully with AniList data - ID: %d, MAL: %d, Image: %s",
+			anime.AnilistID, anime.MalID, anime.ImageURL)
+	}
+
+	// Fallback: tentar buscar detalhes específicos da fonte se necessário
 	if anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to") {
 		if err := api.FetchAnimeDetails(anime); err != nil {
-			log.Println("Failed to fetch anime details:", err)
-		}
-	} else {
-		// For short IDs or other sources, we already have the basic info
-		if util.IsDebug {
-			util.Debugf("Skipping detailed fetch for %s anime with ID: %s", anime.Source, anime.URL)
+			util.Debugf("Failed to fetch anime details from source: %v", err)
 		}
 	}
 

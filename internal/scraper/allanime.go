@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,9 +16,9 @@ import (
 )
 
 const (
-	AllAnimeReferer = "https://allmanga.to"
+	AllAnimeReferer = "https://allanime.to"
 	AllAnimeBase    = "allanime.day"
-	AllAnimeAPI     = "https://api.allanime.day"
+	AllAnimeAPI     = "https://api.allanime.day/api"
 	UserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 )
 
@@ -79,28 +81,50 @@ type EpisodesListResponse struct {
 	} `json:"data"`
 }
 
-// SearchAnime searches for anime on AllAnime
-func (c *AllAnimeClient) SearchAnime(query string, mode string) ([]*models.Anime, error) {
-	if mode == "" {
-		mode = "sub"
+// SearchAnime searches for anime using AllAnime API (based on Curd implementation)
+func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	// Use the exact same GraphQL query as Curd
+	searchGql := `query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
+		shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
+			edges {
+				_id
+				name
+				englishName
+				availableEpisodes
+				__typename
+			}
+		}
+	}`
+
+	// Prepare the GraphQL variables exactly like Curd
+	variables := map[string]interface{}{
+		"search": map[string]interface{}{
+			"allowAdult":   false,
+			"allowUnknown": false,
+			"query":        query,
+		},
+		"limit":           40,
+		"page":            1,
+		"translationType": "sub",
+		"countryOrigin":   "ALL",
 	}
 
-	searchGQL := `query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}`
+	// Marshal the variables to JSON
+	variablesJSON, err := json.Marshal(variables)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal variables: %w", err)
+	}
 
-	variables := fmt.Sprintf(`{"search":{"allowAdult":false,"allowUnknown":false,"query":"%s"},"limit":40,"page":1,"translationType":"%s","countryOrigin":"ALL"}`, query, mode)
+	// Build the request URL exactly like Curd
+	reqURL := fmt.Sprintf("%s?variables=%s&query=%s", c.apiBase, url.QueryEscape(string(variablesJSON)), url.QueryEscape(searchGql))
 
-	req, err := http.NewRequest("GET", c.apiBase+"/api", nil)
+	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	q := req.URL.Query()
-	q.Add("variables", variables)
-	q.Add("query", searchGQL)
-	req.URL.RawQuery = q.Encode()
-
-	req.Header.Set("Referer", c.referer)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Referer", c.referer)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -113,21 +137,44 @@ func (c *AllAnimeClient) SearchAnime(query string, mode string) ([]*models.Anime
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var searchResp SearchResponse
-	if err := json.Unmarshal(body, &searchResp); err != nil {
+	// Parse using a simple structure like Curd
+	var response struct {
+		Data struct {
+			Shows struct {
+				Edges []struct {
+					ID                string      `json:"_id"`
+					Name              string      `json:"name"`
+					EnglishName       string      `json:"englishName"`
+					AvailableEpisodes interface{} `json:"availableEpisodes"`
+				} `json:"edges"`
+			} `json:"shows"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	var animes []*models.Anime
-	for _, edge := range searchResp.Data.Shows.Edges {
-		episodeCount := edge.AvailableEpisodes.Sub
-		if mode == "dub" {
-			episodeCount = edge.AvailableEpisodes.Dub
+	for _, edge := range response.Data.Shows.Edges {
+		var episodesStr string
+		if episodes, ok := edge.AvailableEpisodes.(map[string]interface{}); ok {
+			if subEpisodes, ok := episodes["sub"].(float64); ok {
+				episodesStr = fmt.Sprintf("(%d episodes)", int(subEpisodes))
+			} else {
+				episodesStr = "(Unknown episodes)"
+			}
+		}
+
+		// Use English name if available, otherwise use default name
+		displayName := edge.Name
+		if edge.EnglishName != "" {
+			displayName = edge.EnglishName
 		}
 
 		anime := &models.Anime{
-			Name: fmt.Sprintf("%s (%d episodes)", edge.Name, episodeCount),
-			URL:  edge.ID, // Store the ID in URL field for later use
+			Name: fmt.Sprintf("%s %s", displayName, episodesStr),
+			URL:  edge.ID, // For AllAnime, the "URL" is actually the anime ID
 		}
 		animes = append(animes, anime)
 	}
@@ -135,27 +182,27 @@ func (c *AllAnimeClient) SearchAnime(query string, mode string) ([]*models.Anime
 	return animes, nil
 }
 
-// GetEpisodesList gets the list of available episodes for an anime
+// GetEpisodesList gets the list of available episodes for an anime (based on Curd implementation)
 func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string, error) {
 	if mode == "" {
 		mode = "sub"
 	}
 
-	episodesListGQL := `query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}`
-	variables := fmt.Sprintf(`{"showId":"%s"}`, animeID)
+	episodesListGql := `query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}`
 
-	req, err := http.NewRequest("GET", c.apiBase+"/api", nil)
+	// Correctly URL encode the parameters like Curd does
+	variables := fmt.Sprintf(`{"showId":"%s"}`, animeID)
+	reqURL := fmt.Sprintf("%s?variables=%s&query=%s",
+		c.apiBase,
+		url.QueryEscape(variables),
+		url.QueryEscape(episodesListGql))
+
+	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
-	q := req.URL.Query()
-	q.Add("variables", variables)
-	q.Add("query", episodesListGQL)
-	req.URL.RawQuery = q.Encode()
-
-	req.Header.Set("Referer", c.referer)
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Referer", c.referer)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -168,26 +215,210 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var episodesResp EpisodesListResponse
-	if err := json.Unmarshal(body, &episodesResp); err != nil {
+	// Use the same response structure as Curd
+	var response struct {
+		Data struct {
+			Show struct {
+				ID                      string                 `json:"_id"`
+				AvailableEpisodesDetail map[string]interface{} `json:"availableEpisodesDetail"`
+			} `json:"show"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	// Extract episode numbers from availableEpisodesDetail
-	var episodes []string
-	if detail := episodesResp.Data.Show.AvailableEpisodesDetail; detail != nil {
-		if modeData, ok := detail[mode]; ok {
-			if episodeList, ok := modeData.([]interface{}); ok {
-				for _, ep := range episodeList {
-					if epStr, ok := ep.(string); ok {
-						episodes = append(episodes, epStr)
-					}
+	// Extract and sort the episodes exactly like Curd
+	episodes := extractEpisodes(response.Data.Show.AvailableEpisodesDetail, mode)
+	return episodes, nil
+}
+
+// Helper function to get map keys for debugging
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// extractEpisodes extracts the episodes list from the availableEpisodesDetail field (from Curd)
+func extractEpisodes(availableEpisodesDetail map[string]interface{}, mode string) []string {
+	var episodes []float64
+
+	// Check if the mode (e.g., "sub") exists in the map
+	if eps, ok := availableEpisodesDetail[mode].([]interface{}); ok {
+		for _, ep := range eps {
+			var epNum float64
+			if n, _ := fmt.Sscanf(fmt.Sprintf("%v", ep), "%f", &epNum); n == 1 {
+				episodes = append(episodes, epNum)
+			}
+		}
+	}
+
+	// Sort episodes numerically
+	sort.Float64s(episodes)
+
+	// Convert to string and return
+	var episodesStr []string
+	for _, ep := range episodes {
+		episodesStr = append(episodesStr, fmt.Sprintf("%v", ep))
+	}
+	return episodesStr
+}
+
+// GetAnimeEpisodes converts AllAnime episode list to models.Episode format
+func (c *AllAnimeClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// Extract anime ID from URL (animeURL should be the anime ID for AllAnime)
+	animeID := animeURL
+
+	// Get episode list using existing function
+	episodeStrings, err := c.GetEpisodesList(animeID, "sub")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episodes list: %w", err)
+	}
+
+	// Convert to models.Episode format
+	var episodes []models.Episode
+	for _, epStr := range episodeStrings {
+		episodes = append(episodes, models.Episode{
+			Number: epStr,
+			Num:    parseEpisodeNum(epStr),
+			URL:    epStr, // For AllAnime, the episode "URL" is just the episode number
+		})
+	}
+
+	return episodes, nil
+}
+
+// GetAnimeEpisodesWithAniSkip converts AllAnime episode list to models.Episode format and enriches with AniSkip data (like Curd)
+func (c *AllAnimeClient) GetAnimeEpisodesWithAniSkip(animeURL string, malID int, aniSkipFunc func(int, int, *models.Episode) error) ([]models.Episode, error) {
+	// Get basic episodes first
+	episodes, err := c.GetAnimeEpisodes(animeURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich with AniSkip data for each episode (like Curd does)
+	if malID > 0 && aniSkipFunc != nil {
+		for i := range episodes {
+			episodeNum := episodes[i].Num
+			if episodeNum > 0 {
+				// Try to get AniSkip data for this episode
+				if err := aniSkipFunc(malID, episodeNum, &episodes[i]); err != nil {
+					// Not an error if AniSkip data is not found, just log it
+					fmt.Printf("AniSkip data not found for episode %d: %v\n", episodeNum, err)
 				}
 			}
 		}
 	}
 
 	return episodes, nil
+}
+
+// SendSkipTimesToMPV sends OP and ED timings to MPV as chapter markers (based on Curd implementation)
+func (c *AllAnimeClient) SendSkipTimesToMPV(episode *models.Episode, socketPath string, mpvSendCommand func(string, []interface{}) (interface{}, error)) error {
+	// Only proceed if we have valid skip times
+	if episode.SkipTimes.Op.Start == 0 && episode.SkipTimes.Op.End == 0 &&
+		episode.SkipTimes.Ed.Start == 0 && episode.SkipTimes.Ed.End == 0 {
+		return fmt.Errorf("no skip times available for episode")
+	}
+
+	// Create chapter list exactly like Curd does
+	chapterList := []map[string]interface{}{}
+
+	// Pre-Opening chapter
+	if episode.SkipTimes.Op.Start > 0 {
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Pre-Opening",
+			"time":  0.0,
+			"end":   float64(episode.SkipTimes.Op.Start),
+		})
+	}
+
+	// Opening chapter
+	if episode.SkipTimes.Op.Start > 0 && episode.SkipTimes.Op.End > episode.SkipTimes.Op.Start {
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Opening",
+			"time":  float64(episode.SkipTimes.Op.Start),
+			"end":   float64(episode.SkipTimes.Op.End),
+		})
+	}
+
+	// Main content chapter
+	mainStart := float64(episode.SkipTimes.Op.End)
+	if mainStart == 0 {
+		mainStart = 0.0
+	}
+	mainEnd := float64(episode.SkipTimes.Ed.Start)
+	if mainEnd == 0 {
+		// If no ending skip time, don't set an end for main content
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Main",
+			"time":  mainStart,
+		})
+	} else {
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Main",
+			"time":  mainStart,
+			"end":   mainEnd,
+		})
+	}
+
+	// Ending chapter
+	if episode.SkipTimes.Ed.Start > 0 && episode.SkipTimes.Ed.End > episode.SkipTimes.Ed.Start {
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Ending",
+			"time":  float64(episode.SkipTimes.Ed.Start),
+			"end":   float64(episode.SkipTimes.Ed.End),
+		})
+	}
+
+	// Post-Credits chapter
+	if episode.SkipTimes.Ed.End > 0 {
+		chapterList = append(chapterList, map[string]interface{}{
+			"title": "Post-Credits",
+			"time":  float64(episode.SkipTimes.Ed.End),
+		})
+	}
+
+	// Send chapter list to MPV exactly like Curd does
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"chapter-list",
+		chapterList,
+	})
+	if err != nil {
+		return fmt.Errorf("error sending chapter list to MPV: %w", err)
+	}
+
+	fmt.Printf("✅ AniSkip chapter markers sent to MPV successfully\n")
+	return nil
+}
+
+// min helper function
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// parseEpisodeNum converts episode string to integer
+func parseEpisodeNum(epStr string) int {
+	// Try to extract number from string
+	var num int
+	fmt.Sscanf(epStr, "%d", &num)
+	if num == 0 {
+		num = 1 // Default to 1 if parsing fails
+	}
+	return num
+}
+
+// GetAnimeDetails - placeholder method for interface consistency
+func (c *AllAnimeClient) GetAnimeDetails(animeURL string) (*models.Anime, error) {
+	return nil, fmt.Errorf("anime details should be fetched using API layer, not scraper")
 }
 
 // LinkPriorities defines the order of priority for link domains (from Curd project)
@@ -640,4 +871,16 @@ func (c *AllAnimeClient) selectQuality(links map[string]string, requestedQuality
 	}
 
 	return "", metadata
+}
+
+// GetStreamURL implements the UnifiedScraper interface
+func (c *AllAnimeClient) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// For AllAnime, episodeURL contains episode ID, we need anime ID and episode number
+	// This is a simplified implementation - in practice you'd need to parse more context
+	return "", map[string]string{}, fmt.Errorf("GetStreamURL not fully implemented for AllAnime - use GetEpisodeURL instead")
+}
+
+// GetType implements the UnifiedScraper interface
+func (c *AllAnimeClient) GetType() ScraperType {
+	return AllAnimeType
 }
