@@ -167,3 +167,12 @@ func CheckIfSeries(url string) (bool, int) {
 	}
 	return series, totalEpisodes
 }
+
+// CheckIfSeriesEnhanced checks if anime is a series using enhanced API
+func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
+	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
+	if err != nil {
+		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
+	}
+	return series, totalEpisodes
+}

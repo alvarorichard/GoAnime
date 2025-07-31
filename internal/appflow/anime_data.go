@@ -2,6 +2,7 @@ package appflow
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -23,11 +24,36 @@ func SearchAnime(name string) *models.Anime {
 	return anime
 }
 
+// SearchAnimeEnhanced - busca em ambas as fontes (AllAnime e AnimeFire) simultaneamente
+func SearchAnimeEnhanced(name string) *models.Anime {
+	searchStart := time.Now()
+
+	// Buscar em ambas as fontes (source = "" significa buscar em todas)
+	anime, err := api.SearchAnimeEnhanced(name, "")
+	if err != nil {
+		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
+	}
+
+	util.Debugf("[PERF] SearchAnimeEnhanced completed in %v", time.Since(searchStart))
+	return anime
+}
+
 func FetchAnimeDetails(anime *models.Anime) {
 	detailsStart := time.Now()
-	if err := api.FetchAnimeDetails(anime); err != nil {
-		log.Println("Failed to fetch anime details:", err)
+
+	// For AllAnime animes with short IDs, we can skip detailed fetching
+	// since we already have the essential information
+	if anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to") {
+		if err := api.FetchAnimeDetails(anime); err != nil {
+			log.Println("Failed to fetch anime details:", err)
+		}
+	} else {
+		// For short IDs or other sources, we already have the basic info
+		if util.IsDebug {
+			util.Debugf("Skipping detailed fetch for %s anime with ID: %s", anime.Source, anime.URL)
+		}
 	}
+
 	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
 }
 

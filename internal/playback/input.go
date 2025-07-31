@@ -50,8 +50,8 @@ func ChangeAnime() (*models.Anime, []models.Episode, error) {
 		return nil, nil, fmt.Errorf("anime name must be at least 2 characters")
 	}
 
-	// Search for the new anime
-	anime := appflow.SearchAnime(animeName)
+	// Search for the new anime using enhanced search (both AllAnime and AnimeFire)
+	anime := appflow.SearchAnimeEnhanced(animeName)
 	if anime == nil {
 		return nil, nil, fmt.Errorf("failed to find anime")
 	}
