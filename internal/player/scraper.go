@@ -223,7 +223,7 @@ func extractVideoURL(url string) (string, error) {
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to parse HTML: %+v", err))
+		return "", fmt.Errorf("failed to parse HTML: %+v", err)
 	}
 
 	// Try different selectors for video elements
