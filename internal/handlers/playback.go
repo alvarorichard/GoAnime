@@ -30,7 +30,7 @@ func HandlePlaybackMode(animeName string) {
 
 	anime := appflow.SearchAnime(animeName)
 	appflow.FetchAnimeDetails(anime)
-	episodes := appflow.GetAnimeEpisodes(anime.URL)
+	episodes := appflow.GetAnimeEpisodes(anime)
 
 	util.Debugf("[PERF] Full boot in %v", time.Since(startAll))
 

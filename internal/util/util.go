@@ -15,6 +15,8 @@ var (
 	IsDebug          bool
 	minNameLength    = 4
 	ErrHelpRequested = errors.New("help requested") // Custom error for help
+	GlobalSource     string                         // Global variable to store selected source
+	GlobalQuality    string                         // Global variable to store selected quality
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
@@ -44,6 +46,8 @@ type DownloadRequest struct {
 	IsRange      bool
 	StartEpisode int
 	EndEpisode   int
+	Source       string // Added source field for specifying anime source
+	Quality      string // Added quality field for video quality
 }
 
 // Global variable to store download request
@@ -59,11 +63,18 @@ func FlagParser() (string, error) {
 	updateFlag := flag.Bool("update", false, "check for updates and update if available")
 	downloadFlag := flag.Bool("d", false, "download mode")
 	rangeFlag := flag.Bool("r", false, "download episode range (use with -d)")
+	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
+	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
+
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
 
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
+
+	// Store global configurations
+	GlobalSource = *sourceFlag
+	GlobalQuality = *qualityFlag
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()
@@ -81,7 +92,7 @@ func FlagParser() (string, error) {
 
 	// Handle download mode
 	if *downloadFlag {
-		return handleDownloadMode(*rangeFlag)
+		return handleDownloadMode(*rangeFlag, *sourceFlag, *qualityFlag)
 	}
 
 	if *debug {
@@ -129,7 +140,7 @@ func TreatingAnimeName(animeName string) string {
 }
 
 // handleDownloadMode processes download command-line arguments
-func handleDownloadMode(isRange bool) (string, error) {
+func handleDownloadMode(isRange bool, source, quality string) (string, error) {
 	args := flag.Args()
 
 	if len(args) == 0 {
@@ -175,6 +186,8 @@ func handleDownloadMode(isRange bool) (string, error) {
 			IsRange:      true,
 			StartEpisode: startEp,
 			EndEpisode:   endEp,
+			Source:       source,
+			Quality:      quality,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
@@ -202,6 +215,8 @@ func handleDownloadMode(isRange bool) (string, error) {
 			AnimeName:  animeName,
 			EpisodeNum: episodeNum,
 			IsRange:    false,
+			Source:     source,
+			Quality:    quality,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested

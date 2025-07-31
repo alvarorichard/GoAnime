@@ -60,7 +60,6 @@ func ChangeAnime() (*models.Anime, []models.Episode, error) {
 	appflow.FetchAnimeDetails(anime)
 
 	// Get episodes for the new anime
-	episodes := appflow.GetAnimeEpisodes(anime.URL)
-
+	episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
 	return anime, episodes, nil
 }

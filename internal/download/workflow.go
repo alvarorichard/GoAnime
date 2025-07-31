@@ -4,6 +4,7 @@ package download
 import (
 	"log"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -11,24 +12,52 @@ import (
 
 // HandleDownloadRequest processes a download request from command line
 func HandleDownloadRequest(request *util.DownloadRequest) error {
-	util.Info("Starting download mode...")
+	util.Info("Starting enhanced download mode...")
 
-	// Search for anime
-	anime := appflow.SearchAnime(request.AnimeName)
-	appflow.FetchAnimeDetails(anime)
-	episodes := appflow.GetAnimeEpisodes(anime.URL)
+	// Use source preference if specified
+	source := request.Source
+	quality := request.Quality
+	if quality == "" {
+		quality = "best"
+	}
 
-	// Create downloader
-	downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
+	util.Infof("Using source: %s, quality: %s", source, quality)
+
+	// Try enhanced search first (supports multiple sources)
+	anime, err := api.SearchAnimeEnhanced(request.AnimeName, source)
+	if err != nil {
+		util.Infof("Enhanced search failed, falling back to legacy search: %v", err)
+		// Fallback to legacy search
+		anime = appflow.SearchAnime(request.AnimeName)
+		appflow.FetchAnimeDetails(anime)
+	}
 
 	if request.IsRange {
 		util.Infof("Downloading episodes %d-%d of %s",
 			request.StartEpisode, request.EndEpisode, anime.Name)
-		return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+
+		// Try enhanced download first
+		if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
+			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
+			// Fallback to legacy downloader
+			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+			downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
+			return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+		}
+		return nil
 	} else {
 		util.Infof("Downloading episode %d of %s",
 			request.EpisodeNum, anime.Name)
-		return downloader.DownloadSingleEpisode(request.EpisodeNum)
+
+		// Try enhanced download first
+		if err := api.DownloadEpisodeEnhanced(anime, request.EpisodeNum, quality); err != nil {
+			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
+			// Fallback to legacy downloader
+			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+			downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
+			return downloader.DownloadSingleEpisode(request.EpisodeNum)
+		}
+		return nil
 	}
 }
 

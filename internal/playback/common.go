@@ -34,7 +34,26 @@ func PlayEpisode(
 		log.Printf("Error fetching episode data: %v", err)
 	}
 
-	videoURL, err := player.GetVideoURLForEpisode(episodeURL)
+	// Find the specific episode to pass to enhanced API
+	var currentEpisode *models.Episode
+	for i := range episodes {
+		if episodes[i].Number == episodeNumberStr {
+			currentEpisode = &episodes[i]
+			break
+		}
+	}
+
+	if currentEpisode == nil {
+		// Create episode if not found
+		currentEpisode = &models.Episode{
+			Number: episodeNumberStr,
+			Num:    episodeNum,
+			URL:    episodeURL,
+		}
+	}
+
+	// Try enhanced API first, fallback to legacy if needed
+	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
 	if err != nil {
 		log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 	}

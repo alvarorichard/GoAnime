@@ -2,6 +2,7 @@ package player
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
-	"github.com/pkg/errors"
 )
 
 // WINDOWS RELEASE
@@ -177,6 +177,32 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 		return "", err
 	}
 	return extractActualVideoURL(videoURL)
+}
+
+// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API
+func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
+	if util.IsDebug {
+		util.Debugf("🎬 Obtendo URL de stream usando API enhanced para episódio: %s", episode.Number)
+	}
+
+	// Use the enhanced API to get stream URL
+	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+	if err != nil {
+		if util.IsDebug {
+			util.Debugf("❌ Erro ao obter URL de stream via API enhanced: %v", err)
+		}
+		// Fallback to legacy method
+		if util.IsDebug {
+			util.Debugf("🔄 Tentando método legado...")
+		}
+		return GetVideoURLForEpisode(episode.URL)
+	}
+
+	if util.IsDebug {
+		util.Debugf("✅ URL de stream obtido com sucesso: %s", streamURL)
+	}
+
+	return streamURL, nil
 }
 
 func extractVideoURL(url string) (string, error) {

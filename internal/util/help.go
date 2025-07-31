@@ -103,6 +103,8 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d).")
+	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
+	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -111,6 +113,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime and AnimeFire with automatic fallback.")
 	addFeature(&helpContent, "Smart Search", "Intelligent anime search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes or entire seasons for offline viewing.")
@@ -132,6 +135,9 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --version", "Show version information")
 	addExample(&helpContent, "goanime -d \"one piece\" 1", "Download episode 1 of One Piece")
 	addExample(&helpContent, "goanime -d -r \"naruto\" 1-5", "Download episodes 1-5 of Naruto")
+	addExample(&helpContent, "goanime -d --source allanime \"bleach\" 10", "Download from AllAnime specifically")
+	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
+	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
 	helpContent.WriteString("\n")
 
 	// Footer
