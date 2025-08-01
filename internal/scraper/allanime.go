@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 const (
@@ -308,7 +309,7 @@ func (c *AllAnimeClient) GetAnimeEpisodesWithAniSkip(animeURL string, malID int,
 				// Try to get AniSkip data for this episode
 				if err := aniSkipFunc(malID, episodeNum, &episodes[i]); err != nil {
 					// Not an error if AniSkip data is not found, just log it
-					fmt.Printf("AniSkip data not found for episode %d: %v\n", episodeNum, err)
+					util.Debugf("AniSkip data not found for episode %d: %v", episodeNum, err)
 				}
 			}
 		}
@@ -393,7 +394,7 @@ func (c *AllAnimeClient) SendSkipTimesToMPV(episode *models.Episode, socketPath 
 		return fmt.Errorf("error sending chapter list to MPV: %w", err)
 	}
 
-	fmt.Printf("✅ AniSkip chapter markers sent to MPV successfully\n")
+	util.Debug("AniSkip chapter markers sent to MPV successfully")
 	return nil
 }
 
@@ -729,7 +730,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 	links := make(map[string]string)
 
 	// Debug: log response structure
-	fmt.Printf("[DEBUG] Response length: %d\n", len(response))
+	util.Debugf("Response length: %d", len(response))
 
 	// Parse JSON response
 	var jsonData map[string]interface{}
@@ -748,7 +749,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 
 						link = strings.ReplaceAll(link, "\\", "")
 						links[quality] = link
-						fmt.Printf("[DEBUG] Found link - Quality: %s, URL: %s\n", quality, link)
+						util.Debugf("Found link - Quality: %s, URL: %s", quality, link)
 					}
 				}
 			}
@@ -766,7 +767,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 			// Clean up the link
 			link = strings.ReplaceAll(link, "\\", "")
 			links[quality] = link
-			fmt.Printf("[DEBUG] Regex found link - Quality: %s, URL: %s\n", quality, link)
+			util.Debugf("Regex found link - Quality: %s, URL: %s", quality, link)
 		}
 	}
 
@@ -779,11 +780,11 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 			link := match[1]
 			link = strings.ReplaceAll(link, "\\", "")
 			links["hls"] = link
-			fmt.Printf("[DEBUG] Found HLS link: %s\n", link)
+			util.Debugf("Found HLS link: %s", link)
 		}
 	}
 
-	fmt.Printf("[DEBUG] Total links found: %d\n", len(links))
+	util.Debugf("Total links found: %d", len(links))
 	return links
 }
 

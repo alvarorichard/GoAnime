@@ -96,7 +96,7 @@ func FlagParser() (string, error) {
 	}
 
 	if *debug {
-		fmt.Println("--- Debug mode is enabled ---")
+		Debug("Debug mode is enabled")
 	}
 
 	// If the user has provided an anime name as an argument, we use it.
@@ -107,7 +107,7 @@ func FlagParser() (string, error) {
 		if strings.Contains(animeName, "-") {
 			animeName = strings.Split(animeName, "-")[0]
 		}
-		fmt.Println("Anime name:", animeName)
+		Debug("Anime name", "name", animeName)
 		if len(animeName) < minNameLength {
 			return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 		}

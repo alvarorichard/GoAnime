@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // ScraperType represents different scraper types
@@ -49,7 +50,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	if scraperType != nil {
 		// Search using specific scraper
 		if scraper, exists := sm.scrapers[*scraperType]; exists {
-			fmt.Printf("🔍 Buscando em %s...\n", sm.getScraperDisplayName(*scraperType))
+			util.Debug("Searching specific scraper", "scraper", sm.getScraperDisplayName(*scraperType))
 
 			results, err := scraper.SearchAnime(query)
 			if err != nil {
@@ -69,7 +70,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			}
 
 			if len(results) > 0 {
-				fmt.Printf("✅ Encontrados %d resultados em %s\n", len(results), sm.getScraperDisplayName(*scraperType))
+				util.Debug("Search completed", "scraper", sm.getScraperDisplayName(*scraperType), "results", len(results))
 			}
 
 			return results, nil
@@ -78,23 +79,19 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	}
 
 	// Search across all scrapers simultaneously
-	fmt.Printf("🌐 Iniciando busca simultânea em todas as fontes para: '%s'\n", query)
+	util.Debug("Starting simultaneous search", "query", query)
 
 	for scraperType, scraper := range sm.scrapers {
-		fmt.Printf("  � Buscando em %s...\n", sm.getScraperDisplayName(scraperType))
+		util.Debug("Searching in source", "source", sm.getScraperDisplayName(scraperType))
 
 		results, err := scraper.SearchAnime(query)
 		if err != nil {
 			// Log error but continue with other scrapers
-			fmt.Printf("  ⚠️  Erro ao buscar em %s: %v\n", sm.getScraperDisplayName(scraperType), err)
+			util.Debug("Search error", "source", sm.getScraperDisplayName(scraperType), "error", err)
 			continue
 		}
 
-		if len(results) > 0 {
-			fmt.Printf("  ✅ Encontrados %d resultados em %s\n", len(results), sm.getScraperDisplayName(scraperType))
-		} else {
-			fmt.Printf("  ❌ Nenhum resultado em %s\n", sm.getScraperDisplayName(scraperType))
-		}
+		util.Debug("Search results", "source", sm.getScraperDisplayName(scraperType), "count", len(results))
 
 		// Add source information to results with enhanced formatting
 		for _, anime := range results {
@@ -113,12 +110,8 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	}
 
 	if len(allResults) == 0 {
-		fmt.Printf("❌ Nenhum anime encontrado com o nome: '%s'\n", query)
-		fmt.Printf("💡 Dicas: \n")
-		fmt.Printf("   - Verifique a ortografia do nome\n")
-		fmt.Printf("   - Tente usar apenas parte do nome\n")
-		fmt.Printf("   - Use o nome em inglês ou japonês\n")
-		return nil, fmt.Errorf("nenhum anime encontrado com o nome: %s", query)
+		util.Debug("No anime found", "query", query)
+		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}
 
 	// Count results by source for summary
@@ -132,10 +125,12 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 		}
 	}
 
-	fmt.Printf("\n📊 Resumo da busca:\n")
-	fmt.Printf("🔥 AnimeFire.plus: %d resultados\n", animefireCount)
-	fmt.Printf("🌐 AllAnime: %d resultados\n", allanimeCount)
-	fmt.Printf("📈 Total: %d resultados encontrados\n", len(allResults))
+	if util.IsDebug {
+		util.Debug("Search summary",
+			"animeFire", animefireCount,
+			"allAnime", allanimeCount,
+			"total", len(allResults))
+	}
 
 	return allResults, nil
 }
@@ -176,9 +171,9 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 func (sm *ScraperManager) getSourceTag(scraperType ScraperType) string {
 	switch scraperType {
 	case AllAnimeType:
-		return "🌐[AllAnime]"
+		return "[AllAnime]"
 	case AnimefireType:
-		return "🔥[AnimeFire]"
+		return "[AnimeFire]"
 	default:
 		return "[Unknown]"
 	}
