@@ -147,6 +147,7 @@ func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
 // }
 
 // playVideo plays the video and manages interactions
+// playVideo plays the video and manages interactions
 func playVideo(
 	videoURL string,
 	episodes []models.Episode,
@@ -213,22 +214,8 @@ func playVideo(
 	preloadNextEpisode(episodes, currentEpisodeIndex)
 
 	// Start tracking routine if tracker is available
-	stopTracking := make(chan struct{})
-	if tracker != nil {
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					updateTracking(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
-				case <-stopTracking:
-					return
-				}
-			}
-		}()
-		defer close(stopTracking)
-	}
+	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
+	defer close(stopTracking)
 
 	// Handle user input for interactive controls
 	return handleUserInput(
@@ -242,6 +229,7 @@ func playVideo(
 		currentEpisode,
 	)
 }
+
 
 
 // getCurrentEpisode gets the current episode
