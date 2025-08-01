@@ -156,14 +156,26 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
-func ExtractEpisodeNumber(episodeStr string) string {
-	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
-	matches := numRe.FindStringSubmatch(episodeStr)
+// func ExtractEpisodeNumber(episodeStr string) string {
+// 	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+// 	matches := numRe.FindStringSubmatch(episodeStr)
 
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	return "1"
+// 	if len(matches) >= 2 {
+// 		return matches[1]
+// 	}
+// 	return "1"
+// }
+
+// ExtractEpisodeNumber extracts the episode number from the episode string
+func ExtractEpisodeNumber(episodeStr string) string {
+    // Handle formats like "Episode 100" or "100"
+    parts := strings.Split(strings.TrimSpace(episodeStr), " ")
+    for _, part := range parts {
+        if num, err := strconv.Atoi(part); err == nil {
+            return fmt.Sprintf("%d", num)
+        }
+    }
+    return episodeStr // Fallback to original string if no number is found
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL

@@ -120,6 +120,16 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			continue // Skip normal navigation and start playing the new anime
 		}
 
+		// Handle episode selection
+		if userInput == "e" {
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode: %v", err)
+				continue
+			}
+			continue
+		}
+
 		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigation(
 			userInput,
 			episodes,
