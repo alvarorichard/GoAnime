@@ -143,18 +143,6 @@ func (sm *ScraperManager) GetScraper(scraperType ScraperType) (UnifiedScraper, e
 	return nil, fmt.Errorf("scraper type %v not found", scraperType)
 }
 
-// getScraperName returns a human-readable name for the scraper type
-func (sm *ScraperManager) getScraperName(scraperType ScraperType) string {
-	switch scraperType {
-	case AllAnimeType:
-		return "AllAnime"
-	case AnimefireType:
-		return "AnimeFire"
-	default:
-		return "Unknown"
-	}
-}
-
 // getScraperDisplayName returns a Portuguese display name for the scraper type
 func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string {
 	switch scraperType {

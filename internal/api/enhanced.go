@@ -233,11 +233,11 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if strings.Contains(anime.Source, "AnimeFire") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
-	} else if strings.Contains(anime.Name, "🌐[AllAnime]") || strings.Contains(anime.Name, "[AllAnime]") {
+	} else if strings.Contains(anime.Name, "[AllAnime]") {
 		// Priority 2: Check name tags
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "🔥[AnimeFire]") || strings.Contains(anime.Name, "[AnimeFire]") {
+	} else if strings.Contains(anime.Name, "[AnimeFire]") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
 	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {

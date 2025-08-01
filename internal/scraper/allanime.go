@@ -131,7 +131,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -209,7 +209,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -233,15 +233,6 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	// Extract and sort the episodes exactly like Curd
 	episodes := extractEpisodes(response.Data.Show.AvailableEpisodesDetail, mode)
 	return episodes, nil
-}
-
-// Helper function to get map keys for debugging
-func getKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // extractEpisodes extracts the episodes list from the availableEpisodesDetail field (from Curd)
@@ -398,20 +389,12 @@ func (c *AllAnimeClient) SendSkipTimesToMPV(episode *models.Episode, socketPath 
 	return nil
 }
 
-// min helper function
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // parseEpisodeNum converts episode string to integer
 func parseEpisodeNum(epStr string) int {
 	// Try to extract number from string
 	var num int
-	fmt.Sscanf(epStr, "%d", &num)
-	if num == 0 {
+	_, err := fmt.Sscanf(epStr, "%d", &num)
+	if err != nil || num == 0 {
 		num = 1 // Default to 1 if parsing fails
 	}
 	return num
@@ -460,7 +443,7 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -691,7 +674,7 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
