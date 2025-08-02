@@ -382,7 +382,7 @@ func sanitizeFilename(name string) string {
 }
 
 // Basic download function (placeholder - integrate with your existing downloader)
-func downloadFromURL(url, filename string) error {
+func downloadFromURL(_url, _filename string) error {
 	// This is a placeholder that should fail to trigger fallback to the proper downloader
 	util.Debugf("Enhanced API downloadFromURL is a placeholder - returning error to trigger fallback")
 	return fmt.Errorf("enhanced download not implemented - use legacy downloader")

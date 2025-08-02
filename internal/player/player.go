@@ -441,7 +441,9 @@ func downloadAndPlayEpisode(
 		if stat, err := os.Stat(episodePath); err == nil {
 			if stat.Size() < 1024 {
 				fmt.Println("File is too small, re-downloading...")
-				os.Remove(episodePath) // Remove invalid file
+				if removeErr := os.Remove(episodePath); removeErr != nil {
+					util.Warnf("Failed to remove invalid file: %v", removeErr)
+				}
 				return downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr, animeMalID, updater)
 			}
 		}

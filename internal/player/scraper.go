@@ -166,7 +166,11 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 		util.Debugf("Range request failed, using default size estimate")
 		return 300 * 1024 * 1024, nil // 300MB default
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			util.Warnf("Failed to close response body: %v", closeErr)
+		}
+	}()
 
 	// Check Content-Range header for total size
 	contentRange := resp.Header.Get("Content-Range")
