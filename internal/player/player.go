@@ -336,6 +336,11 @@ func downloadAndPlayEpisode(
 	animeMalID int, // Added animeMalID parameter
 	updater *discord.RichPresenceUpdater,
 ) error {
+	// Check if video URL is valid
+	if videoURL == "" {
+		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
+	}
+
 	currentUser, err := user.Current()
 	if err != nil {
 		util.Fatal("Failed to get current user:", err)
@@ -353,23 +358,36 @@ func downloadAndPlayEpisode(
 	if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 		numThreads := 4 // Define the number of threads for downloading
 
-		// Check if the video URL is from Blogger
-		if strings.Contains(videoURL, "blogger.com") {
-			// Use yt-dlp to download the video from Blogger
-			fmt.Printf("Downloading episode %s with yt-dlp...\n", episodeNumberStr)
+		// Check URL type and use appropriate download method
+		if strings.Contains(videoURL, "blogger.com") ||
+			strings.Contains(videoURL, ".m3u8") ||
+			strings.Contains(videoURL, "wixmp.com") ||
+			strings.Contains(videoURL, "sharepoint.com") {
+			// Use yt-dlp to download from these sources
+			fmt.Printf("Downloading episode %s with yt-dlp (detected streaming URL)...\n", episodeNumberStr)
 
 			// Ensure yt-dlp is installed
 			ytdlp.MustInstall(context.Background(), nil)
 
 			// Configure downloader
 			dl := ytdlp.New().
-				//Quiet(true).          // --no-progress
 				Output(episodePath) // -o <episodePath>
 
 			// Execute download
 			if _, err := dl.Run(context.Background(), videoURL); err != nil {
-				util.Error("Failed to download video using yt-dlp:", err)
+				return fmt.Errorf("failed to download video using yt-dlp: %w", err)
 			}
+
+			// Verify the file was actually downloaded
+			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+				return fmt.Errorf("download failed: file was not created")
+			}
+
+			// Check file size
+			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
+				return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
+			}
+
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 
 		} else {
@@ -419,6 +437,14 @@ func downloadAndPlayEpisode(
 		}
 	} else {
 		fmt.Println("Video already downloaded.")
+		// Check if the file is actually valid (not empty)
+		if stat, err := os.Stat(episodePath); err == nil {
+			if stat.Size() < 1024 {
+				fmt.Println("File is too small, re-downloading...")
+				os.Remove(episodePath) // Remove invalid file
+				return downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr, animeMalID, updater)
+			}
+		}
 	}
 
 	if askForPlayOffline() {

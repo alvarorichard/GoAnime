@@ -383,13 +383,9 @@ func sanitizeFilename(name string) string {
 
 // Basic download function (placeholder - integrate with your existing downloader)
 func downloadFromURL(url, filename string) error {
-	// This is a placeholder - you would integrate this with your existing
-	// downloader package functionality
-	util.Debugf("Downloading from URL: %s to file: %s", url, filename)
-
-	// For now, just log the download intent
-	// In a real implementation, you'd use the downloader package
-	return nil
+	// This is a placeholder that should fail to trigger fallback to the proper downloader
+	util.Debugf("Enhanced API downloadFromURL is a placeholder - returning error to trigger fallback")
+	return fmt.Errorf("enhanced download not implemented - use legacy downloader")
 }
 
 // Legacy wrapper functions to maintain compatibility

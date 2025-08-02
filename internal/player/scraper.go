@@ -78,6 +78,12 @@ func DownloadFolderFormatter(str string) string {
 
 // getContentLength retrieves the content length of the given URL.
 func getContentLength(url string, client *http.Client) (int64, error) {
+	// Check if this is an AllAnime URL that might not have Content-Length header
+	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
+		strings.Contains(url, "wixmp.com") ||
+		strings.Contains(url, "master.m3u8") ||
+		strings.Contains(url, "allanime.pro")
+
 	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
@@ -116,7 +122,13 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Retrieves the "Content-Length" header from the response.
 	contentLengthHeader := resp.Header.Get("Content-Length")
 	if contentLengthHeader == "" {
-		// Returns an error if the "Content-Length" header is missing.
+		// For AllAnime URLs that might not have Content-Length, return a default size
+		if isAllAnimeURL {
+			util.Debugf("Content-Length header missing for AllAnime URL, using fallback method")
+			// Try to estimate content length or use a default for streaming
+			return estimateContentLengthForAllAnime(url, client)
+		}
+		// Returns an error if the "Content-Length" header is missing for non-AllAnime URLs.
 		return 0, fmt.Errorf("Content-Length header is missing")
 	}
 
@@ -129,6 +141,48 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 
 	// Returns the content length in bytes.
 	return contentLength, nil
+}
+
+// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
+func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
+	if strings.Contains(url, ".m3u8") {
+		util.Debugf("HLS stream detected, using estimated size for download")
+		// Return an estimated size for a typical episode (500MB)
+		return 500 * 1024 * 1024, nil
+	}
+
+	// For other AllAnime URLs, try to get partial content to estimate size
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	// Request only first few KB to check response
+	req.Header.Set("Range", "bytes=0-4095")
+	resp, err := client.Do(req)
+	if err != nil {
+		// If range request fails, return default size
+		util.Debugf("Range request failed, using default size estimate")
+		return 300 * 1024 * 1024, nil // 300MB default
+	}
+	defer resp.Body.Close()
+
+	// Check Content-Range header for total size
+	contentRange := resp.Header.Get("Content-Range")
+	if contentRange != "" {
+		// Parse "bytes 0-4095/12345678" format
+		parts := strings.Split(contentRange, "/")
+		if len(parts) == 2 && parts[1] != "*" {
+			if totalSize, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				return totalSize, nil
+			}
+		}
+	}
+
+	// Fallback to default size estimate
+	util.Debugf("Could not determine exact size, using default estimate")
+	return 300 * 1024 * 1024, nil // 300MB default
 }
 
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
@@ -168,14 +222,14 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 
 // ExtractEpisodeNumber extracts the episode number from the episode string
 func ExtractEpisodeNumber(episodeStr string) string {
-    // Handle formats like "Episode 100" or "100"
-    parts := strings.Split(strings.TrimSpace(episodeStr), " ")
-    for _, part := range parts {
-        if num, err := strconv.Atoi(part); err == nil {
-            return fmt.Sprintf("%d", num)
-        }
-    }
-    return episodeStr // Fallback to original string if no number is found
+	// Handle formats like "Episode 100" or "100"
+	parts := strings.Split(strings.TrimSpace(episodeStr), " ")
+	for _, part := range parts {
+		if num, err := strconv.Atoi(part); err == nil {
+			return fmt.Sprintf("%d", num)
+		}
+	}
+	return episodeStr // Fallback to original string if no number is found
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
