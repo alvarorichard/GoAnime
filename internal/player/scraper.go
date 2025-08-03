@@ -19,28 +19,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
-
-// WINDOWS RELEASE
-
-//  func dialMPVSocket(socketPath string) (net.Conn, error) {
-//  	if runtime.GOOS == "windows" {
-// // 		//Attempt to connect using named pipe on Windows
-//  		conn, err := winio.DialPipe(socketPath, nil)
-//  		if err != nil {
-//  			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
-//  		}
-//  		return conn, nil
-//  } else {
-//  		// Unix-like system uses Unix sockets
-//  		conn, err := net.Dial("unix", socketPath)
-//  		if err != nil {
-//  			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
-//  		}
-//  		return conn, nil
-//  	}
-//  }
 
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
@@ -226,14 +207,44 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 
 // ExtractEpisodeNumber extracts the episode number from the episode string
 func ExtractEpisodeNumber(episodeStr string) string {
-	// Handle formats like "Episode 100" or "100"
+	// Try to extract numeric episode number from various patterns
+	patterns := []string{
+		`(?i)epis[oó]dio\s+(\d+)`, // "Episódio 1"
+		`(?i)episode\s+(\d+)`,     // "Episode 1"
+		`(?i)ep\.?\s*(\d+)`,       // "Ep 1" or "Ep. 1"
+		`(?i)cap[íi]tulo\s+(\d+)`, // "Capítulo 1"
+		`\b(\d+)\b`,               // Any standalone number
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(episodeStr)
+		if len(matches) >= 2 {
+			return matches[1]
+		}
+	}
+
+	// Handle simple numeric cases by splitting
 	parts := strings.Split(strings.TrimSpace(episodeStr), " ")
 	for _, part := range parts {
-		if num, err := strconv.Atoi(part); err == nil {
+		// Clean common separators and try to parse
+		cleanPart := strings.Trim(part, "()[]{}:.-_")
+		if num, err := strconv.Atoi(cleanPart); err == nil && num > 0 {
 			return fmt.Sprintf("%d", num)
 		}
 	}
-	return episodeStr // Fallback to original string if no number is found
+
+	// For movies, OVAs, and specials that don't have episode numbers, return "1"
+	lowerStr := strings.ToLower(episodeStr)
+	if strings.Contains(lowerStr, "filme") ||
+		strings.Contains(lowerStr, "movie") ||
+		strings.Contains(lowerStr, "ova") ||
+		strings.Contains(lowerStr, "special") {
+		return "1"
+	}
+
+	// If no number found at all, return "1" as fallback (for single episodes/movies)
+	return "1"
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
@@ -405,6 +416,7 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
+// extractActualVideoURL processes the video source and allows the user to select quality
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
 		util.Debugf("Processing video source: %s", videoSrc)
@@ -414,7 +426,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return videoSrc, nil
 	}
 
-	// If the URL is from animefire.plus, we need to fetch it first
+	// If the URL is from animefire.plus, fetch the content
 	if strings.Contains(videoSrc, "animefire.plus/video/") {
 		if util.IsDebug {
 			util.Debugf("Found animefire.plus video URL, fetching content...")
@@ -437,7 +449,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			return "", fmt.Errorf("failed to read video page: %w", err)
 		}
 
-		// Try to parse as JSON first
+		// Try to parse as JSON
 		var videoResponse VideoResponse
 		err = json.Unmarshal(body, &videoResponse)
 		if err == nil && len(videoResponse.Data) > 0 {
@@ -447,24 +459,60 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 					util.Debugf("Available quality: %s -> %s", v.Label, v.Src)
 				}
 			}
-			// If we have multiple qualities, pick the highest automatically
-			if len(videoResponse.Data) > 1 {
-				best := videoResponse.Data[0]
-				bestQ, _ := strconv.Atoi(best.Label)
+
+			// If only one quality, use it directly
+			if len(videoResponse.Data) == 1 {
+				return videoResponse.Data[0].Src, nil
+			}
+
+			// Use global quality preference only if it's a specific quality (not "best")
+			if util.GlobalQuality != "" && util.GlobalQuality != "best" {
+				selectedSrc := selectQualityFromOptions(videoResponse.Data, util.GlobalQuality)
+				if selectedSrc != "" {
+					if util.IsDebug {
+						util.Debugf("Using global quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
+					}
+					return selectedSrc, nil
+				}
+			}
+
+			// Always prompt user for quality selection to maintain the 360p, 720p, 1080p options
+			// Create options for huh.Select
+			var options []huh.Option[string]
+			for _, v := range videoResponse.Data {
+				options = append(options, huh.NewOption(v.Label, v.Src))
+			}
+
+			// Present quality options to the user
+			var selectedSrc string
+			err := huh.NewSelect[string]().
+				Title("Select Video Quality").
+				Options(options...).
+				Value(&selectedSrc).
+				Run()
+			if err != nil {
+				return "", fmt.Errorf("failed to select quality: %w", err)
+			}
+
+			// Store the selected quality for future use in this session
+			if util.GlobalQuality == "" || util.GlobalQuality == "best" {
+				// Extract quality label from selected option
 				for _, v := range videoResponse.Data {
-					q, _ := strconv.Atoi(v.Label)
-					if q > bestQ {
-						best = v
-						bestQ = q
+					if v.Src == selectedSrc {
+						util.GlobalQuality = strings.ToLower(v.Label)
+						if util.IsDebug {
+							util.Debugf("Storing selected quality for session: %s", util.GlobalQuality)
+						}
+						break
 					}
 				}
-				return best.Src, nil
 			}
-			// If only one quality, use it
-			return videoResponse.Data[0].Src, nil
+
+			// Return the selected source URL
+			return selectedSrc, nil
 		}
 
-		// Try to find a direct video URL in the content
+		// Fallback: Try to find a direct video URL in the content
 		videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
 		re := regexp.MustCompile(videoURLPattern)
 		matches := re.FindString(string(body))
@@ -476,7 +524,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 
 		// Try to find a blogger link
-		videoSrc, err = findBloggerLink(string(body))
+		videoSrc, err := findBloggerLink(string(body))
 		if err == nil && videoSrc != "" {
 			if util.IsDebug {
 				util.Debugf("Found blogger link: %s", videoSrc)
@@ -485,37 +533,88 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 	}
 
-	// Try to parse as JSON first
-	var videoResponse VideoResponse
-	err := json.Unmarshal([]byte(videoSrc), &videoResponse)
-	if err == nil && len(videoResponse.Data) > 0 {
-		// If we have multiple qualities, pick the highest automatically
-		if len(videoResponse.Data) > 1 {
-			best := videoResponse.Data[0]
-			bestQ, _ := strconv.Atoi(best.Label)
-			for _, v := range videoResponse.Data {
-				q, _ := strconv.Atoi(v.Label)
-				if q > bestQ {
-					best = v
-					bestQ = q
-				}
+	// If not JSON or no qualities found, return an error
+	return "", errors.New("no valid video URL found")
+}
+
+// selectQualityFromOptions selects the best matching quality from available options
+func selectQualityFromOptions(videoData []VideoData, preferredQuality string) string {
+	if len(videoData) == 0 {
+		return ""
+	}
+
+	// Normalize preferred quality string
+	preferredQuality = strings.ToLower(strings.TrimSpace(preferredQuality))
+
+	// Handle "best" quality preference
+	if preferredQuality == "best" || preferredQuality == "" {
+		// Find the highest quality (assume higher resolution numbers are better)
+		bestQuality := videoData[0]
+		for _, v := range videoData {
+			if extractResolution(v.Label) > extractResolution(bestQuality.Label) {
+				bestQuality = v
 			}
-			return best.Src, nil
 		}
-		// If only one quality, use it
-		return videoResponse.Data[0].Src, nil
+		return bestQuality.Src
 	}
 
-	// If not JSON, try to find a direct video URL
-	videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
-	re := regexp.MustCompile(videoURLPattern)
-	matches := re.FindString(videoSrc)
-
-	if matches == "" {
-		return "", errors.New("no valid video URL found")
+	// Handle "worst" quality preference
+	if preferredQuality == "worst" {
+		// Find the lowest quality
+		worstQuality := videoData[0]
+		for _, v := range videoData {
+			if extractResolution(v.Label) < extractResolution(worstQuality.Label) {
+				worstQuality = v
+			}
+		}
+		return worstQuality.Src
 	}
 
-	return matches, nil
+	// Try to find exact match first
+	for _, v := range videoData {
+		if strings.Contains(strings.ToLower(v.Label), preferredQuality) {
+			return v.Src
+		}
+	}
+
+	// If no exact match, try to find the closest resolution
+	targetResolution := extractResolution(preferredQuality)
+	if targetResolution > 0 {
+		closestMatch := videoData[0]
+		minDiff := abs(extractResolution(closestMatch.Label) - targetResolution)
+
+		for _, v := range videoData {
+			diff := abs(extractResolution(v.Label) - targetResolution)
+			if diff < minDiff {
+				minDiff = diff
+				closestMatch = v
+			}
+		}
+		return closestMatch.Src
+	}
+
+	// Fallback to first option if nothing matches
+	return videoData[0].Src
+}
+
+// extractResolution extracts numeric resolution from quality label (e.g., "1080p" -> 1080)
+func extractResolution(label string) int {
+	re := regexp.MustCompile(`(\d+)p?`)
+	matches := re.FindStringSubmatch(strings.ToLower(label))
+	if len(matches) > 1 {
+		if res, err := strconv.Atoi(matches[1]); err == nil {
+			return res
+		}
+	}
+	return 0
+}
+
+// abs returns the absolute value of an integer
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // VideoData represents the video data structure, with a source URL and a label

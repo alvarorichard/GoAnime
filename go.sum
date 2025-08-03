@@ -92,8 +92,8 @@ github.com/ktr0731/go-ansisgr v0.1.0 h1:fbuupput8739hQbEmZn1cEKjqQFwtCCZNznnF6AN
 github.com/ktr0731/go-ansisgr v0.1.0/go.mod h1:G9lxwgBwH0iey0Dw5YQd7n6PmQTwTuTM/X5Sgm/UrzE=
 github.com/ktr0731/go-fuzzyfinder v0.9.0 h1:JV8S118RABzRl3Lh/RsPhXReJWc2q0rbuipzXQH7L4c=
 github.com/ktr0731/go-fuzzyfinder v0.9.0/go.mod h1:uybx+5PZFCgMCSDHJDQ9M3nNKx/vccPmGffsXPn2ad8=
-github.com/lrstanley/go-ytdlp v1.1.1 h1:1L/H/Hj8Bf9rJLPgY0BlSxDiyGMvCR3o4KHY4CR0C00=
-github.com/lrstanley/go-ytdlp v1.1.1/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
+github.com/lrstanley/go-ytdlp v1.2.0 h1:2L5CiDRLEVPncIaZPMdzlQCg2CJn9YssTUH5vaEmblM=
+github.com/lrstanley/go-ytdlp v1.2.0/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/manifoldco/promptui v0.9.0 h1:3V4HzJk1TtXW1MTZMP7mdlwbBpIinw3HztaIlYthEiA=
