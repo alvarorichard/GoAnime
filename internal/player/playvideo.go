@@ -20,9 +20,6 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-
-
-
 // ErrUserQuit is returned when the user chooses to quit the application
 var ErrUserQuit = errors.New("user requested to quit application")
 
@@ -218,10 +215,9 @@ func playVideo(
 
 	// Start tracking routine if tracker is available
 	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
-	defer close(stopTracking)
 
 	// Handle user input for interactive controls
-	return handleUserInput(
+	err = handleUserInput(
 		socketPath,
 		episodes,
 		currentEpisodeIndex,
@@ -231,9 +227,17 @@ func playVideo(
 		stopTracking,
 		currentEpisode,
 	)
+
+	// Close the tracking channel if it's still open
+	select {
+	case <-stopTracking:
+		// Channel already closed
+	default:
+		close(stopTracking)
+	}
+
+	return err
 }
-
-
 
 // getCurrentEpisode gets the current episode
 // func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
@@ -245,12 +249,12 @@ func playVideo(
 
 // getCurrentEpisode retrieves the current episode based on the episode number
 func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
-    for _, ep := range episodes {
-        if ExtractEpisodeNumber(ep.Number) == fmt.Sprintf("%d", num) {
-            return &ep, nil
-        }
-    }
-    return nil, fmt.Errorf("episode %d not found", num)
+	for _, ep := range episodes {
+		if ExtractEpisodeNumber(ep.Number) == fmt.Sprintf("%d", num) {
+			return &ep, nil
+		}
+	}
+	return nil, fmt.Errorf("episode %d not found", num)
 }
 
 // // initTracking initializes the tracking system
@@ -296,43 +300,43 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 
 // initTracking inicializa o sistema de rastreamento
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
-    if !tracking.IsCgoEnabled {
-        if util.IsDebug {
-            util.Debug("Tracking desabilitado: CGO não disponível")
-        }
-        return nil, 0
-    }
+	if !tracking.IsCgoEnabled {
+		if util.IsDebug {
+			util.Debug("Tracking desabilitado: CGO não disponível")
+		}
+		return nil, 0
+	}
 
-    currentUser, err := user.Current()
-    if err != nil {
-        util.Errorf("Falha ao obter usuário atual: %v", err)
-        return nil, 0
-    }
+	currentUser, err := user.Current()
+	if err != nil {
+		util.Errorf("Falha ao obter usuário atual: %v", err)
+		return nil, 0
+	}
 
-    var dbPath string
-    if runtime.GOOS == "windows" {
-        dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
-    } else {
-        dbPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
-    }
+	var dbPath string
+	if runtime.GOOS == "windows" {
+		dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+	} else {
+		dbPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
+	}
 
-    tracker := tracking.NewLocalTracker(dbPath)
-    if tracker == nil {
-        return nil, 0
-    }
+	tracker := tracking.NewLocalTracker(dbPath)
+	if tracker == nil {
+		return nil, 0
+	}
 
-    progress, err := tracker.GetAnime(anilistID, episode.URL)
-    if err != nil || progress == nil || progress.PlaybackTime <= 0 {
-        return tracker, 0
-    }
+	progress, err := tracker.GetAnime(anilistID, episode.URL)
+	if err != nil || progress == nil || progress.PlaybackTime <= 0 {
+		return tracker, 0
+	}
 
-    // Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
-    if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
-        util.Debugf("Retomando do tempo salvo: %d segundos para o episódio %d", progress.PlaybackTime, episodeNum)
-        return tracker, progress.PlaybackTime
-    }
+	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
+	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
+		util.Debugf("Retomando do tempo salvo: %d segundos para o episódio %d", progress.PlaybackTime, episodeNum)
+		return tracker, progress.PlaybackTime
+	}
 
-    return tracker, 0
+	return tracker, 0
 }
 
 // fetchAniSkipAsync fetches AniSkip data in parallel
@@ -458,17 +462,16 @@ func getEpisodeTitle(title models.TitleDetails) string {
 // 	return -1
 // }
 
-
 // findEpisodeIndex finds the episode index based on the episode number
 func findEpisodeIndex(episodes []models.Episode, num int) int {
-    episodeStr := fmt.Sprintf("%d", num)
-    for i, ep := range episodes {
-        extractedNum := ExtractEpisodeNumber(ep.Number)
-        if extractedNum == episodeStr {
-            return i
-        }
-    }
-    return -1 // Episode not found
+	episodeStr := fmt.Sprintf("%d", num)
+	for i, ep := range episodes {
+		extractedNum := ExtractEpisodeNumber(ep.Number)
+		if extractedNum == episodeStr {
+			return i
+		}
+	}
+	return -1 // Episode not found
 }
 
 // preloadNextEpisode preloads the next episode
@@ -477,11 +480,15 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 		return
 	}
 
+	// Skip preloading for AllAnime episodes (they use IDs, not HTTP URLs)
+	nextEpisodeURL := episodes[currentIndex+1].URL
+	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
+		return
+	}
+
 	go func() {
-		_, err := GetVideoURLForEpisode(episodes[currentIndex+1].URL)
-		if err != nil {
-			util.Debugf("Preloading error: %v", err)
-		}
+		_, _ = GetVideoURLForEpisode(episodes[currentIndex+1].URL)
+		// Preloading errors are ignored as this is not critical
 	}()
 }
 
@@ -662,7 +669,12 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 		return fmt.Errorf("invalid episode number: %w", err)
 	}
 
-	targetURL, err := GetVideoURLForEpisode(target.URL)
+	var anime *models.Anime
+	if updater != nil {
+		anime = updater.GetAnime()
+	}
+
+	targetURL, err := GetVideoURLForEpisodeEnhanced(&target, anime)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
 	}

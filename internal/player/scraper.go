@@ -5,10 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	//"net"
-	//"runtime"
-
 	"net/http"
 	"regexp"
 	"strconv"
@@ -249,10 +245,11 @@ func ExtractEpisodeNumber(episodeStr string) string {
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
-
-	if util.IsDebug {
-		util.Debugf("Attempting to extract video URL for episode: %s", episodeURL)
+	// Check if this looks like an AllAnime ID instead of URL
+	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
+		return "", fmt.Errorf("GetVideoURLForEpisode called with AllAnime ID '%s' instead of HTTP URL - use enhanced API", episodeURL)
 	}
+
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
 		return "", err
@@ -260,30 +257,47 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API
+// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
 func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
-	if util.IsDebug {
-		util.Debugf("🎬 Obtendo URL de stream usando API enhanced para episódio: %s", episode.Number)
+	// Try AllAnime enhanced navigation first if applicable
+	if isAllAnimeSourcePlayer(anime) {
+		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
+		if err == nil {
+			return streamURL, nil
+		}
 	}
 
-	// Use the enhanced API to get stream URL
+	// Use the regular enhanced API to get stream URL
 	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 	if err != nil {
-		if util.IsDebug {
-			util.Debugf("❌ Erro ao obter URL de stream via API enhanced: %v", err)
+		// Only use legacy fallback for non-AllAnime sources
+		if !isAllAnimeSourcePlayer(anime) {
+			return GetVideoURLForEpisode(episode.URL)
 		}
-		// Fallback to legacy method
-		if util.IsDebug {
-			util.Debugf("🔄 Tentando método legado...")
-		}
-		return GetVideoURLForEpisode(episode.URL)
-	}
-
-	if util.IsDebug {
-		util.Debugf("✅ URL de stream obtido com sucesso: %s", streamURL)
+		// For AllAnime, return the error instead of trying legacy method
+		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
 	}
 
 	return streamURL, nil
+}
+
+// Helper function to check if anime is from AllAnime source (player module)
+func isAllAnimeSourcePlayer(anime *models.Anime) bool {
+	if anime.Source == "AllAnime" {
+		return true
+	}
+
+	if strings.Contains(anime.URL, "allanime") {
+		return true
+	}
+
+	if len(anime.URL) < 30 &&
+		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
+		!strings.Contains(anime.URL, "http") {
+		return true
+	}
+
+	return false
 }
 
 func extractVideoURL(url string) (string, error) {

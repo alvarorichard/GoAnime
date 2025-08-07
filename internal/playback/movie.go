@@ -29,7 +29,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			log.Printf("Error fetching movie/OVA data: %v", err)
 		}
 
-		videoURL, err := player.GetVideoURLForEpisode(episodes[0].URL)
+		videoURL, err := player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
 		if err != nil {
 			log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
 		}
@@ -59,7 +59,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 
 		// Check if user requested to change anime during video playback
 		if errors.Is(err, player.ErrChangeAnime) {
-			newAnime, newEpisodes, err := ChangeAnime()
+			newAnime, newEpisodes, err := ChangeAnimeLocal()
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
 				continue // Stay with current anime if change fails
@@ -95,7 +95,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 
 		// Handle anime change for movies
 		if userInput == "c" {
-			newAnime, newEpisodes, err := ChangeAnime()
+			newAnime, newEpisodes, err := ChangeAnimeLocal()
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
 				continue // Stay with current anime if change fails

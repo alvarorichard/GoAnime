@@ -3,6 +3,7 @@ package playback
 import (
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,10 +46,16 @@ func PlayEpisode(
 
 	if currentEpisode == nil {
 		// Create episode if not found
+		// For AllAnime, use the anime ID as URL instead of episode-specific URL
+		episodeURLForCreation := episodeURL
+		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http")) {
+			episodeURLForCreation = anime.URL // Use anime ID for AllAnime
+		}
+
 		currentEpisode = &models.Episode{
 			Number: episodeNumberStr,
 			Num:    episodeNum,
-			URL:    episodeURL,
+			URL:    episodeURLForCreation,
 		}
 	}
 

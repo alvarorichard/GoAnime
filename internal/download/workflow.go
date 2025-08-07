@@ -49,15 +49,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		util.Infof("Downloading episode %d of %s",
 			request.EpisodeNum, anime.Name)
 
-		// Try enhanced download first
-		if err := api.DownloadEpisodeEnhanced(anime, request.EpisodeNum, quality); err != nil {
-			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
-			// Fallback to legacy downloader
-			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-			downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-			return downloader.DownloadSingleEpisode(request.EpisodeNum)
-		}
-		return nil
+		// Enhanced download is a placeholder - use legacy downloader
+		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
+		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
+		return downloader.DownloadSingleEpisode(request.EpisodeNum)
 	}
 }
 

@@ -1,10 +1,6 @@
 package playback
 
 import (
-	"fmt"
-
-	"github.com/alvarorichard/Goanime/internal/appflow"
-	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
 )
@@ -19,7 +15,6 @@ func GetUserInput() string {
 			huh.NewOption("Next episode", "n"),
 			huh.NewOption("Previous episode", "p"),
 			huh.NewOption("Select episode", "e"),
-			huh.NewOption("Change anime", "c"),
 			huh.NewOption("Quit", "q"),
 		).
 		Value(&choice)
@@ -30,36 +25,4 @@ func GetUserInput() string {
 	}
 
 	return choice
-}
-
-// ChangeAnime allows the user to search for and select a new anime
-func ChangeAnime() (*models.Anime, []models.Episode, error) {
-	var animeName string
-
-	prompt := huh.NewInput().
-		Title("Change Anime").
-		Description("Enter the name of the anime you want to watch:").
-		Value(&animeName)
-
-	if err := prompt.Run(); err != nil {
-		return nil, nil, err
-	}
-
-	if len(animeName) < 2 {
-		util.Errorf("Anime name too short")
-		return nil, nil, fmt.Errorf("anime name must be at least 2 characters")
-	}
-
-	// Search for the new anime using enhanced search (both AllAnime and AnimeFire)
-	anime := appflow.SearchAnimeEnhanced(animeName)
-	if anime == nil {
-		return nil, nil, fmt.Errorf("failed to find anime")
-	}
-
-	// Fetch anime details
-	appflow.FetchAnimeDetails(anime)
-
-	// Get episodes for the new anime
-	episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-	return anime, episodes, nil
 }
