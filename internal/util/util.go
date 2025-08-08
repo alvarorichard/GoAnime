@@ -41,13 +41,14 @@ var (
 
 // DownloadRequest holds download command parameters
 type DownloadRequest struct {
-	AnimeName    string
-	EpisodeNum   int
-	IsRange      bool
-	StartEpisode int
-	EndEpisode   int
-	Source       string // Added source field for specifying anime source
-	Quality      string // Added quality field for video quality
+	AnimeName     string
+	EpisodeNum    int
+	IsRange       bool
+	StartEpisode  int
+	EndEpisode    int
+	Source        string // Added source field for specifying anime source
+	Quality       string // Added quality field for video quality
+	AllAnimeSmart bool   // Enable AllAnime Smart Range (auto-skip intros/credits and preferred mirrors)
 }
 
 // Global variable to store download request
@@ -65,6 +66,7 @@ func FlagParser() (string, error) {
 	rangeFlag := flag.Bool("r", false, "download episode range (use with -d)")
 	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
 	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
+	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -92,7 +94,7 @@ func FlagParser() (string, error) {
 
 	// Handle download mode
 	if *downloadFlag {
-		return handleDownloadMode(*rangeFlag, *sourceFlag, *qualityFlag)
+		return handleDownloadModeWithSmart(*rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
 	}
 
 	if *debug {
@@ -141,6 +143,11 @@ func TreatingAnimeName(animeName string) string {
 
 // handleDownloadMode processes download command-line arguments
 func handleDownloadMode(isRange bool, source, quality string) (string, error) {
+	return handleDownloadModeWithSmart(isRange, source, quality, false)
+}
+
+// handleDownloadModeWithSmart processes download args with AllAnime Smart option
+func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeSmart bool) (string, error) {
 	args := flag.Args()
 
 	if len(args) == 0 {
@@ -182,12 +189,13 @@ func handleDownloadMode(isRange bool, source, quality string) (string, error) {
 
 		// Store download request
 		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:    animeName,
-			IsRange:      true,
-			StartEpisode: startEp,
-			EndEpisode:   endEp,
-			Source:       source,
-			Quality:      quality,
+			AnimeName:     animeName,
+			IsRange:       true,
+			StartEpisode:  startEp,
+			EndEpisode:    endEp,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
@@ -212,11 +220,12 @@ func handleDownloadMode(isRange bool, source, quality string) (string, error) {
 
 		// Store download request
 		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:  animeName,
-			EpisodeNum: episodeNum,
-			IsRange:    false,
-			Source:     source,
-			Quality:    quality,
+			AnimeName:     animeName,
+			EpisodeNum:    episodeNum,
+			IsRange:       false,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested

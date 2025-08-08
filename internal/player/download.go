@@ -250,21 +250,44 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 }
 
 // getBestQualityURL returns the best available quality for an episode.
-func getBestQualityURL(episodeURL string) (string, error) {
-	sources, err := ExtractVideoSources(episodeURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract video sources: %w", err)
-	}
-	if len(sources) == 0 {
-		return "", fmt.Errorf("no video sources available")
-	}
-	best := sources[0]
-	for _, s := range sources {
-		if s.Quality > best.Quality {
-			best = s
+// For AllAnime episodes (non-HTTP identifiers), resolve via enhanced API using episode.Number and animeID.
+func getBestQualityURL(episode models.Episode, animeURL string) (string, error) {
+	// Non-AllAnime HTTP page URL path
+	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
+		sources, err := ExtractVideoSources(episode.URL)
+		if err != nil {
+			return "", fmt.Errorf("failed to extract video sources: %w", err)
 		}
+		if len(sources) == 0 {
+			return "", fmt.Errorf("no video sources available")
+		}
+		best := sources[0]
+		for _, s := range sources {
+			if s.Quality > best.Quality {
+				best = s
+			}
+		}
+		return best.URL, nil
 	}
-	return best.URL, nil
+
+	// AllAnime path: animeURL is AllAnime ID/URL, episode.Number is episode string
+	isAllAnime := func(u string) bool {
+		return strings.Contains(u, "allanime") || (len(u) < 30 && !strings.Contains(u, "http") && len(u) > 0)
+	}
+	if isAllAnime(animeURL) {
+		anime := &models.Anime{URL: animeURL, Source: "AllAnime", Name: "AllAnime"}
+		// Build minimal episode with proper number and AllAnime context URL
+		ep := &models.Episode{Number: episode.Number, URL: animeURL}
+		if url, err := api.GetEpisodeStreamURLEnhanced(ep, anime, util.GlobalQuality); err == nil && url != "" {
+			return url, nil
+		}
+		if url, err := api.GetEpisodeStreamURL(ep, anime, util.GlobalQuality); err == nil && url != "" {
+			return url, nil
+		}
+		return "", fmt.Errorf("failed to resolve AllAnime stream URL")
+	}
+
+	return "", fmt.Errorf("unsupported episode identifier: %s", episode.URL)
 }
 
 // ExtractVideoSourcesWithPrompt allows the user to choose video quality.
@@ -341,7 +364,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 		// Episode needs downloading
 		episodesToDownload = append(episodesToDownload, episodeNum)
 
-		videoURL, err := getBestQualityURL(episode.URL)
+		videoURL, err := getBestQualityURL(episode, animeURL)
 		if err != nil {
 			util.Logger.Warn("Skipping episode", "episode", episodeNum, "error", err)
 			continue
@@ -390,7 +413,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 					util.Logger.Warn("Episode not found in batch", "episode", epNum)
 					return
 				}
-				videoURL, err := getBestQualityURL(episode.URL)
+				videoURL, err := getBestQualityURL(episode, animeURL)
 				if err != nil {
 					util.Logger.Warn("Skipping episode in batch", "episode", epNum, "error", err)
 					return
@@ -412,7 +435,10 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				if p != nil {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
-				if strings.Contains(videoURL, "blogger.com") {
+				// Use yt-dlp for HLS/DASH playlists and hosters that require it
+				if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") {
+					err = downloadWithYtDlp(videoURL, episodePath)
+				} else if strings.Contains(videoURL, "blogger.com") {
 					err = downloadWithYtDlp(videoURL, episodePath)
 				} else {
 					err = DownloadVideo(videoURL, episodePath, 4, m)

@@ -36,6 +36,24 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		util.Infof("Downloading episodes %d-%d of %s",
 			request.StartEpisode, request.EndEpisode, anime.Name)
 
+		// Exclusive AllAnime Smart Range
+		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
+			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration")
+			if err := api.DownloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
+				util.Errorf("AllAnime Smart Range failed: %v", err)
+				// Fallback to normal enhanced
+				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
+					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
+					// Fallback to legacy downloader
+					episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
+					return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+				}
+				return nil
+			}
+			return nil
+		}
+
 		// Try enhanced download first
 		if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 			util.Infof("Enhanced download failed, falling back to legacy: %v", err)

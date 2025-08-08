@@ -105,6 +105,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d).")
 	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
+	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -121,6 +122,7 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what anime you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
 	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
+	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
 	helpContent.WriteString("\n")
 
 	// Examples section
@@ -138,6 +140,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d --source allanime \"bleach\" 10", "Download from AllAnime specifically")
 	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
+	addExample(&helpContent, "goanime -d -r --source allanime --allanime-smart \"vinland saga\" 1-4", "AllAnime Smart Range for episodes 1-4")
 	helpContent.WriteString("\n")
 
 	// Footer
