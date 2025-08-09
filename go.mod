@@ -31,7 +31,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
-	golang.org/x/exp v0.0.0-20250718183923-645b1fa84792 // indirect
+	golang.org/x/exp v0.0.0-20250808145144-a408d31f581a // indirect
 )
 
 require (
