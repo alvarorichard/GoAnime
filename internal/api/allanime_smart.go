@@ -127,7 +127,11 @@ func smartDownload(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			util.Logger.Warn("Error closing response body", "error", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
@@ -135,7 +139,11 @@ func smartDownload(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); err != nil {
+			util.Logger.Warn("Error closing output file", "error", err)
+		}
+	}()
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return err
 	}

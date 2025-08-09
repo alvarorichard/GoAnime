@@ -141,11 +141,6 @@ func TreatingAnimeName(animeName string) string {
 	return strings.ReplaceAll(loweredName, " ", "-")
 }
 
-// handleDownloadMode processes download command-line arguments
-func handleDownloadMode(isRange bool, source, quality string) (string, error) {
-	return handleDownloadModeWithSmart(isRange, source, quality, false)
-}
-
 // handleDownloadModeWithSmart processes download args with AllAnime Smart option
 func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeSmart bool) (string, error) {
 	args := flag.Args()
