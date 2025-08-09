@@ -52,7 +52,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusMsg:
 		m.status = string(msg)
-		return m, nil
+		// Force a small progress refresh when status changes
+		cmd := m.progress.SetPercent(float64(m.received) / max(1, float64(m.totalBytes)))
+		return m, tea.Batch(cmd)
 
 	case progress.FrameMsg:
 		var cmd tea.Cmd
@@ -113,4 +115,12 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// Provide a small helper for avoiding div by zero
+func max(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

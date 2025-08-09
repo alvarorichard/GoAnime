@@ -2,7 +2,6 @@ package player
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -24,7 +23,6 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
-	"github.com/lrstanley/go-ytdlp"
 	"github.com/pkg/errors"
 )
 
@@ -363,19 +361,40 @@ func downloadAndPlayEpisode(
 			strings.Contains(videoURL, ".m3u8") ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {
-			// Use yt-dlp to download from these sources
-			fmt.Printf("Downloading episode %s with yt-dlp (detected streaming URL)...\n", episodeNumberStr)
+			// Use yt-dlp with progress bar
+			m := &model{
+				progress: progress.New(progress.WithDefaultGradient()),
+				keys: keyMap{
+					quit: key.NewBinding(
+						key.WithKeys("ctrl+c"),
+						key.WithHelp("ctrl+c", "quit"),
+					),
+				},
+			}
+			p := tea.NewProgram(m)
 
-			// Ensure yt-dlp is installed
-			ytdlp.MustInstall(context.Background(), nil)
+			// Estimate/obtain total size for progress percentage
+			httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
+				m.totalBytes = sz
+			} else {
+				// Fallback for HLS
+				m.totalBytes = 500 * 1024 * 1024
+			}
 
-			// Configure downloader
-			dl := ytdlp.New().
-				Output(episodePath) // -o <episodePath>
+			go func() {
+				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
+				if err := downloadWithYtDlp(videoURL, episodePath, m); err != nil {
+					util.Fatal("Failed to download video:", err)
+				}
+				m.mu.Lock()
+				m.done = true
+				m.mu.Unlock()
+				p.Send(statusMsg("Download completed!"))
+			}()
 
-			// Execute download
-			if _, err := dl.Run(context.Background(), videoURL); err != nil {
-				return fmt.Errorf("failed to download video using yt-dlp: %w", err)
+			if _, err := p.Run(); err != nil {
+				util.Fatal("Error running progress bar:", err)
 			}
 
 			// Verify the file was actually downloaded

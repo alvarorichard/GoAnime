@@ -1,6 +1,7 @@
 package player
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -153,13 +154,81 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	return nil
 }
 
-// downloadWithYtDlp downloads a video using yt-dlp.
-func downloadWithYtDlp(url, path string) error {
-	cmd := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", path, url)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("yt-dlp error: %v\n%s", err, string(output))
+// downloadWithYtDlp downloads a video using yt-dlp and updates the progress model if provided.
+func downloadWithYtDlp(url, path string, m *model) error {
+	// Build yt-dlp command with newline progress and no colors
+	args := []string{"--newline", "--no-color", "-f", "best", "-o", path, url}
+	cmd := exec.Command("yt-dlp", args...)
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("yt-dlp stderr pipe: %w", err)
 	}
-	return nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("yt-dlp stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		// Fallback to original behavior to not break flow
+		out, e := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", path, url).CombinedOutput()
+		if e != nil {
+			return fmt.Errorf("yt-dlp error: %v\n%s", e, string(out))
+		}
+		return nil
+	}
+
+	// Estimate per-episode total for progress accounting
+	var epTotal int64
+	var lastBytes int64
+	if m != nil {
+		client := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+		if sz, e := getContentLength(url, client); e == nil && sz > 0 {
+			epTotal = sz
+		} else {
+			// Fallback estimate for HLS
+			epTotal = 500 * 1024 * 1024
+		}
+	}
+
+	reader := bufio.NewScanner(io.MultiReader(stdout, stderr))
+	// Increase buffer in case yt-dlp outputs long lines
+	buf := make([]byte, 0, 1024*64)
+	reader.Buffer(buf, 1024*1024)
+	percentRe := regexp.MustCompile(`(?i)(\d{1,3}(?:\.\d+)?)\s*%`)
+	for reader.Scan() {
+		line := reader.Text()
+		// Parse percent and update shared progress
+		if m != nil && epTotal > 0 {
+			if pm := percentRe.FindStringSubmatch(line); len(pm) > 1 {
+				pStr := pm[1]
+				pVal, _ := strconv.ParseFloat(pStr, 64)
+				if pVal < 0 {
+					pVal = 0
+				}
+				if pVal > 100 {
+					pVal = 100
+				}
+				current := int64(float64(epTotal) * (pVal / 100.0))
+				delta := current - lastBytes
+				if delta > 0 {
+					m.mu.Lock()
+					m.received += delta
+					m.mu.Unlock()
+					lastBytes = current
+				}
+			}
+		}
+	}
+	// Wait for command completion
+	err = cmd.Wait()
+	if m != nil && epTotal > 0 && lastBytes < epTotal {
+		// Ensure completion accounts for full episode size
+		m.mu.Lock()
+		m.received += (epTotal - lastBytes)
+		m.mu.Unlock()
+	}
+	return err
 }
 
 // ExtractVideoSources returns the available video sources for an episode.
@@ -437,9 +506,9 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				}
 				// Use yt-dlp for HLS/DASH playlists and hosters that require it
 				if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") {
-					err = downloadWithYtDlp(videoURL, episodePath)
+					err = downloadWithYtDlp(videoURL, episodePath, m)
 				} else if strings.Contains(videoURL, "blogger.com") {
-					err = downloadWithYtDlp(videoURL, episodePath)
+					err = downloadWithYtDlp(videoURL, episodePath, m)
 				} else {
 					err = DownloadVideo(videoURL, episodePath, 4, m)
 				}
