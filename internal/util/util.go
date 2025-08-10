@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/version"
-	"github.com/manifoldco/promptui"
+	"github.com/charmbracelet/huh"
 )
 
 var (
@@ -121,16 +121,25 @@ func FlagParser() (string, error) {
 
 // getUserInput prompts the user for input the anime name and returns it
 func getUserInput(label string) (string, error) {
-	prompt := promptui.Prompt{
-		Label: label,
-	}
+	var animeName string
 
-	animeName, err := prompt.Run()
-	if err != nil {
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title(label).
+				Description("Type the anime title and press Enter").
+				Value(&animeName).
+				Validate(func(v string) error {
+					if len(strings.TrimSpace(v)) < minNameLength {
+						return fmt.Errorf("name must have at least %d characters", minNameLength)
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := form.Run(); err != nil {
 		return "", err
-	}
-	if len(animeName) < minNameLength {
-		return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 	}
 	return animeName, nil
 }

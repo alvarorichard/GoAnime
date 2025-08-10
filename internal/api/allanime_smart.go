@@ -59,7 +59,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 		if stat, err := os.Stat(filePath); err == nil && stat.Size() > 1024 {
 			util.Infof("Episode %d already exists, skipping", i)
 			// Even if file exists, (re)write sidecar if needed
-			_ = writeAniSkipSidecar(filePath, &ep)
+			_ = WriteAniSkipSidecar(filePath, &ep)
 			continue
 		}
 
@@ -83,7 +83,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 		}
 
 		// Write AniSkip sidecar markers if available
-		if err := writeAniSkipSidecar(filePath, &ep); err != nil {
+		if err := WriteAniSkipSidecar(filePath, &ep); err != nil {
 			util.Debugf("Failed to write AniSkip sidecar for episode %d: %v", i, err)
 		}
 
@@ -185,6 +185,13 @@ func writeAniSkipSidecar(videoPath string, ep *models.Episode) error {
 	b, _ := json.MarshalIndent(payload, "", "  ")
 	sidecar := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".skips.json"
 	return os.WriteFile(sidecar, b, 0644)
+}
+
+// WriteAniSkipSidecar is an exported wrapper to write AniSkip sidecar files.
+// It delegates to the internal writeAniSkipSidecar and exists to allow other
+// packages (e.g., player) to generate the sidecar after downloads.
+func WriteAniSkipSidecar(videoPath string, ep *models.Episode) error {
+	return writeAniSkipSidecar(videoPath, ep)
 }
 
 func smartOutputDir(anime *models.Anime) (string, error) {

@@ -551,20 +551,190 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	return askAndPlayDownloadedEpisode(episodes, animeURL, startNum, endNum)
 }
 
+// HandleBatchDownloadRange performs batch download of episodes using a provided range.
+// It mirrors HandleBatchDownload but skips prompting for the range and enables optional
+// AniSkip sidecar generation when AllAnime Smart is enabled.
+func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startNum, endNum int) error {
+	start := time.Now()
+	if util.IsDebug {
+		util.Logger.Debug("HandleBatchDownloadRange started", "animeURL", animeURL, "start", startNum, "end", endNum)
+	}
+
+	if startNum < 1 || endNum < startNum {
+		return fmt.Errorf("invalid episode range: %d-%d", startNum, endNum)
+	}
+
+	var (
+		m                  *model
+		p                  *tea.Program
+		totalBytes         int64
+		httpClient         = &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+		episodesToDownload []int
+	)
+
+	// First pass: check which episodes need downloading and calculate total bytes
+	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
+		episode, found := findEpisode(episodes, episodeNum)
+		if !found {
+			util.Logger.Warn("Episode not found", "episode", episodeNum)
+			continue
+		}
+
+		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		if err != nil {
+			util.Logger.Error("Episode path error", "episode", episodeNum, "error", err)
+			continue
+		}
+		if fileExists(episodePath) {
+			util.Logger.Info("Episode already exists", "episode", episodeNum)
+			continue
+		}
+
+		episodesToDownload = append(episodesToDownload, episodeNum)
+
+		videoURL, err := getBestQualityURL(episode, animeURL)
+		if err != nil {
+			util.Logger.Warn("Skipping episode", "episode", episodeNum, "error", err)
+			continue
+		}
+		if sz, err := getContentLength(videoURL, httpClient); err == nil {
+			totalBytes += sz
+		}
+	}
+
+	if len(episodesToDownload) == 0 {
+		return handleExistingEpisodes(episodes, animeURL, startNum, endNum)
+	}
+
+	fmt.Printf("Found %d episode(s) to download...\n", len(episodesToDownload))
+
+	if totalBytes > 0 {
+		m = &model{
+			progress:   progress.New(progress.WithDefaultGradient()),
+			keys:       keyMap{quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))},
+			totalBytes: totalBytes,
+		}
+		p = tea.NewProgram(m)
+	}
+
+	downloadErrChan := make(chan error)
+	go func() {
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 4)
+		for _, epNum := range episodesToDownload {
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(epNum int) {
+				defer func() { <-sem; wg.Done() }()
+				episode, found := findEpisode(episodes, epNum)
+				if !found {
+					util.Logger.Warn("Episode not found in batch", "episode", epNum)
+					return
+				}
+
+				videoURL, err := getBestQualityURL(episode, animeURL)
+				if err != nil {
+					util.Logger.Warn("Skipping episode in batch", "episode", epNum, "error", err)
+					return
+				}
+				episodePath, err := createEpisodePath(animeURL, epNum)
+				if err != nil {
+					util.Logger.Error("Episode path error", "episode", epNum, "error", err)
+					return
+				}
+
+				if fileExists(episodePath) {
+					if p != nil {
+						p.Send(statusMsg(fmt.Sprintf("Episode %d already exists, skipping...", epNum)))
+					}
+					return
+				}
+
+				if p != nil {
+					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
+				}
+
+				var dlErr error
+				if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
+					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+				} else {
+					dlErr = DownloadVideo(videoURL, episodePath, 4, m)
+				}
+				if dlErr != nil {
+					util.Logger.Error("Failed episode download", "episode", epNum, "error", dlErr)
+					return
+				}
+
+				// Optional: write AniSkip sidecar when AllAnime Smart is enabled
+				if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.AllAnimeSmart {
+					// Basic heuristic for AllAnime
+					if strings.Contains(strings.ToLower(animeURL), "allanime") || (len(animeURL) < 30 && !strings.Contains(animeURL, "http")) {
+						_ = api.WriteAniSkipSidecar(episodePath, &episode)
+					}
+				}
+			}(epNum)
+		}
+		wg.Wait()
+
+		if m != nil {
+			if p != nil {
+				p.Send(statusMsg("All downloads completed!"))
+			}
+			time.Sleep(500 * time.Millisecond)
+			m.mu.Lock()
+			m.done = true
+			m.mu.Unlock()
+		}
+		downloadErrChan <- nil
+	}()
+
+	if p != nil {
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("progress UI error: %w", err)
+		}
+	}
+	if err := <-downloadErrChan; err != nil {
+		return err
+	}
+	fmt.Println("\nAll episodes downloaded successfully!")
+	if util.IsDebug {
+		util.Logger.Debug("HandleBatchDownloadRange completed", "animeURL", animeURL, "duration", time.Since(start))
+	}
+	return nil
+}
+
 // getEpisodeRange asks the user for the episode range for download.
 func getEpisodeRange() (startNum, endNum int, err error) {
-	prompt := promptui.Prompt{Label: "Enter start episode number"}
-	startStr, err := prompt.Run()
-	if err != nil {
+	var startStr, endStr string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Enter start episode number").
+				Value(&startStr).
+				Validate(func(v string) error {
+					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
+						return fmt.Errorf("invalid number")
+					}
+					return nil
+				}),
+			huh.NewInput().
+				Title("Enter end episode number").
+				Value(&endStr).
+				Validate(func(v string) error {
+					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
+						return fmt.Errorf("invalid number")
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := form.Run(); err != nil {
 		return 0, 0, err
 	}
-	prompt.Label = "Enter end episode number"
-	endStr, err := prompt.Run()
-	if err != nil {
-		return 0, 0, err
-	}
-	startNum, _ = strconv.Atoi(startStr)
-	endNum, _ = strconv.Atoi(endStr)
+	startNum, _ = strconv.Atoi(strings.TrimSpace(startStr))
+	endNum, _ = strconv.Atoi(strings.TrimSpace(endStr))
 	if startNum > endNum {
 		return 0, 0, fmt.Errorf("start cannot be greater than end")
 	}

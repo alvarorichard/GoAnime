@@ -7,6 +7,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
+	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -38,7 +39,18 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		// Exclusive AllAnime Smart Range
 		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
-			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration")
+			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
+			// Use player batch downloader with provided range to get consistent progress UI
+			eps, err := api.GetAnimeEpisodesEnhanced(anime)
+			if err == nil && len(eps) > 0 {
+				if err := player.HandleBatchDownloadRange(eps, anime.URL, request.StartEpisode, request.EndEpisode); err == nil {
+					return nil
+				}
+				// Fall through to API-based smart range if UI path fails
+				util.Infof("Progress UI path failed, falling back to API smart range: %v", err)
+			} else if err != nil {
+				util.Infof("Enhanced episodes fetch failed for progress path: %v", err)
+			}
 			if err := api.DownloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 				util.Errorf("AllAnime Smart Range failed: %v", err)
 				// Fallback to normal enhanced
