@@ -19,13 +19,9 @@ import (
 // DownloadAllAnimeSmartRange downloads a range of episodes exclusively for AllAnime.
 // It prioritizes high-quality mirrors and writes AniSkip sidecar files for intro/outro skipping.
 func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality string) error {
-	// Validate source
-	if !isAllAnimeSourceAPI(anime) {
-		return fmt.Errorf("AllAnime Smart Range is only available for AllAnime sources")
-	}
-
-	if quality == "" {
-		quality = "best"
+	// Validate
+	if err := validateSmartRangeInputs(anime, startEp, endEp, &quality); err != nil {
+		return err
 	}
 
 	util.Debug("AllAnime Smart Range start",
@@ -33,7 +29,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 		"range", fmt.Sprintf("%d-%d", startEp, endEp),
 		"quality", quality)
 
-	// Fetch episodes using enhanced path (this enables AniSkip enrichment when MAL ID is available)
+	// Fetch episodes using enhanced path (enables AniSkip enrichment)
 	episodes, err := GetAnimeEpisodesEnhanced(anime)
 	if err != nil {
 		return fmt.Errorf("failed to get episodes: %w", err)
@@ -56,40 +52,28 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 		ep := episodes[i-1]
 		filePath := filepath.Join(outDir, fmt.Sprintf("%d.mp4", i))
 
-		if stat, err := os.Stat(filePath); err == nil && stat.Size() > 1024 {
+		if alreadyDownloaded(filePath) {
 			util.Infof("Episode %d already exists, skipping", i)
-			// Even if file exists, (re)write sidecar if needed
-			_ = WriteAniSkipSidecar(filePath, &ep)
+			_ = WriteAniSkipSidecar(filePath, &ep) // refresh sidecar if needed
 			continue
 		}
 
-		util.Infof("Resolving stream URL for episode %d...", i)
-		streamURL, err := GetEpisodeStreamURLEnhanced(&ep, anime, quality)
-		if err != nil || streamURL == "" {
-			// Fallback to non-enhanced AllAnime-aware function
-			streamURL, err = GetEpisodeStreamURL(&ep, anime, quality)
-			if err != nil || streamURL == "" {
-				util.Errorf("Failed to get stream URL for episode %d: %v", i, err)
-				continue
-			}
+		streamURL, err := resolveStreamURLForEpisode(&ep, anime, quality)
+		if err != nil {
+			util.Errorf("Failed to get stream URL for episode %d: %v", i, err)
+			continue
 		}
 
-		util.Debug("Stream URL resolved", "episode", i, "len", len(streamURL))
-
-		// Prefer yt-dlp for HLS and known hosters used by AllAnime
 		if err := smartDownload(streamURL, filePath); err != nil {
 			util.Errorf("Download failed for episode %d: %v", i, err)
 			continue
 		}
 
-		// Write AniSkip sidecar markers if available
 		if err := WriteAniSkipSidecar(filePath, &ep); err != nil {
 			util.Debugf("Failed to write AniSkip sidecar for episode %d: %v", i, err)
 		}
-
 		util.Infof("Episode %d downloaded successfully", i)
 	}
-
 	return nil
 }
 
@@ -100,13 +84,8 @@ func smartDownload(url, dest string) error {
 		return err
 	}
 
-	// Use yt-dlp for most AllAnime links (m3u8, wixmp, blogger, sharepoint, etc.)
-	if strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "master.m3u8") ||
-		strings.Contains(url, "wixmp.com") || strings.Contains(url, "repackager.wixmp.com") ||
-		strings.Contains(url, "blogger.com") ||
-		strings.Contains(url, "sharepoint.com") ||
-		strings.Contains(url, "allanime") || strings.Contains(url, "allmanga") {
+	// Use yt-dlp for HLS/known hosters
+	if shouldUseYtDlp(url) {
 		ctx := context.Background()
 		ytdlp.MustInstall(ctx, nil)
 		dl := ytdlp.New().Output(dest)
@@ -210,4 +189,57 @@ func sanitizeSmart(name string) string {
 		name = strings.ReplaceAll(name, ch, "_")
 	}
 	return name
+}
+
+// Helpers to reduce complexity
+
+// validateSmartRangeInputs ensures correct source and quality defaulting
+func validateSmartRangeInputs(anime *models.Anime, startEp, endEp int, quality *string) error {
+	if !isAllAnimeSourceAPI(anime) {
+		return fmt.Errorf("AllAnime Smart Range is only available for AllAnime sources")
+	}
+	if quality != nil && *quality == "" {
+		*quality = "best"
+	}
+	if startEp < 1 || endEp < startEp {
+		return fmt.Errorf("invalid range %d-%d", startEp, endEp)
+	}
+	return nil
+}
+
+// shouldUseYtDlp decides if yt-dlp is preferred for a given URL
+func shouldUseYtDlp(u string) bool {
+	l := strings.ToLower(u)
+	return strings.Contains(l, ".m3u8") ||
+		strings.Contains(l, "master.m3u8") ||
+		strings.Contains(l, "wixmp.com") || strings.Contains(l, "repackager.wixmp.com") ||
+		strings.Contains(l, "blogger.com") ||
+		strings.Contains(l, "sharepoint.com") ||
+		strings.Contains(l, "allanime") || strings.Contains(l, "allmanga")
+}
+
+// alreadyDownloaded checks if the file exists and seems valid (>1KB)
+func alreadyDownloaded(path string) bool {
+	if st, err := os.Stat(path); err == nil {
+		return st.Size() > 1024
+	}
+	return false
+}
+
+// resolveStreamURLForEpisode resolves the streaming URL with enhanced fallback
+func resolveStreamURLForEpisode(ep *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if ep == nil || anime == nil {
+		return "", fmt.Errorf("nil episode or anime")
+	}
+	url, err := GetEpisodeStreamURLEnhanced(ep, anime, quality)
+	if err == nil && url != "" {
+		util.Debug("Stream URL resolved (enhanced)", "len", len(url))
+		return url, nil
+	}
+	url, err = GetEpisodeStreamURL(ep, anime, quality)
+	if err != nil || url == "" {
+		return "", fmt.Errorf("fallback stream URL resolution failed: %w", err)
+	}
+	util.Debug("Stream URL resolved (fallback)", "len", len(url))
+	return url, nil
 }
