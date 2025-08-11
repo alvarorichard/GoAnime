@@ -19,7 +19,7 @@ require (
 require (
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/log v0.4.2
-	github.com/lrstanley/go-ytdlp v1.2.0
+	github.com/lrstanley/go-ytdlp v1.2.1
 )
 
 require (

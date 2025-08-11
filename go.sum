@@ -98,6 +98,8 @@ github.com/ktr0731/go-fuzzyfinder v0.9.0 h1:JV8S118RABzRl3Lh/RsPhXReJWc2q0rbuipz
 github.com/ktr0731/go-fuzzyfinder v0.9.0/go.mod h1:uybx+5PZFCgMCSDHJDQ9M3nNKx/vccPmGffsXPn2ad8=
 github.com/lrstanley/go-ytdlp v1.2.0 h1:2L5CiDRLEVPncIaZPMdzlQCg2CJn9YssTUH5vaEmblM=
 github.com/lrstanley/go-ytdlp v1.2.0/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
+github.com/lrstanley/go-ytdlp v1.2.1 h1:Y4Vsnwt9HPn8gVv8BxQNDYa/1Cyf/1+T7Xy8CZzI83U=
+github.com/lrstanley/go-ytdlp v1.2.1/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/manifoldco/promptui v0.9.0 h1:3V4HzJk1TtXW1MTZMP7mdlwbBpIinw3HztaIlYthEiA=
