@@ -261,7 +261,7 @@ func HandleDownloadAndPlay(
 	case 2:
 		// Download episodes in a range
 		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-			util.Fatal("Failed to download episodes:", err)
+			return err
 		}
 	default:
 		// Play online - determine the best approach based on URL type
@@ -472,8 +472,10 @@ func downloadAndPlayEpisode(
 		if err := playVideo(episodePath, episodes, selectedEpisodeNum, animeMalID, updater); err != nil {
 			return err
 		}
+		return nil
 	}
-	return nil
+	// User chose not to watch; terminate flow cleanly
+	return ErrUserQuit
 }
 
 // askForDownload presents a prompt for the user to choose a download option.

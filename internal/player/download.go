@@ -700,7 +700,8 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 	if util.IsDebug {
 		util.Logger.Debug("HandleBatchDownloadRange completed", "animeURL", animeURL, "duration", time.Since(start))
 	}
-	return nil
+	// For programmatic range downloads, exit without further prompts
+	return ErrUserQuit
 }
 
 // getEpisodeRange asks the user for the episode range for download.
@@ -826,7 +827,7 @@ func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum
 
 	if selectedEpisode == "exit" {
 		fmt.Println("No episode selected.")
-		return nil
+		return ErrUserQuit
 	}
 
 	// Find and play the selected episode
@@ -908,7 +909,7 @@ func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, sta
 
 	if selectedEpisode == "exit" {
 		fmt.Println("No episode selected.")
-		return nil
+		return ErrUserQuit
 	}
 
 	// Find and play the selected episode
