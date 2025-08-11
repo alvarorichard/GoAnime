@@ -184,7 +184,8 @@ func writeAniSkipSidecar(videoPath string, ep *models.Episode) error {
 
 	b, _ := json.MarshalIndent(payload, "", "  ")
 	sidecar := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".skips.json"
-	return os.WriteFile(sidecar, b, 0644)
+	// Restrictive permissions: owner read/write only
+	return os.WriteFile(sidecar, b, 0600)
 }
 
 // WriteAniSkipSidecar is an exported wrapper to write AniSkip sidecar files.
