@@ -47,7 +47,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 	if err != nil {
 		return err
 	}
-	if mkErr := os.MkdirAll(outDir, 0755); mkErr != nil {
+	if mkErr := os.MkdirAll(outDir, 0700); mkErr != nil {
 		return fmt.Errorf("failed to create output directory: %w", mkErr)
 	}
 
@@ -96,7 +96,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 // smartDownload chooses the best method to download AllAnime links (HLS/hosters)
 func smartDownload(url, dest string) error {
 	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 		return err
 	}
 

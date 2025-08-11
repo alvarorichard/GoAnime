@@ -67,7 +67,7 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -96,7 +96,7 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -109,7 +109,6 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			util.Warnf("Episode %d not found, skipping", epNum)
 			continue
 		}
-
 		episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
 		if d.fileExists(episodePath) {
 			existingEpisodes = append(existingEpisodes, epNum)
@@ -117,7 +116,6 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			episodesToDownload = append(episodesToDownload, epNum)
 		}
 	}
-
 	// Handle case where all episodes already exist
 	if len(episodesToDownload) == 0 {
 		fmt.Printf("All episodes in range %d-%d already exist!\n", startEp, endEp)

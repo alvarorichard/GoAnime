@@ -760,7 +760,7 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 	}
 	safeAnimeName := strings.ReplaceAll(DownloadFolderFormatter(animeURL), " ", "_")
 	downloadDir := filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
-	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+	if err := os.MkdirAll(downloadDir, 0700); err != nil {
 		return "", err
 	}
 	return filepath.Join(downloadDir, fmt.Sprintf("%d.mp4", epNum)), nil

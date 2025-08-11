@@ -71,7 +71,7 @@ func StartVideo(link string, args []string) (string, error) {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
 		tmpDir := "/tmp"
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		if err := os.MkdirAll(tmpDir, 0700); err != nil {
 			return "", fmt.Errorf("failed to create tmp directory: %w", err)
 		}
 		socketPath = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
@@ -348,7 +348,7 @@ func downloadAndPlayEpisode(
 	episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
+		if err := os.MkdirAll(downloadPath, 0700); err != nil {
 			util.Fatal("Failed to create download directory:", err)
 		}
 	}
