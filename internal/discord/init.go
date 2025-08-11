@@ -37,7 +37,10 @@ func (m *Manager) Initialize() error {
 	m.initTime = time.Now()
 
 	if err := client.Login(m.clientID); err != nil {
-		util.Errorf("Failed to initialize Discord Rich Presence: %v", err)
+		// Discord is optional; only log when debug is enabled
+		if util.IsDebug {
+			util.Debugf("Discord Rich Presence not available: %v", err)
+		}
 		m.isEnabled = false
 		return err
 	}
