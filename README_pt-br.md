@@ -21,12 +21,13 @@
 
 # GoAnime
 
-GoAnime é uma interface de linha de comando (CLI) simples, desenvolvida em Go, que permite aos usuários procurar um anime e reproduzir ou baixar episódios diretamente no MPV. Ele coleta dados de sites para fornecer uma seleção de animes e episódios ao usuário, com um foco e objetivo especial em oferecer animes que são legendados e dublados em português.
+GoAnime é uma interface de usuário baseada em texto (TUI) simples, desenvolvida em Go, que permite aos usuários procurar animes e reproduzir ou baixar episódios diretamente no mpv. Ele coleta dados de sites para oferecer uma seleção de animes e episódios, com suporte a conteúdo legendado e dublado em inglês e português.
 
 ## Recursos
 
 - Buscar anime por nome
 - Navegar pelos episódios
+- Suporte a conteúdo legendado e dublado em inglês e português
 - Pular introdução do anime
 - Reproduzir online com seleção de qualidade
 - Baixar episódios únicos
