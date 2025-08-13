@@ -41,8 +41,11 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 			util.Logger.Warn("Error closing response body", "error", err)
 		}
 	}()
-	partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), part)
-	partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+	partFilePath, err := safePartPath(destPath, part)
+	if err != nil {
+		return err
+	}
+	// #nosec G304: path validated by safePartPath to remain within destination directory
 	file, err := os.Create(partFilePath)
 	if err != nil {
 		return err
@@ -75,7 +78,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 
 // combineParts combines downloaded parts into a single final file.
 func combineParts(destPath string, numThreads int) error {
-	outFile, err := os.Create(destPath)
+	outFile, err := os.Create(filepath.Clean(destPath))
 	if err != nil {
 		return err
 	}
@@ -85,8 +88,11 @@ func combineParts(destPath string, numThreads int) error {
 		}
 	}()
 	for i := 0; i < numThreads; i++ {
-		partFileName := fmt.Sprintf("%s.part%d", filepath.Base(destPath), i)
-		partFilePath := filepath.Join(filepath.Dir(destPath), partFileName)
+		partFilePath, err := safePartPath(destPath, i)
+		if err != nil {
+			return err
+		}
+		// #nosec G304: path validated by safePartPath to remain within destination directory
 		partFile, err := os.Open(partFilePath)
 		if err != nil {
 			return err
@@ -105,6 +111,30 @@ func combineParts(destPath string, numThreads int) error {
 		}
 	}
 	return nil
+}
+
+// safePartPath builds the part file path and ensures it stays within the destination directory
+func safePartPath(destPath string, part int) (string, error) {
+	dir := filepath.Clean(filepath.Dir(destPath))
+	base := filepath.Base(destPath)
+	name := fmt.Sprintf("%s.part%d", base, part)
+	joined := filepath.Join(dir, name)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	absFile, err := filepath.Abs(joined)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absDir, absFile)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid part path: %s", joined)
+	}
+	return joined, nil
 }
 
 // DownloadVideo downloads a video using multiple threads.
