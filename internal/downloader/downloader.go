@@ -305,7 +305,12 @@ func (d *EpisodeDownloader) downloadEpisodeWithSharedProgress(videoURL, destPath
 	}
 
 	// Create destination file
-	out, err := os.Create(destPath)
+	safeDest, err := d.sanitizeDestPath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+	// #nosec G304: dest path validated by sanitizeDestPath to remain within configured OutputDir
+	out, err := os.Create(safeDest)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -369,6 +374,31 @@ func (d *EpisodeDownloader) findEpisodeByNumber(num int) (models.Episode, bool) 
 func (d *EpisodeDownloader) fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
+}
+
+// sanitizeDestPath ensures the destination path stays within the configured OutputDir
+func (d *EpisodeDownloader) sanitizeDestPath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("empty destination path")
+	}
+	cleaned := filepath.Clean(p)
+	outDir := filepath.Clean(d.config.OutputDir)
+	absDir, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", err
+	}
+	absFile, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absDir, absFile)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("destination escapes output directory: %s", cleaned)
+	}
+	return absFile, nil
 }
 
 func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
@@ -635,8 +665,16 @@ func (d *EpisodeDownloader) downloadHTTPWithProgress(videoURL, destPath string, 
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	// Create destination file
-	out, err := os.Create(destPath)
+	// Ensure directory exists and validate destination path
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	safeDest, err := d.sanitizeDestPath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+	// #nosec G304: dest path validated by sanitizeDestPath to remain within configured OutputDir
+	out, err := os.Create(safeDest)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
