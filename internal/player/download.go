@@ -156,8 +156,24 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 
 // downloadWithYtDlp downloads a video using yt-dlp and updates the progress model if provided.
 func downloadWithYtDlp(url, path string, m *model) error {
+	// Sanitize inputs
+	safeURL, err := sanitizeMediaTarget(url)
+	if err != nil {
+		return fmt.Errorf("invalid download URL: %w", err)
+	}
+	safePath, err := sanitizeOutputPath(path)
+	if err != nil {
+		return fmt.Errorf("invalid output path: %w", err)
+	}
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(safePath), 0o700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
 	// Build yt-dlp command with newline progress and no colors
-	args := []string{"--newline", "--no-color", "-f", "best", "-o", path, url}
+	args := []string{"--newline", "--no-color", "-f", "best", "-o", safePath, safeURL}
+	// #nosec G204: arguments are fixed/allowlisted and inputs are sanitized above
 	cmd := exec.Command("yt-dlp", args...)
 
 	stderr, err := cmd.StderrPipe()
@@ -171,7 +187,8 @@ func downloadWithYtDlp(url, path string, m *model) error {
 
 	if err := cmd.Start(); err != nil {
 		// Fallback to original behavior to not break flow
-		out, e := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", path, url).CombinedOutput()
+		// #nosec G204: arguments are fixed and inputs sanitized
+		out, e := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", safePath, safeURL).CombinedOutput()
 		if e != nil {
 			return fmt.Errorf("yt-dlp error: %v\n%s", e, string(out))
 		}
