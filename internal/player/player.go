@@ -27,6 +27,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+// lastAnimeURL stores the most recent anime URL/ID to support navigation when no updater is present
+var lastAnimeURL string
+
 const (
 	padding = 2
 )
@@ -332,6 +335,8 @@ func HandleDownloadAndPlay(
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
+	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
+	lastAnimeURL = animeURL
 	downloadOption := askForDownload()
 	switch downloadOption {
 	case 1:

@@ -79,8 +79,13 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 
 // smartDownload chooses the best method to download AllAnime links (HLS/hosters)
 func smartDownload(url, dest string) error {
+	// Sanitize and validate destination path under the downloads root
+	safeDest, err := sanitizeSmartDest(dest)
+	if err != nil {
+		return err
+	}
 	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(safeDest), 0700); err != nil {
 		return err
 	}
 
@@ -88,14 +93,14 @@ func smartDownload(url, dest string) error {
 	if shouldUseYtDlp(url) {
 		ctx := context.Background()
 		ytdlp.MustInstall(ctx, nil)
-		dl := ytdlp.New().Output(dest)
+		dl := ytdlp.New().Output(safeDest)
 		_, err := dl.Run(ctx, url)
 		if err != nil {
 			return fmt.Errorf("yt-dlp failed: %w", err)
 		}
 		// Verify
-		if st, err := os.Stat(dest); err != nil || st.Size() < 1024 {
-			return fmt.Errorf("download verification failed for %s", dest)
+		if st, err := os.Stat(safeDest); err != nil || st.Size() < 1024 {
+			return fmt.Errorf("download verification failed for %s", safeDest)
 		}
 		return nil
 	}
@@ -114,7 +119,8 @@ func smartDownload(url, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
-	out, err := os.Create(dest)
+	// #nosec G304: path validated by sanitizeSmartDest to remain within the GoAnime downloads root
+	out, err := os.Create(safeDest)
 	if err != nil {
 		return err
 	}
@@ -189,6 +195,38 @@ func sanitizeSmart(name string) string {
 		name = strings.ReplaceAll(name, ch, "_")
 	}
 	return name
+}
+
+// sanitizeSmartDest ensures destination path is within the GoAnime downloads root under the user's home
+func sanitizeSmartDest(p string) (string, error) {
+	if strings.TrimSpace(p) == "" {
+		return "", fmt.Errorf("empty destination path")
+	}
+	if strings.HasPrefix(p, "-") || strings.ContainsAny(p, "\x00\n\r") {
+		return "", fmt.Errorf("invalid destination path")
+	}
+	cleaned := filepath.Clean(p)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(home, ".local", "goanime", "downloads", "anime")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absFile, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absRoot, absFile)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("destination escapes downloads root: %s", cleaned)
+	}
+	return absFile, nil
 }
 
 // Helpers to reduce complexity

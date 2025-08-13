@@ -259,6 +259,40 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 // GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
 func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
+	// If we don't have anime context, decide safely how to resolve
+	if anime == nil {
+		// If it's a normal HTTP URL, use legacy extraction
+		if strings.Contains(episode.URL, "http") {
+			if util.IsDebug {
+				util.Debugf("No anime context; using legacy extraction for HTTP URL, episode %s", episode.Number)
+			}
+			return GetVideoURLForEpisode(episode.URL)
+		}
+
+		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
+		if isLikelyAllAnimeID(episode.URL) {
+			if util.IsDebug {
+				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
+			}
+			tmpAnime := &models.Anime{
+				URL:    episode.URL,
+				Source: "AllAnime",
+				Name:   "[AllAnime]",
+			}
+			// Ensure episode number is set
+			if episode.Number == "" && episode.Num > 0 {
+				episode.Number = fmt.Sprintf("%d", episode.Num)
+			}
+			if episode.Number == "" {
+				episode.Number = "1"
+			}
+			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
+		}
+
+		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
+		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
+	}
+
 	// Try AllAnime enhanced navigation first if applicable
 	if isAllAnimeSourcePlayer(anime) {
 		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
@@ -283,6 +317,9 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 
 // Helper function to check if anime is from AllAnime source (player module)
 func isAllAnimeSourcePlayer(anime *models.Anime) bool {
+	if anime == nil {
+		return false
+	}
 	if anime.Source == "AllAnime" {
 		return true
 	}
@@ -297,6 +334,32 @@ func isAllAnimeSourcePlayer(anime *models.Anime) bool {
 		return true
 	}
 
+	return false
+}
+
+// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
+func isNumericString(s string) bool {
+	if s == "" {
+		return false
+	}
+	re := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+	return re.MatchString(s)
+}
+
+// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
+func isLikelyAllAnimeID(s string) bool {
+	if strings.Contains(s, "http") {
+		return false
+	}
+	if isNumericString(s) {
+		return false
+	}
+	// Typical AllAnime IDs are short-ish alphanumeric strings
+	if len(s) >= 6 && len(s) < 30 {
+		// Must contain at least one letter
+		re := regexp.MustCompile(`[A-Za-z]`)
+		return re.MatchString(s)
+	}
 	return false
 }
 

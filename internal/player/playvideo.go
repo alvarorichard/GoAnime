@@ -674,6 +674,15 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 		anime = updater.GetAnime()
 	}
 
+	// If no updater/anime context, try to synthesize from lastAnimeURL
+	if anime == nil && lastAnimeURL != "" {
+		guessedSource := ""
+		if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
+			guessedSource = "AllAnime"
+		}
+		anime = &models.Anime{URL: lastAnimeURL, Source: guessedSource}
+	}
+
 	targetURL, err := GetVideoURLForEpisodeEnhanced(&target, anime)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
