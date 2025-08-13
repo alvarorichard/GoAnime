@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime
 
-go 1.24
+go 1.25
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
@@ -31,7 +31,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
-	golang.org/x/exp v0.0.0-20250811191247-51f88131bc50 // indirect
+	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6 // indirect
 )
 
 require (
