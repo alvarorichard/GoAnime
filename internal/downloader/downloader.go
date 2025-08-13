@@ -750,7 +750,7 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 	program.Send(statusMsg("Starting yt-dlp download (using go-ytdlp library)..."))
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -841,7 +841,7 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 
 func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
