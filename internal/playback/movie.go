@@ -31,7 +31,27 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 
 		videoURL, err := player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
 		if err != nil {
-			log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
+			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(err))
+			// Try to change anime immediately instead of exiting
+			newAnime, newEpisodes, chErr := ChangeAnimeLocal()
+			if chErr != nil {
+				log.Printf("Error changing anime: %v", chErr)
+				// If change fails, ask user on next loop iteration
+				continue
+			}
+			anime = newAnime
+			episodes = newEpisodes
+
+			// If new anime is a series, delegate handling and exit movie loop
+			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
+			if series {
+				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
+				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
+				break
+			}
+			// Otherwise continue loop to play the new movie
+			fmt.Printf("Switched to movie: %s\n", anime.Name)
+			continue
 		}
 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
@@ -70,7 +90,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			episodes = newEpisodes
 
 			// Check if new anime is a series
-			series, totalEpisodes := CheckIfSeries(anime.URL)
+			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
@@ -106,7 +126,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			episodes = newEpisodes
 
 			// Check if new anime is a series
-			series, totalEpisodes := CheckIfSeries(anime.URL)
+			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)

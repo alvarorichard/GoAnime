@@ -21,7 +21,8 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
 	if err != nil {
-		log.Fatalln(util.ErrorHandler(err))
+		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
+		return
 	}
 
 	for {
@@ -55,7 +56,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			episodes = newEpisodes
 
 			// Check if new anime is a series and get new total episodes
-			series, newTotalEpisodes := CheckIfSeries(anime.URL)
+			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
 			totalEpisodes = newTotalEpisodes
 
 			if !series {
@@ -100,7 +101,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			episodes = newEpisodes
 
 			// Check if new anime is a series and get new total episodes
-			series, newTotalEpisodes := CheckIfSeries(anime.URL)
+			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
 			totalEpisodes = newTotalEpisodes
 
 			if !series {
@@ -226,7 +227,9 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 func CheckIfSeries(url string) (bool, int) {
 	series, totalEpisodes, err := api.IsSeries(url)
 	if err != nil {
-		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
+		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
+		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		return false, 1
 	}
 	return series, totalEpisodes
 }
@@ -235,7 +238,8 @@ func CheckIfSeries(url string) (bool, int) {
 func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
 	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
 	if err != nil {
-		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
+		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		return false, 1
 	}
 	return series, totalEpisodes
 }

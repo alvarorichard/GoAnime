@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -62,10 +63,17 @@ func PlayEpisode(
 	// Try enhanced API first, fallback to legacy if needed
 	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
 	if err != nil {
-		log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
+		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
+		return fmt.Errorf("failed to extract video URL: %w", err)
 	}
 
-	episodeDuration := time.Duration(episodes[0].Duration) * time.Second
+	// Guard against empty or missing durations
+	var episodeDuration time.Duration
+	if len(episodes) > 0 && episodes[0].Duration > 0 {
+		episodeDuration = time.Duration(episodes[0].Duration) * time.Second
+	} else {
+		episodeDuration = 0
+	}
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
 	err = player.HandleDownloadAndPlay(
