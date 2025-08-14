@@ -54,6 +54,7 @@ jobs:
         run: go get -v -t -d ./...
 
       - name: Run tests with coverage
+        shell: bash
         run: go test -v -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
