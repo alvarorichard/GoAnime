@@ -1,19 +1,18 @@
-
 name: GoAnime CI
 
 on:
   push:
-    branches: [main, dev, ipc]
+    branches: [ main, dev, ipc ]
   pull_request:
-    branches: [main, dev, ipc]
+    branches: [ main, dev, ipc ]
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
-        go-version: ['1.25.x']
+        os: [ ubuntu-latest, windows-latest, macOS-latest ]
+        go-version: [ '1.25.x' ]
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -24,7 +23,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Go Cache
+      - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
@@ -44,7 +43,6 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install mpv -y
-          # golangci-lint will be installed via official GitHub Action
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -62,11 +60,10 @@ jobs:
           args: --timeout=5m ./...
 
       - name: Run tests
-        run: go test -v -coverprofile="coverage.out" ./...
+        run: go test -v -coverprofile=coverage.out ./...
 
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4.0.1
-  if: ${{ secrets.CODECOV_TOKEN != '' }}
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          file: coverage.out
           file: coverage.out
