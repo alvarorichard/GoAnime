@@ -217,7 +217,13 @@ func sanitizeMediaTarget(link string) (string, error) {
 	if strings.HasPrefix(l, "-") {
 		return "", fmt.Errorf("media target must not start with '-' (looks like a flag)")
 	}
-	if u, err := url.Parse(l); err == nil && u.Scheme != "" {
+	// Treat as URL only if it contains "://". This avoids misclassifying Windows
+	// paths like "C:\\..." as having scheme "c".
+	if strings.Contains(l, "://") {
+		u, err := url.Parse(l)
+		if err != nil {
+			return "", fmt.Errorf("invalid URL: %w", err)
+		}
 		switch strings.ToLower(u.Scheme) {
 		case "http", "https":
 			return l, nil

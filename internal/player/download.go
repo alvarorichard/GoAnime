@@ -1,13 +1,12 @@
 package player
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -22,6 +21,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/lrstanley/go-ytdlp"
 	"github.com/manifoldco/promptui"
 )
 
@@ -201,81 +201,181 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Build yt-dlp command with newline progress and no colors
-	args := []string{"--newline", "--no-color", "-f", "best", "-o", safePath, safeURL}
-	// #nosec G204: arguments are fixed/allowlisted and inputs are sanitized above
-	cmd := exec.Command("yt-dlp", args...)
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("yt-dlp stderr pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("yt-dlp stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		// Fallback to original behavior to not break flow
-		// #nosec G204: arguments are fixed and inputs sanitized
-		out, e := exec.Command("yt-dlp", "--no-progress", "-f", "best", "-o", safePath, safeURL).CombinedOutput()
-		if e != nil {
-			return fmt.Errorf("yt-dlp error: %v\n%s", e, string(out))
-		}
-		return nil
-	}
-
-	// Estimate per-episode total for progress accounting
+	// Determine an estimated size for per-episode tracking (do NOT overwrite m.totalBytes here)
 	var epTotal int64
-	var lastBytes int64
 	if m != nil {
 		client := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
-		if sz, e := getContentLength(url, client); e == nil && sz > 0 {
+		if sz, e := getContentLength(safeURL, client); e == nil && sz > 0 {
 			epTotal = sz
+		} else if strings.Contains(safeURL, ".m3u8") || strings.Contains(safeURL, "master.m3u8") || strings.Contains(safeURL, "wixmp.com") || strings.Contains(safeURL, "repackager.wixmp.com") {
+			epTotal = 500 * 1024 * 1024 // 500MB default for HLS-like streams
 		} else {
-			// Fallback estimate for HLS
-			epTotal = 500 * 1024 * 1024
+			epTotal = 200 * 1024 * 1024 // 200MB generic fallback
+		}
+		// Keep stdout clean; log only in debug
+		if util.IsDebug {
+			util.Logger.Debug("Starting download", "estimate_mb", fmt.Sprintf("%.1f", float64(epTotal)/(1024*1024)))
 		}
 	}
 
-	reader := bufio.NewScanner(io.MultiReader(stdout, stderr))
-	// Increase buffer in case yt-dlp outputs long lines
-	buf := make([]byte, 0, 1024*64)
-	reader.Buffer(buf, 1024*1024)
-	percentRe := regexp.MustCompile(`(?i)(\d{1,3}(?:\.\d+)?)\s*%`)
-	for reader.Scan() {
-		line := reader.Text()
-		// Parse percent and update shared progress
-		if m != nil && epTotal > 0 {
-			if pm := percentRe.FindStringSubmatch(line); len(pm) > 1 {
-				pStr := pm[1]
-				pVal, _ := strconv.ParseFloat(pStr, 64)
-				if pVal < 0 {
-					pVal = 0
+	// Start a progress goroutine: aggressively poll file size during the download for real-time updates
+	done := make(chan struct{})
+	if m != nil && epTotal > 0 {
+		go func(total int64, outPath string) {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			var lastLocal int64 // last local bytes accounted to the global aggregator
+
+			// Precompute base name to aggregate temp files created by yt-dlp/ffmpeg
+			dir := filepath.Dir(outPath)
+			base := filepath.Base(outPath)
+			prefix := strings.TrimSuffix(base, filepath.Ext(base))
+
+			// helper: measure current local bytes by summing sizes of temp files for this output
+			measureLocal := func() int64 {
+				var sum int64
+				// Check the final file straight away
+				if fi, err := os.Stat(outPath); err == nil {
+					// If final file exists, that's the authoritative size
+					return fi.Size()
 				}
-				if pVal > 100 {
-					pVal = 100
+				// Otherwise, sum temp files that start with the prefix in the same dir
+				entries, err := os.ReadDir(dir)
+				if err != nil {
+					return 0
 				}
-				current := int64(float64(epTotal) * (pVal / 100.0))
-				delta := current - lastBytes
-				if delta > 0 {
-					m.mu.Lock()
-					m.received += delta
-					m.mu.Unlock()
-					lastBytes = current
+				for _, e := range entries {
+					name := e.Name()
+					if !strings.HasPrefix(name, prefix) {
+						continue
+					}
+					// Skip the intended final filename
+					if name == base {
+						continue
+					}
+					if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+						sum += fi.Size()
+					}
+				}
+				return sum
+			}
+
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					// Measure local progress as bytes for this single episode
+					cur := measureLocal()
+					// Convert to a conservative percent against estimate, capped until completion
+					// But for aggregation we only care about delta bytes
+					if cur < 0 {
+						cur = 0
+					}
+					// Cap contribution to avoid runaway when estimate is small
+					if float64(cur) > float64(total)*0.98 {
+						cur = int64(float64(total) * 0.98)
+					}
+					// Apply only positive deltas to the global model
+					if delta := cur - lastLocal; delta > 0 {
+						m.mu.Lock()
+						m.received += delta
+						m.mu.Unlock()
+						lastLocal = cur
+					}
 				}
 			}
+		}(epTotal, safePath)
+	}
+
+	// Use go-ytdlp library (no external binary required on PATH)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // Increased timeout for slow connections
+	defer cancel()
+
+	if m != nil && util.IsDebug {
+		fmt.Println("Preparing yt-dlp engine (first run may take a moment)...")
+	}
+
+	// Try to install yt-dlp with timeout and error handling
+	_, installErr := ytdlp.Install(ctx, nil)
+	if installErr != nil {
+		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
+	}
+
+	if m != nil && util.IsDebug {
+		fmt.Println("Starting yt-dlp download...")
+	}
+
+	dl := ytdlp.New().
+		Output(safePath)
+
+	// Run the download with HLS-friendly options and retry logic
+	var runErr error
+	maxRetries := 2
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			if m != nil && util.IsDebug {
+				fmt.Printf("Retrying download (attempt %d/%d)...\n", attempt+1, maxRetries+1)
+			}
+			time.Sleep(time.Duration(attempt*2) * time.Second) // Progressive backoff
+		}
+
+		_, runErr = dl.Run(ctx, safeURL,
+			"--downloader", "ffmpeg",
+			"--hls-use-mpegts",
+			"--fragment-retries", "3",
+			"--retries", "3",
+			"--socket-timeout", "30")
+
+		if runErr == nil {
+			break // Success, exit retry loop
+		}
+
+		// Check if this is a retryable error
+		if attempt < maxRetries && isRetryableError(runErr) {
+			continue
+		} else {
+			break // Either max retries reached or non-retryable error
 		}
 	}
-	// Wait for command completion
-	err = cmd.Wait()
-	if m != nil && epTotal > 0 && lastBytes < epTotal {
-		// Ensure completion accounts for full episode size
-		m.mu.Lock()
-		m.received += (epTotal - lastBytes)
-		m.mu.Unlock()
+
+	// Stop progress goroutine and finalize remaining delta
+	close(done)
+
+	if runErr != nil {
+		return fmt.Errorf("go-ytdlp download failed: %w", runErr)
 	}
-	return err
+
+	if m != nil && epTotal > 0 {
+		// Apply a small remaining delta so UI reaches the batch total smoothly
+		tail := int64(float64(epTotal) * 0.02)
+		if tail < 0 {
+			tail = 0
+		}
+		m.mu.Lock()
+		m.received += tail
+		if m.totalBytes > 0 && m.received > m.totalBytes {
+			m.received = m.totalBytes
+		}
+		m.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return nil
+}
+
+// isRetryableError checks if an error is retryable (network timeouts, connection issues)
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "connection") ||
+		strings.Contains(errStr, "network") ||
+		strings.Contains(errStr, "temporary") ||
+		strings.Contains(errStr, "reset") ||
+		strings.Contains(errStr, "refused")
 }
 
 // ExtractVideoSources returns the available video sources for an episode.
@@ -477,17 +577,22 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 			continue
 		}
 
-		// Episode needs downloading
-		episodesToDownload = append(episodesToDownload, episodeNum)
-
+		// Resolve URL first; only queue episodes we can actually download
 		videoURL, err := getBestQualityURL(episode, animeURL)
-		if err != nil {
-			util.Logger.Warn("Skipping episode", "episode", episodeNum, "error", err)
+		if err != nil || videoURL == "" {
+			util.Logger.Warn("Skipping episode (no stream)", "episode", episodeNum, "error", err)
 			continue
 		}
-		contentLength, err := getContentLength(videoURL, httpClient)
-		if err == nil {
-			totalBytes += contentLength
+
+		// Episode needs downloading
+		episodesToDownload = append(episodesToDownload, episodeNum)
+		// Include HLS estimate when Content-Length is not available so progress accumulates realistically
+		if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
+			totalBytes += sz
+		} else if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") || strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
+			totalBytes += 500 * 1024 * 1024
+		} else {
+			totalBytes += 200 * 1024 * 1024
 		}
 	}
 
@@ -548,7 +653,8 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 					return
 				}
 
-				if p != nil {
+				// Keep UI clean in batch mode; don't spam per-episode status or reset aggregate progress
+				if p != nil && util.IsDebug {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
 				// Use yt-dlp for HLS/DASH playlists and hosters that require it
@@ -637,15 +743,20 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 			continue
 		}
 
-		episodesToDownload = append(episodesToDownload, episodeNum)
-
+		// Resolve URL first; only queue episodes we can actually download
 		videoURL, err := getBestQualityURL(episode, animeURL)
-		if err != nil {
-			util.Logger.Warn("Skipping episode", "episode", episodeNum, "error", err)
+		if err != nil || videoURL == "" {
+			util.Logger.Warn("Skipping episode (no stream)", "episode", episodeNum, "error", err)
 			continue
 		}
-		if sz, err := getContentLength(videoURL, httpClient); err == nil {
+
+		episodesToDownload = append(episodesToDownload, episodeNum)
+		if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 			totalBytes += sz
+		} else if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") || strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
+			totalBytes += 500 * 1024 * 1024
+		} else {
+			totalBytes += 200 * 1024 * 1024
 		}
 	}
 
@@ -697,7 +808,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 					return
 				}
 
-				if p != nil {
+				if p != nil && util.IsDebug {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
 

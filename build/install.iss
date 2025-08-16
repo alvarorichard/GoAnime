@@ -14,11 +14,11 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 ; Copia o executável principal do GoAnime
-Source: "C:\Users\krone\Documents\GoAnime\build\goanime.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\krone\Documents\codes\GoAnime\build\goanime.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Copia os binários de mpv e yt-dlp para a pasta bin dentro do diretório de instalação
-Source: "C:\Users\krone\Documents\GoAnime\build\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-;Source: "C:\Users\krone\Documents\GoAnime\build\yt-dlp.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "C:\Users\krone\Documents\codes\GoAnime\build\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+;Source: "C:\Users\krone\Documents\codes\GoAnime\build\yt-dlp.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 [Icons]
 ; Cria o atalho no Menu Iniciar

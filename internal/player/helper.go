@@ -46,7 +46,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if m.totalBytes > 0 {
-			cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			// Calculate current progress percentage with smoothing
+			currentProgress := float64(m.received) / float64(m.totalBytes)
+
+			// Ensure progress is within valid bounds
+			if currentProgress > 1.0 {
+				currentProgress = 1.0
+			}
+			if currentProgress < 0.0 {
+				currentProgress = 0.0
+			}
+
+			// Update the progress bar with the new percentage
+			cmd := m.progress.SetPercent(currentProgress)
 			return m, tea.Batch(cmd, tickCmd())
 		}
 		return m, tickCmd()
@@ -104,16 +116,16 @@ func (m *model) View() string {
 		pad + "Press Ctrl+C to quit" // Show quit instruction
 }
 
-// tickCmd returns a command that triggers a "tick" every 100 milliseconds.
+// tickCmd returns a command that triggers a "tick" every 25 milliseconds.
 //
-// This function sets up a recurring event (tick) that fires every 100 milliseconds.
+// This function sets up a recurring event (tick) that fires every 25 milliseconds for very smooth updates.
 // Each tick sends a `tickMsg` with the current time (`t`) as a message, which can be
 // handled by the update function to trigger actions like updating the progress bar.
 //
 // Returns:
-// - A `tea.Cmd` that schedules a tick every 100 milliseconds and sends a `tickMsg`.
+// - A `tea.Cmd` that schedules a tick every 25 milliseconds and sends a `tickMsg`.
 func tickCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*25, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
