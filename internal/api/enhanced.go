@@ -112,7 +112,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
 				return name
 			},
-			fuzzyfinder.WithPromptString("Selecione o anime desejado: "),
+			fuzzyfinder.WithPromptString("Select the anime you want: "),
 			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
 				if i >= 0 && i < len(animes) {
 					anime := animes[i]
@@ -137,7 +137,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
 				return name
 			},
-			fuzzyfinder.WithPromptString("Selecione o anime desejado: "),
+			fuzzyfinder.WithPromptString("Select the anime you want: "),
 		)
 	}
 
