@@ -87,6 +87,17 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		return animes[0], nil
 	}
 
+	// Helper to map provider tags to user-friendly language labels for display only
+	providerLabel := func(src string) string {
+		if strings.Contains(src, "AnimeFire") {
+			return "Portuguese"
+		}
+		if src == "AllAnime" {
+			return "English"
+		}
+		return src
+	}
+
 	// Use fuzzy finder to let user select
 	var idx int
 
@@ -95,14 +106,18 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animes,
 			func(i int) string {
-				return animes[i].Name
+				// Replace provider tags in the display name only
+				name := animes[i].Name
+				name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
+				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
+				return name
 			},
 			fuzzyfinder.WithPromptString("Selecione o anime desejado: "),
 			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
 				if i >= 0 && i < len(animes) {
 					anime := animes[i]
 					var preview string
-					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
+					preview = "Source: " + providerLabel(anime.Source) + "\nURL: " + anime.URL
 					if anime.ImageURL != "" {
 						preview += "\nImage: " + anime.ImageURL
 					}
@@ -116,7 +131,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animes,
 			func(i int) string {
-				return animes[i].Name
+				// Replace provider tags in the display name only
+				name := animes[i].Name
+				name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
+				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
+				return name
 			},
 			fuzzyfinder.WithPromptString("Selecione o anime desejado: "),
 		)

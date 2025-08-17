@@ -364,7 +364,10 @@ func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) 
 	})
 
 	idx, err := fuzzyfinder.Find(animes, func(i int) string {
-		return animes[i].Name
+		name := animes[i].Name
+		name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
+		name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
+		return name
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fuzzy selection failed: %w", err)
