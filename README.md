@@ -39,6 +39,10 @@ GoAnime is a simple text-based user interface (TUI) built in Go, allowing users 
 > **Note:** GoAnime can be built with or without SQLite support for tracking anime progress.  
 > [See the build options documentation](docs/BUILD_OPTIONS.md) for more details.
 
+> ⚠️ Warning: Portuguese (PT-BR) source availability
+>
+> If you want to watch anime in Portuguese (PT-BR) and you are outside Brazil, you’ll need a VPN, proxy, or any method to obtain a Brazilian IP address. The PT-BR provider blocks access from IPs outside Brazil.
+
 # Demo
 
 <https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048-c80082119836>

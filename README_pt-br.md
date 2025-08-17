@@ -39,6 +39,10 @@ GoAnime é uma interface de usuário baseada em texto (TUI) simples, desenvolvid
 > **Nota:** GoAnime pode ser compilado com ou sem suporte SQLite para rastreamento do progresso do anime.  
 > [Veja a documentação das opções de build](docs/BUILD_OPTIONS.md) para mais detalhes.
 
+> ⚠️ Aviso: disponibilidade da fonte em Português (PT-BR)
+>
+> Se você deseja assistir animes em português (PT-BR) e está fora do Brasil, será necessário usar uma VPN, proxy ou qualquer método para obter um endereço de IP brasileiro. A fonte de animes em PT-BR bloqueia o acesso de IPs fora do Brasil.
+
 # Demo
 
 <https://github.com/alvarorichard/GoAnime/assets/88117897/ffec6ad7-6ac1-464d-b048-c80082119836>
