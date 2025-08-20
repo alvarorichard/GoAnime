@@ -28,13 +28,14 @@ func HandlePlaybackMode(animeName string) {
 		defer discordManager.Shutdown()
 	}
 
-	anime := appflow.SearchAnime(animeName)
+	// Use enhanced search to find anime in both AllAnime and AnimeFire
+	anime := appflow.SearchAnimeEnhanced(animeName)
 	appflow.FetchAnimeDetails(anime)
-	episodes := appflow.GetAnimeEpisodes(anime.URL)
+	episodes := appflow.GetAnimeEpisodes(anime)
 
 	util.Debugf("[PERF] Full boot in %v", time.Since(startAll))
 
-	series, totalEpisodes := playback.CheckIfSeries(anime.URL)
+	series, totalEpisodes := playback.CheckIfSeriesEnhanced(anime)
 	if series {
 		playback.HandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
 	} else {

@@ -76,7 +76,7 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
 		fmt.Printf("Error creating data directory: %v\n", err)
 		return nil
 	}

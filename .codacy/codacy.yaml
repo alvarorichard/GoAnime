@@ -1,6 +1,8 @@
 runtimes:
+    - go@1.22.3
     - python@3.11.11
 tools:
+    - lizard@1.17.31
+    - revive@1.11.0
     - semgrep@1.78.0
-    - lizard@1.17.19
-    - trivy@0.59.1
+    - trivy@0.65.0

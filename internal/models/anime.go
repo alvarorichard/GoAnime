@@ -8,6 +8,7 @@ type Anime struct {
 	AnilistID int
 	MalID     int
 	Details   AniListDetails
+	Source    string // Identifies the source (AllAnime, AnimeFire, etc.)
 }
 
 // Episode represents a single episode of an anime series, containing details such as episode number,

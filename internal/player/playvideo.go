@@ -14,6 +14,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
@@ -21,6 +22,9 @@ import (
 
 // ErrUserQuit is returned when the user chooses to quit the application
 var ErrUserQuit = errors.New("user requested to quit application")
+
+// ErrChangeAnime is returned when the user chooses to change anime
+var ErrChangeAnime = errors.New("user requested to change anime")
 
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
@@ -75,6 +79,75 @@ func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
 }
 
 // playVideo plays the video and manages interactions
+// func playVideo(
+// 	videoURL string,
+// 	episodes []models.Episode,
+// 	currentEpisodeNum int,
+// 	anilistID int,
+// 	updater *discord.RichPresenceUpdater,
+// ) error {
+// 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
+// 	util.Debugf("Video URL: %s", videoURL)
+
+// 	currentEpisode, err := getCurrentEpisode(episodes, currentEpisodeNum)
+// 	if err != nil {
+// 		return fmt.Errorf("error getting current episode: %w", err)
+// 	}
+
+// 	mpvArgs := []string{
+// 		"--hwdec=auto-safe",
+// 		"--vo=gpu",
+// 		"--profile=fast",
+// 		"--cache=yes",
+// 		"--demuxer-max-bytes=300M",
+// 		"--demuxer-readahead-secs=20",
+// 		"--no-config",
+// 		"--video-latency-hacks=yes",
+// 		"--audio-display=no",
+// 	}
+
+// 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
+// 	if resumeTime > 0 {
+// 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
+// 	}
+
+// 	skipDataChan := fetchAniSkipAsync(anilistID, currentEpisodeNum, currentEpisode)
+// 	socketPath, err := StartVideo(videoURL, mpvArgs)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to start video: %w", err)
+// 	}
+
+// 	applyAniSkipResults(skipDataChan, socketPath, currentEpisode, currentEpisodeNum)
+
+// 	if updater != nil {
+// 		initDiscordPresence(updater, socketPath, tracker, anilistID, currentEpisode, currentEpisodeNum)
+// 		defer updater.Stop()
+// 	}
+
+// 	currentEpisodeIndex := findEpisodeIndex(episodes, currentEpisodeNum)
+// 	if currentEpisodeIndex == -1 {
+// 		return fmt.Errorf("episode %d not found in list", currentEpisodeNum)
+// 	}
+
+// 	preloadNextEpisode(episodes, currentEpisodeIndex)
+
+// 	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
+// 	defer close(stopTracking)
+
+// 	return handleUserInput(
+// 		socketPath,
+// 		episodes,
+// 		currentEpisodeIndex,
+// 		currentEpisodeNum,
+// 		anilistID,
+// 		updater,
+// 		stopTracking,
+// 		currentEpisode,
+// 	)
+// }
+
+// playVideo plays the video and manages interactions
+// playVideo plays the video and manages interactions
 func playVideo(
 	videoURL string,
 	episodes []models.Episode,
@@ -82,14 +155,19 @@ func playVideo(
 	anilistID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
-	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
-	util.Debugf("Video URL: %s", videoURL)
+	// Log the episode number and URL for debugging
+	util.Debugf("Playing video for episode %d, URL: %s", currentEpisodeNum, videoURL)
 
+	// Normalize video URL if necessary
+	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
+
+	// Get the current episode
 	currentEpisode, err := getCurrentEpisode(episodes, currentEpisodeNum)
 	if err != nil {
 		return fmt.Errorf("error getting current episode: %w", err)
 	}
 
+	// Set up mpv arguments for optimal playback
 	mpvArgs := []string{
 		"--hwdec=auto-safe",
 		"--vo=gpu",
@@ -102,35 +180,44 @@ func playVideo(
 		"--audio-display=no",
 	}
 
+	// Initialize tracking and check for resume time
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
 	if resumeTime > 0 {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}
 
+	// Fetch AniSkip data asynchronously
 	skipDataChan := fetchAniSkipAsync(anilistID, currentEpisodeNum, currentEpisode)
+
+	// Start the video with mpv
 	socketPath, err := StartVideo(videoURL, mpvArgs)
 	if err != nil {
 		return fmt.Errorf("failed to start video: %w", err)
 	}
 
+	// Apply AniSkip results to skip intros/outros
 	applyAniSkipResults(skipDataChan, socketPath, currentEpisode, currentEpisodeNum)
 
+	// Initialize Discord Rich Presence if updater is provided
 	if updater != nil {
 		initDiscordPresence(updater, socketPath, tracker, anilistID, currentEpisode, currentEpisodeNum)
 		defer updater.Stop()
 	}
 
+	// Find the current episode index in the episode list
 	currentEpisodeIndex := findEpisodeIndex(episodes, currentEpisodeNum)
 	if currentEpisodeIndex == -1 {
 		return fmt.Errorf("episode %d not found in list", currentEpisodeNum)
 	}
 
+	// Preload the next episode for seamless playback
 	preloadNextEpisode(episodes, currentEpisodeIndex)
 
+	// Start tracking routine if tracker is available
 	stopTracking := startTrackingRoutine(tracker, socketPath, anilistID, currentEpisode, currentEpisodeNum, updater)
-	defer close(stopTracking)
 
-	return handleUserInput(
+	// Handle user input for interactive controls
+	err = handleUserInput(
 		socketPath,
 		episodes,
 		currentEpisodeIndex,
@@ -140,28 +227,89 @@ func playVideo(
 		stopTracking,
 		currentEpisode,
 	)
+
+	// Close the tracking channel if it's still open
+	select {
+	case <-stopTracking:
+		// Channel already closed
+	default:
+		close(stopTracking)
+	}
+
+	return err
 }
 
 // getCurrentEpisode gets the current episode
+// func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
+// 	if num < 1 || num > len(episodes) {
+// 		return nil, fmt.Errorf("invalid episode number: %d", num)
+// 	}
+// 	return &episodes[num-1], nil
+// }
+
+// getCurrentEpisode retrieves the current episode based on the episode number
 func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
-	if num < 1 || num > len(episodes) {
-		return nil, fmt.Errorf("invalid episode number: %d", num)
+	for _, ep := range episodes {
+		if ExtractEpisodeNumber(ep.Number) == fmt.Sprintf("%d", num) {
+			return &ep, nil
+		}
 	}
-	return &episodes[num-1], nil
+	return nil, fmt.Errorf("episode %d not found", num)
 }
+
+// // initTracking initializes the tracking system
+// func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
+// 	if !tracking.IsCgoEnabled {
+// 		if util.IsDebug {
+// 			util.Debug("Tracking disabled: CGO not available")
+// 		}
+// 		return nil, 0
+// 	}
+
+// 	currentUser, err := user.Current()
+// 	if err != nil {
+// 		util.Errorf("Failed to get current user: %v", err)
+// 		return nil, 0
+// 	}
+
+// 	var dbPath string
+// 	if runtime.GOOS == "windows" {
+// 		dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+// 	} else {
+// 		dbPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
+// 	}
+
+// 	tracker := tracking.NewLocalTracker(dbPath)
+// 	if tracker == nil {
+// 		return nil, 0
+// 	}
+
+// 	progress, err := tracker.GetAnime(anilistID, episode.URL)
+// 	if err != nil || progress == nil || progress.PlaybackTime <= 0 {
+// 		return tracker, 0
+// 	}
+
+// 	// Always use the selected episodeNum for the dialog, but use the tracked PlaybackTime if available
+// 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
+// 		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
+// 		return tracker, progress.PlaybackTime
+// 	}
+
+// 	return tracker, 0
+// }
 
 // initTracking inicializa o sistema de rastreamento
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
 		if util.IsDebug {
-			util.Debug("Tracking disabled: CGO not available")
+			util.Debug("Tracking desabilitado: CGO não disponível")
 		}
 		return nil, 0
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		util.Errorf("Failed to get current user: %v", err)
+		util.Errorf("Falha ao obter usuário atual: %v", err)
 		return nil, 0
 	}
 
@@ -178,13 +326,13 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 	}
 
 	progress, err := tracker.GetAnime(anilistID, episode.URL)
-	if err != nil || progress == nil || progress.EpisodeNumber != episodeNum || progress.PlaybackTime <= 0 {
+	if err != nil || progress == nil || progress.PlaybackTime <= 0 {
 		return tracker, 0
 	}
 
-	// Use the beautiful dialog to ask for resume
-	if ok, _ := showResumeDialog(progress.EpisodeNumber, progress.PlaybackTime); ok {
-		util.Debugf("Resuming from saved time: %d seconds", progress.PlaybackTime)
+	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
+	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
+		util.Debugf("Retomando do tempo salvo: %d segundos para o episódio %d", progress.PlaybackTime, episodeNum)
 		return tracker, progress.PlaybackTime
 	}
 
@@ -207,6 +355,15 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 	case err := <-ch:
 		if err == nil {
 			applySkipTimes(socketPath, episode)
+
+			// For AllAnime episodes, also try to set chapter markers (like Curd does)
+			if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
+				// This looks like an AllAnime episode ID, try to apply chapter markers
+				allAnimeClient := scraper.NewAllAnimeClient()
+				if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
+					util.Debugf("Failed to set chapter markers: %v", chapterErr)
+				}
+			}
 		} else {
 			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 		}
@@ -215,7 +372,7 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 	}
 }
 
-// initDiscordPresence inicia a presença no Discord
+// initDiscordPresence initializes Discord presence
 func initDiscordPresence(updater *discord.RichPresenceUpdater, socketPath string, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
 	updater.SetSocketPath(socketPath)
 	updater.Start()
@@ -295,14 +452,26 @@ func getEpisodeTitle(title models.TitleDetails) string {
 }
 
 // findEpisodeIndex finds the episode index
+// func findEpisodeIndex(episodes []models.Episode, num int) int {
+// 	episodeStr := strconv.Itoa(num)
+// 	for i, ep := range episodes {
+// 		if ExtractEpisodeNumber(ep.Number) == episodeStr {
+// 			return i
+// 		}
+// 	}
+// 	return -1
+// }
+
+// findEpisodeIndex finds the episode index based on the episode number
 func findEpisodeIndex(episodes []models.Episode, num int) int {
-	episodeStr := strconv.Itoa(num)
+	episodeStr := fmt.Sprintf("%d", num)
 	for i, ep := range episodes {
-		if ExtractEpisodeNumber(ep.Number) == episodeStr {
+		extractedNum := ExtractEpisodeNumber(ep.Number)
+		if extractedNum == episodeStr {
 			return i
 		}
 	}
-	return -1
+	return -1 // Episode not found
 }
 
 // preloadNextEpisode preloads the next episode
@@ -311,15 +480,19 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 		return
 	}
 
+	// Skip preloading for AllAnime episodes (they use IDs, not HTTP URLs)
+	nextEpisodeURL := episodes[currentIndex+1].URL
+	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
+		return
+	}
+
 	go func() {
-		_, err := GetVideoURLForEpisode(episodes[currentIndex+1].URL)
-		if err != nil {
-			util.Debugf("Preloading error: %v", err)
-		}
+		_, _ = GetVideoURLForEpisode(episodes[currentIndex+1].URL)
+		// Preloading errors are ignored as this is not critical
 	}()
 }
 
-// startTrackingRoutine inicia rotina de rastreamento
+// startTrackingRoutine starts the tracking routine
 func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, anilistID int, episode *models.Episode, episodeNum int, updater *discord.RichPresenceUpdater) chan struct{} {
 	stopChan := make(chan struct{})
 	if tracker == nil {
@@ -399,6 +572,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
 			huh.NewOption("Select episode", "select"),
+			huh.NewOption("Change anime", "change"),
 			huh.NewOption("Skip intro", "skip"),
 			huh.NewOption("Exit", "quit"),
 		).
@@ -442,6 +616,9 @@ func handleUserInput(
 		case "quit":
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return ErrUserQuit
+		case "change":
+			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			return ErrChangeAnime
 		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
 		case "skip":
@@ -492,7 +669,21 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 		return fmt.Errorf("invalid episode number: %w", err)
 	}
 
-	targetURL, err := GetVideoURLForEpisode(target.URL)
+	var anime *models.Anime
+	if updater != nil {
+		anime = updater.GetAnime()
+	}
+
+	// If no updater/anime context, try to synthesize from lastAnimeURL
+	if anime == nil && lastAnimeURL != "" {
+		guessedSource := ""
+		if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
+			guessedSource = "AllAnime"
+		}
+		anime = &models.Anime{URL: lastAnimeURL, Source: guessedSource}
+	}
+
+	targetURL, err := GetVideoURLForEpisodeEnhanced(&target, anime)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
 	}
@@ -522,7 +713,7 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	return playVideo(targetURL, episodes, targetNum, anilistID, newUpdater)
 }
 
-// skipIntro pula a introdução
+// skipIntro skips the intro
 func skipIntro(socketPath string, episode *models.Episode) {
 	if episode.SkipTimes.Op.End > 0 {
 		_, _ = mpvSendCommand(socketPath, []interface{}{"seek", episode.SkipTimes.Op.End, "absolute"})

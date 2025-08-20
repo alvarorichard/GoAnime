@@ -62,6 +62,7 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 
 	if retrieved == nil {
 		t.Fatal("Anime not found after update")
+		return // This will never execute but satisfies linter
 	}
 
 	// Verifica todos os campos
@@ -126,6 +127,7 @@ func TestLocalTracker_GetAnime(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("GetAnime returned nil after insert")
+		return // This will never execute but satisfies linter
 	}
 	if got.EpisodeNumber != anime.EpisodeNumber || got.PlaybackTime != anime.PlaybackTime || got.Duration != anime.Duration || got.Title != anime.Title {
 		t.Errorf("Anime fields do not match after GetAnime: got %+v, want %+v", got, anime)

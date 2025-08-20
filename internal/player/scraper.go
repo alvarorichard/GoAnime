@@ -2,12 +2,9 @@ package player
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-
-	//"net"
-	//"runtime"
-
 	"net/http"
 	"regexp"
 	"strconv"
@@ -18,29 +15,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 	"github.com/ktr0731/go-fuzzyfinder"
-	"github.com/pkg/errors"
 )
-
-// WINDOWS RELEASE
-
-//  func dialMPVSocket(socketPath string) (net.Conn, error) {
-//  	if runtime.GOOS == "windows" {
-// // 		//Attempt to connect using named pipe on Windows
-//  		conn, err := winio.DialPipe(socketPath, nil)
-//  		if err != nil {
-//  			return nil, fmt.Errorf("failed to connect to named pipe: %w", err)
-//  		}
-//  		return conn, nil
-//  } else {
-//  		// Unix-like system uses Unix sockets
-//  		conn, err := net.Dial("unix", socketPath)
-//  		if err != nil {
-//  			return nil, fmt.Errorf("failed to connect to Unix socket: %w", err)
-//  		}
-//  		return conn, nil
-//  	}
-//  }
 
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
@@ -78,6 +55,12 @@ func DownloadFolderFormatter(str string) string {
 
 // getContentLength retrieves the content length of the given URL.
 func getContentLength(url string, client *http.Client) (int64, error) {
+	// Check if this is an AllAnime URL that might not have Content-Length header
+	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
+		strings.Contains(url, "wixmp.com") ||
+		strings.Contains(url, "master.m3u8") ||
+		strings.Contains(url, "allanime.pro")
+
 	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
@@ -116,7 +99,13 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Retrieves the "Content-Length" header from the response.
 	contentLengthHeader := resp.Header.Get("Content-Length")
 	if contentLengthHeader == "" {
-		// Returns an error if the "Content-Length" header is missing.
+		// For AllAnime URLs that might not have Content-Length, return a default size
+		if isAllAnimeURL {
+			util.Debugf("Content-Length header missing for AllAnime URL, using fallback method")
+			// Try to estimate content length or use a default for streaming
+			return estimateContentLengthForAllAnime(url, client)
+		}
+		// Returns an error if the "Content-Length" header is missing for non-AllAnime URLs.
 		return 0, fmt.Errorf("Content-Length header is missing")
 	}
 
@@ -129,6 +118,52 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 
 	// Returns the content length in bytes.
 	return contentLength, nil
+}
+
+// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
+func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
+	if strings.Contains(url, ".m3u8") {
+		util.Debugf("HLS stream detected, using estimated size for download")
+		// Return an estimated size for a typical episode (500MB)
+		return 500 * 1024 * 1024, nil
+	}
+
+	// For other AllAnime URLs, try to get partial content to estimate size
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	// Request only first few KB to check response
+	req.Header.Set("Range", "bytes=0-4095")
+	resp, err := client.Do(req)
+	if err != nil {
+		// If range request fails, return default size
+		util.Debugf("Range request failed, using default size estimate")
+		return 300 * 1024 * 1024, nil // 300MB default
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			util.Warnf("Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	// Check Content-Range header for total size
+	contentRange := resp.Header.Get("Content-Range")
+	if contentRange != "" {
+		// Parse "bytes 0-4095/12345678" format
+		parts := strings.Split(contentRange, "/")
+		if len(parts) == 2 && parts[1] != "*" {
+			if totalSize, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				return totalSize, nil
+			}
+		}
+	}
+
+	// Fallback to default size estimate
+	util.Debugf("Could not determine exact size, using default estimate")
+	return 300 * 1024 * 1024, nil // 300MB default
 }
 
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
@@ -156,27 +191,176 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
-func ExtractEpisodeNumber(episodeStr string) string {
-	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
-	matches := numRe.FindStringSubmatch(episodeStr)
+// func ExtractEpisodeNumber(episodeStr string) string {
+// 	numRe := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+// 	matches := numRe.FindStringSubmatch(episodeStr)
 
-	if len(matches) >= 2 {
-		return matches[1]
+// 	if len(matches) >= 2 {
+// 		return matches[1]
+// 	}
+// 	return "1"
+// }
+
+// ExtractEpisodeNumber extracts the episode number from the episode string
+func ExtractEpisodeNumber(episodeStr string) string {
+	// Try to extract numeric episode number from various patterns
+	patterns := []string{
+		`(?i)epis[oó]dio\s+(\d+)`, // "Episódio 1"
+		`(?i)episode\s+(\d+)`,     // "Episode 1"
+		`(?i)ep\.?\s*(\d+)`,       // "Ep 1" or "Ep. 1"
+		`(?i)cap[íi]tulo\s+(\d+)`, // "Capítulo 1"
+		`\b(\d+)\b`,               // Any standalone number
 	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(episodeStr)
+		if len(matches) >= 2 {
+			return matches[1]
+		}
+	}
+
+	// Handle simple numeric cases by splitting
+	parts := strings.Split(strings.TrimSpace(episodeStr), " ")
+	for _, part := range parts {
+		// Clean common separators and try to parse
+		cleanPart := strings.Trim(part, "()[]{}:.-_")
+		if num, err := strconv.Atoi(cleanPart); err == nil && num > 0 {
+			return fmt.Sprintf("%d", num)
+		}
+	}
+
+	// For movies, OVAs, and specials that don't have episode numbers, return "1"
+	lowerStr := strings.ToLower(episodeStr)
+	if strings.Contains(lowerStr, "filme") ||
+		strings.Contains(lowerStr, "movie") ||
+		strings.Contains(lowerStr, "ova") ||
+		strings.Contains(lowerStr, "special") {
+		return "1"
+	}
+
+	// If no number found at all, return "1" as fallback (for single episodes/movies)
 	return "1"
 }
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
-
-	if util.IsDebug {
-		util.Debugf("Attempting to extract video URL for episode: %s", episodeURL)
+	// Check if this looks like an AllAnime ID instead of URL
+	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
+		return "", fmt.Errorf("GetVideoURLForEpisode called with AllAnime ID '%s' instead of HTTP URL - use enhanced API", episodeURL)
 	}
+
 	videoURL, err := extractVideoURL(episodeURL)
 	if err != nil {
 		return "", err
 	}
 	return extractActualVideoURL(videoURL)
+}
+
+// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
+func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
+	// If we don't have anime context, decide safely how to resolve
+	if anime == nil {
+		// If it's a normal HTTP URL, use legacy extraction
+		if strings.Contains(episode.URL, "http") {
+			if util.IsDebug {
+				util.Debugf("No anime context; using legacy extraction for HTTP URL, episode %s", episode.Number)
+			}
+			return GetVideoURLForEpisode(episode.URL)
+		}
+
+		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
+		if isLikelyAllAnimeID(episode.URL) {
+			if util.IsDebug {
+				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
+			}
+			tmpAnime := &models.Anime{
+				URL:    episode.URL,
+				Source: "AllAnime",
+				Name:   "[AllAnime]",
+			}
+			// Ensure episode number is set
+			if episode.Number == "" && episode.Num > 0 {
+				episode.Number = fmt.Sprintf("%d", episode.Num)
+			}
+			if episode.Number == "" {
+				episode.Number = "1"
+			}
+			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
+		}
+
+		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
+		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
+	}
+
+	// Try AllAnime enhanced navigation first if applicable
+	if isAllAnimeSourcePlayer(anime) {
+		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
+		if err == nil {
+			return streamURL, nil
+		}
+	}
+
+	// Use the regular enhanced API to get stream URL
+	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+	if err != nil {
+		// Only use legacy fallback for non-AllAnime sources
+		if !isAllAnimeSourcePlayer(anime) {
+			return GetVideoURLForEpisode(episode.URL)
+		}
+		// For AllAnime, return the error instead of trying legacy method
+		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+	}
+
+	return streamURL, nil
+}
+
+// Helper function to check if anime is from AllAnime source (player module)
+func isAllAnimeSourcePlayer(anime *models.Anime) bool {
+	if anime == nil {
+		return false
+	}
+	if anime.Source == "AllAnime" {
+		return true
+	}
+
+	if strings.Contains(anime.URL, "allanime") {
+		return true
+	}
+
+	if len(anime.URL) < 30 &&
+		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
+		!strings.Contains(anime.URL, "http") {
+		return true
+	}
+
+	return false
+}
+
+// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
+func isNumericString(s string) bool {
+	if s == "" {
+		return false
+	}
+	re := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+	return re.MatchString(s)
+}
+
+// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
+func isLikelyAllAnimeID(s string) bool {
+	if strings.Contains(s, "http") {
+		return false
+	}
+	if isNumericString(s) {
+		return false
+	}
+	// Typical AllAnime IDs are short-ish alphanumeric strings
+	if len(s) >= 6 && len(s) < 30 {
+		// Must contain at least one letter
+		re := regexp.MustCompile(`[A-Za-z]`)
+		return re.MatchString(s)
+	}
+	return false
 }
 
 func extractVideoURL(url string) (string, error) {
@@ -186,7 +370,7 @@ func extractVideoURL(url string) (string, error) {
 
 	response, err := api.SafeGet(url)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to fetch URL: %+v", err))
+		return "", fmt.Errorf("failed to fetch URL: %+v", err)
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -197,7 +381,7 @@ func extractVideoURL(url string) (string, error) {
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("failed to parse HTML: %+v", err))
+		return "", fmt.Errorf("failed to parse HTML: %+v", err)
 	}
 
 	// Try different selectors for video elements
@@ -309,6 +493,7 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
+// extractActualVideoURL processes the video source and allows the user to select quality
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
 		util.Debugf("Processing video source: %s", videoSrc)
@@ -318,7 +503,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return videoSrc, nil
 	}
 
-	// If the URL is from animefire.plus, we need to fetch it first
+	// If the URL is from animefire.plus, fetch the content
 	if strings.Contains(videoSrc, "animefire.plus/video/") {
 		if util.IsDebug {
 			util.Debugf("Found animefire.plus video URL, fetching content...")
@@ -341,7 +526,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			return "", fmt.Errorf("failed to read video page: %w", err)
 		}
 
-		// Try to parse as JSON first
+		// Try to parse as JSON
 		var videoResponse VideoResponse
 		err = json.Unmarshal(body, &videoResponse)
 		if err == nil && len(videoResponse.Data) > 0 {
@@ -351,24 +536,60 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 					util.Debugf("Available quality: %s -> %s", v.Label, v.Src)
 				}
 			}
-			// If we have multiple qualities, pick the highest automatically
-			if len(videoResponse.Data) > 1 {
-				best := videoResponse.Data[0]
-				bestQ, _ := strconv.Atoi(best.Label)
+
+			// If only one quality, use it directly
+			if len(videoResponse.Data) == 1 {
+				return videoResponse.Data[0].Src, nil
+			}
+
+			// Use global quality preference only if it's a specific quality (not "best")
+			if util.GlobalQuality != "" && util.GlobalQuality != "best" {
+				selectedSrc := selectQualityFromOptions(videoResponse.Data, util.GlobalQuality)
+				if selectedSrc != "" {
+					if util.IsDebug {
+						util.Debugf("Using global quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
+					}
+					return selectedSrc, nil
+				}
+			}
+
+			// Always prompt user for quality selection to maintain the 360p, 720p, 1080p options
+			// Create options for huh.Select
+			var options []huh.Option[string]
+			for _, v := range videoResponse.Data {
+				options = append(options, huh.NewOption(v.Label, v.Src))
+			}
+
+			// Present quality options to the user
+			var selectedSrc string
+			err := huh.NewSelect[string]().
+				Title("Select Video Quality").
+				Options(options...).
+				Value(&selectedSrc).
+				Run()
+			if err != nil {
+				return "", fmt.Errorf("failed to select quality: %w", err)
+			}
+
+			// Store the selected quality for future use in this session
+			if util.GlobalQuality == "" || util.GlobalQuality == "best" {
+				// Extract quality label from selected option
 				for _, v := range videoResponse.Data {
-					q, _ := strconv.Atoi(v.Label)
-					if q > bestQ {
-						best = v
-						bestQ = q
+					if v.Src == selectedSrc {
+						util.GlobalQuality = strings.ToLower(v.Label)
+						if util.IsDebug {
+							util.Debugf("Storing selected quality for session: %s", util.GlobalQuality)
+						}
+						break
 					}
 				}
-				return best.Src, nil
 			}
-			// If only one quality, use it
-			return videoResponse.Data[0].Src, nil
+
+			// Return the selected source URL
+			return selectedSrc, nil
 		}
 
-		// Try to find a direct video URL in the content
+		// Fallback: Try to find a direct video URL in the content
 		videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
 		re := regexp.MustCompile(videoURLPattern)
 		matches := re.FindString(string(body))
@@ -380,7 +601,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 
 		// Try to find a blogger link
-		videoSrc, err = findBloggerLink(string(body))
+		videoSrc, err := findBloggerLink(string(body))
 		if err == nil && videoSrc != "" {
 			if util.IsDebug {
 				util.Debugf("Found blogger link: %s", videoSrc)
@@ -389,37 +610,88 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 	}
 
-	// Try to parse as JSON first
-	var videoResponse VideoResponse
-	err := json.Unmarshal([]byte(videoSrc), &videoResponse)
-	if err == nil && len(videoResponse.Data) > 0 {
-		// If we have multiple qualities, pick the highest automatically
-		if len(videoResponse.Data) > 1 {
-			best := videoResponse.Data[0]
-			bestQ, _ := strconv.Atoi(best.Label)
-			for _, v := range videoResponse.Data {
-				q, _ := strconv.Atoi(v.Label)
-				if q > bestQ {
-					best = v
-					bestQ = q
-				}
+	// If not JSON or no qualities found, return an error
+	return "", errors.New("no valid video URL found")
+}
+
+// selectQualityFromOptions selects the best matching quality from available options
+func selectQualityFromOptions(videoData []VideoData, preferredQuality string) string {
+	if len(videoData) == 0 {
+		return ""
+	}
+
+	// Normalize preferred quality string
+	preferredQuality = strings.ToLower(strings.TrimSpace(preferredQuality))
+
+	// Handle "best" quality preference
+	if preferredQuality == "best" || preferredQuality == "" {
+		// Find the highest quality (assume higher resolution numbers are better)
+		bestQuality := videoData[0]
+		for _, v := range videoData {
+			if extractResolution(v.Label) > extractResolution(bestQuality.Label) {
+				bestQuality = v
 			}
-			return best.Src, nil
 		}
-		// If only one quality, use it
-		return videoResponse.Data[0].Src, nil
+		return bestQuality.Src
 	}
 
-	// If not JSON, try to find a direct video URL
-	videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
-	re := regexp.MustCompile(videoURLPattern)
-	matches := re.FindString(videoSrc)
-
-	if matches == "" {
-		return "", errors.New("no valid video URL found")
+	// Handle "worst" quality preference
+	if preferredQuality == "worst" {
+		// Find the lowest quality
+		worstQuality := videoData[0]
+		for _, v := range videoData {
+			if extractResolution(v.Label) < extractResolution(worstQuality.Label) {
+				worstQuality = v
+			}
+		}
+		return worstQuality.Src
 	}
 
-	return matches, nil
+	// Try to find exact match first
+	for _, v := range videoData {
+		if strings.Contains(strings.ToLower(v.Label), preferredQuality) {
+			return v.Src
+		}
+	}
+
+	// If no exact match, try to find the closest resolution
+	targetResolution := extractResolution(preferredQuality)
+	if targetResolution > 0 {
+		closestMatch := videoData[0]
+		minDiff := abs(extractResolution(closestMatch.Label) - targetResolution)
+
+		for _, v := range videoData {
+			diff := abs(extractResolution(v.Label) - targetResolution)
+			if diff < minDiff {
+				minDiff = diff
+				closestMatch = v
+			}
+		}
+		return closestMatch.Src
+	}
+
+	// Fallback to first option if nothing matches
+	return videoData[0].Src
+}
+
+// extractResolution extracts numeric resolution from quality label (e.g., "1080p" -> 1080)
+func extractResolution(label string) int {
+	re := regexp.MustCompile(`(\d+)p?`)
+	matches := re.FindStringSubmatch(strings.ToLower(label))
+	if len(matches) > 1 {
+		if res, err := strconv.Atoi(matches[1]); err == nil {
+			return res
+		}
+	}
+	return 0
+}
+
+// abs returns the absolute value of an integer
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // VideoData represents the video data structure, with a source URL and a label

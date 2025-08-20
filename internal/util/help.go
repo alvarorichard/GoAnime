@@ -103,6 +103,9 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d).")
+	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
+	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
+	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -111,6 +114,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime and AnimeFire with automatic fallback.")
 	addFeature(&helpContent, "Smart Search", "Intelligent anime search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes or entire seasons for offline viewing.")
@@ -118,6 +122,7 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what anime you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
 	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
+	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
 	helpContent.WriteString("\n")
 
 	// Examples section
@@ -132,6 +137,10 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --version", "Show version information")
 	addExample(&helpContent, "goanime -d \"one piece\" 1", "Download episode 1 of One Piece")
 	addExample(&helpContent, "goanime -d -r \"naruto\" 1-5", "Download episodes 1-5 of Naruto")
+	addExample(&helpContent, "goanime -d --source allanime \"bleach\" 10", "Download from AllAnime specifically")
+	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
+	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
+	addExample(&helpContent, "goanime -d -r --source allanime --allanime-smart \"vinland saga\" 1-4", "AllAnime Smart Range for episodes 1-4")
 	helpContent.WriteString("\n")
 
 	// Footer

@@ -8,13 +8,15 @@ import (
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/version"
-	"github.com/manifoldco/promptui"
+	"github.com/charmbracelet/huh"
 )
 
 var (
 	IsDebug          bool
 	minNameLength    = 4
 	ErrHelpRequested = errors.New("help requested") // Custom error for help
+	GlobalSource     string                         // Global variable to store selected source
+	GlobalQuality    string                         // Global variable to store selected quality
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
@@ -39,11 +41,14 @@ var (
 
 // DownloadRequest holds download command parameters
 type DownloadRequest struct {
-	AnimeName    string
-	EpisodeNum   int
-	IsRange      bool
-	StartEpisode int
-	EndEpisode   int
+	AnimeName     string
+	EpisodeNum    int
+	IsRange       bool
+	StartEpisode  int
+	EndEpisode    int
+	Source        string // Added source field for specifying anime source
+	Quality       string // Added quality field for video quality
+	AllAnimeSmart bool   // Enable AllAnime Smart Range (auto-skip intros/credits and preferred mirrors)
 }
 
 // Global variable to store download request
@@ -59,11 +64,19 @@ func FlagParser() (string, error) {
 	updateFlag := flag.Bool("update", false, "check for updates and update if available")
 	downloadFlag := flag.Bool("d", false, "download mode")
 	rangeFlag := flag.Bool("r", false, "download episode range (use with -d)")
+	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
+	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
+	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
+
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
 
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
+
+	// Store global configurations
+	GlobalSource = *sourceFlag
+	GlobalQuality = *qualityFlag
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()
@@ -81,11 +94,11 @@ func FlagParser() (string, error) {
 
 	// Handle download mode
 	if *downloadFlag {
-		return handleDownloadMode(*rangeFlag)
+		return handleDownloadModeWithSmart(*rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
 	}
 
 	if *debug {
-		fmt.Println("--- Debug mode is enabled ---")
+		Debug("Debug mode is enabled")
 	}
 
 	// If the user has provided an anime name as an argument, we use it.
@@ -96,7 +109,7 @@ func FlagParser() (string, error) {
 		if strings.Contains(animeName, "-") {
 			animeName = strings.Split(animeName, "-")[0]
 		}
-		fmt.Println("Anime name:", animeName)
+		Debug("Anime name", "name", animeName)
 		if len(animeName) < minNameLength {
 			return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 		}
@@ -108,16 +121,25 @@ func FlagParser() (string, error) {
 
 // getUserInput prompts the user for input the anime name and returns it
 func getUserInput(label string) (string, error) {
-	prompt := promptui.Prompt{
-		Label: label,
-	}
+	var animeName string
 
-	animeName, err := prompt.Run()
-	if err != nil {
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title(label).
+				Description("Type the anime title and press Enter").
+				Value(&animeName).
+				Validate(func(v string) error {
+					if len(strings.TrimSpace(v)) < minNameLength {
+						return fmt.Errorf("name must have at least %d characters", minNameLength)
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := form.Run(); err != nil {
 		return "", err
-	}
-	if len(animeName) < minNameLength {
-		return "", fmt.Errorf("anime name must have at least %d characters, you entered: %v", minNameLength, animeName)
 	}
 	return animeName, nil
 }
@@ -128,8 +150,8 @@ func TreatingAnimeName(animeName string) string {
 	return strings.ReplaceAll(loweredName, " ", "-")
 }
 
-// handleDownloadMode processes download command-line arguments
-func handleDownloadMode(isRange bool) (string, error) {
+// handleDownloadModeWithSmart processes download args with AllAnime Smart option
+func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeSmart bool) (string, error) {
 	args := flag.Args()
 
 	if len(args) == 0 {
@@ -171,10 +193,13 @@ func handleDownloadMode(isRange bool) (string, error) {
 
 		// Store download request
 		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:    animeName,
-			IsRange:      true,
-			StartEpisode: startEp,
-			EndEpisode:   endEp,
+			AnimeName:     animeName,
+			IsRange:       true,
+			StartEpisode:  startEp,
+			EndEpisode:    endEp,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
@@ -199,9 +224,12 @@ func handleDownloadMode(isRange bool) (string, error) {
 
 		// Store download request
 		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:  animeName,
-			EpisodeNum: episodeNum,
-			IsRange:    false,
+			AnimeName:     animeName,
+			EpisodeNum:    episodeNum,
+			IsRange:       false,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested

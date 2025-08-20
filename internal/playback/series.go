@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 )
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) {
@@ -20,7 +21,8 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
 	if err != nil {
-		log.Fatalln(util.ErrorHandler(err))
+		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
+		return
 	}
 
 	for {
@@ -41,22 +43,101 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			break
 		}
 
+		// Check if user requested to change anime during video playback
+		if errors.Is(err, player.ErrChangeAnime) {
+			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if err != nil {
+				log.Printf("Error changing anime: %v", err)
+				continue // Stay with current anime if change fails
+			}
+
+			// Update anime and episodes
+			anime = newAnime
+			episodes = newEpisodes
+
+			// Check if new anime is a series and get new total episodes
+			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
+			totalEpisodes = newTotalEpisodes
+
+			if !series {
+				// If new anime is a movie, handle it differently
+				log.Println("Switched to a movie/OVA, handling as single episode.")
+				HandleMovie(anime, episodes, discordEnabled)
+				break
+			}
+
+			// Select initial episode for the new anime
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode for new anime: %v", err)
+				continue
+			}
+
+			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
+			continue // Skip normal navigation and start playing the new anime
+		}
+
 		// Handle other errors
 		if err != nil {
 			log.Printf("Error during episode playback: %v", err)
 		}
 
 		userInput := GetUserInput()
-		if userInput == "q" {
+		if userInput == "quit" {
 			log.Println("Quitting application as per user request.")
 			break
 		}
 
-		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigation(
+		// Handle anime change
+		if userInput == "c" {
+			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if err != nil {
+				log.Printf("Error changing anime: %v", err)
+				continue // Stay with current anime if change fails
+			}
+
+			// Update anime and episodes
+			anime = newAnime
+			episodes = newEpisodes
+
+			// Check if new anime is a series and get new total episodes
+			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
+			totalEpisodes = newTotalEpisodes
+
+			if !series {
+				// If new anime is a movie, handle it differently
+				log.Println("Switched to a movie/OVA, handling as single episode.")
+				HandleMovie(anime, episodes, discordEnabled)
+				break
+			}
+
+			// Select initial episode for the new anime
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode for new anime: %v", err)
+				continue
+			}
+
+			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
+			continue // Skip normal navigation and start playing the new anime
+		}
+
+		// Handle episode selection
+		if userInput == "e" {
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				log.Printf("Error selecting episode: %v", err)
+				continue
+			}
+			continue
+		}
+
+		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigationEnhanced(
 			userInput,
 			episodes,
 			selectedEpisodeNum,
 			totalEpisodes,
+			anime,
 		)
 	}
 }
@@ -92,10 +173,110 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 	}
 }
 
+// Enhanced navigation handler that supports AllAnime-specific navigation
+func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
+	// Check if this is an AllAnime source and use enhanced navigation
+	if isAllAnimeSource(anime) {
+		return handleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
+	}
+
+	// Fallback to regular navigation for other sources
+	return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
+}
+
+// AllAnime-specific navigation handler
+func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
+	// Find current episode string
+	currentEpisodeStr := ""
+	for _, ep := range episodes {
+		if ep.Num == currentNum {
+			currentEpisodeStr = ep.Number
+			break
+		}
+	}
+
+	if currentEpisodeStr == "" {
+		util.Debug("Current episode not found, falling back to regular navigation", "currentNum", currentNum)
+		return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
+	}
+
+	switch input {
+	case "e":
+		return SelectEpisodeWithFuzzy(episodes)
+	case "p":
+		// Use AllAnime navigator for previous episode
+		nextEp, err := HandleAllAnimeEpisodeNavigation(anime, currentEpisodeStr, "previous")
+		if err != nil {
+			util.Debug("AllAnime previous navigation failed, using fallback", "error", err.Error())
+			return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
+		}
+		return nextEp.URL, nextEp.Number, nextEp.Num
+	case "n":
+		// Use AllAnime navigator for next episode
+		nextEp, err := HandleAllAnimeEpisodeNavigation(anime, currentEpisodeStr, "next")
+		if err != nil {
+			util.Debug("AllAnime next navigation failed, using fallback", "error", err.Error())
+			return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
+		}
+		return nextEp.URL, nextEp.Number, nextEp.Num
+	default:
+		return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
+	}
+}
+
 func CheckIfSeries(url string) (bool, int) {
 	series, totalEpisodes, err := api.IsSeries(url)
 	if err != nil {
-		log.Fatalln("Error checking if the anime is a series:", util.ErrorHandler(err))
+		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
+		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		return false, 1
 	}
 	return series, totalEpisodes
+}
+
+// CheckIfSeriesEnhanced checks if anime is a series using enhanced API
+func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
+	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
+	if err != nil {
+		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		return false, 1
+	}
+	return series, totalEpisodes
+}
+
+// ChangeAnimeLocal allows the user to search for and select a new anime (local implementation to avoid circular imports)
+func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
+	var animeName string
+
+	prompt := huh.NewInput().
+		Title("Change Anime").
+		Description("Enter the name of the anime you want to watch:").
+		Value(&animeName)
+
+	if err := prompt.Run(); err != nil {
+		return nil, nil, err
+	}
+
+	if len(animeName) < 2 {
+		util.Errorf("Anime name too short")
+		return nil, nil, fmt.Errorf("anime name must be at least 2 characters")
+	}
+
+	// Use the enhanced API to search for anime
+	anime, err := api.SearchAnimeEnhanced(animeName, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to search anime: %w", err)
+	}
+
+	if anime == nil {
+		return nil, nil, fmt.Errorf("no anime found with name: %s", animeName)
+	}
+
+	// Get episodes for the new anime using enhanced API
+	episodes, err := api.GetAnimeEpisodesEnhanced(anime)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get episodes: %w", err)
+	}
+
+	return anime, episodes, nil
 }

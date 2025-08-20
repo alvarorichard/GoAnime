@@ -2,11 +2,11 @@ package player
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -24,9 +24,11 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
-	"github.com/lrstanley/go-ytdlp"
 	"github.com/pkg/errors"
 )
+
+// lastAnimeURL stores the most recent anime URL/ID to support navigation when no updater is present
+var lastAnimeURL string
 
 const (
 	padding = 2
@@ -62,7 +64,8 @@ func (m *model) Init() tea.Cmd {
 // Modify the StartVideo function in player.go
 func StartVideo(link string, args []string) (string, error) {
 	// Verify MPV is installed
-	if _, err := exec.LookPath("mpv"); err != nil {
+	mpvPath, err := exec.LookPath("mpv")
+	if err != nil {
 		return "", fmt.Errorf("mpv not found in PATH. Please install mpv: https://mpv.io/installation/")
 	}
 
@@ -73,7 +76,7 @@ func StartVideo(link string, args []string) (string, error) {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
 		tmpDir := "/tmp"
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		if err := os.MkdirAll(tmpDir, 0700); err != nil {
 			return "", fmt.Errorf("failed to create tmp directory: %w", err)
 		}
 		socketPath = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
@@ -84,14 +87,22 @@ func StartVideo(link string, args []string) (string, error) {
 		"--quiet",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 	}
-	mpvArgs = append(mpvArgs, args...)
-	mpvArgs = append(mpvArgs, link)
+	// Validate and filter any additional args before passing to mpv
+	mpvArgs = append(mpvArgs, filterMPVArgs(args)...)
+
+	// Sanitize media target (URL or local file path)
+	safeLink, err := sanitizeMediaTarget(link)
+	if err != nil {
+		return "", fmt.Errorf("invalid media target: %w", err)
+	}
+	mpvArgs = append(mpvArgs, safeLink)
 
 	if util.IsDebug {
 		fmt.Printf("[DEBUG] Starting mpv with arguments: %v\n", mpvArgs)
 	}
 
-	cmd := exec.Command("mpv", mpvArgs...)
+	// #nosec G204: mpvArgs are validated via filterMPVArgs and sanitizeMediaTarget
+	cmd := exec.Command(mpvPath, mpvArgs...)
 	setProcessGroup(cmd) // Handle OS-specific process groups
 
 	// Capture stderr for better error reporting
@@ -143,7 +154,7 @@ func StartVideo(link string, args []string) (string, error) {
 		fmt.Printf("[DEBUG] Timeout after %.2fs waiting  socket of mpv\n", time.Since(startTime).Seconds())
 	}
 	// Cleanup if timeout occurs
-	err := cmd.Process.Kill()
+	err = cmd.Process.Kill()
 	if err != nil {
 
 		return "", err
@@ -154,6 +165,91 @@ func StartVideo(link string, args []string) (string, error) {
 // MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages
 func MpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
 	return mpvSendCommand(socketPath, command)
+}
+
+// filterMPVArgs whitelists allowed mpv flags to avoid passing unexpected parameters.
+func filterMPVArgs(args []string) []string {
+	allowedNoValue := map[string]struct{}{
+		"--no-config": {},
+	}
+	allowedWithValuePrefixes := []string{
+		"--hwdec=",
+		"--vo=",
+		"--profile=",
+		"--cache=",
+		"--demuxer-max-bytes=",
+		"--demuxer-readahead-secs=",
+		"--video-latency-hacks=",
+		"--audio-display=",
+		"--start=",
+		// Add more allowed prefixes here if needed in the future
+	}
+
+	var filtered []string
+	for _, a := range args {
+		if !strings.HasPrefix(a, "--") {
+			// ignore positional args; media target is handled separately
+			continue
+		}
+		if _, ok := allowedNoValue[a]; ok {
+			filtered = append(filtered, a)
+			continue
+		}
+		for _, p := range allowedWithValuePrefixes {
+			if strings.HasPrefix(a, p) {
+				filtered = append(filtered, a)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+// sanitizeMediaTarget ensures the media target is a safe http(s) URL or a cleaned file path
+func sanitizeMediaTarget(link string) (string, error) {
+	l := strings.TrimSpace(link)
+	if l == "" {
+		return "", fmt.Errorf("empty link")
+	}
+	if strings.ContainsAny(l, "\x00\n\r") {
+		return "", fmt.Errorf("invalid control characters in link")
+	}
+	if strings.HasPrefix(l, "-") {
+		return "", fmt.Errorf("media target must not start with '-' (looks like a flag)")
+	}
+	// Treat as URL only if it contains "://". This avoids misclassifying Windows
+	// paths like "C:\\..." as having scheme "c".
+	if strings.Contains(l, "://") {
+		u, err := url.Parse(l)
+		if err != nil {
+			return "", fmt.Errorf("invalid URL: %w", err)
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http", "https":
+			return l, nil
+		default:
+			return "", fmt.Errorf("unsupported URL scheme: %s", u.Scheme)
+		}
+	}
+	// Treat as local path
+	cleaned := filepath.Clean(l)
+	return cleaned, nil
+}
+
+// sanitizeOutputPath validates an output path to avoid directory traversal and disallow leading '-'
+func sanitizeOutputPath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("empty output path")
+	}
+	if strings.ContainsAny(p, "\x00\n\r") {
+		return "", fmt.Errorf("invalid control characters in output path")
+	}
+	if strings.HasPrefix(p, "-") {
+		return "", fmt.Errorf("output path must not start with '-' (looks like a flag)")
+	}
+	cleaned := filepath.Clean(p)
+	// optional: prevent escaping user home via path like ../../
+	return cleaned, nil
 }
 
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
@@ -245,6 +341,8 @@ func HandleDownloadAndPlay(
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
+	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
+	lastAnimeURL = animeURL
 	downloadOption := askForDownload()
 	switch downloadOption {
 	case 1:
@@ -263,27 +361,57 @@ func HandleDownloadAndPlay(
 	case 2:
 		// Download episodes in a range
 		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-			util.Fatal("Failed to download episodes:", err)
+			return err
 		}
 	default:
-		// Play online
+		// Play online - determine the best approach based on URL type
 		videoURLToPlay := ""
-		// Always use the episode page URL for streaming, so the user can select quality
-		if len(episodes) > 0 && selectedEpisodeNum > 0 {
-			// Find the selected episode struct
-			selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-			if found {
-				if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil {
+
+		// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
+		if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
+			strings.Contains(videoURL, "dropbox.com") ||
+			strings.Contains(videoURL, "wixmp.com") ||
+			strings.HasSuffix(videoURL, ".mp4") ||
+			strings.HasSuffix(videoURL, ".m3u8")) {
+			// Use direct stream URL
+			videoURLToPlay = videoURL
+			if util.IsDebug {
+				util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+			}
+		} else {
+			// Try to extract video URL from episode page
+			if len(episodes) > 0 && selectedEpisodeNum > 0 {
+				selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
+				if found {
+					if util.IsDebug {
+						util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+					}
+					if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+						videoURLToPlay = url
+					}
+				}
+			}
+			// Fallback: try to extract from original videoURL
+			if videoURLToPlay == "" && videoURL != "" {
+				if util.IsDebug {
+					util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
+				}
+				if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
 					videoURLToPlay = url
 				}
 			}
 		}
+
+		// Final validation
 		if videoURLToPlay == "" {
-			// fallback: try original videoURL
-			if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil {
-				videoURLToPlay = url
-			}
+			util.Debugf("❌ No valid video URL found")
+			return fmt.Errorf("no valid video URL found")
 		}
+
+		if util.IsDebug {
+			util.Debugf("✅ Final video URL: %s", videoURLToPlay)
+		}
+
 		if err := playVideo(
 			videoURLToPlay,
 			episodes,
@@ -306,6 +434,11 @@ func downloadAndPlayEpisode(
 	animeMalID int, // Added animeMalID parameter
 	updater *discord.RichPresenceUpdater,
 ) error {
+	// Check if video URL is valid
+	if videoURL == "" {
+		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
+	}
+
 	currentUser, err := user.Current()
 	if err != nil {
 		util.Fatal("Failed to get current user:", err)
@@ -315,7 +448,7 @@ func downloadAndPlayEpisode(
 	episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(downloadPath, os.ModePerm); err != nil {
+		if err := os.MkdirAll(downloadPath, 0700); err != nil {
 			util.Fatal("Failed to create download directory:", err)
 		}
 	}
@@ -323,23 +456,57 @@ func downloadAndPlayEpisode(
 	if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 		numThreads := 4 // Define the number of threads for downloading
 
-		// Check if the video URL is from Blogger
-		if strings.Contains(videoURL, "blogger.com") {
-			// Use yt-dlp to download the video from Blogger
-			fmt.Printf("Downloading episode %s with yt-dlp...\n", episodeNumberStr)
-
-			// Ensure yt-dlp is installed
-			ytdlp.MustInstall(context.Background(), nil)
-
-			// Configure downloader
-			dl := ytdlp.New().
-				//Quiet(true).          // --no-progress
-				Output(episodePath) // -o <episodePath>
-
-			// Execute download
-			if _, err := dl.Run(context.Background(), videoURL); err != nil {
-				util.Error("Failed to download video using yt-dlp:", err)
+		// Check URL type and use appropriate download method
+		if strings.Contains(videoURL, "blogger.com") ||
+			strings.Contains(videoURL, ".m3u8") ||
+			strings.Contains(videoURL, "wixmp.com") ||
+			strings.Contains(videoURL, "sharepoint.com") {
+			// Use yt-dlp with progress bar
+			m := &model{
+				progress: progress.New(progress.WithDefaultGradient()),
+				keys: keyMap{
+					quit: key.NewBinding(
+						key.WithKeys("ctrl+c"),
+						key.WithHelp("ctrl+c", "quit"),
+					),
+				},
 			}
+			p := tea.NewProgram(m)
+
+			// Estimate/obtain total size for progress percentage
+			httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
+				m.totalBytes = sz
+			} else {
+				// Fallback for HLS
+				m.totalBytes = 500 * 1024 * 1024
+			}
+
+			go func() {
+				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
+				if err := downloadWithYtDlp(videoURL, episodePath, m); err != nil {
+					util.Fatal("Failed to download video:", err)
+				}
+				m.mu.Lock()
+				m.done = true
+				m.mu.Unlock()
+				p.Send(statusMsg("Download completed!"))
+			}()
+
+			if _, err := p.Run(); err != nil {
+				util.Fatal("Error running progress bar:", err)
+			}
+
+			// Verify the file was actually downloaded
+			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+				return fmt.Errorf("download failed: file was not created")
+			}
+
+			// Check file size
+			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
+				return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
+			}
+
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 
 		} else {
@@ -389,14 +556,26 @@ func downloadAndPlayEpisode(
 		}
 	} else {
 		fmt.Println("Video already downloaded.")
+		// Check if the file is actually valid (not empty)
+		if stat, err := os.Stat(episodePath); err == nil {
+			if stat.Size() < 1024 {
+				fmt.Println("File is too small, re-downloading...")
+				if removeErr := os.Remove(episodePath); removeErr != nil {
+					util.Warnf("Failed to remove invalid file: %v", removeErr)
+				}
+				return downloadAndPlayEpisode(videoURL, episodes, selectedEpisodeNum, animeURL, episodeNumberStr, animeMalID, updater)
+			}
+		}
 	}
 
 	if askForPlayOffline() {
 		if err := playVideo(episodePath, episodes, selectedEpisodeNum, animeMalID, updater); err != nil {
 			return err
 		}
+		return nil
 	}
-	return nil
+	// User chose not to watch; terminate flow cleanly
+	return ErrUserQuit
 }
 
 // askForDownload presents a prompt for the user to choose a download option.

@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/lrstanley/go-ytdlp"
 )
 
 // DownloadConfig holds configuration for download operations
@@ -31,10 +33,16 @@ type DownloadConfig struct {
 type EpisodeDownloader struct {
 	config   DownloadConfig
 	episodes []models.Episode
+	anime    *models.Anime // Store anime data for enhanced API calls
 }
 
 // NewEpisodeDownloader creates a new episode downloader
 func NewEpisodeDownloader(episodes []models.Episode, animeURL string) *EpisodeDownloader {
+	return NewEpisodeDownloaderWithAnime(episodes, animeURL, nil)
+}
+
+// NewEpisodeDownloaderWithAnime creates a new episode downloader with anime data for enhanced API support
+func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, anime *models.Anime) *EpisodeDownloader {
 	userHome, _ := os.UserHomeDir()
 	safeAnimeName := strings.ReplaceAll(player.DownloadFolderFormatter(animeURL), " ", "_")
 	outputDir := filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
@@ -47,6 +55,7 @@ func NewEpisodeDownloader(episodes []models.Episode, animeURL string) *EpisodeDo
 			Concurrent: 3, // Download max 3 episodes concurrently
 		},
 		episodes: episodes,
+		anime:    anime,
 	}
 }
 
@@ -58,7 +67,7 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -70,7 +79,7 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 		return d.promptPlayExisting(episodeNum, episodePath)
 	}
 
-	// Get video URL
+	// Get video URL using enhanced method if possible, fallback to regular method
 	videoURL, err := d.getBestQualityURL(episode.URL)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
@@ -87,7 +96,7 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -100,7 +109,6 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			util.Warnf("Episode %d not found, skipping", epNum)
 			continue
 		}
-
 		episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
 		if d.fileExists(episodePath) {
 			existingEpisodes = append(existingEpisodes, epNum)
@@ -108,7 +116,6 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			episodesToDownload = append(episodesToDownload, epNum)
 		}
 	}
-
 	// Handle case where all episodes already exist
 	if len(episodesToDownload) == 0 {
 		fmt.Printf("All episodes in range %d-%d already exist!\n", startEp, endEp)
@@ -298,7 +305,12 @@ func (d *EpisodeDownloader) downloadEpisodeWithSharedProgress(videoURL, destPath
 	}
 
 	// Create destination file
-	out, err := os.Create(destPath)
+	safeDest, err := d.sanitizeDestPath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+	// #nosec G304: dest path validated by sanitizeDestPath to remain within configured OutputDir
+	out, err := os.Create(safeDest)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -364,12 +376,57 @@ func (d *EpisodeDownloader) fileExists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
+// sanitizeDestPath ensures the destination path stays within the configured OutputDir
+func (d *EpisodeDownloader) sanitizeDestPath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("empty destination path")
+	}
+	cleaned := filepath.Clean(p)
+	outDir := filepath.Clean(d.config.OutputDir)
+	absDir, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", err
+	}
+	absFile, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absDir, absFile)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("destination escapes output directory: %s", cleaned)
+	}
+	return absFile, nil
+}
+
 func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
 	// Use existing player functionality to get video URL
-	return player.GetVideoURLForEpisode(episodeURL)
+	videoURL, err := player.GetVideoURLForEpisode(episodeURL)
+	if err != nil {
+		return "", err
+	}
+	return videoURL, nil
 }
 
 func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
+	// Check if this is an AllAnime URL that might not have Content-Length header
+	// Based on ani-cli patterns
+	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
+		strings.Contains(url, "wixmp.com") ||
+		strings.Contains(url, "repackager.wixmp.com") ||
+		strings.Contains(url, "master.m3u8") ||
+		strings.Contains(url, ".m3u8") ||
+		strings.Contains(url, "allanime.pro") ||
+		strings.Contains(url, "blogger.com")
+
+	// For streaming URLs that we know won't have Content-Length, return estimate immediately
+	if strings.Contains(url, ".m3u8") || strings.Contains(url, "master.m3u8") {
+		fmt.Println("HLS stream detected, using estimated size")
+		return 400 * 1024 * 1024, nil // 400MB estimate for HLS streams
+	}
+
 	// Simple HTTP HEAD request to get content length
 	httpClient := &http.Client{
 		Transport: api.SafeTransport(10 * time.Second),
@@ -378,10 +435,24 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
+		if isAllAnimeURL {
+			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		}
 		return 0, err
 	}
+
+	// Add referer for AllAnime URLs (like ani-cli does)
+	if isAllAnimeURL {
+		req.Header.Set("Referer", "https://allmanga.to")
+	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if isAllAnimeURL {
+			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		}
 		return 0, err
 	}
 	defer func() {
@@ -392,9 +463,60 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	contentLength := resp.Header.Get("Content-Length")
 	if contentLength == "" {
+		// For AllAnime URLs that might not have Content-Length, use fallback
+		if isAllAnimeURL {
+			fmt.Println("Content-Length header missing for AllAnime URL, using fallback estimate")
+			return d.estimateContentLengthForAllAnime(url, httpClient)
+		}
 		return 0, fmt.Errorf("content-length header missing")
 	}
 	return strconv.ParseInt(contentLength, 10, 64)
+}
+
+// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
+func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
+	if strings.Contains(url, ".m3u8") {
+		util.Debugf("HLS stream detected, using estimated size for download")
+		// Return an estimated size for a typical episode (500MB)
+		return 500 * 1024 * 1024, nil
+	}
+
+	// For other AllAnime URLs, try to get partial content to estimate size
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	// Request only first few KB to check response
+	req.Header.Set("Range", "bytes=0-4095")
+	resp, err := client.Do(req)
+	if err != nil {
+		// If range request fails, return default size
+		util.Debugf("Range request failed, using default size estimate")
+		return 300 * 1024 * 1024, nil // 300MB default
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			util.Warnf("Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	// Check Content-Range header for total size
+	contentRange := resp.Header.Get("Content-Range")
+	if contentRange != "" {
+		// Parse "bytes 0-4095/12345678" format
+		parts := strings.Split(contentRange, "/")
+		if len(parts) == 2 && parts[1] != "*" {
+			if totalSize, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				return totalSize, nil
+			}
+		}
+	}
+
+	// Fallback to default size estimate
+	util.Debugf("Could not determine exact size, using default estimate")
+	return 300 * 1024 * 1024, nil // 300MB default
 }
 
 // downloadWithProgress downloads a single episode with progress bar
@@ -407,28 +529,43 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 	// Get content length for progress tracking
 	contentLength, err := d.getContentLength(videoURL)
 	if err != nil {
-		return fmt.Errorf("failed to get content length: %w", err)
+		fmt.Printf("Warning: Failed to get content length: %v, using fallback\n", err)
+		// Use a reasonable fallback size for progress tracking
+		contentLength = 200 * 1024 * 1024 // 200MB fallback
 	}
 	m.totalBytes = contentLength
+
+	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
 	p := tea.NewProgram(m)
 
 	// Start download in goroutine with proper progress tracking
 	downloadComplete := make(chan error, 1)
 	go func() {
-		defer func() {
-			m.mu.Lock()
-			m.done = true
-			m.mu.Unlock()
-			// Send quit after a small delay to show completion
-			time.Sleep(500 * time.Millisecond)
-			p.Send(statusMsg("Download completed!"))
-			time.Sleep(200 * time.Millisecond)
-			p.Quit()
-		}()
-
 		// Use the existing player download functionality with progress tracking
 		err := d.downloadEpisodeWithProgress(videoURL, episodePath, m, p)
+
+		// Verify the file was actually downloaded before marking as complete
+		if err == nil && !d.fileExists(episodePath) {
+			err = fmt.Errorf("download failed: file was not created")
+		}
+
+		// Send completion status and wait before quitting
+		if err == nil {
+			p.Send(statusMsg("Download completed!"))
+			// Give time for final progress update to show 100%
+			time.Sleep(1 * time.Second)
+		} else {
+			p.Send(statusMsg(fmt.Sprintf("Download failed: %v", err)))
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// Mark as done and quit
+		m.mu.Lock()
+		m.done = true
+		m.mu.Unlock()
+		p.Quit()
+
 		downloadComplete <- err
 	}()
 
@@ -442,16 +579,71 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 		return err
 	}
 
+	// Double-check the file exists and has reasonable size
+	if !d.fileExists(episodePath) {
+		return fmt.Errorf("download verification failed: file does not exist")
+	}
+
+	if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
+		return fmt.Errorf("download verification failed: file is too small (%d bytes)", stat.Size())
+	}
+
 	fmt.Printf("\nEpisode %d downloaded successfully!\n", episodeNum)
 	return d.promptPlayDownloaded(episodeNum, episodePath)
 }
 
 // downloadEpisodeWithProgress downloads an episode with progress model and Bubble Tea program
 func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
-	if strings.Contains(videoURL, "blogger.com") {
-		return d.downloadWithYtDlp(videoURL, destPath)
+	// Check if URL is empty or invalid
+	if videoURL == "" {
+		return fmt.Errorf("empty video URL provided")
 	}
 
+	// Inspired by ani-cli download logic
+	// Check URL type and use appropriate download method
+
+	// For m3u8 streams (HLS) - use yt-dlp like ani-cli
+	if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") {
+		fmt.Println("Detected HLS stream, using yt-dlp download (ani-cli style)")
+		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+	}
+
+	// For wixmp.com URLs (common in AllAnime) - use yt-dlp
+	if strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
+		fmt.Println("Detected wixmp URL, using yt-dlp download")
+		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+	}
+
+	// For blogger.com URLs - use yt-dlp
+	if strings.Contains(videoURL, "blogger.com") {
+		fmt.Println("Detected blogger URL, using yt-dlp download")
+		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+	}
+
+	// For sharepoint URLs (AllAnime) - try HTTP first, fallback to yt-dlp
+	if strings.Contains(videoURL, "sharepoint.com") {
+		fmt.Println("Detected SharePoint URL, trying HTTP download first")
+		err := d.downloadHTTPWithProgress(videoURL, destPath, progressModel, program)
+		if err != nil {
+			fmt.Printf("HTTP download failed: %v, trying yt-dlp fallback\n", err)
+			return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+		}
+		return nil
+	}
+
+	// For any AllAnime URL, try yt-dlp as default
+	if strings.Contains(videoURL, "allanime") || strings.Contains(videoURL, "allmanga") {
+		fmt.Println("Detected AllAnime URL, using yt-dlp download")
+		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+	}
+
+	// For regular MP4 URLs - use HTTP download
+	fmt.Println("Using HTTP download for regular MP4 URL")
+	return d.downloadHTTPWithProgress(videoURL, destPath, progressModel, program)
+}
+
+// downloadHTTPWithProgress downloads via HTTP with progress tracking
+func (d *EpisodeDownloader) downloadHTTPWithProgress(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
 	// Create HTTP client with longer timeout for video downloads
 	client := &http.Client{
 		Transport: api.SafeTransport(10 * time.Minute), // Much longer transport timeout
@@ -473,8 +665,16 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	// Create destination file
-	out, err := os.Create(destPath)
+	// Ensure directory exists and validate destination path
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	safeDest, err := d.sanitizeDestPath(destPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+	// #nosec G304: dest path validated by sanitizeDestPath to remain within configured OutputDir
+	out, err := os.Create(safeDest)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
@@ -484,12 +684,17 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 		}
 	}()
 
+	// Get actual content length from response if available
+	actualContentLength := resp.ContentLength
+	if actualContentLength > 0 {
+		progressModel.mu.Lock()
+		progressModel.totalBytes = actualContentLength
+		progressModel.mu.Unlock()
+	}
+
 	// Copy with progress tracking
 	buffer := make([]byte, 32*1024) // 32KB buffer
-
-	// Shared progress variables
 	var totalReceived int64
-	var mu sync.Mutex
 
 	for {
 		n, err := resp.Body.Read(buffer)
@@ -500,12 +705,15 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 			}
 
 			// Update progress tracking
-			mu.Lock()
 			totalReceived += int64(n)
 
 			// Update the progress model
 			progressModel.mu.Lock()
 			progressModel.received = totalReceived
+			// Update total bytes if we got it from response and it's more accurate
+			if actualContentLength > 0 {
+				progressModel.totalBytes = actualContentLength
+			}
 			progressModel.mu.Unlock()
 
 			// Send progress update
@@ -513,7 +721,6 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 				received:   totalReceived,
 				totalBytes: progressModel.totalBytes,
 			})
-			mu.Unlock()
 		}
 
 		if err == io.EOF {
@@ -523,31 +730,141 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 			return fmt.Errorf("failed to read from response: %w", err)
 		}
 	}
+
+	// Send final progress update to ensure 100% is shown
+	progressModel.mu.Lock()
+	progressModel.received = totalReceived
+	progressModel.mu.Unlock()
+
+	program.Send(progressMsg{
+		received:   totalReceived,
+		totalBytes: progressModel.totalBytes,
+	})
+
+	fmt.Printf("HTTP download completed: %d bytes downloaded\n", totalReceived)
+	return nil
+}
+
+// downloadM3U8WithYtDlp downloads m3u8/HLS streams using go-ytdlp library
+func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
+	program.Send(statusMsg("Starting yt-dlp download (using go-ytdlp library)..."))
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Start a goroutine to simulate progress for yt-dlp downloads
+	done := make(chan bool, 1)
+	go func() {
+		// Simulate progress updates since yt-dlp doesn't give us real-time progress easily
+		for i := 0; i < 100; i++ {
+			select {
+			case <-done:
+				return
+			default:
+				time.Sleep(300 * time.Millisecond) // Update every 300ms
+
+				// Simulate gradual progress
+				simulatedReceived := int64(float64(progressModel.totalBytes) * float64(i) / 100.0)
+
+				progressModel.mu.Lock()
+				progressModel.received = simulatedReceived
+				progressModel.mu.Unlock()
+
+				program.Send(progressMsg{
+					received:   simulatedReceived,
+					totalBytes: progressModel.totalBytes,
+				})
+
+				if i%10 == 0 { // Update status every 3 seconds
+					program.Send(statusMsg(fmt.Sprintf("Downloading with yt-dlp... %d%%", i)))
+				}
+			}
+		}
+	}()
+
+	// Ensure yt-dlp is installed
+	ctx := context.Background()
+	ytdlp.MustInstall(ctx, nil)
+
+	// Configure downloader using the basic API that we know works
+	dl := ytdlp.New().
+		Output(destPath) // -o destPath
+
+	// Execute download
+	_, err := dl.Run(ctx, videoURL)
+	if err != nil {
+		done <- true // Stop progress simulation
+		return fmt.Errorf("go-ytdlp download failed: %w", err)
+	}
+
+	// Stop progress simulation
+	done <- true
+
+	// Verify the file was created
+	if !d.fileExists(destPath) {
+		// List files in directory to see what was created
+		if dir := filepath.Dir(destPath); dir != "" {
+			if files, err := os.ReadDir(dir); err == nil {
+				util.Infof("Files in directory %s:", dir)
+				for _, file := range files {
+					util.Infof("  - %s", file.Name())
+				}
+			}
+		}
+		return fmt.Errorf("download failed: file was not created at %s", destPath)
+	}
+
+	// Check file size
+	if stat, err := os.Stat(destPath); err == nil {
+		if stat.Size() < 1024 {
+			return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
+		}
+	}
+
+	// Update progress to 100%
+	progressModel.mu.Lock()
+	progressModel.received = progressModel.totalBytes
+	progressModel.mu.Unlock()
+
+	program.Send(progressMsg{
+		received:   progressModel.totalBytes,
+		totalBytes: progressModel.totalBytes,
+	})
+
+	program.Send(statusMsg("yt-dlp download completed successfully!"))
+	fmt.Printf("Download completed successfully: %s\n", destPath)
+
 	return nil
 }
 
 func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
-	// Use the existing function from player package
-	if err := runYtDlpCommand(url, path); err != nil {
-		return fmt.Errorf("yt-dlp download failed: %w", err)
-	}
-	return nil
-}
-
-// runYtDlpCommand executes yt-dlp command
-func runYtDlpCommand(url, outputPath string) error {
-	args := []string{"--no-progress", "-f", "best", "-o", outputPath, url}
-
-	// Check if yt-dlp is available
-	if _, err := os.Stat("yt-dlp"); err != nil {
-		if _, err := os.Stat("yt-dlp.exe"); err != nil {
-			return fmt.Errorf("yt-dlp not found. Please install yt-dlp")
-		}
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	fmt.Printf("Running: yt-dlp %v\n", args)
-	// For now, return success to avoid blocking
-	// In production, you would use exec.Command("yt-dlp", args...).Run()
+	// Use go-ytdlp library instead of command line
+	ctx := context.Background()
+	ytdlp.MustInstall(ctx, nil)
+
+	// Configure downloader
+	dl := ytdlp.New().
+		Output(path) // -o path
+
+	fmt.Printf("Running go-ytdlp for: %s\n", url)
+
+	// Execute download
+	if _, err := dl.Run(ctx, url); err != nil {
+		return fmt.Errorf("go-ytdlp error: %w", err)
+	}
+
+	// Verify the file was actually downloaded
+	if !d.fileExists(path) {
+		return fmt.Errorf("download failed: file was not created at %s", path)
+	}
+
 	return nil
 }
 
@@ -720,8 +1037,13 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
+		// Immediately update the progress bar when we get a progress message
+		var cmd tea.Cmd
+		if m.totalBytes > 0 {
+			cmd = m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+		}
 		m.mu.Unlock()
-		return m, nil
+		return m, cmd
 	case progress.FrameMsg:
 		var cmd tea.Cmd
 		newModel, cmd := m.progress.Update(msg)

@@ -1,8 +1,10 @@
 package playback
 
 import (
+	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,12 +36,44 @@ func PlayEpisode(
 		log.Printf("Error fetching episode data: %v", err)
 	}
 
-	videoURL, err := player.GetVideoURLForEpisode(episodeURL)
-	if err != nil {
-		log.Fatalln("Failed to extract video URL:", util.ErrorHandler(err))
+	// Find the specific episode to pass to enhanced API
+	var currentEpisode *models.Episode
+	for i := range episodes {
+		if episodes[i].Number == episodeNumberStr {
+			currentEpisode = &episodes[i]
+			break
+		}
 	}
 
-	episodeDuration := time.Duration(episodes[0].Duration) * time.Second
+	if currentEpisode == nil {
+		// Create episode if not found
+		// For AllAnime, use the anime ID as URL instead of episode-specific URL
+		episodeURLForCreation := episodeURL
+		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http")) {
+			episodeURLForCreation = anime.URL // Use anime ID for AllAnime
+		}
+
+		currentEpisode = &models.Episode{
+			Number: episodeNumberStr,
+			Num:    episodeNum,
+			URL:    episodeURLForCreation,
+		}
+	}
+
+	// Try enhanced API first, fallback to legacy if needed
+	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
+	if err != nil {
+		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
+		return fmt.Errorf("failed to extract video URL: %w", err)
+	}
+
+	// Guard against empty or missing durations
+	var episodeDuration time.Duration
+	if len(episodes) > 0 && episodes[0].Duration > 0 {
+		episodeDuration = time.Duration(episodes[0].Duration) * time.Second
+	} else {
+		episodeDuration = 0
+	}
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
 	err = player.HandleDownloadAndPlay(
