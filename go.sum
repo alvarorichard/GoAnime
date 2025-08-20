@@ -46,6 +46,8 @@ github.com/charmbracelet/x/exp/strings v0.0.0-20250814162307-57b675fecd71 h1:9z6
 github.com/charmbracelet/x/exp/strings v0.0.0-20250814162307-57b675fecd71/go.mod h1:Rgw3/F+xlcUc5XygUtimVSxAqCOsqyvJjqF5UHRvc5k=
 github.com/charmbracelet/x/exp/strings v0.0.0-20250818131617-61d774aefe53 h1:feDJGab3MA9Kq/g6L7rlu7n5BP5+U9QzeS+6oYAvaxQ=
 github.com/charmbracelet/x/exp/strings v0.0.0-20250818131617-61d774aefe53/go.mod h1:Rgw3/F+xlcUc5XygUtimVSxAqCOsqyvJjqF5UHRvc5k=
+github.com/charmbracelet/x/exp/strings v0.0.0-20250820142022-371acb6ebad9 h1:IhpkTLJ0YN+PlxCeCGbapaKQpeNId3KXQaktWSK05zA=
+github.com/charmbracelet/x/exp/strings v0.0.0-20250820142022-371acb6ebad9/go.mod h1:Rgw3/F+xlcUc5XygUtimVSxAqCOsqyvJjqF5UHRvc5k=
 github.com/charmbracelet/x/term v0.2.1 h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=
 github.com/charmbracelet/x/term v0.2.1/go.mod h1:oQ4enTYFV7QN4m0i9mzHrViD7TQKvNEEkHUMCmsxdUg=
 github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=
@@ -96,6 +98,8 @@ github.com/ktr0731/go-fuzzyfinder v0.9.0 h1:JV8S118RABzRl3Lh/RsPhXReJWc2q0rbuipz
 github.com/ktr0731/go-fuzzyfinder v0.9.0/go.mod h1:uybx+5PZFCgMCSDHJDQ9M3nNKx/vccPmGffsXPn2ad8=
 github.com/lrstanley/go-ytdlp v1.2.1 h1:Y4Vsnwt9HPn8gVv8BxQNDYa/1Cyf/1+T7Xy8CZzI83U=
 github.com/lrstanley/go-ytdlp v1.2.1/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
+github.com/lrstanley/go-ytdlp v1.2.2 h1:bBFDDlEUYkEMwbtOrUVfU4qBf3PbDJWgCER2pU60TSE=
+github.com/lrstanley/go-ytdlp v1.2.2/go.mod h1:4Mwvk8i5dAeeBDAEoxeJLa46xA/YpkzO5M6zg7MHJa0=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/manifoldco/promptui v0.9.0 h1:3V4HzJk1TtXW1MTZMP7mdlwbBpIinw3HztaIlYthEiA=
@@ -136,6 +140,8 @@ github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOf
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/ulikunitz/xz v0.5.12 h1:37Nm15o69RwBkXM0J6A5OlE67RZTfzUxTj8fB3dfcsc=
 github.com/ulikunitz/xz v0.5.12/go.mod h1:nbz6k7qbPmH4IRqmfOplQw/tblSgqTqBwxkY0oWt/14=
+github.com/ulikunitz/xz v0.5.13 h1:ar98gWrjf4H1ev05fYP/o29PDZw9DrI3niHtnEqyuXA=
+github.com/ulikunitz/xz v0.5.13/go.mod h1:nbz6k7qbPmH4IRqmfOplQw/tblSgqTqBwxkY0oWt/14=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
