@@ -5,12 +5,14 @@ set -e
 
 # Variables
 OUTPUT_DIR="../build"  # Adjusted to place the binaries in the build directory
-BINARY_NAME_AMD64="goanime-apple-darwin-amd64"
-BINARY_NAME_ARM64="goanime-apple-darwin-arm64"
-BINARY_NAME_UNIVERSAL="goanime-apple-darwin-universal"
+BINARY_NAME_AMD64="goanime-darwin-amd64"
+BINARY_NAME_ARM64="goanime-darwin-arm64"
+BINARY_NAME_UNIVERSAL="goanime-darwin-universal"
+BINARY_NAME_UNIVERSAL_GENERIC="goanime-darwin"
 BINARY_PATH_AMD64="$OUTPUT_DIR/$BINARY_NAME_AMD64"
 BINARY_PATH_ARM64="$OUTPUT_DIR/$BINARY_NAME_ARM64"
 BINARY_PATH_UNIVERSAL="$OUTPUT_DIR/$BINARY_NAME_UNIVERSAL"
+BINARY_PATH_UNIVERSAL_GENERIC="$OUTPUT_DIR/$BINARY_NAME_UNIVERSAL_GENERIC"
 MAIN_PACKAGE="../cmd/goanime"
 
 # Create the output directory if it doesn't exist
@@ -33,6 +35,10 @@ echo "Creating universal binary..."
 if command -v lipo >/dev/null 2>&1; then
     lipo -create -output "$BINARY_PATH_UNIVERSAL" "$BINARY_PATH_AMD64" "$BINARY_PATH_ARM64"
     echo "Universal binary created: $BINARY_PATH_UNIVERSAL"
+    
+    # Create a copy with generic name for updater compatibility
+    cp "$BINARY_PATH_UNIVERSAL" "$BINARY_PATH_UNIVERSAL_GENERIC"
+    echo "Generic universal binary created: $BINARY_PATH_UNIVERSAL_GENERIC"
 else
     echo "Warning: lipo command not found. Cannot create universal binary."
 fi
@@ -59,6 +65,9 @@ compress_binary "$BINARY_PATH_AMD64"
 compress_binary "$BINARY_PATH_ARM64"
 if [ -f "$BINARY_PATH_UNIVERSAL" ]; then
     compress_binary "$BINARY_PATH_UNIVERSAL"
+fi
+if [ -f "$BINARY_PATH_UNIVERSAL_GENERIC" ]; then
+    compress_binary "$BINARY_PATH_UNIVERSAL_GENERIC"
 fi
 
 # Check if binaries were built successfully
@@ -101,10 +110,27 @@ create_tarball_and_checksum "$BINARY_PATH_ARM64"
 if [ -f "$BINARY_PATH_UNIVERSAL" ]; then
     create_tarball_and_checksum "$BINARY_PATH_UNIVERSAL"
 fi
+if [ -f "$BINARY_PATH_UNIVERSAL_GENERIC" ]; then
+    create_tarball_and_checksum "$BINARY_PATH_UNIVERSAL_GENERIC"
+fi
 
 echo "Build script completed successfully. Generated binaries:"
 echo "- Intel (amd64): $BINARY_PATH_AMD64"
 echo "- Apple Silicon (arm64): $BINARY_PATH_ARM64"
 if [ -f "$BINARY_PATH_UNIVERSAL" ]; then
-    echo "- Universal: $BINARY_PATH_UNIVERSAL"
+    echo "- Universal (explicit): $BINARY_PATH_UNIVERSAL"
+fi
+if [ -f "$BINARY_PATH_UNIVERSAL_GENERIC" ]; then
+    echo "- Universal (generic): $BINARY_PATH_UNIVERSAL_GENERIC"
+fi
+
+echo ""
+echo "GitHub Release Assets:"
+echo "- goanime-darwin-amd64 (Intel macOS)"
+echo "- goanime-darwin-arm64 (Apple Silicon macOS)"
+if [ -f "$BINARY_PATH_UNIVERSAL" ]; then
+    echo "- goanime-darwin-universal (Universal macOS - explicit)"
+fi
+if [ -f "$BINARY_PATH_UNIVERSAL_GENERIC" ]; then
+    echo "- goanime-darwin (Universal macOS - fallback for updater)"
 fi

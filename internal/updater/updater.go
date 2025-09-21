@@ -277,8 +277,9 @@ func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo)
 		expectedNames = []string{
 			fmt.Sprintf("goanime-darwin-%s", platform.Arch),
 			fmt.Sprintf("goanime-macos-%s", platform.Arch),
-			"goanime-darwin",
-			"goanime-macos",
+			"goanime-darwin-universal", // Universal binary (explicit)
+			"goanime-darwin",           // Universal binary (generic) or fallback
+			"goanime-macos",            // Alternative generic name
 		}
 	case "linux":
 		expectedNames = []string{
@@ -302,11 +303,18 @@ func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo)
 	return "", "", fmt.Errorf("no compatible asset found for %s/%s", platform.OS, platform.Arch)
 }
 
-// validateGitHubURL validates that the URL is from GitHub and safe to download from
-func validateGitHubURL(urlStr string) error {
+// validateGitHubURLWithTestFlag validates URLs with optional test mode support
+func validateGitHubURLWithTestFlag(urlStr string, allowTestMode bool) error {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Allow localhost and 127.0.0.1 in test mode
+	if allowTestMode && (parsedURL.Host == "localhost" ||
+		strings.HasPrefix(parsedURL.Host, "127.0.0.1") ||
+		strings.HasPrefix(parsedURL.Host, "localhost:")) {
+		return nil
 	}
 
 	// Only allow GitHub domains
@@ -329,8 +337,8 @@ func validateGitHubURL(urlStr string) error {
 		return fmt.Errorf("URL host %s not allowed", parsedURL.Host)
 	}
 
-	// Ensure HTTPS
-	if parsedURL.Scheme != "https" {
+	// Ensure HTTPS (except in test mode)
+	if !allowTestMode && parsedURL.Scheme != "https" {
 		return fmt.Errorf("only HTTPS URLs are allowed")
 	}
 
@@ -378,8 +386,13 @@ func safeTempFile(filename string) (string, error) {
 }
 
 func downloadAsset(url, filename string) (string, error) {
+	return downloadAssetWithTestFlag(url, filename, false)
+}
+
+// downloadAssetWithTestFlag downloads an asset with optional test mode support
+func downloadAssetWithTestFlag(url, filename string, allowTestMode bool) (string, error) {
 	// Validate URL before making request
-	if err := validateGitHubURL(url); err != nil {
+	if err := validateGitHubURLWithTestFlag(url, allowTestMode); err != nil {
 		return "", fmt.Errorf("URL validation failed: %w", err)
 	}
 
