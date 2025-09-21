@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -108,12 +110,22 @@ func PerformUpdate(release *GitHubRelease) error {
 
 	// Replace current executable
 	if err := replaceExecutable(currentExe, tempFile); err != nil {
-		// Try to restore backup
+		// Try to restore backup if replacement fails
 		if _, backupErr := os.Stat(backupFile); backupErr == nil {
 			if restoreErr := copyFile(backupFile, currentExe); restoreErr != nil {
 				util.Warn("Failed to restore backup:", restoreErr)
+			} else {
+				util.Info("Successfully restored backup after failed update")
 			}
 		}
+
+		// Check if this is the Windows deferred update case
+		if strings.Contains(err.Error(), "update script created") {
+			// This is not actually an error - the update will complete after restart
+			util.Info("Update will complete when you restart the application")
+			return nil
+		}
+
 		return fmt.Errorf("failed to replace executable: %w", err)
 	}
 
@@ -290,7 +302,88 @@ func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo)
 	return "", "", fmt.Errorf("no compatible asset found for %s/%s", platform.OS, platform.Arch)
 }
 
+// validateGitHubURL validates that the URL is from GitHub and safe to download from
+func validateGitHubURL(urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow GitHub domains
+	allowedHosts := []string{
+		"github.com",
+		"api.github.com",
+		"objects.githubusercontent.com",
+		"github-releases.githubusercontent.com",
+	}
+
+	hostAllowed := false
+	for _, allowedHost := range allowedHosts {
+		if parsedURL.Host == allowedHost {
+			hostAllowed = true
+			break
+		}
+	}
+
+	if !hostAllowed {
+		return fmt.Errorf("URL host %s not allowed", parsedURL.Host)
+	}
+
+	// Ensure HTTPS
+	if parsedURL.Scheme != "https" {
+		return fmt.Errorf("only HTTPS URLs are allowed")
+	}
+
+	return nil
+}
+
+// validateFilePath validates that a file path is safe and doesn't contain directory traversal
+func validateFilePath(path string) error {
+	// Clean the path to resolve any .. or . components
+	cleanPath := filepath.Clean(path)
+
+	// Check for directory traversal attempts
+	if strings.Contains(cleanPath, "..") {
+		return fmt.Errorf("path contains directory traversal: %s", path)
+	}
+
+	// Ensure the path is absolute or within expected directories
+	if !filepath.IsAbs(cleanPath) {
+		// For relative paths, ensure they don't start with ..
+		if strings.HasPrefix(cleanPath, "..") {
+			return fmt.Errorf("relative path traversal detected: %s", path)
+		}
+	}
+
+	return nil
+}
+
+// safeTempFile creates a validated temporary file path
+func safeTempFile(filename string) (string, error) {
+	// Sanitize filename
+	filename = filepath.Base(filename) // Remove any path components
+	if filename == "" || filename == "." || filename == ".." {
+		return "", fmt.Errorf("invalid filename: %s", filename)
+	}
+
+	tempDir := os.TempDir()
+	tempFile := filepath.Join(tempDir, "goanime-update-"+filename)
+
+	// Validate the resulting path
+	if err := validateFilePath(tempFile); err != nil {
+		return "", fmt.Errorf("temp file path validation failed: %w", err)
+	}
+
+	return tempFile, nil
+}
+
 func downloadAsset(url, filename string) (string, error) {
+	// Validate URL before making request
+	if err := validateGitHubURL(url); err != nil {
+		return "", fmt.Errorf("URL validation failed: %w", err)
+	}
+
+	// #nosec G107 - URL is validated above to ensure it's from trusted GitHub domains
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
@@ -305,10 +398,13 @@ func downloadAsset(url, filename string) (string, error) {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Create temporary file
-	tempDir := os.TempDir()
-	tempFile := filepath.Join(tempDir, "goanime-update-"+filename)
+	// Create temporary file with validation
+	tempFile, err := safeTempFile(filename)
+	if err != nil {
+		return "", fmt.Errorf("failed to create safe temp file: %w", err)
+	}
 
+	// #nosec G304 - tempFile is validated by safeTempFile function above
 	out, err := os.Create(tempFile)
 	if err != nil {
 		return "", err
@@ -333,6 +429,15 @@ func downloadAsset(url, filename string) (string, error) {
 }
 
 func copyFile(src, dst string) error {
+	// Validate source and destination paths
+	if err := validateFilePath(src); err != nil {
+		return fmt.Errorf("source path validation failed: %w", err)
+	}
+	if err := validateFilePath(dst); err != nil {
+		return fmt.Errorf("destination path validation failed: %w", err)
+	}
+
+	// #nosec G304 - src path is validated above
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -343,6 +448,7 @@ func copyFile(src, dst string) error {
 		}
 	}()
 
+	// #nosec G304 - dst path is validated above
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -368,29 +474,70 @@ func copyFile(src, dst string) error {
 }
 
 func replaceExecutable(currentExe, newExe string) error {
-	// On Windows, we might need to rename the current executable first
-	if runtime.GOOS == "windows" {
-		tempName := currentExe + ".old"
+	// On Unix systems (Linux, macOS), we can move the running executable
+	// and place the new one in its location. The running process continues
+	// to use the moved executable until it exits.
+	if runtime.GOOS != "windows" {
+		// Generate a unique temporary name for the old executable
+		tempName := currentExe + ".old." + fmt.Sprintf("%d", os.Getpid())
+
+		// Move current executable to temporary location
+		// This works even while the executable is running on Unix systems
 		if err := os.Rename(currentExe, tempName); err != nil {
-			return err
+			return fmt.Errorf("failed to move current executable: %w", err)
 		}
+
+		// Schedule cleanup of the old executable
 		defer func() {
 			if removeErr := os.Remove(tempName); removeErr != nil {
 				util.Debug("Failed to remove old executable:", removeErr)
 			}
 		}()
+
+		// Copy new executable to the original location
+		if err := copyFile(newExe, currentExe); err != nil {
+			// Try to restore the original executable if copy fails
+			if restoreErr := os.Rename(tempName, currentExe); restoreErr != nil {
+				util.Debug("Failed to restore original executable:", restoreErr)
+			}
+			return fmt.Errorf("failed to copy new executable: %w", err)
+		}
+
+		// Make sure the new executable has proper permissions
+		// #nosec G302 - 0755 is appropriate for executable files
+		if err := os.Chmod(currentExe, 0755); err != nil {
+			util.Debug("Failed to set executable permissions:", err)
+			// Don't fail the update for permission issues
+		}
+
+		return nil
 	}
+
+	// Windows handling - more complex due to file locking
+	// We need to use a different approach for Windows
+	tempName := currentExe + ".old"
+
+	// Try to rename the current executable
+	// This may fail if the executable is in use
+	if err := os.Rename(currentExe, tempName); err != nil {
+		// If rename fails, try a different approach
+		// Create a batch script that will replace the executable after this process exits
+		return createWindowsUpdateScript(currentExe, newExe)
+	}
+
+	defer func() {
+		if removeErr := os.Remove(tempName); removeErr != nil {
+			util.Debug("Failed to remove old executable:", removeErr)
+		}
+	}()
 
 	// Copy new executable to current location
 	if err := copyFile(newExe, currentExe); err != nil {
-		return err
-	}
-
-	// Make sure it's executable on Unix systems
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(currentExe, 0755); err != nil {
-			return err
+		// Try to restore the original executable if copy fails
+		if restoreErr := os.Rename(tempName, currentExe); restoreErr != nil {
+			util.Debug("Failed to restore original executable:", restoreErr)
 		}
+		return fmt.Errorf("failed to copy new executable: %w", err)
 	}
 
 	return nil
@@ -401,4 +548,68 @@ func truncateText(text string, maxLen int) string {
 		return text
 	}
 	return text[:maxLen] + "..."
+}
+
+// createWindowsUpdateScript creates a batch script to replace the executable
+// after the current process exits. This is used as a fallback when the
+// executable cannot be moved while running.
+func createWindowsUpdateScript(currentExe, newExe string) error {
+	if runtime.GOOS != "windows" {
+		return fmt.Errorf("createWindowsUpdateScript called on non-Windows platform")
+	}
+
+	// Create a batch script that will:
+	// 1. Wait for the current process to exit
+	// 2. Replace the executable
+	// 3. Clean up the temporary files
+	// 4. Restart the application (optional)
+
+	scriptPath := filepath.Join(filepath.Dir(currentExe), "update_goanime.bat")
+
+	// Create the batch script content
+	scriptContent := fmt.Sprintf(`@echo off
+echo Updating GoAnime...
+timeout /t 2 /nobreak > nul
+:WAIT
+tasklist /FI "PID eq %d" 2>NUL | find /I /N "%d">NUL
+if "%%ERRORLEVEL%%"=="0" (
+    timeout /t 1 /nobreak > nul
+    goto WAIT
+)
+echo Replacing executable...
+copy /Y "%s" "%s" > nul
+if exist "%s" del "%s"
+echo Update completed!
+del "%%~f0"
+`, os.Getpid(), os.Getpid(), newExe, currentExe, newExe, newExe)
+
+	// Write the script to file
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0600); err != nil {
+		return fmt.Errorf("failed to create update script: %w", err)
+	}
+
+	util.Info("Created update script. The application will be updated after exit.")
+	util.Info("Please close the application to complete the update.")
+
+	// Validate script path before executing
+	if err := validateFilePath(scriptPath); err != nil {
+		// Clean up script if path is invalid
+		if removeErr := os.Remove(scriptPath); removeErr != nil {
+			util.Debug("Failed to remove invalid script:", removeErr)
+		}
+		return fmt.Errorf("script path validation failed: %w", err)
+	}
+
+	// Execute the script in the background
+	// Note: We don't wait for it to complete as it needs to run after this process exits
+	// #nosec G204 - scriptPath is validated above for safety
+	if err := exec.Command("cmd", "/C", "start", "/B", scriptPath).Start(); err != nil {
+		// Clean up script if we can't execute it
+		if removeErr := os.Remove(scriptPath); removeErr != nil {
+			util.Debug("Failed to remove script after execution failure:", removeErr)
+		}
+		return fmt.Errorf("failed to execute update script: %w", err)
+	}
+
+	return fmt.Errorf("update script created - please restart the application to complete the update")
 }
