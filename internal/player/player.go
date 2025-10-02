@@ -75,7 +75,9 @@ func StartVideo(link string, args []string) (string, error) {
 	if runtime.GOOS == "windows" {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
-		tmpDir := "/tmp"
+		// Use os.TempDir() instead of hardcoded /tmp for macOS compatibility
+		// macOS uses /var/folders/... accessed via $TMPDIR
+		tmpDir := os.TempDir()
 		if err := os.MkdirAll(tmpDir, 0700); err != nil {
 			return "", fmt.Errorf("failed to create tmp directory: %w", err)
 		}
