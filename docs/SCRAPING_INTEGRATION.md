@@ -2,7 +2,7 @@
 
 This integration adds powerful web scraping capabilities to GoAnime, inspired by the popular `ani-cli` script. It supports multiple anime streaming sources with automatic fallback and enhanced download features.
 
-## 🌟 New Features
+##  New Features
 
 ### Multi-Source Support
 - **AllAnime.day**: High-quality streams with multiple resolution options
@@ -22,7 +22,7 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 - **720p, 1080p, 480p**: Specific resolution selection
 - **hls**: HLS/m3u8 streams for better compatibility
 
-## 🚀 Usage Examples
+##  Usage Examples
 
 ### Basic Usage
 ```bash
@@ -51,7 +51,7 @@ goanime -d --source animefire "naruto" 25
 goanime -d --quality best "bleach" 100
 ```
 
-## 🔧 Technical Implementation
+##  Technical Implementation
 
 ### Architecture Overview
 ```
@@ -84,21 +84,7 @@ type UnifiedScraper interface {
 5. **Error Handling with Fallbacks**
 6. **Metadata Extraction**
 
-## 🔄 Migration from ani-cli
 
-This integration brings many features from the popular `ani-cli` bash script:
-
-### Supported ani-cli Features
-- [x] Multi-source anime search
-- [x] Quality selection (best, worst, specific resolutions)
-- [x] Episode range downloads
-- [x] HLS/m3u8 stream support
-- [x] Subtitle extraction
-- [x] Referrer handling for protected streams
-- [x] User-agent spoofing
-- [ ] Skip intro functionality (planned)
-- [ ] Syncplay support (planned)
-- [ ] VLC integration (planned)
 
 ### Command Equivalents
 ```bash
@@ -114,7 +100,7 @@ goanime -d -r "anime name" 1-5
 goanime -d --quality 720p "anime name" 1
 ```
 
-## 📋 Configuration
+##  Configuration
 
 ### Environment Variables
 ```bash
@@ -161,7 +147,7 @@ Enable verbose logging to troubleshoot issues:
 goanime --debug -d --source allanime "your anime" 1
 ```
 
-## 🔮 Future Enhancements
+##  Future Enhancements
 
 ### Planned Features
 - [ ] Additional streaming sources
@@ -181,7 +167,7 @@ goanime --debug -d --source allanime "your anime" 1
 - [ ] Web UI for remote control
 - [ ] Mobile app companion
 
-## 🤝 Contributing
+##  Contributing
 
 To add a new anime source:
 
@@ -203,10 +189,3 @@ func (c *NewSourceClient) SearchAnime(query string, options ...interface{}) ([]*
 }
 ```
 
-## 📄 License
-
-This enhanced scraping functionality is part of the GoAnime project and follows the same license terms. The implementation is inspired by `ani-cli` but written from scratch in Go.
-
----
-
-**Note**: Always respect the terms of service of the streaming sites you're accessing. This tool is for educational purposes and personal use only.
