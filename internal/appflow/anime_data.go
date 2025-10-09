@@ -1,6 +1,7 @@
 package appflow
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh"
 )
 
 func SearchAnime(name string) *models.Anime {
@@ -36,6 +38,58 @@ func SearchAnimeEnhanced(name string) *models.Anime {
 
 	util.Debugf("[PERF] SearchAnimeEnhanced completed in %v", time.Since(searchStart))
 	return anime
+}
+
+// SearchAnimeWithRetry - searches for anime with retry logic on failure
+func SearchAnimeWithRetry(name string) (*models.Anime, error) {
+	const maxRetries = 3
+	currentName := name
+
+	for i := 0; i < maxRetries; i++ {
+		searchStart := time.Now()
+
+		// Attempt to search for anime (empty string means search all sources)
+		util.Debugf("Search attempt %d/%d for: %s (searching all sources)", i+1, maxRetries, currentName)
+		anime, err := api.SearchAnimeEnhanced(currentName, "")
+
+		if err == nil && anime != nil {
+			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))
+			return anime, nil
+		}
+
+		// Display error message to user
+		if i < maxRetries-1 {
+			util.Errorf("No anime found with the name: %s", currentName)
+			util.Infof("Please try again with a different search term.")
+
+			// Prompt user for new input
+			var newName string
+			prompt := huh.NewInput().
+				Title("Search Again").
+				Description("Enter a new anime name to search for:").
+				Value(&newName).
+				Validate(func(v string) error {
+					if len(strings.TrimSpace(v)) < 2 {
+						return fmt.Errorf("anime name must be at least 2 characters")
+					}
+					return nil
+				})
+
+			if promptErr := prompt.Run(); promptErr != nil {
+				return nil, fmt.Errorf("search cancelled by user")
+			}
+
+			currentName = strings.TrimSpace(newName)
+			if currentName == "" {
+				return nil, fmt.Errorf("search cancelled: empty name provided")
+			}
+		} else {
+			// Last attempt failed
+			return nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
+		}
+	}
+
+	return nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
 }
 
 func FetchAnimeDetails(anime *models.Anime) {

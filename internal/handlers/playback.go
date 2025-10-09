@@ -28,8 +28,13 @@ func HandlePlaybackMode(animeName string) {
 		defer discordManager.Shutdown()
 	}
 
-	// Use enhanced search to find anime in both AllAnime and AnimeFire
-	anime := appflow.SearchAnimeEnhanced(animeName)
+	// Use enhanced search with retry logic
+	anime, err := appflow.SearchAnimeWithRetry(animeName)
+	if err != nil {
+		util.Errorf("Failed to search for anime: %v", err)
+		return
+	}
+
 	appflow.FetchAnimeDetails(anime)
 	episodes := appflow.GetAnimeEpisodes(anime)
 

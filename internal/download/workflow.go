@@ -24,13 +24,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	util.Infof("Using source: %s, quality: %s", source, quality)
 
-	// Try enhanced search first (supports multiple sources)
-	anime, err := api.SearchAnimeEnhanced(request.AnimeName, source)
+	// Try enhanced search with retry logic
+	anime, err := appflow.SearchAnimeWithRetry(request.AnimeName)
 	if err != nil {
-		util.Infof("Enhanced search failed, falling back to legacy search: %v", err)
-		// Fallback to legacy search
-		anime = appflow.SearchAnime(request.AnimeName)
-		appflow.FetchAnimeDetails(anime)
+		util.Errorf("Failed to search for anime: %v", err)
+		return err
 	}
 
 	if request.IsRange {

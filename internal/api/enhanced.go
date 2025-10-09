@@ -21,12 +21,15 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	if strings.ToLower(source) == "allanime" {
 		t := scraper.AllAnimeType
 		scraperType = &t
+		util.Debug("Searching specific source", "source", "AllAnime")
 	} else if strings.ToLower(source) == "animefire" {
 		t := scraper.AnimefireType
 		scraperType = &t
+		util.Debug("Searching specific source", "source", "AnimeFire")
 	} else {
 		// Default behavior: search both sources simultaneously
 		scraperType = nil
+		util.Debug("Searching all sources", "query", name)
 	}
 
 	// Perform the search - this will search both sources if scraperType is nil

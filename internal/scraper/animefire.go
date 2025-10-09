@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 const (
@@ -41,7 +41,11 @@ func NewAnimefireClient() *AnimefireClient {
 
 // SearchAnime searches for anime on Animefire.plus using the original logic
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
-	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, url.PathEscape(query))
+	// AnimeFire expects spaces as hyphens in the URL
+	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
+	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, normalizedQuery)
+
+	util.Debug("AnimeFire search", "query", query, "normalized", normalizedQuery, "url", searchURL)
 
 	var lastErr error
 	attempts := c.maxRetries + 1
