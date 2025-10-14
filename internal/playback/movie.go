@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -164,5 +166,6 @@ func getSocketPath() string {
 	if runtime.GOOS == "windows" {
 		return `\\.\pipe\goanime_mpvsocket`
 	}
-	return "/tmp/mpvsocket"
+	// Use os.TempDir() for macOS compatibility
+	return filepath.Join(os.TempDir(), "mpvsocket")
 }

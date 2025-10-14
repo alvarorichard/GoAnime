@@ -28,6 +28,8 @@ var mockRelease = GitHubRelease{
 		{Name: "goanime-windows-amd64.exe", BrowserDownloadURL: "http://example.com/goanime-windows-amd64.exe"},
 		{Name: "goanime-darwin-amd64", BrowserDownloadURL: "http://example.com/goanime-darwin-amd64"},
 		{Name: "goanime-darwin-arm64", BrowserDownloadURL: "http://example.com/goanime-darwin-arm64"},
+		{Name: "goanime-darwin-universal", BrowserDownloadURL: "http://example.com/goanime-darwin-universal"},
+		{Name: "goanime-darwin", BrowserDownloadURL: "http://example.com/goanime-darwin"},
 	},
 }
 
@@ -318,7 +320,7 @@ func TestDownloadAsset_MockServer(t *testing.T) {
 	defer server.Close()
 
 	// Download the asset
-	tempFile, err := downloadAsset(server.URL, "test-binary")
+	tempFile, err := downloadAssetWithTestFlag(server.URL, "test-binary", true)
 	require.NoError(t, err)
 	defer func() {
 		if err := os.Remove(tempFile); err != nil {
@@ -343,7 +345,7 @@ func TestDownloadAsset_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := downloadAsset(server.URL, "test-binary")
+	_, err := downloadAssetWithTestFlag(server.URL, "test-binary", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "download failed with status 500")
 }
@@ -436,7 +438,7 @@ func TestDownloadAsset_Timeout(t *testing.T) {
 
 	// This test would need custom HTTP client with timeout, but our current implementation uses default client
 	// In production, you might want to add configurable timeouts
-	tempFile, err := downloadAsset(server.URL, "test-binary")
+	tempFile, err := downloadAssetWithTestFlag(server.URL, "test-binary", true)
 	assert.NoError(t, err)
 	if tempFile != "" {
 		defer func() {
@@ -460,7 +462,7 @@ func TestDownloadAsset_LargeFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tempFile, err := downloadAsset(server.URL, "large-binary")
+	tempFile, err := downloadAssetWithTestFlag(server.URL, "large-binary", true)
 	require.NoError(t, err)
 	defer func() {
 		if err := os.Remove(tempFile); err != nil {
@@ -803,12 +805,12 @@ func TestIsVersionNewer_StressTest(t *testing.T) {
 // Test error handling in downloadAsset
 func TestDownloadAsset_ErrorHandling(t *testing.T) {
 	t.Run("invalid URL", func(t *testing.T) {
-		_, err := downloadAsset("not-a-valid-url", "test")
+		_, err := downloadAssetWithTestFlag("not-a-valid-url", "test", true)
 		assert.Error(t, err)
 	})
 
 	t.Run("network unreachable", func(t *testing.T) {
-		_, err := downloadAsset("http://192.0.2.1:1234/nonexistent", "test")
+		_, err := downloadAssetWithTestFlag("http://192.0.2.1:1234/nonexistent", "test", true)
 		assert.Error(t, err)
 	})
 
@@ -818,7 +820,7 @@ func TestDownloadAsset_ErrorHandling(t *testing.T) {
 		}))
 		defer server.Close()
 
-		_, err := downloadAsset(server.URL, "test")
+		_, err := downloadAssetWithTestFlag(server.URL, "test", true)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "404")
 	})
@@ -863,6 +865,8 @@ func TestFindAssetForPlatform_AllCombinations(t *testing.T) {
 			// macOS assets
 			{Name: "goanime-darwin-amd64", BrowserDownloadURL: "http://example.com/goanime-darwin-amd64"},
 			{Name: "goanime-darwin-arm64", BrowserDownloadURL: "http://example.com/goanime-darwin-arm64"},
+			{Name: "goanime-darwin-universal", BrowserDownloadURL: "http://example.com/goanime-darwin-universal"},
+			{Name: "goanime-darwin", BrowserDownloadURL: "http://example.com/goanime-darwin"},
 
 			// Alternative naming patterns
 			{Name: "goanime-macos-amd64", BrowserDownloadURL: "http://example.com/goanime-macos-amd64"},
@@ -893,4 +897,73 @@ func TestFindAssetForPlatform_AllCombinations(t *testing.T) {
 			assert.Contains(t, url, "http://example.com/")
 		})
 	}
+}
+
+// Test universal binary fallback behavior for macOS
+func TestFindAssetForPlatform_UniversalBinaryFallback(t *testing.T) {
+	// Test case where only universal binaries are available
+	universalOnlyRelease := &GitHubRelease{
+		Assets: []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			{Name: "goanime-linux-amd64", BrowserDownloadURL: "http://example.com/goanime-linux-amd64"},
+			{Name: "goanime-windows-amd64.exe", BrowserDownloadURL: "http://example.com/goanime-windows-amd64.exe"},
+			// Only universal binaries for macOS
+			{Name: "goanime-darwin-universal", BrowserDownloadURL: "http://example.com/goanime-darwin-universal"},
+			{Name: "goanime-darwin", BrowserDownloadURL: "http://example.com/goanime-darwin"},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		platform     PlatformInfo
+		expectedName string
+		description  string
+	}{
+		{
+			name:         "amd64_falls_back_to_universal",
+			platform:     PlatformInfo{OS: "darwin", Arch: "amd64"},
+			expectedName: "goanime-darwin-universal",
+			description:  "Intel Mac should use universal binary when arch-specific not available",
+		},
+		{
+			name:         "arm64_falls_back_to_universal",
+			platform:     PlatformInfo{OS: "darwin", Arch: "arm64"},
+			expectedName: "goanime-darwin-universal",
+			description:  "Apple Silicon Mac should use universal binary when arch-specific not available",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, name, err := findAssetForPlatformWithInfo(universalOnlyRelease, tt.platform)
+
+			assert.NoError(t, err, tt.description)
+			assert.Equal(t, tt.expectedName, name, tt.description)
+			assert.Contains(t, url, "http://example.com/")
+		})
+	}
+
+	// Test case where only generic universal binary is available
+	genericOnlyRelease := &GitHubRelease{
+		Assets: []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			{Name: "goanime-linux-amd64", BrowserDownloadURL: "http://example.com/goanime-linux-amd64"},
+			{Name: "goanime-windows-amd64.exe", BrowserDownloadURL: "http://example.com/goanime-windows-amd64.exe"},
+			// Only generic universal binary for macOS
+			{Name: "goanime-darwin", BrowserDownloadURL: "http://example.com/goanime-darwin"},
+		},
+	}
+
+	t.Run("fallback_to_generic_universal", func(t *testing.T) {
+		platform := PlatformInfo{OS: "darwin", Arch: "amd64"}
+		url, name, err := findAssetForPlatformWithInfo(genericOnlyRelease, platform)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "goanime-darwin", name)
+		assert.Contains(t, url, "http://example.com/")
+	})
 }

@@ -14,7 +14,7 @@ This document describes the comprehensive test suite implemented for the GoAnime
 
 ## Tested Functions and Features
 
-### ✅ Fully Tested (100% Coverage)
+###  Fully Tested (100% Coverage)
 
 1. **`isVersionNewer`** - Version comparison logic
    - Basic semantic version comparison (major.minor.patch)
@@ -39,7 +39,7 @@ This document describes the comprehensive test suite implemented for the GoAnime
    - Unicode character handling
    - Empty strings and edge cases
 
-### ✅ Well Tested (70%+ Coverage)
+###  Well Tested (70%+ Coverage)
 
 1. **`copyFile`** - File copying functionality
    - Basic file copying with content verification
@@ -56,7 +56,7 @@ This document describes the comprehensive test suite implemented for the GoAnime
    - Network timeout scenarios
    - Invalid URLs and unreachable servers
 
-### ⚠️ Partially Tested (38% Coverage)
+###  Partially Tested (38% Coverage)
 
 1. **`replaceExecutable`** - Executable replacement
    - Basic replacement functionality (Unix systems)
@@ -65,7 +65,7 @@ This document describes the comprehensive test suite implemented for the GoAnime
    - Platform-specific logic partially covered
    - Windows-specific tests skipped on non-Windows systems
 
-### ❌ Not Tested (0% Coverage)
+###  Not Tested (0% Coverage)
 
 The following high-level functions are not tested due to complexity and external dependencies:
 
@@ -132,38 +132,38 @@ The following high-level functions are not tested due to complexity and external
 
 ### Windows (Simulated)
 
-- ⚠️ Platform detection logic tested
-- ⚠️ Asset matching for .exe files
-- ❌ Actual Windows file operations skipped
-- ❌ File locking scenarios not tested
+-  Platform detection logic tested
+-  Asset matching for .exe files
+-  Actual Windows file operations skipped
+-  File locking scenarios not tested
 
 ### macOS (Simulated)
 
-- ✅ Platform detection and asset matching
-- ✅ Universal binary support (arm64/amd64)
-- ❌ Actual macOS-specific operations not tested
+-  Platform detection and asset matching
+-  Universal binary support (arm64/amd64)
+-  Actual macOS-specific operations not tested
 
 ## Error Handling Coverage
 
 ### Network Errors
 
-- ✅ Invalid URLs
-- ✅ Connection timeouts
-- ✅ HTTP error codes (404, 500)
-- ✅ Network unreachable scenarios
+-  Invalid URLs
+-  Connection timeouts
+-  HTTP error codes (404, 500)
+-  Network unreachable scenarios
 
 ### File System Errors
 
-- ✅ Source file not found
-- ✅ Invalid destination paths
-- ✅ Permission denied scenarios
-- ✅ Disk space issues (implicit)
+-  Source file not found
+-  Invalid destination paths
+-  Permission denied scenarios
+-  Disk space issues (implicit)
 
 ### Version Parsing Errors
 
-- ✅ Invalid version formats
-- ✅ Non-numeric version parts
-- ✅ Empty version strings
+-  Invalid version formats
+-  Non-numeric version parts
+-  Empty version strings
 
 ## Test Infrastructure
 

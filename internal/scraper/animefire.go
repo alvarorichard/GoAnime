@@ -2,14 +2,15 @@
 package scraper
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 const (
@@ -18,9 +19,11 @@ const (
 
 // AnimefireClient handles interactions with Animefire.plus
 type AnimefireClient struct {
-	client    *http.Client
-	baseURL   string
-	userAgent string
+	client     *http.Client
+	baseURL    string
+	userAgent  string
+	maxRetries int
+	retryDelay time.Duration
 }
 
 // NewAnimefireClient creates a new Animefire client
@@ -29,84 +32,168 @@ func NewAnimefireClient() *AnimefireClient {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		baseURL:   AnimefireBase,
-		userAgent: UserAgent,
+		baseURL:    AnimefireBase,
+		userAgent:  UserAgent,
+		maxRetries: 2,
+		retryDelay: 350 * time.Millisecond,
 	}
 }
 
 // SearchAnime searches for anime on Animefire.plus using the original logic
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
-	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, url.QueryEscape(query))
+	// AnimeFire expects spaces as hyphens in the URL
+	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
+	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, normalizedQuery)
 
-	req, err := http.NewRequest("GET", searchURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+	util.Debug("AnimeFire search", "query", query, "normalized", normalizedQuery, "url", searchURL)
 
-	req.Header.Set("User-Agent", c.userAgent)
+	var lastErr error
+	attempts := c.maxRetries + 1
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusForbidden {
-			return nil, fmt.Errorf("access restricted: VPN may be required")
+	for attempt := 0; attempt < attempts; attempt++ {
+		req, err := http.NewRequest("GET", searchURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		return nil, fmt.Errorf("server returned: %s", resp.Status)
+
+		c.decorateRequest(req)
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to make request: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = c.handleStatusError(resp)
+			_ = resp.Body.Close()
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse HTML: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if c.isChallengePage(doc) {
+			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		animes := c.extractSearchResults(doc)
+		if len(animes) == 0 {
+			// Legitimate empty result set – return without error
+			return []*models.Anime{}, nil
+		}
+
+		return animes, nil
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("failed to retrieve results from AnimeFire")
+}
+
+func (c *AnimefireClient) decorateRequest(req *http.Request) {
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Referer", c.baseURL+"/")
+}
+
+func (c *AnimefireClient) handleStatusError(resp *http.Response) error {
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("access restricted: VPN may be required")
+	}
+	return fmt.Errorf("server returned: %s", resp.Status)
+}
+
+func (c *AnimefireClient) shouldRetry(attempt int) bool {
+	return attempt < c.maxRetries
+}
+
+func (c *AnimefireClient) sleep() {
+	if c.retryDelay <= 0 {
+		return
+	}
+	time.Sleep(c.retryDelay)
+}
+
+func (c *AnimefireClient) isChallengePage(doc *goquery.Document) bool {
+	title := strings.ToLower(strings.TrimSpace(doc.Find("title").First().Text()))
+	if strings.Contains(title, "just a moment") {
+		return true
 	}
 
+	if doc.Find("#cf-wrapper").Length() > 0 || doc.Find("#challenge-form").Length() > 0 {
+		return true
+	}
+
+	body := strings.ToLower(doc.Text())
+	return strings.Contains(body, "cf-error") || strings.Contains(body, "cloudflare")
+}
+
+func (c *AnimefireClient) extractSearchResults(doc *goquery.Document) []*models.Anime {
 	var animes []*models.Anime
 
-	// Use the same parsing logic as the original system
 	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
 		if urlPath, exists := s.Attr("href"); exists {
 			name := strings.TrimSpace(s.Text())
 			if name != "" {
-				fullURL := c.resolveURL(c.baseURL, urlPath)
-				anime := &models.Anime{
+				animes = append(animes, &models.Anime{
 					Name: name,
-					URL:  fullURL,
-				}
-				animes = append(animes, anime)
+					URL:  c.resolveURL(c.baseURL, urlPath),
+				})
 			}
 		}
 	})
 
-	// If no results with the primary selector, try the card-based selector as fallback
-	if len(animes) == 0 {
-		doc.Find(".card_ani").Each(func(i int, s *goquery.Selection) {
-			titleElem := s.Find(".ani_name a")
-			title := strings.TrimSpace(titleElem.Text())
-			link, exists := titleElem.Attr("href")
-
-			if exists && title != "" {
-				// Get image URL
-				imgElem := s.Find(".div_img img")
-				imgURL, _ := imgElem.Attr("src")
-				if imgURL != "" {
-					imgURL = c.resolveURL(c.baseURL, imgURL)
-				}
-
-				anime := &models.Anime{
-					Name:     title,
-					URL:      c.resolveURL(c.baseURL, link),
-					ImageURL: imgURL,
-				}
-
-				animes = append(animes, anime)
-			}
-		})
+	if len(animes) > 0 {
+		return animes
 	}
 
-	return animes, nil
+	doc.Find(".card_ani").Each(func(i int, s *goquery.Selection) {
+		titleElem := s.Find(".ani_name a")
+		title := strings.TrimSpace(titleElem.Text())
+		link, exists := titleElem.Attr("href")
+
+		if exists && title != "" {
+			imgElem := s.Find(".div_img img")
+			imgURL, _ := imgElem.Attr("src")
+			if imgURL != "" {
+				imgURL = c.resolveURL(c.baseURL, imgURL)
+			}
+
+			animes = append(animes, &models.Anime{
+				Name:     title,
+				URL:      c.resolveURL(c.baseURL, link),
+				ImageURL: imgURL,
+			})
+		}
+	})
+
+	return animes
 }
 
 // resolveURL resolves relative URLs to absolute URLs

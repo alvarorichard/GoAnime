@@ -246,37 +246,50 @@ func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
 
 // ChangeAnimeLocal allows the user to search for and select a new anime (local implementation to avoid circular imports)
 func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
-	var animeName string
+	const maxRetries = 3
 
-	prompt := huh.NewInput().
-		Title("Change Anime").
-		Description("Enter the name of the anime you want to watch:").
-		Value(&animeName)
+	for i := 0; i < maxRetries; i++ {
+		var animeName string
 
-	if err := prompt.Run(); err != nil {
-		return nil, nil, err
+		prompt := huh.NewInput().
+			Title("Change Anime").
+			Description("Enter the name of the anime you want to watch:").
+			Value(&animeName).
+			Validate(func(v string) error {
+				if len(v) < 2 {
+					return fmt.Errorf("anime name must be at least 2 characters")
+				}
+				return nil
+			})
+
+		if err := prompt.Run(); err != nil {
+			return nil, nil, err
+		}
+
+		// Use the enhanced API to search for anime
+		anime, err := api.SearchAnimeEnhanced(animeName, "")
+		if err != nil || anime == nil {
+			if i < maxRetries-1 {
+				util.Errorf("No anime found with the name: %s", animeName)
+				util.Infof("Please try again with a different search term. (Attempt %d/%d)", i+2, maxRetries)
+				continue
+			}
+			return nil, nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
+		}
+
+		// Get episodes for the new anime using enhanced API
+		episodes, err := api.GetAnimeEpisodesEnhanced(anime)
+		if err != nil {
+			if i < maxRetries-1 {
+				util.Errorf("Failed to get episodes for: %s", anime.Name)
+				util.Infof("Please try searching for a different anime. (Attempt %d/%d)", i+2, maxRetries)
+				continue
+			}
+			return nil, nil, fmt.Errorf("failed to get episodes after %d attempts", maxRetries)
+		}
+
+		return anime, episodes, nil
 	}
 
-	if len(animeName) < 2 {
-		util.Errorf("Anime name too short")
-		return nil, nil, fmt.Errorf("anime name must be at least 2 characters")
-	}
-
-	// Use the enhanced API to search for anime
-	anime, err := api.SearchAnimeEnhanced(animeName, "")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to search anime: %w", err)
-	}
-
-	if anime == nil {
-		return nil, nil, fmt.Errorf("no anime found with name: %s", animeName)
-	}
-
-	// Get episodes for the new anime using enhanced API
-	episodes, err := api.GetAnimeEpisodesEnhanced(anime)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get episodes: %w", err)
-	}
-
-	return anime, episodes, nil
+	return nil, nil, fmt.Errorf("failed to change anime after %d attempts", maxRetries)
 }
