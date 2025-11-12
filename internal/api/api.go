@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pkg/errors"
 	"context"
+	"github.com/pkg/errors"
 )
 
 // IsDisallowedIP checks if the given IP address falls under a disallowed category.
