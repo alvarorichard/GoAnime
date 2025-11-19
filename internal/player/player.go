@@ -124,24 +124,22 @@ func StartVideo(link string, args []string) (string, error) {
 	maxAttempts := 30 // 3 seconds total
 	for i := 0; i < maxAttempts; i++ {
 		if util.IsDebug {
-			fmt.Printf("[DEBUG] Try %d/%d: checking existence of socket...\n", i+1, maxAttempts)
+			fmt.Printf("[DEBUG] Try %d/%d: checking socket connection...\n", i+1, maxAttempts)
 		}
-		if runtime.GOOS == "windows" {
-			// Special handling for Windows named pipes
-			_, err := os.Stat(`\\.\pipe\` + strings.TrimPrefix(socketPath, `\\.\pipe\`))
-			if err == nil {
-				if util.IsDebug {
-					fmt.Printf("[DEBUG] Socket found after %.2fs\n", time.Since(startTime).Seconds())
-				}
-				return socketPath, nil
+
+		// Try to connect to the socket instead of checking file existence
+		// This works for both Unix sockets and Windows named pipes
+		conn, err := dialMPVSocket(socketPath)
+		if err == nil {
+			_ = conn.Close() // Close immediately, we just wanted to verify connectivity
+			if util.IsDebug {
+				fmt.Printf("[DEBUG] Socket connected successfully after %.2fs\n", time.Since(startTime).Seconds())
 			}
-		} else {
-			if _, err := os.Stat(socketPath); err == nil {
-				if util.IsDebug {
-					fmt.Printf("[DEBUG] Socket found after %.2fs\n", time.Since(startTime).Seconds())
-				}
-				return socketPath, nil
-			}
+			return socketPath, nil
+		}
+
+		if util.IsDebug {
+			fmt.Printf("[DEBUG] Connection attempt failed: %v\n", err)
 		}
 
 		// Check if MPV process is still running
