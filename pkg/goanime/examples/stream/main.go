@@ -45,11 +45,15 @@ func main() {
 		log.Fatal("No episodes found")
 	}
 
-	// Get stream URL for first episode
+	// Get stream URL for first episode using the new recommended method
 	episode := episodes[0]
 	fmt.Printf("\nGetting stream URL for Episode %s...\n", episode.Number)
 
-	streamURL, headers, err := client.GetStreamURL(episode.URL, source)
+	// Use GetEpisodeStreamURL with options for best quality and subtitled
+	streamURL, metadata, err := client.GetEpisodeStreamURL(anime, episode, &goanime.StreamOptions{
+		Quality: "best",
+		Mode:    "sub",
+	})
 	if err != nil {
 		log.Fatalf("Error getting stream URL: %v", err)
 	}
@@ -58,13 +62,11 @@ func main() {
 	fmt.Printf("Episode: %s\n", episode.Number)
 	fmt.Printf("Stream URL: %s\n", streamURL)
 
-	if len(headers) > 0 {
-		fmt.Println("\nRequired Headers:")
-		for key, value := range headers {
+	if len(metadata) > 0 {
+		fmt.Println("\nMetadata:")
+		for key, value := range metadata {
 			fmt.Printf("  %s: %s\n", key, value)
 		}
-	} else {
-		fmt.Println("\nNo special headers required")
 	}
 
 	fmt.Println("\nYou can use this URL with video players like mpv, vlc, or ffmpeg")

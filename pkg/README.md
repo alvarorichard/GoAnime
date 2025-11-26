@@ -7,13 +7,13 @@ A clean and simple Go library for searching and scraping anime content from mult
 
 ## Features
 
-- 🔍 **Multi-source Search**: Search across multiple anime sources (AllAnime, AnimeFire, etc.)
-- 📺 **Episode Management**: Get detailed episode lists with metadata
-- 🎬 **Stream URLs**: Extract streaming URLs and required headers
-- 🏷️ **Rich Metadata**: Access AniList IDs, MAL IDs, genres, scores, and more
-- 🧩 **Simple API**: Clean and intuitive interface
-- 🔒 **Type-safe**: Full Go type safety with documented structs
-- ⚡ **Fast**: Concurrent searches across sources
+-  **Multi-source Search**: Search across multiple anime sources (AllAnime, AnimeFire, etc.)
+-  **Episode Management**: Get detailed episode lists with metadata
+-  **Stream URLs**: Extract streaming URLs and required headers
+-  **Rich Metadata**: Access AniList IDs, MAL IDs, genres, scores, and more
+-  **Simple API**: Clean and intuitive interface
+-  **Type-safe**: Full Go type safety with documented structs
+-  **Fast**: Concurrent searches across sources
 
 ## Installation
 

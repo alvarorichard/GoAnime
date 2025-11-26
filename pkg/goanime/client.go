@@ -41,14 +41,21 @@ func (c *Client) SearchAnime(query string, source *types.Source) ([]*types.Anime
 // GetAnimeEpisodes retrieves all episodes for a specific anime.
 // The animeURL should be obtained from a SearchAnime result.
 func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*types.Episode, error) {
-	scraper, err := c.manager.GetScraper(source.ToScraperType())
+	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return nil, err
 	}
 
-	episodes, err := scraper.GetAnimeEpisodes(animeURL)
+	episodes, err := scr.GetAnimeEpisodes(animeURL)
 	if err != nil {
 		return nil, err
+	}
+
+	// For AllAnime, we need to store the anime ID in episodes for later stream URL retrieval
+	if source == types.SourceAllAnime {
+		for i := range episodes {
+			episodes[i].URL = animeURL // Store anime ID in URL field
+		}
 	}
 
 	return types.FromInternalEpisodeList(episodes), nil
@@ -56,13 +63,73 @@ func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*type
 
 // GetStreamURL retrieves the streaming URL and headers for a specific episode.
 // The episodeURL should be obtained from GetAnimeEpisodes.
+// Deprecated: Use GetEpisodeStreamURL instead for better control over quality and mode.
 func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...interface{}) (string, map[string]string, error) {
-	scraper, err := c.manager.GetScraper(source.ToScraperType())
+	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return "", nil, err
 	}
 
-	return scraper.GetStreamURL(episodeURL, options...)
+	return scr.GetStreamURL(episodeURL, options...)
+}
+
+// StreamOptions contains options for retrieving stream URLs
+type StreamOptions struct {
+	// Quality can be "best", "worst", "1080p", "720p", "480p", "360p"
+	Quality string
+	// Mode can be "sub" (subtitled) or "dub" (dubbed)
+	Mode string
+}
+
+// DefaultStreamOptions returns default stream options
+func DefaultStreamOptions() StreamOptions {
+	return StreamOptions{
+		Quality: "best",
+		Mode:    "sub",
+	}
+}
+
+// GetEpisodeStreamURL retrieves the streaming URL for a specific episode with full control.
+// This is the recommended method to get playback URLs.
+//
+// Parameters:
+//   - anime: The anime object from SearchAnime
+//   - episode: The episode object from GetAnimeEpisodes
+//   - options: Optional StreamOptions (uses defaults if nil)
+//
+// Returns:
+//   - streamURL: Direct URL for video playback
+//   - metadata: Additional info like quality, source, etc.
+//   - error: Any error that occurred
+func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (string, map[string]string, error) {
+	source, err := types.ParseSource(anime.Source)
+	if err != nil {
+		return "", nil, err
+	}
+
+	scr, err := c.manager.GetScraper(source.ToScraperType())
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Set default options if not provided
+	opts := DefaultStreamOptions()
+	if options != nil {
+		if options.Quality != "" {
+			opts.Quality = options.Quality
+		}
+		if options.Mode != "" {
+			opts.Mode = options.Mode
+		}
+	}
+
+	// For AllAnime, we need to pass: animeID (URL), episodeNumber, quality, mode
+	if source == types.SourceAllAnime {
+		return scr.GetStreamURL(anime.URL, episode.Number, opts.Quality, opts.Mode)
+	}
+
+	// For AnimeFire, the episode URL is the direct episode page
+	return scr.GetStreamURL(episode.URL)
 }
 
 // GetAvailableSources returns a list of all available scraper sources.

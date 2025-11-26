@@ -122,7 +122,7 @@ func main() {
 }
 ```
 
-### 3. Get Stream URL for an Episode
+### 3. Get Stream URL for an Episode (Recommended)
 
 ```go
 package main
@@ -161,17 +161,24 @@ func main() {
         log.Fatal("No episodes found")
     }
 
-    // Get stream URL for first episode
-    streamURL, headers, err := client.GetStreamURL(episodes[0].URL, source)
+    // Get stream URL for first episode using the recommended method
+    // This properly handles AllAnime and AnimeFire sources
+    streamURL, metadata, err := client.GetEpisodeStreamURL(anime, episodes[0], &goanime.StreamOptions{
+        Quality: "best", // Options: "best", "worst", "1080p", "720p", "480p", "360p"
+        Mode:    "sub",  // Options: "sub" (subtitled), "dub" (dubbed)
+    })
     if err != nil {
         log.Fatal(err)
     }
 
     fmt.Printf("Stream URL: %s\n", streamURL)
-    fmt.Println("Headers:")
-    for key, value := range headers {
+    fmt.Println("Metadata:")
+    for key, value := range metadata {
         fmt.Printf("  %s: %s\n", key, value)
     }
+
+    // Play with mpv
+    fmt.Printf("\nPlay with: mpv \"%s\"\n", streamURL)
 }
 ```
 
@@ -269,14 +276,17 @@ func main() {
     // 3. Get stream URL for first episode
     if len(episodes) > 0 {
         fmt.Println("\nGetting stream URL for episode 1...")
-        streamURL, headers, err := client.GetStreamURL(episodes[0].URL, source)
+        streamURL, metadata, err := client.GetEpisodeStreamURL(selectedAnime, episodes[0], &goanime.StreamOptions{
+            Quality: "best",
+            Mode:    "sub",
+        })
         if err != nil {
             log.Printf("Error getting stream URL: %v\n", err)
         } else {
             fmt.Printf("Stream URL: %s\n", streamURL)
-            if len(headers) > 0 {
-                fmt.Println("Required headers:")
-                for key, value := range headers {
+            if len(metadata) > 0 {
+                fmt.Println("Metadata:")
+                for key, value := range metadata {
                     fmt.Printf("  %s: %s\n", key, value)
                 }
             }
@@ -300,8 +310,15 @@ Searches for anime by name. If `source` is `nil`, searches across all sources.
 #### `GetAnimeEpisodes(animeURL string, source types.Source) ([]*types.Episode, error)`
 Retrieves all episodes for a specific anime using its URL and source.
 
+#### `GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (string, map[string]string, error)`
+**Recommended method** to get the streaming URL for a specific episode. Properly handles different source types.
+
+**StreamOptions:**
+- `Quality`: Video quality - "best", "worst", "1080p", "720p", "480p", "360p"
+- `Mode`: Audio mode - "sub" (subtitled), "dub" (dubbed)
+
 #### `GetStreamURL(episodeURL string, source types.Source, options ...interface{}) (string, map[string]string, error)`
-Gets the streaming URL and required headers for a specific episode.
+Legacy method to get streaming URL. Use `GetEpisodeStreamURL` for better results.
 
 #### `GetAvailableSources() []types.Source`
 Returns a list of all available scraper sources.
