@@ -78,6 +78,8 @@ func StartVideo(link string, args []string) (string, error) {
 		// Use os.TempDir() instead of hardcoded /tmp for macOS compatibility
 		// macOS uses /var/folders/... accessed via $TMPDIR
 		tmpDir := os.TempDir()
+		// Remove trailing slash if present (macOS adds one)
+		tmpDir = strings.TrimSuffix(tmpDir, "/")
 		if err := os.MkdirAll(tmpDir, 0700); err != nil {
 			return "", fmt.Errorf("failed to create tmp directory: %w", err)
 		}
