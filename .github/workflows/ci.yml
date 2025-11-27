@@ -65,6 +65,11 @@ jobs:
       - name: Run golangci-lint
         run: golangci-lint run --timeout=5m ./...
 
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: ./...
+
       - name: Run tests
         shell: bash
         run: go test -v -coverprofile=coverage.out ./...
