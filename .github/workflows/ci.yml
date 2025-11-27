@@ -49,6 +49,13 @@ jobs:
         run: |
           brew install mpv
 
+      - name: Run macOS Socket Tests (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          echo "=== Testing macOS-specific socket path handling ==="
+          echo "TMPDIR=$TMPDIR"
+          go test -v ./internal/player/test/... -run "Socket|MacOS" -count=1
+
       - name: Get dependencies
         run: go get -v -t -d ./...
 

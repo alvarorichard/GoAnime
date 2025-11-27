@@ -75,15 +75,10 @@ func StartVideo(link string, args []string) (string, error) {
 	if runtime.GOOS == "windows" {
 		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
 	} else {
-		// Use os.TempDir() instead of hardcoded /tmp for macOS compatibility
+		// Use os.TempDir() for cross-platform compatibility
 		// macOS uses /var/folders/... accessed via $TMPDIR
-		tmpDir := os.TempDir()
-		// Remove trailing slash if present (macOS adds one)
-		tmpDir = strings.TrimSuffix(tmpDir, "/")
-		if err := os.MkdirAll(tmpDir, 0700); err != nil {
-			return "", fmt.Errorf("failed to create tmp directory: %w", err)
-		}
-		socketPath = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
+		// filepath.Join handles trailing slashes correctly (fixes macOS double-slash issue)
+		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("goanime_mpvsocket_%s", randomNumber))
 	}
 
 	mpvArgs := []string{
