@@ -65,10 +65,11 @@ jobs:
       - name: Run golangci-lint
         run: golangci-lint run --timeout=5m ./...
 
+      - name: Install Gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
-        with:
-          args: ./...
+        run: gosec ./...
 
       - name: Run tests
         shell: bash
