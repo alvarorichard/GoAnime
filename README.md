@@ -18,6 +18,17 @@
 ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
+[![Discord](https://img.shields.io/badge/Discord-Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/6nZ2SYv3)
+
+## Mobile Version
+
+> **Warning:** The mobile version is currently under active development and may be unstable. Use at your own risk.
+
+A mobile version of GoAnime is available at [GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile).
+
+## Community
+
+Join our Discord community for support, discussions, and updates: [Discord Server](https://discord.gg/6nZ2SYv3)
 
 # GoAnime
 
