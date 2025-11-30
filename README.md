@@ -24,34 +24,15 @@
 
 GoAnime is a simple text-based user interface (TUI) built in Go, allowing users to search for anime and either play or download episodes directly in mpv. It scrapes data from websites to provide a selection of anime and episodes, with support for both subbed and dubbed content in English and Portuguese.
 
----
-
-<table>
-<tr>
-<td width="50%">
-
 ### Mobile Version
 
-A mobile version of GoAnime is available for Android devices.
+A mobile version of GoAnime is available for Android devices: [GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile)
 
-**Repository:** [GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile)
-
-> **Note:** This version is under active development and may contain bugs or incomplete features. Contributions and feedback are welcome.
-
-</td>
-<td width="50%">
+> **Note:** This version is under active development and may contain bugs or incomplete features.
 
 ### Community
 
-Connect with other users, get support, share feedback, and stay updated on the latest developments.
-
-**Discord:** [Join Server](https://discord.gg/6nZ2SYv3)
-
-</td>
-</tr>
-</table>
-
----
+Join our Discord for support, feedback, and updates: [Discord Server](https://discord.gg/6nZ2SYv3)
 
 ## Features
 
