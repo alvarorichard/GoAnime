@@ -83,7 +83,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 		}
 
 		userInput := GetUserInput()
-		if userInput == "quit" {
+		if userInput == "q" || userInput == "quit" {
 			log.Println("Quitting application as per user request.")
 			break
 		}

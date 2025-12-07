@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"context"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 // IsDisallowedIP checks if the given IP address falls under a disallowed category.
