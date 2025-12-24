@@ -503,10 +503,10 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return videoSrc, nil
 	}
 
-	// If the URL is from animefire.plus, fetch the content
-	if strings.Contains(videoSrc, "animefire.plus/video/") {
+	// If the URL is from animefire.io, fetch the content
+	if strings.Contains(videoSrc, "animefire.io/video/") {
 		if util.IsDebug {
-			util.Debugf("Found animefire.plus video URL, fetching content...")
+			util.Debugf("Found animefire.io video URL, fetching content...")
 		}
 
 		// Fetch the video page

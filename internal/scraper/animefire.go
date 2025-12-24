@@ -1,4 +1,4 @@
-// Package scraper provides web scraping functionality for animefire.plus
+// Package scraper provides web scraping functionality for animefire.io
 package scraper
 
 import (
@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	AnimefireBase = "https://animefire.plus"
+	AnimefireBase = "https://animefire.io"
 )
 
-// AnimefireClient handles interactions with Animefire.plus
+// AnimefireClient handles interactions with Animefire.io
 type AnimefireClient struct {
 	client     *http.Client
 	baseURL    string
@@ -39,7 +39,7 @@ func NewAnimefireClient() *AnimefireClient {
 	}
 }
 
-// SearchAnime searches for anime on Animefire.plus using the original logic
+// SearchAnime searches for anime on Animefire.io using the original logic
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 	// AnimeFire expects spaces as hyphens in the URL
 	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
