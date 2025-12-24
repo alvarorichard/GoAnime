@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	AnimefireBase = "https://animefire.plus"
+	AnimefireBase = "https://animefire.io"
 )
 
 // AnimefireClient handles interactions with Animefire.plus

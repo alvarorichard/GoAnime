@@ -387,7 +387,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(videoSrc, "animefire.plus/video/") {
+	if strings.Contains(videoSrc, "animefire.io/video/") {
 		resp, err := api.SafeGet(videoSrc)
 		if err != nil {
 			return nil, err
