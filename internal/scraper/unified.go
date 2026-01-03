@@ -4,6 +4,7 @@ package scraper
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -78,25 +79,57 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 		return nil, fmt.Errorf("tipo de scraper %v não encontrado", *scraperType)
 	}
 
-	// Search across all scrapers simultaneously
-	util.Debug("Starting simultaneous search", "query", query)
+	// Search across all scrapers concurrently for better performance
+	util.Debug("Starting concurrent search across all sources", "query", query)
 
-	for scraperType, scraper := range sm.scrapers {
-		util.Debug("Searching in source", "source", sm.getScraperDisplayName(scraperType))
+	type searchResult struct {
+		scraperType ScraperType
+		results     []*models.Anime
+		err         error
+	}
 
-		results, err := scraper.SearchAnime(query)
-		if err != nil {
-			// Log error but continue with other scrapers
-			util.Debug("Search error", "source", sm.getScraperDisplayName(scraperType), "error", err)
+	resultChan := make(chan searchResult, len(sm.scrapers))
+	var wg sync.WaitGroup
+
+	// Launch concurrent searches
+	for sType, scraper := range sm.scrapers {
+		wg.Add(1)
+		go func(st ScraperType, s UnifiedScraper) {
+			defer wg.Done()
+			util.Debug("Searching in source", "source", sm.getScraperDisplayName(st))
+
+			results, err := s.SearchAnime(query)
+			resultChan <- searchResult{
+				scraperType: st,
+				results:     results,
+				err:         err,
+			}
+		}(sType, scraper)
+	}
+
+	// Close channel when all goroutines complete
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results and track errors
+	var searchErrors []string
+	for res := range resultChan {
+		if res.err != nil {
+			// Log error and track it for user feedback
+			sourceName := sm.getScraperDisplayName(res.scraperType)
+			util.Debug("Search error", "source", sourceName, "error", res.err)
+			searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
 			continue
 		}
 
-		util.Debug("Search results", "source", sm.getScraperDisplayName(scraperType), "count", len(results))
+		util.Debug("Search results", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results))
 
 		// Add source information to results with enhanced formatting
-		for _, anime := range results {
-			sourceName := sm.getScraperDisplayName(scraperType)
-			sourceTag := sm.getSourceTag(scraperType)
+		for _, anime := range res.results {
+			sourceName := sm.getScraperDisplayName(res.scraperType)
+			sourceTag := sm.getSourceTag(res.scraperType)
 
 			if !strings.Contains(anime.Name, sourceTag) {
 				anime.Name = fmt.Sprintf("%s %s", sourceTag, anime.Name)
@@ -106,11 +139,21 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			anime.Source = sourceName
 		}
 
-		allResults = append(allResults, results...)
+		allResults = append(allResults, res.results...)
+	}
+
+	// Log warnings for failed sources at INFO level so users can see them
+	if len(searchErrors) > 0 {
+		for _, errMsg := range searchErrors {
+			util.Warn("Fonte de busca indisponível", "detalhes", errMsg)
+		}
 	}
 
 	if len(allResults) == 0 {
 		util.Debug("No anime found", "query", query)
+		if len(searchErrors) > 0 {
+			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s)", query, strings.Join(searchErrors, "; "))
+		}
 		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}
 

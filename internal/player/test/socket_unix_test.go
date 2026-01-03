@@ -290,3 +290,109 @@ func BenchmarkSocketPathConstruction(b *testing.B) {
 		_ = fmt.Sprintf("%s/goanime_mpvsocket_%s", tmpDir, randomNumber)
 	}
 }
+
+// TestExponentialBackoffSocketConnection tests that socket connection uses proper exponential backoff
+// This simulates the improved StartVideo behavior where we wait up to 10 seconds with backoff
+func TestExponentialBackoffSocketConnection(t *testing.T) {
+	t.Run("Exponential backoff adapts interval over time", func(t *testing.T) {
+		// Test the exponential backoff logic used in StartVideo
+		initialInterval := 50 * time.Millisecond
+		maxInterval := 500 * time.Millisecond
+		currentInterval := initialInterval
+
+		intervals := []time.Duration{currentInterval}
+
+		// Simulate 10 iterations of backoff
+		for i := 0; i < 10; i++ {
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
+			intervals = append(intervals, currentInterval)
+		}
+
+		// First interval should be small (50ms)
+		assert.Equal(t, initialInterval, intervals[0])
+
+		// Later intervals should grow up to maxInterval
+		assert.Equal(t, maxInterval, intervals[len(intervals)-1])
+
+		// Verify gradual growth
+		for i := 1; i < len(intervals); i++ {
+			assert.GreaterOrEqual(t, intervals[i], intervals[i-1],
+				"Intervals should grow or stay at max")
+		}
+
+		t.Logf("Backoff intervals: %v", intervals)
+	})
+
+	t.Run("Connection with delayed socket creation (simulating slow stream)", func(t *testing.T) {
+		tmpDir := strings.TrimSuffix(os.TempDir(), "/")
+		socketPath := filepath.Join(tmpDir, fmt.Sprintf("goanime_slow_stream_%d", time.Now().UnixNano()))
+
+		_ = os.Remove(socketPath)
+
+		// Simulate a slow stream by delaying socket creation by 2 seconds
+		// This tests that our 10-second timeout is sufficient
+		socketDelay := 2 * time.Second
+
+		listenerReady := make(chan struct{})
+		go func() {
+			time.Sleep(socketDelay)
+			listener, err := net.Listen("unix", socketPath)
+			if err != nil {
+				close(listenerReady)
+				return
+			}
+			close(listenerReady)
+			defer func() {
+				_ = listener.Close()
+				_ = os.Remove(socketPath)
+			}()
+
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}()
+
+		// Use exponential backoff like StartVideo does
+		startTime := time.Now()
+		maxWaitTime := 10 * time.Second
+		initialInterval := 50 * time.Millisecond
+		maxIntervalCap := 500 * time.Millisecond
+		currentInterval := initialInterval
+
+		var conn net.Conn
+		var connErr error
+
+		for time.Since(startTime) < maxWaitTime {
+			conn, connErr = net.Dial("unix", socketPath)
+			if connErr == nil {
+				break
+			}
+
+			time.Sleep(currentInterval)
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxIntervalCap {
+				currentInterval = maxIntervalCap
+			}
+		}
+
+		elapsed := time.Since(startTime)
+		require.NoError(t, connErr, "Should connect within 10-second timeout")
+		if conn != nil {
+			_ = conn.Close()
+		}
+
+		// Should have connected after approximately 2 seconds (the delay)
+		assert.GreaterOrEqual(t, elapsed, socketDelay,
+			"Connection should happen after socket is created")
+		assert.Less(t, elapsed, 5*time.Second,
+			"Should not take too long after socket is available")
+
+		<-listenerReady
+		t.Logf("Connected after %.2fs (socket delayed by %v)", elapsed.Seconds(), socketDelay)
+	})
+}

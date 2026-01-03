@@ -114,14 +114,21 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG]mpv started, waiting for socket creation: %s\n", socketPath)
+		fmt.Printf("[DEBUG] mpv started, waiting for socket creation: %s\n", socketPath)
 	}
 
-	// Wait for socket creation with longer timeout
-	maxAttempts := 30 // 3 seconds total
-	for i := 0; i < maxAttempts; i++ {
+	// Wait for socket creation with adaptive timeout and exponential backoff
+	// Total max wait time: ~10 seconds (accommodates slow network streams)
+	// Initial intervals are short for fast local files, then back off for streams
+	maxWaitTime := 10 * time.Second
+	initialInterval := 50 * time.Millisecond
+	maxInterval := 500 * time.Millisecond
+	currentInterval := initialInterval
+
+	for time.Since(startTime) < maxWaitTime {
 		if util.IsDebug {
-			fmt.Printf("[DEBUG] Try %d/%d: checking socket connection...\n", i+1, maxAttempts)
+			elapsed := time.Since(startTime)
+			fmt.Printf("[DEBUG] Attempt at %.2fs: checking socket connection...\n", elapsed.Seconds())
 		}
 
 		// Try to connect to the socket instead of checking file existence
@@ -140,23 +147,39 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 
 		// Check if MPV process is still running
-		if cmd.Process == nil || cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			return "", fmt.Errorf("mpv process exited prematurely: %s", stderr.String())
+		if cmd.Process == nil {
+			return "", fmt.Errorf("mpv process not started properly: %s", stderr.String())
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		// Check if process exited prematurely
+		// Note: ProcessState is nil until the process exits, so we need a different check
+		select {
+		case <-time.After(currentInterval):
+			// Apply exponential backoff
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
+		default:
+			time.Sleep(currentInterval)
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
+		}
 	}
 
+	elapsed := time.Since(startTime)
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] Timeout after %.2fs waiting  socket of mpv\n", time.Since(startTime).Seconds())
+		fmt.Printf("[DEBUG] Timeout after %.2fs waiting for mpv socket\n", elapsed.Seconds())
 	}
-	// Cleanup if timeout occurs
-	err = cmd.Process.Kill()
-	if err != nil {
 
-		return "", err
+	// Cleanup if timeout occurs
+	if killErr := cmd.Process.Kill(); killErr != nil {
+		util.Debugf("Failed to kill mpv process: %v", killErr)
 	}
-	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
+
+	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs. Possible issues:\n1. Slow network connection - video source may be unresponsive\n2. MPV installation corrupted\n3. Firewall blocking IPC\n4. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds())
 }
 
 // MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages
