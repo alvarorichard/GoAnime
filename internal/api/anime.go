@@ -21,54 +21,11 @@ import (
 // Common HTTP client instance
 var httpClient = &http.Client{}
 
+// GetEpisodeData fetches episode data using multiple providers with fallback support.
+// It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.
+// This provides robust episode data retrieval even when primary APIs are unavailable.
 func GetEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
-
-	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/episodes/%d", animeID, episodeNo)
-
-	response, err := makeGetRequest(url, nil)
-	if err != nil {
-		return fmt.Errorf("error fetching data from Jikan (MyAnimeList) API: %w", err)
-	}
-
-	data, ok := response["data"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
-	}
-
-	getStringValue := func(field string) string {
-		if value, ok := data[field].(string); ok {
-			return value
-		}
-		return ""
-	}
-
-	getIntValue := func(field string) int {
-		if value, ok := data[field].(float64); ok {
-			return int(value)
-		}
-		return 0
-	}
-
-	getBoolValue := func(field string) bool {
-		if value, ok := data[field].(bool); ok {
-			return value
-		}
-		return false
-	}
-
-	if len(anime.Episodes) == 0 {
-		anime.Episodes = make([]models.Episode, 1)
-	}
-	anime.Episodes[0].Title.Romaji = getStringValue("title_romanji")
-	anime.Episodes[0].Title.English = getStringValue("title")
-	anime.Episodes[0].Title.Japanese = getStringValue("title_japanese")
-	anime.Episodes[0].Aired = getStringValue("aired")
-	anime.Episodes[0].Duration = getIntValue("duration")
-	anime.Episodes[0].IsFiller = getBoolValue("filler")
-	anime.Episodes[0].IsRecap = getBoolValue("recap")
-	anime.Episodes[0].Synopsis = getStringValue("synopsis")
-
-	return nil
+	return GetEpisodeDataWithFallback(animeID, episodeNo, anime)
 }
 
 // GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
