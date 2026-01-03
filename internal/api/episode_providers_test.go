@@ -782,9 +782,9 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		data := map[string]interface{}{
-			"title":   "Updated Title",
-			"filler":  false, // This should update
-			"recap":   true,
+			"title":    "Updated Title",
+			"filler":   false, // This should update
+			"recap":    true,
 			"duration": 1200,
 		}
 
@@ -894,4 +894,3 @@ func TestCleanTitle(t *testing.T) {
 		})
 	}
 }
-
