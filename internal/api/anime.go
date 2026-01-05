@@ -183,7 +183,12 @@ func getStringValue(data map[string]interface{}, field string) string {
 }
 
 func getIntValue(data map[string]interface{}, field string) int {
-	if val, ok := data[field].(float64); ok {
+	switch val := data[field].(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
 		return int(val)
 	}
 	return 0
@@ -456,23 +461,25 @@ func CleanTitle(title string) string {
 	reSpaceDash := regexp.MustCompile(`\s+-\s+.*$`)
 	cleaned = strings.TrimSpace(reSpaceDash.ReplaceAllString(cleaned, ""))
 
-	// Remove language indicators
-	re2 := regexp.MustCompile(`(?i)(?:dublado|legendado|dub|sub)\s*`)
+	// Remove content in parentheses if it contains language info (do this BEFORE removing standalone language indicators)
+	re6 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
+	cleaned = strings.TrimSpace(re6.ReplaceAllString(cleaned, ""))
+
+	// Remove standalone language indicators (not in parentheses)
+	re2 := regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub)\s*$`)
 	cleaned = strings.TrimSpace(re2.ReplaceAllString(cleaned, ""))
 
 	// Remove "Todos os Episodios" and similar (in case em-dash removal didn't catch it)
 	re3 := regexp.MustCompile(`(?i)[-–—]?\s*todos\s+os\s+epis[oó]dios`)
 	cleaned = strings.TrimSpace(re3.ReplaceAllString(cleaned, ""))
 
-	// Remove season/episode indicators like "2.0 A2" or "3.5" at the end
+	// Remove season/episode indicators like "2.0 A2" at the end (but NOT plain season numbers)
 	re4 := regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
 	cleaned = strings.TrimSpace(re4.ReplaceAllString(cleaned, ""))
-	re5 := regexp.MustCompile(`\s+\d+(\.\d+)?\s*$`)
-	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
 
-	// Remove content in parentheses if it contains language info
-	re6 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
-	cleaned = strings.TrimSpace(re6.ReplaceAllString(cleaned, ""))
+	// Remove decimal version numbers at the end like "3.5" (but NOT "Season 2")
+	re5 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
+	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
 
 	// Remove episode count like "(171 episodes)" or "(1 eps)"
 	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?)\)`)
@@ -486,9 +493,13 @@ func CleanTitle(title string) string {
 	re9 := regexp.MustCompile(`(?i)\s+N/A\s*$`)
 	cleaned = strings.TrimSpace(re9.ReplaceAllString(cleaned, ""))
 
-	// Remove rating scores like "7.12" or "8.5" at the end
+	// Remove rating scores like "7.12" or "8.5" at the end (only decimal numbers)
 	re10 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
 	cleaned = strings.TrimSpace(re10.ReplaceAllString(cleaned, ""))
+
+	// Remove empty parentheses that may be left after other cleanups
+	reEmptyParens := regexp.MustCompile(`\s*\(\s*\)`)
+	cleaned = strings.TrimSpace(reEmptyParens.ReplaceAllString(cleaned, ""))
 
 	// Replace hyphens with spaces (for URL-style names like "black-clover")
 	// But only if surrounded by letters (not em-dashes already handled above)
