@@ -48,10 +48,12 @@ type AniListDetails struct {
 	Episodes     int         `json:"episodes"`
 	Status       string      `json:"status"`
 	CoverImage   CoverImages `json:"coverImage"`
+	Synonyms     []string    `json:"synonyms"`
 }
 type Title struct {
 	Romaji  string `json:"romaji"`
 	English string `json:"english"`
+	Native  string `json:"native"`
 }
 type CoverImages struct {
 	Large  string `json:"large"`

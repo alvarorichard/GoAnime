@@ -48,8 +48,9 @@ func PlayEpisode(
 	if currentEpisode == nil {
 		// Create episode if not found
 		// For AllAnime, use the anime ID as URL instead of episode-specific URL
+		// For AnimeDrive, use the episode URL directly
 		episodeURLForCreation := episodeURL
-		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http")) {
+		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http") && !strings.Contains(anime.URL, "animesdrive")) {
 			episodeURLForCreation = anime.URL // Use anime ID for AllAnime
 		}
 

@@ -26,6 +26,10 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.AnimefireType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "AnimeFire")
+	} else if strings.ToLower(source) == "animedrive" {
+		t := scraper.AnimeDriveType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "AnimeDrive")
 	} else {
 		// Default behavior: search both sources simultaneously
 		scraperType = nil
@@ -52,6 +56,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "AllAnime"
 			} else if strings.Contains(anime.URL, "animefire") {
 				anime.Source = "AnimeFire.plus"
+			} else if strings.Contains(anime.URL, "animesdrive") {
+				anime.Source = "AnimeDrive"
 			}
 		}
 
@@ -60,6 +66,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			anime.Name = "[AllAnime] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AllAnime]", ""))
 		} else if anime.Source == "AnimeFire.plus" && !strings.Contains(anime.Name, "AnimeFire") {
 			anime.Name = "[AnimeFire] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AnimeFire]", ""))
+		} else if anime.Source == "AnimeDrive" && !strings.Contains(anime.Name, "AnimeDrive") {
+			anime.Name = "[AnimeDrive] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AnimeDrive]", ""))
 		}
 	}
 
@@ -68,15 +76,18 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	// Show sources breakdown in debug only
 	animefireCount := 0
 	allanimeCount := 0
+	animedriveCount := 0
 	for _, anime := range animes {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
 		} else if anime.Source == "AllAnime" {
 			allanimeCount++
+		} else if anime.Source == "AnimeDrive" {
+			animedriveCount++
 		}
 	}
 
-	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount)
+	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount)
 
 	// If only one result, return it directly
 	if len(animes) == 1 {
@@ -90,17 +101,6 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		return animes[0], nil
 	}
 
-	// Helper to map provider tags to user-friendly language labels for display only
-	providerLabel := func(src string) string {
-		if strings.Contains(src, "AnimeFire") {
-			return "Portuguese"
-		}
-		if src == "AllAnime" {
-			return "English"
-		}
-		return src
-	}
-
 	// Use fuzzy finder to let user select
 	var idx int
 
@@ -109,18 +109,15 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animes,
 			func(i int) string {
-				// Replace provider tags in the display name only
-				name := animes[i].Name
-				name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
-				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
-				return name
+				// Show the anime name with source tag as-is
+				return animes[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
 				if i >= 0 && i < len(animes) {
 					anime := animes[i]
 					var preview string
-					preview = "Source: " + providerLabel(anime.Source) + "\nURL: " + anime.URL
+					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
 					if anime.ImageURL != "" {
 						preview += "\nImage: " + anime.ImageURL
 					}
@@ -134,11 +131,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animes,
 			func(i int) string {
-				// Replace provider tags in the display name only
-				name := animes[i].Name
-				name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
-				name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
-				return name
+				// Show the anime name with source tag as-is
+				return animes[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 		)
@@ -169,6 +163,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "AllAnime"
 	} else if strings.Contains(anime.Source, "AnimeFire") {
 		sourceName = "AnimeFire.plus"
+	} else if anime.Source == "AnimeDrive" {
+		sourceName = "AnimeDrive"
 	} else if strings.Contains(anime.Name, "[AllAnime]") {
 		// Priority 2: Check name tags
 		sourceName = "AllAnime"
@@ -176,6 +172,9 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	} else if strings.Contains(anime.Name, "[AnimeFire]") {
 		sourceName = "AnimeFire.plus"
 		anime.Source = "AnimeFire.plus" // Update source field
+	} else if strings.Contains(anime.Name, "[AnimeDrive]") {
+		sourceName = "AnimeDrive"
+		anime.Source = "AnimeDrive" // Update source field
 	} else if strings.Contains(anime.URL, "allanime") || (len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http")) {
 		// Priority 3: URL analysis for AllAnime (short IDs or allanime URLs)
 		sourceName = "AllAnime"
@@ -184,13 +183,17 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		// Priority 4: URL analysis for AnimeFire
 		sourceName = "AnimeFire.plus"
 		anime.Source = "AnimeFire.plus" // Update source field
+	} else if strings.Contains(anime.URL, "animesdrive") {
+		// Priority 5: URL analysis for AnimeDrive
+		sourceName = "AnimeDrive"
+		anime.Source = "AnimeDrive" // Update source field
 	} else {
 		// Default to AllAnime for unknown sources
 		sourceName = "AllAnime (default)"
 		anime.Source = "AllAnime"
 	}
 
-	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[AllAnime]", ""), "[AnimeFire]", ""))
+	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[AllAnime]", ""), "[AnimeFire]", ""), "[AnimeDrive]", ""))
 
 	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
 
@@ -215,6 +218,14 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			// Fallback to regular episodes
 			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 		}
+	} else if sourceName == "AnimeDrive" {
+		// For AnimeDrive, use the AnimeDrive scraper
+		scraperManager := scraper.NewScraperManager()
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimeDriveType)
+		if scErr != nil {
+			return nil, fmt.Errorf("failed to get AnimeDrive scraper: %w", scErr)
+		}
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else {
 		// For AnimeFire and others, use the original API function
 		episodes, err = GetAnimeEpisodes(anime.URL)
@@ -230,6 +241,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		// Provide additional info for user based on source (debug only)
 		if strings.Contains(sourceName, "AllAnime") {
 			util.Debug("Source info", "type", "AllAnime", "quality", "high")
+		} else if sourceName == "AnimeDrive" {
+			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
 		} else {
 			util.Debug("Source info", "type", "AnimeFire.plus", "features", "dubbed/subtitled")
 		}
@@ -255,6 +268,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if strings.Contains(anime.Source, "AnimeFire") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
+	} else if anime.Source == "AnimeDrive" {
+		scraperType = scraper.AnimeDriveType
+		sourceName = "AnimeDrive"
 	} else if strings.Contains(anime.Name, "[AllAnime]") {
 		// Priority 2: Check name tags
 		scraperType = scraper.AllAnimeType
@@ -262,6 +278,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if strings.Contains(anime.Name, "[AnimeFire]") {
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
+	} else if strings.Contains(anime.Name, "[AnimeDrive]") {
+		scraperType = scraper.AnimeDriveType
+		sourceName = "AnimeDrive"
 	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
 		// Priority 3: URL analysis for AllAnime (short IDs)
 		scraperType = scraper.AllAnimeType
@@ -270,8 +289,12 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		// Priority 4: URL analysis for AnimeFire
 		scraperType = scraper.AnimefireType
 		sourceName = "AnimeFire.plus"
+	} else if strings.Contains(anime.URL, "animesdrive") {
+		// Priority 5: URL analysis for AnimeDrive
+		scraperType = scraper.AnimeDriveType
+		sourceName = "AnimeDrive"
 	} else if strings.Contains(anime.URL, "allanime") {
-		// Priority 5: AllAnime full URLs
+		// Priority 6: AllAnime full URLs
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
 	} else {
@@ -302,10 +325,14 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	var streamErr error
 
 	// Handle different scraper types with appropriate parameters
-	if scraperType == scraper.AllAnimeType {
+	switch scraperType {
+	case scraper.AllAnimeType:
 		util.Debug("Processing through AllAnime")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
-	} else {
+	case scraper.AnimeDriveType:
+		util.Debug("Processing through AnimeDrive")
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
+	default:
 		util.Debug("Processing through AnimeFire.plus")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
 	}

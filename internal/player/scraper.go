@@ -293,6 +293,16 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
+	// Try AnimeDrive enhanced navigation if applicable
+	if isAnimeDriveSourcePlayer(anime) {
+		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+		if err == nil {
+			return streamURL, nil
+		}
+		// For AnimeDrive, return the error instead of trying legacy method
+		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
+	}
+
 	// Try AllAnime enhanced navigation first if applicable
 	if isAllAnimeSourcePlayer(anime) {
 		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
@@ -330,10 +340,28 @@ func isAllAnimeSourcePlayer(anime *models.Anime) bool {
 
 	if len(anime.URL) < 30 &&
 		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") {
+		!strings.Contains(anime.URL, "http") &&
+		!strings.Contains(anime.URL, "animesdrive") {
 		return true
 	}
 
+	return false
+}
+
+// Helper function to check if anime is from AnimeDrive source (player module)
+func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
+	if anime == nil {
+		return false
+	}
+	if anime.Source == "AnimeDrive" {
+		return true
+	}
+	if strings.Contains(anime.Name, "[AnimeDrive]") {
+		return true
+	}
+	if strings.Contains(anime.URL, "animesdrive") {
+		return true
+	}
 	return false
 }
 

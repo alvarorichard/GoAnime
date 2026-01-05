@@ -249,11 +249,35 @@ func playVideo(
 
 // getCurrentEpisode retrieves the current episode based on the episode number
 func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
-	for _, ep := range episodes {
-		if ExtractEpisodeNumber(ep.Number) == fmt.Sprintf("%d", num) {
-			return &ep, nil
+	numStr := fmt.Sprintf("%d", num)
+
+	// First try: match by extracted episode number
+	for i := range episodes {
+		if ExtractEpisodeNumber(episodes[i].Number) == numStr {
+			return &episodes[i], nil
 		}
 	}
+
+	// Second try: match by Num field directly
+	for i := range episodes {
+		if episodes[i].Num == num {
+			return &episodes[i], nil
+		}
+	}
+
+	// Third try: match by Number field directly (for simple numeric cases)
+	for i := range episodes {
+		if episodes[i].Number == numStr {
+			return &episodes[i], nil
+		}
+	}
+
+	// Fourth try: check if we're within the bounds and use index-based access
+	// This handles cases where episode numbering doesn't match exactly
+	if num > 0 && num <= len(episodes) {
+		return &episodes[num-1], nil
+	}
+
 	return nil, fmt.Errorf("episode %d not found", num)
 }
 
@@ -465,12 +489,34 @@ func getEpisodeTitle(title models.TitleDetails) string {
 // findEpisodeIndex finds the episode index based on the episode number
 func findEpisodeIndex(episodes []models.Episode, num int) int {
 	episodeStr := fmt.Sprintf("%d", num)
+
+	// First try: match by extracted episode number
 	for i, ep := range episodes {
 		extractedNum := ExtractEpisodeNumber(ep.Number)
 		if extractedNum == episodeStr {
 			return i
 		}
 	}
+
+	// Second try: match by Num field directly
+	for i, ep := range episodes {
+		if ep.Num == num {
+			return i
+		}
+	}
+
+	// Third try: match by Number field directly
+	for i, ep := range episodes {
+		if ep.Number == episodeStr {
+			return i
+		}
+	}
+
+	// Fourth try: use index-based access if within bounds
+	if num > 0 && num <= len(episodes) {
+		return num - 1
+	}
+
 	return -1 // Episode not found
 }
 

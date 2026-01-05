@@ -2,9 +2,11 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -13,9 +15,13 @@ import (
 // ScraperType represents different scraper types
 type ScraperType int
 
+// searchTimeout is the maximum time to wait for all scrapers
+const searchTimeout = 15 * time.Second
+
 const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
+	AnimeDriveType
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -40,6 +46,7 @@ func NewScraperManager() *ScraperManager {
 	// Initialize scrapers
 	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
+	manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
 	return manager
 }
@@ -88,6 +95,10 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 		err         error
 	}
 
+	// Create context with timeout to prevent hanging on slow scrapers
+	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
+	defer cancel()
+
 	resultChan := make(chan searchResult, len(sm.scrapers))
 	var wg sync.WaitGroup
 
@@ -98,11 +109,31 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			defer wg.Done()
 			util.Debug("Searching in source", "source", sm.getScraperDisplayName(st))
 
-			results, err := s.SearchAnime(query)
-			resultChan <- searchResult{
-				scraperType: st,
-				results:     results,
-				err:         err,
+			// Create a channel for this individual search result
+			done := make(chan struct{})
+			var results []*models.Anime
+			var err error
+
+			go func() {
+				results, err = s.SearchAnime(query)
+				close(done)
+			}()
+
+			// Wait for result or context cancellation
+			select {
+			case <-done:
+				resultChan <- searchResult{
+					scraperType: st,
+					results:     results,
+					err:         err,
+				}
+			case <-ctx.Done():
+				util.Debug("Search timeout", "source", sm.getScraperDisplayName(st))
+				resultChan <- searchResult{
+					scraperType: st,
+					results:     nil,
+					err:         fmt.Errorf("search timed out after %v", searchTimeout),
+				}
 			}
 		}(sType, scraper)
 	}
@@ -160,11 +191,14 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	// Count results by source for summary
 	animefireCount := 0
 	allanimeCount := 0
+	animedriveCount := 0
 	for _, anime := range allResults {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
 		} else if anime.Source == "AllAnime" {
 			allanimeCount++
+		} else if anime.Source == "AnimeDrive" {
+			animedriveCount++
 		}
 	}
 
@@ -172,6 +206,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 		util.Debug("Search summary",
 			"animeFire", animefireCount,
 			"allAnime", allanimeCount,
+			"animeDrive", animedriveCount,
 			"total", len(allResults))
 	}
 
@@ -193,6 +228,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "AllAnime"
 	case AnimefireType:
 		return "AnimeFire.plus"
+	case AnimeDriveType:
+		return "AnimeDrive"
 	default:
 		return "Desconhecido"
 	}
@@ -205,6 +242,8 @@ func (sm *ScraperManager) getSourceTag(scraperType ScraperType) string {
 		return "[AllAnime]"
 	case AnimefireType:
 		return "[AnimeFire]"
+	case AnimeDriveType:
+		return "[AnimeDrive]"
 	default:
 		return "[Unknown]"
 	}
@@ -297,4 +336,25 @@ func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...interface{
 
 func (a *AnimefireAdapter) GetType() ScraperType {
 	return AnimefireType
+}
+
+// AnimeDriveAdapter adapts AnimeDriveClient to UnifiedScraper interface
+type AnimeDriveAdapter struct {
+	client *AnimeDriveClient
+}
+
+func (a *AnimeDriveAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	return a.client.GetStreamURL(episodeURL)
+}
+
+func (a *AnimeDriveAdapter) GetType() ScraperType {
+	return AnimeDriveType
 }

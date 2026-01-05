@@ -198,6 +198,7 @@ func getBoolValue(data map[string]interface{}, field string) bool {
 func enrichAnimeData(anime *models.Anime) error {
 	aniListInfo, err := FetchAnimeFromAniList(anime.Name)
 	if err != nil {
+		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)
 		return fmt.Errorf("AniList enrichment failed: %w", err)
 	}
 
@@ -269,46 +270,92 @@ func ParseAnimes(doc *goquery.Document) []models.Anime {
 
 func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	cleanedName := CleanTitle(animeName)
-	util.Debugf("Querying AniList for: %s", cleanedName)
+	util.Debugf("Querying AniList for: '%s' (original: '%s')", cleanedName, animeName)
+
+	// Try multiple search variations for better matching
+	searchVariations := []string{cleanedName}
+
+	// Add variation with first word capitalized if it's all lowercase
+	if strings.ToLower(cleanedName) == cleanedName {
+		words := strings.Fields(cleanedName)
+		for i, w := range words {
+			if len(w) > 0 {
+				words[i] = strings.ToUpper(string(w[0])) + w[1:]
+			}
+		}
+		titleCase := strings.Join(words, " ")
+		if titleCase != cleanedName {
+			searchVariations = append(searchVariations, titleCase)
+		}
+	}
 
 	query := `query ($search: String) {
         Media(search: $search, type: ANIME) {
             id
-            title { romaji english }
+            title { romaji english native }
             idMal
             coverImage { large }
+            synonyms
         }
     }`
 
-	jsonData, err := json.Marshal(map[string]interface{}{
-		"query": query,
-		"variables": map[string]interface{}{
-			"search": cleanedName,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("JSON marshal failed: %w", err)
+	var lastErr error
+	for _, searchTerm := range searchVariations {
+		util.Debugf("Trying AniList search with: '%s'", searchTerm)
+
+		jsonData, err := json.Marshal(map[string]interface{}{
+			"query": query,
+			"variables": map[string]interface{}{
+				"search": searchTerm,
+			},
+		})
+		if err != nil {
+			lastErr = fmt.Errorf("JSON marshal failed: %w", err)
+			continue
+		}
+
+		resp, err := httpPost("https://graphql.anilist.co", jsonData)
+		if err != nil {
+			lastErr = fmt.Errorf("AniList request failed: %w", err)
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		safeClose(resp.Body, "AniList response body")
+
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response: %w", err)
+			continue
+		}
+
+		util.Debugf("AniList response status: %d", resp.StatusCode)
+
+		if resp.StatusCode != http.StatusOK {
+			util.Debugf("AniList error response: %s", string(body))
+			lastErr = fmt.Errorf("AniList returned: %s", resp.Status)
+			continue
+		}
+
+		var result models.AniListResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			lastErr = fmt.Errorf("JSON decode failed: %w", err)
+			continue
+		}
+
+		if result.Data.Media.ID == 0 {
+			lastErr = errors.New("no matching anime found on AniList")
+			continue
+		}
+
+		util.Debugf("AniList found: ID=%d, MAL=%d, Title=%s",
+			result.Data.Media.ID,
+			result.Data.Media.IDMal,
+			result.Data.Media.Title.Romaji)
+
+		return &result, nil
 	}
 
-	resp, err := httpPost("https://graphql.anilist.co", jsonData)
-	if err != nil {
-		return nil, fmt.Errorf("AniList request failed: %w", err)
-	}
-	defer safeClose(resp.Body, "AniList response body")
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("AniList returned: %s", resp.Status)
-	}
-
-	var result models.AniListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("JSON decode failed: %w", err)
-	}
-
-	if result.Data.Media.ID == 0 {
-		return nil, errors.New("no matching anime found on AniList")
-	}
-	return &result, nil
+	return nil, lastErr
 }
 
 func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) {
@@ -352,6 +399,8 @@ func httpPost(url string, body []byte) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "GoAnime/1.0")
 	return httpClient.Do(req)
 }
 
@@ -394,29 +443,65 @@ func resolveURL(base, ref string) string {
 }
 
 func CleanTitle(title string) string {
-	// Remove common AnimeFire suffixes and patterns
-	re := regexp.MustCompile(`(?i)(dublado|legendado|todos os episodios)|\s+\d+(\.\d+)?\s+A\d+$|\s+\d+(\.\d+)?$`)
-	cleaned := strings.TrimSpace(re.ReplaceAllString(title, ""))
+	cleaned := title
 
-	// Remove anything in parentheses if it contains "dublado", "legendado", etc.
-	re2 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
+	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], or [AnimeDrive]
+	re1 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive)\]\s*`)
+	cleaned = strings.TrimSpace(re1.ReplaceAllString(cleaned, ""))
+
+	// Remove everything after em-dash or en-dash (typically subtitles like "– Todos os Episódios")
+	// This handles both em-dash (—), en-dash (–), and regular dash with spaces ( - )
+	reEmDash := regexp.MustCompile(`\s*[–—]\s+.*$`)
+	cleaned = strings.TrimSpace(reEmDash.ReplaceAllString(cleaned, ""))
+	reSpaceDash := regexp.MustCompile(`\s+-\s+.*$`)
+	cleaned = strings.TrimSpace(reSpaceDash.ReplaceAllString(cleaned, ""))
+
+	// Remove language indicators
+	re2 := regexp.MustCompile(`(?i)(?:dublado|legendado|dub|sub)\s*`)
 	cleaned = strings.TrimSpace(re2.ReplaceAllString(cleaned, ""))
 
-	// Remove source tags like 🔥[AnimeFire] or 🌐[AllAnime]
-	re3 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime)\]\s*`)
+	// Remove "Todos os Episodios" and similar (in case em-dash removal didn't catch it)
+	re3 := regexp.MustCompile(`(?i)[-–—]?\s*todos\s+os\s+epis[oó]dios`)
 	cleaned = strings.TrimSpace(re3.ReplaceAllString(cleaned, ""))
 
-	// Remove AllAnime specific patterns like "(171 episodes)" or "(1 episodes)"
-	re4 := regexp.MustCompile(`\s*\(\d+\s+episodes?\)`)
+	// Remove season/episode indicators like "2.0 A2" or "3.5" at the end
+	re4 := regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
 	cleaned = strings.TrimSpace(re4.ReplaceAllString(cleaned, ""))
-
-	// Remove special titles and common additions
-	re5 := regexp.MustCompile(`(?i):\s*(Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)
+	re5 := regexp.MustCompile(`\s+\d+(\.\d+)?\s*$`)
 	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
 
-	// Additional cleanup for colons and extra spaces
+	// Remove content in parentheses if it contains language info
+	re6 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
+	cleaned = strings.TrimSpace(re6.ReplaceAllString(cleaned, ""))
+
+	// Remove episode count like "(171 episodes)" or "(1 eps)"
+	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?)\)`)
+	cleaned = strings.TrimSpace(re7.ReplaceAllString(cleaned, ""))
+
+	// Remove special titles and additions after colon
+	re8 := regexp.MustCompile(`(?i):\s*(?:Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)
+	cleaned = strings.TrimSpace(re8.ReplaceAllString(cleaned, ""))
+
+	// Remove N/A ratings and similar suffixes
+	re9 := regexp.MustCompile(`(?i)\s+N/A\s*$`)
+	cleaned = strings.TrimSpace(re9.ReplaceAllString(cleaned, ""))
+
+	// Remove rating scores like "7.12" or "8.5" at the end
+	re10 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
+	cleaned = strings.TrimSpace(re10.ReplaceAllString(cleaned, ""))
+
+	// Replace hyphens with spaces (for URL-style names like "black-clover")
+	// But only if surrounded by letters (not em-dashes already handled above)
+	cleaned = regexp.MustCompile(`([a-zA-Z])-([a-zA-Z])`).ReplaceAllString(cleaned, "$1 $2")
+
+	// Replace underscores with spaces
+	cleaned = strings.ReplaceAll(cleaned, "_", " ")
+
+	// Normalize whitespace
 	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
 	cleaned = strings.TrimSpace(cleaned)
+
+	util.Debugf("CleanTitle: '%s' -> '%s'", title, cleaned)
 
 	return cleaned
 }
