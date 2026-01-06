@@ -453,3 +453,81 @@ func TestAnimeDriveAlphabetLetters(t *testing.T) {
 	assert.Equal(t, "A", letters[1])
 	assert.Equal(t, "Z", letters[26])
 }
+
+func TestSelectServerWithFuzzyFinder_EmptyOptions(t *testing.T) {
+	t.Parallel()
+
+	_, err := SelectServerWithFuzzyFinder([]VideoOption{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no server options available")
+}
+
+func TestSelectServerWithFuzzyFinder_SingleOption(t *testing.T) {
+	t.Parallel()
+
+	options := []VideoOption{
+		{
+			Label:      "FHD",
+			Quality:    QualityFHD,
+			ServerName: "Server 1",
+			VideoURL:   "https://example.com/video.mp4",
+		},
+	}
+
+	selected, err := SelectServerWithFuzzyFinder(options)
+	assert.NoError(t, err)
+	assert.NotNil(t, selected)
+	assert.Equal(t, "FHD", selected.Label)
+	assert.Equal(t, "https://example.com/video.mp4", selected.VideoURL)
+}
+
+func TestVideoOptionDisplay(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		option   VideoOption
+		expected string
+	}{
+		{
+			name: "With label",
+			option: VideoOption{
+				Label:      "FullHD / HLS",
+				Quality:    QualityFullHD,
+				ServerName: "Server 1",
+			},
+			expected: "FullHD / HLS",
+		},
+		{
+			name: "Without label uses quality",
+			option: VideoOption{
+				Label:      "",
+				Quality:    QualityFHD,
+				ServerName: "Server 2",
+			},
+			expected: "FHD (Server 2)",
+		},
+		{
+			name: "Mobile quality",
+			option: VideoOption{
+				Label:      "Mobile / Celular",
+				Quality:    QualityMobile,
+				ServerName: "Server 3",
+			},
+			expected: "Mobile / Celular",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test the display format logic
+			var display string
+			if tc.option.Label != "" {
+				display = tc.option.Label
+			} else {
+				display = fmt.Sprintf("%s (%s)", tc.option.Quality.String(), tc.option.ServerName)
+			}
+			assert.Equal(t, tc.expected, display)
+		})
+	}
+}

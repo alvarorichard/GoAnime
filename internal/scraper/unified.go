@@ -352,6 +352,21 @@ func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode,
 }
 
 func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// Check if server selection is requested via options
+	selectServer := true // Default to showing server selection
+	for _, opt := range options {
+		if s, ok := opt.(string); ok && s == "auto" {
+			selectServer = false
+			break
+		}
+		if b, ok := opt.(bool); ok {
+			selectServer = b
+		}
+	}
+
+	if selectServer {
+		return a.client.GetStreamURLWithSelection(episodeURL)
+	}
 	return a.client.GetStreamURL(episodeURL)
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 const (
@@ -117,6 +118,40 @@ type VideoOption struct {
 	PostID      string
 	Type        string
 	Nume        string
+}
+
+// SelectServerWithFuzzyFinder allows the user to select a server/quality option using fuzzy finder
+func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
+	if len(options) == 0 {
+		return nil, errors.New("no server options available")
+	}
+
+	// If only one option, return it directly
+	if len(options) == 1 {
+		return &options[0], nil
+	}
+
+	idx, err := fuzzyfinder.Find(
+		options,
+		func(i int) string {
+			opt := options[i]
+			// Format: "Quality Label (Server Name)"
+			if opt.Label != "" {
+				return opt.Label
+			}
+			return fmt.Sprintf("%s (%s)", opt.Quality.String(), opt.ServerName)
+		},
+		fuzzyfinder.WithPromptString("Select server/quality: "),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select server: %w", err)
+	}
+
+	if idx < 0 || idx >= len(options) {
+		return nil, errors.New("invalid server selection")
+	}
+
+	return &options[idx], nil
 }
 
 // AnimeDriveGenre represents a genre from AnimeDrive
@@ -974,6 +1009,55 @@ func (c *AnimeDriveClient) ResolveVideoURL(option VideoOption) (string, error) {
 	return urlStr, err
 }
 
+// GetVideoURLWithSelection allows user to select a server/quality before getting the video URL
+func (c *AnimeDriveClient) GetVideoURLWithSelection(episodeURL string) (string, error) {
+	util.Debug("AnimeDrive getting video URL with selection", "url", episodeURL)
+
+	// First get all options
+	options, err := c.GetVideoOptions(episodeURL)
+	if err != nil || len(options) == 0 {
+		util.Debug("AnimeDrive no options found, using fallback")
+		return c.getVideoURLFallback(episodeURL)
+	}
+
+	// Resolve video URLs for all options to show what's actually available
+	var resolvedOptions []VideoOption
+	for _, opt := range options {
+		videoURL, videoType, err := c.ResolveVideoURLWithType(opt)
+		if err == nil && videoURL != "" {
+			opt.VideoURL = videoURL
+			// Update label to include type info
+			if opt.Label == "" {
+				opt.Label = opt.Quality.String()
+			}
+			if videoType == "hls" {
+				opt.Label = opt.Label + " (HLS)"
+			}
+			resolvedOptions = append(resolvedOptions, opt)
+		}
+	}
+
+	if len(resolvedOptions) == 0 {
+		util.Debug("AnimeDrive no resolved options, using fallback")
+		return c.getVideoURLFallback(episodeURL)
+	}
+
+	// Let user select a server
+	selected, err := SelectServerWithFuzzyFinder(resolvedOptions)
+	if err != nil {
+		// If selection fails (e.g., user cancelled), try auto-selection
+		util.Debug("AnimeDrive server selection failed, using auto-select", "error", err)
+		return c.GetVideoURL(episodeURL)
+	}
+
+	if selected.VideoURL != "" {
+		util.Debug("AnimeDrive user selected server", "label", selected.Label, "url", selected.VideoURL)
+		return selected.VideoURL, nil
+	}
+
+	return c.getVideoURLFallback(episodeURL)
+}
+
 // GetVideoURL extracts the direct MP4 link from an episode (best quality available)
 // Prioritizes reliable servers (tityos) over problematic ones (aniplay)
 func (c *AnimeDriveClient) GetVideoURL(episodeURL string) (string, error) {
@@ -1456,9 +1540,23 @@ func (c *AnimeDriveClient) resolveURL(ref string) string {
 	return c.baseURL + "/" + ref
 }
 
-// GetStreamURL gets the streaming URL for a specific episode
+// GetStreamURL gets the streaming URL for a specific episode (auto-selects best server)
 func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (string, map[string]string, error) {
 	videoURL, err := c.GetVideoURL(episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+
+	metadata := map[string]string{
+		"source": "animedrive",
+	}
+
+	return videoURL, metadata, nil
+}
+
+// GetStreamURLWithSelection gets the streaming URL with user server selection
+func (c *AnimeDriveClient) GetStreamURLWithSelection(episodeURL string) (string, map[string]string, error) {
+	videoURL, err := c.GetVideoURLWithSelection(episodeURL)
 	if err != nil {
 		return "", nil, err
 	}
