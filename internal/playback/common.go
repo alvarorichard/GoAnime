@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -96,6 +97,10 @@ func PlayEpisode(
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
+		// If user selected back, return empty values to signal back request
+		if errors.Is(err, player.ErrBackRequested) {
+			return "", "back", -1
+		}
 		log.Fatalln(util.ErrorHandler(err))
 	}
 	epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(numStr))

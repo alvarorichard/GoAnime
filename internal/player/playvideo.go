@@ -615,6 +615,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		Title(title).
 		Description("Choose an action:").
 		Options(
+			huh.NewOption("← Back (resume playback)", "back"),
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
 			huh.NewOption("Select episode", "select"),
@@ -655,6 +656,9 @@ func handleUserInput(
 		}
 
 		switch choice {
+		case "back":
+			// Resume playback - simply continue the loop without taking action
+			return nil
 		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
 		case "previous":
@@ -695,6 +699,10 @@ func playPreviousEpisode(newIndex int, episodes []models.Episode, anilistID int,
 func selectEpisode(episodes []models.Episode, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
 	selectedURL, selectedNumStr, err := SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
+		// If user selected back, return nil to continue without action
+		if errors.Is(err, ErrBackRequested) {
+			return nil
+		}
 		return fmt.Errorf("failed to select episode: %w", err)
 	}
 

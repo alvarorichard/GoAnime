@@ -166,28 +166,46 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 	return 300 * 1024 * 1024, nil // 300MB default
 }
 
+// ErrBackRequested is returned when user selects the back option
+var ErrBackRequested = errors.New("back requested")
+
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
 
+	// Create a list with back option at the beginning
+	backOption := "← Back"
+	displayList := make([]string, len(episodes)+1)
+	displayList[0] = backOption
+	for i, ep := range episodes {
+		displayList[i+1] = ep.Number
+	}
+
 	idx, err := fuzzyfinder.Find(
-		episodes,
+		displayList,
 		func(i int) string {
-			return episodes[i].Number
+			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select the episode"),
+		fuzzyfinder.WithPromptString("Select the episode (or ← Back)"),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
 	}
 
-	if idx < 0 || idx >= len(episodes) {
+	if idx < 0 || idx >= len(displayList) {
 		return "", "", errors.New("invalid index returned by fuzzyfinder")
 	}
 
-	return episodes[idx].URL, episodes[idx].Number, nil
+	// Check if back was selected
+	if idx == 0 {
+		return "", "", ErrBackRequested
+	}
+
+	// Adjust index for episodes (subtract 1 for the back option)
+	episodeIdx := idx - 1
+	return episodes[episodeIdx].URL, episodes[episodeIdx].Number, nil
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
@@ -582,8 +600,9 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			}
 
 			// Always prompt user for quality selection to maintain the 360p, 720p, 1080p options
-			// Create options for huh.Select
+			// Create options for huh.Select with back option first
 			var options []huh.Option[string]
+			options = append(options, huh.NewOption("← Back", "back"))
 			for _, v := range videoResponse.Data {
 				options = append(options, huh.NewOption(v.Label, v.Src))
 			}
@@ -597,6 +616,11 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 				Run()
 			if err != nil {
 				return "", fmt.Errorf("failed to select quality: %w", err)
+			}
+
+			// Handle back selection
+			if selectedSrc == "back" {
+				return "", ErrBackRequested
 			}
 
 			// Store the selected quality for future use in this session

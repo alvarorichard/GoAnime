@@ -21,6 +21,22 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
 	if err != nil {
+		// If user selected back at initial episode selection, trigger anime change
+		if errors.Is(err, player.ErrBackRequested) {
+			newAnime, newEpisodes, changeErr := ChangeAnimeLocal()
+			if changeErr != nil {
+				log.Printf("Error changing anime: %v", changeErr)
+				return
+			}
+			// Recursively handle the new anime
+			series, newTotalEpisodes := CheckIfSeriesEnhanced(newAnime)
+			if series {
+				HandleSeries(newAnime, newEpisodes, newTotalEpisodes, discordEnabled)
+			} else {
+				HandleMovie(newAnime, newEpisodes, discordEnabled)
+			}
+			return
+		}
 		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
 		return
 	}
@@ -88,8 +104,8 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			break
 		}
 
-		// Handle anime change
-		if userInput == "c" {
+		// Handle back/change anime - both options allow searching for a new anime
+		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
@@ -126,6 +142,10 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 		if userInput == "e" {
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
 			if err != nil {
+				// If user selected back, just continue without changing episode
+				if errors.Is(err, player.ErrBackRequested) {
+					continue
+				}
 				log.Printf("Error selecting episode: %v", err)
 				continue
 			}
@@ -145,6 +165,10 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
 	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
+		// Propagate back request error
+		if errors.Is(err, player.ErrBackRequested) {
+			return "", "", -1, player.ErrBackRequested
+		}
 		return "", "", 0, err
 	}
 	selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))

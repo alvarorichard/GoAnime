@@ -120,6 +120,9 @@ type VideoOption struct {
 	Nume        string
 }
 
+// ErrBackRequested is returned when user selects the back option
+var ErrBackRequested = errors.New("back requested")
+
 // SelectServerWithFuzzyFinder allows the user to select a server/quality option using fuzzy finder
 func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 	if len(options) == 0 {
@@ -131,27 +134,41 @@ func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 		return &options[0], nil
 	}
 
+	// Create display list with back option first
+	backOption := "← Back"
+	displayList := make([]string, len(options)+1)
+	displayList[0] = backOption
+	for i, opt := range options {
+		if opt.Label != "" {
+			displayList[i+1] = opt.Label
+		} else {
+			displayList[i+1] = fmt.Sprintf("%s (%s)", opt.Quality.String(), opt.ServerName)
+		}
+	}
+
 	idx, err := fuzzyfinder.Find(
-		options,
+		displayList,
 		func(i int) string {
-			opt := options[i]
-			// Format: "Quality Label (Server Name)"
-			if opt.Label != "" {
-				return opt.Label
-			}
-			return fmt.Sprintf("%s (%s)", opt.Quality.String(), opt.ServerName)
+			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select server/quality: "),
+		fuzzyfinder.WithPromptString("Select server/quality (or ← Back): "),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select server: %w", err)
 	}
 
-	if idx < 0 || idx >= len(options) {
+	if idx < 0 || idx >= len(displayList) {
 		return nil, errors.New("invalid server selection")
 	}
 
-	return &options[idx], nil
+	// Check if back was selected
+	if idx == 0 {
+		return nil, ErrBackRequested
+	}
+
+	// Adjust index for options (subtract 1 for the back option)
+	optionIdx := idx - 1
+	return &options[optionIdx], nil
 }
 
 // AnimeDriveGenre represents a genre from AnimeDrive
@@ -1045,6 +1062,10 @@ func (c *AnimeDriveClient) GetVideoURLWithSelection(episodeURL string) (string, 
 	// Let user select a server
 	selected, err := SelectServerWithFuzzyFinder(resolvedOptions)
 	if err != nil {
+		// If user selected back, return the error to propagate it
+		if errors.Is(err, ErrBackRequested) {
+			return "", ErrBackRequested
+		}
 		// If selection fails (e.g., user cancelled), try auto-selection
 		util.Debug("AnimeDrive server selection failed, using auto-select", "error", err)
 		return c.GetVideoURL(episodeURL)

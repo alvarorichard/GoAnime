@@ -115,8 +115,8 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			break
 		}
 
-		// Handle anime change for movies
-		if userInput == "c" {
+		// Handle back/change anime for movies - both options allow searching for a new anime
+		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
