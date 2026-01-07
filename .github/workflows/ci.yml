@@ -300,20 +300,18 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          # Download and install Inno Setup
-          $innoUrl = "https://jrsoftware.org/download.php/is.exe"
-          $innoInstaller = "innosetup.exe"
+          # Install Inno Setup via Chocolatey (more reliable in CI)
+          Write-Host "Installing Inno Setup via Chocolatey..."
+          choco install innosetup -y --no-progress
           
-          Write-Host "Downloading Inno Setup..."
-          Invoke-WebRequest -Uri $innoUrl -OutFile $innoInstaller -UserAgent "Mozilla/5.0"
-          
-          Write-Host "Installing Inno Setup silently..."
-          Start-Process -FilePath $innoInstaller -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-          
-          # Add to PATH for this session
-          $env:PATH = "C:\Program Files (x86)\Inno Setup 6;$env:PATH"
-          
-          Write-Host "Inno Setup installed successfully"
+          # Verify installation
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            Write-Host "Inno Setup installed successfully at: $iscc"
+          } else {
+            Write-Error "Inno Setup installation failed - ISCC.exe not found"
+            exit 1
+          }
 
       - name: Create dist directory
         shell: pwsh
