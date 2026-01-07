@@ -238,17 +238,44 @@ jobs:
         shell: pwsh
         run: |
           # Download latest mpv from zhongfly/mpv-winbuild GitHub releases
-          # Using mpv 0.40+ (x86_64-v3 build for modern CPUs with AVX2 support)
-          $mpvVersion = "mpv-x86_64-v3-20260107-git-85bf9f4"
-          $mpvUrl = "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-01-07/$mpvVersion.7z"
+          # Using GitHub API to get the latest release and download x86_64-v3 build
+          
+          Write-Host "Fetching latest mpv release from zhongfly/mpv-winbuild..."
+          
+          # Get the latest release info from GitHub API
+          $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers @{ "User-Agent" = "GoAnime-CI" }
+          
+          Write-Host "Latest release: $($releaseInfo.tag_name)"
+          
+          # Find the x86_64-v3 asset (optimized for modern CPUs)
+          $mpvAsset = $releaseInfo.assets | Where-Object { $_.name -like "mpv-x86_64-v3-*.7z" } | Select-Object -First 1
+          
+          if (-not $mpvAsset) {
+            # Fallback to regular x86_64 if v3 not found
+            $mpvAsset = $releaseInfo.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" -and $_.name -notlike "*v3*" } | Select-Object -First 1
+          }
+          
+          if (-not $mpvAsset) {
+            Write-Error "No suitable mpv asset found in release"
+            exit 1
+          }
+          
+          $mpvUrl = $mpvAsset.browser_download_url
           $mpvArchive = "mpv.7z"
           
-          Write-Host "Downloading mpv v0.40+ from: $mpvUrl"
+          Write-Host "Downloading: $($mpvAsset.name)"
+          Write-Host "URL: $mpvUrl"
           
-          # Download mpv archive from GitHub releases
-          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive -MaximumRedirection 5
+          # Download mpv archive from GitHub releases with proper headers
+          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive -Headers @{ "Accept" = "application/octet-stream"; "User-Agent" = "GoAnime-CI" }
           
-          Write-Host "Downloaded mpv archive, extracting..."
+          # Verify download
+          if (-not (Test-Path $mpvArchive) -or (Get-Item $mpvArchive).Length -lt 1000000) {
+            Write-Error "Download failed or file too small"
+            exit 1
+          }
+          
+          Write-Host "Downloaded mpv archive ($(((Get-Item $mpvArchive).Length / 1MB).ToString('F2')) MB), extracting..."
           
           # Extract using 7z (available on Windows runners)
           7z x $mpvArchive -ompv_extracted -y
