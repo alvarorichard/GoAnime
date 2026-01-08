@@ -26,6 +26,9 @@ var ErrUserQuit = errors.New("user requested to quit application")
 // ErrChangeAnime is returned when the user chooses to change anime
 var ErrChangeAnime = errors.New("user requested to change anime")
 
+// ErrBackToDownloadOptions is returned when user wants to go back to download options
+var ErrBackToDownloadOptions = errors.New("back to download options")
+
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
 	var opts []string
@@ -615,6 +618,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		Title(title).
 		Description("Choose an action:").
 		Options(
+			huh.NewOption("← Voltar (opções de download)", "download_options"),
 			huh.NewOption("← Back (resume playback)", "back"),
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
@@ -656,6 +660,10 @@ func handleUserInput(
 		}
 
 		switch choice {
+		case "download_options":
+			// Stop playback and go back to download options
+			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			return ErrBackToDownloadOptions
 		case "back":
 			// Resume playback - simply continue the loop without taking action
 			return nil

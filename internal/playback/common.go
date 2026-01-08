@@ -65,6 +65,10 @@ func PlayEpisode(
 	// Try enhanced API first, fallback to legacy if needed
 	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
 	if err != nil {
+		// Check if user requested to go back to episode selection
+		if errors.Is(err, player.ErrBackToEpisodeSelection) {
+			return player.ErrBackToEpisodeSelection
+		}
 		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
 		return fmt.Errorf("failed to extract video URL: %w", err)
 	}

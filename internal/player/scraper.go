@@ -14,6 +14,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -169,6 +170,12 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 // ErrBackRequested is returned when user selects the back option
 var ErrBackRequested = errors.New("back requested")
 
+// ErrBackToAnimeSelection is returned when user wants to go back to anime selection
+var ErrBackToAnimeSelection = errors.New("back to anime selection")
+
+// ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
+var ErrBackToEpisodeSelection = errors.New("back to episode selection")
+
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
@@ -176,7 +183,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	}
 
 	// Create a list with back option at the beginning
-	backOption := "← Back"
+	backOption := "← Voltar (seleção de anime)"
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {
@@ -188,7 +195,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		func(i int) string {
 			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select the episode (or ← Back)"),
+		fuzzyfinder.WithPromptString("Selecione o episódio: "),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
@@ -316,6 +323,10 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
 			return streamURL, nil
+		}
+		// Check if user requested to go back from server selection
+		if errors.Is(err, scraper.ErrBackRequested) {
+			return "", ErrBackToEpisodeSelection
 		}
 		// For AnimeDrive, return the error instead of trying legacy method
 		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)

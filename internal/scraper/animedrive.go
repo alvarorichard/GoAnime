@@ -135,7 +135,7 @@ func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 	}
 
 	// Create display list with back option first
-	backOption := "← Back"
+	backOption := "← Voltar (seleção de episódio)"
 	displayList := make([]string, len(options)+1)
 	displayList[0] = backOption
 	for i, opt := range options {
@@ -151,7 +151,7 @@ func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 		func(i int) string {
 			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select server/quality (or ← Back): "),
+		fuzzyfinder.WithPromptString("Selecione o servidor: "),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select server: %w", err)

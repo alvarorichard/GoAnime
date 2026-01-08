@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
+
+// ErrBackToSearch is returned when user selects the back option to search again
+var ErrBackToSearch = errors.New("back to search requested")
 
 // Enhanced search that supports multiple sources - always searches both animefire.plus and allanime simultaneously
 func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
@@ -89,17 +93,17 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount)
 
-	// If only one result, return it directly
-	if len(animes) == 1 {
-		util.Debug("Auto-selecting single result", "anime", animes[0].Name)
-
-		// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
-		if err := enrichAnimeData(animes[0]); err != nil {
-			util.Errorf("Error enriching anime data: %v", err)
-		}
-
-		return animes[0], nil
+	// Create a special "back" option as the first item
+	backOption := &models.Anime{
+		Name:   "← Voltar (nova busca)",
+		URL:    "__back__",
+		Source: "__back__",
 	}
+
+	// Prepend back option to the list
+	animesWithBack := make([]*models.Anime, 0, len(animes)+1)
+	animesWithBack = append(animesWithBack, backOption)
+	animesWithBack = append(animesWithBack, animes...)
 
 	// Use fuzzy finder to let user select
 	var idx int
@@ -107,15 +111,18 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	if util.IsDebug {
 		// In debug mode, show preview window with technical details
 		idx, err = fuzzyfinder.Find(
-			animes,
+			animesWithBack,
 			func(i int) string {
 				// Show the anime name with source tag as-is
-				return animes[i].Name
+				return animesWithBack[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
-				if i >= 0 && i < len(animes) {
-					anime := animes[i]
+				if i >= 0 && i < len(animesWithBack) {
+					anime := animesWithBack[i]
+					if anime.Source == "__back__" {
+						return "Voltar para fazer uma nova busca"
+					}
 					var preview string
 					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
 					if anime.ImageURL != "" {
@@ -129,10 +136,10 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	} else {
 		// In normal mode, no preview window at all
 		idx, err = fuzzyfinder.Find(
-			animes,
+			animesWithBack,
 			func(i int) string {
 				// Show the anime name with source tag as-is
-				return animes[i].Name
+				return animesWithBack[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 		)
@@ -142,7 +149,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		return nil, fmt.Errorf("seleção de anime cancelada: %w", err)
 	}
 
-	selectedAnime := animes[idx]
+	selectedAnime := animesWithBack[idx]
+
+	// Check if user selected the back option
+	if selectedAnime.Source == "__back__" {
+		return nil, ErrBackToSearch
+	}
 	util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
 
 	// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
@@ -338,6 +350,10 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	}
 
 	if streamErr != nil {
+		// Propagate back request error without wrapping
+		if errors.Is(streamErr, scraper.ErrBackRequested) {
+			return "", streamErr
+		}
 		return "", fmt.Errorf("falha ao obter URL de stream de %s: %w", sourceName, streamErr)
 	}
 

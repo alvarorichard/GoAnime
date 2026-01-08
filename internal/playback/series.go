@@ -14,31 +14,19 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) {
+func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
 	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
 	if err != nil {
-		// If user selected back at initial episode selection, trigger anime change
+		// If user selected back at initial episode selection, return to anime selection
 		if errors.Is(err, player.ErrBackRequested) {
-			newAnime, newEpisodes, changeErr := ChangeAnimeLocal()
-			if changeErr != nil {
-				log.Printf("Error changing anime: %v", changeErr)
-				return
-			}
-			// Recursively handle the new anime
-			series, newTotalEpisodes := CheckIfSeriesEnhanced(newAnime)
-			if series {
-				HandleSeries(newAnime, newEpisodes, newTotalEpisodes, discordEnabled)
-			} else {
-				HandleMovie(newAnime, newEpisodes, discordEnabled)
-			}
-			return
+			return player.ErrBackToAnimeSelection
 		}
 		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
-		return
+		return err
 	}
 
 	for {
@@ -57,6 +45,19 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 		if errors.Is(err, player.ErrUserQuit) {
 			log.Println("Quitting application as per user request.")
 			break
+		}
+
+		// Check if user requested to go back to episode selection (from server selection)
+		if errors.Is(err, player.ErrBackToEpisodeSelection) {
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+			if err != nil {
+				// If user selected back at episode selection, go back to anime selection
+				if errors.Is(err, player.ErrBackRequested) {
+					return player.ErrBackToAnimeSelection
+				}
+				log.Printf("Error selecting episode: %v", err)
+			}
+			continue
 		}
 
 		// Check if user requested to change anime during video playback
@@ -78,7 +79,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				HandleMovie(anime, episodes, discordEnabled)
+				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -123,7 +128,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				HandleMovie(anime, episodes, discordEnabled)
+				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -160,6 +169,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			anime,
 		)
 	}
+	return nil
 }
 
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {

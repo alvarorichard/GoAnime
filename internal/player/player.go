@@ -363,86 +363,102 @@ func HandleDownloadAndPlay(
 ) error {
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
-	downloadOption := askForDownload()
-	switch downloadOption {
-	case 1:
-		// Download the current episode
-		if err := downloadAndPlayEpisode(
-			videoURL,
-			episodes,
-			selectedEpisodeNum,
-			animeURL,
-			episodeNumberStr,
-			animeMalID,
-			updater,
-		); err != nil {
-			return err
-		}
-	case 2:
-		// Download episodes in a range
-		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-			return err
-		}
-	default:
-		// Play online - determine the best approach based on URL type
-		videoURLToPlay := ""
 
-		// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
-		if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
-			strings.Contains(videoURL, "dropbox.com") ||
-			strings.Contains(videoURL, "wixmp.com") ||
-			strings.HasSuffix(videoURL, ".mp4") ||
-			strings.HasSuffix(videoURL, ".m3u8")) {
-			// Use direct stream URL
-			videoURLToPlay = videoURL
-			if util.IsDebug {
-				util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+	for {
+		downloadOption := askForDownload()
+		switch downloadOption {
+		case 0:
+			// User wants to go back to server selection
+			return ErrBackToEpisodeSelection
+		case 1:
+			// Download the current episode
+			err := downloadAndPlayEpisode(
+				videoURL,
+				episodes,
+				selectedEpisodeNum,
+				animeURL,
+				episodeNumberStr,
+				animeMalID,
+				updater,
+			)
+			if err != nil {
+				if errors.Is(err, ErrBackToDownloadOptions) {
+					continue // Go back to download options menu
+				}
+				return err
 			}
-		} else {
-			// Try to extract video URL from episode page
-			if len(episodes) > 0 && selectedEpisodeNum > 0 {
-				selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-				if found {
-					if util.IsDebug {
-						util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+			return nil
+		case 2:
+			// Download episodes in a range
+			if err := HandleBatchDownload(episodes, animeURL); err != nil {
+				return err
+			}
+			return nil
+		default:
+			// Play online - determine the best approach based on URL type
+			videoURLToPlay := ""
+
+			// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
+			if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
+				strings.Contains(videoURL, "dropbox.com") ||
+				strings.Contains(videoURL, "wixmp.com") ||
+				strings.HasSuffix(videoURL, ".mp4") ||
+				strings.HasSuffix(videoURL, ".m3u8")) {
+				// Use direct stream URL
+				videoURLToPlay = videoURL
+				if util.IsDebug {
+					util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+				}
+			} else {
+				// Try to extract video URL from episode page
+				if len(episodes) > 0 && selectedEpisodeNum > 0 {
+					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
+					if found {
+						if util.IsDebug {
+							util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+						}
+						if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+							videoURLToPlay = url
+						}
 					}
-					if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+				}
+				// Fallback: try to extract from original videoURL
+				if videoURLToPlay == "" && videoURL != "" {
+					if util.IsDebug {
+						util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
+					}
+					if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
 						videoURLToPlay = url
 					}
 				}
 			}
-			// Fallback: try to extract from original videoURL
-			if videoURLToPlay == "" && videoURL != "" {
-				if util.IsDebug {
-					util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
-				}
-				if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
-					videoURLToPlay = url
-				}
+
+			// Final validation
+			if videoURLToPlay == "" {
+				util.Debugf("❌ No valid video URL found")
+				return fmt.Errorf("no valid video URL found")
 			}
-		}
 
-		// Final validation
-		if videoURLToPlay == "" {
-			util.Debugf("❌ No valid video URL found")
-			return fmt.Errorf("no valid video URL found")
-		}
+			if util.IsDebug {
+				util.Debugf("✅ Final video URL: %s", videoURLToPlay)
+			}
 
-		if util.IsDebug {
-			util.Debugf("✅ Final video URL: %s", videoURLToPlay)
-		}
-
-		if err := playVideo(
-			videoURLToPlay,
-			episodes,
-			selectedEpisodeNum,
-			animeMalID,
-			updater,
-		); err != nil {
-			return err
+			err := playVideo(
+				videoURLToPlay,
+				episodes,
+				selectedEpisodeNum,
+				animeMalID,
+				updater,
+			)
+			if err != nil {
+				if errors.Is(err, ErrBackToDownloadOptions) {
+					continue // Go back to download options menu
+				}
+				return err
+			}
+			return nil
 		}
 	}
-	return nil
 }
 
 func downloadAndPlayEpisode(
@@ -606,6 +622,7 @@ func askForDownload() int {
 		Title("Download Options").
 		Description("Choose how you want to proceed:").
 		Options(
+			huh.NewOption("← Voltar (seleção de servidor)", "back"),
 			huh.NewOption("Download this episode", "download_single"),
 			huh.NewOption("Download episodes in a range", "download_range"),
 			huh.NewOption("No download (play online)", "play_online"),
@@ -619,6 +636,8 @@ func askForDownload() int {
 
 	// Determines the selected option based on the choice value
 	switch choice {
+	case "back":
+		return 0
 	case "download_single":
 		return 1
 	case "download_range":

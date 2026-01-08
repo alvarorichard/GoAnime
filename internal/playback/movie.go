@@ -18,7 +18,7 @@ import (
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
-func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled bool) {
+func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
 	for {
 		animeMutex := sync.Mutex{}
 		isPaused := false
@@ -34,26 +34,8 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		videoURL, err := player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
 		if err != nil {
 			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(err))
-			// Try to change anime immediately instead of exiting
-			newAnime, newEpisodes, chErr := ChangeAnimeLocal()
-			if chErr != nil {
-				log.Printf("Error changing anime: %v", chErr)
-				// If change fails, ask user on next loop iteration
-				continue
-			}
-			anime = newAnime
-			episodes = newEpisodes
-
-			// If new anime is a series, delegate handling and exit movie loop
-			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
-			if series {
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
-				break
-			}
-			// Otherwise continue loop to play the new movie
-			fmt.Printf("Switched to movie: %s\n", anime.Name)
-			continue
+			// Return to anime selection
+			return player.ErrBackToAnimeSelection
 		}
 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
@@ -96,7 +78,11 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
+				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -132,7 +118,11 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
+				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -143,6 +133,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		// For movies, other navigation options don't make much sense, so just continue playing the same movie
 		log.Println("Replaying the same movie...")
 	}
+	return nil
 }
 
 // createUpdater cria um atualizador de Discord Rich Presence se estiver habilitado
