@@ -48,7 +48,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	}
 
 	if len(animes) == 0 {
-		return nil, fmt.Errorf("nenhum anime encontrado com o nome: %s", name)
+		return nil, fmt.Errorf("no anime found with the name: %s", name)
 	}
 
 	// Enhance source identification and tagging
@@ -95,7 +95,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
-		Name:   "← Voltar (nova busca)",
+		Name:   "← Back (new search)",
 		URL:    "__back__",
 		Source: "__back__",
 	}
@@ -121,7 +121,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				if i >= 0 && i < len(animesWithBack) {
 					anime := animesWithBack[i]
 					if anime.Source == "__back__" {
-						return "Voltar para fazer uma nova busca"
+						return "Go back to perform a new search"
 					}
 					var preview string
 					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
@@ -146,7 +146,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("seleção de anime cancelada: %w", err)
+		return nil, fmt.Errorf("anime selection cancelled: %w", err)
 	}
 
 	selectedAnime := animesWithBack[idx]
@@ -312,7 +312,7 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else {
 		// Default to AllAnime
 		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime (padrão)"
+		sourceName = "AllAnime (default)"
 	}
 
 	util.Debug("Getting stream URL", "source", sourceName, "episode", episode.Number)
@@ -326,7 +326,7 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 
 	scraperInstance, err := scraperManager.GetScraper(scraperType)
 	if err != nil {
-		return "", fmt.Errorf("falha ao obter scraper para %s: %w", sourceName, err)
+		return "", fmt.Errorf("failed to get scraper for %s: %w", sourceName, err)
 	}
 
 	if quality == "" {
@@ -354,11 +354,11 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		if errors.Is(streamErr, scraper.ErrBackRequested) {
 			return "", streamErr
 		}
-		return "", fmt.Errorf("falha ao obter URL de stream de %s: %w", sourceName, streamErr)
+		return "", fmt.Errorf("failed to get stream URL from %s: %w", sourceName, streamErr)
 	}
 
 	if streamURL == "" {
-		return "", fmt.Errorf("URL de stream vazia retornada de %s", sourceName)
+		return "", fmt.Errorf("empty stream URL returned from %s", sourceName)
 	}
 
 	util.Debug("Stream URL obtained", "source", sourceName)

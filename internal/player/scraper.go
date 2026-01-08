@@ -183,7 +183,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	}
 
 	// Create a list with back option at the beginning
-	backOption := "← Voltar (seleção de anime)"
+	backOption := "← Back (anime selection)"
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {
@@ -195,7 +195,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		func(i int) string {
 			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Selecione o episódio: "),
+		fuzzyfinder.WithPromptString("Select the episode: "),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)

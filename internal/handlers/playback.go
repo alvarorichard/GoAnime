@@ -55,7 +55,7 @@ func HandlePlaybackMode(animeName string) {
 
 		// Check if user wants to go back to anime selection
 		if errors.Is(playbackErr, player.ErrBackToAnimeSelection) {
-			util.Infof("Voltando para seleção de anime...")
+			util.Infof("Going back to anime selection...")
 			// Keep the same search term to show the anime list again
 			continue
 		}

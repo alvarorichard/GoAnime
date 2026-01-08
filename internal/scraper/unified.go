@@ -83,7 +83,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 
 			return results, nil
 		}
-		return nil, fmt.Errorf("tipo de scraper %v não encontrado", *scraperType)
+		return nil, fmt.Errorf("scraper type %v not found", *scraperType)
 	}
 
 	// Search across all scrapers concurrently for better performance
@@ -176,7 +176,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	// Log warnings for failed sources at INFO level so users can see them
 	if len(searchErrors) > 0 {
 		for _, errMsg := range searchErrors {
-			util.Warn("Fonte de busca indisponível", "detalhes", errMsg)
+			util.Warn("Search source unavailable", "details", errMsg)
 		}
 	}
 

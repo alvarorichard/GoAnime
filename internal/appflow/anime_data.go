@@ -59,7 +59,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 
 		// Check if user requested to go back to search
 		if errors.Is(err, api.ErrBackToSearch) {
-			util.Infof("Voltando para nova busca...")
+			util.Infof("Going back to new search...")
 		} else {
 			// Display error message to user for other errors
 			util.Errorf("No anime found with the name: %s", currentName)

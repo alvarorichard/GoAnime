@@ -329,14 +329,14 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
 		if util.IsDebug {
-			util.Debug("Tracking desabilitado: CGO não disponível")
+			util.Debug("Tracking disabled: CGO not available")
 		}
 		return nil, 0
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		util.Errorf("Falha ao obter usuário atual: %v", err)
+		util.Errorf("Failed to get current user: %v", err)
 		return nil, 0
 	}
 
@@ -359,7 +359,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 
 	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
-		util.Debugf("Retomando do tempo salvo: %d segundos para o episódio %d", progress.PlaybackTime, episodeNum)
+		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
 		return tracker, progress.PlaybackTime
 	}
 
@@ -618,7 +618,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		Title(title).
 		Description("Choose an action:").
 		Options(
-			huh.NewOption("← Voltar (opções de download)", "download_options"),
+			huh.NewOption("← Back (download options)", "download_options"),
 			huh.NewOption("← Back (resume playback)", "back"),
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),

@@ -622,7 +622,7 @@ func askForDownload() int {
 		Title("Download Options").
 		Description("Choose how you want to proceed:").
 		Options(
-			huh.NewOption("← Voltar (seleção de servidor)", "back"),
+			huh.NewOption("← Back (server selection)", "back"),
 			huh.NewOption("Download this episode", "download_single"),
 			huh.NewOption("Download episodes in a range", "download_range"),
 			huh.NewOption("No download (play online)", "play_online"),
