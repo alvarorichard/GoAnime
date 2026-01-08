@@ -135,7 +135,7 @@ func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 	}
 
 	// Create display list with back option first
-	backOption := "← Back (episode selection)"
+	backOption := "← Back"
 	displayList := make([]string, len(options)+1)
 	displayList[0] = backOption
 	for i, opt := range options {

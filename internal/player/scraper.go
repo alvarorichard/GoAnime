@@ -183,7 +183,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	}
 
 	// Create a list with back option at the beginning
-	backOption := "← Back (anime selection)"
+	backOption := "← Back"
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {

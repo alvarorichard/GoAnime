@@ -95,7 +95,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
-		Name:   "← Back (new search)",
+		Name:   "← Back",
 		URL:    "__back__",
 		Source: "__back__",
 	}

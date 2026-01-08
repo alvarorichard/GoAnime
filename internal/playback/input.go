@@ -16,7 +16,7 @@ func GetUserInput() string {
 			huh.NewOption("Previous episode", "p"),
 			huh.NewOption("Select episode", "e"),
 			huh.NewOption("Change anime", "c"),
-			huh.NewOption("← Back (search new anime)", "back"),
+			huh.NewOption("← Back", "back"),
 			huh.NewOption("Quit", "q"),
 		).
 		Value(&choice)

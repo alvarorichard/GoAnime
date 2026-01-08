@@ -618,7 +618,7 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		Title(title).
 		Description("Choose an action:").
 		Options(
-			huh.NewOption("← Back (download options)", "download_options"),
+			huh.NewOption("← Back ", "download_options"),
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
 			huh.NewOption("Select episode", "select"),
