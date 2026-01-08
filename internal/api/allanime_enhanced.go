@@ -31,7 +31,7 @@ func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, q
 	} else if strings.Contains(anime.Name, "[AnimeFire]") {
 		// Priority 2: AnimeFire tag detection
 		scraperType = scraper.AnimefireType
-		sourceName = "AnimeFire.plus"
+		sourceName = "Animefire.io"
 	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
 		// Priority 3: URL analysis for AllAnime (short IDs)
 		scraperType = scraper.AllAnimeType
@@ -39,7 +39,7 @@ func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, q
 	} else if strings.Contains(anime.URL, "animefire") {
 		// Priority 4: URL analysis for AnimeFire
 		scraperType = scraper.AnimefireType
-		sourceName = "AnimeFire.plus"
+		sourceName = "Animefire.io"
 	} else if strings.Contains(anime.URL, "allanime") {
 		// Priority 5: AllAnime full URLs
 		scraperType = scraper.AllAnimeType

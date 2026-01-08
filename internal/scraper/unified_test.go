@@ -110,7 +110,7 @@ func TestSearchAnime_BothSourcesSucceed(t *testing.T) {
 		case "AllAnime":
 			allAnimeCount++
 			assert.Contains(t, anime.Name, "[AllAnime]")
-		case "AnimeFire.plus":
+		case "Animefire.io":
 			animefireCount++
 			assert.Contains(t, anime.Name, "[AnimeFire]")
 		}
@@ -179,7 +179,7 @@ func TestSearchAnime_AllAnimeFails_AnimefireSucceeds(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
-	assert.Equal(t, "AnimeFire.plus", results[0].Source)
+	assert.Equal(t, "Animefire.io", results[0].Source)
 }
 
 // =============================================================================
@@ -264,7 +264,7 @@ func TestSearchAnime_OneSourceEmpty_OtherHasResults(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
-	assert.Equal(t, "AnimeFire.plus", results[0].Source)
+	assert.Equal(t, "Animefire.io", results[0].Source)
 }
 
 // =============================================================================
@@ -382,7 +382,7 @@ func TestSearchAnime_SpecificScraper_AnimefireOnly(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
-	assert.Equal(t, "AnimeFire.plus", results[0].Source)
+	assert.Equal(t, "Animefire.io", results[0].Source)
 
 	// Only AnimeFire should be called
 	assert.Equal(t, int32(0), allAnimeMock.searchCallCount.Load())

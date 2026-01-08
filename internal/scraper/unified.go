@@ -227,7 +227,7 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 	case AllAnimeType:
 		return "AllAnime"
 	case AnimefireType:
-		return "AnimeFire.plus"
+		return "Animefire.io"
 	case AnimeDriveType:
 		return "AnimeDrive"
 	default:
