@@ -619,7 +619,6 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		Description("Choose an action:").
 		Options(
 			huh.NewOption("← Back (download options)", "download_options"),
-			huh.NewOption("← Back (resume playback)", "back"),
 			huh.NewOption("Next episode", "next"),
 			huh.NewOption("Previous episode", "previous"),
 			huh.NewOption("Select episode", "select"),
@@ -664,9 +663,6 @@ func handleUserInput(
 			// Stop playback and go back to download options
 			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
 			return ErrBackToDownloadOptions
-		case "back":
-			// Resume playback - simply continue the loop without taking action
-			return nil
 		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
 		case "previous":
