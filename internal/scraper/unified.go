@@ -46,7 +46,7 @@ func NewScraperManager() *ScraperManager {
 	// Initialize scrapers
 	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
-	
+
 	// AnimeDrive - Currently on standby
 	// Reason: Site is protected by Cloudflare, no bypass solution found yet
 	// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
@@ -75,7 +75,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 				languageTag := sm.getLanguageTag(*scraperType)
 
 				// Check if the anime name already has any language tag
-				hasLanguageTag := strings.Contains(anime.Name, "[English]") || 
+				hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 					strings.Contains(anime.Name, "[Portuguese]") ||
 					strings.Contains(anime.Name, "[Português]")
 
@@ -172,7 +172,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			languageTag := sm.getLanguageTag(res.scraperType)
 
 			// Check if the anime name already has any language tag
-			hasLanguageTag := strings.Contains(anime.Name, "[English]") || 
+			hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 				strings.Contains(anime.Name, "[Portuguese]") ||
 				strings.Contains(anime.Name, "[Português]")
 

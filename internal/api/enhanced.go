@@ -64,7 +64,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "AnimeDrive"
 			}
 		}
-		
+
 		// Language tags are already added by unified.go, don't duplicate them here
 	}
 
