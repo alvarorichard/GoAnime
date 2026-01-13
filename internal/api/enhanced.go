@@ -51,9 +51,9 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		return nil, fmt.Errorf("no anime found with the name: %s", name)
 	}
 
-	// Enhance source identification and tagging
+	// Enhance source identification - names already have language tags from unified.go
 	for _, anime := range animes {
-		// Ensure proper source identification
+		// Ensure proper source identification (for internal use only)
 		if anime.Source == "" {
 			// Fallback source identification by URL analysis
 			if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
@@ -64,15 +64,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "AnimeDrive"
 			}
 		}
-
-		// Ensure name has proper source tag (without emojis for cleaner display)
-		if anime.Source == "AllAnime" && !strings.Contains(anime.Name, "AllAnime") {
-			anime.Name = "[AllAnime] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AllAnime]", ""))
-		} else if anime.Source == "Animefire.io" && !strings.Contains(anime.Name, "AnimeFire") {
-			anime.Name = "[AnimeFire] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AnimeFire]", ""))
-		} else if anime.Source == "AnimeDrive" && !strings.Contains(anime.Name, "AnimeDrive") {
-			anime.Name = "[AnimeDrive] " + strings.TrimSpace(strings.ReplaceAll(anime.Name, "[AnimeDrive]", ""))
-		}
+		
+		// Language tags are already added by unified.go, don't duplicate them here
 	}
 
 	util.Debug("Search results summary", "total", len(animes))
@@ -113,7 +106,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animesWithBack,
 			func(i int) string {
-				// Show the anime name with source tag as-is
+				// Show the anime name with language tag as-is
 				return animesWithBack[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
@@ -138,7 +131,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		idx, err = fuzzyfinder.Find(
 			animesWithBack,
 			func(i int) string {
-				// Show the anime name with source tag as-is
+				// Show the anime name with language tag as-is
 				return animesWithBack[i].Name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
@@ -177,16 +170,20 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "Animefire.io"
 	} else if anime.Source == "AnimeDrive" {
 		sourceName = "AnimeDrive"
-	} else if strings.Contains(anime.Name, "[AllAnime]") {
-		// Priority 2: Check name tags
+	} else if strings.Contains(anime.Name, "[English]") {
+		// Priority 2: Check language tags (AllAnime = English)
 		sourceName = "AllAnime"
 		anime.Source = "AllAnime" // Update source field
-	} else if strings.Contains(anime.Name, "[AnimeFire]") {
-		sourceName = "Animefire.io"
-		anime.Source = "Animefire.io" // Update source field
-	} else if strings.Contains(anime.Name, "[AnimeDrive]") {
-		sourceName = "AnimeDrive"
-		anime.Source = "AnimeDrive" // Update source field
+	} else if strings.Contains(anime.Name, "[Portuguese]") || strings.Contains(anime.Name, "[Português]") {
+		// AnimeFire or AnimeDrive = Portuguese
+		// Check URL to determine which one
+		if strings.Contains(anime.URL, "animesdrive") {
+			sourceName = "AnimeDrive"
+			anime.Source = "AnimeDrive"
+		} else {
+			sourceName = "Animefire.io"
+			anime.Source = "Animefire.io"
+		}
 	} else if strings.Contains(anime.URL, "allanime") || (len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http")) {
 		// Priority 3: URL analysis for AllAnime (short IDs or allanime URLs)
 		sourceName = "AllAnime"
@@ -205,7 +202,7 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		anime.Source = "AllAnime"
 	}
 
-	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[AllAnime]", ""), "[AnimeFire]", ""), "[AnimeDrive]", ""))
+	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[English]", ""), "[Portuguese]", ""))
 
 	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
 
@@ -283,16 +280,20 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if anime.Source == "AnimeDrive" {
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
-	} else if strings.Contains(anime.Name, "[AllAnime]") {
-		// Priority 2: Check name tags
+	} else if strings.Contains(anime.Name, "[English]") {
+		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "[AnimeFire]") {
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	} else if strings.Contains(anime.Name, "[AnimeDrive]") {
-		scraperType = scraper.AnimeDriveType
-		sourceName = "AnimeDrive"
+	} else if strings.Contains(anime.Name, "[Portuguese]") || strings.Contains(anime.Name, "[Português]") {
+		// AnimeFire or AnimeDrive = Portuguese
+		// Check URL to determine which one
+		if strings.Contains(anime.URL, "animesdrive") {
+			scraperType = scraper.AnimeDriveType
+			sourceName = "AnimeDrive"
+		} else {
+			scraperType = scraper.AnimefireType
+			sourceName = "Animefire.io"
+		}
 	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
 		// Priority 3: URL analysis for AllAnime (short IDs)
 		scraperType = scraper.AllAnimeType
@@ -430,9 +431,10 @@ func DownloadEpisodeRangeEnhanced(anime *models.Anime, startEp, endEp int, quali
 
 // Helper function to sanitize filename
 func sanitizeFilename(name string) string {
-	// Remove source tags
-	name = strings.ReplaceAll(name, "[AllAnime]", "")
-	name = strings.ReplaceAll(name, "[AnimeFire]", "")
+	// Remove language tags
+	name = strings.ReplaceAll(name, "[English]", "")
+	name = strings.ReplaceAll(name, "[Portuguese]", "")
+	name = strings.ReplaceAll(name, "[Português]", "")
 	name = strings.TrimSpace(name)
 
 	// Replace invalid characters

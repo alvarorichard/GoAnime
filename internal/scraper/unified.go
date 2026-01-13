@@ -46,7 +46,11 @@ func NewScraperManager() *ScraperManager {
 	// Initialize scrapers
 	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
-	manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+	
+	// AnimeDrive - Currently on standby
+	// Reason: Site is protected by Cloudflare, no bypass solution found yet
+	// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
+	// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
 	return manager
 }
@@ -65,15 +69,20 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 				return nil, fmt.Errorf("busca falhou em %s: %w", sm.getScraperDisplayName(*scraperType), err)
 			}
 
-			// Add source tags even for specific searches
+			// Add language tags (not source names)
 			for _, anime := range results {
 				sourceName := sm.getScraperDisplayName(*scraperType)
-				sourceTag := sm.getSourceTag(*scraperType)
+				languageTag := sm.getLanguageTag(*scraperType)
 
-				if !strings.Contains(anime.Name, fmt.Sprintf("[%s]", sourceName)) && !strings.Contains(anime.Name, sourceTag) {
-					anime.Name = fmt.Sprintf("%s %s", sourceTag, anime.Name)
+				// Check if the anime name already has any language tag
+				hasLanguageTag := strings.Contains(anime.Name, "[English]") || 
+					strings.Contains(anime.Name, "[Portuguese]") ||
+					strings.Contains(anime.Name, "[Português]")
+
+				if !hasLanguageTag {
+					anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 				}
-				// Add metadata to identify the source
+				// Add metadata to identify the source (internal use only)
 				anime.Source = sourceName
 			}
 
@@ -157,16 +166,21 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 
 		util.Debug("Search results", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results))
 
-		// Add source information to results with enhanced formatting
+		// Add language tags to results (not source names)
 		for _, anime := range res.results {
 			sourceName := sm.getScraperDisplayName(res.scraperType)
-			sourceTag := sm.getSourceTag(res.scraperType)
+			languageTag := sm.getLanguageTag(res.scraperType)
 
-			if !strings.Contains(anime.Name, sourceTag) {
-				anime.Name = fmt.Sprintf("%s %s", sourceTag, anime.Name)
+			// Check if the anime name already has any language tag
+			hasLanguageTag := strings.Contains(anime.Name, "[English]") || 
+				strings.Contains(anime.Name, "[Portuguese]") ||
+				strings.Contains(anime.Name, "[Português]")
+
+			if !hasLanguageTag {
+				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 			}
 
-			// Add metadata to identify the source
+			// Add metadata to identify the source (internal use only)
 			anime.Source = sourceName
 		}
 
@@ -235,15 +249,15 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 	}
 }
 
-// getSourceTag returns a colored tag for the source
-func (sm *ScraperManager) getSourceTag(scraperType ScraperType) string {
+// getLanguageTag returns a language tag for the source
+func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	switch scraperType {
 	case AllAnimeType:
-		return "[AllAnime]"
+		return "[English]"
 	case AnimefireType:
-		return "[AnimeFire]"
+		return "[Portuguese]"
 	case AnimeDriveType:
-		return "[AnimeDrive]"
+		return "[Portuguese]"
 	default:
 		return "[Unknown]"
 	}
