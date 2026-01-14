@@ -278,21 +278,7 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	util.Debugf("Querying AniList for: '%s' (original: '%s')", cleanedName, animeName)
 
 	// Try multiple search variations for better matching
-	searchVariations := []string{cleanedName}
-
-	// Add variation with first word capitalized if it's all lowercase
-	if strings.ToLower(cleanedName) == cleanedName {
-		words := strings.Fields(cleanedName)
-		for i, w := range words {
-			if len(w) > 0 {
-				words[i] = strings.ToUpper(string(w[0])) + w[1:]
-			}
-		}
-		titleCase := strings.Join(words, " ")
-		if titleCase != cleanedName {
-			searchVariations = append(searchVariations, titleCase)
-		}
-	}
+	searchVariations := generateSearchVariations(cleanedName)
 
 	query := `query ($search: String) {
         Media(search: $search, type: ANIME) {
@@ -447,8 +433,80 @@ func resolveURL(base, ref string) string {
 	return baseURL.ResolveReference(refURL).String()
 }
 
+// generateSearchVariations creates multiple search term variations for better AniList matching
+// This is especially important for Brazilian sources that have localized titles
+func generateSearchVariations(cleanedName string) []string {
+	variations := []string{cleanedName}
+	seen := make(map[string]bool)
+	seen[cleanedName] = true
+
+	addVariation := func(v string) {
+		v = strings.TrimSpace(v)
+		if v != "" && !seen[v] {
+			seen[v] = true
+			variations = append(variations, v)
+		}
+	}
+
+	// Variation: Title case (for all lowercase names from URLs)
+	if strings.ToLower(cleanedName) == cleanedName {
+		words := strings.Fields(cleanedName)
+		for i, w := range words {
+			if len(w) > 0 {
+				words[i] = strings.ToUpper(string(w[0])) + w[1:]
+			}
+		}
+		addVariation(strings.Join(words, " "))
+	}
+
+	// Variation: Remove common subtitle patterns after colon
+	if idx := strings.Index(cleanedName, ":"); idx > 0 {
+		addVariation(strings.TrimSpace(cleanedName[:idx]))
+	}
+
+	// Variation: Remove trailing roman numerals (seasons like II, III, IV)
+	reRoman := regexp.MustCompile(`\s+(?:II|III|IV|V|VI|VII|VIII|IX|X)\s*$`)
+	if match := reRoman.FindString(cleanedName); match != "" {
+		addVariation(strings.TrimSpace(reRoman.ReplaceAllString(cleanedName, "")))
+	}
+
+	// Variation: Remove trailing numbers that might be season indicators (2, 3, 4, etc.)
+	reTrailingNum := regexp.MustCompile(`\s+\d+\s*$`)
+	if match := reTrailingNum.FindString(cleanedName); match != "" {
+		addVariation(strings.TrimSpace(reTrailingNum.ReplaceAllString(cleanedName, "")))
+	}
+
+	// Variation: Common Japanese title adaptations
+	// Try removing "no" particles which are sometimes omitted
+	if strings.Contains(cleanedName, " no ") {
+		addVariation(strings.ReplaceAll(cleanedName, " no ", " "))
+	}
+
+	// Variation: Try with common alternative title patterns
+	// Some anime have "The" prefix in English but not in romaji
+	if strings.HasPrefix(strings.ToLower(cleanedName), "the ") {
+		addVariation(cleanedName[4:])
+	}
+
+	// Variation: For very long titles, try first few words
+	words := strings.Fields(cleanedName)
+	if len(words) > 4 {
+		// Try first 3 words
+		addVariation(strings.Join(words[:3], " "))
+		// Try first 4 words
+		addVariation(strings.Join(words[:4], " "))
+	}
+
+	util.Debugf("Generated %d search variations for '%s': %v", len(variations), cleanedName, variations)
+	return variations
+}
+
 func CleanTitle(title string) string {
 	cleaned := title
+
+	// Remove language tags like [English], [Portuguese], [Português] at the start
+	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese)\]\s*`)
+	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
 
 	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], or [AnimeDrive]
 	re1 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive)\]\s*`)
@@ -465,13 +523,25 @@ func CleanTitle(title string) string {
 	re6 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	cleaned = strings.TrimSpace(re6.ReplaceAllString(cleaned, ""))
 
-	// Remove standalone language indicators (not in parentheses)
-	re2 := regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub)\s*$`)
+	// Remove standalone language indicators (not in parentheses) - more comprehensive for Brazilian sources
+	re2 := regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)
 	cleaned = strings.TrimSpace(re2.ReplaceAllString(cleaned, ""))
 
-	// Remove "Todos os Episodios" and similar (in case em-dash removal didn't catch it)
+	// Remove "Todos os Episodios" and similar Brazilian phrases (in case em-dash removal didn't catch it)
 	re3 := regexp.MustCompile(`(?i)[-–—]?\s*todos\s+os\s+epis[oó]dios`)
 	cleaned = strings.TrimSpace(re3.ReplaceAllString(cleaned, ""))
+
+	// Remove "Completo" or "Episodio X" suffixes common in Brazilian sources
+	reCompleto := regexp.MustCompile(`(?i)\s+(?:completo|episodio\s*\d+|ep\s*\d+)\s*$`)
+	cleaned = strings.TrimSpace(reCompleto.ReplaceAllString(cleaned, ""))
+
+	// Remove season indicators like "X Temporada", "Season X", "Temporada X", "Xª Temporada"
+	reSeasonPt := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:\d+[ªº]?\s*temporada|temporada\s*\d+|season\s*\d+|\d+(?:st|nd|rd|th)\s*season)\s*$`)
+	cleaned = strings.TrimSpace(reSeasonPt.ReplaceAllString(cleaned, ""))
+
+	// Remove "Parte X" (Part X) common in Brazilian titles
+	rePart := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:parte\s*\d+|part\s*\d+)\s*$`)
+	cleaned = strings.TrimSpace(rePart.ReplaceAllString(cleaned, ""))
 
 	// Remove season/episode indicators like "2.0 A2" at the end (but NOT plain season numbers)
 	re4 := regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
@@ -481,8 +551,8 @@ func CleanTitle(title string) string {
 	re5 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
 	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
 
-	// Remove episode count like "(171 episodes)" or "(1 eps)"
-	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?)\)`)
+	// Remove episode count like "(171 episodes)" or "(1 eps)" or Portuguese equivalents
+	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?|epis[oó]dios?)\)`)
 	cleaned = strings.TrimSpace(re7.ReplaceAllString(cleaned, ""))
 
 	// Remove special titles and additions after colon
@@ -500,6 +570,10 @@ func CleanTitle(title string) string {
 	// Remove empty parentheses that may be left after other cleanups
 	reEmptyParens := regexp.MustCompile(`\s*\(\s*\)`)
 	cleaned = strings.TrimSpace(reEmptyParens.ReplaceAllString(cleaned, ""))
+
+	// Remove trailing colons that may be left after removing season/part info
+	cleaned = strings.TrimSuffix(strings.TrimSpace(cleaned), ":")
+	cleaned = strings.TrimSpace(cleaned)
 
 	// Replace hyphens with spaces (for URL-style names like "black-clover")
 	// But only if surrounded by letters (not em-dashes already handled above)

@@ -2,6 +2,7 @@ package discord
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,16 +186,57 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 		totalMinutes, totalSeconds,
 	)
 
+	// Get anime title - prefer romaji, fall back to anime name
+	animeTitle := rpu.anime.Details.Title.Romaji
+	if animeTitle == "" {
+		animeTitle = rpu.anime.Details.Title.English
+	}
+	if animeTitle == "" {
+		// Clean the anime name from source tags for display
+		animeTitle = rpu.anime.Name
+		// Remove language/source tags like [English], [Portuguese], [AnimeFire] etc.
+		if idx := strings.Index(animeTitle, "]"); idx != -1 && idx < 20 {
+			animeTitle = strings.TrimSpace(animeTitle[idx+1:])
+		}
+	}
+
+	// Get episode number safely
+	episodeNumber := "1"
+	if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
+		episodeNumber = rpu.anime.Episodes[0].Number
+	}
+
+	// Get image URL with fallback - Discord requires an externally accessible URL
+	// If no AniList image is available, use a default GoAnime logo/placeholder
+	imageURL := rpu.anime.ImageURL
+	if imageURL == "" {
+		// Use a default anime-related placeholder image
+		// This is a generic anime icon that will work with Discord RPC
+		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
+		util.Debugf("Using fallback image for Discord RPC (no AniList image available)")
+	}
+
+	// Build activity details
+	details := fmt.Sprintf("%s | Episode %s | %s / %d min", animeTitle, episodeNumber, timeInfo, totalMinutes)
+
 	// Create the activity with updated Details
 	activity := client.Activity{
-		Details:    fmt.Sprintf("%s | Episode %s | %s / %d min", rpu.anime.Details.Title.Romaji, rpu.anime.Episodes[0].Number, timeInfo, totalMinutes),
+		Details:    details,
 		State:      "Watching",
-		LargeImage: rpu.anime.ImageURL,
-		LargeText:  rpu.anime.Details.Title.Romaji,
-		Buttons: []*client.Button{
-			{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)},
-			{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)},
-		},
+		LargeImage: imageURL,
+		LargeText:  animeTitle,
+	}
+
+	// Only add buttons if we have valid IDs
+	if rpu.anime.AnilistID > 0 || rpu.anime.MalID > 0 {
+		var buttons []*client.Button
+		if rpu.anime.AnilistID > 0 {
+			buttons = append(buttons, &client.Button{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)})
+		}
+		if rpu.anime.MalID > 0 {
+			buttons = append(buttons, &client.Button{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)})
+		}
+		activity.Buttons = buttons
 	}
 
 	// Set the activity in Discord Rich Presence
