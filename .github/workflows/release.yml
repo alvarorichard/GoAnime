@@ -1,0 +1,470 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'  # Pre-releases like v1.0.0-beta.1
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.23'
+  BINARY_NAME: goanime
+
+jobs:
+  # =============================================================================
+  # Job 1: Run tests before building
+  # =============================================================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify dependencies
+        run: |
+          go mod verify
+          go mod download
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+        continue-on-error: true
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Check test coverage
+        run: |
+          go tool cover -func=coverage.out
+          echo ""
+          echo "Coverage report generated"
+
+      - name: Build verification
+        run: |
+          # Verify the project builds successfully before proceeding
+          go build -v ./cmd/goanime
+          echo "Build verification passed"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Go Version: ${{ env.GO_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- Race Detection: Enabled" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  # =============================================================================
+  # Job 2: Build cross-platform binaries
+  # =============================================================================
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds
+          - os: linux
+            arch: amd64
+            ext: ''
+          - os: linux
+            arch: arm64
+            ext: ''
+          - os: linux
+            arch: '386'
+            ext: ''
+          
+          # macOS builds
+          - os: darwin
+            arch: amd64
+            ext: ''
+          - os: darwin
+            arch: arm64
+            ext: ''
+          
+          # Windows builds
+          - os: windows
+            arch: amd64
+            ext: '.exe'
+          - os: windows
+            arch: arm64
+            ext: '.exe'
+          - os: windows
+            arch: '386'
+            ext: '.exe'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          COMMIT=$(git rev-parse --short HEAD)
+          
+          LDFLAGS="-s -w"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Version=${VERSION}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.BuildTime=${BUILD_TIME}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Commit=${COMMIT}"
+          
+          OUTPUT_NAME="${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          
+          go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
+          
+          echo "Built ${OUTPUT_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          retention-days: 1
+
+  # =============================================================================
+  # Job 3: Build Windows Installer using Inno Setup
+  # =============================================================================
+  windows-installer:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUMBER=${VERSION#v}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "VERSION_NUMBER=${VERSION_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Download Windows amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-windows-amd64
+          path: build/staging
+
+      - name: Rename binary for installer
+        shell: bash
+        run: |
+          mv build/staging/goanime-windows-amd64.exe build/staging/goanime.exe
+
+      - name: Download MPV for Windows
+        shell: pwsh
+        run: |
+          # Create bin directory
+          New-Item -ItemType Directory -Force -Path build/staging/bin
+          
+          # Get latest MPV release from GitHub (shinchiro builds - official recommended)
+          Write-Host "Fetching latest MPV release..."
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          
+          # Find the 64-bit release asset
+          $asset = $releases.assets | Where-Object { $_.name -match "mpv-x86_64-.*\.7z$" -and $_.name -notmatch "dev" } | Select-Object -First 1
+          
+          if (-not $asset) {
+            Write-Error "Could not find MPV 64-bit release"
+            exit 1
+          }
+          
+          $mpvUrl = $asset.browser_download_url
+          $mpvArchive = "mpv.7z"
+          
+          Write-Host "Downloading MPV from: $mpvUrl"
+          Write-Host "Version: $($releases.tag_name)"
+          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive
+          
+          # Extract MPV
+          7z x $mpvArchive -ompv_temp -y
+          
+          # Find and copy mpv.exe (it might be in a subdirectory)
+          $mpvExe = Get-ChildItem -Path "mpv_temp" -Recurse -Filter "mpv.exe" | Select-Object -First 1
+          if ($mpvExe) {
+            Copy-Item $mpvExe.FullName "build/staging/bin/mpv.exe" -Force
+            Write-Host "MPV $($releases.tag_name) downloaded and staged successfully"
+          } else {
+            Write-Error "mpv.exe not found in archive"
+            exit 1
+          }
+          
+          # Cleanup
+          Remove-Item -Recurse -Force mpv_temp
+          Remove-Item $mpvArchive
+
+      - name: Update version in Inno Setup script
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION_NUMBER }}"
+          $issPath = "build/install.iss"
+          
+          # Read the file
+          $content = Get-Content $issPath -Raw
+          
+          # Update the version
+          $content = $content -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
+          
+          # Write back
+          Set-Content $issPath $content
+          
+          Write-Host "Updated install.iss with version $version"
+
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        run: |
+          # Inno Setup is pre-installed on windows-latest runners
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build/install.iss
+          
+          # Check if installer was created
+          $installerPath = "dist/GoAnime-Installer-${{ steps.version.outputs.VERSION_NUMBER }}.exe"
+          if (Test-Path $installerPath) {
+            Write-Host "Installer created successfully: $installerPath"
+            Get-Item $installerPath | Select-Object Name, Length
+          } else {
+            Write-Error "Installer was not created!"
+            exit 1
+          }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/GoAnime-Installer-*.exe
+          retention-days: 1
+
+  # =============================================================================
+  # Job 4: Create release with all artifacts
+  # =============================================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, windows-installer]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "VERSION_NUMBER=${VERSION#v}" >> $GITHUB_OUTPUT
+          
+          # Check if pre-release
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "PRERELEASE=true" >> $GITHUB_OUTPUT
+          else
+            echo "PRERELEASE=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: ${{ env.BINARY_NAME }}-*
+          merge-multiple: false
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: artifacts/windows-installer
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          
+          # Move all binaries to release folder and create archives
+          for dir in artifacts/*/; do
+            if [ -d "$dir" ]; then
+              for file in "$dir"*; do
+                if [ -f "$file" ]; then
+                  filename=$(basename "$file")
+                  cp "$file" "release/${filename}"
+                  
+                  # Create tar.gz for Unix systems
+                  if [[ "$filename" != *".exe" ]]; then
+                    chmod +x "release/${filename}"
+                    tar -czf "release/${filename}.tar.gz" -C release "${filename}"
+                  fi
+                  
+                  # Create zip for Windows binaries (not installer)
+                  if [[ "$filename" == *".exe" ]] && [[ "$filename" != *"Installer"* ]]; then
+                    (cd release && zip "${filename%.exe}.zip" "${filename}")
+                  fi
+                fi
+              done
+            fi
+          done
+          
+          echo "Release assets prepared:"
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          
+          # Generate SHA256 checksums for all files
+          sha256sum * > checksums-sha256.txt
+          
+          # Generate SHA512 checksums for extra security
+          sha512sum * > checksums-sha512.txt
+          
+          echo "Checksums generated:"
+          cat checksums-sha256.txt
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          echo "## What's Changed in ${VERSION}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Commits since ${PREV_TAG}" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            
+            # Group commits by type (conventional commits)
+            echo "#### Features" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+            
+            echo "#### Bug Fixes" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^fix" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+            
+            echo "#### Documentation" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^docs" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+            
+            echo "#### Other Changes" >> CHANGELOG.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --invert-grep --grep="^feat\|^fix\|^docs" >> CHANGELOG.md || true
+            echo "" >> CHANGELOG.md
+          else
+            echo "Initial release" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+          fi
+          
+          echo "" >> CHANGELOG.md
+          echo "---" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Installation" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "#### Linux / macOS" >> CHANGELOG.md
+          echo '```bash' >> CHANGELOG.md
+          echo "# Download the binary for your platform" >> CHANGELOG.md
+          echo "curl -LO https://github.com/alvarorichard/Goanime/releases/download/${VERSION}/goanime-linux-amd64.tar.gz" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "# Extract and install" >> CHANGELOG.md
+          echo "tar -xzf goanime-linux-amd64.tar.gz" >> CHANGELOG.md
+          echo "chmod +x goanime-linux-amd64" >> CHANGELOG.md
+          echo "sudo mv goanime-linux-amd64 /usr/local/bin/goanime" >> CHANGELOG.md
+          echo '```' >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "#### Windows" >> CHANGELOG.md
+          echo "**Recommended:** Download and run the \`GoAnime-Installer-${VERSION#v}.exe\` for automatic setup with MPV included." >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "Or download the portable \`.zip\` file for your architecture and extract it." >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Verification" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "Verify your download using the checksums:" >> CHANGELOG.md
+          echo '```bash' >> CHANGELOG.md
+          echo "sha256sum -c checksums-sha256.txt" >> CHANGELOG.md
+          echo '```' >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### Supported Platforms" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "| OS | Architecture | Binary |" >> CHANGELOG.md
+          echo "|---|---|---|" >> CHANGELOG.md
+          echo "| Linux | x86_64 | \`goanime-linux-amd64\` |" >> CHANGELOG.md
+          echo "| Linux | ARM64 | \`goanime-linux-arm64\` |" >> CHANGELOG.md
+          echo "| Linux | x86 | \`goanime-linux-386\` |" >> CHANGELOG.md
+          echo "| macOS | x86_64 (Intel) | \`goanime-darwin-amd64\` |" >> CHANGELOG.md
+          echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> CHANGELOG.md
+          echo "| Windows | Installer | \`GoAnime-Installer-${VERSION#v}.exe\` (Recommended) |" >> CHANGELOG.md
+          echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> CHANGELOG.md
+          echo "| Windows | ARM64 | \`goanime-windows-arm64.exe\` |" >> CHANGELOG.md
+          echo "| Windows | x86 | \`goanime-windows-386.exe\` |" >> CHANGELOG.md
+          
+          cat CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GoAnime ${{ steps.version.outputs.VERSION }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: ${{ steps.version.outputs.PRERELEASE }}
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/GoAnime-Installer-*.exe
+            release/checksums-sha256.txt
+            release/checksums-sha512.txt
+          fail_on_unmatched_files: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        run: |
+          echo "## Release ${{ steps.version.outputs.VERSION }} created successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts:" >> $GITHUB_STEP_SUMMARY
+          ls -la release/*.tar.gz release/*.zip release/*.exe 2>/dev/null | awk '{print "- " $NF}' >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checksums:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat release/checksums-sha256.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
