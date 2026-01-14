@@ -881,9 +881,9 @@ func TestCleanTitle(t *testing.T) {
 			expected: "Demon Slayer Episode 1",
 		},
 		{
-			name:     "Season indicator",
+			name:     "Season indicator is removed for better AniList matching",
 			input:    "Jujutsu Kaisen Season 2 [AllAnime]",
-			expected: "Jujutsu Kaisen Season 2",
+			expected: "Jujutsu Kaisen",
 		},
 	}
 

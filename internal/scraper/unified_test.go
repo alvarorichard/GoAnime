@@ -102,17 +102,18 @@ func TestSearchAnime_BothSourcesSucceed(t *testing.T) {
 	assert.Equal(t, int32(1), allAnimeMock.searchCallCount.Load())
 	assert.Equal(t, int32(1), animefireMock.searchCallCount.Load())
 
-	// Verify source tags are added
+	// Verify language tags are added (not source tags)
+	// AllAnime uses [English], AnimeFire uses [Portuguese]
 	allAnimeCount := 0
 	animefireCount := 0
 	for _, anime := range results {
 		switch anime.Source {
 		case "AllAnime":
 			allAnimeCount++
-			assert.Contains(t, anime.Name, "[AllAnime]")
+			assert.Contains(t, anime.Name, "[English]")
 		case "Animefire.io":
 			animefireCount++
-			assert.Contains(t, anime.Name, "[AnimeFire]")
+			assert.Contains(t, anime.Name, "[Portuguese]")
 		}
 	}
 	assert.Equal(t, 2, allAnimeCount)
