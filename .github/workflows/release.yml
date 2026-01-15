@@ -361,86 +361,95 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          
-          echo "## What's Changed in ${VERSION}" > CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          
-          if [ -n "$PREV_TAG" ]; then
-            echo "### Commits since ${PREV_TAG}" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
-            
-            # Group commits by type (conventional commits)
-            echo "#### Features" >> CHANGELOG.md
-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" >> CHANGELOG.md || true
-            echo "" >> CHANGELOG.md
-            
-            echo "#### Bug Fixes" >> CHANGELOG.md
-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^fix" >> CHANGELOG.md || true
-            echo "" >> CHANGELOG.md
-            
-            echo "#### Documentation" >> CHANGELOG.md
-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^docs" >> CHANGELOG.md || true
-            echo "" >> CHANGELOG.md
-            
-            echo "#### Other Changes" >> CHANGELOG.md
-            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --invert-grep --grep="^feat\|^fix\|^docs" >> CHANGELOG.md || true
-            echo "" >> CHANGELOG.md
+          # Check if manual CHANGELOG.md exists in repo root
+          if [ -f "CHANGELOG.md" ]; then
+            echo "Using manual CHANGELOG.md from repository"
+            cp CHANGELOG.md RELEASE_NOTES.md
           else
-            echo "Initial release" >> CHANGELOG.md
-            echo "" >> CHANGELOG.md
+            echo "Generating changelog from commits"
+            
+            # Get the previous tag
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            
+            echo "## What's Changed in ${VERSION}" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            
+            if [ -n "$PREV_TAG" ]; then
+              echo "### Commits since ${PREV_TAG}" >> RELEASE_NOTES.md
+              echo "" >> RELEASE_NOTES.md
+              
+              # Group commits by type (conventional commits)
+              echo "#### Features" >> RELEASE_NOTES.md
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" >> RELEASE_NOTES.md || true
+              echo "" >> RELEASE_NOTES.md
+              
+              echo "#### Bug Fixes" >> RELEASE_NOTES.md
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^fix" >> RELEASE_NOTES.md || true
+              echo "" >> RELEASE_NOTES.md
+              
+              echo "#### Documentation" >> RELEASE_NOTES.md
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^docs" >> RELEASE_NOTES.md || true
+              echo "" >> RELEASE_NOTES.md
+              
+              echo "#### Other Changes" >> RELEASE_NOTES.md
+              git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --invert-grep --grep="^feat\|^fix\|^docs" >> RELEASE_NOTES.md || true
+              echo "" >> RELEASE_NOTES.md
+            else
+              echo "Initial release" >> RELEASE_NOTES.md
+              echo "" >> RELEASE_NOTES.md
+            fi
           fi
           
-          echo "" >> CHANGELOG.md
-          echo "---" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "### Installation" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "#### Linux / macOS" >> CHANGELOG.md
-          echo '```bash' >> CHANGELOG.md
-          echo "# Download the binary for your platform" >> CHANGELOG.md
-          echo "curl -LO https://github.com/alvarorichard/Goanime/releases/download/${VERSION}/goanime-linux-amd64.tar.gz" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "# Extract and install" >> CHANGELOG.md
-          echo "tar -xzf goanime-linux-amd64.tar.gz" >> CHANGELOG.md
-          echo "chmod +x goanime-linux-amd64" >> CHANGELOG.md
-          echo "sudo mv goanime-linux-amd64 /usr/local/bin/goanime" >> CHANGELOG.md
-          echo '```' >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "#### Windows" >> CHANGELOG.md
-          echo "**Recommended:** Download and run the \`GoAnime-Installer-${VERSION#v}.exe\` for automatic setup with MPV included." >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "Or download the portable \`.zip\` file for your architecture and extract it." >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "### Verification" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "Verify your download using the checksums:" >> CHANGELOG.md
-          echo '```bash' >> CHANGELOG.md
-          echo "sha256sum -c checksums-sha256.txt" >> CHANGELOG.md
-          echo '```' >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "### Supported Platforms" >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
-          echo "| OS | Architecture | Binary |" >> CHANGELOG.md
-          echo "|---|---|---|" >> CHANGELOG.md
-          echo "| Linux | x86_64 | \`goanime-linux-amd64\` |" >> CHANGELOG.md
-          echo "| Linux | ARM64 | \`goanime-linux-arm64\` |" >> CHANGELOG.md
-          echo "| Linux | x86 | \`goanime-linux-386\` |" >> CHANGELOG.md
-          echo "| macOS | x86_64 (Intel) | \`goanime-darwin-amd64\` |" >> CHANGELOG.md
-          echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> CHANGELOG.md
-          echo "| Windows | Installer | \`GoAnime-Installer-${VERSION#v}.exe\` (Recommended) |" >> CHANGELOG.md
-          echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> CHANGELOG.md
-          echo "| Windows | x86 | \`goanime-windows-386.exe\` |" >> CHANGELOG.md
-          echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> CHANGELOG.md
+          # Append installation instructions
+          echo "" >> RELEASE_NOTES.md
+          echo "---" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "### Installation" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "#### Linux / macOS" >> RELEASE_NOTES.md
+          echo '```bash' >> RELEASE_NOTES.md
+          echo "# Download the binary for your platform" >> RELEASE_NOTES.md
+          echo "curl -LO https://github.com/alvarorichard/Goanime/releases/download/${VERSION}/goanime-linux-amd64.tar.gz" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "# Extract and install" >> RELEASE_NOTES.md
+          echo "tar -xzf goanime-linux-amd64.tar.gz" >> RELEASE_NOTES.md
+          echo "chmod +x goanime-linux-amd64" >> RELEASE_NOTES.md
+          echo "sudo mv goanime-linux-amd64 /usr/local/bin/goanime" >> RELEASE_NOTES.md
+          echo '```' >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "#### Windows" >> RELEASE_NOTES.md
+          echo "**Recommended:** Download and run the \`GoAnime-Installer-${VERSION#v}.exe\` for automatic setup with MPV included." >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "Or download the portable \`.zip\` file for your architecture and extract it." >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "### Verification" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "Verify your download using the checksums:" >> RELEASE_NOTES.md
+          echo '```bash' >> RELEASE_NOTES.md
+          echo "sha256sum -c checksums-sha256.txt" >> RELEASE_NOTES.md
+          echo '```' >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "### Supported Platforms" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "| OS | Architecture | Binary |" >> RELEASE_NOTES.md
+          echo "|---|---|---|" >> RELEASE_NOTES.md
+          echo "| Linux | x86_64 | \`goanime-linux-amd64\` |" >> RELEASE_NOTES.md
+          echo "| Linux | ARM64 | \`goanime-linux-arm64\` |" >> RELEASE_NOTES.md
+          echo "| Linux | x86 | \`goanime-linux-386\` |" >> RELEASE_NOTES.md
+          echo "| macOS | x86_64 (Intel) | \`goanime-darwin-amd64\` |" >> RELEASE_NOTES.md
+          echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> RELEASE_NOTES.md
+          echo "| Windows | Installer | \`GoAnime-Installer-${VERSION#v}.exe\` (Recommended) |" >> RELEASE_NOTES.md
+          echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> RELEASE_NOTES.md
+          echo "| Windows | x86 | \`goanime-windows-386.exe\` |" >> RELEASE_NOTES.md
+          echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> RELEASE_NOTES.md
           
-          cat CHANGELOG.md
+          cat RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: GoAnime ${{ steps.version.outputs.VERSION }}
-          body_path: CHANGELOG.md
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: ${{ steps.version.outputs.PRERELEASE }}
           files: |
@@ -453,7 +462,7 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
 
       - name: Release summary
         run: |
