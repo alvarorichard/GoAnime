@@ -22,6 +22,7 @@
 
 # GoAnime
 
+
 GoAnime is a simple text-based user interface (TUI) built in Go, allowing users to search for anime and either play or download episodes directly in mpv. It scrapes data from websites to provide a selection of anime and episodes, with support for both subbed and dubbed content in English and Portuguese.
 
 ### Mobile Version
