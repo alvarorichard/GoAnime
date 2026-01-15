@@ -16,7 +16,7 @@ func main() {
 				log.Fatalln(util.ErrorHandler(updateErr))
 			}
 			return
-			
+
 		}
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
