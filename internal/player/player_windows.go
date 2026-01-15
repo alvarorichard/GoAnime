@@ -37,8 +37,8 @@ func findMPVPath() (string, error) {
 		execDir := filepath.Dir(execPath)
 		// Check for bundled mpv in the same directory as goanime
 		possiblePaths = append(possiblePaths,
-			filepath.Join(execDir, "bin", "mpv.exe"),     // Installed via GoAnime installer
-			filepath.Join(execDir, "mpv.exe"),            // Portable installation
+			filepath.Join(execDir, "bin", "mpv.exe"), // Installed via GoAnime installer
+			filepath.Join(execDir, "mpv.exe"),        // Portable installation
 		)
 	}
 
