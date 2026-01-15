@@ -431,8 +431,8 @@ jobs:
           echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> CHANGELOG.md
           echo "| Windows | Installer | \`GoAnime-Installer-${VERSION#v}.exe\` (Recommended) |" >> CHANGELOG.md
           echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> CHANGELOG.md
-          echo "| Windows | ARM64 | \`goanime-windows-arm64.exe\` |" >> CHANGELOG.md
           echo "| Windows | x86 | \`goanime-windows-386.exe\` |" >> CHANGELOG.md
+          echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> CHANGELOG.md
           
           cat CHANGELOG.md
 
@@ -465,3 +465,58 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat release/checksums-sha256.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # =============================================================================
+  # Job 5: Publish to AUR (Arch User Repository)
+  # =============================================================================
+  aur-publish:
+    name: Publish to AUR
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ !contains(github.ref, '-') }}  # Skip pre-releases
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUMBER=${VERSION#v}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "VERSION_NUMBER=${VERSION_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Update PKGBUILD version
+        run: |
+          cd aur/goanime
+          sed -i "s/pkgver=.*/pkgver=${{ steps.version.outputs.VERSION_NUMBER }}/" PKGBUILD
+          sed -i "s/pkgrel=.*/pkgrel=1/" PKGBUILD
+          
+          # Update source URL in PKGBUILD
+          sed -i "s|goanime-[0-9.]*::|goanime-${{ steps.version.outputs.VERSION_NUMBER }}::|" PKGBUILD
+          
+          cat PKGBUILD
+
+      - name: Generate .SRCINFO
+        uses: docker://archlinux:latest
+        with:
+          args: bash -c "pacman -Sy --noconfirm pacman-contrib && cd aur/goanime && makepkg --printsrcinfo > .SRCINFO && cat .SRCINFO"
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: goanime
+          pkgbuild: ./aur/goanime/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ steps.version.outputs.VERSION }}"
+          force_push: true
+
+      - name: AUR publish summary
+        run: |
+          echo "## AUR Package Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Package: goanime" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.VERSION_NUMBER }}" >> $GITHUB_STEP_SUMMARY
+          echo "- AUR URL: https://aur.archlinux.org/packages/goanime" >> $GITHUB_STEP_SUMMARY
