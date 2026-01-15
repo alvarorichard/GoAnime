@@ -63,10 +63,10 @@ func (m *model) Init() tea.Cmd {
 // StartVideo opens mpv with a socket for IPC
 // Modify the StartVideo function in player.go
 func StartVideo(link string, args []string) (string, error) {
-	// Verify MPV is installed
-	mpvPath, err := exec.LookPath("mpv")
+	// Verify MPV is installed using platform-specific search
+	mpvPath, err := findMPVPath()
 	if err != nil {
-		return "", fmt.Errorf("mpv not found in PATH. Please install mpv: https://mpv.io/installation/")
+		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", err)
 	}
 
 	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())

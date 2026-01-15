@@ -12,3 +12,9 @@ func setProcessGroup(cmd *exec.Cmd) {
 		Setpgid: true,
 	}
 }
+
+// findMPVPath searches for mpv executable on Unix systems.
+// On Unix, mpv is typically installed system-wide and available in PATH.
+func findMPVPath() (string, error) {
+	return exec.LookPath("mpv")
+}

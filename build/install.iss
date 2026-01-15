@@ -53,16 +53,41 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+; Add to user PATH using setx for immediate effect (works better in Windows Sandbox)
+; This runs before the postinstall option so PATH is ready when GoAnime starts
+Filename: "{cmd}"; Parameters: "/C setx PATH ""%PATH%;{app};{app}\bin"""; Flags: runhidden runascurrentuser; Tasks: addtopath
 ; Option to run GoAnime after installation
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Registry]
-; Add GoAnime directory to PATH if selected
+; Note: We use setx in [Run] section for immediate PATH update (works in Windows Sandbox)
+; Registry entries below are kept as backup for system-wide persistence
+; They will be applied on next login/restart if setx fails
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath('{app}')
-; Add MPV bin directory to PATH if selected  
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\bin"; Tasks: addtopath; Check: NeedsAddPath('{app}\bin')
 
 [Code]
+// Windows API constant for broadcasting environment changes
+const
+  SMTO_ABORTIFHUNG = 2;
+  WM_SETTINGCHANGE = $001A;
+  HWND_BROADCAST = $FFFF;
+
+// Import Windows API function to broadcast environment changes
+function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: WPARAM; lParam: PAnsiChar; 
+  fuFlags, uTimeout: UINT; var lpdwResult: DWORD): UINT;
+  external 'SendMessageTimeoutA@user32.dll stdcall';
+
+// Broadcast environment change to all windows so PATH is updated immediately
+procedure RefreshEnvironment;
+var
+  Res: DWORD;
+begin
+  // Notify all windows that environment variables have changed
+  // This makes the PATH update take effect immediately without requiring logout/restart
+  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment', SMTO_ABORTIFHUNG, 5000, Res);
+end;
+
 function NeedsAddPath(Param: string): boolean;
 var
   OrigPath: string;
@@ -103,6 +128,17 @@ begin
   end;
 end;
 
+// Called after installation steps complete
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    // Broadcast environment change so new PATH is available immediately
+    // This is crucial for Windows Sandbox and fresh installs
+    RefreshEnvironment;
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
@@ -110,5 +146,7 @@ begin
     // Remove paths added during installation
     RemovePath(ExpandConstant('{app}'));
     RemovePath(ExpandConstant('{app}\bin'));
+    // Broadcast environment change after removing paths
+    RefreshEnvironment;
   end;
 end;
