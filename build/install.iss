@@ -34,14 +34,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "addtopath"; Description: "Add GoAnime to PATH"; GroupDescription: "System Integration:"; Flags: checkedonce
+Name: "addtopath"; Description: "Add GoAnime and MPV to PATH"; GroupDescription: "System Integration:"; Flags: checkedonce
 
 [Files]
 ; Main application binary (staged in build/staging directory)
 Source: "staging\goanime.exe"; DestDir: "{app}"; Flags: ignoreversion
 
-; MPV binary for video playback
+; MPV binary and required DLLs for video playback
 Source: "staging\bin\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "staging\bin\*.dll"; DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Start Menu shortcuts
@@ -56,7 +57,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Registry]
-; Add to PATH if selected
+; Add GoAnime directory to PATH if selected
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath('{app}')
+; Add MPV bin directory to PATH if selected  
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\bin"; Tasks: addtopath; Check: NeedsAddPath('{app}\bin')
 
 [Code]
@@ -70,4 +73,42 @@ begin
     exit;
   end;
   Result := Pos(';' + Param + ';', ';' + OrigPath + ';') = 0;
+end;
+
+procedure RemovePath(PathToRemove: string);
+var
+  OrigPath: string;
+  NewPath: string;
+  P: Integer;
+begin
+  if RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+  begin
+    NewPath := OrigPath;
+    // Try to remove with semicolon before
+    P := Pos(';' + PathToRemove, NewPath);
+    if P > 0 then
+    begin
+      Delete(NewPath, P, Length(PathToRemove) + 1);
+    end
+    else
+    begin
+      // Try to remove with semicolon after
+      P := Pos(PathToRemove + ';', NewPath);
+      if P > 0 then
+        Delete(NewPath, P, Length(PathToRemove) + 1);
+    end;
+    
+    if NewPath <> OrigPath then
+      RegWriteStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', NewPath);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Remove paths added during installation
+    RemovePath(ExpandConstant('{app}'));
+    RemovePath(ExpandConstant('{app}\bin'));
+  end;
 end;

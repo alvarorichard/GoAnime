@@ -199,7 +199,7 @@ jobs:
           
           # Get latest MPV release from GitHub (shinchiro builds - official recommended)
           Write-Host "Fetching latest MPV release..."
-          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers @{ "User-Agent" = "GoAnime-CI" }
           
           # Find the 64-bit release asset
           $asset = $releases.assets | Where-Object { $_.name -match "mpv-x86_64-.*\.7z$" -and $_.name -notmatch "dev" } | Select-Object -First 1
@@ -214,16 +214,39 @@ jobs:
           
           Write-Host "Downloading MPV from: $mpvUrl"
           Write-Host "Version: $($releases.tag_name)"
-          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive
+          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive -Headers @{ "Accept" = "application/octet-stream"; "User-Agent" = "GoAnime-CI" }
+          
+          # Verify download
+          if (-not (Test-Path $mpvArchive) -or (Get-Item $mpvArchive).Length -lt 1000000) {
+            Write-Error "Download failed or file too small"
+            exit 1
+          }
+          
+          Write-Host "Downloaded mpv archive ($(((Get-Item $mpvArchive).Length / 1MB).ToString('F2')) MB), extracting..."
           
           # Extract MPV
           7z x $mpvArchive -ompv_temp -y
           
-          # Find and copy mpv.exe (it might be in a subdirectory)
+          # Find and copy mpv.exe and required DLLs (it might be in a subdirectory)
           $mpvExe = Get-ChildItem -Path "mpv_temp" -Recurse -Filter "mpv.exe" | Select-Object -First 1
           if ($mpvExe) {
+            $mpvDir = $mpvExe.DirectoryName
+            
+            # Copy mpv.exe
             Copy-Item $mpvExe.FullName "build/staging/bin/mpv.exe" -Force
             Write-Host "MPV $($releases.tag_name) downloaded and staged successfully"
+            
+            # Copy all required DLLs from the same directory
+            $dlls = Get-ChildItem -Path $mpvDir -Filter "*.dll" -ErrorAction SilentlyContinue
+            if ($dlls) {
+              foreach ($dll in $dlls) {
+                Copy-Item $dll.FullName -Destination "build/staging/bin/" -Force
+                Write-Host "Copied DLL: $($dll.Name)"
+              }
+            }
+            
+            # Verify mpv works
+            & "build/staging/bin/mpv.exe" --version
           } else {
             Write-Error "mpv.exe not found in archive"
             exit 1

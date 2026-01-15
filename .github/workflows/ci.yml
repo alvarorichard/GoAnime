@@ -280,11 +280,23 @@ jobs:
           # Extract using 7z (available on Windows runners)
           7z x $mpvArchive -ompv_extracted -y
           
-          # Find and copy mpv.exe to staging
+          # Find and copy mpv.exe and required DLLs to staging
           $mpvExe = Get-ChildItem -Path "mpv_extracted" -Recurse -Filter "mpv.exe" | Select-Object -First 1
           if ($mpvExe) {
+            $mpvDir = $mpvExe.DirectoryName
+            
+            # Copy mpv.exe
             Copy-Item $mpvExe.FullName -Destination "build/staging/bin/mpv.exe"
             Write-Host "mpv.exe copied to build/staging/bin/"
+            
+            # Copy all required DLLs from the same directory
+            $dlls = Get-ChildItem -Path $mpvDir -Filter "*.dll" -ErrorAction SilentlyContinue
+            if ($dlls) {
+              foreach ($dll in $dlls) {
+                Copy-Item $dll.FullName -Destination "build/staging/bin/" -Force
+                Write-Host "Copied DLL: $($dll.Name)"
+              }
+            }
             
             # Verify mpv version
             & "build/staging/bin/mpv.exe" --version
@@ -292,6 +304,10 @@ jobs:
             Write-Error "mpv.exe not found in extracted archive"
             exit 1
           }
+          
+          # Cleanup extracted files
+          Remove-Item -Path "mpv_extracted" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $mpvArchive -Force -ErrorAction SilentlyContinue
           
           # Verify files exist
           Write-Host "Staging directory contents:"
