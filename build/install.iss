@@ -67,27 +67,7 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\bin"; Tasks: addtopath; Check: NeedsAddPath('{app}\bin')
 
 [Code]
-// Windows API constant for broadcasting environment changes
-const
-  SMTO_ABORTIFHUNG = 2;
-  WM_SETTINGCHANGE = $001A;
-  HWND_BROADCAST = $FFFF;
-
-// Import Windows API function to broadcast environment changes
-function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: WPARAM; lParam: PAnsiChar; 
-  fuFlags, uTimeout: UINT; var lpdwResult: DWORD): UINT;
-  external 'SendMessageTimeoutA@user32.dll stdcall';
-
-// Broadcast environment change to all windows so PATH is updated immediately
-procedure RefreshEnvironment;
-var
-  Res: DWORD;
-begin
-  // Notify all windows that environment variables have changed
-  // This makes the PATH update take effect immediately without requiring logout/restart
-  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment', SMTO_ABORTIFHUNG, 5000, Res);
-end;
-
+// Check if a path is already in the system PATH
 function NeedsAddPath(Param: string): boolean;
 var
   OrigPath: string;
@@ -100,6 +80,7 @@ begin
   Result := Pos(';' + Param + ';', ';' + OrigPath + ';') = 0;
 end;
 
+// Remove a path from system PATH during uninstall
 procedure RemovePath(PathToRemove: string);
 var
   OrigPath: string;
@@ -128,17 +109,6 @@ begin
   end;
 end;
 
-// Called after installation steps complete
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Broadcast environment change so new PATH is available immediately
-    // This is crucial for Windows Sandbox and fresh installs
-    RefreshEnvironment;
-  end;
-end;
-
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
@@ -146,7 +116,5 @@ begin
     // Remove paths added during installation
     RemovePath(ExpandConstant('{app}'));
     RemovePath(ExpandConstant('{app}\bin'));
-    // Broadcast environment change after removing paths
-    RefreshEnvironment;
   end;
 end;
