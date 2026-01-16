@@ -47,13 +47,50 @@ Join our Discord for support, feedback, and updates: [Discord Server](https://di
 - Batch download multiple episodes
 - Resume playback from where you left off (in builds with SQLite support)
 - Track watched episodes (in builds with SQLite support)
+- **NEW:** Movies and TV Shows support via FlixHQ source
+- **NEW:** TMDB/OMDb integration for movie/TV metadata (ratings, genres, runtime)
 
 > **Note:** GoAnime can be built with or without SQLite support for tracking anime progress.  
 > [See the build options documentation](docs/BUILD_OPTIONS.md) for more details.
 
 > ⚠️ Warning: Portuguese (PT-BR) source availability
 >
-> If you want to watch anime in Portuguese (PT-BR) and you are outside Brazil, you’ll need a VPN, proxy, or any method to obtain a Brazilian IP address. The PT-BR provider blocks access from IPs outside Brazil.
+> If you want to watch anime in Portuguese (PT-BR) and you are outside Brazil, you'll need a VPN, proxy, or any method to obtain a Brazilian IP address. The PT-BR provider blocks access from IPs outside Brazil.
+
+## Movies and TV Shows
+
+GoAnime now supports movies and TV shows through the FlixHQ source. Use the `--source flixhq` flag to search for movies and TV shows.
+
+```bash
+# Search for movies/TV shows
+goanime --source flixhq "The Matrix"
+
+# Search specifically for movies
+goanime --source flixhq --type movie "Inception"
+
+# Search specifically for TV shows  
+goanime --source flixhq --type tv "Breaking Bad"
+
+# Enable subtitles (English by default)
+goanime --source flixhq --subs "Avatar"
+```
+
+### Metadata Enrichment
+
+GoAnime automatically fetches movie/TV metadata from TMDB or OMDb to display:
+- IMDB ratings
+- Genres
+- Runtime
+- Synopsis
+
+To enable TMDB (recommended for better metadata), set the `TMDB_API_KEY` environment variable:
+
+```bash
+# Get your free API key at https://www.themoviedb.org/settings/api
+export TMDB_API_KEY="your_api_key_here"
+```
+
+If TMDB is not configured, GoAnime automatically falls back to OMDb which works without configuration.
 
 # Demo
 
