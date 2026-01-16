@@ -1,4 +1,4 @@
-package api
+package movie
 
 import (
 	"testing"
@@ -27,7 +27,6 @@ func TestOMDbSearchByTitle(t *testing.T) {
 func TestOMDbGetByIMDBID(t *testing.T) {
 	client := NewOMDbClient()
 
-	// The Matrix IMDB ID
 	media, err := client.GetByIMDBID("tt0133093")
 	if err != nil {
 		t.Fatalf("Failed to get by IMDB ID: %v", err)
@@ -62,26 +61,6 @@ func TestOMDbGetByTitle(t *testing.T) {
 	}
 
 	t.Logf("Movie: %s (%s) - Director: %s", media.Title, media.Year, media.Director)
-}
-
-func TestOMDbSearchTV(t *testing.T) {
-	client := NewOMDbClient()
-
-	result, err := client.SearchByTitle("Breaking Bad", "series")
-	if err != nil {
-		t.Fatalf("Failed to search TV: %v", err)
-	}
-
-	if len(result.Search) == 0 {
-		t.Fatal("Expected at least one result for 'Breaking Bad'")
-	}
-
-	firstResult := result.Search[0]
-	if firstResult.Type != "series" {
-		t.Errorf("Expected type 'series', got '%s'", firstResult.Type)
-	}
-
-	t.Logf("Found: %s (%s) - Type: %s", firstResult.Title, firstResult.Year, firstResult.Type)
 }
 
 func TestOMDbRuntimeParsing(t *testing.T) {

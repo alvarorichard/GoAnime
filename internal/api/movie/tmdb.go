@@ -1,5 +1,5 @@
-// Package api provides TMDB (The Movie Database) integration for movie/TV metadata
-package api
+// Package movie provides TMDB (The Movie Database) API integration for movie/TV metadata
+package movie
 
 import (
 	"encoding/json"
@@ -163,11 +163,6 @@ func (c *TMDBClient) GetTVDetails(tvID int) (*models.TMDBDetails, error) {
 
 // GetTVSeasons gets season information for a TV show
 func (c *TMDBClient) GetTVSeasons(tvID int) ([]models.TMDBSeason, error) {
-	details, err := c.GetTVDetails(tvID)
-	if err != nil {
-		return nil, err
-	}
-
 	endpoint := fmt.Sprintf("%s/tv/%d?language=en-US", c.baseURL, tvID)
 	body, err := c.makeRequest(endpoint)
 	if err != nil {
@@ -181,7 +176,6 @@ func (c *TMDBClient) GetTVSeasons(tvID int) ([]models.TMDBSeason, error) {
 		return nil, fmt.Errorf("failed to parse seasons: %w", err)
 	}
 
-	_ = details // Used for validation
 	return result.Seasons, nil
 }
 
@@ -334,154 +328,4 @@ func (c *TMDBClient) GetImageURL(path string, size string) string {
 		size = "w500"
 	}
 	return fmt.Sprintf("%s/%s%s", c.imageBase, size, path)
-}
-
-// EnrichMediaWithTMDB enriches a media item with TMDB data
-// Falls back to OMDb if TMDB API key is not configured
-func EnrichMediaWithTMDB(media *models.Anime) error {
-	if media.MediaType != models.MediaTypeMovie && media.MediaType != models.MediaTypeTV {
-		return nil // Only enrich movies and TV shows
-	}
-
-	client := NewTMDBClient()
-
-	// If TMDB is not configured, fall back to OMDb
-	if !client.IsConfigured() {
-		util.Debug("TMDB not configured, using OMDb fallback")
-		return EnrichMediaWithOMDb(media)
-	}
-
-	// Clean the name for search
-	cleanName := cleanMediaName(media.Name)
-	util.Debug("Searching TMDB for", "name", cleanName)
-
-	var searchResult *models.TMDBSearchResult
-	var err error
-
-	// Search based on media type
-	if media.MediaType == models.MediaTypeMovie {
-		searchResult, err = client.SearchMovies(cleanName)
-	} else {
-		searchResult, err = client.SearchTV(cleanName)
-	}
-
-	if err != nil {
-		util.Debug("TMDB search failed, trying OMDb fallback", "error", err)
-		return EnrichMediaWithOMDb(media)
-	}
-
-	if len(searchResult.Results) == 0 {
-		util.Debug("No TMDB results found, trying OMDb fallback", "name", cleanName)
-		return EnrichMediaWithOMDb(media)
-	}
-
-	// Use the first result (best match)
-	tmdbMedia := searchResult.Results[0]
-
-	// Enrich the media object
-	media.TMDBID = tmdbMedia.ID
-	media.Rating = tmdbMedia.VoteAverage
-	media.Overview = tmdbMedia.Overview
-
-	if tmdbMedia.PosterPath != "" {
-		media.ImageURL = client.GetImageURL(tmdbMedia.PosterPath, "w500")
-	}
-
-	if media.Year == "" {
-		media.Year = tmdbMedia.GetReleaseYear()
-	}
-
-	// Get detailed information
-	var details *models.TMDBDetails
-	if media.MediaType == models.MediaTypeMovie {
-		details, err = client.GetMovieDetails(tmdbMedia.ID)
-	} else {
-		details, err = client.GetTVDetails(tmdbMedia.ID)
-	}
-
-	if err == nil && details != nil {
-		media.TMDBDetails = details
-		media.IMDBID = details.IMDBID
-		media.Runtime = details.Runtime
-
-		// Extract genres
-		var genres []string
-		for _, g := range details.Genres {
-			genres = append(genres, g.Name)
-		}
-		media.Genres = genres
-	}
-
-	util.Debug("TMDB enrichment successful",
-		"id", media.TMDBID,
-		"rating", media.Rating,
-		"year", media.Year)
-
-	return nil
-}
-
-// cleanMediaName removes tags and cleans the media name for search
-func cleanMediaName(name string) string {
-	// Remove common tags
-	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[Portuguese]", "[Português]"}
-	for _, tag := range tags {
-		name = strings.ReplaceAll(name, tag, "")
-	}
-
-	// Remove year in parentheses if present
-	// e.g., "Movie Name (2024)" -> "Movie Name"
-	if idx := strings.LastIndex(name, "("); idx > 0 {
-		if endIdx := strings.LastIndex(name, ")"); endIdx > idx {
-			possibleYear := strings.TrimSpace(name[idx+1 : endIdx])
-			if len(possibleYear) == 4 {
-				// Check if it's a year
-				isYear := true
-				for _, c := range possibleYear {
-					if c < '0' || c > '9' {
-						isYear = false
-						break
-					}
-				}
-				if isYear {
-					name = name[:idx]
-				}
-			}
-		}
-	}
-
-	return strings.TrimSpace(name)
-}
-
-// FormatMediaInfo formats TMDB info for display
-func FormatMediaInfo(media *models.Anime) string {
-	var parts []string
-
-	if media.Year != "" {
-		parts = append(parts, media.Year)
-	}
-
-	if media.Rating > 0 {
-		parts = append(parts, fmt.Sprintf("★ %.1f", media.Rating))
-	}
-
-	if media.Runtime > 0 {
-		hours := media.Runtime / 60
-		mins := media.Runtime % 60
-		if hours > 0 {
-			parts = append(parts, fmt.Sprintf("%dh %dm", hours, mins))
-		} else {
-			parts = append(parts, fmt.Sprintf("%dm", mins))
-		}
-	}
-
-	if len(media.Genres) > 0 {
-		// Show first 3 genres
-		maxGenres := 3
-		if len(media.Genres) < maxGenres {
-			maxGenres = len(media.Genres)
-		}
-		parts = append(parts, strings.Join(media.Genres[:maxGenres], ", "))
-	}
-
-	return strings.Join(parts, " | ")
 }

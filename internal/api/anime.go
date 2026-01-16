@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -204,7 +205,7 @@ func enrichAnimeData(anime *models.Anime) error {
 	// Use TMDB enrichment for FlixHQ movies/TV shows
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
-		return EnrichMediaWithTMDB(anime)
+		return movie.EnrichMedia(anime)
 	}
 
 	aniListInfo, err := FetchAnimeFromAniList(anime.Name)

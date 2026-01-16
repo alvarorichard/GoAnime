@@ -12,13 +12,14 @@ import (
 )
 
 var (
-	IsDebug            bool
-	minNameLength      = 4
-	ErrHelpRequested   = errors.New("help requested") // Custom error for help
-	GlobalSource       string                         // Global variable to store selected source
-	GlobalQuality      string                         // Global variable to store selected quality
-	GlobalMediaType    string                         // Global variable to store media type (anime, movie, tv)
-	GlobalSubsLanguage string                         // Global variable to store subtitle language
+	IsDebug             bool
+	minNameLength       = 4
+	ErrHelpRequested    = errors.New("help requested") // Custom error for help
+	GlobalSource        string                         // Global variable to store selected source
+	GlobalQuality       string                         // Global variable to store selected quality
+	GlobalMediaType     string                         // Global variable to store media type (anime, movie, tv)
+	GlobalSubsLanguage  string                         // Global variable to store subtitle language
+	GlobalAudioLanguage string                         // Global variable to store preferred audio language
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
@@ -70,7 +71,8 @@ func FlagParser() (string, error) {
 	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
 	mediaTypeFlag := flag.String("type", "", "specify media type (anime, movie, tv)")
-	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV")
+	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
+	audioLanguageFlag := flag.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -83,6 +85,7 @@ func FlagParser() (string, error) {
 	GlobalQuality = *qualityFlag
 	GlobalMediaType = *mediaTypeFlag
 	GlobalSubsLanguage = *subsLanguageFlag
+	GlobalAudioLanguage = *audioLanguageFlag
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()

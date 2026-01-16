@@ -1,6 +1,6 @@
-// Package api provides OMDb API integration for movie/TV metadata
+// Package movie provides OMDb API integration for movie/TV metadata
 // OMDb API is free with limited usage or with API key for full access
-package api
+package movie
 
 import (
 	"encoding/json"
@@ -12,9 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 const (
@@ -222,83 +219,4 @@ func (m *OMDbMedia) GetGenres() []string {
 	}
 	genres := strings.Split(m.Genre, ", ")
 	return genres
-}
-
-// EnrichMediaWithOMDb enriches a media item with OMDb data
-func EnrichMediaWithOMDb(media *models.Anime) error {
-	if media.MediaType != models.MediaTypeMovie && media.MediaType != models.MediaTypeTV {
-		return nil // Only enrich movies and TV shows
-	}
-
-	client := NewOMDbClient()
-	if !client.IsConfigured() {
-		util.Debug("OMDb not configured, skipping enrichment")
-		return nil
-	}
-
-	// Clean the name for search
-	cleanName := cleanMediaName(media.Name)
-	util.Debug("Searching OMDb for", "name", cleanName)
-
-	// Determine media type for search
-	var searchType string
-	switch media.MediaType {
-	case models.MediaTypeMovie:
-		searchType = "movie"
-	case models.MediaTypeTV:
-		searchType = "series"
-	}
-
-	// Try exact title match first
-	omdbMedia, err := client.GetByTitle(cleanName, media.Year)
-	if err != nil {
-		// Fall back to search
-		util.Debug("Exact title match failed, trying search", "error", err)
-		searchResult, searchErr := client.SearchByTitle(cleanName, searchType)
-		if searchErr != nil || len(searchResult.Search) == 0 {
-			util.Debug("OMDb search failed", "error", searchErr)
-			return searchErr
-		}
-		// Get details for the first result
-		omdbMedia, err = client.GetByIMDBID(searchResult.Search[0].IMDBID)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Enrich the media object
-	if omdbMedia.IMDBID != "" {
-		media.IMDBID = omdbMedia.IMDBID
-	}
-
-	if rating := omdbMedia.GetRating(); rating > 0 {
-		media.Rating = rating
-	}
-
-	if omdbMedia.Plot != "" && omdbMedia.Plot != "N/A" {
-		media.Overview = omdbMedia.Plot
-	}
-
-	if media.Year == "" && omdbMedia.Year != "" && omdbMedia.Year != "N/A" {
-		media.Year = omdbMedia.Year
-	}
-
-	if runtime := omdbMedia.GetRuntimeMinutes(); runtime > 0 {
-		media.Runtime = runtime
-	}
-
-	if genres := omdbMedia.GetGenres(); len(genres) > 0 {
-		media.Genres = genres
-	}
-
-	if omdbMedia.Poster != "" && omdbMedia.Poster != "N/A" && media.ImageURL == "" {
-		media.ImageURL = omdbMedia.Poster
-	}
-
-	util.Debug("OMDb enrichment successful",
-		"imdb", media.IMDBID,
-		"rating", media.Rating,
-		"year", media.Year)
-
-	return nil
 }

@@ -202,6 +202,12 @@ func filterMPVArgs(args []string) []string {
 		"--video-latency-hacks=",
 		"--audio-display=",
 		"--start=",
+		"--alang=",      // Audio language preference
+		"--slang=",      // Subtitle language preference
+		"--aid=",        // Audio track ID
+		"--sid=",        // Subtitle track ID
+		"--sub-file=",   // External subtitle file
+		"--audio-file=", // External audio file
 		// Add more allowed prefixes here if needed in the future
 	}
 
@@ -327,6 +333,14 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 				fmt.Println("[DEBUG] Property not yet available, ignoring...")
 			}
 			continue
+		}
+		// Check for success response (set_property returns {"error":"success"} without data)
+		if errStr, ok := response["error"].(string); ok && errStr == "success" {
+			// Command succeeded, return nil data
+			if data, exists := response["data"]; exists {
+				return data, nil
+			}
+			return nil, nil
 		}
 		if data, exists := response["data"]; exists {
 			return data, nil
@@ -711,4 +725,120 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 		speed,
 	})
 	return err
+}
+
+// CycleAudioTrack cycles through available audio tracks
+func CycleAudioTrack(socketPath string) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"cycle",
+		"aid",
+	})
+	return err
+}
+
+// CycleSubtitleTrack cycles through available subtitle tracks
+func CycleSubtitleTrack(socketPath string) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"cycle",
+		"sid",
+	})
+	return err
+}
+
+// SetAudioTrack sets a specific audio track by ID
+func SetAudioTrack(socketPath string, trackID int) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"aid",
+		trackID,
+	})
+	return err
+}
+
+// SetSubtitleTrack sets a specific subtitle track by ID
+func SetSubtitleTrack(socketPath string, trackID int) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"sid",
+		trackID,
+	})
+	return err
+}
+
+// GetAudioTracks returns list of available audio tracks
+func GetAudioTracks(socketPath string) ([]map[string]interface{}, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+	if err != nil {
+		return nil, err
+	}
+
+	tracks, ok := result.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected track-list format")
+	}
+
+	var audioTracks []map[string]interface{}
+	for _, t := range tracks {
+		track, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if trackType, ok := track["type"].(string); ok && trackType == "audio" {
+			audioTracks = append(audioTracks, track)
+		}
+	}
+	return audioTracks, nil
+}
+
+// GetSubtitleTracks returns list of available subtitle tracks
+func GetSubtitleTracks(socketPath string) ([]map[string]interface{}, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+	if err != nil {
+		return nil, err
+	}
+
+	tracks, ok := result.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected track-list format")
+	}
+
+	var subTracks []map[string]interface{}
+	for _, t := range tracks {
+		track, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if trackType, ok := track["type"].(string); ok && trackType == "sub" {
+			subTracks = append(subTracks, track)
+		}
+	}
+	return subTracks, nil
+}
+
+// GetCurrentAudioTrack returns the current audio track ID
+func GetCurrentAudioTrack(socketPath string) (int, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "aid"})
+	if err != nil {
+		return 0, err
+	}
+	if id, ok := result.(float64); ok {
+		return int(id), nil
+	}
+	return 0, fmt.Errorf("unexpected aid format")
+}
+
+// GetCurrentSubtitleTrack returns the current subtitle track ID
+func GetCurrentSubtitleTrack(socketPath string) (int, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "sid"})
+	if err != nil {
+		return 0, err
+	}
+	if id, ok := result.(float64); ok {
+		return int(id), nil
+	}
+	// "no" means no subtitle is selected
+	if _, ok := result.(string); ok {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("unexpected sid format")
 }

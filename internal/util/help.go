@@ -107,7 +107,8 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	addOption(&helpContent, "--type", "Specify media type (anime, movie, tv). Default: anime.")
-	addOption(&helpContent, "--subs", "Specify subtitle language for movies/TV shows (english, spanish, portuguese, etc.).")
+	addOption(&helpContent, "--subs", "Specify subtitle language for movies/TV shows (FlixHQ only: english, spanish, portuguese, etc.).")
+	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -126,6 +127,7 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
 	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
 	addFeature(&helpContent, "Subtitle Support", "Multilingual subtitle support for movies and TV shows.")
+	addFeature(&helpContent, "Audio Track Selection", "Select preferred audio language for movies/TV during playback (FlixHQ only).")
 	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
 	helpContent.WriteString("\n")
 
@@ -148,6 +150,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --type movie \"avengers\"", "Search for movies matching 'avengers'")
 	addExample(&helpContent, "goanime --type tv \"breaking bad\"", "Search for TV shows matching 'breaking bad'")
 	addExample(&helpContent, "goanime --type movie --subs spanish \"spider-man\"", "Search movies with Spanish subtitles")
+	addExample(&helpContent, "goanime --type movie --audio \"pt-BR,english\" \"matrix\"", "Play movie with Portuguese audio preference")
 	helpContent.WriteString("\n")
 
 	// Footer

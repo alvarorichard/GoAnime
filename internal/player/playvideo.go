@@ -183,6 +183,30 @@ func playVideo(
 		"--audio-display=no",
 	}
 
+	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
+	// Check if this is a movie/TV content by examining the updater's anime source
+	isMovieOrTV := false
+	if updater != nil && updater.GetAnime() != nil {
+		anime := updater.GetAnime()
+		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
+	}
+
+	if isMovieOrTV {
+		// Audio and subtitle language preferences only for movies/TV
+		audioLang := util.GlobalAudioLanguage
+		if audioLang == "" {
+			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English
+			audioLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
+		}
+		subsLang := util.GlobalSubsLanguage
+		if subsLang == "" {
+			subsLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
+		}
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--alang=%s", audioLang))
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--slang=%s", subsLang))
+		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
+	}
+
 	// Initialize tracking and check for resume time
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
 	if resumeTime > 0 {
@@ -606,7 +630,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 }
 
 // showPlayerMenu displays an interactive menu using huh.Select
-func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+func showPlayerMenu(animeName string, currentEpisodeNum int, isMovieOrTV bool) (string, error) {
 	var choice string
 
 	title := "GoAnime Player Controls"
@@ -614,18 +638,24 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
 	}
 
+	// Build menu options
+	options := []huh.Option[string]{
+		huh.NewOption("← Back ", "download_options"),
+		huh.NewOption("Next episode", "next"),
+		huh.NewOption("Previous episode", "previous"),
+		huh.NewOption("Select episode", "select"),
+		huh.NewOption("Change anime", "change"),
+		huh.NewOption("Skip intro", "skip"),
+		huh.NewOption("Exit", "quit"),
+	}
+
+	// isMovieOrTV parameter kept for future use but not currently adding extra options
+	_ = isMovieOrTV
+
 	menu := huh.NewSelect[string]().
 		Title(title).
 		Description("Choose an action:").
-		Options(
-			huh.NewOption("← Back ", "download_options"),
-			huh.NewOption("Next episode", "next"),
-			huh.NewOption("Previous episode", "previous"),
-			huh.NewOption("Select episode", "select"),
-			huh.NewOption("Change anime", "change"),
-			huh.NewOption("Skip intro", "skip"),
-			huh.NewOption("Exit", "quit"),
-		).
+		Options(options...).
 		Value(&choice)
 
 	if err := menu.Run(); err != nil {
@@ -646,14 +676,17 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display
+	// Get anime name for display and check if movie/TV
 	var animeName string
+	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
-		animeName = updater.GetAnime().Name
+		anime := updater.GetAnime()
+		animeName = anime.Name
+		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
 	}
 
 	for {
-		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
+		choice, err := showPlayerMenu(animeName, currentEpisodeNum, isMovieOrTV)
 		if err != nil {
 			return fmt.Errorf("error showing menu: %w", err)
 		}
@@ -675,6 +708,10 @@ func handleUserInput(
 			return ErrChangeAnime
 		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
+		case "audio":
+			selectAudioTrack(socketPath)
+		case "subtitle":
+			selectSubtitleTrack(socketPath)
 		case "skip":
 			skipIntro(socketPath, currentEpisode)
 		}
@@ -778,5 +815,170 @@ func skipIntro(socketPath string, episode *models.Episode) {
 		fmt.Printf("Intro skipped to %ds\n", episode.SkipTimes.Op.End)
 	} else {
 		fmt.Println("Intro skip data not available")
+	}
+}
+
+// selectAudioTrack shows a menu to select audio track
+func selectAudioTrack(socketPath string) {
+	tracks, err := GetAudioTracks(socketPath)
+	if err != nil {
+		fmt.Printf("Error getting audio tracks: %v\n", err)
+		return
+	}
+
+	if len(tracks) == 0 {
+		fmt.Println("No audio tracks available")
+		return
+	}
+
+	currentID, _ := GetCurrentAudioTrack(socketPath)
+
+	var options []huh.Option[int]
+	for _, track := range tracks {
+		id := int(track["id"].(float64))
+
+		// Build label with all available info
+		var parts []string
+
+		// Language
+		lang := ""
+		if l, ok := track["lang"].(string); ok && l != "" {
+			lang = l
+		}
+
+		// Title (often contains language info)
+		title := ""
+		if t, ok := track["title"].(string); ok && t != "" {
+			title = t
+		}
+
+		// Codec
+		codec := ""
+		if c, ok := track["codec"].(string); ok && c != "" {
+			codec = c
+		}
+
+		// Channels (stereo, 5.1, etc.)
+		channels := ""
+		if ch, ok := track["demux-channels"].(string); ok && ch != "" {
+			channels = ch
+		} else if ch, ok := track["audio-channels"].(float64); ok {
+			channels = fmt.Sprintf("%.0fch", ch)
+		}
+
+		// Build the label
+		if title != "" {
+			parts = append(parts, title)
+		} else if lang != "" {
+			parts = append(parts, lang)
+		} else {
+			parts = append(parts, fmt.Sprintf("Audio %d", id))
+		}
+
+		if codec != "" {
+			parts = append(parts, codec)
+		}
+		if channels != "" {
+			parts = append(parts, channels)
+		}
+
+		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
+		if id == currentID {
+			label = "* " + label + " (current)"
+		}
+		options = append(options, huh.NewOption(label, id))
+	}
+
+	var selected int
+	menu := huh.NewSelect[int]().
+		Title("Select Audio Track").
+		Description("Choose the audio language/track:").
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		return
+	}
+
+	if err := SetAudioTrack(socketPath, selected); err != nil {
+		fmt.Printf("Error setting audio track: %v\n", err)
+	} else {
+		fmt.Printf("Audio track changed to %d\n", selected)
+	}
+}
+
+// selectSubtitleTrack shows a menu to select subtitle track
+func selectSubtitleTrack(socketPath string) {
+	tracks, err := GetSubtitleTracks(socketPath)
+	if err != nil {
+		fmt.Printf("Error getting subtitle tracks: %v\n", err)
+		return
+	}
+
+	currentID, _ := GetCurrentSubtitleTrack(socketPath)
+
+	var options []huh.Option[int]
+	// Add option to disable subtitles
+	disableLabel := "Disable subtitles"
+	if currentID == 0 {
+		disableLabel = "* " + disableLabel + " (current)"
+	}
+	options = append(options, huh.NewOption(disableLabel, 0))
+
+	for _, track := range tracks {
+		id := int(track["id"].(float64))
+
+		// Build label with all available info
+		var parts []string
+
+		// Language
+		lang := ""
+		if l, ok := track["lang"].(string); ok && l != "" {
+			lang = l
+		}
+
+		// Title (often contains language info)
+		title := ""
+		if t, ok := track["title"].(string); ok && t != "" {
+			title = t
+		}
+
+		// Build the label
+		if title != "" {
+			parts = append(parts, title)
+		} else if lang != "" {
+			parts = append(parts, lang)
+		} else {
+			parts = append(parts, fmt.Sprintf("Subtitle %d", id))
+		}
+
+		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
+		if id == currentID {
+			label = "* " + label + " (current)"
+		}
+		options = append(options, huh.NewOption(label, id))
+	}
+
+	var selected int
+	menu := huh.NewSelect[int]().
+		Title("Select Subtitle Track").
+		Description("Choose the subtitle language:").
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		return
+	}
+
+	if selected == 0 {
+		// Disable subtitles
+		_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "sid", "no"})
+		fmt.Println("Subtitles disabled")
+	} else {
+		if err := SetSubtitleTrack(socketPath, selected); err != nil {
+			fmt.Printf("Error setting subtitle track: %v\n", err)
+		} else {
+			fmt.Printf("Subtitle track changed to %d\n", selected)
+		}
 	}
 }
