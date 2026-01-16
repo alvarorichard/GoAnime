@@ -17,7 +17,7 @@ type Anime struct {
 	AnilistID int
 	MalID     int
 	Details   AniListDetails
-	Source    string // Identifies the source (AllAnime, AnimeFire, FlixHQ, etc.)
+	Source    string    // Identifies the source (AllAnime, AnimeFire, FlixHQ, etc.)
 	MediaType MediaType // Type of media (anime, movie, tv)
 	Year      string    // Release year
 	Quality   string    // Video quality (if available)

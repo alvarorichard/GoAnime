@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	IsDebug          bool
-	minNameLength    = 4
-	ErrHelpRequested = errors.New("help requested") // Custom error for help
-	GlobalSource     string                         // Global variable to store selected source
-	GlobalQuality    string                         // Global variable to store selected quality
-	GlobalMediaType  string                         // Global variable to store media type (anime, movie, tv)
-	GlobalSubsLanguage string                       // Global variable to store subtitle language
+	IsDebug            bool
+	minNameLength      = 4
+	ErrHelpRequested   = errors.New("help requested") // Custom error for help
+	GlobalSource       string                         // Global variable to store selected source
+	GlobalQuality      string                         // Global variable to store selected quality
+	GlobalMediaType    string                         // Global variable to store media type (anime, movie, tv)
+	GlobalSubsLanguage string                         // Global variable to store subtitle language
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.

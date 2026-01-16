@@ -42,15 +42,15 @@ type FlixHQClient struct {
 
 // FlixHQMedia represents a movie or TV show from FlixHQ
 type FlixHQMedia struct {
-	ID        string
-	Title     string
-	Type      MediaType
-	Year      string
-	ImageURL  string
-	URL       string
-	Seasons   []FlixHQSeason
-	Duration  string // For movies
-	Quality   string
+	ID       string
+	Title    string
+	Type     MediaType
+	Year     string
+	ImageURL string
+	URL      string
+	Seasons  []FlixHQSeason
+	Duration string // For movies
+	Quality  string
 }
 
 // FlixHQSeason represents a TV show season
