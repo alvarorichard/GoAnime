@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -64,12 +65,54 @@ type LocalTracker struct {
 
 /*
 ────────────────────────────────────────────────────────────────────────────*
+│  Singleton/Cache Global do Tracker                                         │
+*────────────────────────────────────────────────────────────────────────────
+*/
+var (
+	globalTracker     *LocalTracker
+	globalTrackerPath string
+	trackerMutex      = &sync.Mutex{}
+)
+
+// GetGlobalTracker returns the cached global tracker instance.
+// This avoids repeatedly opening the database connection which is slow.
+func GetGlobalTracker() *LocalTracker {
+	trackerMutex.Lock()
+	defer trackerMutex.Unlock()
+	return globalTracker
+}
+
+// CloseGlobalTracker closes the global tracker and clears the cache.
+// Should be called on application shutdown.
+func CloseGlobalTracker() error {
+	trackerMutex.Lock()
+	defer trackerMutex.Unlock()
+
+	if globalTracker != nil {
+		err := globalTracker.Close()
+		globalTracker = nil
+		globalTrackerPath = ""
+		return err
+	}
+	return nil
+}
+
+/*
+────────────────────────────────────────────────────────────────────────────*
 │  Construtor e Inicialização                                                │
 *────────────────────────────────────────────────────────────────────────────
 */
 var NewLocalTracker func(dbPath string) *LocalTracker
 
 func newLocalTrackerImpl(dbPath string) *LocalTracker {
+	// Use singleton pattern to avoid repeatedly opening the database
+	trackerMutex.Lock()
+	defer trackerMutex.Unlock()
+
+	// Return cached tracker if path matches
+	if globalTracker != nil && globalTrackerPath == dbPath {
+		return globalTracker
+	}
 	// Check if CGO is disabled (SQLite not available)
 	if !IsCgoEnabled {
 		fmt.Println("Warning: CGO is disabled, anime progress tracking will be unavailable")
@@ -132,13 +175,19 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		return nil
 	}
 
-	return &LocalTracker{
+	tracker := &LocalTracker{
 		db:       db,
 		upsertPS: statements.upsert,
 		getPS:    statements.get,
 		allPS:    statements.all,
 		deletePS: statements.delete,
 	}
+
+	// Cache the tracker globally for reuse
+	globalTracker = tracker
+	globalTrackerPath = dbPath
+
+	return tracker
 }
 
 /*

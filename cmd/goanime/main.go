@@ -4,10 +4,14 @@ import (
 	"log"
 
 	"github.com/alvarorichard/Goanime/internal/handlers"
+	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 func main() {
+	// Initialize tracker early in background to avoid delays when playing movies
+	player.InitTrackerAsync()
+
 	animeName, err := util.FlagParser()
 	if err != nil {
 		// Check if error is update request

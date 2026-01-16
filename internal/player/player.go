@@ -378,6 +378,22 @@ func HandleDownloadAndPlay(
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
 
+	// For HLS streams (movies/TV from FlixHQ), skip download menu and play directly
+	// These are streaming URLs that can't be easily downloaded
+	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	if isHLSStream {
+		if util.IsDebug {
+			util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURL)
+		}
+		return playVideo(
+			videoURL,
+			episodes,
+			selectedEpisodeNum,
+			animeMalID,
+			updater,
+		)
+	}
+
 	for {
 		downloadOption := askForDownload()
 		switch downloadOption {

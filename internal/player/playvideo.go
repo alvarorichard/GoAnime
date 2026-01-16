@@ -29,6 +29,56 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 // ErrBackToDownloadOptions is returned when user wants to go back to download options
 var ErrBackToDownloadOptions = errors.New("back to download options")
 
+// waitForVideoReady waits for the HLS video to be ready for playback
+// This prevents the menu from appearing before the video is loaded
+func waitForVideoReady(socketPath string) {
+	util.Debugf("Waiting for HLS video to be ready...")
+
+	maxAttempts := 60 // Wait up to 30 seconds
+	for i := 0; i < maxAttempts; i++ {
+		// Check if video is loaded by getting duration
+		durationResp, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+		if err == nil {
+			if duration, ok := durationResp.(float64); ok && duration > 0 {
+				util.Debugf("HLS video ready (duration: %.0f seconds)", duration)
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	util.Debugf("Timeout waiting for HLS video to load, continuing anyway...")
+}
+
+// seekToResumePosition seeks to the saved resume position for HLS streams
+// This is done after playback starts because --start doesn't work reliably with HLS
+func seekToResumePosition(socketPath string, resumeTime int) {
+	util.Debugf("HLS resume: seeking to %d seconds", resumeTime)
+
+	// Use set_property to set time-pos directly (more reliable than seek command)
+	_, seekErr := mpvSendCommand(socketPath, []interface{}{"set_property", "time-pos", float64(resumeTime)})
+	if seekErr != nil {
+		util.Debugf("HLS resume: set_property failed, trying seek command: %v", seekErr)
+		// Fallback to seek command
+		_, seekErr = mpvSendCommand(socketPath, []interface{}{"seek", float64(resumeTime), "absolute"})
+		if seekErr != nil {
+			util.Debugf("HLS resume: seek command also failed: %v", seekErr)
+			return
+		}
+	}
+
+	// Verify the seek worked
+	time.Sleep(300 * time.Millisecond)
+	posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+	if posErr == nil {
+		if pos, ok := posResp.(float64); ok {
+			util.Debugf("HLS resume: successfully seeked to position %.0f seconds (target was %d)", pos, resumeTime)
+			return
+		}
+	}
+
+	util.Debugf("HLS resume: seek completed for position %d seconds", resumeTime)
+}
+
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
 	var opts []string
@@ -209,7 +259,11 @@ func playVideo(
 
 	// Initialize tracking and check for resume time
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
-	if resumeTime > 0 {
+
+	// For HLS streams (.m3u8), we'll seek after playback starts instead of using --start
+	// because --start doesn't work reliably with HLS streams
+	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	if resumeTime > 0 && !isHLSStream {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}
 
@@ -220,6 +274,16 @@ func playVideo(
 	socketPath, err := StartVideo(videoURL, mpvArgs)
 	if err != nil {
 		return fmt.Errorf("failed to start video: %w", err)
+	}
+
+	// For HLS streams, wait for video to load and seek to resume position
+	// This is done synchronously to ensure video is ready before showing menu
+	if isHLSStream {
+		util.Debugf("HLS stream detected, waiting for video to load...")
+		waitForVideoReady(socketPath)
+		if resumeTime > 0 {
+			seekToResumePosition(socketPath, resumeTime)
+		}
 	}
 
 	// Apply AniSkip results to skip intros/outros
@@ -349,6 +413,30 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 // 	return tracker, 0
 // }
 
+// cachedDBPath stores the database path to avoid repeated user.Current() calls
+var cachedDBPath string
+
+// getTrackerDBPath returns the cached database path
+func getTrackerDBPath() string {
+	if cachedDBPath != "" {
+		return cachedDBPath
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		util.Errorf("Failed to get current user: %v", err)
+		return ""
+	}
+
+	if runtime.GOOS == "windows" {
+		cachedDBPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+	} else {
+		cachedDBPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
+	}
+
+	return cachedDBPath
+}
+
 // initTracking inicializa o sistema de rastreamento
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
@@ -358,22 +446,19 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		return nil, 0
 	}
 
-	currentUser, err := user.Current()
-	if err != nil {
-		util.Errorf("Failed to get current user: %v", err)
+	dbPath := getTrackerDBPath()
+	if dbPath == "" {
 		return nil, 0
 	}
 
-	var dbPath string
-	if runtime.GOOS == "windows" {
-		dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
-	} else {
-		dbPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
-	}
-
-	tracker := tracking.NewLocalTracker(dbPath)
+	// First check if we have a cached tracker (fast path)
+	tracker := tracking.GetGlobalTracker()
 	if tracker == nil {
-		return nil, 0
+		// Need to initialize - this is only slow the first time
+		tracker = tracking.NewLocalTracker(dbPath)
+		if tracker == nil {
+			return nil, 0
+		}
 	}
 
 	progress, err := tracker.GetAnime(anilistID, episode.URL)
@@ -388,6 +473,21 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 	}
 
 	return tracker, 0
+}
+
+// InitTrackerAsync initializes the tracker in the background.
+// Call this early in the application lifecycle to avoid delays later.
+func InitTrackerAsync() {
+	if !tracking.IsCgoEnabled {
+		return
+	}
+
+	go func() {
+		dbPath := getTrackerDBPath()
+		if dbPath != "" {
+			tracking.NewLocalTracker(dbPath)
+		}
+	}()
 }
 
 // fetchAniSkipAsync fetches AniSkip data in parallel
