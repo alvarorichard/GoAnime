@@ -34,21 +34,25 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.AnimeDriveType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "AnimeDrive")
+	} else if strings.ToLower(source) == "flixhq" || strings.ToLower(source) == "movie" || strings.ToLower(source) == "tv" {
+		t := scraper.FlixHQType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "FlixHQ")
 	} else {
-		// Default behavior: search both sources simultaneously
+		// Default behavior: search all sources simultaneously (including FlixHQ)
 		scraperType = nil
 		util.Debug("Searching all sources", "query", name)
 	}
 
-	// Perform the search - this will search both sources if scraperType is nil
-	util.Debug("Searching for anime", "query", name)
+	// Perform the search - this will search all sources if scraperType is nil
+	util.Debug("Searching for anime/media", "query", name)
 	animes, err := scraperManager.SearchAnime(name, scraperType)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search anime: %w", err)
+		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 
 	if len(animes) == 0 {
-		return nil, fmt.Errorf("no anime found with the name: %s", name)
+		return nil, fmt.Errorf("no results found for: %s", name)
 	}
 
 	// Enhance source identification - names already have language tags from unified.go
@@ -62,6 +66,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "Animefire.io"
 			} else if strings.Contains(anime.URL, "animesdrive") {
 				anime.Source = "AnimeDrive"
+			} else if strings.Contains(anime.URL, "flixhq") {
+				anime.Source = "FlixHQ"
 			}
 		}
 
@@ -74,6 +80,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	animefireCount := 0
 	allanimeCount := 0
 	animedriveCount := 0
+	flixhqCount := 0
 	for _, anime := range animes {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
@@ -81,10 +88,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			allanimeCount++
 		} else if anime.Source == "AnimeDrive" {
 			animedriveCount++
+		} else if anime.Source == "FlixHQ" {
+			flixhqCount++
 		}
 	}
 
-	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount)
+	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount)
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
@@ -160,6 +169,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
+	// Check if this is a FlixHQ movie/TV show
+	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+		return GetFlixHQEpisodes(anime)
+	}
+
 	// Determine source type from multiple indicators with enhanced logic
 	var sourceName string
 
@@ -264,6 +278,12 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 
 // Enhanced episode URL fetching with improved source detection
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	// Check if this is FlixHQ content
+	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+		streamURL, _, err := GetFlixHQStreamURL(anime, episode, quality)
+		return streamURL, err
+	}
+
 	scraperManager := scraper.NewScraperManager()
 
 	// Determine source type with enhanced logic
@@ -456,6 +476,166 @@ func downloadFromURL(_ string, _ string) error {
 // Legacy wrapper functions to maintain compatibility
 func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
+}
+
+// GetFlixHQEpisodes handles episodes/content for FlixHQ movies and TV shows
+func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
+	flixhqClient := scraper.NewFlixHQClient()
+
+	// Extract media ID from URL
+	mediaID := extractMediaIDFromURL(media.URL)
+	if mediaID == "" {
+		return nil, fmt.Errorf("could not extract media ID from URL: %s", media.URL)
+	}
+
+	util.Debug("Getting FlixHQ content", "mediaType", media.MediaType, "mediaID", mediaID)
+
+	// For movies, return a single "episode" representing the movie
+	if media.MediaType == models.MediaTypeMovie {
+		util.Debug("FlixHQ: Processing movie")
+		return []models.Episode{
+			{
+				Number: "1",
+				Num:    1,
+				URL:    mediaID, // Store media ID for later use
+				Title: models.TitleDetails{
+					English: media.Name,
+					Romaji:  media.Name,
+				},
+			},
+		}, nil
+	}
+
+	// For TV shows, get seasons and let user select
+	util.Debug("FlixHQ: Processing TV show, getting seasons")
+	seasons, err := flixhqClient.GetSeasons(mediaID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get seasons: %w", err)
+	}
+
+	if len(seasons) == 0 {
+		return nil, fmt.Errorf("no seasons found for TV show")
+	}
+
+	// Let user select a season
+	seasonNames := make([]string, len(seasons))
+	for i, s := range seasons {
+		seasonNames[i] = s.Title
+	}
+
+	seasonIdx, err := fuzzyfinder.Find(
+		seasonNames,
+		func(i int) string { return seasonNames[i] },
+		fuzzyfinder.WithPromptString("Select season: "),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("season selection cancelled: %w", err)
+	}
+
+	selectedSeason := seasons[seasonIdx]
+	util.Debug("Selected season", "season", selectedSeason.Title, "id", selectedSeason.ID)
+
+	// Get episodes for the selected season
+	flixEpisodes, err := flixhqClient.GetEpisodes(selectedSeason.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episodes: %w", err)
+	}
+
+	// Convert to models.Episode
+	var episodes []models.Episode
+	for _, ep := range flixEpisodes {
+		episodes = append(episodes, models.Episode{
+			Number: fmt.Sprintf("%d", ep.Number),
+			Num:    ep.Number,
+			URL:    ep.DataID, // Store DataID for stream retrieval
+			Title: models.TitleDetails{
+				English: ep.Title,
+				Romaji:  ep.Title,
+			},
+			DataID:   ep.DataID,
+			SeasonID: selectedSeason.ID,
+		})
+	}
+
+	util.Debug("FlixHQ episodes loaded", "count", len(episodes))
+	return episodes, nil
+}
+
+// GetFlixHQStreamURL gets the stream URL for FlixHQ content
+func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, []models.Subtitle, error) {
+	flixhqClient := scraper.NewFlixHQClient()
+	provider := "Vidcloud"
+	subsLanguage := util.GlobalSubsLanguage
+	if subsLanguage == "" {
+		subsLanguage = "english"
+	}
+
+	var streamInfo *scraper.FlixHQStreamInfo
+	var episodeID string
+	var embedLink string
+	var err error
+
+	if media.MediaType == models.MediaTypeMovie {
+		// For movies, episode.URL contains the media ID
+		mediaID := episode.URL
+		util.Debug("Getting movie stream", "mediaID", mediaID)
+
+		episodeID, err = flixhqClient.GetMovieServerID(mediaID, provider)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to get movie server: %w", err)
+		}
+
+		embedLink, err = flixhqClient.GetEmbedLink(episodeID)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to get embed link: %w", err)
+		}
+
+		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, quality, subsLanguage)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+		}
+	} else {
+		// For TV shows, episode.URL contains the DataID
+		dataID := episode.URL
+		util.Debug("Getting TV episode stream", "dataID", dataID)
+
+		episodeID, err = flixhqClient.GetEpisodeServerID(dataID, provider)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to get episode server: %w", err)
+		}
+
+		embedLink, err = flixhqClient.GetEmbedLink(episodeID)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to get embed link: %w", err)
+		}
+
+		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, quality, subsLanguage)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+		}
+	}
+
+	// Convert subtitles
+	var subtitles []models.Subtitle
+	for _, sub := range streamInfo.Subtitles {
+		subtitles = append(subtitles, models.Subtitle{
+			URL:      sub.URL,
+			Language: sub.Language,
+			Label:    sub.Label,
+		})
+	}
+
+	return streamInfo.VideoURL, subtitles, nil
+}
+
+// extractMediaIDFromURL extracts the media ID from a FlixHQ URL
+func extractMediaIDFromURL(urlStr string) string {
+	// URL format: https://flixhq.to/movie/watch-movie-name-12345 or /movie/watch-movie-name-12345
+	parts := strings.Split(urlStr, "-")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
 }
 
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {

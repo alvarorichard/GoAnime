@@ -201,6 +201,12 @@ func getBoolValue(data map[string]interface{}, field string) bool {
 
 // Enrich anime data from AniList
 func enrichAnimeData(anime *models.Anime) error {
+	// Skip AniList enrichment for FlixHQ movies/TV shows as they don't exist in AniList
+	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+		util.Debug("Skipping AniList enrichment for FlixHQ content", "name", anime.Name)
+		return nil // Not an error, just skip enrichment
+	}
+
 	aniListInfo, err := FetchAnimeFromAniList(anime.Name)
 	if err != nil {
 		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)

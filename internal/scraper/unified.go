@@ -22,6 +22,7 @@ const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
 	AnimeDriveType
+	FlixHQType // Movies and TV Shows source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -46,6 +47,7 @@ func NewScraperManager() *ScraperManager {
 	// Initialize scrapers
 	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
+	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
 
 	// AnimeDrive - Currently on standby
 	// Reason: Site is protected by Cloudflare, no bypass solution found yet
@@ -206,6 +208,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 	animefireCount := 0
 	allanimeCount := 0
 	animedriveCount := 0
+	flixhqCount := 0
 	for _, anime := range allResults {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
@@ -213,6 +216,8 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			allanimeCount++
 		} else if anime.Source == "AnimeDrive" {
 			animedriveCount++
+		} else if anime.Source == "FlixHQ" {
+			flixhqCount++
 		}
 	}
 
@@ -221,6 +226,7 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 			"animeFire", animefireCount,
 			"allAnime", allanimeCount,
 			"animeDrive", animedriveCount,
+			"flixHQ", flixhqCount,
 			"total", len(allResults))
 	}
 
@@ -244,6 +250,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "Animefire.io"
 	case AnimeDriveType:
 		return "AnimeDrive"
+	case FlixHQType:
+		return "FlixHQ"
 	default:
 		return "Desconhecido"
 	}
@@ -258,6 +266,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 		return "[Portuguese]"
 	case AnimeDriveType:
 		return "[Portuguese]"
+	case FlixHQType:
+		return "[Movies/TV]"
 	default:
 		return "[Unknown]"
 	}
@@ -386,4 +396,97 @@ func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...interface
 
 func (a *AnimeDriveAdapter) GetType() ScraperType {
 	return AnimeDriveType
+}
+
+// FlixHQAdapter adapts FlixHQClient to UnifiedScraper interface for movies and TV shows
+type FlixHQAdapter struct {
+	client *FlixHQClient
+}
+
+func (a *FlixHQAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	media, err := a.client.SearchMedia(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var animes []*models.Anime
+	for _, m := range media {
+		anime := m.ToAnimeModel()
+		// Set the media type
+		if m.Type == MediaTypeMovie {
+			anime.MediaType = models.MediaTypeMovie
+		} else {
+			anime.MediaType = models.MediaTypeTV
+		}
+		anime.Year = m.Year
+		animes = append(animes, anime)
+	}
+
+	return animes, nil
+}
+
+func (a *FlixHQAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// For FlixHQ, animeURL contains the media ID
+	// This needs to be called differently for movies vs TV shows
+	// For movies, return a single "episode"
+	// For TV shows, we need to get seasons first
+
+	// This is a simplified implementation - in practice, you'd need to know if it's a movie or TV show
+	return nil, fmt.Errorf("for FlixHQ, use GetSeasons and GetEpisodes directly on the client")
+}
+
+func (a *FlixHQAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// Parse options
+	provider := "Vidcloud"
+	quality := "1080"
+	subsLanguage := "english"
+
+	for i, opt := range options {
+		if s, ok := opt.(string); ok {
+			switch i {
+			case 0:
+				provider = s
+			case 1:
+				quality = s
+			case 2:
+				subsLanguage = s
+			}
+		}
+	}
+
+	// Get embed link directly from episode ID
+	embedLink, err := a.client.GetEmbedLink(episodeURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get embed link: %w", err)
+	}
+
+	streamInfo, err := a.client.ExtractStreamInfo(embedLink, quality, subsLanguage)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+	}
+
+	metadata := make(map[string]string)
+	metadata["source"] = "flixhq"
+	metadata["provider"] = provider
+	metadata["quality"] = quality
+
+	// Include subtitle URLs in metadata
+	if len(streamInfo.Subtitles) > 0 {
+		var subURLs []string
+		for _, sub := range streamInfo.Subtitles {
+			subURLs = append(subURLs, sub.URL)
+		}
+		metadata["subtitles"] = strings.Join(subURLs, ",")
+	}
+
+	return streamInfo.VideoURL, metadata, nil
+}
+
+func (a *FlixHQAdapter) GetType() ScraperType {
+	return FlixHQType
+}
+
+// GetClient returns the underlying FlixHQ client for direct access
+func (a *FlixHQAdapter) GetClient() *FlixHQClient {
+	return a.client
 }

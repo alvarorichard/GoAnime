@@ -17,6 +17,8 @@ var (
 	ErrHelpRequested = errors.New("help requested") // Custom error for help
 	GlobalSource     string                         // Global variable to store selected source
 	GlobalQuality    string                         // Global variable to store selected quality
+	GlobalMediaType  string                         // Global variable to store media type (anime, movie, tv)
+	GlobalSubsLanguage string                       // Global variable to store subtitle language
 )
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
@@ -67,6 +69,8 @@ func FlagParser() (string, error) {
 	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
 	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
+	mediaTypeFlag := flag.String("type", "", "specify media type (anime, movie, tv)")
+	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -77,6 +81,8 @@ func FlagParser() (string, error) {
 	// Store global configurations
 	GlobalSource = *sourceFlag
 	GlobalQuality = *qualityFlag
+	GlobalMediaType = *mediaTypeFlag
+	GlobalSubsLanguage = *subsLanguageFlag
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()
