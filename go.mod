@@ -5,7 +5,6 @@ go 1.25
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/alvarorichard/rich-go v0.0.0-20250531060310-d14b9a86fb85
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -20,6 +19,7 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/lrstanley/go-ytdlp v1.2.7
+	github.com/tr1xem/go-discordrpc v1.0.0
 )
 
 require (

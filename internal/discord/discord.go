@@ -8,10 +8,25 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/rich-go/client"
+	"github.com/tr1xem/go-discordrpc/client"
 )
 
-// RichPresenceUpdater gerencia as atualizações do Discord Rich Presence
+// DiscordClientID is the Discord application client ID
+const DiscordClientID = "1302721937717334128"
+
+// Global state for smart updates
+var (
+	discordClient       *client.Client
+	isLoggedIn          bool
+	lastPausedState     bool
+	lastEpisodeNumber   string
+	lastTitle           string
+	lastUpdateTime      time.Time
+	lastForceUpdateTime time.Time
+	clientMutex         sync.Mutex
+)
+
+// RichPresenceUpdater manages Discord Rich Presence updates
 type RichPresenceUpdater struct {
 	anime           *models.Anime
 	isPaused        *bool
@@ -19,14 +34,14 @@ type RichPresenceUpdater struct {
 	updateFreq      time.Duration
 	done            chan bool
 	wg              sync.WaitGroup
-	startTime       time.Time                                        // Start time of playback
-	episodeDuration time.Duration                                    // Total duration of the episode
-	episodeStarted  bool                                             // Whether the episode has started
-	socketPath      string                                           // Path to mpv IPC socket
-	mpvSendCommand  func(string, []interface{}) (interface{}, error) // Função para enviar comandos ao MPV
+	startTime       time.Time
+	episodeDuration time.Duration
+	episodeStarted  bool
+	socketPath      string
+	mpvSendCommand  func(string, []interface{}) (interface{}, error)
 }
 
-// NewRichPresenceUpdater cria uma nova instância do atualizador de Rich Presence
+// NewRichPresenceUpdater creates a new Rich Presence updater instance
 func NewRichPresenceUpdater(
 	anime *models.Anime,
 	isPaused *bool,
@@ -50,14 +65,56 @@ func NewRichPresenceUpdater(
 	}
 }
 
-// GetCurrentPlaybackPosition obtém a posição atual de reprodução do MPV
+// LoginClient logs into Discord RPC
+func LoginClient() error {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	if discordClient != nil && isLoggedIn {
+		return nil // Already logged in
+	}
+
+	discordClient = client.NewClient(DiscordClientID)
+
+	if err := discordClient.Login(); err != nil {
+		return fmt.Errorf("discord login failed: %w", err)
+	}
+
+	isLoggedIn = true
+	util.Debug("Discord RPC logged in successfully")
+	return nil
+}
+
+// LogoutClient logs out from Discord RPC
+func LogoutClient() error {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	if discordClient != nil && isLoggedIn {
+		if err := discordClient.Logout(); err != nil {
+			return fmt.Errorf("discord logout failed: %w", err)
+		}
+		isLoggedIn = false
+		discordClient = nil
+		util.Debug("Discord RPC logged out")
+	}
+	return nil
+}
+
+// IsClientLoggedIn returns whether the Discord client is logged in
+func IsClientLoggedIn() bool {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+	return isLoggedIn
+}
+
+// GetCurrentPlaybackPosition gets the current playback position from MPV
 func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, error) {
 	position, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
 	if err != nil {
 		return 0, err
 	}
 
-	// Convert position to float64 and then to time.Duration
 	posSeconds, ok := position.(float64)
 	if !ok {
 		return 0, fmt.Errorf("failed to parse playback position")
@@ -116,58 +173,67 @@ func (rpu *RichPresenceUpdater) GetUpdateFreq() time.Duration {
 	return rpu.updateFreq
 }
 
-// Start inicia as atualizações periódicas do Rich Presence
+// Start begins periodic Rich Presence updates
 func (rpu *RichPresenceUpdater) Start() {
+	// Ensure client is logged in
+	if err := LoginClient(); err != nil {
+		util.Debugf("Failed to login Discord client: %v", err)
+		return
+	}
+
 	rpu.wg.Add(1)
 	go func() {
 		defer rpu.wg.Done()
 		ticker := time.NewTicker(rpu.updateFreq)
 		defer ticker.Stop()
 
+		// Initial update
+		rpu.updateDiscordPresence(false)
+
 		for {
 			select {
 			case <-ticker.C:
-				go rpu.updateDiscordPresence() // Run update asynchronously
+				rpu.updateDiscordPresence(false)
 			case <-rpu.done:
-				util.Debug("Rich Presence updater received stop signal.")
+				util.Debug("Rich Presence updater received stop signal")
 				return
 			}
 		}
 	}()
-	util.Debug("Rich Presence updater started.")
+	util.Debug("Rich Presence updater started")
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish
 func (rpu *RichPresenceUpdater) Stop() {
-	// Evita fechar o canal múltiplas vezes
 	if rpu != nil {
 		select {
 		case <-rpu.done:
-			// Canal já fechado
+			// Channel already closed
 		default:
 			close(rpu.done)
 		}
 		rpu.wg.Wait()
-		util.Debug("Rich Presence updater stopped.")
+		util.Debug("Rich Presence updater stopped")
 	}
 }
 
-// updateDiscordPresence atualiza o status do Discord Rich Presence
-func (rpu *RichPresenceUpdater) updateDiscordPresence() {
-	// Use TryLock to avoid blocking playback if mutex is held
+// updateDiscordPresence updates the Discord Rich Presence status
+func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
+	// Use TryLock to avoid blocking playback
 	if !rpu.animeMutex.TryLock() {
-		util.Debug("Discord update skipped - mutex busy")
 		return
 	}
 	defer rpu.animeMutex.Unlock()
 
+	// Get current playback position
 	currentPosition, err := rpu.GetCurrentPlaybackPosition()
 	if err != nil {
-		// Don't spam logs on temporary connection issues
 		return
 	}
 
-	// Only fetch duration once if not set
+	currentPositionSec := int(currentPosition.Seconds())
+
+	// Fetch duration if not set
 	if rpu.episodeDuration == 0 {
 		durationResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
 		if err == nil && durationResponse != nil {
@@ -177,191 +243,227 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 		}
 	}
 
-	// Format time as HH:MM:SS for movies/long content (>= 60 min) or MM:SS for episodes
-	timeInfo := formatPlaybackTime(currentPosition, rpu.episodeDuration)
+	totalDurationSec := int(rpu.episodeDuration.Seconds())
 
-	// Detect if this is a movie/TV show (FlixHQ content) or anime
-	isMovieOrTV := rpu.anime.IsMovieOrTV() || rpu.anime.Source == "FlixHQ"
-
-	// Get title - prefer romaji for anime, use Name for movies/TV
-	var title string
-	if isMovieOrTV {
-		// For movies/TV, use the Name directly (it comes from FlixHQ/TMDB)
-		title = rpu.anime.Name
-	} else {
-		// For anime, prefer romaji, fall back to english, then name
-		title = rpu.anime.Details.Title.Romaji
-		if title == "" {
-			title = rpu.anime.Details.Title.English
-		}
-		if title == "" {
-			// Clean the anime name from source tags for display
-			title = rpu.anime.Name
-			// Remove language/source tags like [English], [Portuguese], [AnimeFire] etc.
-			if idx := strings.Index(title, "]"); idx != -1 && idx < 20 {
-				title = strings.TrimSpace(title[idx+1:])
-			}
-		}
+	// Check pause state
+	pauseResponse, _ := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "pause"})
+	isPaused := false
+	if pause, ok := pauseResponse.(bool); ok {
+		isPaused = pause
 	}
 
-	// Get image URL with fallback - Discord requires an externally accessible URL
+	// Detect content type
+	isMovieOrTV := rpu.anime.IsMovieOrTV() || rpu.anime.Source == "FlixHQ"
+
+	// Get title
+	title := rpu.getTitle(isMovieOrTV)
+
+	// Get episode number
+	episodeNumber := "1"
+	if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
+		episodeNumber = rpu.anime.Episodes[0].Number
+	}
+
+	// Smart update check - only update if something changed or forced
+	now := time.Now()
+	shouldUpdate := false
+
+	// Force update every 2 minutes to keep presence alive
+	if lastForceUpdateTime.IsZero() || time.Since(lastForceUpdateTime) >= 2*time.Minute {
+		shouldUpdate = true
+		lastForceUpdateTime = now
+	}
+
+	// Update if state changed
+	if lastUpdateTime.IsZero() ||
+		lastPausedState != isPaused ||
+		lastEpisodeNumber != episodeNumber ||
+		lastTitle != title ||
+		forceUpdate {
+		shouldUpdate = true
+	}
+
+	if !shouldUpdate {
+		return
+	}
+
+	// Get image URL
 	imageURL := rpu.anime.ImageURL
 	if imageURL == "" {
-		// Use a default placeholder image
 		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
 	}
 
-	// Build activity details based on content type
-	totalDurationDisplay := formatDurationDisplay(rpu.episodeDuration)
-	var details string
-	var state string
+	// Build timestamps
+	var timestamps *client.Timestamps
+	var smallImage, smallText string
 
-	if isMovieOrTV {
-		// For movies/TV, don't show "Episode X"
-		if rpu.anime.IsMovie() || rpu.anime.MediaType == "movie" {
-			details = fmt.Sprintf("%s | %s / %s", title, timeInfo, totalDurationDisplay)
-			state = "Watching a movie"
-		} else {
-			// For TV shows, show season/episode info if available
-			episodeNumber := "1"
-			if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
-				episodeNumber = rpu.anime.Episodes[0].Number
-			}
-			details = fmt.Sprintf("%s | Ep %s | %s / %s", title, episodeNumber, timeInfo, totalDurationDisplay)
-			state = "Watching a TV show"
+	startTime := now.Add(-time.Duration(currentPositionSec) * time.Second)
+
+	if isPaused {
+		timestamps = &client.Timestamps{
+			Start: &startTime,
+			End:   nil,
 		}
+		smallImage = "pause-button"
+		smallText = "Paused"
 	} else {
-		// For anime, show episode number
-		episodeNumber := "1"
-		if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
-			episodeNumber = rpu.anime.Episodes[0].Number
+		if totalDurationSec > 60 && totalDurationSec > currentPositionSec {
+			remainingSeconds := totalDurationSec - currentPositionSec
+			endTime := now.Add(time.Duration(remainingSeconds) * time.Second)
+			timestamps = &client.Timestamps{
+				Start: &startTime,
+				End:   &endTime,
+			}
+		} else {
+			timestamps = &client.Timestamps{
+				Start: &startTime,
+				End:   nil,
+			}
 		}
-		details = fmt.Sprintf("%s | Episode %s | %s / %s", title, episodeNumber, timeInfo, totalDurationDisplay)
-		state = "Watching anime"
+		smallImage = ""
+		smallText = ""
 	}
 
-	// Create the activity with updated Details
+	// Build state text
+	var state string
+	if isMovieOrTV {
+		if rpu.anime.IsMovie() || rpu.anime.MediaType == "movie" {
+			state = "Watching a movie"
+		} else {
+			state = fmt.Sprintf("Episode %s", episodeNumber)
+		}
+	} else {
+		state = fmt.Sprintf("Episode %s", episodeNumber)
+	}
+
+	// Build buttons
+	buttons := rpu.buildButtons(isMovieOrTV)
+
+	// Create and set activity
 	activity := client.Activity{
-		Details:    details,
+		Type:       3, // Watching
+		Name:       title,
+		Details:    title,
 		State:      state,
 		LargeImage: imageURL,
 		LargeText:  title,
+		SmallImage: smallImage,
+		SmallText:  smallText,
+		Timestamps: timestamps,
+		Buttons:    buttons,
 	}
 
-	// Add buttons based on content type
-	var buttons []*client.Button
+	clientMutex.Lock()
+	if discordClient != nil && isLoggedIn {
+		_ = discordClient.SetActivity(activity)
+	}
+	clientMutex.Unlock()
+
+	// Update last state
+	lastPausedState = isPaused
+	lastEpisodeNumber = episodeNumber
+	lastTitle = title
+	lastUpdateTime = now
+}
+
+// getTitle extracts the appropriate title based on content type
+func (rpu *RichPresenceUpdater) getTitle(isMovieOrTV bool) string {
 	if isMovieOrTV {
-		// For movies/TV from FlixHQ, add IMDB button if available
+		return rpu.anime.Name
+	}
+
+	title := rpu.anime.Details.Title.Romaji
+	if title == "" {
+		title = rpu.anime.Details.Title.English
+	}
+	if title == "" {
+		title = rpu.anime.Name
+		if idx := strings.Index(title, "]"); idx != -1 && idx < 20 {
+			title = strings.TrimSpace(title[idx+1:])
+		}
+	}
+	return title
+}
+
+// buildButtons creates the appropriate buttons based on content type
+func (rpu *RichPresenceUpdater) buildButtons(isMovieOrTV bool) []*client.Button {
+	var buttons []*client.Button
+
+	if isMovieOrTV {
 		if rpu.anime.IMDBID != "" {
-			buttons = append(buttons, &client.Button{Label: "View on IMDB", Url: fmt.Sprintf("https://www.imdb.com/title/%s", rpu.anime.IMDBID)})
+			buttons = append(buttons, &client.Button{
+				Label: "View on IMDB",
+				Url:   fmt.Sprintf("https://www.imdb.com/title/%s", rpu.anime.IMDBID),
+			})
 		}
 		if rpu.anime.TMDBID > 0 {
 			mediaType := "movie"
 			if rpu.anime.IsTV() || rpu.anime.MediaType == "tv" {
 				mediaType = "tv"
 			}
-			buttons = append(buttons, &client.Button{Label: "View on TMDB", Url: fmt.Sprintf("https://www.themoviedb.org/%s/%d", mediaType, rpu.anime.TMDBID)})
+			buttons = append(buttons, &client.Button{
+				Label: "View on TMDB",
+				Url:   fmt.Sprintf("https://www.themoviedb.org/%s/%d", mediaType, rpu.anime.TMDBID),
+			})
 		}
 	} else {
-		// For anime, add AniList and MAL buttons
 		if rpu.anime.AnilistID > 0 {
-			buttons = append(buttons, &client.Button{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)})
+			buttons = append(buttons, &client.Button{
+				Label: "View on AniList",
+				Url:   fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID),
+			})
 		}
 		if rpu.anime.MalID > 0 {
-			buttons = append(buttons, &client.Button{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)})
+			buttons = append(buttons, &client.Button{
+				Label: "View on MAL",
+				Url:   fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID),
+			})
 		}
 	}
-	if len(buttons) > 0 {
-		activity.Buttons = buttons
+
+	// Discord allows max 2 buttons
+	if len(buttons) > 2 {
+		buttons = buttons[:2]
 	}
 
-	// Set the activity in Discord Rich Presence (silently ignore errors to reduce log spam)
-	_ = client.SetActivity(activity)
+	return buttons
 }
 
-// FetchDuration fetches the episode duration from MPV and calls the callback with duration in seconds
+// FetchDuration fetches the episode duration from MPV
 func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
-	// Use the provided socketPath or fall back to the instance's socketPath
 	path := socketPath
 	if path == "" {
 		path = rpu.socketPath
 	}
 
-	// Send command to MPV to get the duration property
 	durationResponse, err := rpu.mpvSendCommand(path, []interface{}{"get_property", "duration"})
 	if err != nil {
-		util.Debugf("Error fetching duration from MPV: %v", err)
 		return
 	}
 
-	// Check if we got a valid response
 	if durationResponse == nil {
-		util.Debug("Duration property not available from MPV")
 		return
 	}
 
-	// Convert the response to float64 (MPV returns duration in seconds as a float)
 	durationSeconds, ok := durationResponse.(float64)
 	if !ok {
-		util.Debugf("Failed to parse duration response: %v", durationResponse)
 		return
 	}
 
-	// Convert to int seconds and call the callback
 	durSec := int(durationSeconds)
 	if durSec > 0 {
 		f(durSec)
-	} else {
-		util.Debug("Duration is zero or negative, skipping callback")
 	}
 }
 
-// WaitEpisodeStart waits for episode start (future feature)
-func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
-	// TODO: Implement waiting for episode start
-	panic("unimplemented")
-}
+// FormatTime formats seconds into human-readable time
+func FormatTime(seconds int) string {
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	remainingSeconds := seconds % 60
 
-// formatPlaybackTime formats the current position and total duration
-// Uses HH:MM:SS format for content >= 60 minutes (movies), MM:SS for shorter content (episodes)
-func formatPlaybackTime(currentPosition, totalDuration time.Duration) string {
-	// Use hours format if total duration is >= 60 minutes (movies/long content)
-	useHoursFormat := totalDuration.Minutes() >= 60
-
-	if useHoursFormat {
-		// Format as HH:MM:SS / HH:MM:SS for movies
-		currentHours := int(currentPosition.Hours())
-		currentMinutes := int(currentPosition.Minutes()) % 60
-		currentSeconds := int(currentPosition.Seconds()) % 60
-
-		totalHours := int(totalDuration.Hours())
-		totalMinutes := int(totalDuration.Minutes()) % 60
-		totalSeconds := int(totalDuration.Seconds()) % 60
-
-		return fmt.Sprintf("%d:%02d:%02d / %d:%02d:%02d",
-			currentHours, currentMinutes, currentSeconds,
-			totalHours, totalMinutes, totalSeconds,
-		)
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, remainingSeconds)
 	}
-
-	// Format as MM:SS / MM:SS for episodes
-	return fmt.Sprintf("%02d:%02d / %02d:%02d",
-		int(currentPosition.Minutes()), int(currentPosition.Seconds())%60,
-		int(totalDuration.Minutes()), int(totalDuration.Seconds())%60,
-	)
-}
-
-// formatDurationDisplay returns a human-readable duration string
-// Shows hours and minutes for long content, just minutes for short content
-func formatDurationDisplay(duration time.Duration) string {
-	totalMinutes := int(duration.Minutes())
-	if totalMinutes >= 60 {
-		hours := totalMinutes / 60
-		minutes := totalMinutes % 60
-		if minutes > 0 {
-			return fmt.Sprintf("%dh%02dm", hours, minutes)
-		}
-		return fmt.Sprintf("%dh", hours)
-	}
-	return fmt.Sprintf("%d min", totalMinutes)
+	return fmt.Sprintf("%d:%02d", minutes, remainingSeconds)
 }
