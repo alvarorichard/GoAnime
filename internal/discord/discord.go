@@ -154,16 +154,20 @@ func (rpu *RichPresenceUpdater) Stop() {
 
 // updateDiscordPresence atualiza o status do Discord Rich Presence
 func (rpu *RichPresenceUpdater) updateDiscordPresence() {
-	rpu.animeMutex.Lock()
+	// Use TryLock to avoid blocking playback if mutex is held
+	if !rpu.animeMutex.TryLock() {
+		util.Debug("Discord update skipped - mutex busy")
+		return
+	}
 	defer rpu.animeMutex.Unlock()
 
 	currentPosition, err := rpu.GetCurrentPlaybackPosition()
 	if err != nil {
-		util.Debugf("Error fetching playback position: %v", err)
+		// Don't spam logs on temporary connection issues
 		return
 	}
 
-	// Se a duração do episódio não estiver definida ou for 0, buscar do MPV
+	// Only fetch duration once if not set
 	if rpu.episodeDuration == 0 {
 		durationResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
 		if err == nil && durationResponse != nil {
@@ -172,9 +176,6 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 			}
 		}
 	}
-
-	// Debug log to check episode duration
-	util.Debugf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
 
 	// Format time as HH:MM:SS for movies/long content (>= 60 min) or MM:SS for episodes
 	timeInfo := formatPlaybackTime(currentPosition, rpu.episodeDuration)
@@ -205,11 +206,9 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 
 	// Get image URL with fallback - Discord requires an externally accessible URL
 	imageURL := rpu.anime.ImageURL
-	util.Debugf("Discord RPC - Title: %s, Source: %s, MediaType: %s, ImageURL: %s", title, rpu.anime.Source, rpu.anime.MediaType, imageURL)
 	if imageURL == "" {
 		// Use a default placeholder image
 		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
-		util.Debugf("Using fallback image for Discord RPC (no image available)")
 	}
 
 	// Build activity details based on content type
@@ -276,12 +275,8 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 		activity.Buttons = buttons
 	}
 
-	// Set the activity in Discord Rich Presence
-	if err := client.SetActivity(activity); err != nil {
-		util.Debugf("Error updating Discord Rich Presence: %v", err)
-	} else {
-		util.Debugf("Discord Rich Presence updated with elapsed time: %s", timeInfo)
-	}
+	// Set the activity in Discord Rich Presence (silently ignore errors to reduce log spam)
+	_ = client.SetActivity(activity)
 }
 
 // FetchDuration fetches the episode duration from MPV and calls the callback with duration in seconds

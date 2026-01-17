@@ -614,7 +614,8 @@ func initDiscordPresence(updater *discord.RichPresenceUpdater, socketPath string
 
 // waitForPlaybackStart waits for playback to start
 func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdater) {
-	for {
+	maxAttempts := 30 // Max 30 seconds to wait
+	for i := 0; i < maxAttempts; i++ {
 		timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
 		if err == nil && timePos != nil && !updater.IsEpisodeStarted() {
 			updater.SetEpisodeStarted(true)
@@ -622,24 +623,36 @@ func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdate
 		}
 		time.Sleep(1 * time.Second)
 	}
+	// Set as started anyway to avoid infinite loop
+	updater.SetEpisodeStarted(true)
 }
 
 // updateEpisodeDuration updates the episode duration
 func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdater, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
-	for {
-		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() == 0 {
-			time.Sleep(1 * time.Second)
+	maxAttempts := 10 // Only try 10 times to get duration
+	for i := 0; i < maxAttempts; i++ {
+		if !updater.IsEpisodeStarted() {
+			time.Sleep(2 * time.Second)
 			continue
+		}
+
+		// If duration is already set, just update tracking and exit
+		if updater.GetEpisodeDuration() > 0 {
+			dur := updater.GetEpisodeDuration()
+			updateTrackingWithDuration(tracker, anilistID, episode, episodeNum, dur)
+			return
 		}
 
 		durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
 		if err != nil || durationPos == nil {
-			break
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		duration, ok := durationPos.(float64)
-		if !ok {
-			break
+		if !ok || duration <= 0 {
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		dur := time.Duration(duration * float64(time.Second))
@@ -648,21 +661,25 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 		}
 
 		updater.SetEpisodeDuration(dur)
+		updateTrackingWithDuration(tracker, anilistID, episode, episodeNum, dur)
+		return
+	}
+}
 
-		if tracker != nil && dur > 0 {
-			anime := tracking.Anime{
-				AnilistID:     anilistID,
-				AllanimeID:    episode.URL,
-				EpisodeNumber: episodeNum,
-				Duration:      int(dur.Seconds()),
-				Title:         getEpisodeTitle(episode.Title),
-				LastUpdated:   time.Now(),
-			}
-			if err := tracker.UpdateProgress(anime); err != nil {
-				util.Errorf("Failed to update tracking: %v", err)
-			}
+// updateTrackingWithDuration updates the local tracker with episode info and duration
+func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
+	if tracker != nil && dur > 0 {
+		anime := tracking.Anime{
+			AnilistID:     anilistID,
+			AllanimeID:    episode.URL,
+			EpisodeNumber: episodeNum,
+			Duration:      int(dur.Seconds()),
+			Title:         getEpisodeTitle(episode.Title),
+			LastUpdated:   time.Now(),
 		}
-		break
+		if err := tracker.UpdateProgress(anime); err != nil {
+			util.Errorf("Failed to update tracking: %v", err)
+		}
 	}
 }
 

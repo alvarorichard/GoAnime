@@ -145,11 +145,13 @@ func createUpdater(anime *models.Anime, isPaused *bool, animeMutex *sync.Mutex, 
 	if !discordEnabled {
 		return nil
 	}
+	// Use 5 second update interval for movies to reduce socket overhead
+	// Movies don't need frequent updates since playback position changes slowly
 	return discord.NewRichPresenceUpdater(
 		anime,
 		isPaused,
 		animeMutex,
-		1*time.Second,
+		5*time.Second,
 		episodeDuration,
 		getSocketPath(),
 		player.MpvSendCommand,
