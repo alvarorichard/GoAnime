@@ -30,53 +30,106 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 var ErrBackToDownloadOptions = errors.New("back to download options")
 
 // waitForVideoReady waits for the HLS video to be ready for playback
-// This prevents the menu from appearing before the video is loaded
-func waitForVideoReady(socketPath string) {
+// Returns true if video is ready, false if timeout
+func waitForVideoReady(socketPath string) bool {
 	util.Debugf("Waiting for HLS video to be ready...")
 
-	maxAttempts := 60 // Wait up to 30 seconds
-	for i := 0; i < maxAttempts; i++ {
-		// Check if video is loaded by getting duration
+	maxWait := 45 * time.Second // Increased for slow HLS streams
+	pollInterval := 500 * time.Millisecond
+	startTime := time.Now()
+
+	for time.Since(startTime) < maxWait {
+		// Try multiple properties to detect when video is ready
+		// Method 1: Check duration (most reliable for HLS)
 		durationResp, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
 		if err == nil {
 			if duration, ok := durationResp.(float64); ok && duration > 0 {
-				util.Debugf("HLS video ready (duration: %.0f seconds)", duration)
-				return
+				util.Debugf("HLS video ready (duration: %.0f seconds) after %.1fs", duration, time.Since(startTime).Seconds())
+				return true
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+
+		// Method 2: Check if time-pos is available (video playing)
+		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		if posErr == nil {
+			if pos, ok := posResp.(float64); ok && pos >= 0 {
+				util.Debugf("HLS video playing (position: %.1f seconds) after %.1fs", pos, time.Since(startTime).Seconds())
+				return true
+			}
+		}
+
+		// Method 3: Check playback-time (alternative property)
+		playbackResp, playErr := mpvSendCommand(socketPath, []interface{}{"get_property", "playback-time"})
+		if playErr == nil {
+			if playback, ok := playbackResp.(float64); ok && playback >= 0 {
+				util.Debugf("HLS video playback started (time: %.1f seconds) after %.1fs", playback, time.Since(startTime).Seconds())
+				return true
+			}
+		}
+
+		time.Sleep(pollInterval)
 	}
-	util.Debugf("Timeout waiting for HLS video to load, continuing anyway...")
+	util.Debugf("Timeout waiting for HLS video (%.1fs)", time.Since(startTime).Seconds())
+	return false
 }
 
 // seekToResumePosition seeks to the saved resume position for HLS streams
-// This is done after playback starts because --start doesn't work reliably with HLS
+// This function is robust: it waits for video ready, seeks, and verifies the seek worked
 func seekToResumePosition(socketPath string, resumeTime int) {
-	util.Debugf("HLS resume: seeking to %d seconds", resumeTime)
-
-	// Use set_property to set time-pos directly (more reliable than seek command)
-	_, seekErr := mpvSendCommand(socketPath, []interface{}{"set_property", "time-pos", float64(resumeTime)})
-	if seekErr != nil {
-		util.Debugf("HLS resume: set_property failed, trying seek command: %v", seekErr)
-		// Fallback to seek command
-		_, seekErr = mpvSendCommand(socketPath, []interface{}{"seek", float64(resumeTime), "absolute"})
-		if seekErr != nil {
-			util.Debugf("HLS resume: seek command also failed: %v", seekErr)
-			return
-		}
+	if resumeTime <= 0 {
+		return
 	}
 
-	// Verify the seek worked
+	util.Debugf("HLS resume: will seek to %d seconds", resumeTime)
+
+	// Wait for video to be fully ready first
+	if !waitForVideoReady(socketPath) {
+		util.Debugf("HLS resume: video not ready after timeout, attempting seek anyway")
+	}
+
+	// Give mpv a moment to stabilize after video is ready
 	time.Sleep(300 * time.Millisecond)
-	posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
-	if posErr == nil {
-		if pos, ok := posResp.(float64); ok {
-			util.Debugf("HLS resume: successfully seeked to position %.0f seconds (target was %d)", pos, resumeTime)
-			return
+
+	// Try multiple seek methods with verification - more attempts, longer waits
+	maxAttempts := 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		util.Debugf("HLS resume: seek attempt %d/%d to %d seconds", attempt, maxAttempts, resumeTime)
+
+		// Method 1: seek absolute (works best with HLS)
+		_, err := mpvSendCommand(socketPath, []interface{}{"seek", float64(resumeTime), "absolute"})
+		if err != nil {
+			util.Debugf("HLS resume: seek absolute failed: %v, trying set_property", err)
+			// Method 2: set_property time-pos
+			_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "time-pos", float64(resumeTime)})
+		}
+
+		// Wait for seek to complete (HLS can be slow)
+		time.Sleep(800 * time.Millisecond)
+
+		// Verify position
+		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		if posErr == nil {
+			if pos, ok := posResp.(float64); ok {
+				// Allow 10 second tolerance for HLS streams
+				if pos >= float64(resumeTime-10) {
+					util.Debugf("HLS resume: SUCCESS - position is %.0f seconds (target: %d)", pos, resumeTime)
+					return
+				}
+				util.Debugf("HLS resume: position mismatch - got %.0f, want %d", pos, resumeTime)
+			}
+		} else {
+			util.Debugf("HLS resume: could not get position: %v", posErr)
+		}
+
+		// Wait before retry, increasing delay
+		if attempt < maxAttempts {
+			waitTime := time.Duration(attempt) * 500 * time.Millisecond
+			util.Debugf("HLS resume: waiting %v before retry", waitTime)
+			time.Sleep(waitTime)
 		}
 	}
 
-	util.Debugf("HLS resume: seek completed for position %d seconds", resumeTime)
+	util.Debugf("HLS resume: FAILED after %d attempts - video may start from beginning", maxAttempts)
 }
 
 // applySkipTimes applies skip times to an mpv instance
@@ -208,6 +261,10 @@ func playVideo(
 	anilistID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
+	timer := util.StartTimer("playVideo:Total")
+	defer timer.Stop()
+	util.PerfCount("video_plays")
+
 	// Log the episode number and URL for debugging
 	util.Debugf("Playing video for episode %d, URL: %s", currentEpisodeNum, videoURL)
 
@@ -271,19 +328,24 @@ func playVideo(
 	skipDataChan := fetchAniSkipAsync(anilistID, currentEpisodeNum, currentEpisode)
 
 	// Start the video with mpv
+	mpvTimer := util.StartTimer("MPV:StartVideo")
 	socketPath, err := StartVideo(videoURL, mpvArgs)
+	mpvTimer.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to start video: %w", err)
 	}
 
-	// For HLS streams, wait for video to load and seek to resume position
-	// This is done synchronously to ensure video is ready before showing menu
-	if isHLSStream {
-		util.Debugf("HLS stream detected, waiting for video to load...")
+	// For HLS streams, seek to resume position (includes waiting for video ready)
+	if isHLSStream && resumeTime > 0 {
+		util.Debugf("HLS stream detected with resume time %d seconds", resumeTime)
+		hlsTimer := util.StartTimer("HLS:SeekToResume")
+		seekToResumePosition(socketPath, resumeTime)
+		hlsTimer.Stop()
+	} else if isHLSStream {
+		// Just wait for video ready without seeking
+		hlsTimer := util.StartTimer("HLS:WaitForReady")
 		waitForVideoReady(socketPath)
-		if resumeTime > 0 {
-			seekToResumePosition(socketPath, resumeTime)
-		}
+		hlsTimer.Stop()
 	}
 
 	// Apply AniSkip results to skip intros/outros
@@ -461,10 +523,24 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		}
 	}
 
+	// Debug: log what we're looking up
+	util.Debugf("Tracking lookup: anilistID=%d, episode.URL=%s", anilistID, episode.URL)
+
 	progress, err := tracker.GetAnime(anilistID, episode.URL)
-	if err != nil || progress == nil || progress.PlaybackTime <= 0 {
+	if err != nil {
+		util.Debugf("Tracking lookup error: %v", err)
 		return tracker, 0
 	}
+	if progress == nil {
+		util.Debugf("Tracking lookup: no progress found")
+		return tracker, 0
+	}
+	if progress.PlaybackTime <= 0 {
+		util.Debugf("Tracking lookup: playback time is 0 or negative")
+		return tracker, 0
+	}
+
+	util.Debugf("Tracking found: PlaybackTime=%d seconds", progress.PlaybackTime)
 
 	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
@@ -472,6 +548,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		return tracker, progress.PlaybackTime
 	}
 
+	util.Debugf("User declined to resume")
 	return tracker, 0
 }
 
@@ -501,6 +578,7 @@ func fetchAniSkipAsync(anilistID, episodeNum int, episode *models.Episode) chan 
 }
 
 // applyAniSkipResults applies AniSkip results
+// Reduced timeout from 3s to 2s for faster playback start
 func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episode, episodeNum int) {
 	select {
 	case err := <-ch:
@@ -518,7 +596,7 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 		} else {
 			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(2 * time.Second):
 		util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
 	}
 }
@@ -666,6 +744,7 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 }
 
 // startTrackingRoutine starts the tracking routine
+// Optimized with adaptive update interval to reduce overhead
 func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, anilistID int, episode *models.Episode, episodeNum int, updater *discord.RichPresenceUpdater) chan struct{} {
 	stopChan := make(chan struct{})
 	if tracker == nil {
@@ -673,14 +752,23 @@ func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, ani
 	}
 
 	go func() {
-		ticker := time.NewTicker(2 * time.Second)
+		// Start with faster updates, then slow down for efficiency
+		ticker := time.NewTicker(3 * time.Second) // Increased from 2s to reduce overhead
 		defer ticker.Stop()
 
+		updateCount := 0
 		for {
 			select {
 			case <-ticker.C:
 				updateTracking(tracker, socketPath, anilistID, episode, episodeNum, updater)
+				updateCount++
+				// After 30 updates (~90 seconds), slow down to every 5 seconds
+				if updateCount == 30 {
+					ticker.Reset(5 * time.Second)
+				}
 			case <-stopChan:
+				// Final update before stopping
+				updateTracking(tracker, socketPath, anilistID, episode, episodeNum, updater)
 				return
 			}
 		}

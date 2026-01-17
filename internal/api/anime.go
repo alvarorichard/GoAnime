@@ -284,6 +284,17 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	cleanedName := CleanTitle(animeName)
 	util.Debugf("Querying AniList for: '%s' (original: '%s')", cleanedName, animeName)
 
+	// Check cache first
+	cache := util.GetAniListCache()
+	cacheKey := "anilist:" + strings.ToLower(cleanedName)
+	if cached, found := cache.Get(cacheKey); found {
+		var result models.AniListResponse
+		if err := json.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
+			util.Debugf("AniList cache hit for: '%s'", cleanedName)
+			return &result, nil
+		}
+	}
+
 	// Try multiple search variations for better matching
 	searchVariations := generateSearchVariations(cleanedName)
 
@@ -312,7 +323,7 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 			continue
 		}
 
-		resp, err := httpPost("https://graphql.anilist.co", jsonData)
+		resp, err := httpPostFast("https://graphql.anilist.co", jsonData)
 		if err != nil {
 			lastErr = fmt.Errorf("AniList request failed: %w", err)
 			continue
@@ -344,6 +355,9 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 			lastErr = errors.New("no matching anime found on AniList")
 			continue
 		}
+
+		// Cache the successful result
+		cache.Set(cacheKey, body)
 
 		util.Debugf("AniList found: ID=%d, MAL=%d, Title=%s",
 			result.Data.Media.ID,
@@ -388,7 +402,7 @@ func httpGetWithUA(url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	return httpClient.Do(req)
+	return util.GetSharedClient().Do(req)
 }
 
 func httpPost(url string, body []byte) (*http.Response, error) {
@@ -399,7 +413,19 @@ func httpPost(url string, body []byte) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "GoAnime/1.0")
-	return httpClient.Do(req)
+	return util.GetSharedClient().Do(req)
+}
+
+// httpPostFast uses the fast client for quick API requests
+func httpPostFast(url string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "GoAnime/1.0")
+	return util.GetFastClient().Do(req)
 }
 
 func makeGetRequest(url string, headers map[string]string) (map[string]interface{}, error) {
@@ -510,6 +536,10 @@ func generateSearchVariations(cleanedName string) []string {
 
 func CleanTitle(title string) string {
 	cleaned := title
+
+	// Remove media type tags like [Movies/TV], [Anime], [Series], [Movie] at the start
+	reMediaTags := regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
+	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
 
 	// Remove language tags like [English], [Portuguese], [Português] at the start
 	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese)\]\s*`)

@@ -90,14 +90,12 @@ type FlixHQSubtitle struct {
 // NewFlixHQClient creates a new FlixHQ client
 func NewFlixHQClient() *FlixHQClient {
 	return &FlixHQClient{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:     util.GetFastClient(), // Use shared fast client
 		baseURL:    FlixHQBase,
 		apiURL:     FlixHQAPI,
 		userAgent:  FlixHQUserAgent,
 		maxRetries: 2,
-		retryDelay: 500 * time.Millisecond,
+		retryDelay: 300 * time.Millisecond, // Reduced from 500ms
 	}
 }
 

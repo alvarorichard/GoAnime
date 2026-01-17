@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -31,16 +32,23 @@ type AllAnimeClient struct {
 	userAgent string
 }
 
-// NewAllAnimeClient creates a new AllAnime client
+// allAnimeClientInstance is a singleton for connection reuse
+var (
+	allAnimeClientInstance *AllAnimeClient
+	allAnimeClientOnce     sync.Once
+)
+
+// NewAllAnimeClient creates a new AllAnime client (returns cached instance for connection reuse)
 func NewAllAnimeClient() *AllAnimeClient {
-	return &AllAnimeClient{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		referer:   AllAnimeReferer,
-		apiBase:   AllAnimeAPI,
-		userAgent: UserAgent,
-	}
+	allAnimeClientOnce.Do(func() {
+		allAnimeClientInstance = &AllAnimeClient{
+			client:    util.GetFastClient(), // Use shared fast client for API requests
+			referer:   AllAnimeReferer,
+			apiBase:   AllAnimeAPI,
+			userAgent: UserAgent,
+		}
+	})
+	return allAnimeClientInstance
 }
 
 // SearchResponse represents the API response structure for anime search

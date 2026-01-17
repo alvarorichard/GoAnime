@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"errors"
-	"time"
 
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
@@ -15,7 +14,8 @@ import (
 
 // HandlePlaybackMode processes normal anime playback
 func HandlePlaybackMode(animeName string) {
-	startAll := time.Now()
+	timer := util.StartTimer("PlaybackMode:Total")
+	defer timer.Stop()
 
 	// Initialize the beautiful logger
 	util.InitLogger()
@@ -23,35 +23,48 @@ func HandlePlaybackMode(animeName string) {
 	tracking.HandleTrackingNotice()
 	util.Debugf("[PERF] starting Goanime v%s", version.Version)
 
+	discordTimer := util.StartTimer("Discord:Initialize")
 	discordManager := discord.NewManager()
 	if err := discordManager.Initialize(); err != nil {
 		util.Debug("Failed to initialize Discord Rich Presence:", "error", err)
 	} else {
 		defer discordManager.Shutdown()
 	}
+	discordTimer.Stop()
 
 	currentAnimeName := animeName
 
 	for {
 		// Use enhanced search with retry logic
+		searchTimer := util.StartTimer("SearchAnime:WithRetry")
 		anime, err := appflow.SearchAnimeWithRetry(currentAnimeName)
+		searchTimer.Stop()
+
 		if err != nil {
 			util.Errorf("Failed to search for anime: %v", err)
 			return
 		}
 
+		detailsTimer := util.StartTimer("FetchAnimeDetails")
 		appflow.FetchAnimeDetails(anime)
-		episodes := appflow.GetAnimeEpisodes(anime)
+		detailsTimer.Stop()
 
-		util.Debugf("[PERF] Full boot in %v", time.Since(startAll))
+		episodesTimer := util.StartTimer("GetAnimeEpisodes")
+		episodes := appflow.GetAnimeEpisodes(anime)
+		episodesTimer.Stop()
+
+		util.PerfCount("anime_loaded")
 
 		series, totalEpisodes := playback.CheckIfSeriesEnhanced(anime)
 		var playbackErr error
+
+		playbackTimer := util.StartTimer("Playback:Handle")
 		if series {
 			playbackErr = playback.HandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
 		} else {
 			playbackErr = playback.HandleMovie(anime, episodes, discordManager.IsEnabled())
 		}
+		playbackTimer.Stop()
 
 		// Check if user wants to go back to anime selection
 		if errors.Is(playbackErr, player.ErrBackToAnimeSelection) {

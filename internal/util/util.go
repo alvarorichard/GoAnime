@@ -22,6 +22,25 @@ var (
 	GlobalAudioLanguage string                         // Global variable to store preferred audio language
 )
 
+// Cleanup function to be called on program exit
+var cleanupFuncs []func()
+
+// RegisterCleanup registers a function to be called on program exit
+func RegisterCleanup(fn func()) {
+	cleanupFuncs = append(cleanupFuncs, fn)
+}
+
+// RunCleanup runs all registered cleanup functions
+func RunCleanup() {
+	for _, fn := range cleanupFuncs {
+		fn()
+	}
+	// Print performance report if enabled
+	if PerfEnabled {
+		GetPerfTracker().PrintReport()
+	}
+}
+
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
 func ErrorHandler(err error) string {
 	if IsDebug {
@@ -61,6 +80,7 @@ var GlobalDownloadRequest *DownloadRequest
 func FlagParser() (string, error) {
 	// Define flags
 	debug := flag.Bool("debug", false, "enable debug mode")
+	perf := flag.Bool("perf", false, "enable performance profiling")
 	help := flag.Bool("help", false, "show help message")
 	altHelp := flag.Bool("h", false, "show help message")
 	versionFlag := flag.Bool("version", false, "show version information")
@@ -79,6 +99,14 @@ func FlagParser() (string, error) {
 
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
+
+	// Set performance profiling mode
+	PerfEnabled = *perf
+	if PerfEnabled {
+		// Also enable debug for performance mode to see detailed logs
+		IsDebug = true
+		Debug("Performance profiling enabled")
+	}
 
 	// Store global configurations
 	GlobalSource = *sourceFlag

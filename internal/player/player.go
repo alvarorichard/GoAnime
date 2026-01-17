@@ -378,21 +378,8 @@ func HandleDownloadAndPlay(
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
 
-	// For HLS streams (movies/TV from FlixHQ), skip download menu and play directly
-	// These are streaming URLs that can't be easily downloaded
+	// Check if this is an HLS stream (for proper handling later)
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
-	if isHLSStream {
-		if util.IsDebug {
-			util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURL)
-		}
-		return playVideo(
-			videoURL,
-			episodes,
-			selectedEpisodeNum,
-			animeMalID,
-			updater,
-		)
-	}
 
 	for {
 		downloadOption := askForDownload()
@@ -402,6 +389,10 @@ func HandleDownloadAndPlay(
 			return ErrBackToEpisodeSelection
 		case 1:
 			// Download the current episode
+			if isHLSStream {
+				// HLS streams need special download handling
+				util.Debugf("HLS download requested - using stream URL")
+			}
 			err := downloadAndPlayEpisode(
 				videoURL,
 				episodes,
@@ -428,13 +419,17 @@ func HandleDownloadAndPlay(
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
 
-			// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
-			if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
+			// For HLS streams, use directly
+			if isHLSStream {
+				videoURLToPlay = videoURL
+				if util.IsDebug {
+					util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURLToPlay)
+				}
+			} else if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
 				strings.Contains(videoURL, "dropbox.com") ||
 				strings.Contains(videoURL, "wixmp.com") ||
-				strings.HasSuffix(videoURL, ".mp4") ||
-				strings.HasSuffix(videoURL, ".m3u8")) {
-				// Use direct stream URL
+				strings.HasSuffix(videoURL, ".mp4")) {
+				// Use direct stream URL (SharePoint, Dropbox, etc.)
 				videoURLToPlay = videoURL
 				if util.IsDebug {
 					util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)

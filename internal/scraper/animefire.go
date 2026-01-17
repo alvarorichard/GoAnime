@@ -29,13 +29,11 @@ type AnimefireClient struct {
 // NewAnimefireClient creates a new Animefire client
 func NewAnimefireClient() *AnimefireClient {
 	return &AnimefireClient{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:     util.GetFastClient(), // Use shared fast client
 		baseURL:    AnimefireBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
-		retryDelay: 350 * time.Millisecond,
+		retryDelay: 250 * time.Millisecond, // Reduced from 350ms
 	}
 }
 

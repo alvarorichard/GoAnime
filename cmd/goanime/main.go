@@ -2,6 +2,9 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/alvarorichard/Goanime/internal/handlers"
 	"github.com/alvarorichard/Goanime/internal/player"
@@ -9,6 +12,22 @@ import (
 )
 
 func main() {
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		util.RunCleanup()
+		os.Exit(0)
+	}()
+
+	// Ensure cleanup runs on normal exit
+	defer util.RunCleanup()
+
+	// Start total execution timer
+	timer := util.StartTimer("TotalExecution")
+	defer timer.Stop()
+
 	// Initialize tracker early in background to avoid delays when playing movies
 	player.InitTrackerAsync()
 
