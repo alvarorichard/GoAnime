@@ -21,6 +21,7 @@ var (
 	lastPausedState     bool
 	lastEpisodeNumber   string
 	lastTitle           string
+	lastPositionSec     int
 	lastUpdateTime      time.Time
 	lastForceUpdateTime time.Time
 	clientMutex         sync.Mutex
@@ -34,10 +35,10 @@ type RichPresenceUpdater struct {
 	updateFreq      time.Duration
 	done            chan bool
 	wg              sync.WaitGroup
-	startTime       time.Time
-	episodeDuration time.Duration
-	episodeStarted  bool
-	socketPath      string
+	playbackStart   time.Time     // Exact time when playback started
+	episodeDuration time.Duration // Total duration of the episode
+	episodeStarted  bool          // Whether the episode has started
+	socketPath      string        // Path to mpv IPC socket
 	mpvSendCommand  func(string, []interface{}) (interface{}, error)
 }
 
@@ -57,7 +58,7 @@ func NewRichPresenceUpdater(
 		animeMutex:      animeMutex,
 		updateFreq:      updateFreq,
 		done:            make(chan bool),
-		startTime:       time.Now(),
+		playbackStart:   time.Time{}, // Will be set precisely when we get first position
 		episodeDuration: episodeDuration,
 		episodeStarted:  false,
 		socketPath:      socketPath,
@@ -217,7 +218,7 @@ func (rpu *RichPresenceUpdater) Stop() {
 	}
 }
 
-// updateDiscordPresence updates the Discord Rich Presence status
+// updateDiscordPresence updates the Discord Rich Presence status with precise timing
 func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	// Use TryLock to avoid blocking playback
 	if !rpu.animeMutex.TryLock() {
@@ -225,31 +226,10 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	}
 	defer rpu.animeMutex.Unlock()
 
-	// Get current playback position
-	currentPosition, err := rpu.GetCurrentPlaybackPosition()
-	if err != nil {
+	// Get precise playback state from MPV
+	playbackState := rpu.getPrecisePlaybackState()
+	if playbackState == nil {
 		return
-	}
-
-	currentPositionSec := int(currentPosition.Seconds())
-
-	// Fetch duration if not set
-	if rpu.episodeDuration == 0 {
-		durationResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
-		if err == nil && durationResponse != nil {
-			if durationSeconds, ok := durationResponse.(float64); ok && durationSeconds > 0 {
-				rpu.episodeDuration = time.Duration(durationSeconds) * time.Second
-			}
-		}
-	}
-
-	totalDurationSec := int(rpu.episodeDuration.Seconds())
-
-	// Check pause state
-	pauseResponse, _ := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "pause"})
-	isPaused := false
-	if pause, ok := pauseResponse.(bool); ok {
-		isPaused = pause
 	}
 
 	// Detect content type
@@ -264,7 +244,7 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 		episodeNumber = rpu.anime.Episodes[0].Number
 	}
 
-	// Smart update check - only update if something changed or forced
+	// Smart update check - only update if something meaningful changed
 	now := time.Now()
 	shouldUpdate := false
 
@@ -274,11 +254,13 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 		lastForceUpdateTime = now
 	}
 
-	// Update if state changed
+	// Update if state changed significantly
+	positionChanged := abs(playbackState.positionSec-lastPositionSec) >= 2 // 2 second threshold
 	if lastUpdateTime.IsZero() ||
-		lastPausedState != isPaused ||
+		lastPausedState != playbackState.isPaused ||
 		lastEpisodeNumber != episodeNumber ||
 		lastTitle != title ||
+		(positionChanged && !playbackState.isPaused) ||
 		forceUpdate {
 		shouldUpdate = true
 	}
@@ -293,39 +275,18 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
 	}
 
-	// Build timestamps
-	var timestamps *client.Timestamps
-	var smallImage, smallText string
-
-	startTime := now.Add(-time.Duration(currentPositionSec) * time.Second)
-
-	if isPaused {
-		timestamps = &client.Timestamps{
-			Start: &startTime,
-			End:   nil,
-		}
-		smallImage = "pause-button"
-		smallText = "Paused"
-	} else {
-		if totalDurationSec > 60 && totalDurationSec > currentPositionSec {
-			remainingSeconds := totalDurationSec - currentPositionSec
-			endTime := now.Add(time.Duration(remainingSeconds) * time.Second)
-			timestamps = &client.Timestamps{
-				Start: &startTime,
-				End:   &endTime,
-			}
-		} else {
-			timestamps = &client.Timestamps{
-				Start: &startTime,
-				End:   nil,
-			}
-		}
-		smallImage = ""
-		smallText = ""
-	}
+	// Build precise timestamps based on actual playback position
+	timestamps := rpu.buildPreciseTimestamps(playbackState, now)
 
 	// Build state text
 	var state string
+	var smallImage, smallText string
+
+	if playbackState.isPaused {
+		smallImage = "pause-button"
+		smallText = "Paused"
+	}
+
 	if isMovieOrTV {
 		if rpu.anime.IsMovie() || rpu.anime.MediaType == "movie" {
 			state = "Watching a movie"
@@ -339,7 +300,7 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	// Build buttons
 	buttons := rpu.buildButtons(isMovieOrTV)
 
-	// Create and set activity
+	// Create and set activity with precise timing
 	activity := client.Activity{
 		Type:       3, // Watching
 		Name:       title,
@@ -360,10 +321,114 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	clientMutex.Unlock()
 
 	// Update last state
-	lastPausedState = isPaused
+	lastPausedState = playbackState.isPaused
 	lastEpisodeNumber = episodeNumber
 	lastTitle = title
+	lastPositionSec = playbackState.positionSec
 	lastUpdateTime = now
+}
+
+// playbackState holds precise playback information
+type playbackState struct {
+	positionSec int
+	durationSec int
+	isPaused    bool
+	speed       float64
+}
+
+// getPrecisePlaybackState gets the exact playback state from MPV
+func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
+	// Get position with high precision
+	posResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
+	if err != nil || posResponse == nil {
+		return nil
+	}
+
+	position, ok := posResponse.(float64)
+	if !ok {
+		return nil
+	}
+
+	// Get duration
+	var durationSec int
+	if rpu.episodeDuration > 0 {
+		durationSec = int(rpu.episodeDuration.Seconds())
+	} else {
+		durResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
+		if err == nil && durResponse != nil {
+			if dur, ok := durResponse.(float64); ok && dur > 0 {
+				durationSec = int(dur)
+				rpu.episodeDuration = time.Duration(dur) * time.Second
+			}
+		}
+	}
+
+	// Get pause state
+	isPaused := false
+	pauseResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "pause"})
+	if err == nil && pauseResponse != nil {
+		if pause, ok := pauseResponse.(bool); ok {
+			isPaused = pause
+		}
+	}
+
+	// Get playback speed (for precise timing)
+	speed := 1.0
+	speedResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "speed"})
+	if err == nil && speedResponse != nil {
+		if s, ok := speedResponse.(float64); ok && s > 0 {
+			speed = s
+		}
+	}
+
+	return &playbackState{
+		positionSec: int(position),
+		durationSec: durationSec,
+		isPaused:    isPaused,
+		speed:       speed,
+	}
+}
+
+// buildPreciseTimestamps creates exact timestamps for Discord
+func (rpu *RichPresenceUpdater) buildPreciseTimestamps(state *playbackState, now time.Time) *client.Timestamps {
+	// Calculate the exact start time based on current position
+	// This ensures the progress bar in Discord is perfectly synced
+	startTime := now.Add(-time.Duration(state.positionSec) * time.Second)
+
+	if state.isPaused {
+		// When paused, only show start time (elapsed), no end time
+		// This freezes the progress bar at the current position
+		return &client.Timestamps{
+			Start: &startTime,
+			End:   nil,
+		}
+	}
+
+	// When playing, calculate precise end time
+	if state.durationSec > 0 && state.durationSec > state.positionSec {
+		// Calculate remaining time, accounting for playback speed
+		remainingSec := float64(state.durationSec-state.positionSec) / state.speed
+		endTime := now.Add(time.Duration(remainingSec) * time.Second)
+
+		return &client.Timestamps{
+			Start: &startTime,
+			End:   &endTime,
+		}
+	}
+
+	// Duration unknown, just show elapsed time
+	return &client.Timestamps{
+		Start: &startTime,
+		End:   nil,
+	}
+}
+
+// abs returns absolute value of int
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // getTitle extracts the appropriate title based on content type
