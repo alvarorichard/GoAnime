@@ -176,66 +176,103 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence() {
 	// Debug log to check episode duration
 	util.Debugf("Episode Duration in updateDiscordPresence: %v seconds (%v minutes)", rpu.episodeDuration.Seconds(), rpu.episodeDuration.Minutes())
 
-	// Convert episode duration to minutes and seconds format
-	totalMinutes := int(rpu.episodeDuration.Minutes())
-	totalSeconds := int(rpu.episodeDuration.Seconds()) % 60 // Remaining seconds after full minutes
+	// Format time as HH:MM:SS for movies/long content (>= 60 min) or MM:SS for episodes
+	timeInfo := formatPlaybackTime(currentPosition, rpu.episodeDuration)
 
-	// Format the current playback position as minutes and seconds
-	timeInfo := fmt.Sprintf("%02d:%02d / %02d:%02d",
-		int(currentPosition.Minutes()), int(currentPosition.Seconds())%60,
-		totalMinutes, totalSeconds,
-	)
+	// Detect if this is a movie/TV show (FlixHQ content) or anime
+	isMovieOrTV := rpu.anime.IsMovieOrTV() || rpu.anime.Source == "FlixHQ"
 
-	// Get anime title - prefer romaji, fall back to anime name
-	animeTitle := rpu.anime.Details.Title.Romaji
-	if animeTitle == "" {
-		animeTitle = rpu.anime.Details.Title.English
-	}
-	if animeTitle == "" {
-		// Clean the anime name from source tags for display
-		animeTitle = rpu.anime.Name
-		// Remove language/source tags like [English], [Portuguese], [AnimeFire] etc.
-		if idx := strings.Index(animeTitle, "]"); idx != -1 && idx < 20 {
-			animeTitle = strings.TrimSpace(animeTitle[idx+1:])
+	// Get title - prefer romaji for anime, use Name for movies/TV
+	var title string
+	if isMovieOrTV {
+		// For movies/TV, use the Name directly (it comes from FlixHQ/TMDB)
+		title = rpu.anime.Name
+	} else {
+		// For anime, prefer romaji, fall back to english, then name
+		title = rpu.anime.Details.Title.Romaji
+		if title == "" {
+			title = rpu.anime.Details.Title.English
+		}
+		if title == "" {
+			// Clean the anime name from source tags for display
+			title = rpu.anime.Name
+			// Remove language/source tags like [English], [Portuguese], [AnimeFire] etc.
+			if idx := strings.Index(title, "]"); idx != -1 && idx < 20 {
+				title = strings.TrimSpace(title[idx+1:])
+			}
 		}
 	}
 
-	// Get episode number safely
-	episodeNumber := "1"
-	if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
-		episodeNumber = rpu.anime.Episodes[0].Number
-	}
-
 	// Get image URL with fallback - Discord requires an externally accessible URL
-	// If no AniList image is available, use a default GoAnime logo/placeholder
 	imageURL := rpu.anime.ImageURL
+	util.Debugf("Discord RPC - Title: %s, Source: %s, MediaType: %s, ImageURL: %s", title, rpu.anime.Source, rpu.anime.MediaType, imageURL)
 	if imageURL == "" {
-		// Use a default anime-related placeholder image
-		// This is a generic anime icon that will work with Discord RPC
+		// Use a default placeholder image
 		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
-		util.Debugf("Using fallback image for Discord RPC (no AniList image available)")
+		util.Debugf("Using fallback image for Discord RPC (no image available)")
 	}
 
-	// Build activity details
-	details := fmt.Sprintf("%s | Episode %s | %s / %d min", animeTitle, episodeNumber, timeInfo, totalMinutes)
+	// Build activity details based on content type
+	totalDurationDisplay := formatDurationDisplay(rpu.episodeDuration)
+	var details string
+	var state string
+
+	if isMovieOrTV {
+		// For movies/TV, don't show "Episode X"
+		if rpu.anime.IsMovie() || rpu.anime.MediaType == "movie" {
+			details = fmt.Sprintf("%s | %s / %s", title, timeInfo, totalDurationDisplay)
+			state = "Watching a movie"
+		} else {
+			// For TV shows, show season/episode info if available
+			episodeNumber := "1"
+			if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
+				episodeNumber = rpu.anime.Episodes[0].Number
+			}
+			details = fmt.Sprintf("%s | Ep %s | %s / %s", title, episodeNumber, timeInfo, totalDurationDisplay)
+			state = "Watching a TV show"
+		}
+	} else {
+		// For anime, show episode number
+		episodeNumber := "1"
+		if len(rpu.anime.Episodes) > 0 && rpu.anime.Episodes[0].Number != "" {
+			episodeNumber = rpu.anime.Episodes[0].Number
+		}
+		details = fmt.Sprintf("%s | Episode %s | %s / %s", title, episodeNumber, timeInfo, totalDurationDisplay)
+		state = "Watching anime"
+	}
 
 	// Create the activity with updated Details
 	activity := client.Activity{
 		Details:    details,
-		State:      "Watching",
+		State:      state,
 		LargeImage: imageURL,
-		LargeText:  animeTitle,
+		LargeText:  title,
 	}
 
-	// Only add buttons if we have valid IDs
-	if rpu.anime.AnilistID > 0 || rpu.anime.MalID > 0 {
-		var buttons []*client.Button
+	// Add buttons based on content type
+	var buttons []*client.Button
+	if isMovieOrTV {
+		// For movies/TV from FlixHQ, add IMDB button if available
+		if rpu.anime.IMDBID != "" {
+			buttons = append(buttons, &client.Button{Label: "View on IMDB", Url: fmt.Sprintf("https://www.imdb.com/title/%s", rpu.anime.IMDBID)})
+		}
+		if rpu.anime.TMDBID > 0 {
+			mediaType := "movie"
+			if rpu.anime.IsTV() || rpu.anime.MediaType == "tv" {
+				mediaType = "tv"
+			}
+			buttons = append(buttons, &client.Button{Label: "View on TMDB", Url: fmt.Sprintf("https://www.themoviedb.org/%s/%d", mediaType, rpu.anime.TMDBID)})
+		}
+	} else {
+		// For anime, add AniList and MAL buttons
 		if rpu.anime.AnilistID > 0 {
 			buttons = append(buttons, &client.Button{Label: "View on AniList", Url: fmt.Sprintf("https://anilist.co/anime/%d", rpu.anime.AnilistID)})
 		}
 		if rpu.anime.MalID > 0 {
 			buttons = append(buttons, &client.Button{Label: "View on MAL", Url: fmt.Sprintf("https://myanimelist.net/anime/%d", rpu.anime.MalID)})
 		}
+	}
+	if len(buttons) > 0 {
 		activity.Buttons = buttons
 	}
 
@@ -288,4 +325,48 @@ func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec i
 func (rpu *RichPresenceUpdater) WaitEpisodeStart() {
 	// TODO: Implement waiting for episode start
 	panic("unimplemented")
+}
+
+// formatPlaybackTime formats the current position and total duration
+// Uses HH:MM:SS format for content >= 60 minutes (movies), MM:SS for shorter content (episodes)
+func formatPlaybackTime(currentPosition, totalDuration time.Duration) string {
+	// Use hours format if total duration is >= 60 minutes (movies/long content)
+	useHoursFormat := totalDuration.Minutes() >= 60
+
+	if useHoursFormat {
+		// Format as HH:MM:SS / HH:MM:SS for movies
+		currentHours := int(currentPosition.Hours())
+		currentMinutes := int(currentPosition.Minutes()) % 60
+		currentSeconds := int(currentPosition.Seconds()) % 60
+
+		totalHours := int(totalDuration.Hours())
+		totalMinutes := int(totalDuration.Minutes()) % 60
+		totalSeconds := int(totalDuration.Seconds()) % 60
+
+		return fmt.Sprintf("%d:%02d:%02d / %d:%02d:%02d",
+			currentHours, currentMinutes, currentSeconds,
+			totalHours, totalMinutes, totalSeconds,
+		)
+	}
+
+	// Format as MM:SS / MM:SS for episodes
+	return fmt.Sprintf("%02d:%02d / %02d:%02d",
+		int(currentPosition.Minutes()), int(currentPosition.Seconds())%60,
+		int(totalDuration.Minutes()), int(totalDuration.Seconds())%60,
+	)
+}
+
+// formatDurationDisplay returns a human-readable duration string
+// Shows hours and minutes for long content, just minutes for short content
+func formatDurationDisplay(duration time.Duration) string {
+	totalMinutes := int(duration.Minutes())
+	if totalMinutes >= 60 {
+		hours := totalMinutes / 60
+		minutes := totalMinutes % 60
+		if minutes > 0 {
+			return fmt.Sprintf("%dh%02dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%d min", totalMinutes)
 }

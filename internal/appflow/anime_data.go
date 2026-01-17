@@ -94,21 +94,33 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 func FetchAnimeDetails(anime *models.Anime) {
 	detailsStart := time.Now()
 
-	// SEMPRE enriquecer com dados do AniList para qualquer fonte
-	// Isso é essencial para a integração com Discord, AniSkip, etc.
-	// O sistema original SEMPRE usa imagens do AniList
+	// For FlixHQ movies/TV shows, use TMDB enrichment instead of AniList
+	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+		util.Debugf("Skipping AniList enrichment for FlixHQ content: %s", anime.Name)
+		// The anime already has ImageURL from FlixHQ scraping
+		// Optionally enrich with TMDB for more metadata (IMDB ID, rating, etc.)
+		if err := api.FetchAnimeDetails(anime); err != nil {
+			util.Debugf("Failed to enrich FlixHQ content with TMDB: %v", err)
+		}
+		util.Debugf("[PERF] FetchAnimeDetails (FlixHQ) completed in %v", time.Since(detailsStart))
+		return
+	}
 
-	// Usar a função de enriquecimento que já existe no sistema original
+	// ALWAYS enrich anime with AniList data
+	// This is essential for Discord integration, AniSkip, etc.
+	// The original system ALWAYS uses AniList images for anime
+
+	// Use the enrichment function from the original system
 	aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
 	if err != nil {
 		util.Debugf("Failed to fetch from AniList: %v", err)
 	} else {
-		// Enriquecer o anime com dados do AniList
+		// Enrich the anime with AniList data
 		anime.AnilistID = aniListInfo.Data.Media.ID
 		anime.MalID = aniListInfo.Data.Media.IDMal
 		anime.Details = aniListInfo.Data.Media
 
-		// SEMPRE usar imagem do AniList (como no sistema original)
+		// ALWAYS use AniList image (as in the original system)
 		if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
 			anime.ImageURL = cover
 		} else {
@@ -119,7 +131,7 @@ func FetchAnimeDetails(anime *models.Anime) {
 			anime.AnilistID, anime.MalID, anime.ImageURL)
 	}
 
-	// Fallback: tentar buscar detalhes específicos da fonte se necessário
+	// Fallback: try to fetch source-specific details if needed
 	if anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to") {
 		if err := api.FetchAnimeDetails(anime); err != nil {
 			util.Debugf("Failed to fetch anime details from source: %v", err)
