@@ -85,6 +85,26 @@ cd GoAnime
 go run cmd/goanime/main.go
 ```
 
+## Filmes e Séries
+
+GoAnime agora suporta filmes e séries através da fonte FlixHQ. Use a flag `--source flixhq` para buscar filmes e séries. Você também pode filtrar por tipo usando o parâmetro `--type` (por exemplo `--type movie` para buscar somente filmes).
+
+```bash
+# Buscar filmes/séries
+goanime --source flixhq "The Matrix"
+
+# Buscar somente filmes
+goanime --source flixhq --type movie "Inception"
+
+# Buscar somente séries
+goanime --source flixhq --type tv "Breaking Bad"
+
+# Habilitar legendas (inglês por padrão)
+goanime --source flixhq --subs "Avatar"
+```
+
+
+
 ## Linux
 
 <details>
