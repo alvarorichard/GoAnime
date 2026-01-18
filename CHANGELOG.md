@@ -4,6 +4,7 @@ Release date: 2026-01-18
 
 ## Features
 
+
 - FlixHQ integration for movies and TV shows, enabling searching and playback of FlixHQ content.
 - TMDB and OMDb integration for improved media enrichment and metadata (posters, descriptions, external IDs).
 - Concurrent anime search with exponential backoff for faster, more reliable search results across sources.

@@ -33,6 +33,7 @@ A mobile version of GoAnime is available for Android devices: [GoAnime Mobile](h
 
 ### Community
 
+
 Join our Discord for support, feedback, and updates: [Discord Server](https://discord.gg/6nZ2SYv3)
 
 ## Features
