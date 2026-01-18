@@ -434,7 +434,7 @@ func abs(x int) int {
 // getTitle extracts the appropriate title based on content type
 func (rpu *RichPresenceUpdater) getTitle(isMovieOrTV bool) string {
 	if isMovieOrTV {
-		return rpu.anime.Name
+		return cleanMediaTags(rpu.anime.Name)
 	}
 
 	title := rpu.anime.Details.Title.Romaji
@@ -447,7 +447,16 @@ func (rpu *RichPresenceUpdater) getTitle(isMovieOrTV bool) string {
 			title = strings.TrimSpace(title[idx+1:])
 		}
 	}
-	return title
+	return cleanMediaTags(title)
+}
+
+// cleanMediaTags removes [Movies/TV], [Movie], [TV] and similar tags from titles
+func cleanMediaTags(name string) string {
+	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[Portuguese]", "[Português]"}
+	for _, tag := range tags {
+		name = strings.ReplaceAll(name, tag, "")
+	}
+	return strings.TrimSpace(name)
 }
 
 // buildButtons creates the appropriate buttons based on content type
