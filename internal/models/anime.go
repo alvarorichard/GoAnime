@@ -1,43 +1,18 @@
+// Package models contains anime-specific data structures
 package models
 
-type Anime struct {
-	Name      string
-	URL       string
-	ImageURL  string
-	Episodes  []Episode
-	AnilistID int
-	MalID     int
-	Details   AniListDetails
-	Source    string // Identifies the source (AllAnime, AnimeFire, etc.)
-}
+// Anime represents an anime series with its metadata
+// For backwards compatibility, this is an alias to Media
+type Anime = Media
 
-// Episode represents a single episode of an anime series, containing details such as episode number,
-// URL, title information, air date, duration, filler/recap status, synopsis, and skip times.
-type Episode struct {
-	Number    string
-	Num       int
-	URL       string
-	Title     TitleDetails
-	Aired     string
-	Duration  int
-	IsFiller  bool
-	IsRecap   bool
-	Synopsis  string
-	SkipTimes SkipTimes
-}
-
-type TitleDetails struct {
-	Romaji   string
-	English  string
-	Japanese string
-}
-
+// AniListResponse represents the response from AniList GraphQL API
 type AniListResponse struct {
 	Data struct {
 		Media AniListDetails `json:"Media"`
 	} `json:"data"`
 }
 
+// AniListDetails contains detailed anime information from AniList
 type AniListDetails struct {
 	ID           int         `json:"id"`
 	IDMal        int         `json:"idMal"`
@@ -48,11 +23,17 @@ type AniListDetails struct {
 	Episodes     int         `json:"episodes"`
 	Status       string      `json:"status"`
 	CoverImage   CoverImages `json:"coverImage"`
+	Synonyms     []string    `json:"synonyms"`
 }
+
+// Title contains anime title in multiple languages
 type Title struct {
 	Romaji  string `json:"romaji"`
 	English string `json:"english"`
+	Native  string `json:"native"`
 }
+
+// CoverImages contains anime cover image URLs
 type CoverImages struct {
 	Large  string `json:"large"`
 	Medium string `json:"medium"`

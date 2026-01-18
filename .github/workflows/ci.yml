@@ -2,12 +2,12 @@ name: GoAnime CI
 
 on:
   push:
-    branches: [ main, dev, ipc ]
+    branches: [ main, dev]
   pull_request:
-    branches: [ main, dev, ipc ]
+    branches: [ main, dev ]
 
 jobs:
-  build:
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -74,3 +74,305 @@ jobs:
       - name: Run tests
         shell: bash
         run: go test -v -coverprofile=coverage.out ./...
+
+  build-binaries:
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary_name: goanime-linux
+            asset_name: goanime-linux-amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            binary_name: goanime.exe
+            asset_name: goanime-windows-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            binary_name: goanime-darwin-amd64
+            asset_name: goanime-darwin-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            binary_name: goanime-darwin-arm64
+            asset_name: goanime-darwin-arm64
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Get dependencies
+        run: go get -v -t -d ./...
+
+      - name: Build binary
+        shell: bash
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          go build -o dist/${{ matrix.binary_name }} -ldflags="-s -w" -trimpath ./cmd/goanime
+
+      - name: Create archive (Unix)
+        if: matrix.goos != 'windows'
+        shell: bash
+        run: |
+          cd dist
+          tar -czvf ${{ matrix.asset_name }}.tar.gz ${{ matrix.binary_name }}
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+          elif command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+          fi
+
+      - name: Create archive (Windows)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path ${{ matrix.binary_name }} -DestinationPath ${{ matrix.asset_name }}.zip
+          (Get-FileHash -Algorithm SHA256 ${{ matrix.asset_name }}.zip).Hash.ToLower() + "  ${{ matrix.asset_name }}.zip" | Out-File -Encoding utf8 ${{ matrix.asset_name }}.zip.sha256
+
+      - name: Upload binary artifact (Unix)
+        if: matrix.goos != 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            dist/${{ matrix.asset_name }}.tar.gz
+            dist/${{ matrix.asset_name }}.tar.gz.sha256
+          retention-days: 30
+
+      - name: Upload binary artifact (Windows)
+        if: matrix.goos == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            dist/${{ matrix.asset_name }}.zip
+            dist/${{ matrix.asset_name }}.zip.sha256
+          retention-days: 30
+
+  # Windows Installer Job - Creates an offline installer with bundled mpv
+  build-windows-installer:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Get dependencies
+        run: go get -v -t -d ./...
+
+      - name: Install GCC for CGO (SQLite support)
+        shell: pwsh
+        run: |
+          # Install TDM-GCC for Windows CGO builds with SQLite
+          Write-Host "Installing TDM-GCC for CGO support..."
+          choco install mingw -y
+          
+          # Verify GCC is available
+          $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
+          gcc --version
+          
+          Write-Host "GCC installed successfully for CGO builds"
+
+      - name: Build GoAnime binary with SQLite
+        shell: pwsh
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+          CC: gcc
+        run: |
+          # Add MinGW to PATH
+          $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
+          
+          # Create staging directory structure
+          New-Item -ItemType Directory -Force -Path "build/staging/bin"
+          
+          # Build the Go application with CGO enabled for SQLite support
+          go build -o build/staging/goanime.exe -ldflags="-s -w" -trimpath -tags="windows" ./cmd/goanime
+          
+          Write-Host "GoAnime binary built successfully with SQLite support"
+          Get-ChildItem build/staging/
+
+      - name: Download mpv for Windows
+        shell: pwsh
+        run: |
+          # Download latest mpv from zhongfly/mpv-winbuild GitHub releases
+          # Using GitHub API to get the latest release and download x86_64-v3 build
+          
+          Write-Host "Fetching latest mpv release from zhongfly/mpv-winbuild..."
+          
+          # Get the latest release info from GitHub API
+          $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers @{ "User-Agent" = "GoAnime-CI" }
+          
+          Write-Host "Latest release: $($releaseInfo.tag_name)"
+          
+          # Find the x86_64-v3 asset (optimized for modern CPUs)
+          $mpvAsset = $releaseInfo.assets | Where-Object { $_.name -like "mpv-x86_64-v3-*.7z" } | Select-Object -First 1
+          
+          if (-not $mpvAsset) {
+            # Fallback to regular x86_64 if v3 not found
+            $mpvAsset = $releaseInfo.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" -and $_.name -notlike "*v3*" } | Select-Object -First 1
+          }
+          
+          if (-not $mpvAsset) {
+            Write-Error "No suitable mpv asset found in release"
+            exit 1
+          }
+          
+          $mpvUrl = $mpvAsset.browser_download_url
+          $mpvArchive = "mpv.7z"
+          
+          Write-Host "Downloading: $($mpvAsset.name)"
+          Write-Host "URL: $mpvUrl"
+          
+          # Download mpv archive from GitHub releases with proper headers
+          Invoke-WebRequest -Uri $mpvUrl -OutFile $mpvArchive -Headers @{ "Accept" = "application/octet-stream"; "User-Agent" = "GoAnime-CI" }
+          
+          # Verify download
+          if (-not (Test-Path $mpvArchive) -or (Get-Item $mpvArchive).Length -lt 1000000) {
+            Write-Error "Download failed or file too small"
+            exit 1
+          }
+          
+          Write-Host "Downloaded mpv archive ($(((Get-Item $mpvArchive).Length / 1MB).ToString('F2')) MB), extracting..."
+          
+          # Extract using 7z (available on Windows runners)
+          7z x $mpvArchive -ompv_extracted -y
+          
+          # Find and copy mpv.exe and required DLLs to staging
+          $mpvExe = Get-ChildItem -Path "mpv_extracted" -Recurse -Filter "mpv.exe" | Select-Object -First 1
+          if ($mpvExe) {
+            $mpvDir = $mpvExe.DirectoryName
+            
+            # Copy mpv.exe
+            Copy-Item $mpvExe.FullName -Destination "build/staging/bin/mpv.exe"
+            Write-Host "mpv.exe copied to build/staging/bin/"
+            
+            # Copy all required DLLs from the same directory
+            $dlls = Get-ChildItem -Path $mpvDir -Filter "*.dll" -ErrorAction SilentlyContinue
+            if ($dlls) {
+              foreach ($dll in $dlls) {
+                Copy-Item $dll.FullName -Destination "build/staging/bin/" -Force
+                Write-Host "Copied DLL: $($dll.Name)"
+              }
+            }
+            
+            # Verify mpv version
+            & "build/staging/bin/mpv.exe" --version
+          } else {
+            Write-Error "mpv.exe not found in extracted archive"
+            exit 1
+          }
+          
+          # Cleanup extracted files
+          Remove-Item -Path "mpv_extracted" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $mpvArchive -Force -ErrorAction SilentlyContinue
+          
+          # Verify files exist
+          Write-Host "Staging directory contents:"
+          Get-ChildItem -Recurse build/staging/
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          # Install Inno Setup via Chocolatey (more reliable in CI)
+          Write-Host "Installing Inno Setup via Chocolatey..."
+          choco install innosetup -y --no-progress
+          
+          # Verify installation
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            Write-Host "Inno Setup installed successfully at: $iscc"
+          } else {
+            Write-Error "Inno Setup installation failed - ISCC.exe not found"
+            exit 1
+          }
+
+      - name: Create dist directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist"
+
+      - name: Build Windows Installer
+        shell: pwsh
+        run: |
+          # Add Inno Setup to PATH
+          $env:PATH = "C:\Program Files (x86)\Inno Setup 6;$env:PATH"
+          
+          # Verify ISCC exists
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Error "Inno Setup compiler not found at $iscc"
+            exit 1
+          }
+          
+          Write-Host "Building installer with Inno Setup..."
+          & $iscc "build/install.iss"
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup compilation failed"
+            exit 1
+          }
+          
+          Write-Host "Installer built successfully"
+          Get-ChildItem dist/
+
+      - name: Generate installer checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+          if ($installer) {
+            $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLower()
+            "$hash  $($installer.Name)" | Out-File -Encoding utf8 "dist/$($installer.BaseName).sha256"
+            Write-Host "Checksum generated: $hash"
+          }
+
+      - name: Upload Windows Installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: goanime-windows-installer
+          path: |
+            dist/GoAnime-Installer-*.exe
+            dist/GoAnime-Installer-*.sha256
+          retention-days: 30

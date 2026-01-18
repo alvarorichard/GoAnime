@@ -6,7 +6,7 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 
 ### Multi-Source Support
 - **AllAnime.day**: High-quality streams with multiple resolution options
-- **AnimeFire.plus**: Brazilian anime streaming site with Portuguese content
+- **Animefire.io**: Brazilian anime streaming site with Portuguese content
 - **Automatic Fallback**: If one source fails, automatically tries others
 
 ### Enhanced CLI Options
@@ -58,7 +58,7 @@ goanime -d --quality best "bleach" 100
 internal/
 ├── scraper/
 │   ├── allanime.go     # AllAnime.day scraper
-│   ├── animefire.go    # AnimeFire.plus scraper
+│   ├── animefire.go    # Animefire.io scraper
 │   └── unified.go      # Unified scraper interface
 ├── api/
 │   └── enhanced.go     # Enhanced API with multi-source support

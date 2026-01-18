@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -48,8 +49,9 @@ func PlayEpisode(
 	if currentEpisode == nil {
 		// Create episode if not found
 		// For AllAnime, use the anime ID as URL instead of episode-specific URL
+		// For AnimeDrive, use the episode URL directly
 		episodeURLForCreation := episodeURL
-		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http")) {
+		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http") && !strings.Contains(anime.URL, "animesdrive")) {
 			episodeURLForCreation = anime.URL // Use anime ID for AllAnime
 		}
 
@@ -63,6 +65,10 @@ func PlayEpisode(
 	// Try enhanced API first, fallback to legacy if needed
 	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
 	if err != nil {
+		// Check if user requested to go back to episode selection
+		if errors.Is(err, player.ErrBackToEpisodeSelection) {
+			return player.ErrBackToEpisodeSelection
+		}
 		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
 		return fmt.Errorf("failed to extract video URL: %w", err)
 	}
@@ -95,6 +101,10 @@ func PlayEpisode(
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
+		// If user selected back, return empty values to signal back request
+		if errors.Is(err, player.ErrBackRequested) {
+			return "", "back", -1
+		}
 		log.Fatalln(util.ErrorHandler(err))
 	}
 	epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(numStr))

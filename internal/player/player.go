@@ -63,10 +63,10 @@ func (m *model) Init() tea.Cmd {
 // StartVideo opens mpv with a socket for IPC
 // Modify the StartVideo function in player.go
 func StartVideo(link string, args []string) (string, error) {
-	// Verify MPV is installed
-	mpvPath, err := exec.LookPath("mpv")
+	// Verify MPV is installed using platform-specific search
+	mpvPath, err := findMPVPath()
 	if err != nil {
-		return "", fmt.Errorf("mpv not found in PATH. Please install mpv: https://mpv.io/installation/")
+		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", err)
 	}
 
 	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
@@ -114,14 +114,21 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	if util.IsDebug {
-		fmt.Printf("[DEBUG]mpv started, waiting for socket creation: %s\n", socketPath)
+		fmt.Printf("[DEBUG] mpv started, waiting for socket creation: %s\n", socketPath)
 	}
 
-	// Wait for socket creation with longer timeout
-	maxAttempts := 30 // 3 seconds total
-	for i := 0; i < maxAttempts; i++ {
+	// Wait for socket creation with adaptive timeout and exponential backoff
+	// Total max wait time: ~10 seconds (accommodates slow network streams)
+	// Initial intervals are short for fast local files, then back off for streams
+	maxWaitTime := 10 * time.Second
+	initialInterval := 50 * time.Millisecond
+	maxInterval := 500 * time.Millisecond
+	currentInterval := initialInterval
+
+	for time.Since(startTime) < maxWaitTime {
 		if util.IsDebug {
-			fmt.Printf("[DEBUG] Try %d/%d: checking socket connection...\n", i+1, maxAttempts)
+			elapsed := time.Since(startTime)
+			fmt.Printf("[DEBUG] Attempt at %.2fs: checking socket connection...\n", elapsed.Seconds())
 		}
 
 		// Try to connect to the socket instead of checking file existence
@@ -140,23 +147,39 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 
 		// Check if MPV process is still running
-		if cmd.Process == nil || cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			return "", fmt.Errorf("mpv process exited prematurely: %s", stderr.String())
+		if cmd.Process == nil {
+			return "", fmt.Errorf("mpv process not started properly: %s", stderr.String())
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		// Check if process exited prematurely
+		// Note: ProcessState is nil until the process exits, so we need a different check
+		select {
+		case <-time.After(currentInterval):
+			// Apply exponential backoff
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
+		default:
+			time.Sleep(currentInterval)
+			currentInterval = time.Duration(float64(currentInterval) * 1.5)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
+		}
 	}
 
+	elapsed := time.Since(startTime)
 	if util.IsDebug {
-		fmt.Printf("[DEBUG] Timeout after %.2fs waiting  socket of mpv\n", time.Since(startTime).Seconds())
+		fmt.Printf("[DEBUG] Timeout after %.2fs waiting for mpv socket\n", elapsed.Seconds())
 	}
-	// Cleanup if timeout occurs
-	err = cmd.Process.Kill()
-	if err != nil {
 
-		return "", err
+	// Cleanup if timeout occurs
+	if killErr := cmd.Process.Kill(); killErr != nil {
+		util.Debugf("Failed to kill mpv process: %v", killErr)
 	}
-	return "", fmt.Errorf("timeout waiting for mpv socket. Possible issues:\n1. MPV installation corrupted\n2. Firewall blocking IPC\n3. Invalid video URL\nCheck debug logs with -debug flag")
+
+	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs. Possible issues:\n1. Slow network connection - video source may be unresponsive\n2. MPV installation corrupted\n3. Firewall blocking IPC\n4. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds())
 }
 
 // MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages
@@ -179,6 +202,12 @@ func filterMPVArgs(args []string) []string {
 		"--video-latency-hacks=",
 		"--audio-display=",
 		"--start=",
+		"--alang=",      // Audio language preference
+		"--slang=",      // Subtitle language preference
+		"--aid=",        // Audio track ID
+		"--sid=",        // Subtitle track ID
+		"--sub-file=",   // External subtitle file
+		"--audio-file=", // External audio file
 		// Add more allowed prefixes here if needed in the future
 	}
 
@@ -305,6 +334,14 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 			}
 			continue
 		}
+		// Check for success response (set_property returns {"error":"success"} without data)
+		if errStr, ok := response["error"].(string); ok && errStr == "success" {
+			// Command succeeded, return nil data
+			if data, exists := response["data"]; exists {
+				return data, nil
+			}
+			return nil, nil
+		}
 		if data, exists := response["data"]; exists {
 			return data, nil
 		}
@@ -340,86 +377,113 @@ func HandleDownloadAndPlay(
 ) error {
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
-	downloadOption := askForDownload()
-	switch downloadOption {
-	case 1:
-		// Download the current episode
-		if err := downloadAndPlayEpisode(
-			videoURL,
-			episodes,
-			selectedEpisodeNum,
-			animeURL,
-			episodeNumberStr,
-			animeMalID,
-			updater,
-		); err != nil {
-			return err
-		}
-	case 2:
-		// Download episodes in a range
-		if err := HandleBatchDownload(episodes, animeURL); err != nil {
-			return err
-		}
-	default:
-		// Play online - determine the best approach based on URL type
-		videoURLToPlay := ""
 
-		// Check if we have a direct stream URL (SharePoint, Dropbox, etc.)
-		if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
-			strings.Contains(videoURL, "dropbox.com") ||
-			strings.Contains(videoURL, "wixmp.com") ||
-			strings.HasSuffix(videoURL, ".mp4") ||
-			strings.HasSuffix(videoURL, ".m3u8")) {
-			// Use direct stream URL
-			videoURLToPlay = videoURL
-			if util.IsDebug {
-				util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+	// Check if this is an HLS stream (for proper handling later)
+	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+
+	for {
+		downloadOption := askForDownload()
+		switch downloadOption {
+		case 0:
+			// User wants to go back to server selection
+			return ErrBackToEpisodeSelection
+		case 1:
+			// Download the current episode
+			if isHLSStream {
+				// HLS streams need special download handling
+				util.Debugf("HLS download requested - using stream URL")
 			}
-		} else {
-			// Try to extract video URL from episode page
-			if len(episodes) > 0 && selectedEpisodeNum > 0 {
-				selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-				if found {
-					if util.IsDebug {
-						util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+			err := downloadAndPlayEpisode(
+				videoURL,
+				episodes,
+				selectedEpisodeNum,
+				animeURL,
+				episodeNumberStr,
+				animeMalID,
+				updater,
+			)
+			if err != nil {
+				if errors.Is(err, ErrBackToDownloadOptions) {
+					continue // Go back to download options menu
+				}
+				return err
+			}
+			return nil
+		case 2:
+			// Download episodes in a range
+			if err := HandleBatchDownload(episodes, animeURL); err != nil {
+				return err
+			}
+			return nil
+		default:
+			// Play online - determine the best approach based on URL type
+			videoURLToPlay := ""
+
+			// For HLS streams, use directly
+			if isHLSStream {
+				videoURLToPlay = videoURL
+				if util.IsDebug {
+					util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURLToPlay)
+				}
+			} else if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
+				strings.Contains(videoURL, "dropbox.com") ||
+				strings.Contains(videoURL, "wixmp.com") ||
+				strings.HasSuffix(videoURL, ".mp4")) {
+				// Use direct stream URL (SharePoint, Dropbox, etc.)
+				videoURLToPlay = videoURL
+				if util.IsDebug {
+					util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+				}
+			} else {
+				// Try to extract video URL from episode page
+				if len(episodes) > 0 && selectedEpisodeNum > 0 {
+					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
+					if found {
+						if util.IsDebug {
+							util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+						}
+						if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+							videoURLToPlay = url
+						}
 					}
-					if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
+				}
+				// Fallback: try to extract from original videoURL
+				if videoURLToPlay == "" && videoURL != "" {
+					if util.IsDebug {
+						util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
+					}
+					if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
 						videoURLToPlay = url
 					}
 				}
 			}
-			// Fallback: try to extract from original videoURL
-			if videoURLToPlay == "" && videoURL != "" {
-				if util.IsDebug {
-					util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
-				}
-				if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
-					videoURLToPlay = url
-				}
+
+			// Final validation
+			if videoURLToPlay == "" {
+				util.Debugf("❌ No valid video URL found")
+				return fmt.Errorf("no valid video URL found")
 			}
-		}
 
-		// Final validation
-		if videoURLToPlay == "" {
-			util.Debugf("❌ No valid video URL found")
-			return fmt.Errorf("no valid video URL found")
-		}
+			if util.IsDebug {
+				util.Debugf("✅ Final video URL: %s", videoURLToPlay)
+			}
 
-		if util.IsDebug {
-			util.Debugf("✅ Final video URL: %s", videoURLToPlay)
-		}
-
-		if err := playVideo(
-			videoURLToPlay,
-			episodes,
-			selectedEpisodeNum,
-			animeMalID,
-			updater,
-		); err != nil {
-			return err
+			err := playVideo(
+				videoURLToPlay,
+				episodes,
+				selectedEpisodeNum,
+				animeMalID,
+				updater,
+			)
+			if err != nil {
+				if errors.Is(err, ErrBackToDownloadOptions) {
+					continue // Go back to download options menu
+				}
+				return err
+			}
+			return nil
 		}
 	}
-	return nil
 }
 
 func downloadAndPlayEpisode(
@@ -583,6 +647,7 @@ func askForDownload() int {
 		Title("Download Options").
 		Description("Choose how you want to proceed:").
 		Options(
+			huh.NewOption("← Back", "back"),
 			huh.NewOption("Download this episode", "download_single"),
 			huh.NewOption("Download episodes in a range", "download_range"),
 			huh.NewOption("No download (play online)", "play_online"),
@@ -596,6 +661,8 @@ func askForDownload() int {
 
 	// Determines the selected option based on the choice value
 	switch choice {
+	case "back":
+		return 0
 	case "download_single":
 		return 1
 	case "download_range":
@@ -669,4 +736,120 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 		speed,
 	})
 	return err
+}
+
+// CycleAudioTrack cycles through available audio tracks
+func CycleAudioTrack(socketPath string) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"cycle",
+		"aid",
+	})
+	return err
+}
+
+// CycleSubtitleTrack cycles through available subtitle tracks
+func CycleSubtitleTrack(socketPath string) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"cycle",
+		"sid",
+	})
+	return err
+}
+
+// SetAudioTrack sets a specific audio track by ID
+func SetAudioTrack(socketPath string, trackID int) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"aid",
+		trackID,
+	})
+	return err
+}
+
+// SetSubtitleTrack sets a specific subtitle track by ID
+func SetSubtitleTrack(socketPath string, trackID int) error {
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"set_property",
+		"sid",
+		trackID,
+	})
+	return err
+}
+
+// GetAudioTracks returns list of available audio tracks
+func GetAudioTracks(socketPath string) ([]map[string]interface{}, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+	if err != nil {
+		return nil, err
+	}
+
+	tracks, ok := result.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected track-list format")
+	}
+
+	var audioTracks []map[string]interface{}
+	for _, t := range tracks {
+		track, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if trackType, ok := track["type"].(string); ok && trackType == "audio" {
+			audioTracks = append(audioTracks, track)
+		}
+	}
+	return audioTracks, nil
+}
+
+// GetSubtitleTracks returns list of available subtitle tracks
+func GetSubtitleTracks(socketPath string) ([]map[string]interface{}, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+	if err != nil {
+		return nil, err
+	}
+
+	tracks, ok := result.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected track-list format")
+	}
+
+	var subTracks []map[string]interface{}
+	for _, t := range tracks {
+		track, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if trackType, ok := track["type"].(string); ok && trackType == "sub" {
+			subTracks = append(subTracks, track)
+		}
+	}
+	return subTracks, nil
+}
+
+// GetCurrentAudioTrack returns the current audio track ID
+func GetCurrentAudioTrack(socketPath string) (int, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "aid"})
+	if err != nil {
+		return 0, err
+	}
+	if id, ok := result.(float64); ok {
+		return int(id), nil
+	}
+	return 0, fmt.Errorf("unexpected aid format")
+}
+
+// GetCurrentSubtitleTrack returns the current subtitle track ID
+func GetCurrentSubtitleTrack(socketPath string) (int, error) {
+	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "sid"})
+	if err != nil {
+		return 0, err
+	}
+	if id, ok := result.(float64); ok {
+		return int(id), nil
+	}
+	// "no" means no subtitle is selected
+	if _, ok := result.(string); ok {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("unexpected sid format")
 }

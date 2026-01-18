@@ -18,7 +18,7 @@ import (
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
-func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled bool) {
+func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
 	for {
 		animeMutex := sync.Mutex{}
 		isPaused := false
@@ -27,33 +27,19 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		anime.Episodes = []models.Episode{episodes[0]}
 		animeMutex.Unlock()
 
-		if err := api.GetMovieData(anime.MalID, anime); err != nil {
-			log.Printf("Error fetching movie/OVA data: %v", err)
+		// Only fetch movie data from Jikan API for anime content (not FlixHQ movies/TV)
+		// FlixHQ content already has metadata from TMDB/OMDb
+		if !anime.IsMovieOrTV() && anime.MalID > 0 {
+			if err := api.GetMovieData(anime.MalID, anime); err != nil {
+				log.Printf("Error fetching movie/OVA data: %v", err)
+			}
 		}
 
 		videoURL, err := player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
 		if err != nil {
 			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(err))
-			// Try to change anime immediately instead of exiting
-			newAnime, newEpisodes, chErr := ChangeAnimeLocal()
-			if chErr != nil {
-				log.Printf("Error changing anime: %v", chErr)
-				// If change fails, ask user on next loop iteration
-				continue
-			}
-			anime = newAnime
-			episodes = newEpisodes
-
-			// If new anime is a series, delegate handling and exit movie loop
-			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
-			if series {
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
-				break
-			}
-			// Otherwise continue loop to play the new movie
-			fmt.Printf("Switched to movie: %s\n", anime.Name)
-			continue
+			// Return to anime selection
+			return player.ErrBackToAnimeSelection
 		}
 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
@@ -96,7 +82,11 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
+				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -115,8 +105,8 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			break
 		}
 
-		// Handle anime change for movies
-		if userInput == "c" {
+		// Handle back/change anime for movies - both options allow searching for a new anime
+		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
@@ -132,7 +122,11 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				HandleSeries(anime, episodes, totalEpisodes, discordEnabled)
+				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
+					if errors.Is(err, player.ErrBackToAnimeSelection) {
+						return err
+					}
+				}
 				break
 			}
 
@@ -143,6 +137,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		// For movies, other navigation options don't make much sense, so just continue playing the same movie
 		log.Println("Replaying the same movie...")
 	}
+	return nil
 }
 
 // createUpdater cria um atualizador de Discord Rich Presence se estiver habilitado
@@ -150,11 +145,13 @@ func createUpdater(anime *models.Anime, isPaused *bool, animeMutex *sync.Mutex, 
 	if !discordEnabled {
 		return nil
 	}
+	// Use 3 second update interval for precise timing sync
+	// Discord timestamps need regular updates to stay accurate
 	return discord.NewRichPresenceUpdater(
 		anime,
 		isPaused,
 		animeMutex,
-		1*time.Second,
+		3*time.Second,
 		episodeDuration,
 		getSocketPath(),
 		player.MpvSendCommand,

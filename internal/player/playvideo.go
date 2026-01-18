@@ -26,6 +26,112 @@ var ErrUserQuit = errors.New("user requested to quit application")
 // ErrChangeAnime is returned when the user chooses to change anime
 var ErrChangeAnime = errors.New("user requested to change anime")
 
+// ErrBackToDownloadOptions is returned when user wants to go back to download options
+var ErrBackToDownloadOptions = errors.New("back to download options")
+
+// waitForVideoReady waits for the HLS video to be ready for playback
+// Returns true if video is ready, false if timeout
+func waitForVideoReady(socketPath string) bool {
+	util.Debugf("Waiting for HLS video to be ready...")
+
+	maxWait := 45 * time.Second // Increased for slow HLS streams
+	pollInterval := 500 * time.Millisecond
+	startTime := time.Now()
+
+	for time.Since(startTime) < maxWait {
+		// Try multiple properties to detect when video is ready
+		// Method 1: Check duration (most reliable for HLS)
+		durationResp, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+		if err == nil {
+			if duration, ok := durationResp.(float64); ok && duration > 0 {
+				util.Debugf("HLS video ready (duration: %.0f seconds) after %.1fs", duration, time.Since(startTime).Seconds())
+				return true
+			}
+		}
+
+		// Method 2: Check if time-pos is available (video playing)
+		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		if posErr == nil {
+			if pos, ok := posResp.(float64); ok && pos >= 0 {
+				util.Debugf("HLS video playing (position: %.1f seconds) after %.1fs", pos, time.Since(startTime).Seconds())
+				return true
+			}
+		}
+
+		// Method 3: Check playback-time (alternative property)
+		playbackResp, playErr := mpvSendCommand(socketPath, []interface{}{"get_property", "playback-time"})
+		if playErr == nil {
+			if playback, ok := playbackResp.(float64); ok && playback >= 0 {
+				util.Debugf("HLS video playback started (time: %.1f seconds) after %.1fs", playback, time.Since(startTime).Seconds())
+				return true
+			}
+		}
+
+		time.Sleep(pollInterval)
+	}
+	util.Debugf("Timeout waiting for HLS video (%.1fs)", time.Since(startTime).Seconds())
+	return false
+}
+
+// seekToResumePosition seeks to the saved resume position for HLS streams
+// This function is robust: it waits for video ready, seeks, and verifies the seek worked
+func seekToResumePosition(socketPath string, resumeTime int) {
+	if resumeTime <= 0 {
+		return
+	}
+
+	util.Debugf("HLS resume: will seek to %d seconds", resumeTime)
+
+	// Wait for video to be fully ready first
+	if !waitForVideoReady(socketPath) {
+		util.Debugf("HLS resume: video not ready after timeout, attempting seek anyway")
+	}
+
+	// Give mpv a moment to stabilize after video is ready
+	time.Sleep(300 * time.Millisecond)
+
+	// Try multiple seek methods with verification - more attempts, longer waits
+	maxAttempts := 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		util.Debugf("HLS resume: seek attempt %d/%d to %d seconds", attempt, maxAttempts, resumeTime)
+
+		// Method 1: seek absolute (works best with HLS)
+		_, err := mpvSendCommand(socketPath, []interface{}{"seek", float64(resumeTime), "absolute"})
+		if err != nil {
+			util.Debugf("HLS resume: seek absolute failed: %v, trying set_property", err)
+			// Method 2: set_property time-pos
+			_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "time-pos", float64(resumeTime)})
+		}
+
+		// Wait for seek to complete (HLS can be slow)
+		time.Sleep(800 * time.Millisecond)
+
+		// Verify position
+		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		if posErr == nil {
+			if pos, ok := posResp.(float64); ok {
+				// Allow 10 second tolerance for HLS streams
+				if pos >= float64(resumeTime-10) {
+					util.Debugf("HLS resume: SUCCESS - position is %.0f seconds (target: %d)", pos, resumeTime)
+					return
+				}
+				util.Debugf("HLS resume: position mismatch - got %.0f, want %d", pos, resumeTime)
+			}
+		} else {
+			util.Debugf("HLS resume: could not get position: %v", posErr)
+		}
+
+		// Wait before retry, increasing delay
+		if attempt < maxAttempts {
+			waitTime := time.Duration(attempt) * 500 * time.Millisecond
+			util.Debugf("HLS resume: waiting %v before retry", waitTime)
+			time.Sleep(waitTime)
+		}
+	}
+
+	util.Debugf("HLS resume: FAILED after %d attempts - video may start from beginning", maxAttempts)
+}
+
 // applySkipTimes applies skip times to an mpv instance
 func applySkipTimes(socketPath string, episode *models.Episode) {
 	var opts []string
@@ -155,6 +261,10 @@ func playVideo(
 	anilistID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
+	timer := util.StartTimer("playVideo:Total")
+	defer timer.Stop()
+	util.PerfCount("video_plays")
+
 	// Log the episode number and URL for debugging
 	util.Debugf("Playing video for episode %d, URL: %s", currentEpisodeNum, videoURL)
 
@@ -180,9 +290,37 @@ func playVideo(
 		"--audio-display=no",
 	}
 
+	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
+	// Check if this is a movie/TV content by examining the updater's anime source
+	isMovieOrTV := false
+	if updater != nil && updater.GetAnime() != nil {
+		anime := updater.GetAnime()
+		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
+	}
+
+	if isMovieOrTV {
+		// Audio and subtitle language preferences only for movies/TV
+		audioLang := util.GlobalAudioLanguage
+		if audioLang == "" {
+			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English
+			audioLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
+		}
+		subsLang := util.GlobalSubsLanguage
+		if subsLang == "" {
+			subsLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
+		}
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--alang=%s", audioLang))
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--slang=%s", subsLang))
+		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
+	}
+
 	// Initialize tracking and check for resume time
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
-	if resumeTime > 0 {
+
+	// For HLS streams (.m3u8), we'll seek after playback starts instead of using --start
+	// because --start doesn't work reliably with HLS streams
+	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	if resumeTime > 0 && !isHLSStream {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}
 
@@ -190,9 +328,24 @@ func playVideo(
 	skipDataChan := fetchAniSkipAsync(anilistID, currentEpisodeNum, currentEpisode)
 
 	// Start the video with mpv
+	mpvTimer := util.StartTimer("MPV:StartVideo")
 	socketPath, err := StartVideo(videoURL, mpvArgs)
+	mpvTimer.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to start video: %w", err)
+	}
+
+	// For HLS streams, seek to resume position (includes waiting for video ready)
+	if isHLSStream && resumeTime > 0 {
+		util.Debugf("HLS stream detected with resume time %d seconds", resumeTime)
+		hlsTimer := util.StartTimer("HLS:SeekToResume")
+		seekToResumePosition(socketPath, resumeTime)
+		hlsTimer.Stop()
+	} else if isHLSStream {
+		// Just wait for video ready without seeking
+		hlsTimer := util.StartTimer("HLS:WaitForReady")
+		waitForVideoReady(socketPath)
+		hlsTimer.Stop()
 	}
 
 	// Apply AniSkip results to skip intros/outros
@@ -249,11 +402,35 @@ func playVideo(
 
 // getCurrentEpisode retrieves the current episode based on the episode number
 func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, error) {
-	for _, ep := range episodes {
-		if ExtractEpisodeNumber(ep.Number) == fmt.Sprintf("%d", num) {
-			return &ep, nil
+	numStr := fmt.Sprintf("%d", num)
+
+	// First try: match by extracted episode number
+	for i := range episodes {
+		if ExtractEpisodeNumber(episodes[i].Number) == numStr {
+			return &episodes[i], nil
 		}
 	}
+
+	// Second try: match by Num field directly
+	for i := range episodes {
+		if episodes[i].Num == num {
+			return &episodes[i], nil
+		}
+	}
+
+	// Third try: match by Number field directly (for simple numeric cases)
+	for i := range episodes {
+		if episodes[i].Number == numStr {
+			return &episodes[i], nil
+		}
+	}
+
+	// Fourth try: check if we're within the bounds and use index-based access
+	// This handles cases where episode numbering doesn't match exactly
+	if num > 0 && num <= len(episodes) {
+		return &episodes[num-1], nil
+	}
+
 	return nil, fmt.Errorf("episode %d not found", num)
 }
 
@@ -298,45 +475,96 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 // 	return tracker, 0
 // }
 
-// initTracking inicializa o sistema de rastreamento
-func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
-	if !tracking.IsCgoEnabled {
-		if util.IsDebug {
-			util.Debug("Tracking desabilitado: CGO não disponível")
-		}
-		return nil, 0
+// cachedDBPath stores the database path to avoid repeated user.Current() calls
+var cachedDBPath string
+
+// getTrackerDBPath returns the cached database path
+func getTrackerDBPath() string {
+	if cachedDBPath != "" {
+		return cachedDBPath
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
-		util.Errorf("Falha ao obter usuário atual: %v", err)
-		return nil, 0
+		util.Errorf("Failed to get current user: %v", err)
+		return ""
 	}
 
-	var dbPath string
 	if runtime.GOOS == "windows" {
-		dbPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+		cachedDBPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
 	} else {
-		dbPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
+		cachedDBPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
 	}
 
-	tracker := tracking.NewLocalTracker(dbPath)
-	if tracker == nil {
+	return cachedDBPath
+}
+
+// initTracking inicializa o sistema de rastreamento
+func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
+	if !tracking.IsCgoEnabled {
+		if util.IsDebug {
+			util.Debug("Tracking disabled: CGO not available")
+		}
 		return nil, 0
 	}
+
+	dbPath := getTrackerDBPath()
+	if dbPath == "" {
+		return nil, 0
+	}
+
+	// First check if we have a cached tracker (fast path)
+	tracker := tracking.GetGlobalTracker()
+	if tracker == nil {
+		// Need to initialize - this is only slow the first time
+		tracker = tracking.NewLocalTracker(dbPath)
+		if tracker == nil {
+			return nil, 0
+		}
+	}
+
+	// Debug: log what we're looking up
+	util.Debugf("Tracking lookup: anilistID=%d, episode.URL=%s", anilistID, episode.URL)
 
 	progress, err := tracker.GetAnime(anilistID, episode.URL)
-	if err != nil || progress == nil || progress.PlaybackTime <= 0 {
+	if err != nil {
+		util.Debugf("Tracking lookup error: %v", err)
+		return tracker, 0
+	}
+	if progress == nil {
+		util.Debugf("Tracking lookup: no progress found")
+		return tracker, 0
+	}
+	if progress.PlaybackTime <= 0 {
+		util.Debugf("Tracking lookup: playback time is 0 or negative")
 		return tracker, 0
 	}
 
+	util.Debugf("Tracking found: PlaybackTime=%d seconds", progress.PlaybackTime)
+
 	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
-		util.Debugf("Retomando do tempo salvo: %d segundos para o episódio %d", progress.PlaybackTime, episodeNum)
+		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
 		return tracker, progress.PlaybackTime
 	}
 
+	util.Debugf("User declined to resume")
 	return tracker, 0
+}
+
+// InitTrackerAsync initializes the tracker in the background.
+// Call this early in the application lifecycle to avoid delays later.
+func InitTrackerAsync() {
+	if !tracking.IsCgoEnabled {
+		return
+	}
+
+	go func() {
+		dbPath := getTrackerDBPath()
+		if dbPath != "" {
+			tracking.NewLocalTracker(dbPath)
+		}
+	}()
 }
 
 // fetchAniSkipAsync fetches AniSkip data in parallel
@@ -350,6 +578,7 @@ func fetchAniSkipAsync(anilistID, episodeNum int, episode *models.Episode) chan 
 }
 
 // applyAniSkipResults applies AniSkip results
+// Reduced timeout from 3s to 2s for faster playback start
 func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episode, episodeNum int) {
 	select {
 	case err := <-ch:
@@ -367,7 +596,7 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 		} else {
 			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(2 * time.Second):
 		util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
 	}
 }
@@ -385,7 +614,8 @@ func initDiscordPresence(updater *discord.RichPresenceUpdater, socketPath string
 
 // waitForPlaybackStart waits for playback to start
 func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdater) {
-	for {
+	maxAttempts := 30 // Max 30 seconds to wait
+	for i := 0; i < maxAttempts; i++ {
 		timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
 		if err == nil && timePos != nil && !updater.IsEpisodeStarted() {
 			updater.SetEpisodeStarted(true)
@@ -393,24 +623,36 @@ func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdate
 		}
 		time.Sleep(1 * time.Second)
 	}
+	// Set as started anyway to avoid infinite loop
+	updater.SetEpisodeStarted(true)
 }
 
 // updateEpisodeDuration updates the episode duration
 func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdater, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
-	for {
-		if !updater.IsEpisodeStarted() || updater.GetEpisodeDuration() == 0 {
-			time.Sleep(1 * time.Second)
+	maxAttempts := 10 // Only try 10 times to get duration
+	for i := 0; i < maxAttempts; i++ {
+		if !updater.IsEpisodeStarted() {
+			time.Sleep(2 * time.Second)
 			continue
+		}
+
+		// If duration is already set, just update tracking and exit
+		if updater.GetEpisodeDuration() > 0 {
+			dur := updater.GetEpisodeDuration()
+			updateTrackingWithDuration(tracker, anilistID, episode, episodeNum, dur)
+			return
 		}
 
 		durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
 		if err != nil || durationPos == nil {
-			break
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		duration, ok := durationPos.(float64)
-		if !ok {
-			break
+		if !ok || duration <= 0 {
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		dur := time.Duration(duration * float64(time.Second))
@@ -419,21 +661,25 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 		}
 
 		updater.SetEpisodeDuration(dur)
+		updateTrackingWithDuration(tracker, anilistID, episode, episodeNum, dur)
+		return
+	}
+}
 
-		if tracker != nil && dur > 0 {
-			anime := tracking.Anime{
-				AnilistID:     anilistID,
-				AllanimeID:    episode.URL,
-				EpisodeNumber: episodeNum,
-				Duration:      int(dur.Seconds()),
-				Title:         getEpisodeTitle(episode.Title),
-				LastUpdated:   time.Now(),
-			}
-			if err := tracker.UpdateProgress(anime); err != nil {
-				util.Errorf("Failed to update tracking: %v", err)
-			}
+// updateTrackingWithDuration updates the local tracker with episode info and duration
+func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
+	if tracker != nil && dur > 0 {
+		anime := tracking.Anime{
+			AnilistID:     anilistID,
+			AllanimeID:    episode.URL,
+			EpisodeNumber: episodeNum,
+			Duration:      int(dur.Seconds()),
+			Title:         getEpisodeTitle(episode.Title),
+			LastUpdated:   time.Now(),
 		}
-		break
+		if err := tracker.UpdateProgress(anime); err != nil {
+			util.Errorf("Failed to update tracking: %v", err)
+		}
 	}
 }
 
@@ -465,12 +711,34 @@ func getEpisodeTitle(title models.TitleDetails) string {
 // findEpisodeIndex finds the episode index based on the episode number
 func findEpisodeIndex(episodes []models.Episode, num int) int {
 	episodeStr := fmt.Sprintf("%d", num)
+
+	// First try: match by extracted episode number
 	for i, ep := range episodes {
 		extractedNum := ExtractEpisodeNumber(ep.Number)
 		if extractedNum == episodeStr {
 			return i
 		}
 	}
+
+	// Second try: match by Num field directly
+	for i, ep := range episodes {
+		if ep.Num == num {
+			return i
+		}
+	}
+
+	// Third try: match by Number field directly
+	for i, ep := range episodes {
+		if ep.Number == episodeStr {
+			return i
+		}
+	}
+
+	// Fourth try: use index-based access if within bounds
+	if num > 0 && num <= len(episodes) {
+		return num - 1
+	}
+
 	return -1 // Episode not found
 }
 
@@ -493,6 +761,7 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 }
 
 // startTrackingRoutine starts the tracking routine
+// Optimized with adaptive update interval to reduce overhead
 func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, anilistID int, episode *models.Episode, episodeNum int, updater *discord.RichPresenceUpdater) chan struct{} {
 	stopChan := make(chan struct{})
 	if tracker == nil {
@@ -500,14 +769,23 @@ func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, ani
 	}
 
 	go func() {
-		ticker := time.NewTicker(2 * time.Second)
+		// Start with faster updates, then slow down for efficiency
+		ticker := time.NewTicker(3 * time.Second) // Increased from 2s to reduce overhead
 		defer ticker.Stop()
 
+		updateCount := 0
 		for {
 			select {
 			case <-ticker.C:
 				updateTracking(tracker, socketPath, anilistID, episode, episodeNum, updater)
+				updateCount++
+				// After 30 updates (~90 seconds), slow down to every 5 seconds
+				if updateCount == 30 {
+					ticker.Reset(5 * time.Second)
+				}
 			case <-stopChan:
+				// Final update before stopping
+				updateTracking(tracker, socketPath, anilistID, episode, episodeNum, updater)
 				return
 			}
 		}
@@ -557,7 +835,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 }
 
 // showPlayerMenu displays an interactive menu using huh.Select
-func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+func showPlayerMenu(animeName string, currentEpisodeNum int, isMovieOrTV bool) (string, error) {
 	var choice string
 
 	title := "GoAnime Player Controls"
@@ -565,17 +843,24 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
 	}
 
+	// Build menu options
+	options := []huh.Option[string]{
+		huh.NewOption("← Back ", "download_options"),
+		huh.NewOption("Next episode", "next"),
+		huh.NewOption("Previous episode", "previous"),
+		huh.NewOption("Select episode", "select"),
+		huh.NewOption("Change anime", "change"),
+		huh.NewOption("Skip intro", "skip"),
+		huh.NewOption("Exit", "quit"),
+	}
+
+	// isMovieOrTV parameter kept for future use but not currently adding extra options
+	_ = isMovieOrTV
+
 	menu := huh.NewSelect[string]().
 		Title(title).
 		Description("Choose an action:").
-		Options(
-			huh.NewOption("Next episode", "next"),
-			huh.NewOption("Previous episode", "previous"),
-			huh.NewOption("Select episode", "select"),
-			huh.NewOption("Change anime", "change"),
-			huh.NewOption("Skip intro", "skip"),
-			huh.NewOption("Exit", "quit"),
-		).
+		Options(options...).
 		Value(&choice)
 
 	if err := menu.Run(); err != nil {
@@ -596,19 +881,26 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display
+	// Get anime name for display and check if movie/TV
 	var animeName string
+	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
-		animeName = updater.GetAnime().Name
+		anime := updater.GetAnime()
+		animeName = anime.Name
+		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
 	}
 
 	for {
-		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
+		choice, err := showPlayerMenu(animeName, currentEpisodeNum, isMovieOrTV)
 		if err != nil {
 			return fmt.Errorf("error showing menu: %w", err)
 		}
 
 		switch choice {
+		case "download_options":
+			// Stop playback and go back to download options
+			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			return ErrBackToDownloadOptions
 		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
 		case "previous":
@@ -621,6 +913,10 @@ func handleUserInput(
 			return ErrChangeAnime
 		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
+		case "audio":
+			selectAudioTrack(socketPath)
+		case "subtitle":
+			selectSubtitleTrack(socketPath)
 		case "skip":
 			skipIntro(socketPath, currentEpisode)
 		}
@@ -649,6 +945,10 @@ func playPreviousEpisode(newIndex int, episodes []models.Episode, anilistID int,
 func selectEpisode(episodes []models.Episode, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
 	selectedURL, selectedNumStr, err := SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
+		// If user selected back, return nil to continue without action
+		if errors.Is(err, ErrBackRequested) {
+			return nil
+		}
 		return fmt.Errorf("failed to select episode: %w", err)
 	}
 
@@ -720,5 +1020,170 @@ func skipIntro(socketPath string, episode *models.Episode) {
 		fmt.Printf("Intro skipped to %ds\n", episode.SkipTimes.Op.End)
 	} else {
 		fmt.Println("Intro skip data not available")
+	}
+}
+
+// selectAudioTrack shows a menu to select audio track
+func selectAudioTrack(socketPath string) {
+	tracks, err := GetAudioTracks(socketPath)
+	if err != nil {
+		fmt.Printf("Error getting audio tracks: %v\n", err)
+		return
+	}
+
+	if len(tracks) == 0 {
+		fmt.Println("No audio tracks available")
+		return
+	}
+
+	currentID, _ := GetCurrentAudioTrack(socketPath)
+
+	var options []huh.Option[int]
+	for _, track := range tracks {
+		id := int(track["id"].(float64))
+
+		// Build label with all available info
+		var parts []string
+
+		// Language
+		lang := ""
+		if l, ok := track["lang"].(string); ok && l != "" {
+			lang = l
+		}
+
+		// Title (often contains language info)
+		title := ""
+		if t, ok := track["title"].(string); ok && t != "" {
+			title = t
+		}
+
+		// Codec
+		codec := ""
+		if c, ok := track["codec"].(string); ok && c != "" {
+			codec = c
+		}
+
+		// Channels (stereo, 5.1, etc.)
+		channels := ""
+		if ch, ok := track["demux-channels"].(string); ok && ch != "" {
+			channels = ch
+		} else if ch, ok := track["audio-channels"].(float64); ok {
+			channels = fmt.Sprintf("%.0fch", ch)
+		}
+
+		// Build the label
+		if title != "" {
+			parts = append(parts, title)
+		} else if lang != "" {
+			parts = append(parts, lang)
+		} else {
+			parts = append(parts, fmt.Sprintf("Audio %d", id))
+		}
+
+		if codec != "" {
+			parts = append(parts, codec)
+		}
+		if channels != "" {
+			parts = append(parts, channels)
+		}
+
+		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
+		if id == currentID {
+			label = "* " + label + " (current)"
+		}
+		options = append(options, huh.NewOption(label, id))
+	}
+
+	var selected int
+	menu := huh.NewSelect[int]().
+		Title("Select Audio Track").
+		Description("Choose the audio language/track:").
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		return
+	}
+
+	if err := SetAudioTrack(socketPath, selected); err != nil {
+		fmt.Printf("Error setting audio track: %v\n", err)
+	} else {
+		fmt.Printf("Audio track changed to %d\n", selected)
+	}
+}
+
+// selectSubtitleTrack shows a menu to select subtitle track
+func selectSubtitleTrack(socketPath string) {
+	tracks, err := GetSubtitleTracks(socketPath)
+	if err != nil {
+		fmt.Printf("Error getting subtitle tracks: %v\n", err)
+		return
+	}
+
+	currentID, _ := GetCurrentSubtitleTrack(socketPath)
+
+	var options []huh.Option[int]
+	// Add option to disable subtitles
+	disableLabel := "Disable subtitles"
+	if currentID == 0 {
+		disableLabel = "* " + disableLabel + " (current)"
+	}
+	options = append(options, huh.NewOption(disableLabel, 0))
+
+	for _, track := range tracks {
+		id := int(track["id"].(float64))
+
+		// Build label with all available info
+		var parts []string
+
+		// Language
+		lang := ""
+		if l, ok := track["lang"].(string); ok && l != "" {
+			lang = l
+		}
+
+		// Title (often contains language info)
+		title := ""
+		if t, ok := track["title"].(string); ok && t != "" {
+			title = t
+		}
+
+		// Build the label
+		if title != "" {
+			parts = append(parts, title)
+		} else if lang != "" {
+			parts = append(parts, lang)
+		} else {
+			parts = append(parts, fmt.Sprintf("Subtitle %d", id))
+		}
+
+		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
+		if id == currentID {
+			label = "* " + label + " (current)"
+		}
+		options = append(options, huh.NewOption(label, id))
+	}
+
+	var selected int
+	menu := huh.NewSelect[int]().
+		Title("Select Subtitle Track").
+		Description("Choose the subtitle language:").
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		return
+	}
+
+	if selected == 0 {
+		// Disable subtitles
+		_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "sid", "no"})
+		fmt.Println("Subtitles disabled")
+	} else {
+		if err := SetSubtitleTrack(socketPath, selected); err != nil {
+			fmt.Printf("Error setting subtitle track: %v\n", err)
+		} else {
+			fmt.Printf("Subtitle track changed to %d\n", selected)
+		}
 	}
 }

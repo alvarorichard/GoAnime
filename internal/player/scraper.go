@@ -14,6 +14,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -166,28 +167,52 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 	return 300 * 1024 * 1024, nil // 300MB default
 }
 
+// ErrBackRequested is returned when user selects the back option
+var ErrBackRequested = errors.New("back requested")
+
+// ErrBackToAnimeSelection is returned when user wants to go back to anime selection
+var ErrBackToAnimeSelection = errors.New("back to anime selection")
+
+// ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
+var ErrBackToEpisodeSelection = errors.New("back to episode selection")
+
 // SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
 
+	// Create a list with back option at the beginning
+	backOption := "← Back"
+	displayList := make([]string, len(episodes)+1)
+	displayList[0] = backOption
+	for i, ep := range episodes {
+		displayList[i+1] = ep.Number
+	}
+
 	idx, err := fuzzyfinder.Find(
-		episodes,
+		displayList,
 		func(i int) string {
-			return episodes[i].Number
+			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select the episode"),
+		fuzzyfinder.WithPromptString("Select the episode: "),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
 	}
 
-	if idx < 0 || idx >= len(episodes) {
+	if idx < 0 || idx >= len(displayList) {
 		return "", "", errors.New("invalid index returned by fuzzyfinder")
 	}
 
-	return episodes[idx].URL, episodes[idx].Number, nil
+	// Check if back was selected
+	if idx == 0 {
+		return "", "", ErrBackRequested
+	}
+
+	// Adjust index for episodes (subtract 1 for the back option)
+	episodeIdx := idx - 1
+	return episodes[episodeIdx].URL, episodes[episodeIdx].Number, nil
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
@@ -293,6 +318,20 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
+	// Try AnimeDrive enhanced navigation if applicable
+	if isAnimeDriveSourcePlayer(anime) {
+		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+		if err == nil {
+			return streamURL, nil
+		}
+		// Check if user requested to go back from server selection
+		if errors.Is(err, scraper.ErrBackRequested) {
+			return "", ErrBackToEpisodeSelection
+		}
+		// For AnimeDrive, return the error instead of trying legacy method
+		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
+	}
+
 	// Try AllAnime enhanced navigation first if applicable
 	if isAllAnimeSourcePlayer(anime) {
 		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
@@ -330,10 +369,28 @@ func isAllAnimeSourcePlayer(anime *models.Anime) bool {
 
 	if len(anime.URL) < 30 &&
 		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") {
+		!strings.Contains(anime.URL, "http") &&
+		!strings.Contains(anime.URL, "animesdrive") {
 		return true
 	}
 
+	return false
+}
+
+// Helper function to check if anime is from AnimeDrive source (player module)
+func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
+	if anime == nil {
+		return false
+	}
+	if anime.Source == "AnimeDrive" {
+		return true
+	}
+	if strings.Contains(anime.Name, "[AnimeDrive]") {
+		return true
+	}
+	if strings.Contains(anime.URL, "animesdrive") {
+		return true
+	}
 	return false
 }
 
@@ -503,10 +560,10 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		return videoSrc, nil
 	}
 
-	// If the URL is from animefire.plus, fetch the content
-	if strings.Contains(videoSrc, "animefire.plus/video/") {
+	// If the URL is from animefire.io, fetch the content
+	if strings.Contains(videoSrc, "animefire.io/video/") {
 		if util.IsDebug {
-			util.Debugf("Found animefire.plus video URL, fetching content...")
+			util.Debugf("Found animefire.io video URL, fetching content...")
 		}
 
 		// Fetch the video page
@@ -554,8 +611,9 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			}
 
 			// Always prompt user for quality selection to maintain the 360p, 720p, 1080p options
-			// Create options for huh.Select
+			// Create options for huh.Select with back option first
 			var options []huh.Option[string]
+			options = append(options, huh.NewOption("← Back", "back"))
 			for _, v := range videoResponse.Data {
 				options = append(options, huh.NewOption(v.Label, v.Src))
 			}
@@ -569,6 +627,11 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 				Run()
 			if err != nil {
 				return "", fmt.Errorf("failed to select quality: %w", err)
+			}
+
+			// Handle back selection
+			if selectedSrc == "back" {
+				return "", ErrBackRequested
 			}
 
 			// Store the selected quality for future use in this session

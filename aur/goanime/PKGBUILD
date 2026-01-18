@@ -1,0 +1,15 @@
+pkgname=goanime
+pkgver=1.6
+pkgrel=1
+pkgdesc="A command-line tool to browse, play, and download anime."
+arch=('x86_64')
+url="https://github.com/alvarorichard/GoAnime"
+license=('MIT')
+depends=('mpv')
+optdepends=('discord-rpc: Discord Rich Presence support')
+source=("${pkgname}-${pkgver}::https://github.com/alvarorichard/GoAnime/releases/download/v${pkgver}/goanime-linux-amd64")
+sha256sums=('SKIP')
+
+package() {
+  install -Dm755 "${srcdir}/${pkgname}-${pkgver}" "${pkgdir}/usr/bin/goanime"
+}

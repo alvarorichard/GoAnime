@@ -4,11 +4,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/rich-go/client"
 )
-
-// DiscordClientID é o ID do cliente Discord para Rich Presence
-const DiscordClientID = "1302721937717334128"
 
 // Manager manages the global Discord Rich Presence state
 type Manager struct {
@@ -27,7 +23,7 @@ func NewManager() *Manager {
 	}
 }
 
-// Initialize inicializa o Discord Rich Presence
+// Initialize initializes the Discord Rich Presence
 func (m *Manager) Initialize() error {
 	if m.isInitialized {
 		util.Debug("Discord Rich Presence already initialized")
@@ -36,7 +32,7 @@ func (m *Manager) Initialize() error {
 
 	m.initTime = time.Now()
 
-	if err := client.Login(m.clientID); err != nil {
+	if err := LoginClient(); err != nil {
 		// Discord is optional; only log when debug is enabled
 		if util.IsDebug {
 			util.Debugf("Discord Rich Presence not available: %v", err)
@@ -53,10 +49,10 @@ func (m *Manager) Initialize() error {
 	return nil
 }
 
-// Shutdown desliga o Discord Rich Presence
+// Shutdown shuts down the Discord Rich Presence
 func (m *Manager) Shutdown() {
 	if m.isInitialized && m.isEnabled {
-		client.Logout()
+		_ = LogoutClient()
 		m.isEnabled = false
 		m.isInitialized = false
 		util.Debug("Discord Rich Presence shutdown completed")

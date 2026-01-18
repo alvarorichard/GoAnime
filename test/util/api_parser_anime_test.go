@@ -25,12 +25,12 @@ func TestParseAnimes(t *testing.T) {
 	}
 
 	// Set the base URL for absolute URL resolution
-	doc.Url, _ = url.Parse("https://animefire.plus")
+	doc.Url, _ = url.Parse("https://animefire.io")
 
 	expectedAnimes := []models.Anime{
-		{Name: "Anime One", URL: "https://animefire.plus/anime/1"},
-		{Name: "Anime Two", URL: "https://animefire.plus/anime/2"},
-		{Name: "Anime Three", URL: "https://animefire.plus/anime/3"},
+		{Name: "Anime One", URL: "https://animefire.io/anime/1"},
+		{Name: "Anime Two", URL: "https://animefire.io/anime/2"},
+		{Name: "Anime Three", URL: "https://animefire.io/anime/3"},
 	}
 
 	animes := api.ParseAnimes(doc)

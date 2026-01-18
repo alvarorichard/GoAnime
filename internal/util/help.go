@@ -98,6 +98,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Options:"))
 	helpContent.WriteString("\n")
 	addOption(&helpContent, "--debug", "Enable debug mode for detailed error information and performance metrics.")
+	addOption(&helpContent, "--perf", "Enable performance profiling - shows timing metrics for all operations.")
 	addOption(&helpContent, "--help / -h", "Display this beautiful help message with detailed usage information.")
 	addOption(&helpContent, "--version", "Show version information and build details.")
 	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
@@ -106,6 +107,9 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
+	addOption(&helpContent, "--type", "Specify media type (anime, movie, tv). Default: anime.")
+	addOption(&helpContent, "--subs", "Specify subtitle language for movies/TV shows (FlixHQ only: english, spanish, portuguese, etc.).")
+	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
 	helpContent.WriteString("\n")
 
 	// Features section
@@ -114,14 +118,17 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime and AnimeFire with automatic fallback.")
-	addFeature(&helpContent, "Smart Search", "Intelligent anime search with fuzzy matching and suggestions.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, and FlixHQ (movies/TV) with automatic fallback.")
+	addFeature(&helpContent, "Movies & TV Shows", "Watch movies and TV series alongside anime using FlixHQ integration.")
+	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes or entire seasons for offline viewing.")
 	addFeature(&helpContent, "Interactive Controls", "Beautiful terminal interface with keyboard navigation.")
-	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what anime you're watching.")
+	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
 	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
+	addFeature(&helpContent, "Subtitle Support", "Multilingual subtitle support for movies and TV shows.")
+	addFeature(&helpContent, "Audio Track Selection", "Select preferred audio language for movies/TV during playback (FlixHQ only).")
 	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
 	helpContent.WriteString("\n")
 
@@ -141,6 +148,10 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
 	addExample(&helpContent, "goanime -d -r --source allanime --allanime-smart \"vinland saga\" 1-4", "AllAnime Smart Range for episodes 1-4")
+	addExample(&helpContent, "goanime --type movie \"avengers\"", "Search for movies matching 'avengers'")
+	addExample(&helpContent, "goanime --type tv \"breaking bad\"", "Search for TV shows matching 'breaking bad'")
+	addExample(&helpContent, "goanime --type movie --subs spanish \"spider-man\"", "Search movies with Spanish subtitles")
+	addExample(&helpContent, "goanime --type movie --audio \"pt-BR,english\" \"matrix\"", "Play movie with Portuguese audio preference")
 	helpContent.WriteString("\n")
 
 	// Footer

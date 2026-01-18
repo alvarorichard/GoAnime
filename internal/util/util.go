@@ -12,12 +12,34 @@ import (
 )
 
 var (
-	IsDebug          bool
-	minNameLength    = 4
-	ErrHelpRequested = errors.New("help requested") // Custom error for help
-	GlobalSource     string                         // Global variable to store selected source
-	GlobalQuality    string                         // Global variable to store selected quality
+	IsDebug             bool
+	minNameLength       = 4
+	ErrHelpRequested    = errors.New("help requested") // Custom error for help
+	GlobalSource        string                         // Global variable to store selected source
+	GlobalQuality       string                         // Global variable to store selected quality
+	GlobalMediaType     string                         // Global variable to store media type (anime, movie, tv)
+	GlobalSubsLanguage  string                         // Global variable to store subtitle language
+	GlobalAudioLanguage string                         // Global variable to store preferred audio language
 )
+
+// Cleanup function to be called on program exit
+var cleanupFuncs []func()
+
+// RegisterCleanup registers a function to be called on program exit
+func RegisterCleanup(fn func()) {
+	cleanupFuncs = append(cleanupFuncs, fn)
+}
+
+// RunCleanup runs all registered cleanup functions
+func RunCleanup() {
+	for _, fn := range cleanupFuncs {
+		fn()
+	}
+	// Print performance report if enabled
+	if PerfEnabled {
+		GetPerfTracker().PrintReport()
+	}
+}
 
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
 func ErrorHandler(err error) string {
@@ -58,6 +80,7 @@ var GlobalDownloadRequest *DownloadRequest
 func FlagParser() (string, error) {
 	// Define flags
 	debug := flag.Bool("debug", false, "enable debug mode")
+	perf := flag.Bool("perf", false, "enable performance profiling")
 	help := flag.Bool("help", false, "show help message")
 	altHelp := flag.Bool("h", false, "show help message")
 	versionFlag := flag.Bool("version", false, "show version information")
@@ -67,6 +90,9 @@ func FlagParser() (string, error) {
 	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
 	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
+	mediaTypeFlag := flag.String("type", "", "specify media type (anime, movie, tv)")
+	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
+	audioLanguageFlag := flag.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -74,9 +100,20 @@ func FlagParser() (string, error) {
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
 
+	// Set performance profiling mode
+	PerfEnabled = *perf
+	if PerfEnabled {
+		// Also enable debug for performance mode to see detailed logs
+		IsDebug = true
+		Debug("Performance profiling enabled")
+	}
+
 	// Store global configurations
 	GlobalSource = *sourceFlag
 	GlobalQuality = *qualityFlag
+	GlobalMediaType = *mediaTypeFlag
+	GlobalSubsLanguage = *subsLanguageFlag
+	GlobalAudioLanguage = *audioLanguageFlag
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()

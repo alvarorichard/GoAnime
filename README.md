@@ -18,9 +18,10 @@
 ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
-[![Discord](https://img.shields.io/badge/Discord-Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/6nZ2SYv3)
+[![Discord](https://img.shields.io/badge/Discord-Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/FbQuf78D9G)
 
 # GoAnime
+
 
 GoAnime is a simple text-based user interface (TUI) built in Go, allowing users to search for anime and either play or download episodes directly in mpv. It scrapes data from websites to provide a selection of anime and episodes, with support for both subbed and dubbed content in English and Portuguese.
 
@@ -46,13 +47,17 @@ Join our Discord for support, feedback, and updates: [Discord Server](https://di
 - Batch download multiple episodes
 - Resume playback from where you left off (in builds with SQLite support)
 - Track watched episodes (in builds with SQLite support)
+- **NEW:** Movies and TV Shows support via FlixHQ source
+ - **NEW:** OMDb integration for movie/TV metadata (ratings, genres, runtime)
 
 > **Note:** GoAnime can be built with or without SQLite support for tracking anime progress.  
 > [See the build options documentation](docs/BUILD_OPTIONS.md) for more details.
 
 > ⚠️ Warning: Portuguese (PT-BR) source availability
 >
-> If you want to watch anime in Portuguese (PT-BR) and you are outside Brazil, you’ll need a VPN, proxy, or any method to obtain a Brazilian IP address. The PT-BR provider blocks access from IPs outside Brazil.
+> If you want to watch anime in Portuguese (PT-BR) and you are outside Brazil, you'll need a VPN, proxy, or any method to obtain a Brazilian IP address. The PT-BR provider blocks access from IPs outside Brazil.
+
+...existing code...
 
 # Demo
 
@@ -72,6 +77,7 @@ Join our Discord for support, feedback, and updates: [Discord Server](https://di
 go install github.com/alvarorichard/Goanime/cmd/goanime@latest
 ```
 
+...existing code...
 ### Manual install methods
 
 ```shell
@@ -85,6 +91,25 @@ cd GoAnime
 ```shell
 go run cmd/goanime/main.go
 ```
+
+## Movies and TV Shows
+
+GoAnime supports movies and TV shows through the FlixHQ source. Use the `--source flixhq` flag to search for movies and TV shows. You can also restrict results by type using the `--type` parameter (for example `--type movie` to search only movies).
+
+```bash
+# Search for movies/TV shows
+goanime --source flixhq "The Matrix"
+
+# Search specifically for movies
+goanime --source flixhq --type movie "Inception"
+
+# Search specifically for TV shows
+goanime --source flixhq --type tv "Breaking Bad"
+
+# Enable subtitles (English by default)
+goanime --source flixhq --subs "Avatar"
+```
+
 
 ## Linux
 

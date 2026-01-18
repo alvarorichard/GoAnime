@@ -18,7 +18,7 @@
 ![GitHub contributors](https://img.shields.io/github/contributors/alvarorichard/GoAnime)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9923765cb2854ae39af6b567996aad43)](https://app.codacy.com/gh/alvarorichard/GoAnime/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![Build Status](https://app.travis-ci.com/alvarorichard/GoAnime.svg?branch=main)](https://app.travis-ci.com/alvarorichard/GoAnime)
-[![Discord](https://img.shields.io/badge/Discord-Comunidade-7289DA?logo=discord&logoColor=white)](https://discord.gg/6nZ2SYv3)
+[![Discord](https://img.shields.io/badge/Discord-Comunidade-7289DA?logo=discord&logoColor=white)](https://discord.gg/FbQuf78D9G)
 
 # GoAnime
 
@@ -84,6 +84,26 @@ cd GoAnime
 ```shell
 go run cmd/goanime/main.go
 ```
+
+## Filmes e Séries
+
+GoAnime agora suporta filmes e séries através da fonte FlixHQ. Use a flag `--source flixhq` para buscar filmes e séries. Você também pode filtrar por tipo usando o parâmetro `--type` (por exemplo `--type movie` para buscar somente filmes).
+
+```bash
+# Buscar filmes/séries
+goanime --source flixhq "The Matrix"
+
+# Buscar somente filmes
+goanime --source flixhq --type movie "Inception"
+
+# Buscar somente séries
+goanime --source flixhq --type tv "Breaking Bad"
+
+# Habilitar legendas (inglês por padrão)
+goanime --source flixhq --subs "Avatar"
+```
+
+
 
 ## Linux
 
