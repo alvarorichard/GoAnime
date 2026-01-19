@@ -479,10 +479,18 @@ jobs:
           draft: false
           prerelease: ${{ steps.version.outputs.PRERELEASE }}
           files: |
-            release/goanime-linux-*
-            release/goanime-darwin-*
-            release/*.tar.gz
-            release/*.zip
+            release/goanime-linux-amd64
+            release/goanime-linux-arm64
+            release/goanime-linux-386
+            release/goanime-darwin-amd64
+            release/goanime-darwin-arm64
+            release/goanime-linux-amd64.tar.gz
+            release/goanime-linux-arm64.tar.gz
+            release/goanime-linux-386.tar.gz
+            release/goanime-darwin-amd64.tar.gz
+            release/goanime-darwin-arm64.tar.gz
+            release/goanime-windows-amd64.zip
+            release/goanime-windows-386.zip
             release/GoAnime-Installer-*.exe
             release/checksums-sha256.txt
             release/checksums-sha512.txt
