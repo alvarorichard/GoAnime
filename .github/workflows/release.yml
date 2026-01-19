@@ -105,7 +105,7 @@ jobs:
           # macOS builds (native on macos)
           - os: darwin
             arch: amd64
-            runner: macos-13
+            runner: macos-15
             ext: ''
             cc: clang
           - os: darwin
@@ -139,7 +139,7 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-gcc
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config
 
       - name: Get version from tag
         id: version
@@ -171,27 +171,26 @@ jobs:
 
       - name: Build binary (Windows)
         if: matrix.os == 'windows'
-        shell: msys2 {0}
+        shell: pwsh
         env:
-          GOOS: windows
-          GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 1
         run: |
-          export PATH="/mingw64/bin:$PATH"
-          VERSION=${{ steps.version.outputs.VERSION }}
-          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          COMMIT=$(git rev-parse --short HEAD)
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          $VERSION = "${{ steps.version.outputs.VERSION }}"
+          $BUILD_TIME = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+          $COMMIT = git rev-parse --short HEAD
           
-          LDFLAGS="-s -w"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Version=${VERSION}"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.BuildTime=${BUILD_TIME}"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Commit=${COMMIT}"
+          $LDFLAGS = "-s -w"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.Version=$VERSION"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.BuildTime=$BUILD_TIME"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.Commit=$COMMIT"
           
-          OUTPUT_NAME="${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          $OUTPUT_NAME = "${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
           
-          go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          go build -ldflags "$LDFLAGS" -o "dist/$OUTPUT_NAME" ./cmd/goanime
           
-          echo "Built ${OUTPUT_NAME} with SQLite support"
+          Write-Host "Built $OUTPUT_NAME with SQLite support"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
