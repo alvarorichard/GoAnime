@@ -264,12 +264,20 @@ func findAssetForPlatform(release *GitHubRelease) (string, string, error) {
 }
 
 func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo) (string, string, error) {
+	// Log available assets for debugging
+	util.Debug("Looking for assets for platform:", platform.OS+"/"+platform.Arch)
+	util.Debug("Available assets in release:")
+	for _, asset := range release.Assets {
+		util.Debug("  -", asset.Name)
+	}
+
 	// Map platform names to expected asset names
 	var expectedNames []string
 	switch platform.OS {
 	case "windows":
 		expectedNames = []string{
 			fmt.Sprintf("goanime-windows-%s.exe", platform.Arch),
+			fmt.Sprintf("goanime-windows-%s.zip", platform.Arch), // Also check zip files
 			"goanime-windows.exe",
 			"goanime.exe",
 		}
@@ -291,10 +299,13 @@ func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo)
 		return "", "", fmt.Errorf("unsupported platform: %s", platform.OS)
 	}
 
+	util.Debug("Looking for expected names:", strings.Join(expectedNames, ", "))
+
 	// Find matching asset
 	for _, asset := range release.Assets {
 		for _, expectedName := range expectedNames {
 			if strings.EqualFold(asset.Name, expectedName) {
+				util.Debug("Found matching asset:", asset.Name)
 				return asset.BrowserDownloadURL, asset.Name, nil
 			}
 		}

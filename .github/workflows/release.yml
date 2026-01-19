@@ -479,6 +479,8 @@ jobs:
           draft: false
           prerelease: ${{ steps.version.outputs.PRERELEASE }}
           files: |
+            release/goanime-linux-*
+            release/goanime-darwin-*
             release/*.tar.gz
             release/*.zip
             release/GoAnime-Installer-*.exe
@@ -509,7 +511,7 @@ jobs:
     name: Publish to AUR
     runs-on: ubuntu-latest
     needs: release
-    if: ${{ !contains(github.ref, '-') }}  # Skip pre-releases
+    if: ${{ !contains(github.ref, '-') && secrets.AUR_SSH_PRIVATE_KEY != '' }}  # Skip pre-releases and when AUR secrets not configured
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
