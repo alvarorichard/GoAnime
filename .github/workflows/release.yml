@@ -80,42 +80,46 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
   # =============================================================================
-  # Job 2: Build cross-platform binaries
+  # Job 2: Build cross-platform binaries with SQLite support (CGO enabled)
   # =============================================================================
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     needs: test
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux builds
+          # Linux builds (native on ubuntu)
           - os: linux
             arch: amd64
+            runner: ubuntu-latest
             ext: ''
+            cc: gcc
           - os: linux
             arch: arm64
+            runner: ubuntu-24.04-arm
             ext: ''
-          - os: linux
-            arch: '386'
-            ext: ''
+            cc: gcc
           
-          # macOS builds
+          # macOS builds (native on macos)
           - os: darwin
             arch: amd64
+            runner: macos-13
             ext: ''
+            cc: clang
           - os: darwin
             arch: arm64
+            runner: macos-latest
             ext: ''
+            cc: clang
           
-          # Windows builds
+          # Windows builds (native on windows)
           - os: windows
             arch: amd64
+            runner: windows-latest
             ext: '.exe'
-          - os: windows
-            arch: '386'
-            ext: '.exe'
+            cc: gcc
 
     steps:
       - name: Checkout code
@@ -129,15 +133,26 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Install GCC (Windows)
+        if: matrix.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
       - name: Get version from tag
         id: version
+        shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Build binary
+      - name: Build binary (Unix)
+        if: matrix.os != 'windows'
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -152,7 +167,31 @@ jobs:
           
           go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
           
-          echo "Built ${OUTPUT_NAME}"
+          echo "Built ${OUTPUT_NAME} with SQLite support"
+
+      - name: Build binary (Windows)
+        if: matrix.os == 'windows'
+        shell: msys2 {0}
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          VERSION=${{ steps.version.outputs.VERSION }}
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          COMMIT=$(git rev-parse --short HEAD)
+          
+          LDFLAGS="-s -w"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Version=${VERSION}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.BuildTime=${BUILD_TIME}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Commit=${COMMIT}"
+          
+          OUTPUT_NAME="${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          
+          go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
+          
+          echo "Built ${OUTPUT_NAME} with SQLite support"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -461,13 +500,13 @@ jobs:
           echo "|---|---|---|" >> RELEASE_NOTES.md
           echo "| Linux | x86_64 | \`goanime-linux-amd64\` |" >> RELEASE_NOTES.md
           echo "| Linux | ARM64 | \`goanime-linux-arm64\` |" >> RELEASE_NOTES.md
-          echo "| Linux | x86 | \`goanime-linux-386\` |" >> RELEASE_NOTES.md
           echo "| macOS | x86_64 (Intel) | \`goanime-darwin-amd64\` |" >> RELEASE_NOTES.md
           echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> RELEASE_NOTES.md
-          echo "| Windows | Installer | \`GoAnime-Installer-${VERSION#v}.exe\` (Recommended) |" >> RELEASE_NOTES.md
+          echo "| Windows | Installer | \`GoAnime-Installer-\${VERSION#v}.exe\` (Recommended) |" >> RELEASE_NOTES.md
           echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> RELEASE_NOTES.md
-          echo "| Windows | x86 | \`goanime-windows-386.exe\` |" >> RELEASE_NOTES.md
           echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "All binaries are built with SQLite tracking support enabled." >> RELEASE_NOTES.md
           
           cat RELEASE_NOTES.md
 
@@ -481,16 +520,13 @@ jobs:
           files: |
             release/goanime-linux-amd64
             release/goanime-linux-arm64
-            release/goanime-linux-386
             release/goanime-darwin-amd64
             release/goanime-darwin-arm64
             release/goanime-linux-amd64.tar.gz
             release/goanime-linux-arm64.tar.gz
-            release/goanime-linux-386.tar.gz
             release/goanime-darwin-amd64.tar.gz
             release/goanime-darwin-arm64.tar.gz
             release/goanime-windows-amd64.zip
-            release/goanime-windows-386.zip
             release/GoAnime-Installer-*.exe
             release/checksums-sha256.txt
             release/checksums-sha512.txt

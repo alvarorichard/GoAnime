@@ -1,3 +1,29 @@
+# GoAnime Release Notes - Version 1.6.2
+
+Release date: 2026-01-19
+
+## Highlights
+
+- **SQLite Local Tracking Enabled**: All release binaries are now compiled with CGO enabled, providing full SQLite-based local tracking support for watch history and progress.
+
+## Features
+
+- All platform binaries (Linux, macOS, Windows) now include SQLite local tracking support.
+- Native builds for each platform ensure optimal performance and compatibility.
+
+## Improvements
+
+- Release workflow updated to use native runners for each platform (ubuntu, macos, windows) for CGO support.
+- Improved debug logging in the auto-updater to show available release assets.
+
+## Bug Fixes
+
+- Fixed release workflow to avoid duplicate asset uploads.
+- Fixed AUR publish workflow secrets check (moved from job-level to step-level).
+- Fixed updater debug output showing available assets for troubleshooting.
+
+---
+
 # GoAnime Release Notes - Version 1.6
 
 Release date: 2026-01-18
