@@ -324,6 +324,14 @@ func playVideo(
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--alang=%s", audioLang))
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--slang=%s", subsLang))
 		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
+
+		// Add external subtitle files if available (FlixHQ subtitles)
+		// This follows the lobster.sh implementation for external subtitles
+		subArgs := util.GetSubtitleArgs()
+		if len(subArgs) > 0 {
+			mpvArgs = append(mpvArgs, subArgs...)
+			util.Debugf("Added external subtitles: %v", subArgs)
+		}
 	}
 
 	// Initialize tracking and check for resume time

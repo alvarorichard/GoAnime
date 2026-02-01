@@ -4,12 +4,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/version"
 	"github.com/charmbracelet/huh"
 )
+
+// SubtitleInfo represents a single subtitle track
+type SubtitleInfo struct {
+	URL      string
+	Language string
+	Label    string
+}
 
 var (
 	IsDebug             bool
@@ -20,7 +28,61 @@ var (
 	GlobalMediaType     string                         // Global variable to store media type (anime, movie, tv)
 	GlobalSubsLanguage  string                         // Global variable to store subtitle language
 	GlobalAudioLanguage string                         // Global variable to store preferred audio language
+	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
+	GlobalNoSubs        bool                           // Global flag to disable subtitles
 )
+
+// SetGlobalSubtitles stores subtitles for the current playback session
+func SetGlobalSubtitles(subs []SubtitleInfo) {
+	GlobalSubtitles = subs
+	if len(subs) > 0 {
+		Debugf("Stored %d subtitle track(s) for playback", len(subs))
+		for i, sub := range subs {
+			Debugf("  Subtitle %d: %s (%s)", i+1, sub.Label, sub.Language)
+		}
+	}
+}
+
+// ClearGlobalSubtitles clears stored subtitles
+func ClearGlobalSubtitles() {
+	GlobalSubtitles = nil
+}
+
+// GetSubtitleArgs returns mpv arguments for subtitles
+// Based on lobster.sh implementation:
+// - Single subtitle: --sub-file='URL'
+// - Multiple subtitles: --sub-files='URL1:URL2:...'
+func GetSubtitleArgs() []string {
+	if GlobalNoSubs || len(GlobalSubtitles) == 0 {
+		return nil
+	}
+
+	// Collect all subtitle URLs
+	var urls []string
+	for _, sub := range GlobalSubtitles {
+		if sub.URL != "" {
+			urls = append(urls, sub.URL)
+		}
+	}
+
+	if len(urls) == 0 {
+		return nil
+	}
+
+	if len(urls) == 1 {
+		// Single subtitle file
+		return []string{fmt.Sprintf("--sub-file=%s", urls[0])}
+	}
+
+	// Multiple subtitle files - join with appropriate separator
+	// Unix uses : as separator, Windows uses ; (following lobster.sh implementation)
+	separator := ":"
+	if runtime.GOOS == "windows" {
+		separator = ";"
+	}
+	joined := strings.Join(urls, separator)
+	return []string{fmt.Sprintf("--sub-files=%s", joined)}
+}
 
 // Cleanup function to be called on program exit
 var cleanupFuncs []func()
@@ -93,6 +155,7 @@ func FlagParser() (string, error) {
 	mediaTypeFlag := flag.String("type", "", "specify media type (anime, movie, tv)")
 	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
 	audioLanguageFlag := flag.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
+	noSubsFlag := flag.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
 
 	// Parse the flags early before any manipulation of os.Args
 	flag.Parse()
@@ -114,6 +177,11 @@ func FlagParser() (string, error) {
 	GlobalMediaType = *mediaTypeFlag
 	GlobalSubsLanguage = *subsLanguageFlag
 	GlobalAudioLanguage = *audioLanguageFlag
+	GlobalNoSubs = *noSubsFlag
+
+	if *noSubsFlag {
+		Debug("Subtitles disabled by user")
+	}
 
 	if *versionFlag || version.HasVersionArg() {
 		version.ShowVersion()

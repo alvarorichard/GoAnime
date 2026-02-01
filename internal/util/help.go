@@ -109,6 +109,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	addOption(&helpContent, "--type", "Specify media type (anime, movie, tv). Default: anime.")
 	addOption(&helpContent, "--subs", "Specify subtitle language for movies/TV shows (FlixHQ only: english, spanish, portuguese, etc.).")
+	addOption(&helpContent, "--no-subs", "Disable subtitles for movies/TV shows (FlixHQ only).")
 	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
 	helpContent.WriteString("\n")
 
@@ -151,6 +152,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --type movie \"avengers\"", "Search for movies matching 'avengers'")
 	addExample(&helpContent, "goanime --type tv \"breaking bad\"", "Search for TV shows matching 'breaking bad'")
 	addExample(&helpContent, "goanime --type movie --subs spanish \"spider-man\"", "Search movies with Spanish subtitles")
+	addExample(&helpContent, "goanime --type movie --no-subs \"matrix\"", "Play movie without subtitles")
 	addExample(&helpContent, "goanime --type movie --audio \"pt-BR,english\" \"matrix\"", "Play movie with Portuguese audio preference")
 	helpContent.WriteString("\n")
 

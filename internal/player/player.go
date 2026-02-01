@@ -206,7 +206,8 @@ func filterMPVArgs(args []string) []string {
 		"--slang=",              // Subtitle language preference
 		"--aid=",                // Audio track ID
 		"--sid=",                // Subtitle track ID
-		"--sub-file=",           // External subtitle file
+		"--sub-file=",           // External subtitle file (single)
+		"--sub-files=",          // External subtitle files (multiple, colon-separated)
 		"--audio-file=",         // External audio file
 		"--http-header-fields=", // HTTP headers for HLS streams
 		"--stream-lavf-o=",      // FFmpeg/lavf options for streaming protocols

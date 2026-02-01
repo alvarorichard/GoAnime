@@ -278,10 +278,30 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 
 // Enhanced episode URL fetching with improved source detection
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	// Clear any previous subtitles
+	util.ClearGlobalSubtitles()
+
 	// Check if this is FlixHQ content
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		streamURL, _, err := GetFlixHQStreamURL(anime, episode, quality)
-		return streamURL, err
+		streamURL, subtitles, err := GetFlixHQStreamURL(anime, episode, quality)
+		if err != nil {
+			return "", err
+		}
+
+		// Store subtitles globally for playback
+		if len(subtitles) > 0 && !util.GlobalNoSubs {
+			var subInfos []util.SubtitleInfo
+			for _, sub := range subtitles {
+				subInfos = append(subInfos, util.SubtitleInfo{
+					URL:      sub.URL,
+					Language: sub.Language,
+					Label:    sub.Label,
+				})
+			}
+			util.SetGlobalSubtitles(subInfos)
+		}
+
+		return streamURL, nil
 	}
 
 	scraperManager := scraper.NewScraperManager()
