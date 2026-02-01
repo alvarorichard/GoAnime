@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -210,11 +211,155 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	return nil, fmt.Errorf("episodes should be fetched using API layer, not scraper")
 }
 
-// GetEpisodeStreamURL gets the streaming URL for a specific episode
-// This is specific to scraper functionality, not duplicated from API
+// GetEpisodeStreamURL gets the streaming URL for a specific episode from AnimeFire
+// This handles various video sources including Blogger embeds
 func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
-	// Implementation for getting stream URLs - specific to scraper
-	return "", fmt.Errorf("stream URL extraction not implemented")
+	util.Debug("AnimeFire stream URL extraction", "episodeURL", episodeURL)
+
+	var lastErr error
+	attempts := c.maxRetries + 1
+
+	for attempt := 0; attempt < attempts; attempt++ {
+		req, err := http.NewRequest("GET", episodeURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("failed to create request: %w", err)
+		}
+
+		c.decorateRequest(req)
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to make request: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return "", lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = c.handleStatusError(resp)
+			_ = resp.Body.Close()
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return "", lastErr
+		}
+
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse HTML: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return "", lastErr
+		}
+
+		if c.isChallengePage(doc) {
+			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return "", lastErr
+		}
+
+		// Try to find video URL using multiple methods
+		videoURL, err := c.extractVideoURL(doc)
+		if err == nil && videoURL != "" {
+			util.Debug("AnimeFire video URL found", "url", videoURL)
+			return videoURL, nil
+		}
+
+		lastErr = err
+		if c.shouldRetry(attempt) {
+			c.sleep()
+			continue
+		}
+	}
+
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", errors.New("failed to extract video URL from AnimeFire")
+}
+
+// extractVideoURL extracts the video URL from an AnimeFire episode page
+func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error) {
+	// Method 1: Look for video element with data-video-src attribute
+	if videoSrc, exists := doc.Find("video[data-video-src]").Attr("data-video-src"); exists && videoSrc != "" {
+		return videoSrc, nil
+	}
+
+	// Method 2: Look for video element with src attribute
+	if videoSrc, exists := doc.Find("video source").Attr("src"); exists && videoSrc != "" {
+		return videoSrc, nil
+	}
+	if videoSrc, exists := doc.Find("video").Attr("src"); exists && videoSrc != "" {
+		return videoSrc, nil
+	}
+
+	// Method 3: Look for iframe with Blogger video
+	iframeSrc := ""
+	doc.Find("iframe").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists {
+			if strings.Contains(src, "blogger.com") || strings.Contains(src, "blogspot.com") {
+				iframeSrc = src
+			}
+		}
+	})
+	if iframeSrc != "" {
+		util.Debug("Found Blogger iframe", "src", iframeSrc)
+		return iframeSrc, nil
+	}
+
+	// Method 4: Look for data-video, data-src, data-url attributes in various elements
+	selectors := []string{
+		"div[data-video-src]",
+		"div[data-video]",
+		"div[data-src]",
+		"div[data-url]",
+		"[data-player]",
+	}
+	attrs := []string{"data-video-src", "data-video", "data-src", "data-url", "data-player"}
+
+	for i, selector := range selectors {
+		if elem := doc.Find(selector); elem.Length() > 0 {
+			if val, exists := elem.Attr(attrs[i]); exists && val != "" {
+				return val, nil
+			}
+		}
+	}
+
+	// Method 5: Search in HTML content for video URLs
+	html, err := doc.Html()
+	if err == nil {
+		// Look for Blogger video links
+		bloggerPattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
+		if re := regexp.MustCompile(bloggerPattern); re.MatchString(html) {
+			if matches := re.FindString(html); matches != "" {
+				return matches, nil
+			}
+		}
+
+		// Look for direct video URLs
+		videoPatterns := []string{
+			`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`,
+			`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`,
+		}
+		for _, pattern := range videoPatterns {
+			if re := regexp.MustCompile(pattern); re.MatchString(html) {
+				if matches := re.FindString(html); matches != "" {
+					return matches, nil
+				}
+			}
+		}
+	}
+
+	return "", errors.New("no video source found in the page")
 }
 
 // GetAnimeDetails - placeholder method, details are fetched by API layer

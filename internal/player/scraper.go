@@ -451,6 +451,8 @@ func extractVideoURL(url string) (string, error) {
 		"div[data-player]",
 		"iframe[src*='video']",
 		"iframe[src*='player']",
+		"iframe[src*='blogger']",
+		"iframe[src*='blogspot']",
 	}
 
 	var videoSrc string
@@ -494,12 +496,14 @@ func extractVideoURL(url string) (string, error) {
 		return "", err
 	}
 
-	// Try to find blogger link
+	// Try to find blogger link and extract the actual video URL
 	videoSrc, err = findBloggerLink(urlBody)
 	if err == nil && videoSrc != "" {
 		if util.IsDebug {
-			util.Debugf("Found blogger link: %s", videoSrc)
+			util.Debugf("Found blogger link: %s, extracting actual video URL...", videoSrc)
 		}
+		// Note: The actual extraction happens in extractActualVideoURL
+		// which is called after this function
 		return videoSrc, nil
 	}
 
@@ -550,14 +554,179 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
+// extractBloggerVideoURL extracts the actual video URL from a Blogger embed page
+// Blogger embeds contain the actual video URL in the page source, typically as a
+// direct video link or within JavaScript variables
+func extractBloggerVideoURL(bloggerURL string) (string, error) {
+	if util.IsDebug {
+		util.Debugf("Extracting actual video URL from Blogger page: %s", bloggerURL)
+	}
+
+	// Create a custom request with necessary headers
+	req, err := http.NewRequest("GET", bloggerURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers to mimic a browser request
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Referer", "https://www.blogger.com/")
+
+	client := util.GetFastClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch Blogger page: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			util.Debugf("Failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Blogger page returned status: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read Blogger page: %w", err)
+	}
+
+	content := string(body)
+
+	// Try multiple patterns to extract the actual video URL from Blogger page
+	// Pattern 1: Look for direct video URLs in VIDEO_CONFIG or similar JSON
+	videoPatterns := []string{
+		// Pattern for "video_url" or similar JSON fields
+		`"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
+		`"url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
+		`"contentUrl"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
+		// Pattern for URLs with videoplayback
+		`(https?://[^"'\s]+videoplayback[^"'\s]+)`,
+		// Pattern for googlevideo.com URLs
+		`(https?://[^"'\s]*googlevideo\.com[^"'\s]+)`,
+		// Pattern for blogger video URLs
+		`(https?://[^"'\s]*bp\.blogspot\.com[^"'\s]+\.mp4[^"'\s]*)`,
+		// Pattern for direct video URLs in various formats
+		`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`,
+		// Pattern for HLS streams
+		`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`,
+		// Pattern for video URLs in source tags
+		`<source[^>]+src=["']([^"']+)["']`,
+		// Pattern for data-src attributes
+		`data-src=["'](https?://[^"']+)["']`,
+	}
+
+	for _, pattern := range videoPatterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(content)
+		if len(matches) > 1 {
+			videoURL := matches[1]
+			// Unescape any escaped characters in the URL
+			videoURL = strings.ReplaceAll(videoURL, `\u0026`, "&")
+			videoURL = strings.ReplaceAll(videoURL, `\/`, "/")
+			videoURL = strings.ReplaceAll(videoURL, `\\`, "")
+
+			// Validate it looks like a real video URL
+			if isValidVideoURL(videoURL) {
+				if util.IsDebug {
+					util.Debugf("Found video URL from Blogger: %s", videoURL)
+				}
+				return videoURL, nil
+			}
+		}
+	}
+
+	// Try to find VIDEO_CONFIG JavaScript object
+	configPattern := `VIDEO_CONFIG\s*=\s*(\{[^}]+\})`
+	configRe := regexp.MustCompile(configPattern)
+	configMatches := configRe.FindStringSubmatch(content)
+	if len(configMatches) > 1 {
+		configJSON := configMatches[1]
+		// Look for URL in the config
+		urlPattern := `"(?:url|video_url|contentUrl)"\s*:\s*"([^"]+)"`
+		urlRe := regexp.MustCompile(urlPattern)
+		urlMatches := urlRe.FindStringSubmatch(configJSON)
+		if len(urlMatches) > 1 {
+			videoURL := strings.ReplaceAll(urlMatches[1], `\u0026`, "&")
+			videoURL = strings.ReplaceAll(videoURL, `\/`, "/")
+			if isValidVideoURL(videoURL) {
+				if util.IsDebug {
+					util.Debugf("Found video URL from VIDEO_CONFIG: %s", videoURL)
+				}
+				return videoURL, nil
+			}
+		}
+	}
+
+	// Try to parse as HTML and look for video elements
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
+	if err == nil {
+		// Check video source elements
+		doc.Find("video source, video").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists && isValidVideoURL(src) {
+				if util.IsDebug {
+					util.Debugf("Found video URL from HTML video element: %s", src)
+				}
+			}
+		})
+
+		// Check for data attributes
+		doc.Find("[data-video-url], [data-src], [data-url]").Each(func(i int, s *goquery.Selection) {
+			attrs := []string{"data-video-url", "data-src", "data-url"}
+			for _, attr := range attrs {
+				if src, exists := s.Attr(attr); exists && isValidVideoURL(src) {
+					if util.IsDebug {
+						util.Debugf("Found video URL from data attribute %s: %s", attr, src)
+					}
+				}
+			}
+		})
+	}
+
+	// If no direct video URL found, return the original Blogger URL
+	// This allows yt-dlp to handle it as a fallback
+	if util.IsDebug {
+		util.Debugf("Could not extract direct video URL from Blogger page, returning original URL for yt-dlp handling")
+	}
+	return bloggerURL, nil
+}
+
+// isValidVideoURL checks if a URL looks like a valid video URL
+func isValidVideoURL(url string) bool {
+	if url == "" {
+		return false
+	}
+	// Must start with http
+	if !strings.HasPrefix(url, "http") {
+		return false
+	}
+	// Should contain video-related keywords or file extensions
+	lowerURL := strings.ToLower(url)
+	validIndicators := []string{
+		".mp4", ".m3u8", ".webm", ".mkv", ".avi",
+		"videoplayback", "googlevideo.com", "video/",
+		"stream", "play", "media",
+	}
+	for _, indicator := range validIndicators {
+		if strings.Contains(lowerURL, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
 // extractActualVideoURL processes the video source and allows the user to select quality
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
 		util.Debugf("Processing video source: %s", videoSrc)
 	}
 
+	// If the URL is a Blogger video embed, extract the actual video URL
 	if strings.Contains(videoSrc, "blogger.com") {
-		return videoSrc, nil
+		return extractBloggerVideoURL(videoSrc)
 	}
 
 	// If the URL is from animefire.io, fetch the content
@@ -663,13 +832,13 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			return matches, nil
 		}
 
-		// Try to find a blogger link
-		videoSrc, err := findBloggerLink(string(body))
-		if err == nil && videoSrc != "" {
+		// Try to find a blogger link and extract the actual video URL
+		bloggerLink, err := findBloggerLink(string(body))
+		if err == nil && bloggerLink != "" {
 			if util.IsDebug {
-				util.Debugf("Found blogger link: %s", videoSrc)
+				util.Debugf("Found blogger link: %s, extracting actual video URL...", bloggerLink)
 			}
-			return videoSrc, nil
+			return extractBloggerVideoURL(bloggerLink)
 		}
 	}
 

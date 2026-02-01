@@ -90,3 +90,80 @@ func TestAnimefireSearchDetectsChallengePage(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "challenge")
 }
+
+func TestAnimefireExtractsVideoFromIframe(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `
+        <html>
+            <body>
+                <iframe src="https://www.blogger.com/video.g?token=AD6v5dwBxt4bPF9JPLFzumxc71KRuxIz"></iframe>
+            </body>
+        </html>
+        `)
+	}))
+	defer server.Close()
+
+	client := NewAnimefireClient()
+	client.baseURL = server.URL
+	client.maxRetries = 1
+	client.retryDelay = 0
+
+	videoURL, err := client.GetEpisodeStreamURL(server.URL + "/episode/1")
+	require.NoError(t, err)
+	assert.Contains(t, videoURL, "blogger.com/video.g")
+}
+
+func TestAnimefireExtractsDirectVideoURL(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `
+        <html>
+            <body>
+                <video data-video-src="https://cdn.example.com/video.mp4"></video>
+            </body>
+        </html>
+        `)
+	}))
+	defer server.Close()
+
+	client := NewAnimefireClient()
+	client.baseURL = server.URL
+	client.maxRetries = 1
+	client.retryDelay = 0
+
+	videoURL, err := client.GetEpisodeStreamURL(server.URL + "/episode/1")
+	require.NoError(t, err)
+	assert.Equal(t, "https://cdn.example.com/video.mp4", videoURL)
+}
+
+func TestAnimefireExtractsBloggerLinkFromHTML(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `
+        <html>
+            <body>
+                <script>
+                    var video = "https://www.blogger.com/video.g?token=TestToken123";
+                </script>
+            </body>
+        </html>
+        `)
+	}))
+	defer server.Close()
+
+	client := NewAnimefireClient()
+	client.baseURL = server.URL
+	client.maxRetries = 1
+	client.retryDelay = 0
+
+	videoURL, err := client.GetEpisodeStreamURL(server.URL + "/episode/1")
+	require.NoError(t, err)
+	assert.Contains(t, videoURL, "blogger.com/video.g?token=TestToken123")
+}
