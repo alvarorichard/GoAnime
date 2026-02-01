@@ -237,3 +237,86 @@ func TestUnifiedScraperManager_FlixHQIntegration(t *testing.T) {
 		t.Errorf("Language tag should mention Movies/TV: got %s", languageTag)
 	}
 }
+
+func TestFlixHQClient_GetTVShowStream(t *testing.T) {
+	// Skip if network is unavailable
+	client := NewFlixHQClient()
+
+	// Search for a TV show
+	results, err := client.SearchMedia("dexter")
+	if err != nil {
+		t.Skipf("Skipping test due to network error: %v", err)
+	}
+
+	if len(results) == 0 {
+		t.Skip("No search results found for 'dexter'")
+	}
+
+	// Find a TV show in the results
+	var tvShow *FlixHQMedia
+	for _, media := range results {
+		if media.Type == MediaTypeTV {
+			tvShow = media
+			break
+		}
+	}
+
+	if tvShow == nil {
+		t.Skip("No TV show found in search results")
+	}
+
+	t.Logf("Found TV show: %s (ID: %s)", tvShow.Title, tvShow.ID)
+
+	// Get seasons
+	seasons, err := client.GetSeasons(tvShow.ID)
+	if err != nil {
+		t.Fatalf("Failed to get seasons: %v", err)
+	}
+
+	if len(seasons) == 0 {
+		t.Fatal("No seasons found")
+	}
+
+	t.Logf("Found %d seasons", len(seasons))
+
+	// Get episodes for first season
+	episodes, err := client.GetEpisodes(seasons[0].ID)
+	if err != nil {
+		t.Fatalf("Failed to get episodes: %v", err)
+	}
+
+	if len(episodes) == 0 {
+		t.Fatal("No episodes found")
+	}
+
+	t.Logf("Found %d episodes in season 1", len(episodes))
+
+	// Get server ID for first episode
+	serverID, err := client.GetEpisodeServerID(episodes[0].DataID, "Vidcloud")
+	if err != nil {
+		t.Fatalf("Failed to get server ID: %v", err)
+	}
+
+	t.Logf("Got server ID: %s", serverID)
+
+	// Get embed link
+	embedLink, err := client.GetEmbedLink(serverID)
+	if err != nil {
+		t.Fatalf("Failed to get embed link: %v", err)
+	}
+
+	t.Logf("Got embed link: %s", embedLink)
+
+	// Extract stream info
+	streamInfo, err := client.ExtractStreamInfo(embedLink, "", "english")
+	if err != nil {
+		t.Fatalf("Failed to extract stream info: %v", err)
+	}
+
+	if streamInfo.VideoURL == "" {
+		t.Fatal("Video URL is empty")
+	}
+
+	t.Logf("Got video URL: %s", streamInfo.VideoURL)
+	t.Logf("Found %d subtitle tracks", len(streamInfo.Subtitles))
+}

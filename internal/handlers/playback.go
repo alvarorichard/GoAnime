@@ -55,7 +55,10 @@ func HandlePlaybackMode(animeName string) {
 
 		util.PerfCount("anime_loaded")
 
-		series, totalEpisodes := playback.CheckIfSeriesEnhanced(anime)
+		// Use length of already-fetched episodes to determine if it's a series
+		// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+		totalEpisodes := len(episodes)
+		series := totalEpisodes > 1
 		var playbackErr error
 
 		playbackTimer := util.StartTimer("Playback:Handle")

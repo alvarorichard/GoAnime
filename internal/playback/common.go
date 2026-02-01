@@ -39,9 +39,12 @@ func PlayEpisode(
 
 	// Find the specific episode to pass to enhanced API
 	var currentEpisode *models.Episode
+	util.Debug("PlayEpisode searching for episode", "episodeNumberStr", episodeNumberStr, "totalEpisodes", len(episodes))
 	for i := range episodes {
+		util.Debug("Checking episode", "index", i, "epNumber", episodes[i].Number, "epURL", episodes[i].URL)
 		if episodes[i].Number == episodeNumberStr {
 			currentEpisode = &episodes[i]
+			util.Debug("Found matching episode", "URL", currentEpisode.URL, "DataID", currentEpisode.DataID)
 			break
 		}
 	}

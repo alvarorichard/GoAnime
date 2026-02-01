@@ -202,12 +202,16 @@ func filterMPVArgs(args []string) []string {
 		"--video-latency-hacks=",
 		"--audio-display=",
 		"--start=",
-		"--alang=",      // Audio language preference
-		"--slang=",      // Subtitle language preference
-		"--aid=",        // Audio track ID
-		"--sid=",        // Subtitle track ID
-		"--sub-file=",   // External subtitle file
-		"--audio-file=", // External audio file
+		"--alang=",              // Audio language preference
+		"--slang=",              // Subtitle language preference
+		"--aid=",                // Audio track ID
+		"--sid=",                // Subtitle track ID
+		"--sub-file=",           // External subtitle file
+		"--audio-file=",         // External audio file
+		"--http-header-fields=", // HTTP headers for HLS streams
+		"--stream-lavf-o=",      // FFmpeg/lavf options for streaming protocols
+		"--referrer=",           // HTTP referrer for streaming
+		"--user-agent=",         // HTTP user agent for streaming
 		// Add more allowed prefixes here if needed in the future
 	}
 
@@ -375,11 +379,14 @@ func HandleDownloadAndPlay(
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
 ) error {
+	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
+
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
 
 	// Check if this is an HLS stream (for proper handling later)
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
 		downloadOption := askForDownload()

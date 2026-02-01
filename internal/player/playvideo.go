@@ -290,6 +290,18 @@ func playVideo(
 		"--audio-display=no",
 	}
 
+	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
+	// Many streaming servers require specific User-Agent and Referer headers
+	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	if isHLSStream {
+		// Add HTTP headers required by streaming servers
+		// Note: Only Referer is typically needed; some servers also require User-Agent
+		mpvArgs = append(mpvArgs,
+			"--http-header-fields=Referer: https://streameeeeee.site/",
+		)
+		util.Debugf("HLS stream detected - adding HTTP Referer header")
+	}
+
 	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
 	// Check if this is a movie/TV content by examining the updater's anime source
 	isMovieOrTV := false
@@ -317,9 +329,8 @@ func playVideo(
 	// Initialize tracking and check for resume time
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
 
-	// For HLS streams (.m3u8), we'll seek after playback starts instead of using --start
+	// For HLS streams, we'll seek after playback starts instead of using --start
 	// because --start doesn't work reliably with HLS streams
-	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
 	if resumeTime > 0 && !isHLSStream {
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
 	}

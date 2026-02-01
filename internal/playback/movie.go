@@ -77,8 +77,10 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series
-			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
+			// Check if new anime is a series using already-fetched episodes
+			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+			totalEpisodes := len(newEpisodes)
+			series := totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
@@ -117,8 +119,10 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series
-			series, totalEpisodes := CheckIfSeriesEnhanced(anime)
+			// Check if new anime is a series using already-fetched episodes
+			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+			totalEpisodes := len(newEpisodes)
+			series := totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -346,6 +347,8 @@ func (c *FlixHQClient) GetEpisodes(seasonID string) ([]FlixHQEpisode, error) {
 func (c *FlixHQClient) GetEpisodeServerID(dataID, provider string) (string, error) {
 	serversURL := fmt.Sprintf("%s/ajax/v2/episode/servers/%s", c.baseURL, dataID)
 
+	util.Debug("FlixHQ get episode servers", "url", serversURL, "provider", provider)
+
 	req, err := http.NewRequest("GET", serversURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
@@ -364,18 +367,38 @@ func (c *FlixHQClient) GetEpisodeServerID(dataID, provider string) (string, erro
 		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
+	// Try multiple providers in order of preference
+	providers := []string{provider, "Vidcloud", "UpCloud", "Voe", "MixDrop"}
 	var episodeID string
-	doc.Find(".nav-item a").Each(func(i int, s *goquery.Selection) {
-		serverTitle, _ := s.Attr("title")
-		if strings.EqualFold(serverTitle, provider) {
-			episodeID, _ = s.Attr("data-id")
+
+	for _, prov := range providers {
+		doc.Find(".nav-item a").Each(func(i int, s *goquery.Selection) {
+			if episodeID != "" {
+				return // Already found
+			}
+			serverTitle, _ := s.Attr("title")
+			if strings.EqualFold(serverTitle, prov) {
+				id, exists := s.Attr("data-id")
+				if exists && id != "" {
+					episodeID = id
+					util.Debug("FlixHQ found server", "provider", serverTitle, "id", id)
+				}
+			}
+		})
+		if episodeID != "" {
+			break
 		}
-	})
+	}
 
 	if episodeID == "" {
 		// Fallback to first available server
 		doc.Find(".nav-item a").First().Each(func(i int, s *goquery.Selection) {
-			episodeID, _ = s.Attr("data-id")
+			id, exists := s.Attr("data-id")
+			if exists {
+				episodeID = id
+				title, _ := s.Attr("title")
+				util.Debug("FlixHQ using fallback server", "provider", title, "id", id)
+			}
 		})
 	}
 
@@ -389,6 +412,8 @@ func (c *FlixHQClient) GetEpisodeServerID(dataID, provider string) (string, erro
 // GetMovieServerID gets the server ID for a movie
 func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error) {
 	movieURL := fmt.Sprintf("%s/ajax/movie/episodes/%s", c.baseURL, mediaID)
+
+	util.Debug("FlixHQ get movie servers", "url", movieURL, "provider", provider)
 
 	req, err := http.NewRequest("GET", movieURL, nil)
 	if err != nil {
@@ -408,20 +433,32 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
+	// Try multiple providers in order of preference
+	providers := []string{provider, "Vidcloud", "UpCloud", "Voe", "MixDrop"}
 	var episodeID string
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		serverTitle, _ := s.Attr("title")
-		href, _ := s.Attr("href")
 
-		if strings.EqualFold(serverTitle, provider) {
-			// Extract episode ID from href like /watch-movie-123.456
-			re := regexp.MustCompile(`\.(\d+)$`)
-			matches := re.FindStringSubmatch(href)
-			if len(matches) > 1 {
-				episodeID = matches[1]
+	for _, prov := range providers {
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			if episodeID != "" {
+				return // Already found
 			}
+			serverTitle, _ := s.Attr("title")
+			href, _ := s.Attr("href")
+
+			if strings.EqualFold(serverTitle, prov) {
+				// Extract episode ID from href like /watch-movie-123.456
+				re := regexp.MustCompile(`\.(\d+)$`)
+				matches := re.FindStringSubmatch(href)
+				if len(matches) > 1 {
+					episodeID = matches[1]
+					util.Debug("FlixHQ found movie server", "provider", serverTitle, "id", episodeID)
+				}
+			}
+		})
+		if episodeID != "" {
+			break
 		}
-	})
+	}
 
 	if episodeID == "" {
 		// Fallback to first available server
@@ -431,6 +468,8 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 			matches := re.FindStringSubmatch(href)
 			if len(matches) > 1 {
 				episodeID = matches[1]
+				title, _ := s.Attr("title")
+				util.Debug("FlixHQ using fallback movie server", "provider", title, "id", episodeID)
 			}
 		})
 	}
@@ -446,6 +485,8 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 func (c *FlixHQClient) GetEmbedLink(episodeID string) (string, error) {
 	sourcesURL := fmt.Sprintf("%s/ajax/episode/sources/%s", c.baseURL, episodeID)
 
+	util.Debug("FlixHQ get embed link", "url", sourcesURL, "episodeID", episodeID)
+
 	req, err := http.NewRequest("GET", sourcesURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
@@ -459,24 +500,41 @@ func (c *FlixHQClient) GetEmbedLink(episodeID string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var result struct {
-		Link string `json:"link"`
+	// Read full body for debugging
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+	util.Debug("FlixHQ embed response", "body", string(bodyBytes))
+
+	var result struct {
+		Link  string `json:"link"`
+		Type  string `json:"type"`
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w (body: %s)", err, string(bodyBytes))
+	}
+
+	if result.Error != "" {
+		return "", fmt.Errorf("embed API error: %s", result.Error)
 	}
 
 	if result.Link == "" {
 		return "", errors.New("no embed link found")
 	}
 
+	util.Debug("FlixHQ embed link found", "link", result.Link)
 	return result.Link, nil
 }
 
 // ExtractStreamInfo extracts video URL and subtitles from embed link
 func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality string, subsLanguage string) (*FlixHQStreamInfo, error) {
 	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, url.QueryEscape(embedLink))
+
+	util.Debug("FlixHQ API request", "url", apiURL, "embed", embedLink)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -491,6 +549,18 @@ func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality stri
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status: %s", resp.Status)
+	}
+
+	// Read the full response body for better error handling
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	util.Debug("FlixHQ API response", "body", string(bodyBytes))
+
 	var result struct {
 		File    string `json:"file"`
 		Sources []struct {
@@ -504,10 +574,21 @@ func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality stri
 			Kind    string `json:"kind"`
 			Default bool   `json:"default"`
 		} `json:"tracks"`
+		// Additional fields that might be returned
+		Message string `json:"message"`
+		Error   string `json:"error"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w (body: %s)", err, string(bodyBytes))
+	}
+
+	// Check for error messages
+	if result.Error != "" {
+		return nil, fmt.Errorf("API error: %s", result.Error)
+	}
+	if result.Message != "" && result.File == "" && len(result.Sources) == 0 {
+		return nil, fmt.Errorf("API message: %s", result.Message)
 	}
 
 	streamInfo := &FlixHQStreamInfo{}
@@ -515,12 +596,14 @@ func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality stri
 	// Get video URL
 	if result.File != "" {
 		streamInfo.VideoURL = result.File
+		util.Debug("FlixHQ got file", "url", result.File)
 		// Apply quality preference
-		if preferredQuality != "" && preferredQuality != "auto" {
+		if preferredQuality != "" && preferredQuality != "auto" && preferredQuality != "best" {
 			streamInfo.VideoURL = strings.Replace(streamInfo.VideoURL, "/playlist.m3u8",
 				fmt.Sprintf("/%s/index.m3u8", preferredQuality), 1)
 		}
 	} else if len(result.Sources) > 0 {
+		util.Debug("FlixHQ got sources", "count", len(result.Sources))
 		// Find preferred quality or use first
 		for _, source := range result.Sources {
 			if source.Quality == preferredQuality {

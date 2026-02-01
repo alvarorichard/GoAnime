@@ -284,6 +284,11 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 
 // GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
 func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
+	util.Debug("GetVideoURLForEpisodeEnhanced called", "episodeURL", episode.URL, "episodeNum", episode.Number)
+	if anime != nil {
+		util.Debug("Anime context", "name", anime.Name, "source", anime.Source, "mediaType", anime.MediaType, "url", anime.URL)
+	}
+
 	// If we don't have anime context, decide safely how to resolve
 	if anime == nil {
 		// If it's a normal HTTP URL, use legacy extraction
@@ -330,6 +335,19 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		}
 		// For AnimeDrive, return the error instead of trying legacy method
 		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
+	}
+
+	// Try FlixHQ for movies/TV shows
+	if isFlixHQSourcePlayer(anime) {
+		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType, "episodeURL", episode.URL)
+		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+		if err == nil {
+			util.Debug("FlixHQ stream URL obtained", "url", streamURL)
+			return streamURL, nil
+		}
+		util.Debug("FlixHQ stream URL failed", "error", err)
+		// For FlixHQ, return the error - legacy method won't work with DataIDs
+		return "", fmt.Errorf("failed to get FlixHQ stream URL: %w", err)
 	}
 
 	// Try AllAnime enhanced navigation first if applicable
@@ -389,6 +407,23 @@ func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
 		return true
 	}
 	if strings.Contains(anime.URL, "animesdrive") {
+		return true
+	}
+	return false
+}
+
+// Helper function to check if anime is from FlixHQ source (player module)
+func isFlixHQSourcePlayer(anime *models.Anime) bool {
+	if anime == nil {
+		return false
+	}
+	if anime.Source == "FlixHQ" {
+		return true
+	}
+	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+		return true
+	}
+	if strings.Contains(anime.URL, "flixhq") {
 		return true
 	}
 	return false
@@ -586,7 +621,7 @@ func extractBloggerVideoURL(bloggerURL string) (string, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Blogger page returned status: %d", resp.StatusCode)
+		return "", fmt.Errorf("blogger page returned status: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)

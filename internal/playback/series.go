@@ -72,9 +72,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series and get new total episodes
-			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
+			// Check if new anime is a series using already-fetched episodes
+			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+			newTotalEpisodes := len(newEpisodes)
 			totalEpisodes = newTotalEpisodes
+			series := newTotalEpisodes > 1
 
 			if !series {
 				// If new anime is a movie, handle it differently
@@ -121,9 +123,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series and get new total episodes
-			series, newTotalEpisodes := CheckIfSeriesEnhanced(anime)
+			// Check if new anime is a series using already-fetched episodes
+			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+			newTotalEpisodes := len(newEpisodes)
 			totalEpisodes = newTotalEpisodes
+			series := newTotalEpisodes > 1
 
 			if !series {
 				// If new anime is a movie, handle it differently
