@@ -18,6 +18,7 @@ require (
 require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/log v0.4.2
+	github.com/disintegration/gift v1.2.1
 	github.com/lrstanley/go-ytdlp v1.2.7
 	github.com/tr1xem/go-discordrpc v1.0.0
 )

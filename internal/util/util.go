@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -121,6 +122,7 @@ func Helper() {
 var (
 	ErrUpdateRequested   = errors.New("update requested")
 	ErrDownloadRequested = errors.New("download requested")
+	ErrUpscaleRequested  = errors.New("upscale requested")
 )
 
 // DownloadRequest holds download command parameters
@@ -135,30 +137,79 @@ type DownloadRequest struct {
 	AllAnimeSmart bool   // Enable AllAnime Smart Range (auto-skip intros/credits and preferred mirrors)
 }
 
+// UpscaleRequest holds upscale command parameters
+type UpscaleRequest struct {
+	InputPath        string  // Input video or image file path
+	OutputPath       string  // Output file path (optional, defaults to input_upscaled.ext)
+	ScaleFactor      int     // Upscale multiplier (default: 2)
+	Passes           int     // Number of processing passes (default: 2)
+	StrengthColor    float64 // Line thinning strength 0-1 (default: 0.333)
+	StrengthGradient float64 // Sharpening strength 0-1 (default: 1.0)
+	FastMode         bool    // Use fast mode (lower quality)
+	HighQuality      bool    // Use high quality mode (slower)
+	PreserveAudio    bool    // Preserve original audio track
+	UseGPU           bool    // Use GPU encoding if available
+	VideoBitrate     string  // Video bitrate (default: 8M)
+	Workers          int     // Number of parallel workers
+}
+
 // Global variable to store download request
 var GlobalDownloadRequest *DownloadRequest
 
+// Global variable to store upscale request
+var GlobalUpscaleRequest *UpscaleRequest
+
 // FlagParser parses the -flags and returns the anime name
 func FlagParser() (string, error) {
+	// Override the default flag.Usage to show our custom help
+	flag.Usage = func() {
+		Helper()
+	}
+
+	// Use a custom FlagSet to avoid conflicts with library flags (e.g., Anime4KGo)
+	fs := flag.NewFlagSet("goanime", flag.ContinueOnError)
+
 	// Define flags
-	debug := flag.Bool("debug", false, "enable debug mode")
-	perf := flag.Bool("perf", false, "enable performance profiling")
-	help := flag.Bool("help", false, "show help message")
-	altHelp := flag.Bool("h", false, "show help message")
-	versionFlag := flag.Bool("version", false, "show version information")
-	updateFlag := flag.Bool("update", false, "check for updates and update if available")
-	downloadFlag := flag.Bool("d", false, "download mode")
-	rangeFlag := flag.Bool("r", false, "download episode range (use with -d)")
-	sourceFlag := flag.String("source", "", "specify anime source (allanime, animefire)")
-	qualityFlag := flag.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
-	allanimeSmartFlag := flag.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
-	mediaTypeFlag := flag.String("type", "", "specify media type (anime, movie, tv)")
-	subsLanguageFlag := flag.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
-	audioLanguageFlag := flag.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
-	noSubsFlag := flag.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
+	debug := fs.Bool("debug", false, "enable debug mode")
+	perf := fs.Bool("perf", false, "enable performance profiling")
+	help := fs.Bool("help", false, "show help message")
+	altHelp := fs.Bool("h", false, "show help message")
+	versionFlag := fs.Bool("version", false, "show version information")
+	updateFlag := fs.Bool("update", false, "check for updates and update if available")
+	downloadFlag := fs.Bool("d", false, "download mode")
+	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
+	sourceFlag := fs.String("source", "", "specify anime source (allanime, animefire)")
+	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
+	allanimeSmartFlag := fs.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
+	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
+	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
+	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
+	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
+
+	// Upscale flags
+	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
+	upscaleOutputFlag := fs.String("upscale-output", "", "output path for upscaled file (default: input_upscaled.ext)")
+	upscaleScaleFlag := fs.Int("upscale-scale", 2, "upscale factor (default: 2x)")
+	upscalePassesFlag := fs.Int("upscale-passes", 2, "number of processing passes (default: 2)")
+	upscaleFastFlag := fs.Bool("upscale-fast", false, "use fast mode (lower quality but faster)")
+	upscaleHQFlag := fs.Bool("upscale-hq", false, "use high quality mode (slower but better results)")
+	upscaleGPUFlag := fs.Bool("upscale-gpu", false, "use GPU encoding for video output")
+	upscaleBitrateFlag := fs.String("upscale-bitrate", "8M", "video bitrate for output (default: 8M)")
+	upscaleWorkersFlag := fs.Int("upscale-workers", 0, "number of parallel workers (default: CPU cores)")
+
+	// Set custom usage for our FlagSet
+	fs.Usage = func() {
+		Helper()
+	}
 
 	// Parse the flags early before any manipulation of os.Args
-	flag.Parse()
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			Helper()
+			return "", ErrHelpRequested
+		}
+		return "", err
+	}
 
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
@@ -202,14 +253,29 @@ func FlagParser() (string, error) {
 		return handleDownloadModeWithSmart(*rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
 	}
 
+	// Handle upscale mode
+	if *upscaleFlag {
+		return handleUpscaleMode(
+			fs,
+			*upscaleOutputFlag,
+			*upscaleScaleFlag,
+			*upscalePassesFlag,
+			*upscaleFastFlag,
+			*upscaleHQFlag,
+			*upscaleGPUFlag,
+			*upscaleBitrateFlag,
+			*upscaleWorkersFlag,
+		)
+	}
+
 	if *debug {
 		Debug("Debug mode is enabled")
 	}
 
 	// If the user has provided an anime name as an argument, we use it.
 	var animeName string
-	if len(flag.Args()) > 0 {
-		animeName = strings.Join(flag.Args(), " ")
+	if len(fs.Args()) > 0 {
+		animeName = strings.Join(fs.Args(), " ")
 		// Check if it has some flags and remove them
 		if strings.Contains(animeName, "-") {
 			animeName = strings.Split(animeName, "-")[0]
@@ -339,4 +405,55 @@ func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeS
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
 	}
+}
+
+// handleUpscaleMode processes upscale command arguments
+func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes int, fastMode, hqMode, useGPU bool, bitrate string, workers int) (string, error) {
+	args := fs.Args()
+
+	if len(args) == 0 {
+		return "", fmt.Errorf("upscale mode requires an input file path\nUsage: goanime --upscale <input_file> [options]")
+	}
+
+	inputPath := args[0]
+
+	// Validate input file exists
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("input file not found: %s", inputPath)
+	}
+
+	// Set default values
+	if scaleFactor < 1 || scaleFactor > 4 {
+		scaleFactor = 2
+	}
+	if passes < 1 || passes > 8 {
+		passes = 2
+	}
+
+	// Determine strength values based on mode
+	strengthColor := 1.0 / 3.0
+	strengthGradient := 1.0
+
+	if hqMode {
+		passes = 4
+		strengthColor = 0.4
+	}
+
+	// Store upscale request
+	GlobalUpscaleRequest = &UpscaleRequest{
+		InputPath:        inputPath,
+		OutputPath:       outputPath,
+		ScaleFactor:      scaleFactor,
+		Passes:           passes,
+		StrengthColor:    strengthColor,
+		StrengthGradient: strengthGradient,
+		FastMode:         fastMode,
+		HighQuality:      hqMode,
+		PreserveAudio:    true,
+		UseGPU:           useGPU,
+		VideoBitrate:     bitrate,
+		Workers:          workers,
+	}
+
+	return inputPath, ErrUpscaleRequested
 }

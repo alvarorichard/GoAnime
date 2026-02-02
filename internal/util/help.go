@@ -113,6 +113,22 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
 	helpContent.WriteString("\n")
 
+	// Upscale Options section
+	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(sectionTitleStyle.Render("Upscale Options (Anime4K):"))
+	helpContent.WriteString("\n")
+	addOption(&helpContent, "--upscale", "Upscale mode - enhance video/image quality using Anime4K algorithm.")
+	addOption(&helpContent, "--upscale-output", "Output path for upscaled file (default: input_upscaled.ext).")
+	addOption(&helpContent, "--upscale-scale", "Upscale factor (1-4, default: 2x).")
+	addOption(&helpContent, "--upscale-passes", "Number of processing passes (1-8, default: 2).")
+	addOption(&helpContent, "--upscale-fast", "Use fast mode (lower quality but faster processing).")
+	addOption(&helpContent, "--upscale-hq", "Use high quality mode (slower but better results).")
+	addOption(&helpContent, "--upscale-gpu", "Use GPU encoding for video output (if available).")
+	addOption(&helpContent, "--upscale-bitrate", "Video bitrate for output (default: 8M).")
+	addOption(&helpContent, "--upscale-workers", "Number of parallel workers (default: CPU cores).")
+	helpContent.WriteString("\n")
+
 	// Features section
 	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
 	helpContent.WriteString("\n")
@@ -131,6 +147,7 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Subtitle Support", "Multilingual subtitle support for movies and TV shows.")
 	addFeature(&helpContent, "Audio Track Selection", "Select preferred audio language for movies/TV during playback (FlixHQ only).")
 	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
+	addFeature(&helpContent, "Anime4K Upscaling", "Enhance video and image quality using the Anime4K algorithm.")
 	helpContent.WriteString("\n")
 
 	// Examples section
@@ -154,6 +171,20 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --type movie --subs spanish \"spider-man\"", "Search movies with Spanish subtitles")
 	addExample(&helpContent, "goanime --type movie --no-subs \"matrix\"", "Play movie without subtitles")
 	addExample(&helpContent, "goanime --type movie --audio \"pt-BR,english\" \"matrix\"", "Play movie with Portuguese audio preference")
+	helpContent.WriteString("\n")
+
+	// Upscale Examples section
+	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(sectionTitleStyle.Render("Upscale Examples (Anime4K):"))
+	helpContent.WriteString("\n")
+	addExample(&helpContent, "goanime --upscale video.mp4", "Upscale video to 2x resolution")
+	addExample(&helpContent, "goanime --upscale image.png", "Upscale image to 2x resolution")
+	addExample(&helpContent, "goanime --upscale --upscale-hq video.mp4", "High quality upscale (4 passes)")
+	addExample(&helpContent, "goanime --upscale --upscale-fast video.mp4", "Fast upscale (lower quality)")
+	addExample(&helpContent, "goanime --upscale --upscale-scale 4 video.mp4", "Upscale to 4x resolution")
+	addExample(&helpContent, "goanime --upscale --upscale-output out.mp4 video.mp4", "Specify output path")
+	addExample(&helpContent, "goanime --upscale --upscale-gpu video.mp4", "Use GPU hardware encoding")
 	helpContent.WriteString("\n")
 
 	// Footer

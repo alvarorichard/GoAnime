@@ -48,6 +48,13 @@ func main() {
 			}
 			return
 		}
+		// Check if error is upscale request
+		if err == util.ErrUpscaleRequested {
+			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {
+				log.Fatalln(util.ErrorHandler(upscaleErr))
+			}
+			return
+		}
 		// For help and version requests, just exit silently
 		if err == util.ErrHelpRequested {
 			return

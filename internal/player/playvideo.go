@@ -16,6 +16,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
 )
@@ -277,17 +278,40 @@ func playVideo(
 		return fmt.Errorf("error getting current episode: %w", err)
 	}
 
+	// Check if real-time upscaling is enabled
+	shaderArgs := upscaler.GetMPVShaderArgs(upscaler.CurrentShaderMode)
+	upscalingEnabled := len(shaderArgs) > 0
+
 	// Set up mpv arguments for optimal playback
 	mpvArgs := []string{
-		"--hwdec=auto-safe",
-		"--vo=gpu",
-		"--profile=fast",
 		"--cache=yes",
 		"--demuxer-max-bytes=300M",
 		"--demuxer-readahead-secs=20",
-		"--no-config",
-		"--video-latency-hacks=yes",
 		"--audio-display=no",
+	}
+
+	// When using shaders, we need specific GPU settings
+	if upscalingEnabled {
+		// For shader-based upscaling:
+		// - Use gpu-next (libplacebo) for best shader support on macOS
+		// - Disable hw decoding so shaders can process frames
+		// - Remove --no-config to allow shader loading
+		mpvArgs = append(mpvArgs,
+			"--vo=gpu-next",  // libplacebo-based renderer with better shader support
+			"--hwdec=no",     // Disable hw decoding so shaders can process frames
+		)
+		mpvArgs = append(mpvArgs, shaderArgs...)
+		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.CurrentShaderMode))
+		util.Debugf("Shader args: %v", shaderArgs)
+	} else {
+		// Standard playback without shaders
+		mpvArgs = append(mpvArgs,
+			"--no-config",
+			"--hwdec=auto-safe",
+			"--vo=gpu",
+			"--profile=fast",
+			"--video-latency-hacks=yes",
+		)
 	}
 
 	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
@@ -369,6 +393,11 @@ func playVideo(
 
 	// Apply AniSkip results to skip intros/outros
 	applyAniSkipResults(skipDataChan, socketPath, currentEpisode, currentEpisodeNum)
+
+	// Show OSD message if upscaling is enabled
+	if upscalingEnabled {
+		showShaderOSD(socketPath)
+	}
 
 	// Initialize Discord Rich Presence if updater is provided
 	if updater != nil {
@@ -594,6 +623,23 @@ func fetchAniSkipAsync(anilistID, episodeNum int, episode *models.Episode) chan 
 		ch <- err
 	}()
 	return ch
+}
+
+// showShaderOSD displays an OSD message confirming shaders are active
+func showShaderOSD(socketPath string) {
+	// Wait a bit for mpv to fully initialize
+	time.Sleep(500 * time.Millisecond)
+
+	modeName := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+	message := fmt.Sprintf("Anime4K Upscaling: %s\\nPress Shift+I twice for stats", modeName)
+
+	// Show OSD message for 4 seconds
+	_, err := mpvSendCommand(socketPath, []interface{}{
+		"show-text", message, 4000,
+	})
+	if err != nil {
+		util.Debugf("Failed to show shader OSD: %v", err)
+	}
 }
 
 // applyAniSkipResults applies AniSkip results

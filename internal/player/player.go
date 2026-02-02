@@ -19,6 +19,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
@@ -213,6 +214,11 @@ func filterMPVArgs(args []string) []string {
 		"--stream-lavf-o=",      // FFmpeg/lavf options for streaming protocols
 		"--referrer=",           // HTTP referrer for streaming
 		"--user-agent=",         // HTTP user agent for streaming
+		// Anime4K real-time upscaling shaders
+		"--glsl-shader=",          // GLSL shader for video processing
+		"--glsl-shaders=",         // Multiple GLSL shaders (colon-separated)
+		"--gpu-shader-cache-dir=", // Shader cache directory
+		"--gpu-api=",              // GPU API selection (auto, opengl, vulkan, d3d11)
 		// Add more allowed prefixes here if needed in the future
 	}
 
@@ -423,6 +429,12 @@ func HandleDownloadAndPlay(
 				return err
 			}
 			return nil
+		case 3:
+			// Upscale video with Anime4K
+			if err := handleUpscaleFromMenu(); err != nil {
+				util.Errorf("Upscale error: %v", err)
+			}
+			continue // Return to menu after upscaling
 		default:
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
@@ -651,6 +663,10 @@ func downloadAndPlayEpisode(
 func askForDownload() int {
 	var choice string
 
+	// Build the upscale option label with current status
+	upscaleStatus := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+	upscaleLabel := fmt.Sprintf("Real-time Upscale [%s]", upscaleStatus)
+
 	menu := huh.NewSelect[string]().
 		Title("Download Options").
 		Description("Choose how you want to proceed:").
@@ -658,13 +674,14 @@ func askForDownload() int {
 			huh.NewOption("← Back", "back"),
 			huh.NewOption("Download this episode", "download_single"),
 			huh.NewOption("Download episodes in a range", "download_range"),
+			huh.NewOption(upscaleLabel, "upscale"),
 			huh.NewOption("No download (play online)", "play_online"),
 		).
 		Value(&choice)
 
 	if err := menu.Run(); err != nil {
 		util.Errorf("Error showing download menu: %v", err)
-		return 3 // Default to play online on error
+		return 4 // Default to play online on error
 	}
 
 	// Determines the selected option based on the choice value
@@ -675,8 +692,10 @@ func askForDownload() int {
 		return 1
 	case "download_range":
 		return 2
-	default:
+	case "upscale":
 		return 3
+	default:
+		return 4
 	}
 }
 
@@ -860,4 +879,76 @@ func GetCurrentSubtitleTrack(socketPath string) (int, error) {
 		return 0, nil
 	}
 	return 0, fmt.Errorf("unexpected sid format")
+}
+
+// handleUpscaleFromMenu shows the real-time upscaling options menu
+func handleUpscaleFromMenu() error {
+	var choice string
+
+	// Check if shaders are installed
+	shadersInstalled := upscaler.ShadersInstalled()
+	currentMode := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+
+	description := fmt.Sprintf("Current: %s", currentMode)
+	if !shadersInstalled {
+		description = "⚠️ Shaders not installed - select 'Setup shaders' first"
+	}
+
+	options := []huh.Option[string]{
+		huh.NewOption("← Back", "back"),
+		huh.NewOption("Off (no upscaling)", "off"),
+	}
+
+	if shadersInstalled {
+		options = append(options,
+			huh.NewOption("Performance (weak GPU)", "performance"),
+			huh.NewOption("Fast (Mode A - text-heavy)", "fast"),
+			huh.NewOption("Balanced (Mode B - general)", "balanced"),
+			huh.NewOption("Quality (Mode C - films)", "quality"),
+			huh.NewOption("Ultra (Max Enhancement - SD sources)", "ultra"),
+		)
+	}
+
+	options = append(options, huh.NewOption("Setup shaders (download)", "setup"))
+
+	menu := huh.NewSelect[string]().
+		Title("Real-time Anime4K Upscaling").
+		Description(description).
+		Options(options...).
+		Value(&choice)
+
+	if err := menu.Run(); err != nil {
+		return fmt.Errorf("cancelled: %w", err)
+	}
+
+	switch choice {
+	case "back":
+		return nil
+	case "off":
+		upscaler.SetShaderMode(upscaler.ShaderModeOff)
+		util.Info("Real-time upscaling disabled")
+	case "performance":
+		upscaler.SetShaderMode(upscaler.ShaderModePerformance)
+		util.Info("Real-time upscaling: Performance mode (minimal shaders)")
+	case "fast":
+		upscaler.SetShaderMode(upscaler.ShaderModeFast)
+		util.Info("Real-time upscaling: Fast mode (Mode A - good for subtitled anime)")
+	case "balanced":
+		upscaler.SetShaderMode(upscaler.ShaderModeBalanced)
+		util.Info("Real-time upscaling: Balanced mode (Mode B - general purpose)")
+	case "quality":
+		upscaler.SetShaderMode(upscaler.ShaderModeQuality)
+		util.Info("Real-time upscaling: Quality mode (Mode C - best for films)")
+	case "ultra":
+		upscaler.SetShaderMode(upscaler.ShaderModeUltra)
+		util.Info("Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)")
+	case "setup":
+		util.Info("Setting up Anime4K shaders...")
+		if err := upscaler.InstallShaders(); err != nil {
+			return fmt.Errorf("failed to install shaders: %w", err)
+		}
+		util.Info("Anime4K shaders installed! Select a mode to enable upscaling.")
+	}
+
+	return nil
 }
