@@ -297,8 +297,8 @@ func playVideo(
 		// - Disable hw decoding so shaders can process frames
 		// - Remove --no-config to allow shader loading
 		mpvArgs = append(mpvArgs,
-			"--vo=gpu-next",  // libplacebo-based renderer with better shader support
-			"--hwdec=no",     // Disable hw decoding so shaders can process frames
+			"--vo=gpu-next", // libplacebo-based renderer with better shader support
+			"--hwdec=no",    // Disable hw decoding so shaders can process frames
 		)
 		mpvArgs = append(mpvArgs, shaderArgs...)
 		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.CurrentShaderMode))

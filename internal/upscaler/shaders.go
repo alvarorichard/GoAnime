@@ -172,7 +172,7 @@ func extractZip(zipPath, destDir string) error {
 		_, copyErr := io.Copy(outFile, limitedReader)
 		closeOutErr := outFile.Close()
 		closeRcErr := rc.Close()
-		
+
 		if copyErr != nil {
 			return copyErr
 		}
