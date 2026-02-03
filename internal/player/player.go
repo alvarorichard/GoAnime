@@ -895,7 +895,7 @@ func handleUpscaleFromMenu() error {
 	}
 
 	options := []huh.Option[string]{
-		huh.NewOption("← Back", "back"),
+		huh.NewOption("Back", "back"),
 		huh.NewOption("Off (no upscaling)", "off"),
 	}
 
@@ -906,7 +906,22 @@ func handleUpscaleFromMenu() error {
 			huh.NewOption("Balanced (Mode B - general)", "balanced"),
 			huh.NewOption("Quality (Mode C - films)", "quality"),
 			huh.NewOption("Ultra (Max Enhancement - SD sources)", "ultra"),
+			huh.NewOption("--- Advanced Modes ---", "separator"),
+			huh.NewOption("A+A (Max Perceptual - 1080p)", "advanced_aa"),
+			huh.NewOption("B+B (720p Optimized)", "advanced_bb"),
+			huh.NewOption("C+A (Upscaled/Downscaled Content)", "advanced_ca"),
 		)
+
+		// Add GAN UUL option (check if GAN shaders are installed)
+		if upscaler.GANShadersInstalled() {
+			options = append(options,
+				huh.NewOption("GAN UUL (360p to 4K - HEAVY)", "gan_uul"),
+			)
+		} else {
+			options = append(options,
+				huh.NewOption("GAN UUL (not installed)", "setup_gan"),
+			)
+		}
 	}
 
 	options = append(options, huh.NewOption("Setup shaders (download)", "setup"))
@@ -924,6 +939,9 @@ func handleUpscaleFromMenu() error {
 	switch choice {
 	case "back":
 		return nil
+	case "separator":
+		// Do nothing for separator, show menu again
+		return handleUpscaleFromMenu()
 	case "off":
 		upscaler.SetShaderMode(upscaler.ShaderModeOff)
 		util.Info("Real-time upscaling disabled")
@@ -942,6 +960,25 @@ func handleUpscaleFromMenu() error {
 	case "ultra":
 		upscaler.SetShaderMode(upscaler.ShaderModeUltra)
 		util.Info("Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)")
+	case "advanced_aa":
+		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedAA)
+		util.Info("Real-time upscaling: Advanced A+A (highest perceptual quality, may cause ringing)")
+	case "advanced_bb":
+		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedBB)
+		util.Info("Real-time upscaling: Advanced B+B (optimized for 720p with aliasing)")
+	case "advanced_ca":
+		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedCA)
+		util.Info("Real-time upscaling: Advanced C+A (quality + restore for downscaled content)")
+	case "gan_uul":
+		upscaler.SetShaderMode(upscaler.ShaderModeGAN_UUL)
+		util.Info("Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)")
+		util.Warn("⚠️ This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+	case "setup_gan":
+		util.Info("Setting up experimental GAN UUL shaders...")
+		if err := upscaler.InstallGANShaders(); err != nil {
+			return fmt.Errorf("failed to install GAN shaders: %w", err)
+		}
+		util.Info("GAN UUL shaders installed! Select 'GAN UUL' to enable 360p→4K upscaling.")
 	case "setup":
 		util.Info("Setting up Anime4K shaders...")
 		if err := upscaler.InstallShaders(); err != nil {

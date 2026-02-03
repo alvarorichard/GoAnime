@@ -17,6 +17,8 @@ import (
 const (
 	// Anime4K shader release URL
 	anime4kShaderURL = "https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip"
+	// Anime4K GAN UUL shaders URL (experimental for 360p->4K)
+	anime4kGANShaderBaseURL = "https://raw.githubusercontent.com/bloc97/Anime4K/master/glsl/"
 	// Shader directory name
 	shaderDirName = "anime4k-shaders"
 )
@@ -37,6 +39,15 @@ const (
 	ShaderModePerformance
 	// ShaderModeUltra uses maximum enhancement - very visible on low quality sources
 	ShaderModeUltra
+	// ShaderModeGAN_UUL uses experimental SRGAN shaders for 360p->4K upscaling
+	// Best for very low resolution anime (360p, 480p). Requires powerful GPU.
+	ShaderModeGAN_UUL
+	// ShaderModeAdvancedAA uses Mode A+A (highest perceptual quality, double restore)
+	ShaderModeAdvancedAA
+	// ShaderModeAdvancedBB uses Mode B+B (high perceptual quality for 720p content)
+	ShaderModeAdvancedBB
+	// ShaderModeAdvancedCA uses Mode C+A (quality mode with added restore for upscaled content)
+	ShaderModeAdvancedCA
 )
 
 // CurrentShaderMode holds the current real-time upscaling mode
@@ -61,6 +72,23 @@ func ShadersInstalled() bool {
 		"Anime4K_Clamp_Highlights.glsl",
 		"Anime4K_Restore_CNN_M.glsl",
 		"Anime4K_Upscale_CNN_x2_M.glsl",
+	}
+
+	for _, file := range requiredFiles {
+		if _, err := os.Stat(filepath.Join(shaderDir, file)); os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
+}
+
+// GANShadersInstalled checks if experimental GAN UUL shaders are installed
+func GANShadersInstalled() bool {
+	shaderDir := GetShaderDir()
+	// Check for GAN UUL shader files
+	requiredFiles := []string{
+		"Anime4K_Restore_GAN_UUL.glsl",
+		"Anime4K_Upscale_GAN_x4_UUL.glsl",
 	}
 
 	for _, file := range requiredFiles {
@@ -125,6 +153,74 @@ func InstallShaders() error {
 	}
 
 	util.Infof("Anime4K shaders installed to: %s", shaderDir)
+	return nil
+}
+
+// InstallGANShaders downloads and installs experimental GAN UUL shaders for 360p->4K upscaling
+// These shaders are very heavy and require a powerful GPU
+func InstallGANShaders() error {
+	shaderDir := GetShaderDir()
+
+	// Create shader directory
+	if err := os.MkdirAll(shaderDir, 0750); err != nil {
+		return fmt.Errorf("failed to create shader directory: %w", err)
+	}
+
+	// GAN UUL shader files to download
+	ganShaders := []string{
+		"Restore/Anime4K_Restore_GAN_UUL.glsl",
+		"Upscale/Anime4K_Upscale_GAN_x4_UUL.glsl",
+	}
+
+	util.Info("Downloading experimental GAN UUL shaders for 360p->4K upscaling...")
+	util.Warn("Note: These shaders are very heavy and require a powerful GPU!")
+
+	for _, shaderPath := range ganShaders {
+		url := anime4kGANShaderBaseURL + shaderPath
+		fileName := filepath.Base(shaderPath)
+		destPath := filepath.Join(shaderDir, fileName)
+
+		util.Infof("Downloading %s...", fileName)
+
+		// #nosec G107 -- URL is constructed from trusted constant anime4kGANShaderBaseURL
+		resp, err := http.Get(url)
+		if err != nil {
+			return fmt.Errorf("failed to download %s: %w", fileName, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return fmt.Errorf("failed to download %s: HTTP %d", fileName, resp.StatusCode)
+		}
+
+		// Create destination file
+		// #nosec G304 -- destPath is constructed from trusted config directory
+		outFile, err := os.Create(destPath)
+		if err != nil {
+			_ = resp.Body.Close()
+			return fmt.Errorf("failed to create file %s: %w", fileName, err)
+		}
+
+		// Copy with size limit (GAN shaders can be large, up to 10MB)
+		const maxShaderSize = 10 * 1024 * 1024 // 10MB
+		limitedReader := io.LimitReader(resp.Body, maxShaderSize)
+		_, copyErr := io.Copy(outFile, limitedReader)
+		closeOutErr := outFile.Close()
+		closeRespErr := resp.Body.Close()
+
+		if copyErr != nil {
+			return fmt.Errorf("failed to save %s: %w", fileName, copyErr)
+		}
+		if closeOutErr != nil {
+			return fmt.Errorf("failed to close %s: %w", fileName, closeOutErr)
+		}
+		if closeRespErr != nil {
+			util.Warnf("Failed to close response body: %v", closeRespErr)
+		}
+	}
+
+	util.Infof("GAN UUL shaders installed to: %s", shaderDir)
+	util.Info("Recommended usage: For 360p to 4K upscaling of low resolution anime")
 	return nil
 }
 
@@ -263,6 +359,60 @@ func GetMPVShaderArgs(mode ShaderMode) []string {
 			shader("Anime4K_AutoDownscalePre_x4.glsl"),
 			shader("Anime4K_Upscale_CNN_x2_L.glsl"),
 		}
+
+	case ShaderModeGAN_UUL:
+		// GAN UUL mode - experimental SRGAN shaders for 360p->4K upscaling
+		// Recommended for very low resolution anime (360p, 480p)
+		// WARNING: Very heavy shaders, requires powerful GPU!
+		if !GANShadersInstalled() {
+			util.Warn("GAN UUL shaders not installed. Run 'goanime --upscale-install-gan' first.")
+			return nil
+		}
+		shaders = []string{
+			shader("Anime4K_Restore_GAN_UUL.glsl"),
+			shader("Anime4K_Upscale_GAN_x4_UUL.glsl"),
+			shader("Anime4K_Restore_CNN_Soft_M.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_M.glsl"),
+		}
+
+	case ShaderModeAdvancedAA:
+		// Mode A+A - highest perceptual quality, double restore
+		// Best for 1080p anime with high compression artifacts
+		// WARNING: Can cause severe ringing on some content
+		shaders = []string{
+			shader("Anime4K_Clamp_Highlights.glsl"),
+			shader("Anime4K_Restore_CNN_M.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_M.glsl"),
+			shader("Anime4K_Restore_CNN_S.glsl"),
+			shader("Anime4K_AutoDownscalePre_x2.glsl"),
+			shader("Anime4K_AutoDownscalePre_x4.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_S.glsl"),
+		}
+
+	case ShaderModeAdvancedBB:
+		// Mode B+B - high perceptual quality for 720p content
+		// Good for anime with ringing/aliasing artifacts
+		shaders = []string{
+			shader("Anime4K_Clamp_Highlights.glsl"),
+			shader("Anime4K_Restore_CNN_Soft_M.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_M.glsl"),
+			shader("Anime4K_Restore_CNN_Soft_S.glsl"),
+			shader("Anime4K_AutoDownscalePre_x2.glsl"),
+			shader("Anime4K_AutoDownscalePre_x4.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_S.glsl"),
+		}
+
+	case ShaderModeAdvancedCA:
+		// Mode C+A - quality mode with added restore for upscaled content
+		// Good for downscaled 1080p->480p anime
+		shaders = []string{
+			shader("Anime4K_Clamp_Highlights.glsl"),
+			shader("Anime4K_Upscale_Denoise_CNN_x2_M.glsl"),
+			shader("Anime4K_Restore_CNN_M.glsl"),
+			shader("Anime4K_AutoDownscalePre_x2.glsl"),
+			shader("Anime4K_AutoDownscalePre_x4.glsl"),
+			shader("Anime4K_Upscale_CNN_x2_M.glsl"),
+		}
 	}
 
 	// Check that all shaders exist
@@ -311,14 +461,76 @@ func GetShaderModeName(mode ShaderMode) string {
 		return "Performance (Low GPU)"
 	case ShaderModeUltra:
 		return "Ultra (Max Enhancement)"
+	case ShaderModeGAN_UUL:
+		return "GAN UUL (360p→4K)"
+	case ShaderModeAdvancedAA:
+		return "Advanced A+A (Max Perceptual)"
+	case ShaderModeAdvancedBB:
+		return "Advanced B+B (720p Optimized)"
+	case ShaderModeAdvancedCA:
+		return "Advanced C+A (Upscaled Content)"
 	default:
 		return "Unknown"
 	}
 }
 
+// GetShaderModeDescription returns a detailed description for the shader mode
+func GetShaderModeDescription(mode ShaderMode) string {
+	switch mode {
+	case ShaderModeOff:
+		return "Real-time upscaling disabled"
+	case ShaderModeFast:
+		return "Mode A: Optimized for text-heavy anime with subtitles"
+	case ShaderModeBalanced:
+		return "Mode B: General purpose anime upscaling, good balance"
+	case ShaderModeQuality:
+		return "Mode C: High quality for anime films, requires good GPU"
+	case ShaderModePerformance:
+		return "Minimal shaders for weaker GPUs"
+	case ShaderModeUltra:
+		return "Maximum enhancement with denoise + deblur + upscale"
+	case ShaderModeGAN_UUL:
+		return "Experimental SRGAN for 360p→4K, VERY heavy, requires powerful GPU"
+	case ShaderModeAdvancedAA:
+		return "Double restore pass, highest perceptual quality, may cause ringing"
+	case ShaderModeAdvancedBB:
+		return "Double soft restore, good for 720p with aliasing artifacts"
+	case ShaderModeAdvancedCA:
+		return "Quality + restore, good for downscaled 480p anime"
+	default:
+		return "Unknown mode"
+	}
+}
+
+// GetAllShaderModes returns all available shader modes
+func GetAllShaderModes() []ShaderMode {
+	return []ShaderMode{
+		ShaderModeOff,
+		ShaderModeFast,
+		ShaderModeBalanced,
+		ShaderModeQuality,
+		ShaderModePerformance,
+		ShaderModeUltra,
+		ShaderModeGAN_UUL,
+		ShaderModeAdvancedAA,
+		ShaderModeAdvancedBB,
+		ShaderModeAdvancedCA,
+	}
+}
+
+// GetAdvancedShaderModes returns only the advanced shader modes (for menu)
+func GetAdvancedShaderModes() []ShaderMode {
+	return []ShaderMode{
+		ShaderModeGAN_UUL,
+		ShaderModeAdvancedAA,
+		ShaderModeAdvancedBB,
+		ShaderModeAdvancedCA,
+	}
+}
+
 // CycleShaderMode cycles through shader modes
 func CycleShaderMode() ShaderMode {
-	CurrentShaderMode = (CurrentShaderMode + 1) % 6
+	CurrentShaderMode = (CurrentShaderMode + 1) % 10
 	return CurrentShaderMode
 }
 
