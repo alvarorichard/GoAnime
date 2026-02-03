@@ -250,19 +250,14 @@ func TestFlixHQClient_GetTVShowStream(t *testing.T) {
 
 	if len(results) == 0 {
 		t.Skip("No search results found for 'dexter'")
+		return
 	}
 
 	// Find a TV show in the results
-	var tvShow *FlixHQMedia
-	for _, media := range results {
-		if media.Type == MediaTypeTV {
-			tvShow = media
-			break
-		}
-	}
-
+	tvShow := findTVShowInFlixHQResults(results)
 	if tvShow == nil {
 		t.Skip("No TV show found in search results")
+		return
 	}
 
 	t.Logf("Found TV show: %s (ID: %s)", tvShow.Title, tvShow.ID)
@@ -319,4 +314,14 @@ func TestFlixHQClient_GetTVShowStream(t *testing.T) {
 
 	t.Logf("Got video URL: %s", streamInfo.VideoURL)
 	t.Logf("Found %d subtitle tracks", len(streamInfo.Subtitles))
+}
+
+// findTVShowInFlixHQResults finds the first TV show in FlixHQ search results
+func findTVShowInFlixHQResults(results []*FlixHQMedia) *FlixHQMedia {
+	for _, media := range results {
+		if media.Type == MediaTypeTV {
+			return media
+		}
+	}
+	return nil
 }

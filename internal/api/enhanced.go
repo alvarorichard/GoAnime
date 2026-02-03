@@ -10,6 +10,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/manifoldco/promptui"
 )
 
 // ErrBackToSearch is returned when user selects the back option to search again
@@ -610,9 +611,20 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 			return "", nil, fmt.Errorf("failed to get embed link: %w", err)
 		}
 
-		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, quality, subsLanguage)
+		// First extract stream info to get available qualities
+		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+		}
+
+		// If we have multiple quality options, let user choose
+		if len(streamInfo.Qualities) > 1 {
+			selectedQuality, selectErr := selectFlixHQQualityOptions(streamInfo.Qualities)
+			if selectErr == nil && selectedQuality.URL != "" {
+				streamInfo.VideoURL = selectedQuality.URL
+				streamInfo.Quality = string(selectedQuality.Quality)
+				streamInfo.IsM3U8 = selectedQuality.IsM3U8
+			}
 		}
 	} else {
 		// For TV shows, episode.URL contains the DataID
@@ -629,9 +641,20 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 			return "", nil, fmt.Errorf("failed to get embed link: %w", err)
 		}
 
-		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, quality, subsLanguage)
+		// First extract stream info to get available qualities
+		streamInfo, err = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+		}
+
+		// If we have multiple quality options, let user choose
+		if len(streamInfo.Qualities) > 1 {
+			selectedQuality, selectErr := selectFlixHQQualityOptions(streamInfo.Qualities)
+			if selectErr == nil && selectedQuality.URL != "" {
+				streamInfo.VideoURL = selectedQuality.URL
+				streamInfo.Quality = string(selectedQuality.Quality)
+				streamInfo.IsM3U8 = selectedQuality.IsM3U8
+			}
 		}
 	}
 
@@ -646,6 +669,39 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 	}
 
 	return streamInfo.VideoURL, subtitles, nil
+}
+
+// selectFlixHQQualityOptions shows a menu for the user to select video quality from FlixHQQualityOption
+func selectFlixHQQualityOptions(qualities []scraper.FlixHQQualityOption) (scraper.FlixHQQualityOption, error) {
+	if len(qualities) == 0 {
+		return scraper.FlixHQQualityOption{Quality: scraper.QualityAuto}, fmt.Errorf("no qualities available")
+	}
+
+	// If only one quality, use it directly
+	if len(qualities) == 1 {
+		return qualities[0], nil
+	}
+
+	// Build labels for each quality
+	var items []string
+	client := scraper.NewFlixHQClient()
+	for _, q := range qualities {
+		items = append(items, client.QualityToLabel(q.Quality))
+	}
+
+	prompt := promptui.Select{
+		Label: "Select video quality",
+		Items: items,
+		Size:  10,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		// On error/cancel, return first (auto) quality
+		return qualities[0], err
+	}
+
+	return qualities[idx], nil
 }
 
 // extractMediaIDFromURL extracts the media ID from a FlixHQ URL

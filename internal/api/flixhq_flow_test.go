@@ -25,17 +25,14 @@ func TestFlixHQFullFlow(t *testing.T) {
 	}
 
 	// Find TV show
-	var anime *models.Anime
-	for _, r := range results {
-		t.Logf("Found: %s (Source: %s, MediaType: %s, URL: %s)", r.Name, r.Source, r.MediaType, r.URL)
-		if r.MediaType == models.MediaTypeTV {
-			anime = r
-			break
-		}
-	}
-
+	anime := findTVShowInResults(results)
 	if anime == nil {
 		t.Fatal("No TV show found")
+		return
+	}
+
+	for _, r := range results {
+		t.Logf("Found: %s (Source: %s, MediaType: %s, URL: %s)", r.Name, r.Source, r.MediaType, r.URL)
 	}
 
 	t.Logf("=== Step 2: Selected anime - Source: %s, MediaType: %s ===", anime.Source, anime.MediaType)
@@ -45,15 +42,7 @@ func TestFlixHQFullFlow(t *testing.T) {
 	flixhqClient := scraper.NewFlixHQClient()
 
 	// Extract media ID from URL (get last number from URL like "watch-dexter-39448")
-	mediaID := ""
-	urlParts := anime.URL
-	for i := len(urlParts) - 1; i >= 0; i-- {
-		if urlParts[i] >= '0' && urlParts[i] <= '9' {
-			mediaID = string(urlParts[i]) + mediaID
-		} else if len(mediaID) > 0 {
-			break
-		}
-	}
+	mediaID := extractMediaIDFromURL(anime.URL)
 	t.Logf("Extracted mediaID: %s from URL: %s", mediaID, anime.URL)
 
 	seasons, err := flixhqClient.GetSeasons(mediaID)
@@ -99,4 +88,14 @@ func TestFlixHQFullFlow(t *testing.T) {
 	}
 
 	t.Logf("=== SUCCESS! Stream URL: %s ===", streamURL)
+}
+
+// findTVShowInResults finds the first TV show in the search results
+func findTVShowInResults(results []*models.Anime) *models.Anime {
+	for _, r := range results {
+		if r.MediaType == models.MediaTypeTV {
+			return r
+		}
+	}
+	return nil
 }

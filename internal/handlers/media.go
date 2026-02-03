@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 type MediaHandler struct {
 	mediaManager *scraper.MediaManager
 	provider     string
-	quality      string
+	quality      scraper.Quality
 	subsLanguage string
 }
 
@@ -24,7 +25,7 @@ func NewMediaHandler() *MediaHandler {
 	return &MediaHandler{
 		mediaManager: scraper.NewMediaManager(),
 		provider:     "Vidcloud",
-		quality:      "1080",
+		quality:      scraper.Quality1080,
 		subsLanguage: "english",
 	}
 }
@@ -35,7 +36,7 @@ func (mh *MediaHandler) SetOptions(provider, quality, subsLanguage string) {
 		mh.provider = provider
 	}
 	if quality != "" {
-		mh.quality = quality
+		mh.quality = scraper.Quality(quality)
 	}
 	if subsLanguage != "" {
 		mh.subsLanguage = subsLanguage
@@ -182,6 +183,11 @@ func (mh *MediaHandler) SelectEpisode(seasonID string) (*scraper.FlixHQEpisode, 
 
 // GetStreamInfo gets streaming information for selected media
 func (mh *MediaHandler) GetStreamInfo(media *models.Anime, episode *scraper.FlixHQEpisode) (*scraper.FlixHQStreamInfo, error) {
+	return mh.GetStreamInfoWithContext(context.Background(), media, episode)
+}
+
+// GetStreamInfoWithContext gets streaming information with context support
+func (mh *MediaHandler) GetStreamInfoWithContext(ctx context.Context, media *models.Anime, episode *scraper.FlixHQEpisode) (*scraper.FlixHQStreamInfo, error) {
 	source := strings.ToLower(media.Source)
 
 	if !strings.Contains(source, "flixhq") {
@@ -195,19 +201,63 @@ func (mh *MediaHandler) GetStreamInfo(media *models.Anime, episode *scraper.Flix
 	}
 
 	if media.MediaType == models.MediaTypeMovie {
-		return mh.mediaManager.GetMovieStreamInfo(mediaID, mh.provider, mh.quality, mh.subsLanguage)
+		return mh.mediaManager.GetMovieStreamInfo(mediaID, mh.provider, string(mh.quality), mh.subsLanguage)
 	}
 
 	if episode == nil {
 		return nil, fmt.Errorf("episode is required for TV shows")
 	}
 
-	return mh.mediaManager.GetTVEpisodeStreamInfo(episode.DataID, mh.provider, mh.quality, mh.subsLanguage)
+	return mh.mediaManager.GetTVEpisodeStreamInfo(episode.DataID, mh.provider, string(mh.quality), mh.subsLanguage)
+}
+
+// GetStreamWithQuality gets stream info with quality selection
+func (mh *MediaHandler) GetStreamWithQuality(episodeID string, isMovie bool) (*scraper.FlixHQStreamInfo, error) {
+	return mh.mediaManager.GetStreamWithQuality(episodeID, isMovie, mh.quality, mh.subsLanguage)
+}
+
+// GetStreamWithQualityContext gets stream info with quality selection and context
+func (mh *MediaHandler) GetStreamWithQualityContext(ctx context.Context, episodeID string, isMovie bool) (*scraper.FlixHQStreamInfo, error) {
+	return mh.mediaManager.GetStreamWithQualityWithContext(ctx, episodeID, isMovie, mh.quality, mh.subsLanguage)
+}
+
+// SelectQuality prompts user to select video quality
+func (mh *MediaHandler) SelectQuality(episodeID string, isMovie bool) (scraper.Quality, error) {
+	qualities, err := mh.mediaManager.GetAvailableQualities(episodeID, isMovie)
+	if err != nil {
+		return scraper.QualityAuto, err
+	}
+
+	if len(qualities) == 0 {
+		return scraper.QualityAuto, nil
+	}
+
+	var items []string
+	for _, q := range qualities {
+		items = append(items, string(q))
+	}
+
+	prompt := promptui.Select{
+		Label: "Select quality",
+		Items: items,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return scraper.QualityAuto, err
+	}
+
+	return qualities[idx], nil
+}
+
+// GetAvailableQualities returns available video qualities
+func (mh *MediaHandler) GetAvailableQualities(episodeID string, isMovie bool) ([]scraper.Quality, error) {
+	return mh.mediaManager.GetAvailableQualities(episodeID, isMovie)
 }
 
 // GetAnimeStreamURL gets stream URL for anime content
 func (mh *MediaHandler) GetAnimeStreamURL(anime *models.Anime, episodeNum string, mode string) (string, map[string]string, error) {
-	return mh.mediaManager.GetAnimeStreamURL(anime, episodeNum, mh.quality, mode)
+	return mh.mediaManager.GetAnimeStreamURL(anime, episodeNum, string(mh.quality), mode)
 }
 
 // InteractiveMediaFlow runs an interactive media selection and playback flow
@@ -268,12 +318,38 @@ func (mh *MediaHandler) handleFlixHQPlayback(media *models.Anime, info *Playback
 	mediaID := extractIDFromURL(media.URL)
 
 	if media.MediaType == models.MediaTypeMovie {
-		streamInfo, err := mh.mediaManager.GetMovieStreamInfo(mediaID, mh.provider, mh.quality, mh.subsLanguage)
+		// Get available qualities for the movie
+		qualities, err := mh.mediaManager.GetMovieQualities(mediaID)
+		if err != nil {
+			util.Debug("Could not fetch movie qualities", "error", err)
+			// Fall back to default quality
+			streamInfo, err := mh.mediaManager.GetMovieStreamInfo(mediaID, mh.provider, string(mh.quality), mh.subsLanguage)
+			if err != nil {
+				return nil, err
+			}
+			info.StreamURL = streamInfo.VideoURL
+			info.Subtitles = convertSubtitles(streamInfo.Subtitles)
+			return info, nil
+		}
+
+		// If qualities are available, let user select
+		if len(qualities) > 0 {
+			selectedQuality, err := mh.selectMovieQuality(qualities)
+			if err != nil {
+				util.Debug("Quality selection cancelled, using default", "error", err)
+				// Keep mh.quality as default
+			} else {
+				mh.quality = selectedQuality
+			}
+		}
+
+		streamInfo, err := mh.mediaManager.GetMovieStreamWithQuality(mediaID, mh.quality, mh.subsLanguage)
 		if err != nil {
 			return nil, err
 		}
 		info.StreamURL = streamInfo.VideoURL
 		info.Subtitles = convertSubtitles(streamInfo.Subtitles)
+		info.Quality = string(mh.quality)
 		return info, nil
 	}
 
@@ -291,14 +367,49 @@ func (mh *MediaHandler) handleFlixHQPlayback(media *models.Anime, info *Playback
 	info.Episode = episode.Title
 	info.EpisodeNum = episode.Number
 
-	streamInfo, err := mh.mediaManager.GetTVEpisodeStreamInfo(episode.DataID, mh.provider, mh.quality, mh.subsLanguage)
+	// Get available qualities for the episode
+	qualities, err := mh.mediaManager.GetEpisodeQualities(episode.DataID)
+	if err == nil && len(qualities) > 0 {
+		selectedQuality, err := mh.selectMovieQuality(qualities)
+		if err == nil {
+			mh.quality = selectedQuality
+		}
+	}
+
+	streamInfo, err := mh.mediaManager.GetTVEpisodeStreamInfo(episode.DataID, mh.provider, string(mh.quality), mh.subsLanguage)
 	if err != nil {
 		return nil, err
 	}
 	info.StreamURL = streamInfo.VideoURL
 	info.Subtitles = convertSubtitles(streamInfo.Subtitles)
+	info.Quality = string(mh.quality)
 
 	return info, nil
+}
+
+// selectMovieQuality prompts user to select video quality from available options
+func (mh *MediaHandler) selectMovieQuality(qualities []scraper.QualityOption) (scraper.Quality, error) {
+	if len(qualities) == 0 {
+		return mh.quality, nil
+	}
+
+	var items []string
+	for _, q := range qualities {
+		items = append(items, q.Label)
+	}
+
+	prompt := promptui.Select{
+		Label: "Select video quality",
+		Items: items,
+		Size:  10,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return mh.quality, err
+	}
+
+	return qualities[idx].Quality, nil
 }
 
 func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackInfo) (*PlaybackInfo, error) {
@@ -349,6 +460,7 @@ type PlaybackInfo struct {
 	Episode    string
 	EpisodeNum int
 	StreamURL  string
+	Quality    string
 	Subtitles  []models.Subtitle
 	Referer    string
 	ImageURL   string

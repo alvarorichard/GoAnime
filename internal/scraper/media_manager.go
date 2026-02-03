@@ -2,6 +2,7 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -209,4 +210,192 @@ func (mm *MediaManager) GetScraperManager() *ScraperManager {
 // GetFlixHQClient returns the FlixHQ client for direct access
 func (mm *MediaManager) GetFlixHQClient() *FlixHQClient {
 	return mm.flixhqClient
+}
+
+// GetMovieInfo gets detailed info for a movie or TV show
+func (mm *MediaManager) GetMovieInfo(id string) (*FlixHQMedia, error) {
+	return mm.flixhqClient.GetInfo(id)
+}
+
+// GetMovieInfoWithContext gets detailed info with context support
+func (mm *MediaManager) GetMovieInfoWithContext(ctx context.Context, id string) (*FlixHQMedia, error) {
+	return mm.flixhqClient.GetInfoWithContext(ctx, id)
+}
+
+// GetServers gets available streaming servers
+func (mm *MediaManager) GetServers(episodeID string, isMovie bool) ([]FlixHQServer, error) {
+	return mm.flixhqClient.GetServers(episodeID, isMovie)
+}
+
+// GetServersWithContext gets available streaming servers with context
+func (mm *MediaManager) GetServersWithContext(ctx context.Context, episodeID string, isMovie bool) ([]FlixHQServer, error) {
+	return mm.flixhqClient.GetServersWithContext(ctx, episodeID, isMovie)
+}
+
+// GetSources gets video sources from all servers
+func (mm *MediaManager) GetSources(episodeID string, isMovie bool) (*FlixHQVideoSources, error) {
+	return mm.flixhqClient.GetSources(episodeID, isMovie)
+}
+
+// GetSourcesWithContext gets video sources with context support
+func (mm *MediaManager) GetSourcesWithContext(ctx context.Context, episodeID string, isMovie bool) (*FlixHQVideoSources, error) {
+	return mm.flixhqClient.GetSourcesWithContext(ctx, episodeID, isMovie)
+}
+
+// GetAvailableQualities returns available video qualities
+func (mm *MediaManager) GetAvailableQualities(episodeID string, isMovie bool) ([]Quality, error) {
+	return mm.flixhqClient.GetAvailableQualities(episodeID, isMovie)
+}
+
+// GetAvailableQualitiesWithContext returns available qualities with context
+func (mm *MediaManager) GetAvailableQualitiesWithContext(ctx context.Context, episodeID string, isMovie bool) ([]Quality, error) {
+	return mm.flixhqClient.GetAvailableQualitiesWithContext(ctx, episodeID, isMovie)
+}
+
+// GetStreamWithQuality gets stream URL with specific quality
+func (mm *MediaManager) GetStreamWithQuality(episodeID string, isMovie bool, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	return mm.GetStreamWithQualityWithContext(context.Background(), episodeID, isMovie, quality, subsLanguage)
+}
+
+// GetStreamWithQualityWithContext gets stream URL with specific quality and context
+func (mm *MediaManager) GetStreamWithQualityWithContext(ctx context.Context, episodeID string, isMovie bool, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	sources, err := mm.flixhqClient.GetSourcesWithContext(ctx, episodeID, isMovie)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sources: %w", err)
+	}
+
+	if len(sources.Sources) == 0 {
+		return nil, fmt.Errorf("no sources found")
+	}
+
+	// Select best quality based on preference
+	selectedSource := mm.flixhqClient.SelectBestQuality(sources, quality)
+	if selectedSource == nil {
+		return nil, fmt.Errorf("no suitable quality found")
+	}
+
+	// Build stream info
+	streamInfo := &FlixHQStreamInfo{
+		VideoURL: selectedSource.URL,
+		Quality:  string(quality),
+		Referer:  mm.flixhqClient.baseURL,
+		IsM3U8:   selectedSource.IsM3U8,
+		Headers:  make(map[string]string),
+	}
+	streamInfo.Headers["Referer"] = mm.flixhqClient.baseURL
+
+	if selectedSource.IsM3U8 {
+		streamInfo.StreamType = StreamTypeHLS
+	} else {
+		streamInfo.StreamType = StreamTypeMP4
+	}
+
+	// Add subtitles
+	for _, sub := range sources.Subtitles {
+		// Filter by language if specified
+		if subsLanguage != "" {
+			if !strings.Contains(strings.ToLower(sub.Language), strings.ToLower(subsLanguage)) &&
+				!strings.Contains(strings.ToLower(sub.Label), strings.ToLower(subsLanguage)) {
+				continue
+			}
+		}
+		streamInfo.Subtitles = append(streamInfo.Subtitles, sub)
+	}
+
+	// If filtering removed all subs, add them all back
+	if subsLanguage != "" && len(streamInfo.Subtitles) == 0 {
+		streamInfo.Subtitles = sources.Subtitles
+	}
+
+	return streamInfo, nil
+}
+
+// HealthCheck checks if FlixHQ is accessible
+func (mm *MediaManager) HealthCheck(ctx context.Context) error {
+	return mm.flixhqClient.HealthCheck(ctx)
+}
+
+// ClearCache clears all caches
+func (mm *MediaManager) ClearCache() {
+	mm.flixhqClient.ClearCache()
+}
+
+// GetMovieQualities fetches available qualities for a movie
+func (mm *MediaManager) GetMovieQualities(mediaID string) ([]QualityOption, error) {
+	return mm.flixhqClient.GetMovieQualities(mediaID)
+}
+
+// GetMovieQualitiesWithContext fetches available qualities for a movie with context
+func (mm *MediaManager) GetMovieQualitiesWithContext(ctx context.Context, mediaID string) ([]QualityOption, error) {
+	return mm.flixhqClient.GetMovieQualitiesWithContext(ctx, mediaID)
+}
+
+// GetEpisodeQualities fetches available qualities for a TV episode
+func (mm *MediaManager) GetEpisodeQualities(dataID string) ([]QualityOption, error) {
+	return mm.GetEpisodeQualitiesWithContext(context.Background(), dataID)
+}
+
+// GetEpisodeQualitiesWithContext fetches available qualities for a TV episode with context
+func (mm *MediaManager) GetEpisodeQualitiesWithContext(ctx context.Context, dataID string) ([]QualityOption, error) {
+	sources, err := mm.flixhqClient.GetSourcesWithContext(ctx, dataID, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episode sources: %w", err)
+	}
+	return mm.flixhqClient.sourcesToQualityOptions(sources), nil
+}
+
+// GetMovieStreamWithQuality gets the stream URL for a movie with a specific quality
+func (mm *MediaManager) GetMovieStreamWithQuality(mediaID string, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	return mm.flixhqClient.GetMovieStreamWithQuality(mediaID, quality, subsLanguage)
+}
+
+// GetMovieStreamWithQualityContext gets the stream URL for a movie with context support
+func (mm *MediaManager) GetMovieStreamWithQualityContext(ctx context.Context, mediaID string, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	return mm.flixhqClient.GetMovieStreamWithQualityContext(ctx, mediaID, quality, subsLanguage)
+}
+
+// GetEpisodeStreamWithQuality gets the stream URL for an episode with a specific quality
+func (mm *MediaManager) GetEpisodeStreamWithQuality(dataID string, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	return mm.GetEpisodeStreamWithQualityContext(context.Background(), dataID, quality, subsLanguage)
+}
+
+// GetEpisodeStreamWithQualityContext gets the stream URL for an episode with context support
+func (mm *MediaManager) GetEpisodeStreamWithQualityContext(ctx context.Context, dataID string, quality Quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	sources, err := mm.flixhqClient.GetSourcesWithContext(ctx, dataID, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episode sources: %w", err)
+	}
+
+	if len(sources.Sources) == 0 {
+		return nil, fmt.Errorf("no video sources available for this episode")
+	}
+
+	selectedSource := mm.flixhqClient.SelectBestQuality(sources, quality)
+	if selectedSource == nil {
+		return nil, fmt.Errorf("no matching quality found")
+	}
+
+	streamInfo := &FlixHQStreamInfo{
+		VideoURL:  selectedSource.URL,
+		Quality:   selectedSource.Quality,
+		Referer:   mm.flixhqClient.baseURL,
+		IsM3U8:    selectedSource.IsM3U8,
+		Headers:   make(map[string]string),
+		Qualities: mm.flixhqClient.sourcesToFlixHQQualityOptions(sources),
+		Subtitles: sources.Subtitles,
+	}
+	streamInfo.Headers["Referer"] = mm.flixhqClient.baseURL
+
+	if streamInfo.IsM3U8 {
+		streamInfo.StreamType = StreamTypeHLS
+	} else {
+		streamInfo.StreamType = StreamTypeMP4
+	}
+
+	// Filter subtitles by language if specified
+	if subsLanguage != "" && len(streamInfo.Subtitles) > 0 {
+		streamInfo.Subtitles = mm.flixhqClient.filterSubtitlesByLanguage(streamInfo.Subtitles, subsLanguage)
+	}
+
+	return streamInfo, nil
 }
