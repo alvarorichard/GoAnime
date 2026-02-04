@@ -13,6 +13,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh/spinner"
 )
 
 func PlayEpisode(
@@ -33,9 +34,16 @@ func PlayEpisode(
 	}}
 	animeMutex.Unlock()
 
-	if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-		log.Printf("Error fetching episode data: %v", err)
-	}
+	// Fetch episode metadata with spinner
+	_ = spinner.New().
+		Title("Fetching episode data...").
+		Type(spinner.Dots).
+		Action(func() {
+			if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
+				util.Debugf("Error fetching episode data: %v", err)
+			}
+		}).
+		Run()
 
 	// Find the specific episode to pass to enhanced API
 	var currentEpisode *models.Episode
@@ -66,14 +74,25 @@ func PlayEpisode(
 	}
 
 	// Try enhanced API first, fallback to legacy if needed
-	videoURL, err := player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
-	if err != nil {
+	var videoURL string
+	var videoErr error
+
+	// Use spinner while fetching video URL
+	_ = spinner.New().
+		Title("Loading video stream...").
+		Type(spinner.Dots).
+		Action(func() {
+			videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
+		}).
+		Run()
+
+	if videoErr != nil {
 		// Check if user requested to go back to episode selection
-		if errors.Is(err, player.ErrBackToEpisodeSelection) {
+		if errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
 			return player.ErrBackToEpisodeSelection
 		}
 		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
-		return fmt.Errorf("failed to extract video URL: %w", err)
+		return fmt.Errorf("failed to extract video URL: %w", videoErr)
 	}
 
 	// Guard against empty or missing durations
@@ -85,7 +104,7 @@ func PlayEpisode(
 	}
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
-	err = player.HandleDownloadAndPlay(
+	playErr := player.HandleDownloadAndPlay(
 		videoURL,
 		episodes,
 		episodeNum,
@@ -98,7 +117,7 @@ func PlayEpisode(
 	if updater != nil {
 		updater.Stop()
 	}
-	return err
+	return playErr
 }
 
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {

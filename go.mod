@@ -17,6 +17,7 @@ require (
 
 require (
 	github.com/charmbracelet/huh v0.8.0
+	github.com/charmbracelet/huh/spinner v0.0.0-20260202112050-cf338358ac5c
 	github.com/charmbracelet/log v0.4.2
 	github.com/disintegration/gift v1.2.1
 	github.com/lrstanley/go-ytdlp v1.2.7

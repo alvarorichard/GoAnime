@@ -15,6 +15,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/charmbracelet/huh/spinner"
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
@@ -35,9 +36,20 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			}
 		}
 
-		videoURL, err := player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
-		if err != nil {
-			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(err))
+		var videoURL string
+		var videoErr error
+
+		// Use spinner while fetching video URL
+		_ = spinner.New().
+			Title("Loading video stream...").
+			Type(spinner.Dots).
+			Action(func() {
+				videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
+			}).
+			Run()
+
+		if videoErr != nil {
+			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(videoErr))
 			// Return to anime selection
 			return player.ErrBackToAnimeSelection
 		}
@@ -45,7 +57,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
 		updater := createUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
 
-		err = player.HandleDownloadAndPlay(
+		playErr := player.HandleDownloadAndPlay(
 			videoURL,
 			episodes,
 			1,
@@ -60,16 +72,16 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		}
 
 		// Handle playback errors and user interaction
-		if errors.Is(err, player.ErrUserQuit) {
+		if errors.Is(playErr, player.ErrUserQuit) {
 			log.Println("Quitting application as per user request.")
 			break
 		}
 
 		// Check if user requested to change anime during video playback
-		if errors.Is(err, player.ErrChangeAnime) {
-			newAnime, newEpisodes, err := ChangeAnimeLocal()
-			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+		if errors.Is(playErr, player.ErrChangeAnime) {
+			newAnime, newEpisodes, changeErr := ChangeAnimeLocal()
+			if changeErr != nil {
+				log.Printf("Error changing anime: %v", changeErr)
 				continue // Stay with current anime if change fails
 			}
 
@@ -84,9 +96,9 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
-					if errors.Is(err, player.ErrBackToAnimeSelection) {
-						return err
+				if seriesErr := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); seriesErr != nil {
+					if errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
+						return seriesErr
 					}
 				}
 				break
@@ -96,8 +108,8 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			continue // Continue with new movie
 		}
 
-		if err != nil {
-			log.Printf("Error during movie playback: %v", err)
+		if playErr != nil {
+			log.Printf("Error during movie playback: %v", playErr)
 		}
 
 		// Ask user what to do next after movie finishes
