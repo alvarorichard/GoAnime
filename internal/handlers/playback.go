@@ -23,14 +23,10 @@ func HandlePlaybackMode(animeName string) {
 	tracking.HandleTrackingNotice()
 	util.Debugf("[PERF] starting Goanime v%s", version.Version)
 
-	discordTimer := util.StartTimer("Discord:Initialize")
+	// Discord init runs in background - doesn't block startup
 	discordManager := discord.NewManager()
-	if err := discordManager.Initialize(); err != nil {
-		util.Debug("Failed to initialize Discord Rich Presence:", "error", err)
-	} else {
-		defer discordManager.Shutdown()
-	}
-	discordTimer.Stop()
+	_ = discordManager.Initialize() // Non-blocking, runs async
+	defer discordManager.Shutdown()
 
 	currentAnimeName := animeName
 

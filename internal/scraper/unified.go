@@ -34,6 +34,7 @@ const (
 	AnimefireType
 	AnimeDriveType
 	FlixHQType // Movies and TV Shows source
+	SFlixType  // Alternative Movies and TV Shows source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -59,6 +60,7 @@ func NewScraperManager() *ScraperManager {
 	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
 	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
+	manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
 
 	// AnimeDrive - Currently on standby
 	// Reason: Site is protected by Cloudflare, no bypass solution found yet
@@ -347,6 +349,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "AnimeDrive"
 	case FlixHQType:
 		return "FlixHQ"
+	case SFlixType:
+		return "SFlix"
 	default:
 		return "Desconhecido"
 	}
@@ -362,6 +366,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AnimeDriveType:
 		return "[Portuguese]"
 	case FlixHQType:
+		return "[Movies/TV]"
+	case SFlixType:
 		return "[Movies/TV]"
 	default:
 		return "[Unknown]"
@@ -583,5 +589,94 @@ func (a *FlixHQAdapter) GetType() ScraperType {
 
 // GetClient returns the underlying FlixHQ client for direct access
 func (a *FlixHQAdapter) GetClient() *FlixHQClient {
+	return a.client
+}
+
+// SFlixAdapter adapts SFlixClient to UnifiedScraper interface for movies and TV shows
+type SFlixAdapter struct {
+	client *SFlixClient
+}
+
+func (a *SFlixAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+	media, err := a.client.SearchMedia(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var animes []*models.Anime
+	for _, m := range media {
+		anime := m.ToAnimeModel()
+		// Set the media type
+		if m.Type == MediaTypeMovie {
+			anime.MediaType = models.MediaTypeMovie
+		} else {
+			anime.MediaType = models.MediaTypeTV
+		}
+		anime.Year = m.Year
+		animes = append(animes, anime)
+	}
+
+	return animes, nil
+}
+
+func (a *SFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// For SFlix, animeURL contains the media ID
+	// This needs to be called differently for movies vs TV shows
+	return nil, fmt.Errorf("for SFlix, use GetSeasons and GetEpisodes directly on the client")
+}
+
+func (a *SFlixAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+	// Parse options
+	provider := "Vidcloud"
+	quality := "1080"
+	subsLanguage := "english"
+
+	for i, opt := range options {
+		if s, ok := opt.(string); ok {
+			switch i {
+			case 0:
+				provider = s
+			case 1:
+				quality = s
+			case 2:
+				subsLanguage = s
+			}
+		}
+	}
+
+	// Get embed link directly from episode ID
+	embedLink, err := a.client.GetEmbedLink(episodeURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get embed link: %w", err)
+	}
+
+	streamInfo, err := a.client.ExtractStreamInfo(embedLink, quality, subsLanguage)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to extract stream info: %w", err)
+	}
+
+	metadata := make(map[string]string)
+	metadata["source"] = "sflix"
+	metadata["provider"] = provider
+	metadata["quality"] = quality
+
+	// Include subtitle URLs in metadata
+	if len(streamInfo.Subtitles) > 0 {
+		var subURLs []string
+		for _, sub := range streamInfo.Subtitles {
+			subURLs = append(subURLs, sub.URL)
+		}
+		metadata["subtitles"] = strings.Join(subURLs, ",")
+	}
+
+	return streamInfo.VideoURL, metadata, nil
+}
+
+func (a *SFlixAdapter) GetType() ScraperType {
+	return SFlixType
+}
+
+// GetClient returns the underlying SFlix client for direct access
+func (a *SFlixAdapter) GetClient() *SFlixClient {
 	return a.client
 }

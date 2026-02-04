@@ -105,6 +105,7 @@ type FlixHQMedia struct {
 	Country     string
 	Production  string
 	Casts       []string
+	Source      string // Source identifier (FlixHQ, SFlix, etc.)
 }
 
 // FlixHQSeason represents a TV show season

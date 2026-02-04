@@ -66,7 +66,7 @@ func NewRichPresenceUpdater(
 	}
 }
 
-// LoginClient logs into Discord RPC
+// LoginClient logs into Discord RPC with timeout
 func LoginClient() error {
 	clientMutex.Lock()
 	defer clientMutex.Unlock()
@@ -77,6 +77,7 @@ func LoginClient() error {
 
 	discordClient = client.NewClient(DiscordClientID)
 
+	// Direct login - the library has its own 2 second timeout
 	if err := discordClient.Login(); err != nil {
 		return fmt.Errorf("discord login failed: %w", err)
 	}

@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -12,6 +13,7 @@ type Manager struct {
 	clientID      string
 	initTime      time.Time
 	isInitialized bool
+	initMutex     sync.RWMutex
 }
 
 // NewManager creates a new instance of the Discord manager
@@ -23,49 +25,65 @@ func NewManager() *Manager {
 	}
 }
 
-// Initialize initializes the Discord Rich Presence
+// Initialize initializes the Discord Rich Presence (non-blocking, runs in background)
 func (m *Manager) Initialize() error {
+	m.initMutex.Lock()
 	if m.isInitialized {
+		m.initMutex.Unlock()
 		util.Debug("Discord Rich Presence already initialized")
 		return nil
 	}
+	m.initMutex.Unlock()
 
 	m.initTime = time.Now()
 
-	if err := LoginClient(); err != nil {
-		// Discord is optional; only log when debug is enabled
-		if util.IsDebug {
-			util.Debugf("Discord Rich Presence not available: %v", err)
+	// Run Discord init in background so it doesn't block app startup
+	go func() {
+		if err := LoginClient(); err != nil {
+			if util.IsDebug {
+				util.Debugf("Discord Rich Presence not available: %v", err)
+			}
+			m.initMutex.Lock()
+			m.isEnabled = false
+			m.isInitialized = true
+			m.initMutex.Unlock()
+			return
 		}
-		m.isEnabled = false
-		return err
-	}
 
-	m.isEnabled = true
-	m.isInitialized = true
+		m.initMutex.Lock()
+		m.isEnabled = true
+		m.isInitialized = true
+		m.initMutex.Unlock()
 
-	util.Debugf("[PERF] Discord Rich Presence initialized in %v", time.Since(m.initTime))
+		util.Debugf("[PERF] Discord Rich Presence initialized in %v", time.Since(m.initTime))
+	}()
 
 	return nil
 }
 
 // Shutdown shuts down the Discord Rich Presence
 func (m *Manager) Shutdown() {
-	if m.isInitialized && m.isEnabled {
+	m.initMutex.Lock()
+	defer m.initMutex.Unlock()
+
+	if m.isEnabled {
 		_ = LogoutClient()
 		m.isEnabled = false
-		m.isInitialized = false
 		util.Debug("Discord Rich Presence shutdown completed")
 	}
 }
 
 // IsEnabled returns whether Discord Rich Presence is enabled
 func (m *Manager) IsEnabled() bool {
+	m.initMutex.RLock()
+	defer m.initMutex.RUnlock()
 	return m.isEnabled
 }
 
 // IsInitialized returns whether Discord Rich Presence was initialized
 func (m *Manager) IsInitialized() bool {
+	m.initMutex.RLock()
+	defer m.initMutex.RUnlock()
 	return m.isInitialized
 }
 
