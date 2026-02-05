@@ -6,7 +6,7 @@
 </h4>
 
 <p align="center">
-  <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="Imagem logo" />
+  <img src="https://i.ibb.co/4RVM4LvJ/Socorro-Deus-3-1.png" alt="Imagem logo" />
 </p>
 
 [![GitHub license](https://img.shields.io/github/license/alvarorichard/GoAnime)
