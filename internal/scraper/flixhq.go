@@ -789,6 +789,18 @@ func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality stri
 		}
 	}
 
+	// Extract referer from the embed link - this is critical for avoiding 403 errors
+	// The streaming server expects the Referer to be the origin of the embed URL
+	// e.g., https://megacloud.tv/embed-2/abc123 -> https://megacloud.tv/
+	if parsedURL, parseErr := url.Parse(embedLink); parseErr == nil && parsedURL.Host != "" {
+		streamInfo.Referer = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
+		streamInfo.Headers = map[string]string{
+			"Referer": streamInfo.Referer,
+			"Origin":  strings.TrimSuffix(streamInfo.Referer, "/"),
+		}
+		util.Debug("FlixHQ set stream referer", "referer", streamInfo.Referer, "embedLink", embedLink)
+	}
+
 	return streamInfo, nil
 }
 

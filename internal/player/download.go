@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/key"
@@ -376,6 +378,103 @@ func isRetryableError(err error) bool {
 		strings.Contains(errStr, "temporary") ||
 		strings.Contains(errStr, "reset") ||
 		strings.Contains(errStr, "refused")
+}
+
+// downloadWithNativeHLS downloads HLS streams using native implementation instead of yt-dlp
+// This avoids 403 errors that occur with yt-dlp on some streaming servers
+func downloadWithNativeHLS(streamURL, path string, m *model) error {
+	// Sanitize inputs
+	safeURL, err := sanitizeMediaTarget(streamURL)
+	if err != nil {
+		return fmt.Errorf("invalid download URL: %w", err)
+	}
+	safePath, err := sanitizeOutputPath(path)
+	if err != nil {
+		return fmt.Errorf("invalid output path: %w", err)
+	}
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(safePath), 0o700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Determine an estimated size for progress tracking
+	var epTotal int64
+	if m != nil {
+		epTotal = 500 * 1024 * 1024 // 500MB default for HLS streams
+		if util.IsDebug {
+			util.Logger.Debug("Starting native HLS download", "estimate_mb", fmt.Sprintf("%.1f", float64(epTotal)/(1024*1024)))
+		}
+	}
+
+	// Get referer from global storage (set from embed URL in GetFlixHQStreamURL)
+	// This is critical - the Referer must be from the embed URL origin (e.g., megacloud.tv),
+	// NOT from the m3u8 stream URL which is typically on a different CDN domain
+	referer := util.GetGlobalReferer()
+	if referer == "" {
+		// Fallback: try to extract from stream URL (may not work for CDN URLs)
+		referer = extractRefererFromURL(safeURL)
+	}
+
+	if util.IsDebug {
+		util.Logger.Debug("Native HLS download using referer", "referer", referer, "streamURL", safeURL)
+	}
+
+	// Prepare headers with proper referer and origin
+	headers := map[string]string{
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"Accept":     "*/*",
+	}
+
+	if referer != "" {
+		headers["Referer"] = referer
+		headers["Origin"] = strings.TrimSuffix(referer, "/")
+	}
+
+	// Create context for the download
+	ctx := context.Background()
+
+	// Use native HLS downloader with progress callback
+	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(downloaded, total int) {
+		if m != nil && total > 0 {
+			// Calculate progress based on segments
+			percent := float64(downloaded) / float64(total)
+			simulatedReceived := int64(percent * float64(epTotal))
+
+			m.mu.Lock()
+			m.received = simulatedReceived
+			m.mu.Unlock()
+		}
+	})
+
+	if err != nil {
+		return fmt.Errorf("native HLS download failed: %w", err)
+	}
+
+	// Apply final progress update
+	if m != nil && epTotal > 0 {
+		m.mu.Lock()
+		m.received = epTotal
+		if m.totalBytes > 0 && m.received > m.totalBytes {
+			m.received = m.totalBytes
+		}
+		m.mu.Unlock()
+	}
+
+	return nil
+}
+
+// extractRefererFromURL extracts the referer (origin) from a URL
+// e.g., https://megacloud.tv/embed-2/abc123?k=v -> https://megacloud.tv/
+func extractRefererFromURL(streamURL string) string {
+	parsed, err := url.Parse(streamURL)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme != "" && parsed.Host != "" {
+		return fmt.Sprintf("%s://%s/", parsed.Scheme, parsed.Host)
+	}
+	return ""
 }
 
 // ExtractVideoSources returns the available video sources for an episode.

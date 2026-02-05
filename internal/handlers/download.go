@@ -21,3 +21,18 @@ func HandleDownloadRequest() error {
 	}
 	return nil
 }
+
+// HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ/SFlix
+func HandleMovieDownloadRequest() error {
+	// Initialize logger for download process
+	util.InitLogger()
+
+	if util.GlobalDownloadRequest == nil {
+		return fmt.Errorf("movie download request is nil")
+	}
+
+	if err := download.HandleMovieDownloadRequest(util.GlobalDownloadRequest); err != nil {
+		return fmt.Errorf("movie download failed: %w", err)
+	}
+	return nil
+}

@@ -715,6 +715,11 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		})
 	}
 
+	// Store the referer globally for use in downloads
+	if streamInfo.Referer != "" {
+		util.SetGlobalReferer(streamInfo.Referer)
+	}
+
 	return streamInfo.VideoURL, subtitles, nil
 }
 

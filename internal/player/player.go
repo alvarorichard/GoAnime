@@ -443,7 +443,7 @@ func HandleDownloadAndPlay(
 			if isHLSStream {
 				videoURLToPlay = videoURL
 				if util.IsDebug {
-					util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURLToPlay)
+					util.Debugf("HLS stream detected, playing directly: %s", videoURLToPlay)
 				}
 			} else if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
 				strings.Contains(videoURL, "dropbox.com") ||
@@ -452,7 +452,7 @@ func HandleDownloadAndPlay(
 				// Use direct stream URL (SharePoint, Dropbox, etc.)
 				videoURLToPlay = videoURL
 				if util.IsDebug {
-					util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+					util.Debugf("Using direct stream URL: %s", videoURLToPlay)
 				}
 			} else {
 				// Try to extract video URL from episode page
@@ -460,7 +460,7 @@ func HandleDownloadAndPlay(
 					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
 					if found {
 						if util.IsDebug {
-							util.Debugf("🔍 Extracting URL from episode page: %s", selectedEp.URL)
+							util.Debugf("Extracting URL from episode page: %s", selectedEp.URL)
 						}
 						if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
 							videoURLToPlay = url
@@ -470,7 +470,7 @@ func HandleDownloadAndPlay(
 				// Fallback: try to extract from original videoURL
 				if videoURLToPlay == "" && videoURL != "" {
 					if util.IsDebug {
-						util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
+						util.Debugf("Fallback: extracting from original URL: %s", videoURL)
 					}
 					if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
 						videoURLToPlay = url
@@ -480,12 +480,12 @@ func HandleDownloadAndPlay(
 
 			// Final validation
 			if videoURLToPlay == "" {
-				util.Debugf("❌ No valid video URL found")
+				util.Debugf("No valid video URL found")
 				return fmt.Errorf("no valid video URL found")
 			}
 
 			if util.IsDebug {
-				util.Debugf("✅ Final video URL: %s", videoURLToPlay)
+				util.Debugf("Final video URL: %s", videoURLToPlay)
 			}
 
 			err := playVideo(
@@ -538,11 +538,53 @@ func downloadAndPlayEpisode(
 		numThreads := 4 // Define the number of threads for downloading
 
 		// Check URL type and use appropriate download method
-		if strings.Contains(videoURL, "blogger.com") ||
-			strings.Contains(videoURL, ".m3u8") ||
+		isM3U8 := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+
+		if isM3U8 {
+			// Use native HLS downloader for m3u8 streams (avoids 403 errors from yt-dlp)
+			m := &model{
+				progress: progress.New(progress.WithDefaultGradient()),
+				keys: keyMap{
+					quit: key.NewBinding(
+						key.WithKeys("ctrl+c"),
+						key.WithHelp("ctrl+c", "quit"),
+					),
+				},
+			}
+			p := tea.NewProgram(m)
+
+			// Set total bytes for HLS estimate
+			m.totalBytes = 500 * 1024 * 1024 // 500MB estimate for HLS
+
+			go func() {
+				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s (HLS)...", episodeNumberStr)))
+				if err := downloadWithNativeHLS(videoURL, episodePath, m); err != nil {
+					util.Fatal("Failed to download video:", err)
+				}
+				m.mu.Lock()
+				m.done = true
+				m.mu.Unlock()
+				p.Send(statusMsg("Download completed!"))
+			}()
+
+			if _, err := p.Run(); err != nil {
+				util.Fatal("Error running progress bar:", err)
+			}
+
+			// Verify the file was actually downloaded
+			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+				return fmt.Errorf("download failed: file was not created")
+			}
+
+			// Check file size
+			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
+				return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
+			}
+
+		} else if strings.Contains(videoURL, "blogger.com") ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {
-			// Use yt-dlp with progress bar
+			// Use yt-dlp with progress bar for non-HLS special streams
 			m := &model{
 				progress: progress.New(progress.WithDefaultGradient()),
 				keys: keyMap{
@@ -559,7 +601,7 @@ func downloadAndPlayEpisode(
 			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 				m.totalBytes = sz
 			} else {
-				// Fallback for HLS
+				// Fallback
 				m.totalBytes = 500 * 1024 * 1024
 			}
 
@@ -891,7 +933,7 @@ func handleUpscaleFromMenu() error {
 
 	description := fmt.Sprintf("Current: %s", currentMode)
 	if !shadersInstalled {
-		description = "⚠️ Shaders not installed - select 'Setup shaders' first"
+		description = "Shaders not installed - select 'Setup shaders' first"
 	}
 
 	options := []huh.Option[string]{
@@ -972,7 +1014,7 @@ func handleUpscaleFromMenu() error {
 	case "gan_uul":
 		upscaler.SetShaderMode(upscaler.ShaderModeGAN_UUL)
 		util.Info("Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)")
-		util.Warn("⚠️ This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+		util.Warn("This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
 	case "setup_gan":
 		util.Info("Setting up experimental GAN UUL shaders...")
 		if err := upscaler.InstallGANShaders(); err != nil {

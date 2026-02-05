@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1385,6 +1386,16 @@ func (c *SFlixClient) ExtractStreamInfoWithContext(ctx context.Context, embedLin
 		if len(filteredSubs) > 0 {
 			streamInfo.Subtitles = filteredSubs
 		}
+	}
+
+	// Extract referer from the embed link - this is critical for avoiding 403 errors
+	// The streaming server expects the Referer to be the origin of the embed URL
+	// e.g., https://videostr.net/embed-1/abc123 -> https://videostr.net/
+	if parsedURL, parseErr := url.Parse(embedLink); parseErr == nil && parsedURL.Host != "" {
+		streamInfo.Referer = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
+		streamInfo.Headers["Referer"] = streamInfo.Referer
+		streamInfo.Headers["Origin"] = strings.TrimSuffix(streamInfo.Referer, "/")
+		util.Debug("SFlix set stream referer", "referer", streamInfo.Referer, "embedLink", embedLink)
 	}
 
 	return streamInfo, nil

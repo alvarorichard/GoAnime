@@ -48,6 +48,13 @@ func main() {
 			}
 			return
 		}
+		// Check if error is movie download request (FlixHQ/SFlix)
+		if err == util.ErrMovieDownloadRequested {
+			if movieDownloadErr := handlers.HandleMovieDownloadRequest(); movieDownloadErr != nil {
+				log.Fatalln(util.ErrorHandler(movieDownloadErr))
+			}
+			return
+		}
 		// Check if error is upscale request
 		if err == util.ErrUpscaleRequested {
 			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {

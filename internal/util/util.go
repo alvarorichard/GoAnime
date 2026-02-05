@@ -31,6 +31,7 @@ var (
 	GlobalAudioLanguage string                         // Global variable to store preferred audio language
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
+	GlobalReferer       string                         // Global variable to store referer for stream requests
 )
 
 // SetGlobalSubtitles stores subtitles for the current playback session
@@ -47,6 +48,24 @@ func SetGlobalSubtitles(subs []SubtitleInfo) {
 // ClearGlobalSubtitles clears stored subtitles
 func ClearGlobalSubtitles() {
 	GlobalSubtitles = nil
+}
+
+// SetGlobalReferer stores the referer for stream requests
+func SetGlobalReferer(referer string) {
+	GlobalReferer = referer
+	if referer != "" {
+		Debugf("Stored referer for stream requests: %s", referer)
+	}
+}
+
+// GetGlobalReferer returns the stored referer
+func GetGlobalReferer() string {
+	return GlobalReferer
+}
+
+// ClearGlobalReferer clears the stored referer
+func ClearGlobalReferer() {
+	GlobalReferer = ""
 }
 
 // GetSubtitleArgs returns mpv arguments for subtitles
@@ -120,9 +139,10 @@ func Helper() {
 
 // Custom error types for different exit conditions
 var (
-	ErrUpdateRequested   = errors.New("update requested")
-	ErrDownloadRequested = errors.New("download requested")
-	ErrUpscaleRequested  = errors.New("upscale requested")
+	ErrUpdateRequested        = errors.New("update requested")
+	ErrDownloadRequested      = errors.New("download requested")
+	ErrUpscaleRequested       = errors.New("upscale requested")
+	ErrMovieDownloadRequested = errors.New("movie download requested")
 )
 
 // DownloadRequest holds download command parameters
@@ -135,6 +155,11 @@ type DownloadRequest struct {
 	Source        string // Added source field for specifying anime source
 	Quality       string // Added quality field for video quality
 	AllAnimeSmart bool   // Enable AllAnime Smart Range (auto-skip intros/credits and preferred mirrors)
+	// Movie/TV specific fields
+	IsMovie      bool   // True if downloading a movie from FlixHQ/SFlix
+	IsTV         bool   // True if downloading a TV show from FlixHQ/SFlix
+	SeasonNum    int    // Season number for TV shows
+	SubsLanguage string // Subtitle language preference
 }
 
 // UpscaleRequest holds upscale command parameters
@@ -178,6 +203,7 @@ func FlagParser() (string, error) {
 	updateFlag := fs.Bool("update", false, "check for updates and update if available")
 	downloadFlag := fs.Bool("d", false, "download mode")
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
+	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
 	sourceFlag := fs.String("source", "", "specify anime source (allanime, animefire)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	allanimeSmartFlag := fs.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
@@ -251,6 +277,11 @@ func FlagParser() (string, error) {
 	// Handle download mode
 	if *downloadFlag {
 		return handleDownloadModeWithSmart(*rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
+	}
+
+	// Handle movie/TV download mode (FlixHQ/SFlix)
+	if *movieDownloadFlag {
+		return handleMovieDownloadMode(fs.Args(), *rangeFlag, *qualityFlag, *subsLanguageFlag, *mediaTypeFlag)
 	}
 
 	// Handle upscale mode
@@ -456,4 +487,118 @@ func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes 
 	}
 
 	return inputPath, ErrUpscaleRequested
+}
+
+// handleMovieDownloadMode processes movie/TV download arguments for FlixHQ/SFlix
+func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage, mediaType string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)")
+	}
+
+	// Determine if it's a movie or TV download
+	isTV := mediaType == "tv" || isRange
+
+	if isTV && isRange {
+		// TV episode range download: goanime -dm -r "TV Show" season start-end
+		if len(args) < 3 {
+			return "", fmt.Errorf("TV episode range download requires show name, season number, and episode range\nUsage: goanime -dm -r \"TV Show\" 1 1-5")
+		}
+
+		showName := strings.Join(args[:len(args)-2], " ")
+		seasonStr := args[len(args)-2]
+		rangeStr := args[len(args)-1]
+
+		// Parse season number
+		seasonNum, err := strconv.Atoi(strings.TrimSpace(seasonStr))
+		if err != nil {
+			return "", fmt.Errorf("invalid season number: %s", seasonStr)
+		}
+
+		// Parse range (e.g., "1-5")
+		rangeParts := strings.Split(rangeStr, "-")
+		if len(rangeParts) != 2 {
+			return "", fmt.Errorf("invalid episode range format. Use 'start-end' (e.g., '1-5')")
+		}
+
+		startEp, err := strconv.Atoi(strings.TrimSpace(rangeParts[0]))
+		if err != nil {
+			return "", fmt.Errorf("invalid start episode number: %s", rangeParts[0])
+		}
+
+		endEp, err := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
+		if err != nil {
+			return "", fmt.Errorf("invalid end episode number: %s", rangeParts[1])
+		}
+
+		if startEp > endEp {
+			return "", fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
+		}
+
+		if startEp < 1 || seasonNum < 1 {
+			return "", fmt.Errorf("season and episode numbers must be positive")
+		}
+
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:    showName,
+			IsRange:      true,
+			IsTV:         true,
+			SeasonNum:    seasonNum,
+			StartEpisode: startEp,
+			EndEpisode:   endEp,
+			Quality:      quality,
+			SubsLanguage: subsLanguage,
+		}
+
+		return TreatingAnimeName(showName), ErrMovieDownloadRequested
+
+	} else if isTV {
+		// Single TV episode download: goanime -dm --type tv "TV Show" season episode
+		if len(args) < 3 {
+			return "", fmt.Errorf("TV episode download requires show name, season number, and episode number\nUsage: goanime -dm --type tv \"TV Show\" 1 5")
+		}
+
+		showName := strings.Join(args[:len(args)-2], " ")
+		seasonStr := args[len(args)-2]
+		episodeStr := args[len(args)-1]
+
+		seasonNum, err := strconv.Atoi(strings.TrimSpace(seasonStr))
+		if err != nil {
+			return "", fmt.Errorf("invalid season number: %s", seasonStr)
+		}
+
+		episodeNum, err := strconv.Atoi(strings.TrimSpace(episodeStr))
+		if err != nil {
+			return "", fmt.Errorf("invalid episode number: %s", episodeStr)
+		}
+
+		if seasonNum < 1 || episodeNum < 1 {
+			return "", fmt.Errorf("season and episode numbers must be positive")
+		}
+
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:    showName,
+			IsTV:         true,
+			SeasonNum:    seasonNum,
+			EpisodeNum:   episodeNum,
+			IsRange:      false,
+			Quality:      quality,
+			SubsLanguage: subsLanguage,
+		}
+
+		return TreatingAnimeName(showName), ErrMovieDownloadRequested
+
+	} else {
+		// Movie download: goanime -dm "Movie Name"
+		movieName := strings.Join(args, " ")
+
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:    movieName,
+			IsMovie:      true,
+			IsRange:      false,
+			Quality:      quality,
+			SubsLanguage: subsLanguage,
+		}
+
+		return TreatingAnimeName(movieName), ErrMovieDownloadRequested
+	}
 }
