@@ -286,7 +286,7 @@ func FlagParser() (string, error) {
 		}
 		return TreatingAnimeName(animeName), nil
 	}
-	animeName, err := getUserInput("Enter anime name")
+	animeName, err := getUserInput("Enter anime/movie name")
 	return TreatingAnimeName(animeName), err
 }
 
