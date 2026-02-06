@@ -110,6 +110,7 @@ for key, value := range headers {
 ### Types
 
 #### `types.Anime`
+
 - `Name` - Nome do anime
 - `URL` - URL do anime na fonte
 - `ImageURL` - URL da imagem de capa
@@ -120,6 +121,7 @@ for key, value := range headers {
 - `Details` - Metadados estendidos
 
 #### `types.Episode`
+
 - `Number` - Número do episódio
 - `URL` - URL do episódio
 - `Title` - Título do episódio
@@ -129,6 +131,7 @@ for key, value := range headers {
 - `SkipTimes` - Timestamps para pular OP/ED
 
 #### `types.Source`
+
 - `SourceAllAnime` - Fonte AllAnime
 - `SourceAnimeFire` - Fonte AnimeFire
 
@@ -252,10 +255,10 @@ MIT License - veja [LICENSE](../LICENSE)
 
 ## 🔗 Links Úteis
 
-- Repositório principal: https://github.com/alvarorichard/GoAnime
+- Repositório principal: <https://github.com/alvarorichard/GoAnime>
 - Documentação completa: [pkg/goanime/README.md](pkg/goanime/README.md)
 - Exemplos: [pkg/goanime/examples/](pkg/goanime/examples/)
-- Issues: https://github.com/alvarorichard/GoAnime/issues
+- Issues: <https://github.com/alvarorichard/GoAnime/issues>
 
 ---
 

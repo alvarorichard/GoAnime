@@ -314,6 +314,7 @@ Retrieves all episodes for a specific anime using its URL and source.
 **Recommended method** to get the streaming URL for a specific episode. Properly handles different source types.
 
 **StreamOptions:**
+
 - `Quality`: Video quality - "best", "worst", "1080p", "720p", "480p", "360p"
 - `Mode`: Audio mode - "sub" (subtitled), "dub" (dubbed)
 
@@ -326,6 +327,7 @@ Returns a list of all available scraper sources.
 ### Types
 
 #### `types.Source`
+
 - `types.SourceAllAnime` - AllAnime source
 - `types.SourceAnimeFire` - AnimeFire source
 

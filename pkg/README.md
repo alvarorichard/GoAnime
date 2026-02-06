@@ -7,13 +7,13 @@ A clean and simple Go library for searching and scraping anime content from mult
 
 ## Features
 
--  **Multi-source Search**: Search across multiple anime sources (AllAnime, AnimeFire, etc.)
--  **Episode Management**: Get detailed episode lists with metadata
--  **Stream URLs**: Extract streaming URLs and required headers
--  **Rich Metadata**: Access AniList IDs, MAL IDs, genres, scores, and more
--  **Simple API**: Clean and intuitive interface
--  **Type-safe**: Full Go type safety with documented structs
--  **Fast**: Concurrent searches across sources
+- **Multi-source Search**: Search across multiple anime sources (AllAnime, AnimeFire, etc.)
+- **Episode Management**: Get detailed episode lists with metadata
+- **Stream URLs**: Extract streaming URLs and required headers
+- **Rich Metadata**: Access AniList IDs, MAL IDs, genres, scores, and more
+- **Simple API**: Clean and intuitive interface
+- **Type-safe**: Full Go type safety with documented structs
+- **Fast**: Concurrent searches across sources
 
 ## Installation
 
@@ -124,6 +124,7 @@ for _, source := range sources {
 Main client for interacting with anime sources.
 
 **Methods:**
+
 - `NewClient() *Client` - Create a new client
 - `SearchAnime(query string, source *types.Source) ([]*types.Anime, error)` - Search for anime
 - `GetAnimeEpisodes(animeURL string, source types.Source) ([]*types.Episode, error)` - Get episodes
@@ -165,10 +166,12 @@ type Episode struct {
 #### `types.Source`
 
 Available sources:
+
 - `types.SourceAllAnime` - AllAnime source
 - `types.SourceAnimeFire` - AnimeFire source
 
 **Methods:**
+
 - `String() string` - Get source name
 - `ToScraperType() scraper.ScraperType` - Convert to internal type
 - `ParseSource(s string) (Source, error)` - Parse string to Source
@@ -268,6 +271,7 @@ defer resp.Body.Close()
 ## Documentation
 
 For detailed documentation, see:
+
 - [Complete API Documentation](goanime/README.md)
 - [Code Examples](goanime/examples/)
 - [GoDoc](https://pkg.go.dev/github.com/alvarorichard/Goanime/pkg/goanime)
