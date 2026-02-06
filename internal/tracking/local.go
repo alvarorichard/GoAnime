@@ -244,7 +244,7 @@ func initializeDatabase(db *sql.DB) error {
 func migrateOldData(db *sql.DB) {
 	// Check if old table exists
 	var tableName string
-	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='anime_progress'").Scan(&tableName)
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type=? AND name=?", "table", "anime_progress").Scan(&tableName)
 	if err != nil {
 		return // Old table doesn't exist, nothing to migrate
 	}
