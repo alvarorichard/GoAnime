@@ -111,8 +111,8 @@ func FromInternalAnime(internal *models.Anime) *Anime {
 	// Convert episodes
 	if len(internal.Episodes) > 0 {
 		anime.Episodes = make([]*Episode, len(internal.Episodes))
-		for i, ep := range internal.Episodes {
-			anime.Episodes[i] = FromInternalEpisode(&ep)
+		for i := range internal.Episodes {
+			anime.Episodes[i] = FromInternalEpisode(&internal.Episodes[i])
 		}
 	}
 
