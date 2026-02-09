@@ -104,7 +104,9 @@ goanime --source flixhq --type tv "Breaking Bad"
 goanime --source flixhq --subs "Avatar"
 ```
 
+## Upscaling (Anime4K)
 
+O GoAnime inclui um upscaler integrado baseado no algoritmo [Anime4K](https://github.com/bloc97/Anime4K). Ele melhora a qualidade do vídeo via streaming durante a reprodução, com opções de modos de processamento rápido, padrão e alta qualidade. O recurso de upscaling é acessível diretamente pelo menu interativo do GoAnime.
 
 ## Linux
 
