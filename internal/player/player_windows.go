@@ -77,14 +77,16 @@ func findMPVPath() (string, error) {
 
 	// Check each possible path
 	for _, path := range possiblePaths {
+		// #nosec G304 G703 -- paths are constructed from known safe OS directories (ProgramFiles, LOCALAPPDATA, etc.)
+		cleanPath := filepath.Clean(path)
 		if util.IsDebug {
-			fmt.Printf("[DEBUG] Checking for mpv at: %s\n", path)
+			fmt.Printf("[DEBUG] Checking for mpv at: %s\n", cleanPath)
 		}
-		if _, err := os.Stat(path); err == nil {
+		if _, err := os.Stat(cleanPath); err == nil {
 			if util.IsDebug {
-				fmt.Printf("[DEBUG] Found mpv at: %s\n", path)
+				fmt.Printf("[DEBUG] Found mpv at: %s\n", cleanPath)
 			}
-			return path, nil
+			return cleanPath, nil
 		}
 	}
 
