@@ -1,23 +1,23 @@
 module github.com/alvarorichard/Goanime
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/charmbracelet/bubbles v0.21.1
+	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 )
 
 require (
 	github.com/charmbracelet/huh v0.8.0
-	github.com/charmbracelet/huh/spinner v0.0.0-20260202112050-cf338358ac5c
+	github.com/charmbracelet/huh/spinner v0.0.0-20260209112015-5c5971ef3aeb
 	github.com/charmbracelet/log v0.4.2
 	github.com/disintegration/gift v1.2.1
 	github.com/lrstanley/go-ytdlp v1.2.7
@@ -28,15 +28,15 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.1.0 // indirect
-	github.com/clipperhouse/displaywidth v0.9.0 // indirect
+	github.com/clipperhouse/displaywidth v0.10.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
-	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
+	golang.org/x/exp v0.0.0-20260211191109-2735e65f0518 // indirect
 )
 
 require (
@@ -59,7 +59,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
-	github.com/mattn/go-sqlite3 v1.14.33
+	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0
@@ -68,10 +68,10 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/crypto v0.47.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/term v0.39.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
