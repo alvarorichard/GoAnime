@@ -285,7 +285,14 @@ func sanitizeOutputPath(p string) (string, error) {
 		return "", fmt.Errorf("output path must not start with '-' (looks like a flag)")
 	}
 	cleaned := filepath.Clean(p)
-	// optional: prevent escaping user home via path like ../../
+	// Verify the resolved path stays within user home to prevent path traversal
+	userHome, err := os.UserHomeDir()
+	if err == nil {
+		abs, absErr := filepath.Abs(cleaned)
+		if absErr == nil && !strings.HasPrefix(abs, userHome) {
+			return "", fmt.Errorf("output path escapes user home directory")
+		}
+	}
 	return cleaned, nil
 }
 

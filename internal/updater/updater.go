@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/version"
@@ -38,7 +39,8 @@ type GitHubRelease struct {
 // CheckForUpdates checks if a new version is available on GitHub
 func CheckForUpdates() (*GitHubRelease, bool, error) {
 	// Get latest release from GitHub API
-	resp, err := http.Get(GitHubAPI + "/releases/latest")
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Get(GitHubAPI + "/releases/latest") // #nosec G107 -- URL is a constant trusted GitHub API endpoint
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to fetch latest release: %w", err)
 	}

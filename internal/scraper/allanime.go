@@ -141,7 +141,11 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("search request returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -199,11 +203,14 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 
 	episodesListGql := `query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}`
 
-	// Correctly URL encode the parameters like Curd does
-	variables := fmt.Sprintf(`{"showId":"%s"}`, animeID)
+	// Use json.Marshal to safely build the variables JSON, preventing injection
+	varsBytes, err := json.Marshal(map[string]string{"showId": animeID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal variables: %w", err)
+	}
 	reqURL := fmt.Sprintf("%s?variables=%s&query=%s",
 		c.apiBase,
-		url.QueryEscape(variables),
+		url.QueryEscape(string(varsBytes)),
 		url.QueryEscape(episodesListGql))
 
 	req, err := http.NewRequest("GET", reqURL, nil)
@@ -219,7 +226,11 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("episodes list request returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -432,7 +443,18 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	}
 
 	episodeEmbedGQL := `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { episodeString sourceUrls }}`
-	variables := fmt.Sprintf(`{"showId":"%s","translationType":"%s","episodeString":"%s"}`, animeID, mode, episodeNo)
+
+	// Use json.Marshal to safely build the variables JSON, preventing injection
+	varsMap := map[string]string{
+		"showId":          animeID,
+		"translationType": mode,
+		"episodeString":   episodeNo,
+	}
+	varsBytes, err := json.Marshal(varsMap)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to marshal variables: %w", err)
+	}
+	variables := string(varsBytes)
 
 	req, err := http.NewRequest("GET", c.apiBase+"/api", nil)
 	if err != nil {
@@ -453,7 +475,11 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("episode URL request returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -684,7 +710,11 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("links request returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

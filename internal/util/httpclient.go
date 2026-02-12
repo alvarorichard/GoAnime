@@ -36,30 +36,30 @@ type httpClientConfig struct {
 // defaultConfig returns optimized default configuration
 func defaultConfig() httpClientConfig {
 	return httpClientConfig{
-		timeout:             30 * time.Second,
+		timeout:             60 * time.Second,
 		maxIdleConns:        200, // Increased for more parallel requests
 		maxIdleConnsPerHost: 20,  // Doubled for better concurrency
 		maxConnsPerHost:     50,  // Increased significantly
 		idleConnTimeout:     120 * time.Second,
-		tlsHandshakeTimeout: 5 * time.Second,
+		tlsHandshakeTimeout: 10 * time.Second,
 		expectContinue:      1 * time.Second,
 		keepAlive:           30 * time.Second,
-		dialTimeout:         5 * time.Second,
+		dialTimeout:         10 * time.Second,
 	}
 }
 
 // fastConfig returns configuration optimized for quick requests
 func fastConfig() httpClientConfig {
 	return httpClientConfig{
-		timeout:             15 * time.Second,
+		timeout:             30 * time.Second,
 		maxIdleConns:        150, // Increased for parallel scraper requests
 		maxIdleConnsPerHost: 25,  // More connections per host
 		maxConnsPerHost:     40,  // Allow more concurrent connections
 		idleConnTimeout:     90 * time.Second,
-		tlsHandshakeTimeout: 5 * time.Second,
+		tlsHandshakeTimeout: 10 * time.Second,
 		expectContinue:      500 * time.Millisecond,
 		keepAlive:           30 * time.Second,
-		dialTimeout:         5 * time.Second,
+		dialTimeout:         10 * time.Second,
 	}
 }
 

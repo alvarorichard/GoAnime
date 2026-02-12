@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/version"
 	"github.com/charmbracelet/huh"
@@ -105,16 +106,25 @@ func GetSubtitleArgs() []string {
 }
 
 // Cleanup function to be called on program exit
-var cleanupFuncs []func()
+var (
+	cleanupFuncs []func()
+	cleanupMu    sync.Mutex
+)
 
 // RegisterCleanup registers a function to be called on program exit
 func RegisterCleanup(fn func()) {
+	cleanupMu.Lock()
+	defer cleanupMu.Unlock()
 	cleanupFuncs = append(cleanupFuncs, fn)
 }
 
 // RunCleanup runs all registered cleanup functions
 func RunCleanup() {
-	for _, fn := range cleanupFuncs {
+	cleanupMu.Lock()
+	funcs := make([]func(), len(cleanupFuncs))
+	copy(funcs, cleanupFuncs)
+	cleanupMu.Unlock()
+	for _, fn := range funcs {
 		fn()
 	}
 	// Print performance report if enabled

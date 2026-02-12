@@ -105,9 +105,11 @@ func smartDownload(url, dest string) error {
 		return nil
 	}
 
-	// Otherwise, simple HTTP download
-	client := &http.Client{Timeout: 0}
-	resp, err := client.Get(url)
+	// Otherwise, simple HTTP download with SSRF-safe transport
+	client := &http.Client{
+		Transport: SafeTransport(10 * time.Minute),
+	}
+	resp, err := client.Get(url) // #nosec G107 -- URL validated by caller
 	if err != nil {
 		return err
 	}
@@ -129,7 +131,7 @@ func smartDownload(url, dest string) error {
 			util.Logger.Warn("Error closing output file", "error", err)
 		}
 	}()
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := io.Copy(out, io.LimitReader(resp.Body, 5*1024*1024*1024)); err != nil {
 		return err
 	}
 	return nil

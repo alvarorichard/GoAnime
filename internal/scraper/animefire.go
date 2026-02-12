@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ func NewAnimefireClient() *AnimefireClient {
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 	// AnimeFire expects spaces as hyphens in the URL
 	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
-	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, normalizedQuery)
+	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, url.PathEscape(normalizedQuery))
 
 	util.Debug("AnimeFire search", "query", query, "normalized", normalizedQuery, "url", searchURL)
 

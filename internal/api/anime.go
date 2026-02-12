@@ -19,8 +19,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Common HTTP client instance
-var httpClient = &http.Client{}
+// Common HTTP client instance with timeout to prevent indefinite hangs
+var httpClient = &http.Client{
+	Transport: SafeTransport(60 * time.Second),
+	Timeout:   60 * time.Second,
+}
 
 // GetEpisodeData fetches episode data using multiple providers with fallback support.
 // It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.
@@ -84,7 +87,7 @@ func GetMovieData(animeID int, anime *models.Anime) error {
 
 // FetchAnimeDetails retrieves additional information for the selected anime
 func FetchAnimeDetails(anime *models.Anime) error {
-	response, err := http.Get(anime.URL)
+	response, err := SafeGet(anime.URL)
 	if err != nil {
 		return errors.Wrap(err, "failed to get anime details page")
 	}
@@ -136,6 +139,11 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 		if nextPageURL == "" {
 			util.Debugf("[PERF] No results found for %s after %v", animeName, time.Since(start))
 			return nil, errors.New("no anime found with the given name")
+		}
+		// Validate scraped next-page URL to prevent open redirects
+		parsedNext, err := url.Parse(nextPageURL)
+		if err != nil || (parsedNext.Host != "" && !strings.Contains(parsedNext.Host, "animefire")) {
+			return nil, fmt.Errorf("suspicious next page URL rejected: %s", nextPageURL)
 		}
 		currentPageURL = models.AnimeFireURL + nextPageURL
 	}
@@ -329,7 +337,7 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		safeClose(resp.Body, "AniList response body")
 
 		if err != nil {

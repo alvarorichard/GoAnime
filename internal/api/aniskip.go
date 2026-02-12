@@ -36,7 +36,7 @@ func GetAniSkipData(animeMalId int, episode int) (string, error) {
 		return "", fmt.Errorf("AniSkip API request failed with status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}

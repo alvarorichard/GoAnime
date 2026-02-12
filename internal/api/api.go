@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"context"
+
 	"github.com/pkg/errors"
 )
 
@@ -21,6 +22,10 @@ import (
 func IsDisallowedIP(hostIP string) bool {
 	// Parse the provided IP address string into a net.IP object.
 	ip := net.ParseIP(hostIP)
+	if ip == nil {
+		// Unparseable IP is disallowed by default to prevent bypasses.
+		return true
+	}
 
 	// Check if the IP address is in one of the disallowed categories:
 	// - IsMulticast: returns true if the IP is a multicast address.
@@ -40,7 +45,12 @@ func IsDisallowedIP(hostIP string) bool {
 // - error: an error if the IP address is disallowed or if there is an issue closing the connection.
 func checkDisallowedIP(conn net.Conn) error {
 	// Extract the IP address from the connection's remote address.
-	ip, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+	ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+	if err != nil {
+		// If we can't parse the address, close the connection as a safety measure.
+		_ = conn.Close()
+		return errors.New("failed to parse remote address")
+	}
 
 	// Check if the IP address is disallowed using the IsDisallowedIP function.
 	if IsDisallowedIP(ip) {
@@ -138,9 +148,9 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 // - *http.Response: a pointer to the HTTP response object containing the server's response.
 // - error: an error if the request fails or if there is a problem during the request.
 func SafeGet(url string) (*http.Response, error) {
-	// Create an HTTP client with a custom transport that includes a 10-second timeout.
+	// Create an HTTP client with a custom transport that includes a 45-second timeout.
 	httpClient := &http.Client{
-		Transport: SafeTransport(10 * time.Second),
+		Transport: SafeTransport(45 * time.Second),
 	}
 
 	// Perform the GET request using the custom HTTP client and return the response.

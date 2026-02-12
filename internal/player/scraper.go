@@ -573,7 +573,11 @@ func fetchContent(url string) (string, error) {
 		}
 	}(resp.Body)
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", err
 	}
