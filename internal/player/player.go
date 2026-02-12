@@ -520,6 +520,19 @@ func downloadAndPlayEpisode(
 		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
 	}
 
+	// Resolve intermediate URLs (e.g., animefire.io/video/ JSON API) to actual CDN URLs
+	if strings.Contains(videoURL, "animefire.io/video/") {
+		util.Debug("Resolving AnimeFire video API URL before download", "url", videoURL)
+		resolved, err := extractActualVideoURL(videoURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve AnimeFire video URL: %w", err)
+		}
+		if resolved != "" {
+			util.Debug("Resolved AnimeFire URL", "resolved", resolved)
+			videoURL = resolved
+		}
+	}
+
 	currentUser, err := user.Current()
 	if err != nil {
 		util.Fatal("Failed to get current user:", err)
@@ -538,53 +551,11 @@ func downloadAndPlayEpisode(
 		numThreads := 4 // Define the number of threads for downloading
 
 		// Check URL type and use appropriate download method
-		isM3U8 := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
-
-		if isM3U8 {
-			// Use native HLS downloader for m3u8 streams (avoids 403 errors from yt-dlp)
-			m := &model{
-				progress: progress.New(progress.WithDefaultGradient()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
-			}
-			p := tea.NewProgram(m)
-
-			// Set total bytes for HLS estimate
-			m.totalBytes = 500 * 1024 * 1024 // 500MB estimate for HLS
-
-			go func() {
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s (HLS)...", episodeNumberStr)))
-				if err := downloadWithNativeHLS(videoURL, episodePath, m); err != nil {
-					util.Fatal("Failed to download video:", err)
-				}
-				m.mu.Lock()
-				m.done = true
-				m.mu.Unlock()
-				p.Send(statusMsg("Download completed!"))
-			}()
-
-			if _, err := p.Run(); err != nil {
-				util.Fatal("Error running progress bar:", err)
-			}
-
-			// Verify the file was actually downloaded
-			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
-				return fmt.Errorf("download failed: file was not created")
-			}
-
-			// Check file size
-			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
-				return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
-			}
-
-		} else if strings.Contains(videoURL, "blogger.com") ||
+		if strings.Contains(videoURL, "blogger.com") ||
+			strings.Contains(videoURL, ".m3u8") ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {
-			// Use yt-dlp with progress bar for non-HLS special streams
+			// Use yt-dlp with progress bar
 			m := &model{
 				progress: progress.New(progress.WithDefaultGradient()),
 				keys: keyMap{
@@ -601,14 +572,25 @@ func downloadAndPlayEpisode(
 			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 				m.totalBytes = sz
 			} else {
-				// Fallback
+				// Fallback for HLS
 				m.totalBytes = 500 * 1024 * 1024
 			}
 
 			go func() {
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
-				if err := downloadWithYtDlp(videoURL, episodePath, m); err != nil {
-					util.Fatal("Failed to download video:", err)
+				// Try native HLS first for .m3u8 streams (avoids 403 errors), fall back to yt-dlp
+				var dlErr error
+				if strings.Contains(videoURL, ".m3u8") {
+					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
+					if dlErr != nil {
+						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "error", dlErr)
+						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+					}
+				} else {
+					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+				}
+				if dlErr != nil {
+					util.Fatal("Failed to download video:", dlErr)
 				}
 				m.mu.Lock()
 				m.done = true
@@ -651,7 +633,8 @@ func downloadAndPlayEpisode(
 			}
 			contentLength, err := getContentLength(videoURL, httpClient)
 			if err != nil {
-				util.Fatal("Failed to get content length:", err)
+				util.Warnf("Failed to get content length: %v, using fallback estimate", err)
+				contentLength = 200 * 1024 * 1024 // 200MB fallback
 			}
 			m.totalBytes = contentLength
 

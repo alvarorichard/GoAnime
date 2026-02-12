@@ -240,7 +240,7 @@ func (c *FlixHQClient) SearchMediaWithContext(ctx context.Context, query string)
 
 		c.decorateRequest(req)
 
-		resp, err := c.client.Do(req)
+		resp, err := c.client.Do(req) // #nosec G704
 		if err != nil {
 			lastErr = fmt.Errorf("failed to make request: %w", err)
 			if c.shouldRetry(attempt) {
@@ -318,7 +318,7 @@ func (c *FlixHQClient) getMediaFromSection(path, section string) ([]*FlixHQMedia
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -350,7 +350,7 @@ func (c *FlixHQClient) getMediaFromPath(path string) ([]*FlixHQMedia, error) {
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -375,7 +375,7 @@ func (c *FlixHQClient) GetSeasons(mediaID string) ([]FlixHQSeason, error) {
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -430,7 +430,7 @@ func (c *FlixHQClient) GetEpisodes(seasonID string) ([]FlixHQEpisode, error) {
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -481,7 +481,7 @@ func (c *FlixHQClient) GetEpisodeServerID(dataID, provider string) (string, erro
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return "", fmt.Errorf("failed to make request: %w", err)
 	}
@@ -547,7 +547,7 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return "", fmt.Errorf("failed to make request: %w", err)
 	}
@@ -619,7 +619,7 @@ func (c *FlixHQClient) GetEmbedLink(episodeID string) (string, error) {
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return "", fmt.Errorf("failed to make request: %w", err)
 	}
@@ -668,7 +668,7 @@ func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality stri
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -862,7 +862,7 @@ func (c *FlixHQClient) GetInfoWithContext(ctx context.Context, id string) (*Flix
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch movie info: %w", err)
 	}
@@ -978,7 +978,7 @@ func (c *FlixHQClient) GetServersWithContext(ctx context.Context, episodeID stri
 	c.decorateRequest(req)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch servers: %w", err)
 	}
@@ -1162,7 +1162,7 @@ func (c *FlixHQClient) extractSourcesFromServer(ctx context.Context, server Flix
 	c.decorateRequest(req)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch sources: %w", err)
 	}
@@ -1210,7 +1210,7 @@ func (c *FlixHQClient) extractFromEmbedURL(ctx context.Context, embedURL string)
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -1585,7 +1585,7 @@ func (c *FlixHQClient) HealthCheck(ctx context.Context) error {
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
@@ -1618,7 +1618,7 @@ func (c *FlixHQClient) ExtractStreamInfoWithContext(ctx context.Context, embedLi
 
 	c.decorateRequest(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}

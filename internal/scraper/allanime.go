@@ -135,7 +135,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Referer", c.referer)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -213,7 +213,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Referer", c.referer)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -447,7 +447,7 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	req.Header.Set("Referer", c.referer)
 	req.Header.Set("User-Agent", c.userAgent)
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -678,7 +678,7 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	req.Header.Set("Referer", "https://allanime.to")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}

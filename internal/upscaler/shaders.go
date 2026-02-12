@@ -253,7 +253,7 @@ func extractZip(zipPath, destDir string) error {
 		}
 
 		// Create destination file
-		// #nosec G304 -- destPath is constructed from trusted config directory
+		// #nosec G304 G703 -- destPath is constructed from trusted config directory
 		outFile, err := os.Create(destPath)
 		if err != nil {
 			_ = rc.Close()

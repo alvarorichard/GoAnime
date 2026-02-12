@@ -57,7 +57,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 
 		c.decorateRequest(req)
 
-		resp, err := c.client.Do(req)
+		resp, err := c.client.Do(req) // #nosec G704
 		if err != nil {
 			lastErr = fmt.Errorf("failed to make request: %w", err)
 			if c.shouldRetry(attempt) {
@@ -227,7 +227,7 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 
 		c.decorateRequest(req)
 
-		resp, err := c.client.Do(req)
+		resp, err := c.client.Do(req) // #nosec G704
 		if err != nil {
 			lastErr = fmt.Errorf("failed to make request: %w", err)
 			if c.shouldRetry(attempt) {

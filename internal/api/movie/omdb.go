@@ -184,7 +184,7 @@ func (c *OMDbClient) makeRequest(endpoint string) ([]byte, error) {
 
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, err
 	}

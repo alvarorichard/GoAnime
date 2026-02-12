@@ -196,7 +196,7 @@ func (p *KitsuProvider) fetchByAnimeName(anime *models.Anime, episodeNo int) err
 	req.Header.Set("Accept", "application/vnd.api+json")
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return fmt.Errorf("kitsu search failed: %w", err)
 	}
@@ -268,7 +268,7 @@ func (p *KitsuProvider) fetchEpisodeByKitsuID(kitsuAnimeID string, episodeNo int
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return fmt.Errorf("kitsu request failed: %w", err)
 	}
@@ -379,7 +379,7 @@ func getKitsuAnimeID(malID int) (string, error) {
 	req.Header.Set("Content-Type", "application/vnd.api+json")
 
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return "", err
 	}

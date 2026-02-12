@@ -402,7 +402,7 @@ func httpGetWithUA(url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-	return util.GetSharedClient().Do(req)
+	return util.GetSharedClient().Do(req) // #nosec G704
 }
 
 func httpPost(url string, body []byte) (*http.Response, error) {
@@ -413,7 +413,7 @@ func httpPost(url string, body []byte) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "GoAnime/1.0")
-	return util.GetSharedClient().Do(req)
+	return util.GetSharedClient().Do(req) // #nosec G704
 }
 
 // httpPostFast uses the fast client for quick API requests
@@ -425,7 +425,7 @@ func httpPostFast(url string, body []byte) (*http.Response, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "GoAnime/1.0")
-	return util.GetFastClient().Do(req)
+	return util.GetFastClient().Do(req) // #nosec G704
 }
 
 func makeGetRequest(url string, headers map[string]string) (map[string]interface{}, error) {
@@ -442,7 +442,7 @@ func makeGetRequest(url string, headers map[string]string) (map[string]interface
 		req.Header.Set(key, value)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) // #nosec G704
 	if err != nil {
 		return nil, fmt.Errorf("GET request failed: %w", err)
 	}

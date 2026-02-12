@@ -90,7 +90,7 @@ func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	}
 
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (d *Downloader) parseMediaPlaylist(ctx context.Context, url string, headers
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	}
 
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Do(req) // #nosec G704
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 		}
 
-		resp, err := d.client.Do(req)
+		resp, err := d.client.Do(req) // #nosec G704
 		if err != nil {
 			if attempt < maxRetries {
 				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)

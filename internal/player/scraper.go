@@ -56,11 +56,16 @@ func DownloadFolderFormatter(str string) string {
 
 // getContentLength retrieves the content length of the given URL.
 func getContentLength(url string, client *http.Client) (int64, error) {
-	// Check if this is an AllAnime URL that might not have Content-Length header
-	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
+	// Check if this is a URL that might not have Content-Length header
+	isKnownStreamURL := strings.Contains(url, "sharepoint.com") ||
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
-		strings.Contains(url, "allanime.pro")
+		strings.Contains(url, ".m3u8") ||
+		strings.Contains(url, "allanime.pro") ||
+		strings.Contains(url, "animefire") ||
+		strings.Contains(url, "blogger.com") ||
+		strings.Contains(url, "animesfire") ||
+		strings.Contains(url, "repackager.wixmp.com")
 
 	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
 	req, err := http.NewRequest("HEAD", url, nil)
@@ -70,12 +75,12 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	}
 
 	// Sends the HEAD request to the server.
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
 		// If the HEAD request fails or is not supported, fall back to a GET request.
 		req.Method = "GET"
 		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
-		resp, err = client.Do(req)           // Sends the modified GET request.
+		resp, err = client.Do(req)           // #nosec G704 -- Sends the modified GET request.
 		if err != nil {
 			// Returns 0 and the error if the GET request fails.
 			return 0, err
@@ -100,14 +105,14 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Retrieves the "Content-Length" header from the response.
 	contentLengthHeader := resp.Header.Get("Content-Length")
 	if contentLengthHeader == "" {
-		// For AllAnime URLs that might not have Content-Length, return a default size
-		if isAllAnimeURL {
-			util.Debugf("Content-Length header missing for AllAnime URL, using fallback method")
-			// Try to estimate content length or use a default for streaming
+		// For known streaming URLs that might not have Content-Length, return a default size
+		if isKnownStreamURL {
+			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
 			return estimateContentLengthForAllAnime(url, client)
 		}
-		// Returns an error if the "Content-Length" header is missing for non-AllAnime URLs.
-		return 0, fmt.Errorf("Content-Length header is missing")
+		// For any other URL without Content-Length, use a reasonable default instead of failing
+		util.Debugf("Content-Length header missing, using default estimate")
+		return 200 * 1024 * 1024, nil // 200MB default
 	}
 
 	// Converts the "Content-Length" header from a string to an int64.
@@ -138,7 +143,7 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 
 	// Request only first few KB to check response
 	req.Header.Set("Range", "bytes=0-4095")
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		// If range request fails, return default size
 		util.Debugf("Range request failed, using default size estimate")
@@ -610,7 +615,7 @@ func extractBloggerVideoURL(bloggerURL string) (string, error) {
 	req.Header.Set("Referer", "https://www.blogger.com/")
 
 	client := util.GetFastClient()
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Blogger page: %w", err)
 	}

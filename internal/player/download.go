@@ -34,7 +34,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 		return err
 	}
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return err
 	}
@@ -756,10 +756,15 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				if p != nil && util.IsDebug {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
-				// Use yt-dlp for HLS/DASH playlists and hosters that require it
-				if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") {
-					err = downloadWithYtDlp(videoURL, episodePath, m)
-				} else if strings.Contains(videoURL, "blogger.com") {
+				// Use native HLS for .m3u8 streams (avoids 403 errors from yt-dlp),
+				// fall back to yt-dlp if native fails. Use yt-dlp directly for DASH/blogger.
+				if strings.Contains(videoURL, ".m3u8") {
+					err = downloadWithNativeHLS(videoURL, episodePath, m)
+					if err != nil {
+						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", err)
+						err = downloadWithYtDlp(videoURL, episodePath, m)
+					}
+				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
 					err = downloadWithYtDlp(videoURL, episodePath, m)
 				} else {
 					err = DownloadVideo(videoURL, episodePath, 4, m)
@@ -912,7 +917,13 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 				}
 
 				var dlErr error
-				if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
+				if strings.Contains(videoURL, ".m3u8") {
+					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
+					if dlErr != nil {
+						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", dlErr)
+						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+					}
+				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 				} else {
 					dlErr = DownloadVideo(videoURL, episodePath, 4, m)

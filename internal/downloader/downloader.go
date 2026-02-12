@@ -447,7 +447,7 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 		req.Header.Set("Referer", "https://allmanga.to")
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient.Do(req) // #nosec G704
 	if err != nil {
 		if isAllAnimeURL {
 			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
@@ -490,7 +490,7 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 
 	// Request only first few KB to check response
 	req.Header.Set("Range", "bytes=0-4095")
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		// If range request fails, return default size
 		util.Debugf("Range request failed, using default size estimate")

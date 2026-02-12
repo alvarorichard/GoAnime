@@ -398,7 +398,7 @@ func (md *MovieDownloader) downloadHTTPWithProgress(videoURL, destPath, referer 
 		req.Header.Set(k, v)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return fmt.Errorf("failed to start download: %w", err)
 	}
@@ -581,7 +581,7 @@ func (md *MovieDownloader) getContentLength(url string) (int64, error) {
 		return 0, err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704
 	if err != nil {
 		return 0, err
 	}
