@@ -374,8 +374,11 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 	return nil, fmt.Errorf("failed to download segment after %d attempts", maxRetries+1)
 }
 
-// ProgressCallback is a function that reports download progress
-type ProgressCallback func(downloaded, total int)
+// ProgressCallback reports download progress.
+// bytesWritten  = cumulative bytes flushed to the output file (real disk size).
+// segmentsWritten = number of segments sequentially written to disk.
+// totalSegments   = total number of segments in the playlist.
+type ProgressCallback func(bytesWritten int64, segmentsWritten, totalSegments int)
 
 // DownloadWithProgress downloads HLS content with progress reporting
 func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output string, headers map[string]string, progressCallback ProgressCallback) error {
@@ -409,10 +412,11 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 
 	totalSegments := len(playlist.Segments)
 	var downloadedSegments int32
+	var bytesWritten int64 // cumulative bytes flushed to disk
 
 	// Report initial progress
 	if progressCallback != nil {
-		progressCallback(0, totalSegments)
+		progressCallback(0, 0, totalSegments)
 	}
 
 	// Concurrent download configuration
@@ -491,10 +495,13 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 				}
 
 				if data != nil {
-					if _, err := outFile.Write(data); err != nil {
+					n, werr := outFile.Write(data)
+					if werr != nil {
 						if firstErr == nil {
-							firstErr = fmt.Errorf("failed to write segment %d: %w", nextIndex, err)
+							firstErr = fmt.Errorf("failed to write segment %d: %w", nextIndex, werr)
 						}
+					} else {
+						bytesWritten += int64(n)
 					}
 				}
 
@@ -502,9 +509,9 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 				nextIndex++
 			}
 
-			// Report progress
+			// Report progress based on segments WRITTEN to disk (not just downloaded)
 			if progressCallback != nil {
-				progressCallback(int(downloadedSegments), totalSegments)
+				progressCallback(bytesWritten, nextIndex, totalSegments)
 			}
 		}
 	}

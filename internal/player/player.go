@@ -73,6 +73,7 @@ type model struct {
 	totalBytes int64
 	received   int64
 	done       bool
+	doneFrames int // frames elapsed since done; allows 100% to render before quit
 	status     string
 	mu         sync.Mutex
 	keys       keyMap

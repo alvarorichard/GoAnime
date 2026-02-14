@@ -622,24 +622,45 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 	// Create context for the download
 	ctx := context.Background()
 
-	// Use the native HLS downloader with progress callback
-	err := hls.DownloadToFile(ctx, videoURL, destPath, headers, func(downloaded, total int) {
-		// Calculate progress based on segments
-		if total > 0 {
-			percent := float64(downloaded) / float64(total)
-			simulatedReceived := int64(percent * float64(progressModel.totalBytes))
-
-			progressModel.mu.Lock()
-			progressModel.received = simulatedReceived
-			progressModel.mu.Unlock()
-
-			program.Send(movieProgressMsg{
-				received:   simulatedReceived,
-				totalBytes: progressModel.totalBytes,
-			})
-
-			program.Send(movieStatusMsg(fmt.Sprintf("Downloading HLS segments... %d/%d (%.0f%%)", downloaded, total, percent*100)))
+	// Use the native HLS downloader with byte-based progress callback
+	err := hls.DownloadToFile(ctx, videoURL, destPath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
+		if totalSegments <= 0 {
+			return
 		}
+
+		progressModel.mu.Lock()
+		// Update received with real bytes on disk
+		progressModel.received = bytesWritten
+
+		// Dynamically estimate total from average bytes per written segment
+		if segmentsWritten >= 3 {
+			avgBytesPerSeg := bytesWritten / int64(segmentsWritten)
+			estimatedTotal := avgBytesPerSeg * int64(totalSegments)
+			if estimatedTotal > progressModel.totalBytes {
+				progressModel.totalBytes = estimatedTotal
+			}
+		}
+
+		// Cap at 98% until fully done
+		total := progressModel.totalBytes
+		if total > 0 && progressModel.received >= total {
+			progressModel.received = int64(float64(total) * 0.98)
+		}
+		received := progressModel.received
+		progressModel.mu.Unlock()
+
+		program.Send(movieProgressMsg{
+			received:   received,
+			totalBytes: total,
+		})
+
+		percent := float64(0)
+		if total > 0 {
+			percent = float64(received) / float64(total) * 100
+		}
+		program.Send(movieStatusMsg(fmt.Sprintf("Downloading HLS... %d/%d segments, %.0f MB (%.0f%%)",
+			segmentsWritten, totalSegments,
+			float64(bytesWritten)/(1024*1024), percent)))
 	})
 
 	if err != nil {
@@ -651,15 +672,27 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 		return fmt.Errorf("download failed: file was not created at %s", destPath)
 	}
 
-	// Update progress to 100%
-	progressModel.mu.Lock()
-	progressModel.received = progressModel.totalBytes
-	progressModel.mu.Unlock()
+	// Update progress to 100% using actual file size
+	if fi, statErr := os.Stat(destPath); statErr == nil && fi.Size() > 0 {
+		progressModel.mu.Lock()
+		progressModel.totalBytes = fi.Size()
+		progressModel.received = fi.Size()
+		progressModel.mu.Unlock()
 
-	program.Send(movieProgressMsg{
-		received:   progressModel.totalBytes,
-		totalBytes: progressModel.totalBytes,
-	})
+		program.Send(movieProgressMsg{
+			received:   fi.Size(),
+			totalBytes: fi.Size(),
+		})
+	} else {
+		progressModel.mu.Lock()
+		progressModel.received = progressModel.totalBytes
+		progressModel.mu.Unlock()
+
+		program.Send(movieProgressMsg{
+			received:   progressModel.totalBytes,
+			totalBytes: progressModel.totalBytes,
+		})
+	}
 
 	return nil
 }

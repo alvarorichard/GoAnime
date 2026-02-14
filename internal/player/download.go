@@ -370,43 +370,50 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 
 	ctx := context.Background()
 
-	// Track whether we've set the segment-based total yet
-	var totalSet bool
-
-	// Use native HLS downloader with real segment-based progress.
-	// On the first callback we learn the total segment count and override the
-	// byte-estimate that the caller put in m.totalBytes with the segment count.
-	// Each subsequent callback sets m.received = downloaded segments.
-	// This gives a perfectly linear, accurate progress bar.
-	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(downloaded, total int) {
-		if m == nil || total <= 0 {
+	// Real byte-based progress via the HLS callback.
+	// The callback now reports (bytesWritten, segmentsWritten, totalSegments).
+	// bytesWritten = actual bytes flushed to disk.
+	// We use bytesWritten directly for m.received, and dynamically estimate
+	// m.totalBytes from the average bytes per written segment.
+	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
+		if m == nil || totalSegments <= 0 {
 			return
 		}
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		// On the first callback, override the byte estimate with segment count
-		if !totalSet {
-			m.totalBytes = int64(total)
-			m.received = 0
-			totalSet = true
+		// Update received with real bytes on disk
+		m.received = bytesWritten
+
+		// Dynamically estimate total file size from average bytes per segment
+		if segmentsWritten >= 3 {
+			avgBytesPerSeg := bytesWritten / int64(segmentsWritten)
+			estimatedTotal := avgBytesPerSeg * int64(totalSegments)
+			// Only increase estimate (never shrink it to prevent bar going backwards)
+			if estimatedTotal > m.totalBytes {
+				m.totalBytes = estimatedTotal
+			}
 		}
 
-		m.received = int64(downloaded)
+		// Cap at 98% to prevent showing 100% while write buffer still flushing
+		if m.totalBytes > 0 && m.received >= m.totalBytes {
+			m.received = int64(float64(m.totalBytes) * 0.98)
+		}
 	})
 
 	if err != nil {
 		return fmt.Errorf("native HLS download failed: %w", err)
 	}
 
-	// Ensure 100% on completion
+	// Set real 100% from actual file size now that download is truly complete
 	if m != nil {
-		m.mu.Lock()
-		if m.totalBytes > 0 {
-			m.received = m.totalBytes
+		if fi, statErr := os.Stat(safePath); statErr == nil && fi.Size() > 0 {
+			m.mu.Lock()
+			m.totalBytes = fi.Size()
+			m.received = fi.Size()
+			m.mu.Unlock()
 		}
-		m.mu.Unlock()
 	}
 
 	return nil

@@ -43,10 +43,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		if m.done {
-			return m, tea.Quit
+			// View() already renders 100% via ViewAs(1.0) when done.
+			// Wait a few frames so the terminal redraws before we quit.
+			m.doneFrames++
+			if m.doneFrames >= 3 {
+				return m, tea.Quit
+			}
+			return m, tickCmd()
 		}
 		if m.totalBytes > 0 {
-			// Calculate current progress percentage with smoothing
+			// Calculate current progress percentage
 			currentProgress := float64(m.received) / float64(m.totalBytes)
 
 			// Ensure progress is within valid bounds
@@ -110,9 +116,17 @@ func (m *model) View() string {
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
 
 	// Returns the UI layout: status message, progress bar, and quit instruction
+	// When done, render exactly 100% using ViewAs to bypass spring animation.
+	var bar string
+	if m.done {
+		bar = m.progress.ViewAs(1.0)
+	} else {
+		bar = m.progress.View()
+	}
+
 	return "\n" +
 		pad + statusStyle.Render(m.status) + "\n\n" + // Render the styled status message
-		pad + m.progress.View() + "\n\n" + // Render the progress bar
+		pad + bar + "\n\n" + // Render the progress bar
 		pad + "Press Ctrl+C to quit" // Show quit instruction
 }
 
