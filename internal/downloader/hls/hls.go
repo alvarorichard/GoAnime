@@ -4,8 +4,10 @@ package hls
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // Segment represents a single HLS segment
@@ -42,9 +46,29 @@ type Downloader struct {
 
 // NewDownloader creates a new HLS downloader
 func NewDownloader() *Downloader {
+	// Force HTTP/1.1 by disabling HTTP/2.  CDN servers often reset
+	// multiplexed HTTP/2 streams with INTERNAL_ERROR when many segments
+	// are fetched concurrently over a single connection.  HTTP/1.1 opens
+	// a separate TCP connection per request, avoiding this issue.
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+		// Setting TLSNextProto to an empty map disables HTTP/2
+		TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
+
 	return &Downloader{
 		client: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout:   5 * time.Minute,
+			Transport: transport,
 		},
 	}
 }
@@ -299,7 +323,7 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 
 // downloadSegment downloads a single segment
 func (d *Downloader) downloadSegment(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
-	maxRetries := 3
+	maxRetries := 5
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
@@ -319,7 +343,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 		resp, err := d.client.Do(req) // #nosec G704
 		if err != nil {
 			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				time.Sleep(time.Duration(attempt+1) * time.Second) // progressive backoff: 1s, 2s, 3s…
 				continue
 			}
 			return nil, err
@@ -330,7 +354,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 
 		if err != nil {
 			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				time.Sleep(time.Duration(attempt+1) * time.Second)
 				continue
 			}
 			return nil, err
@@ -338,7 +362,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 
 		if resp.StatusCode != http.StatusOK {
 			if attempt < maxRetries {
-				time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				time.Sleep(time.Duration(attempt+1) * time.Second)
 				continue
 			}
 			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -392,6 +416,7 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	}
 
 	// Concurrent download configuration
+	// 8 workers provides good parallelism without triggering most CDN rate limits
 	const maxWorkers = 8
 
 	type job struct {
@@ -435,6 +460,7 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	// Collect results and write in order
 	segmentBuffer := make(map[int][]byte)
 	nextIndex := 0
+	var failedSegments int
 	var firstErr error
 
 	for i := 0; i < totalSegments; i++ {
@@ -443,13 +469,18 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 			return ctx.Err()
 		case res := <-results:
 			if res.err != nil {
+				failedSegments++
 				if firstErr == nil {
 					firstErr = res.err
 				}
-				continue
+				// Still increment downloadedSegments so the write-loop
+				// doesn't block forever waiting for this index.
+				// We write an empty slice for the gap so subsequent
+				// segments can still be flushed in order.
+				segmentBuffer[res.index] = nil
+			} else {
+				segmentBuffer[res.index] = res.data
 			}
-
-			segmentBuffer[res.index] = res.data
 			atomic.AddInt32(&downloadedSegments, 1)
 
 			// Write available sequential segments
@@ -459,9 +490,11 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 					break
 				}
 
-				if _, err := outFile.Write(data); err != nil {
-					if firstErr == nil {
-						firstErr = fmt.Errorf("failed to write segment %d: %w", nextIndex, err)
+				if data != nil {
+					if _, err := outFile.Write(data); err != nil {
+						if firstErr == nil {
+							firstErr = fmt.Errorf("failed to write segment %d: %w", nextIndex, err)
+						}
 					}
 				}
 
@@ -478,8 +511,20 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 
 	wg.Wait()
 
-	if firstErr != nil {
-		return firstErr
+	// Fail if too many segments were lost (>5%).
+	// A handful of missing segments (<5%) in a long stream is tolerable —
+	// the video will have brief glitches but is otherwise watchable.
+	if failedSegments > 0 {
+		failRatio := float64(failedSegments) / float64(totalSegments)
+		if failRatio > 0.05 {
+			return fmt.Errorf("download incomplete: %d/%d segments failed (%.0f%%): %w",
+				failedSegments, totalSegments, failRatio*100, firstErr)
+		}
+		// Log minor losses but don't fail
+		if util.IsDebug {
+			fmt.Printf("Note: %d/%d segments could not be downloaded (%.1f%%), minor glitches possible\n",
+				failedSegments, totalSegments, failRatio*100)
+		}
 	}
 
 	return nil

@@ -93,8 +93,16 @@ func smartDownload(url, dest string) error {
 	if shouldUseYtDlp(url) {
 		ctx := context.Background()
 		ytdlp.MustInstall(ctx, nil)
-		dl := ytdlp.New().Output(safeDest)
-		_, err := dl.Run(ctx, url)
+		dl := ytdlp.New().
+			Output(safeDest).
+			Format("bestvideo+bestaudio/best").
+			Downloader("ffmpeg").
+			DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
+			ConcurrentFragments(4).
+			FragmentRetries("5").
+			Retries("5").
+			Impersonate("chrome")
+		_, err := dl.Run(ctx, url, "--hls-use-mpegts")
 		if err != nil {
 			return fmt.Errorf("yt-dlp failed: %w", err)
 		}

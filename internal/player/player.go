@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,31 @@ import (
 
 // lastAnimeURL stores the most recent anime URL/ID to support navigation when no updater is present
 var lastAnimeURL string
+
+// lastAnimeName stores the most recent anime name for Plex-compatible download naming
+var lastAnimeName string
+
+// lastAnimeSeason stores the most recent anime season number for download naming
+var lastAnimeSeason int
+
+// lastIsMovieOrTV indicates whether the current content is a movie/TV show (non-anime)
+var lastIsMovieOrTV bool
+
+// SetAnimeName sets the anime name and season for Plex-compatible download file naming.
+// Call this before any download operations to ensure proper naming.
+func SetAnimeName(name string, season int) {
+	lastAnimeName = name
+	lastAnimeSeason = season
+	if season < 1 {
+		lastAnimeSeason = 1
+	}
+}
+
+// SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
+// This determines whether downloads go to the movies or anime directory.
+func SetMediaType(isMovieOrTV bool) {
+	lastIsMovieOrTV = isMovieOrTV
+}
 
 const (
 	padding = 2
@@ -392,11 +418,21 @@ func HandleDownloadAndPlay(
 	episodeNumberStr string,
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
+	animeName string,
 ) error {
 	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
 
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
 	lastAnimeURL = animeURL
+
+	// Store anime name for Plex-compatible download file naming
+	if animeName != "" {
+		season := 1
+		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
+			season = util.GlobalDownloadRequest.SeasonNum
+		}
+		SetAnimeName(animeName, season)
+	}
 
 	// Check if this is an HLS stream (for proper handling later)
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
@@ -545,8 +581,44 @@ func downloadAndPlayEpisode(
 		util.Fatal("Failed to get current user:", err)
 	}
 
-	downloadPath := filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime", DownloadFolderFormatter(animeURL))
-	episodePath := filepath.Join(downloadPath, episodeNumberStr+".mp4")
+	// Use Plex-compatible naming when anime name is available
+	var downloadPath, episodePath string
+	if lastAnimeName != "" {
+		season := lastAnimeSeason
+		if season < 1 {
+			season = 1
+		}
+		// Use the int episode number directly; fall back to parsing the string only if needed
+		epNum := selectedEpisodeNum
+		if epNum < 1 {
+			parsed, _ := strconv.Atoi(episodeNumberStr)
+			if parsed > 0 {
+				epNum = parsed
+			} else {
+				epNum = 1
+			}
+		}
+		// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
+		var baseDir string
+		if lastIsMovieOrTV {
+			baseDir = util.DefaultMovieDownloadDir()
+		} else {
+			baseDir = util.DefaultDownloadDir()
+		}
+		downloadPath = util.FormatPlexEpisodeDir(baseDir, lastAnimeName, season)
+		episodePath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
+		util.Debugf("Download routing: isMovieOrTV=%v, baseDir=%s, path=%s", lastIsMovieOrTV, baseDir, episodePath)
+	} else {
+		// Fallback: route based on media type even without anime name
+		var fallbackBase string
+		if lastIsMovieOrTV {
+			fallbackBase = util.DefaultMovieDownloadDir()
+		} else {
+			fallbackBase = filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime")
+		}
+		downloadPath = filepath.Join(fallbackBase, DownloadFolderFormatter(animeURL))
+		episodePath = filepath.Join(downloadPath, episodeNumberStr+".mp4")
+	}
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, 0700); err != nil {
@@ -585,7 +657,9 @@ func downloadAndPlayEpisode(
 
 			go func() {
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
-				// Try native HLS first for .m3u8 streams (avoids 403 errors), fall back to yt-dlp
+				// Native HLS first for .m3u8 — handles obfuscated segment extensions
+				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
+				// yt-dlp is only used for non-HLS streams.
 				var dlErr error
 				if strings.Contains(videoURL, ".m3u8") {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
@@ -598,6 +672,13 @@ func downloadAndPlayEpisode(
 				}
 				if dlErr != nil {
 					util.Fatal("Failed to download video:", dlErr)
+				}
+				// Update progress to reflect real file size so bar shows accurate 100%
+				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
+					m.mu.Lock()
+					m.totalBytes = fi.Size()
+					m.received = fi.Size()
+					m.mu.Unlock()
 				}
 				m.mu.Lock()
 				m.done = true
@@ -614,9 +695,14 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("download failed: file was not created")
 			}
 
-			// Check file size
-			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
-				return fmt.Errorf("download failed: file is too small (%d bytes)", stat.Size())
+			// Verify the file is a reasonable size for a video episode.
+			// HLS episodes are typically at least 20 MB; anything below 10 MB
+			// almost certainly indicates a truncated or failed download.
+			const minEpisodeSize int64 = 10 * 1024 * 1024 // 10 MB
+			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < minEpisodeSize {
+				_ = os.Remove(episodePath) // remove partial file so retry won't skip it
+				return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
+					stat.Size(), float64(stat.Size())/(1024*1024), float64(minEpisodeSize)/(1024*1024))
 			}
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)

@@ -35,6 +35,15 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		return err
 	}
 
+	// Set anime name for Plex-compatible download file naming
+	season := 1
+	if request.SeasonNum > 0 {
+		season = request.SeasonNum
+	}
+	player.SetAnimeName(anime.Name, season)
+	// Route downloads to the correct directory (anime/ vs movies/)
+	player.SetMediaType(anime.IsMovieOrTV())
+
 	if request.IsRange {
 		util.Infof("Downloading episodes %d-%d of %s",
 			request.StartEpisode, request.EndEpisode, anime.Name)
@@ -60,8 +69,8 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 					// Fallback to legacy downloader
 					episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-					downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-					return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 				}
 				return nil
 			}
@@ -73,8 +82,8 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 			// Fallback to legacy downloader
 			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-			downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-			return downloader.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+			dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+			return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 		}
 		return nil
 	} else {
@@ -84,8 +93,8 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		// Enhanced download is a placeholder - use legacy downloader
 		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
 		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-		downloader := downloader.NewEpisodeDownloader(episodes, anime.URL)
-		return downloader.DownloadSingleEpisode(request.EpisodeNum)
+		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+		return dl.DownloadSingleEpisode(request.EpisodeNum)
 	}
 }
 

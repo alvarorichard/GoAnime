@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -203,95 +203,8 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Determine an estimated size for per-episode tracking (do NOT overwrite m.totalBytes here)
-	var epTotal int64
-	if m != nil {
-		client := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
-		if sz, e := getContentLength(safeURL, client); e == nil && sz > 0 {
-			epTotal = sz
-		} else if strings.Contains(safeURL, ".m3u8") || strings.Contains(safeURL, "master.m3u8") || strings.Contains(safeURL, "wixmp.com") || strings.Contains(safeURL, "repackager.wixmp.com") {
-			epTotal = 500 * 1024 * 1024 // 500MB default for HLS-like streams
-		} else {
-			epTotal = 200 * 1024 * 1024 // 200MB generic fallback
-		}
-		// Keep stdout clean; log only in debug
-		if util.IsDebug {
-			util.Logger.Debug("Starting download", "estimate_mb", fmt.Sprintf("%.1f", float64(epTotal)/(1024*1024)))
-		}
-	}
-
-	// Start a progress goroutine: aggressively poll file size during the download for real-time updates
-	done := make(chan struct{})
-	if m != nil && epTotal > 0 {
-		go func(total int64, outPath string) {
-			ticker := time.NewTicker(100 * time.Millisecond)
-			defer ticker.Stop()
-			var lastLocal int64 // last local bytes accounted to the global aggregator
-
-			// Precompute base name to aggregate temp files created by yt-dlp/ffmpeg
-			dir := filepath.Dir(outPath)
-			base := filepath.Base(outPath)
-			prefix := strings.TrimSuffix(base, filepath.Ext(base))
-
-			// helper: measure current local bytes by summing sizes of temp files for this output
-			measureLocal := func() int64 {
-				var sum int64
-				// Check the final file straight away
-				if fi, err := os.Stat(outPath); err == nil {
-					// If final file exists, that's the authoritative size
-					return fi.Size()
-				}
-				// Otherwise, sum temp files that start with the prefix in the same dir
-				entries, err := os.ReadDir(dir)
-				if err != nil {
-					return 0
-				}
-				for _, e := range entries {
-					name := e.Name()
-					if !strings.HasPrefix(name, prefix) {
-						continue
-					}
-					// Skip the intended final filename
-					if name == base {
-						continue
-					}
-					if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
-						sum += fi.Size()
-					}
-				}
-				return sum
-			}
-
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticker.C:
-					// Measure local progress as bytes for this single episode
-					cur := measureLocal()
-					// Convert to a conservative percent against estimate, capped until completion
-					// But for aggregation we only care about delta bytes
-					if cur < 0 {
-						cur = 0
-					}
-					// Cap contribution to avoid runaway when estimate is small
-					if float64(cur) > float64(total)*0.98 {
-						cur = int64(float64(total) * 0.98)
-					}
-					// Apply only positive deltas to the global model
-					if delta := cur - lastLocal; delta > 0 {
-						m.mu.Lock()
-						m.received += delta
-						m.mu.Unlock()
-						lastLocal = cur
-					}
-				}
-			}
-		}(epTotal, safePath)
-	}
-
 	// Use go-ytdlp library (no external binary required on PATH)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // Increased timeout for slow connections
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	if m != nil && util.IsDebug {
@@ -308,10 +221,63 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		fmt.Println("Starting yt-dlp download...")
 	}
 
+	// Use typed API for ALL flags so they are placed before the URL by go-ytdlp.
+	// This is critical for --downloader-args to be processed correctly.
+	// We need --downloader ffmpeg for "live" HLS streams (no #EXT-X-ENDLIST),
+	// and --downloader-args with -allowed_extensions ALL to make ffmpeg accept
+	// obfuscated segment extensions (.jpg, .png) from CDNs like AllAnime.
 	dl := ytdlp.New().
-		Output(safePath)
+		Output(safePath).
+		Format("bestvideo+bestaudio/best").
+		Downloader("ffmpeg").
+		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
+		ConcurrentFragments(4).
+		FragmentRetries("5").
+		Retries("5").
+		SocketTimeout(30).
+		Impersonate("chrome")
 
-	// Run the download with HLS-friendly options and retry logic
+	// Forward the stored referer/origin so the CDN accepts the request
+	if ref := util.GetGlobalReferer(); ref != "" {
+		dl.AddHeaders("Referer:" + ref)
+		origin := strings.TrimSuffix(ref, "/")
+		if u, e := neturl.Parse(origin); e == nil {
+			origin = u.Scheme + "://" + u.Host
+		}
+		dl.AddHeaders("Origin:" + origin)
+	}
+
+	// Real-time progress via yt-dlp's native callback.
+	var lastReportedBytes int64
+	var lastProgressFile string
+	if m != nil {
+		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
+			if update.Status == ytdlp.ProgressStatusPostProcessing ||
+				update.Status == ytdlp.ProgressStatusFinished {
+				return
+			}
+
+			m.mu.Lock()
+			defer m.mu.Unlock()
+
+			if update.Filename != "" && update.Filename != lastProgressFile {
+				lastProgressFile = update.Filename
+				lastReportedBytes = 0
+			}
+
+			downloaded := int64(update.DownloadedBytes)
+			if delta := downloaded - lastReportedBytes; delta > 0 {
+				m.received += delta
+				lastReportedBytes = downloaded
+			}
+
+			if update.TotalBytes > 0 && m.totalBytes < int64(update.TotalBytes) {
+				m.totalBytes = int64(update.TotalBytes)
+			}
+		})
+	}
+
+	// Run with --hls-use-mpegts as raw arg (no typed method available) + retry logic
 	var runErr error
 	maxRetries := 2
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -319,48 +285,26 @@ func downloadWithYtDlp(url, path string, m *model) error {
 			if m != nil && util.IsDebug {
 				fmt.Printf("Retrying download (attempt %d/%d)...\n", attempt+1, maxRetries+1)
 			}
-			time.Sleep(time.Duration(attempt*2) * time.Second) // Progressive backoff
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+			lastReportedBytes = 0
+			lastProgressFile = ""
 		}
 
-		_, runErr = dl.Run(ctx, safeURL,
-			"--downloader", "ffmpeg",
-			"--hls-use-mpegts",
-			"--fragment-retries", "3",
-			"--retries", "3",
-			"--socket-timeout", "30")
+		_, runErr = dl.Run(ctx, safeURL, "--hls-use-mpegts")
 
 		if runErr == nil {
-			break // Success, exit retry loop
+			break
 		}
 
-		// Check if this is a retryable error
 		if attempt < maxRetries && isRetryableError(runErr) {
 			continue
 		} else {
-			break // Either max retries reached or non-retryable error
+			break
 		}
 	}
-
-	// Stop progress goroutine and finalize remaining delta
-	close(done)
 
 	if runErr != nil {
 		return fmt.Errorf("go-ytdlp download failed: %w", runErr)
-	}
-
-	if m != nil && epTotal > 0 {
-		// Apply a small remaining delta so UI reaches the batch total smoothly
-		tail := int64(float64(epTotal) * 0.02)
-		if tail < 0 {
-			tail = 0
-		}
-		m.mu.Lock()
-		m.received += tail
-		if m.totalBytes > 0 && m.received > m.totalBytes {
-			m.received = m.totalBytes
-		}
-		m.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	return nil
@@ -381,7 +325,8 @@ func isRetryableError(err error) bool {
 }
 
 // downloadWithNativeHLS downloads HLS streams using native implementation instead of yt-dlp
-// This avoids 403 errors that occur with yt-dlp on some streaming servers
+// This avoids issues with yt-dlp where ffmpeg rejects obfuscated segment extensions (.jpg, .png)
+// and yt-dlp's native downloader rejects "live" HLS (no #EXT-X-ENDLIST).
 func downloadWithNativeHLS(streamURL, path string, m *model) error {
 	// Sanitize inputs
 	safeURL, err := sanitizeMediaTarget(streamURL)
@@ -398,21 +343,13 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Determine an estimated size for progress tracking
-	var epTotal int64
-	if m != nil {
-		epTotal = 500 * 1024 * 1024 // 500MB default for HLS streams
-		if util.IsDebug {
-			util.Logger.Debug("Starting native HLS download", "estimate_mb", fmt.Sprintf("%.1f", float64(epTotal)/(1024*1024)))
-		}
+	if m != nil && util.IsDebug {
+		util.Logger.Debug("Starting native HLS download", "streamURL", safeURL)
 	}
 
 	// Get referer from global storage (set from embed URL in GetFlixHQStreamURL)
-	// This is critical - the Referer must be from the embed URL origin (e.g., megacloud.tv),
-	// NOT from the m3u8 stream URL which is typically on a different CDN domain
 	referer := util.GetGlobalReferer()
 	if referer == "" {
-		// Fallback: try to extract from stream URL (may not work for CDN URLs)
 		referer = extractRefererFromURL(safeURL)
 	}
 
@@ -431,31 +368,42 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		headers["Origin"] = strings.TrimSuffix(referer, "/")
 	}
 
-	// Create context for the download
 	ctx := context.Background()
 
-	// Use native HLS downloader with progress callback
-	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(downloaded, total int) {
-		if m != nil && total > 0 {
-			// Calculate progress based on segments
-			percent := float64(downloaded) / float64(total)
-			simulatedReceived := int64(percent * float64(epTotal))
+	// Track whether we've set the segment-based total yet
+	var totalSet bool
 
-			m.mu.Lock()
-			m.received = simulatedReceived
-			m.mu.Unlock()
+	// Use native HLS downloader with real segment-based progress.
+	// On the first callback we learn the total segment count and override the
+	// byte-estimate that the caller put in m.totalBytes with the segment count.
+	// Each subsequent callback sets m.received = downloaded segments.
+	// This gives a perfectly linear, accurate progress bar.
+	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(downloaded, total int) {
+		if m == nil || total <= 0 {
+			return
 		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		// On the first callback, override the byte estimate with segment count
+		if !totalSet {
+			m.totalBytes = int64(total)
+			m.received = 0
+			totalSet = true
+		}
+
+		m.received = int64(downloaded)
 	})
 
 	if err != nil {
 		return fmt.Errorf("native HLS download failed: %w", err)
 	}
 
-	// Apply final progress update
-	if m != nil && epTotal > 0 {
+	// Ensure 100% on completion
+	if m != nil {
 		m.mu.Lock()
-		m.received = epTotal
-		if m.totalBytes > 0 && m.received > m.totalBytes {
+		if m.totalBytes > 0 {
 			m.received = m.totalBytes
 		}
 		m.mu.Unlock()
@@ -467,7 +415,7 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 // extractRefererFromURL extracts the referer (origin) from a URL
 // e.g., https://megacloud.tv/embed-2/abc123?k=v -> https://megacloud.tv/
 func extractRefererFromURL(streamURL string) string {
-	parsed, err := url.Parse(streamURL)
+	parsed, err := neturl.Parse(streamURL)
 	if err != nil {
 		return ""
 	}
@@ -756,8 +704,8 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				if p != nil && util.IsDebug {
 					p.Send(statusMsg(fmt.Sprintf("Downloading episode %d...", epNum)))
 				}
-				// Use native HLS for .m3u8 streams (avoids 403 errors from yt-dlp),
-				// fall back to yt-dlp if native fails. Use yt-dlp directly for DASH/blogger.
+				// Native HLS first for .m3u8 — handles obfuscated segment extensions
+				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				if strings.Contains(videoURL, ".m3u8") {
 					err = downloadWithNativeHLS(videoURL, episodePath, m)
 					if err != nil {
@@ -771,6 +719,14 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				}
 				if err != nil {
 					util.Logger.Error("Failed episode download", "episode", epNum, "error", err)
+				} else {
+					// Verify the downloaded file is a reasonable size for a video
+					const minEpSize int64 = 10 * 1024 * 1024 // 10 MB
+					if stat, statErr := os.Stat(episodePath); statErr == nil && stat.Size() < minEpSize {
+						util.Logger.Warn("Downloaded file too small, removing partial file",
+							"episode", epNum, "size_mb", fmt.Sprintf("%.1f", float64(stat.Size())/(1024*1024)))
+						_ = os.Remove(episodePath)
+					}
 				}
 			}(epNum)
 		}
@@ -917,6 +873,8 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 				}
 
 				var dlErr error
+				// Native HLS first for .m3u8 — handles obfuscated segment extensions
+				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				if strings.Contains(videoURL, ".m3u8") {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil {
@@ -1020,14 +978,54 @@ func findEpisode(episodes []models.Episode, episodeNum int) (models.Episode, boo
 	return models.Episode{}, false
 }
 
-// createEpisodePath creates the file path for the downloaded episode.
+// createEpisodePath creates the file path for the downloaded episode
+// using Plex/Jellyfin-compatible naming when anime name is available.
 func createEpisodePath(animeURL string, epNum int) (string, error) {
+	// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
+	var baseDir string
+	if lastIsMovieOrTV {
+		baseDir = util.DefaultMovieDownloadDir()
+	} else {
+		baseDir = util.DefaultDownloadDir()
+	}
+
+	// Use Plex-compatible naming when anime name is available
+	if lastAnimeName != "" {
+		season := lastAnimeSeason
+		if season < 1 {
+			season = 1
+		}
+		var fullPath string
+		if lastIsMovieOrTV && season <= 0 {
+			// Movies: <baseDir>/<MovieName>/<MovieName>.mp4 (no season hierarchy)
+			safeName := util.SanitizeForFilename(lastAnimeName)
+			if safeName == "" {
+				safeName = "Unknown"
+			}
+			fullPath = filepath.Join(baseDir, safeName, safeName+".mp4")
+		} else {
+			fullPath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
+		}
+		dir := filepath.Dir(fullPath)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return "", err
+		}
+		return fullPath, nil
+	}
+
+	// Fallback to URL-based directory for backward compatibility
 	userHome, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	safeAnimeName := strings.ReplaceAll(DownloadFolderFormatter(animeURL), " ", "_")
-	downloadDir := filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
+	var fallbackBase string
+	if lastIsMovieOrTV {
+		fallbackBase = filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
+	} else {
+		fallbackBase = filepath.Join(userHome, ".local", "goanime", "downloads", "anime")
+	}
+	downloadDir := filepath.Join(fallbackBase, safeAnimeName)
 	if err := os.MkdirAll(downloadDir, 0700); err != nil {
 		return "", err
 	}

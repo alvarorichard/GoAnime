@@ -104,6 +104,9 @@ func PlayEpisode(
 	}
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
+	// Route downloads to the correct directory (anime/ vs movies/)
+	player.SetMediaType(anime.IsMovieOrTV())
+
 	playErr := player.HandleDownloadAndPlay(
 		videoURL,
 		episodes,
@@ -112,6 +115,7 @@ func PlayEpisode(
 		episodeNumberStr,
 		anime.MalID,
 		updater,
+		anime.Name,
 	)
 
 	if updater != nil {

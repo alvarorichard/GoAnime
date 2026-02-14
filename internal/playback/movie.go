@@ -57,6 +57,9 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
 		updater := createUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
 
+		// Route downloads to the correct directory (anime/ vs movies/)
+		player.SetMediaType(anime.IsMovieOrTV())
+
 		playErr := player.HandleDownloadAndPlay(
 			videoURL,
 			episodes,
@@ -65,6 +68,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			episodes[0].Number,
 			anime.MalID,
 			updater,
+			anime.Name,
 		)
 
 		if updater != nil {

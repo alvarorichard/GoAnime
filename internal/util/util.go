@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -33,6 +35,7 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
+	GlobalOutputDir     string                         // Global variable to store custom download output directory
 )
 
 // SetGlobalSubtitles stores subtitles for the current playback session
@@ -170,6 +173,7 @@ type DownloadRequest struct {
 	IsTV         bool   // True if downloading a TV show from FlixHQ/SFlix
 	SeasonNum    int    // Season number for TV shows
 	SubsLanguage string // Subtitle language preference
+	OutputDir    string // Custom output directory for downloads
 }
 
 // UpscaleRequest holds upscale command parameters
@@ -221,6 +225,7 @@ func FlagParser() (string, error) {
 	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
 	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
+	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
 
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
@@ -265,6 +270,7 @@ func FlagParser() (string, error) {
 	GlobalSubsLanguage = *subsLanguageFlag
 	GlobalAudioLanguage = *audioLanguageFlag
 	GlobalNoSubs = *noSubsFlag
+	GlobalOutputDir = *outputDirFlag
 
 	if *noSubsFlag {
 		Debug("Subtitles disabled by user")
@@ -412,6 +418,7 @@ func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeS
 			Source:        source,
 			Quality:       quality,
 			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
@@ -442,6 +449,7 @@ func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeS
 			Source:        source,
 			Quality:       quality,
 			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
@@ -557,6 +565,7 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 			EndEpisode:   endEp,
 			Quality:      quality,
 			SubsLanguage: subsLanguage,
+			OutputDir:    GlobalOutputDir,
 		}
 
 		return TreatingAnimeName(showName), ErrMovieDownloadRequested
@@ -593,6 +602,7 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 			IsRange:      false,
 			Quality:      quality,
 			SubsLanguage: subsLanguage,
+			OutputDir:    GlobalOutputDir,
 		}
 
 		return TreatingAnimeName(showName), ErrMovieDownloadRequested
@@ -607,8 +617,139 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 			IsRange:      false,
 			Quality:      quality,
 			SubsLanguage: subsLanguage,
+			OutputDir:    GlobalOutputDir,
 		}
 
 		return TreatingAnimeName(movieName), ErrMovieDownloadRequested
 	}
+}
+
+// SanitizeForFilename removes characters that are not allowed in file/directory names
+// and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
+// It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
+// and language tags that many anime sources append to titles.
+func SanitizeForFilename(name string) string {
+	// Remove language/source tags in brackets
+	name = strings.ReplaceAll(name, "[English]", "")
+	name = strings.ReplaceAll(name, "[Portuguese]", "")
+	name = strings.ReplaceAll(name, "[Português]", "")
+	name = strings.ReplaceAll(name, "[Movies/TV]", "")
+	name = strings.ReplaceAll(name, "[MoviesTV]", "")
+	name = strings.ReplaceAll(name, "[Unknown]", "")
+	name = strings.TrimSpace(name)
+
+	// Remove trailing anime source metadata: ratings like "7.27" and age
+	// classifications like "A14", "A12", "A16", "A18", "L", "AL".
+	// These are commonly appended by AllAnime/AnimeFire sources.
+	// Pattern: strip trailing tokens that look like scores or classifications.
+	name = stripTrailingAnimeMetadata(name)
+
+	// Remove characters not allowed in filenames across platforms
+	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, ch := range invalid {
+		name = strings.ReplaceAll(name, ch, "")
+	}
+	// Remove trailing dots and spaces (problematic on Windows)
+	name = strings.TrimRight(name, ". ")
+	// Collapse multiple spaces
+	for strings.Contains(name, "  ") {
+		name = strings.ReplaceAll(name, "  ", " ")
+	}
+	return strings.TrimSpace(name)
+}
+
+// stripTrailingAnimeMetadata removes common metadata that anime sources append
+// to titles, such as scores (e.g. "7.27"), age classifications (e.g. "A14", "L"),
+// and other trailing tokens that don't belong in a Plex-style filename.
+//
+// Example: "Black Clover (Dublado) 7.27 A14" → "Black Clover (Dublado)"
+func stripTrailingAnimeMetadata(name string) string {
+	// Regex that matches trailing tokens which look like:
+	//   - Decimal ratings: 7.27, 8.5, 10.0, etc.
+	//   - Age classifications: A14, A12, A16, A18, AL, L (Brazilian/Portuguese ratings)
+	//   - Generic trailing numbers that aren't part of a title (standalone "14", "18")
+	// We repeatedly strip from the right so "Name 7.27 A14" becomes "Name".
+	ageRe := regexp.MustCompile(`\s+(A\d{1,2}|AL|L)\s*$`)
+	scoreRe := regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
+
+	changed := true
+	for changed {
+		changed = false
+		// Strip trailing age classification
+		if loc := ageRe.FindStringIndex(name); loc != nil {
+			name = strings.TrimSpace(name[:loc[0]])
+			changed = true
+		}
+		// Strip trailing decimal rating
+		if loc := scoreRe.FindStringIndex(name); loc != nil {
+			name = strings.TrimSpace(name[:loc[0]])
+			changed = true
+		}
+	}
+	return name
+}
+
+// DefaultDownloadDir returns the base download directory for anime content.
+// If the user specified a custom directory via -o flag, that is returned.
+// Otherwise returns the default ~/.local/goanime/downloads/anime/ path.
+func DefaultDownloadDir() string {
+	if GlobalOutputDir != "" {
+		return GlobalOutputDir
+	}
+	userHome, _ := os.UserHomeDir()
+	return filepath.Join(userHome, ".local", "goanime", "downloads", "anime")
+}
+
+// DefaultMovieDownloadDir returns the base download directory for movie/TV content.
+// If the user specified a custom directory via -o flag, that is returned.
+// Otherwise returns the default ~/.local/goanime/downloads/movies/ path.
+func DefaultMovieDownloadDir() string {
+	if GlobalOutputDir != "" {
+		return GlobalOutputDir
+	}
+	userHome, _ := os.UserHomeDir()
+	return filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
+}
+
+// FormatPlexEpisodePath builds a Plex/Jellyfin-compatible file path for an episode.
+// Format: <baseDir>/<AnimeName>/Season XX/<AnimeName> - sXXeXX.mp4
+// Uses lowercase s/e per Plex naming guidelines.
+func FormatPlexEpisodePath(baseDir, animeName string, season, episodeNum int) string {
+	safeName := SanitizeForFilename(animeName)
+	if safeName == "" {
+		safeName = "Unknown Anime"
+	}
+	if season < 1 {
+		season = 1
+	}
+	seasonDir := fmt.Sprintf("Season %02d", season)
+	filename := fmt.Sprintf("%s - s%02de%02d.mp4", safeName, season, episodeNum)
+	return filepath.Join(baseDir, safeName, seasonDir, filename)
+}
+
+// FormatPlexEpisodeDir returns the directory path for a Plex-compatible anime season.
+// Format: <baseDir>/<AnimeName>/Season XX/
+func FormatPlexEpisodeDir(baseDir, animeName string, season int) string {
+	safeName := SanitizeForFilename(animeName)
+	if safeName == "" {
+		safeName = "Unknown Anime"
+	}
+	if season < 1 {
+		season = 1
+	}
+	seasonDir := fmt.Sprintf("Season %02d", season)
+	return filepath.Join(baseDir, safeName, seasonDir)
+}
+
+// PlexEpisodeFilename returns just the filename part in Plex format.
+// Format: <AnimeName> - sXXeXX.mp4
+func PlexEpisodeFilename(animeName string, season, episodeNum int) string {
+	safeName := SanitizeForFilename(animeName)
+	if safeName == "" {
+		safeName = "Unknown Anime"
+	}
+	if season < 1 {
+		season = 1
+	}
+	return fmt.Sprintf("%s - s%02de%02d.mp4", safeName, season, episodeNum)
 }

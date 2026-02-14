@@ -504,13 +504,18 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 	}
 
 	results := make(chan result, len(sourceURLs))
-	highPriorityLink := make(chan string, 1)
 
 	// Rate limiter like in Curd
 	rateLimiter := time.NewTicker(50 * time.Millisecond)
 	defer rateLimiter.Stop()
 
 	// Launch goroutines for concurrent processing
+	type highPriorityResult struct {
+		url      string
+		metadata map[string]string
+	}
+	highPriorityCh := make(chan highPriorityResult, 1)
+
 	for i, sourceURL := range sourceURLs {
 		go func(idx int, url string) {
 			<-rateLimiter.C // Rate limit the requests
@@ -521,18 +526,13 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 				return
 			}
 
-			// Check for high priority links first
-			for _, link := range links {
-				for _, domain := range LinkPriorities[:3] { // Check top 3 priority domains
-					if strings.Contains(link, domain) {
-						// Found high priority link, send it immediately
-						select {
-						case highPriorityLink <- link:
-						default:
-							// Channel already has a high priority link
-						}
-						break
-					}
+			// Check for high priority links, but run them through quality
+			// selection so we don't accidentally grab a low-res variant.
+			selectedURL, meta := c.selectQuality(links, quality)
+			if selectedURL != "" && c.getPriorityScore(selectedURL) > 0 {
+				select {
+				case highPriorityCh <- highPriorityResult{url: selectedURL, metadata: meta}:
+				default:
 				}
 			}
 
@@ -542,15 +542,12 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	// First, try to get a high priority link quickly
 	select {
-	case link := <-highPriorityLink:
-		// Found high priority link, return it immediately
-		metadata := map[string]string{
-			"quality":  quality,
-			"anime_id": animeID,
-			"episode":  episodeNo,
-			"priority": "high",
-		}
-		return link, metadata, nil
+	case hp := <-highPriorityCh:
+		// Found high priority link with proper quality selection
+		hp.metadata["anime_id"] = animeID
+		hp.metadata["episode"] = episodeNo
+		hp.metadata["priority"] = "high"
+		return hp.url, hp.metadata, nil
 	case <-time.After(2 * time.Second): // Wait briefly for high priority link
 		// No high priority link found quickly, proceed with normal collection
 	}

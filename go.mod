@@ -20,7 +20,7 @@ require (
 	github.com/charmbracelet/huh/spinner v0.0.0-20260209112015-5c5971ef3aeb
 	github.com/charmbracelet/log v0.4.2
 	github.com/disintegration/gift v1.2.1
-	github.com/lrstanley/go-ytdlp v1.2.7
+	github.com/lrstanley/go-ytdlp v1.3.0
 	github.com/tr1xem/go-discordrpc v1.0.0
 )
 

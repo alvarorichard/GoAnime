@@ -111,6 +111,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--subs", "Specify subtitle language for movies/TV shows (FlixHQ only: english, spanish, portuguese, etc.).")
 	addOption(&helpContent, "--no-subs", "Disable subtitles for movies/TV shows (FlixHQ only).")
 	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
+	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -166,6 +167,8 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
 	addExample(&helpContent, "goanime -d -r --source allanime --allanime-smart \"vinland saga\" 1-4", "AllAnime Smart Range for episodes 1-4")
+	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
+	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
 	addExample(&helpContent, "goanime --type movie \"avengers\"", "Search for movies matching 'avengers'")
 	addExample(&helpContent, "goanime --type tv \"breaking bad\"", "Search for TV shows matching 'breaking bad'")
 	addExample(&helpContent, "goanime --type movie --subs spanish \"spider-man\"", "Search movies with Spanish subtitles")

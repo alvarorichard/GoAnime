@@ -26,7 +26,9 @@ type DownloadConfig struct {
 	AnimeURL   string
 	OutputDir  string
 	NumThreads int
-	Concurrent int // Number of concurrent episode downloads
+	Concurrent int    // Number of concurrent episode downloads
+	AnimeName  string // Anime name for Plex-compatible file naming
+	Season     int    // Season number (default: 1)
 }
 
 // EpisodeDownloader handles episode download operations
@@ -43,16 +45,49 @@ func NewEpisodeDownloader(episodes []models.Episode, animeURL string) *EpisodeDo
 
 // NewEpisodeDownloaderWithAnime creates a new episode downloader with anime data for enhanced API support
 func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, anime *models.Anime) *EpisodeDownloader {
-	userHome, _ := os.UserHomeDir()
-	safeAnimeName := strings.ReplaceAll(player.DownloadFolderFormatter(animeURL), " ", "_")
-	outputDir := filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
+	// Determine anime name and season
+	animeName := ""
+	season := 1
+	if anime != nil && anime.Name != "" {
+		animeName = anime.Name
+	}
+
+	// Allow override from global download request
+	if util.GlobalDownloadRequest != nil {
+		if util.GlobalDownloadRequest.AnimeName != "" && animeName == "" {
+			animeName = util.GlobalDownloadRequest.AnimeName
+		}
+		if util.GlobalDownloadRequest.SeasonNum > 0 {
+			season = util.GlobalDownloadRequest.SeasonNum
+		}
+	}
+
+	// Compute output directory using Plex-compatible structure
+	// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
+	var baseDir string
+	if anime != nil && anime.IsMovieOrTV() {
+		baseDir = util.DefaultMovieDownloadDir()
+	} else {
+		baseDir = util.DefaultDownloadDir()
+	}
+	var outputDir string
+	if animeName != "" {
+		outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season)
+	} else {
+		// Fallback to URL-based directory for backward compatibility
+		userHome, _ := os.UserHomeDir()
+		safeAnimeName := strings.ReplaceAll(player.DownloadFolderFormatter(animeURL), " ", "_")
+		outputDir = filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
+	}
 
 	return &EpisodeDownloader{
 		config: DownloadConfig{
 			AnimeURL:   animeURL,
 			OutputDir:  outputDir,
 			NumThreads: 4,
-			Concurrent: 3, // Download max 3 episodes concurrently
+			Concurrent: 3,
+			AnimeName:  util.SanitizeForFilename(animeName),
+			Season:     season,
 		},
 		episodes: episodes,
 		anime:    anime,
@@ -71,7 +106,7 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", episodeNum))
+	episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(episodeNum))
 
 	// Check if episode already exists
 	if d.fileExists(episodePath) {
@@ -109,7 +144,7 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			util.Warnf("Episode %d not found, skipping", epNum)
 			continue
 		}
-		episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
+		episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
 		if d.fileExists(episodePath) {
 			existingEpisodes = append(existingEpisodes, epNum)
 		} else {
@@ -159,7 +194,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 			continue
 		}
 
-		episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
+		episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
 
 		// Get content length
 		size, err := d.getContentLength(videoURL)
@@ -399,6 +434,15 @@ func (d *EpisodeDownloader) sanitizeDestPath(p string) (string, error) {
 		return "", fmt.Errorf("destination escapes output directory: %s", cleaned)
 	}
 	return absFile, nil
+}
+
+// episodeFilename returns the filename for an episode using Plex-compatible naming
+// when anime name is available, or falls back to simple numeric naming.
+func (d *EpisodeDownloader) episodeFilename(epNum int) string {
+	if d.config.AnimeName != "" {
+		return util.PlexEpisodeFilename(d.config.AnimeName, d.config.Season, epNum)
+	}
+	return fmt.Sprintf("%d.mp4", epNum)
 }
 
 func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
@@ -925,7 +969,7 @@ func (d *EpisodeDownloader) promptPlayDownloadedRangeHuh(episodeNums []int) erro
 	// Check if choice is in the downloaded episodes
 	for _, epNum := range episodeNums {
 		if epNum == choice {
-			episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
+			episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
 			return d.playEpisode(episodePath, epNum)
 		}
 	}
@@ -956,7 +1000,7 @@ func (d *EpisodeDownloader) promptPlayExistingRangeHuh(episodeNums []int) error 
 	// Check if choice is in the existing episodes
 	for _, epNum := range episodeNums {
 		if epNum == choice {
-			episodePath := filepath.Join(d.config.OutputDir, fmt.Sprintf("%d.mp4", epNum))
+			episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
 			return d.playEpisode(episodePath, epNum)
 		}
 	}

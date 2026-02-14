@@ -23,6 +23,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/lrstanley/go-ytdlp"
 )
 
 // MovieDownloadConfig holds configuration for movie download operations
@@ -481,7 +482,8 @@ func (md *MovieDownloader) downloadHTTPWithProgress(videoURL, destPath, referer 
 	return nil
 }
 
-// downloadM3U8WithNative downloads m3u8/HLS streams using native HLS downloader
+// downloadM3U8WithYtDlp downloads m3u8/HLS streams using yt-dlp for best quality
+// (audio/video merging from master playlists), falling back to native HLS if yt-dlp fails.
 func (md *MovieDownloader) downloadM3U8WithYtDlp(videoURL, destPath, referer string, progressModel *movieProgressModel, program *tea.Program) error {
 	program.Send(movieStatusMsg("Starting HLS download..."))
 
@@ -491,10 +493,120 @@ func (md *MovieDownloader) downloadM3U8WithYtDlp(videoURL, destPath, referer str
 	}
 
 	// Extract referer from the stream URL itself if not provided
-	// The key insight: the Referer should be the origin of the stream URL
 	if referer == "" {
 		referer = extractRefererFromStreamURL(videoURL)
 	}
+
+	// Native HLS first — handles obfuscated segment extensions (.jpg, .png) and
+	// "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp's ffmpeg downloader.
+	nativeErr := md.downloadM3U8WithNativeHLS(videoURL, destPath, referer, progressModel, program)
+	if nativeErr == nil {
+		return nil
+	}
+	util.Logger.Warn("Native HLS failed for movie, falling back to yt-dlp", "error", nativeErr)
+
+	// Fallback to yt-dlp
+	return md.downloadM3U8WithYtDlpDirect(videoURL, destPath, referer, progressModel, program)
+}
+
+// downloadM3U8WithYtDlpDirect uses yt-dlp to download HLS with best format selection.
+// Progress is tracked via yt-dlp's native ProgressFunc callback.
+func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, referer string, progressModel *movieProgressModel, program *tea.Program) error {
+	program.Send(movieStatusMsg("Downloading with yt-dlp (best quality)..."))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+
+	_, installErr := ytdlp.Install(ctx, nil)
+	if installErr != nil {
+		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
+	}
+
+	// Use typed API for ALL flags so they are placed before the URL
+	// (critical for --downloader-args to be processed correctly by yt-dlp).
+	dl := ytdlp.New().
+		Output(destPath).
+		Format("bestvideo+bestaudio/best").
+		Downloader("ffmpeg").
+		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
+		ConcurrentFragments(4).
+		FragmentRetries("5").
+		Retries("5").
+		SocketTimeout(30).
+		Impersonate("chrome")
+
+	if referer != "" {
+		dl.AddHeaders("Referer:" + referer)
+		parsed, _ := url.Parse(referer)
+		if parsed != nil && parsed.Host != "" {
+			origin := parsed.Scheme + "://" + parsed.Host
+			dl.AddHeaders("Origin:" + origin)
+		}
+	}
+
+	// Real-time progress via yt-dlp's native callback
+	var lastReportedBytes int64
+	var lastProgressFile string
+	dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
+		if update.Status == ytdlp.ProgressStatusPostProcessing ||
+			update.Status == ytdlp.ProgressStatusFinished {
+			return
+		}
+
+		progressModel.mu.Lock()
+		defer progressModel.mu.Unlock()
+
+		if update.Filename != "" && update.Filename != lastProgressFile {
+			lastProgressFile = update.Filename
+			lastReportedBytes = 0
+		}
+
+		downloaded := int64(update.DownloadedBytes)
+		if delta := downloaded - lastReportedBytes; delta > 0 {
+			progressModel.received += delta
+			lastReportedBytes = downloaded
+		}
+
+		if update.TotalBytes > 0 && progressModel.totalBytes < int64(update.TotalBytes) {
+			progressModel.totalBytes = int64(update.TotalBytes)
+		}
+
+		program.Send(movieProgressMsg{
+			received:   progressModel.received,
+			totalBytes: progressModel.totalBytes,
+		})
+	})
+
+	_, runErr := dl.Run(ctx, videoURL, "--hls-use-mpegts")
+
+	if runErr != nil {
+		return fmt.Errorf("yt-dlp download failed: %w", runErr)
+	}
+
+	// Use actual file size for final progress (not the estimate)
+	var finalSize int64
+	if fi, err := os.Stat(destPath); err == nil {
+		finalSize = fi.Size()
+	}
+	if finalSize <= 0 {
+		finalSize = progressModel.totalBytes
+	}
+
+	progressModel.mu.Lock()
+	progressModel.totalBytes = finalSize
+	progressModel.received = finalSize
+	progressModel.mu.Unlock()
+	program.Send(movieProgressMsg{
+		received:   finalSize,
+		totalBytes: finalSize,
+	})
+
+	return nil
+}
+
+// downloadM3U8WithNativeHLS downloads m3u8/HLS streams using native HLS downloader as fallback
+func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer string, progressModel *movieProgressModel, program *tea.Program) error {
+	program.Send(movieStatusMsg("Downloading with native HLS..."))
 
 	// Prepare headers for HLS download with proper referer and origin
 	headers := map[string]string{
