@@ -753,7 +753,7 @@ func FormatPlexEpisodePath(baseDir, animeName string, season, episodeNum int) st
 	}
 	seasonDir := fmt.Sprintf("Season %02d", season)
 	filename := fmt.Sprintf("%s - s%02de%02d.mp4", safeName, season, episodeNum)
-	return filepath.Join(baseDir, safeName, seasonDir, filename)
+	return filepath.ToSlash(filepath.Join(baseDir, safeName, seasonDir, filename))
 }
 
 // FormatPlexEpisodeDir returns the directory path for a Plex-compatible anime season.
@@ -767,7 +767,7 @@ func FormatPlexEpisodeDir(baseDir, animeName string, season int) string {
 		season = 1
 	}
 	seasonDir := fmt.Sprintf("Season %02d", season)
-	return filepath.Join(baseDir, safeName, seasonDir)
+	return filepath.ToSlash(filepath.Join(baseDir, safeName, seasonDir))
 }
 
 // PlexEpisodeFilename returns just the filename part in Plex format.
