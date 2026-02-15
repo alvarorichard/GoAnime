@@ -19,6 +19,8 @@ func TestSanitizeForFilename(t *testing.T) {
 		{"My Hero Academia 7.50 L", "My Hero Academia"},
 		{"Bleach: Thousand-Year Blood War", "Bleach Thousand-Year Blood War"},
 		{"[Movies/TV] Dexter", "Dexter"},
+		{"[Movie] 2 Fast 2 Furious", "2 Fast 2 Furious"},
+		{"[TV] Breaking Bad", "Breaking Bad"},
 		{"[English] Naruto", "Naruto"},
 		{"[Portuguese] One Piece", "One Piece"},
 	}

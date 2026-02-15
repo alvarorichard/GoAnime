@@ -41,8 +41,22 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		season = request.SeasonNum
 	}
 	player.SetAnimeName(anime.Name, season)
-	// Route downloads to the correct directory (anime/ vs movies/)
-	player.SetMediaType(anime.IsMovieOrTV())
+	// Route downloads to the correct directory (anime/ vs movies/) using exact media type
+	player.SetExactMediaType(string(anime.MediaType))
+
+	// If this is a movie from FlixHQ/SFlix, redirect to the movie download workflow
+	// Movies should not go through the episode-based download path
+	if anime.IsMovie() {
+		util.Infof("Detected movie content: %s — redirecting to movie download workflow", anime.Name)
+		movieRequest := &util.DownloadRequest{
+			AnimeName:    request.AnimeName,
+			IsMovie:      true,
+			Quality:      quality,
+			SubsLanguage: request.SubsLanguage,
+			OutputDir:    request.OutputDir,
+		}
+		return HandleMovieDownloadRequest(movieRequest)
+	}
 
 	if request.IsRange {
 		util.Infof("Downloading episodes %d-%d of %s",
@@ -167,6 +181,14 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	// Convert to models.Anime for compatibility with downloader
 	anime := selectedMedia.ToAnimeModel()
 	anime.Source = selectedMedia.Source
+
+	// Set exact media type for intelligent path organization
+	if selectedMedia.Type == scraper.MediaTypeMovie {
+		player.SetExactMediaType("movie")
+	} else {
+		player.SetExactMediaType("tv")
+	}
+	player.SetAnimeName(anime.Name, request.SeasonNum)
 
 	// Create movie downloader
 	md := downloader.NewMovieDownloaderWithConfig(downloader.MovieDownloadConfig{

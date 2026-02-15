@@ -635,6 +635,8 @@ func SanitizeForFilename(name string) string {
 	name = strings.ReplaceAll(name, "[Português]", "")
 	name = strings.ReplaceAll(name, "[Movies/TV]", "")
 	name = strings.ReplaceAll(name, "[MoviesTV]", "")
+	name = strings.ReplaceAll(name, "[Movie]", "")
+	name = strings.ReplaceAll(name, "[TV]", "")
 	name = strings.ReplaceAll(name, "[Unknown]", "")
 	name = strings.TrimSpace(name)
 
@@ -709,6 +711,33 @@ func DefaultMovieDownloadDir() string {
 	}
 	userHome, _ := os.UserHomeDir()
 	return filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
+}
+
+// FormatPlexMoviePath builds a Plex/Jellyfin-compatible file path for a movie.
+// Format: <baseDir>/<MovieName>/<MovieName> (Year).mp4
+// Movies are stored flat without season/episode hierarchy.
+func FormatPlexMoviePath(baseDir, movieName string, year string) string {
+	safeName := SanitizeForFilename(movieName)
+	if safeName == "" {
+		safeName = "Unknown Movie"
+	}
+	var filename string
+	if year != "" {
+		filename = fmt.Sprintf("%s (%s).mp4", safeName, year)
+	} else {
+		filename = fmt.Sprintf("%s.mp4", safeName)
+	}
+	return filepath.Join(baseDir, safeName, filename)
+}
+
+// FormatPlexMovieDir returns the directory path for a Plex-compatible movie.
+// Format: <baseDir>/<MovieName>/
+func FormatPlexMovieDir(baseDir, movieName string) string {
+	safeName := SanitizeForFilename(movieName)
+	if safeName == "" {
+		safeName = "Unknown Movie"
+	}
+	return filepath.Join(baseDir, safeName)
 }
 
 // FormatPlexEpisodePath builds a Plex/Jellyfin-compatible file path for an episode.

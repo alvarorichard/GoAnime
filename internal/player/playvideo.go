@@ -332,6 +332,10 @@ func playVideo(
 	if updater != nil && updater.GetAnime() != nil {
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
+		// Update exact media type for download path organization
+		if anime.MediaType != "" && lastMediaType == "" {
+			SetExactMediaType(string(anime.MediaType))
+		}
 	}
 
 	if isMovieOrTV {

@@ -41,6 +41,9 @@ var lastAnimeSeason int
 // lastIsMovieOrTV indicates whether the current content is a movie/TV show (non-anime)
 var lastIsMovieOrTV bool
 
+// lastMediaType stores the exact media type for intelligent path organization
+var lastMediaType string // "movie", "tv", or "anime"
+
 // SetAnimeName sets the anime name and season for Plex-compatible download file naming.
 // Call this before any download operations to ensure proper naming.
 func SetAnimeName(name string, season int) {
@@ -55,6 +58,24 @@ func SetAnimeName(name string, season int) {
 // This determines whether downloads go to the movies or anime directory.
 func SetMediaType(isMovieOrTV bool) {
 	lastIsMovieOrTV = isMovieOrTV
+}
+
+// SetExactMediaType stores the exact media type ("movie", "tv", "anime") for
+// intelligent download path organization. Movies get flat paths, TV shows and
+// anime get season/episode structures.
+func SetExactMediaType(mediaType string) {
+	lastMediaType = mediaType
+	lastIsMovieOrTV = (mediaType == "movie" || mediaType == "tv")
+}
+
+// GetExactMediaType returns the current exact media type.
+func GetExactMediaType() string {
+	return lastMediaType
+}
+
+// IsCurrentMediaMovie returns true if the current content is a standalone movie.
+func IsCurrentMediaMovie() bool {
+	return lastMediaType == "movie"
 }
 
 const (
@@ -585,20 +606,6 @@ func downloadAndPlayEpisode(
 	// Use Plex-compatible naming when anime name is available
 	var downloadPath, episodePath string
 	if lastAnimeName != "" {
-		season := lastAnimeSeason
-		if season < 1 {
-			season = 1
-		}
-		// Use the int episode number directly; fall back to parsing the string only if needed
-		epNum := selectedEpisodeNum
-		if epNum < 1 {
-			parsed, _ := strconv.Atoi(episodeNumberStr)
-			if parsed > 0 {
-				epNum = parsed
-			} else {
-				epNum = 1
-			}
-		}
 		// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
 		var baseDir string
 		if lastIsMovieOrTV {
@@ -606,9 +613,32 @@ func downloadAndPlayEpisode(
 		} else {
 			baseDir = util.DefaultDownloadDir()
 		}
-		downloadPath = util.FormatPlexEpisodeDir(baseDir, lastAnimeName, season)
-		episodePath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
-		util.Debugf("Download routing: isMovieOrTV=%v, baseDir=%s, path=%s", lastIsMovieOrTV, baseDir, episodePath)
+
+		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
+		if IsCurrentMediaMovie() {
+			// Movies: flat structure <baseDir>/<MovieName>/
+			downloadPath = util.FormatPlexMovieDir(baseDir, lastAnimeName)
+			episodePath = util.FormatPlexMoviePath(baseDir, lastAnimeName, "")
+		} else {
+			// TV Shows and Anime: season/episode structure
+			season := lastAnimeSeason
+			if season < 1 {
+				season = 1
+			}
+			// Use the int episode number directly; fall back to parsing the string only if needed
+			epNum := selectedEpisodeNum
+			if epNum < 1 {
+				parsed, _ := strconv.Atoi(episodeNumberStr)
+				if parsed > 0 {
+					epNum = parsed
+				} else {
+					epNum = 1
+				}
+			}
+			downloadPath = util.FormatPlexEpisodeDir(baseDir, lastAnimeName, season)
+			episodePath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
+		}
+		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", lastMediaType, lastIsMovieOrTV, baseDir, episodePath)
 	} else {
 		// Fallback: route based on media type even without anime name
 		var fallbackBase string

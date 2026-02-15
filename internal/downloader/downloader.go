@@ -72,7 +72,14 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 	}
 	var outputDir string
 	if animeName != "" {
-		outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season)
+		// Intelligently organize: movies get flat paths, TV/anime get season paths
+		if anime != nil && anime.IsMovie() {
+			// Standalone movies: <baseDir>/<MovieName>/ (no season hierarchy)
+			outputDir = util.FormatPlexMovieDir(baseDir, animeName)
+		} else {
+			// TV shows and anime: <baseDir>/<Name>/Season XX/
+			outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season)
+		}
 	} else {
 		// Fallback to URL-based directory for backward compatibility
 		userHome, _ := os.UserHomeDir()
@@ -438,8 +445,24 @@ func (d *EpisodeDownloader) sanitizeDestPath(p string) (string, error) {
 
 // episodeFilename returns the filename for an episode using Plex-compatible naming
 // when anime name is available, or falls back to simple numeric naming.
+// For standalone movies, returns a flat filename without season/episode numbering.
 func (d *EpisodeDownloader) episodeFilename(epNum int) string {
 	if d.config.AnimeName != "" {
+		// Check if this is a standalone movie — use flat naming
+		if d.anime != nil && d.anime.IsMovie() {
+			safeName := util.SanitizeForFilename(d.anime.Name)
+			if safeName == "" {
+				safeName = d.config.AnimeName
+			}
+			year := ""
+			if d.anime.Year != "" {
+				year = d.anime.Year
+			}
+			if year != "" {
+				return fmt.Sprintf("%s (%s).mp4", safeName, year)
+			}
+			return fmt.Sprintf("%s.mp4", safeName)
+		}
 		return util.PlexEpisodeFilename(d.config.AnimeName, d.config.Season, epNum)
 	}
 	return fmt.Sprintf("%d.mp4", epNum)

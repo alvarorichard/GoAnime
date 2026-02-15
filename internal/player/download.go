@@ -987,6 +987,10 @@ func findEpisode(episodes []models.Episode, episodeNum int) (models.Episode, boo
 
 // createEpisodePath creates the file path for the downloaded episode
 // using Plex/Jellyfin-compatible naming when anime name is available.
+// Intelligently organizes:
+//   - Movies: <baseDir>/<MovieName>/<MovieName>.mp4 (flat, no season)
+//   - TV Shows: <baseDir>/<ShowName>/Season XX/<ShowName> - sXXeXX.mp4
+//   - Anime: <baseDir>/<AnimeName>/Season XX/<AnimeName> - sXXeXX.mp4
 func createEpisodePath(animeURL string, epNum int) (string, error) {
 	// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
 	var baseDir string
@@ -998,19 +1002,17 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 
 	// Use Plex-compatible naming when anime name is available
 	if lastAnimeName != "" {
-		season := lastAnimeSeason
-		if season < 1 {
-			season = 1
-		}
 		var fullPath string
-		if lastIsMovieOrTV && season <= 0 {
-			// Movies: <baseDir>/<MovieName>/<MovieName>.mp4 (no season hierarchy)
-			safeName := util.SanitizeForFilename(lastAnimeName)
-			if safeName == "" {
-				safeName = "Unknown"
-			}
-			fullPath = filepath.Join(baseDir, safeName, safeName+".mp4")
+		// Check if this is a standalone movie (no season/episode hierarchy)
+		if IsCurrentMediaMovie() {
+			// Movies: flat structure  <baseDir>/<MovieName>/<MovieName>.mp4
+			fullPath = util.FormatPlexMoviePath(baseDir, lastAnimeName, "")
 		} else {
+			// TV Shows and Anime: season/episode structure
+			season := lastAnimeSeason
+			if season < 1 {
+				season = 1
+			}
 			fullPath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
 		}
 		dir := filepath.Dir(fullPath)

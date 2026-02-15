@@ -87,8 +87,13 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 	util.Infof("Starting download for: %s", media.Name)
 	util.Debugf("Source: %s, URL: %s", media.Source, media.URL)
 
-	// Create output directory
-	if err := os.MkdirAll(md.config.OutputDir, 0700); err != nil {
+	// Use Plex-compatible movie path: <OutputDir>/<MovieName>/<MovieName> (Year).mp4
+	safeFileName := util.SanitizeForFilename(media.Name)
+	if safeFileName == "" {
+		safeFileName = sanitizeFileName(media.Name)
+	}
+	movieDir := filepath.Join(md.config.OutputDir, safeFileName)
+	if err := os.MkdirAll(movieDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -98,9 +103,13 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	// Sanitize movie name for filename
-	safeFileName := sanitizeFileName(media.Name)
-	moviePath := filepath.Join(md.config.OutputDir, fmt.Sprintf("%s.mp4", safeFileName))
+	// Build movie filename with year if available
+	var moviePath string
+	if media.Year != "" {
+		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s (%s).mp4", safeFileName, media.Year))
+	} else {
+		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s.mp4", safeFileName))
+	}
 
 	// Check if movie already exists
 	if md.fileExists(moviePath) {
@@ -143,9 +152,12 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 
 	util.Infof("Starting download for: %s S%02dE%02d", media.Name, seasonNum, episodeNum)
 
-	// Create output directory with show name
-	safeShowName := sanitizeFileName(media.Name)
-	showDir := filepath.Join(md.config.OutputDir, safeShowName, fmt.Sprintf("Season %d", seasonNum))
+	// Create Plex-compatible output directory: <OutputDir>/<ShowName>/Season XX/
+	safeShowName := util.SanitizeForFilename(media.Name)
+	if safeShowName == "" {
+		safeShowName = sanitizeFileName(media.Name)
+	}
+	showDir := filepath.Join(md.config.OutputDir, safeShowName, fmt.Sprintf("Season %02d", seasonNum))
 	if err := os.MkdirAll(showDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -156,7 +168,8 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	episodePath := filepath.Join(showDir, fmt.Sprintf("S%02dE%02d.mp4", seasonNum, episodeNum))
+	// Plex-compatible episode filename: <ShowName> - sXXeXX.mp4
+	episodePath := filepath.Join(showDir, fmt.Sprintf("%s - s%02de%02d.mp4", safeShowName, seasonNum, episodeNum))
 
 	// Check if episode already exists
 	if md.fileExists(episodePath) {

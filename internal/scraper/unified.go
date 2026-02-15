@@ -296,16 +296,30 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 // tagResults adds language tags and source metadata to results
 func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
 	sourceName := sm.getScraperDisplayName(scraperType)
-	languageTag := sm.getLanguageTag(scraperType)
 
 	for _, anime := range results {
 		// Check if the anime name already has any language tag
 		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 			strings.Contains(anime.Name, "[Portuguese]") ||
-			strings.Contains(anime.Name, "[Português]")
+			strings.Contains(anime.Name, "[Português]") ||
+			strings.Contains(anime.Name, "[Movie]") ||
+			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
+			// For FlixHQ/SFlix, use specific [Movie] or [TV] tag based on media type
+			if scraperType == FlixHQType || scraperType == SFlixType {
+				switch anime.MediaType {
+				case models.MediaTypeMovie:
+					anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
+				case models.MediaTypeTV:
+					anime.Name = fmt.Sprintf("[TV] %s", anime.Name)
+				default:
+					anime.Name = fmt.Sprintf("[Movies/TV] %s", anime.Name)
+				}
+			} else {
+				languageTag := sm.getLanguageTag(scraperType)
+				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
+			}
 		}
 		anime.Source = sourceName
 	}
