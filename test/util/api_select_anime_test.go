@@ -12,7 +12,7 @@ import (
 
 // FuzzyFinder is an interface to abstract the fuzzyfinder interaction
 type FuzzyFinder interface {
-	Find(slice interface{}, itemFunc func(i int) string) (int, error)
+	Find(slice any, itemFunc func(i int) string) (int, error)
 }
 
 // MockFuzzyFinder is a mock implementation of the FuzzyFinder interface
@@ -20,7 +20,7 @@ type MockFuzzyFinder struct {
 	mock.Mock
 }
 
-func (m *MockFuzzyFinder) Find(slice interface{}, itemFunc func(i int) string) (int, error) {
+func (m *MockFuzzyFinder) Find(slice any, itemFunc func(i int) string) (int, error) {
 	args := m.Called(slice, itemFunc)
 	return args.Int(0), args.Error(1)
 }

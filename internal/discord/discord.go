@@ -39,7 +39,7 @@ type RichPresenceUpdater struct {
 	episodeDuration time.Duration // Total duration of the episode
 	episodeStarted  bool          // Whether the episode has started
 	socketPath      string        // Path to mpv IPC socket
-	mpvSendCommand  func(string, []interface{}) (interface{}, error)
+	mpvSendCommand  func(string, []any) (any, error)
 }
 
 // NewRichPresenceUpdater creates a new Rich Presence updater instance
@@ -50,7 +50,7 @@ func NewRichPresenceUpdater(
 	updateFreq time.Duration,
 	episodeDuration time.Duration,
 	socketPath string,
-	mpvSendCommand func(string, []interface{}) (interface{}, error),
+	mpvSendCommand func(string, []any) (any, error),
 ) *RichPresenceUpdater {
 	return &RichPresenceUpdater{
 		anime:           anime,
@@ -112,7 +112,7 @@ func IsClientLoggedIn() bool {
 
 // GetCurrentPlaybackPosition gets the current playback position from MPV
 func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, error) {
-	position, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
+	position, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "time-pos"})
 	if err != nil {
 		return 0, err
 	}
@@ -183,9 +183,7 @@ func (rpu *RichPresenceUpdater) Start() {
 		return
 	}
 
-	rpu.wg.Add(1)
-	go func() {
-		defer rpu.wg.Done()
+	rpu.wg.Go(func() {
 		ticker := time.NewTicker(rpu.updateFreq)
 		defer ticker.Stop()
 
@@ -201,7 +199,7 @@ func (rpu *RichPresenceUpdater) Start() {
 				return
 			}
 		}
-	}()
+	})
 	util.Debug("Rich Presence updater started")
 }
 
@@ -340,7 +338,7 @@ type playbackState struct {
 // getPrecisePlaybackState gets the exact playback state from MPV
 func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 	// Get position with high precision
-	posResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "time-pos"})
+	posResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "time-pos"})
 	if err != nil || posResponse == nil {
 		return nil
 	}
@@ -355,7 +353,7 @@ func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 	if rpu.episodeDuration > 0 {
 		durationSec = int(rpu.episodeDuration.Seconds())
 	} else {
-		durResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "duration"})
+		durResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "duration"})
 		if err == nil && durResponse != nil {
 			if dur, ok := durResponse.(float64); ok && dur > 0 {
 				durationSec = int(dur)
@@ -366,7 +364,7 @@ func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 
 	// Get pause state
 	isPaused := false
-	pauseResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "pause"})
+	pauseResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "pause"})
 	if err == nil && pauseResponse != nil {
 		if pause, ok := pauseResponse.(bool); ok {
 			isPaused = pause
@@ -375,7 +373,7 @@ func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 
 	// Get playback speed (for precise timing)
 	speed := 1.0
-	speedResponse, err := rpu.mpvSendCommand(rpu.socketPath, []interface{}{"get_property", "speed"})
+	speedResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "speed"})
 	if err == nil && speedResponse != nil {
 		if s, ok := speedResponse.(float64); ok && s > 0 {
 			speed = s
@@ -511,7 +509,7 @@ func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec i
 		path = rpu.socketPath
 	}
 
-	durationResponse, err := rpu.mpvSendCommand(path, []interface{}{"get_property", "duration"})
+	durationResponse, err := rpu.mpvSendCommand(path, []any{"get_property", "duration"})
 	if err != nil {
 		return
 	}

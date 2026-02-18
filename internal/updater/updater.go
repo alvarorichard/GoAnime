@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -213,10 +214,7 @@ func isVersionNewer(latest, current string) (bool, error) {
 	currentParts := strings.Split(current, ".")
 
 	// Pad shorter version with zeros
-	maxLen := len(latestParts)
-	if len(currentParts) > maxLen {
-		maxLen = len(currentParts)
-	}
+	maxLen := max(len(currentParts), len(latestParts))
 
 	for len(latestParts) < maxLen {
 		latestParts = append(latestParts, "0")
@@ -226,7 +224,7 @@ func isVersionNewer(latest, current string) (bool, error) {
 	}
 
 	// Compare each part
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		latestNum, err := strconv.Atoi(latestParts[i])
 		if err != nil {
 			return false, fmt.Errorf("invalid version format in latest: %s", latest)
@@ -338,13 +336,7 @@ func validateGitHubURLWithTestFlag(urlStr string, allowTestMode bool) error {
 		"github-releases.githubusercontent.com",
 	}
 
-	hostAllowed := false
-	for _, allowedHost := range allowedHosts {
-		if parsedURL.Host == allowedHost {
-			hostAllowed = true
-			break
-		}
-	}
+	hostAllowed := slices.Contains(allowedHosts, parsedURL.Host)
 
 	if !hostAllowed {
 		return fmt.Errorf("URL host %s not allowed", parsedURL.Host)

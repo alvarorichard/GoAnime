@@ -13,8 +13,8 @@ func createTestImage(width, height int) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	// Fill with gradient
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			img.Set(x, y, color.RGBA{
 				uint8(x * 255 / width),
 				uint8(y * 255 / height),

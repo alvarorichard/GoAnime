@@ -197,16 +197,10 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 	case "e":
 		return SelectEpisodeWithFuzzy(episodes)
 	case "p":
-		newNum := currentNum - 1
-		if newNum < 1 {
-			newNum = 1
-		}
+		newNum := max(currentNum-1, 1)
 		return FindEpisodeByNumber(episodes, newNum)
 	default: // 'n' or default
-		newNum := currentNum + 1
-		if newNum > totalEpisodes {
-			newNum = totalEpisodes
-		}
+		newNum := min(currentNum+1, totalEpisodes)
 		return FindEpisodeByNumber(episodes, newNum)
 	}
 }
@@ -286,7 +280,7 @@ func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
 func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 	const maxRetries = 3
 
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		var animeName string
 
 		prompt := huh.NewInput().

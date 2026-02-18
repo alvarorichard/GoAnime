@@ -230,10 +230,7 @@ func FormatMediaInfo(media *models.Media) string {
 
 	if len(media.Genres) > 0 {
 		// Show first 3 genres
-		maxGenres := 3
-		if len(media.Genres) < maxGenres {
-			maxGenres = len(media.Genres)
-		}
+		maxGenres := min(len(media.Genres), 3)
 		parts = append(parts, strings.Join(media.Genres[:maxGenres], ", "))
 	}
 

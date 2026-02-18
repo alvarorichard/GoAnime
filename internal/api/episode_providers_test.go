@@ -116,7 +116,7 @@ func TestPopulateEpisodeFromMap(t *testing.T) {
 
 	t.Run("Populates all fields correctly", func(t *testing.T) {
 		anime := &models.Anime{}
-		data := map[string]interface{}{
+		data := map[string]any{
 			"title_romanji":  "Shingeki no Kyojin",
 			"title":          "Attack on Titan",
 			"title_japanese": "進撃の巨人",
@@ -143,7 +143,7 @@ func TestPopulateEpisodeFromMap(t *testing.T) {
 
 	t.Run("Handles missing fields gracefully", func(t *testing.T) {
 		anime := &models.Anime{}
-		data := map[string]interface{}{
+		data := map[string]any{
 			"title": "Only English Title",
 		}
 
@@ -162,7 +162,7 @@ func TestPopulateEpisodeFromMap(t *testing.T) {
 				{Number: "1", Num: 1},
 			},
 		}
-		data := map[string]interface{}{
+		data := map[string]any{
 			"title": "Updated Title",
 		}
 
@@ -221,8 +221,8 @@ func TestJikanProvider_HTTPResponse(t *testing.T) {
 			assert.Contains(t, r.URL.Path, "/anime/")
 			assert.Contains(t, r.URL.Path, "/episodes/")
 
-			response := map[string]interface{}{
-				"data": map[string]interface{}{
+			response := map[string]any{
+				"data": map[string]any{
 					"mal_id":         1,
 					"title":          "Test Episode",
 					"title_japanese": "テストエピソード",
@@ -520,7 +520,7 @@ func TestProviders_Concurrency(t *testing.T) {
 		provider := &MockProvider{name: "ConcurrentTest", shouldErr: false}
 		var wg sync.WaitGroup
 
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			wg.Add(1)
 			go func(epNo int) {
 				defer wg.Done()
@@ -567,7 +567,7 @@ func TestHelperFunctions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("getStringValue handles missing keys", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"existing": "value",
 		}
 
@@ -579,7 +579,7 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("getIntValue handles missing keys", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"existing": 42.0, // JSON numbers are float64
 		}
 
@@ -591,7 +591,7 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("getBoolValue handles missing keys", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"true_val":  true,
 			"false_val": false,
 		}
@@ -629,11 +629,11 @@ func TestResponseParsing(t *testing.T) {
 			}
 		}`
 
-		var response map[string]interface{}
+		var response map[string]any
 		err := json.Unmarshal([]byte(jsonData), &response)
 		require.NoError(t, err)
 
-		data, ok := response["data"].(map[string]interface{})
+		data, ok := response["data"].(map[string]any)
 		require.True(t, ok)
 
 		anime := &models.Anime{}
@@ -748,7 +748,7 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		// Simulate successful population
-		data := map[string]interface{}{
+		data := map[string]any{
 			"title":          "Test Episode",
 			"title_japanese": "テスト",
 			"title_romanji":  "Tesuto",
@@ -781,7 +781,7 @@ func TestProviderIntegration(t *testing.T) {
 			},
 		}
 
-		data := map[string]interface{}{
+		data := map[string]any{
 			"title":    "Updated Title",
 			"filler":   false, // This should update
 			"recap":    true,

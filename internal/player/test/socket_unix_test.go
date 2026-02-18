@@ -178,7 +178,7 @@ func TestUnixSocketCreationAndConnection(t *testing.T) {
 		var conn net.Conn
 		var connErr error
 		maxAttempts := 10
-		for i := 0; i < maxAttempts; i++ {
+		for range maxAttempts {
 			conn, connErr = net.Dial("unix", socketPath)
 			if connErr == nil {
 				break
@@ -303,11 +303,8 @@ func TestExponentialBackoffSocketConnection(t *testing.T) {
 		intervals := []time.Duration{currentInterval}
 
 		// Simulate 10 iterations of backoff
-		for i := 0; i < 10; i++ {
-			currentInterval = time.Duration(float64(currentInterval) * 1.5)
-			if currentInterval > maxInterval {
-				currentInterval = maxInterval
-			}
+		for range 10 {
+			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
 			intervals = append(intervals, currentInterval)
 		}
 
@@ -374,10 +371,7 @@ func TestExponentialBackoffSocketConnection(t *testing.T) {
 			}
 
 			time.Sleep(currentInterval)
-			currentInterval = time.Duration(float64(currentInterval) * 1.5)
-			if currentInterval > maxIntervalCap {
-				currentInterval = maxIntervalCap
-			}
+			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxIntervalCap)
 		}
 
 		elapsed := time.Since(startTime)

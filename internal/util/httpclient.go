@@ -301,10 +301,7 @@ func ParallelExecute(maxWorkers int, tasks ...func()) {
 	}
 
 	// Use min of maxWorkers and task count
-	workers := maxWorkers
-	if len(tasks) < workers {
-		workers = len(tasks)
-	}
+	workers := min(len(tasks), maxWorkers)
 
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, workers)

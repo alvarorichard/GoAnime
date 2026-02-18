@@ -216,7 +216,7 @@ func (pt *PerfTracker) PrintReport() {
 	// Uptime
 	report.WriteString(perfHeaderStyle.Render("📊 Session Info"))
 	report.WriteString("\n")
-	report.WriteString(fmt.Sprintf("   Uptime: %s\n", perfValueStyle.Render(pt.GetUptime().Round(time.Millisecond).String())))
+	fmt.Fprintf(&report, "   Uptime: %s\n", perfValueStyle.Render(pt.GetUptime().Round(time.Millisecond).String()))
 	report.WriteString("\n")
 
 	// Sort metrics by total time (slowest first)
@@ -236,11 +236,11 @@ func (pt *PerfTracker) PrintReport() {
 	if len(entries) > 0 {
 		report.WriteString(perfHeaderStyle.Render("⏱️  Timing Metrics"))
 		report.WriteString("\n")
-		report.WriteString(fmt.Sprintf("   %-40s %10s %8s %12s\n",
+		fmt.Fprintf(&report, "   %-40s %10s %8s %12s\n",
 			perfMetricStyle.Render("Operation"),
 			perfMetricStyle.Render("Total"),
 			perfMetricStyle.Render("Count"),
-			perfMetricStyle.Render("Avg")))
+			perfMetricStyle.Render("Avg"))
 		report.WriteString(perfSeparatorStyle.Render("   " + strings.Repeat("─", 74)))
 		report.WriteString("\n")
 
@@ -276,11 +276,11 @@ func (pt *PerfTracker) PrintReport() {
 				name = name[:35] + "..."
 			}
 
-			report.WriteString(fmt.Sprintf("   %-40s %10s %8d %12s\n",
+			fmt.Fprintf(&report, "   %-40s %10s %8d %12s\n",
 				perfMetricStyle.Render(name),
 				totalStr,
 				entry.metric.Count,
-				avgStr))
+				avgStr)
 		}
 		report.WriteString("\n")
 	}

@@ -43,63 +43,63 @@ func InitLogger() {
 }
 
 // Debug logs a debug message (only when debug mode is enabled)
-func Debug(msg interface{}, keyvals ...interface{}) {
+func Debug(msg any, keyvals ...any) {
 	if IsDebug && Logger != nil {
 		Logger.Debug(fmt.Sprintf("%v", msg), keyvals...)
 	}
 }
 
 // Info logs an info message
-func Info(msg interface{}, keyvals ...interface{}) {
+func Info(msg any, keyvals ...any) {
 	if Logger != nil {
 		Logger.Info(fmt.Sprintf("%v", msg), keyvals...)
 	}
 }
 
 // Warn logs a warning message
-func Warn(msg interface{}, keyvals ...interface{}) {
+func Warn(msg any, keyvals ...any) {
 	if Logger != nil {
 		Logger.Warn(fmt.Sprintf("%v", msg), keyvals...)
 	}
 }
 
 // Error logs an error message
-func Error(msg interface{}, keyvals ...interface{}) {
+func Error(msg any, keyvals ...any) {
 	if Logger != nil {
 		Logger.Error(fmt.Sprintf("%v", msg), keyvals...)
 	}
 }
 
 // Fatal logs a fatal message and exits
-func Fatal(msg interface{}, keyvals ...interface{}) {
+func Fatal(msg any, keyvals ...any) {
 	if Logger != nil {
 		Logger.Fatal(fmt.Sprintf("%v", msg), keyvals...)
 	}
 }
 
 // Debugf logs a formatted debug message (only when debug mode is enabled)
-func Debugf(format string, args ...interface{}) {
+func Debugf(format string, args ...any) {
 	if IsDebug && Logger != nil {
 		Logger.Debug(fmt.Sprintf(format, args...))
 	}
 }
 
 // Infof logs a formatted info message
-func Infof(format string, args ...interface{}) {
+func Infof(format string, args ...any) {
 	if Logger != nil {
 		Logger.Info(fmt.Sprintf(format, args...))
 	}
 }
 
 // Warnf logs a formatted warning message
-func Warnf(format string, args ...interface{}) {
+func Warnf(format string, args ...any) {
 	if Logger != nil {
 		Logger.Warn(fmt.Sprintf(format, args...))
 	}
 }
 
 // Errorf logs a formatted error message
-func Errorf(format string, args ...interface{}) {
+func Errorf(format string, args ...any) {
 	if Logger != nil {
 		Logger.Error(fmt.Sprintf(format, args...))
 	}

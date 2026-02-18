@@ -39,9 +39,9 @@ const (
 
 // UnifiedScraper provides a common interface for all scrapers
 type UnifiedScraper interface {
-	SearchAnime(query string, options ...interface{}) ([]*models.Anime, error)
+	SearchAnime(query string, options ...any) ([]*models.Anime, error)
 	GetAnimeEpisodes(animeURL string) ([]models.Episode, error)
-	GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error)
+	GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error)
 	GetType() ScraperType
 }
 
@@ -393,7 +393,7 @@ type AllAnimeAdapter struct {
 	client *AllAnimeClient
 }
 
-func (a *AllAnimeAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (a *AllAnimeAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	// mode is now hardcoded in the new implementation
 	return a.client.SearchAnime(query)
 }
@@ -420,7 +420,7 @@ func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	return episodeModels, nil
 }
 
-func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	// For AllAnime, episodeURL contains the anime ID
 	animeID := episodeURL
 
@@ -458,7 +458,7 @@ type AnimefireAdapter struct {
 	client *AnimefireClient
 }
 
-func (a *AnimefireAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (a *AnimefireAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	return a.client.SearchAnime(query)
 }
 
@@ -466,7 +466,7 @@ func (a *AnimefireAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, 
 	return a.client.GetAnimeEpisodes(animeURL)
 }
 
-func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	url, err := a.client.GetEpisodeStreamURL(episodeURL)
 	metadata := make(map[string]string)
 	metadata["source"] = "animefire"
@@ -482,7 +482,7 @@ type AnimeDriveAdapter struct {
 	client *AnimeDriveClient
 }
 
-func (a *AnimeDriveAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (a *AnimeDriveAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	return a.client.SearchAnime(query)
 }
 
@@ -490,7 +490,7 @@ func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode,
 	return a.client.GetAnimeEpisodes(animeURL)
 }
 
-func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	// Check if server selection is requested via options
 	selectServer := true // Default to showing server selection
 	for _, opt := range options {
@@ -518,7 +518,7 @@ type FlixHQAdapter struct {
 	client *FlixHQClient
 }
 
-func (a *FlixHQAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (a *FlixHQAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	media, err := a.client.SearchMedia(query)
 	if err != nil {
 		return nil, err
@@ -550,7 +550,7 @@ func (a *FlixHQAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, err
 	return nil, fmt.Errorf("for FlixHQ, use GetSeasons and GetEpisodes directly on the client")
 }
 
-func (a *FlixHQAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (a *FlixHQAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	// Parse options
 	provider := "Vidcloud"
 	quality := "1080"
@@ -611,7 +611,7 @@ type SFlixAdapter struct {
 	client *SFlixClient
 }
 
-func (a *SFlixAdapter) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (a *SFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	media, err := a.client.SearchMedia(query)
 	if err != nil {
 		return nil, err
@@ -639,7 +639,7 @@ func (a *SFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 	return nil, fmt.Errorf("for SFlix, use GetSeasons and GetEpisodes directly on the client")
 }
 
-func (a *SFlixAdapter) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (a *SFlixAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	// Parse options
 	provider := "Vidcloud"
 	quality := "1080"

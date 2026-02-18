@@ -226,7 +226,7 @@ func (c *FlixHQClient) SearchMediaWithContext(ctx context.Context, query string)
 	var lastErr error
 	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -996,7 +996,7 @@ func (c *FlixHQClient) GetServersWithContext(ctx context.Context, episodeID stri
 		servers, parseErr = c.parseMovieServers(string(body))
 	} else {
 		// Try JSON first for TV series
-		var jsonResponse map[string]interface{}
+		var jsonResponse map[string]any
 		if err := json.Unmarshal(body, &jsonResponse); err == nil {
 			if htmlContent, ok := jsonResponse["html"].(string); ok && htmlContent != "" {
 				servers, parseErr = c.parseTVServers(htmlContent)
@@ -1178,7 +1178,7 @@ func (c *FlixHQClient) extractSourcesFromServer(ctx context.Context, server Flix
 	}
 
 	// Parse JSON response to get embed URL
-	var jsonResponse map[string]interface{}
+	var jsonResponse map[string]any
 	embedURL := ""
 
 	if err := json.Unmarshal(body, &jsonResponse); err == nil {

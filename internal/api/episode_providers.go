@@ -38,7 +38,7 @@ func (p *JikanProvider) FetchEpisodeData(animeID int, episodeNo int, anime *mode
 		return fmt.Errorf("jikan API request failed: %w", err)
 	}
 
-	data, ok := response["data"].(map[string]interface{})
+	data, ok := response["data"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid response structure from Jikan")
 	}
@@ -87,9 +87,9 @@ func (p *AniListProvider) FetchEpisodeData(animeID int, episodeNo int, anime *mo
 		}
 	}`
 
-	jsonData, err := json.Marshal(map[string]interface{}{
+	jsonData, err := json.Marshal(map[string]any{
 		"query": query,
-		"variables": map[string]interface{}{
+		"variables": map[string]any{
 			"id": anilistID,
 		},
 	})
@@ -331,9 +331,9 @@ func getAniListIDFromMAL(malID int) (int, error) {
 		}
 	}`
 
-	jsonData, err := json.Marshal(map[string]interface{}{
+	jsonData, err := json.Marshal(map[string]any{
 		"query": query,
-		"variables": map[string]interface{}{
+		"variables": map[string]any{
 			"malId": malID,
 		},
 	})
@@ -415,7 +415,7 @@ func getKitsuAnimeID(malID int) (string, error) {
 }
 
 // populateEpisodeFromMap populates episode data from a map (used by Jikan)
-func populateEpisodeFromMap(anime *models.Anime, data map[string]interface{}) {
+func populateEpisodeFromMap(anime *models.Anime, data map[string]any) {
 	if len(anime.Episodes) == 0 {
 		anime.Episodes = make([]models.Episode, 1)
 	}

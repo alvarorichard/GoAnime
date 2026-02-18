@@ -179,7 +179,7 @@ func (c *SFlixClient) SearchMediaWithContext(ctx context.Context, query string) 
 	var lastErr error
 	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

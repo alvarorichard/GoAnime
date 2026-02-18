@@ -22,7 +22,7 @@ type MockScraper struct {
 	searchDelay     time.Duration
 }
 
-func (m *MockScraper) SearchAnime(query string, options ...interface{}) ([]*models.Anime, error) {
+func (m *MockScraper) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	m.searchCallCount.Add(1)
 	if m.searchDelay > 0 {
 		time.Sleep(m.searchDelay)
@@ -40,7 +40,7 @@ func (m *MockScraper) GetAnimeEpisodes(animeURL string) ([]models.Episode, error
 	return nil, nil
 }
 
-func (m *MockScraper) GetStreamURL(episodeURL string, options ...interface{}) (string, map[string]string, error) {
+func (m *MockScraper) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
 	if m.streamURLFunc != nil {
 		return m.streamURLFunc(episodeURL)
 	}
@@ -513,7 +513,7 @@ func TestSearchAnime_NoConcurrentRaceConditions(t *testing.T) {
 	var wg sync.WaitGroup
 	errChan := make(chan error, 10)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

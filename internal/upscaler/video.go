@@ -330,9 +330,7 @@ func (v *VideoUpscaler) upscaleFrames(ctx context.Context, inputDir, outputDir s
 	// Start workers
 	var wg sync.WaitGroup
 	for w := 0; w < v.config.Workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for frameName := range jobs {
 				select {
 				case <-ctx.Done():
@@ -355,7 +353,7 @@ func (v *VideoUpscaler) upscaleFrames(ctx context.Context, inputDir, outputDir s
 					model.mu.Unlock()
 				}
 			}
-		}()
+		})
 	}
 
 	// Send jobs

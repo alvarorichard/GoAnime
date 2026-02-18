@@ -205,16 +205,10 @@ func StartVideo(link string, args []string) (string, error) {
 		select {
 		case <-time.After(currentInterval):
 			// Apply exponential backoff
-			currentInterval = time.Duration(float64(currentInterval) * 1.5)
-			if currentInterval > maxInterval {
-				currentInterval = maxInterval
-			}
+			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
 		default:
 			time.Sleep(currentInterval)
-			currentInterval = time.Duration(float64(currentInterval) * 1.5)
-			if currentInterval > maxInterval {
-				currentInterval = maxInterval
-			}
+			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
 		}
 	}
 
@@ -232,7 +226,7 @@ func StartVideo(link string, args []string) (string, error) {
 }
 
 // MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages
-func MpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
+func MpvSendCommand(socketPath string, command []any) (any, error) {
 	return mpvSendCommand(socketPath, command)
 }
 
@@ -345,7 +339,7 @@ func sanitizeOutputPath(p string) (string, error) {
 }
 
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
-func mpvSendCommand(socketPath string, command []interface{}) (interface{}, error) {
+func mpvSendCommand(socketPath string, command []any) (any, error) {
 	conn, err := dialMPVSocket(socketPath)
 	if err != nil {
 		return nil, err
@@ -357,7 +351,7 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 		}
 	}(conn)
 
-	commandJSON, err := json.Marshal(map[string]interface{}{
+	commandJSON, err := json.Marshal(map[string]any{
 		"command": command,
 	})
 	if err != nil {
@@ -380,12 +374,12 @@ func mpvSendCommand(socketPath string, command []interface{}) (interface{}, erro
 	}
 
 	// Tratar múltiplos JSONs na mesma resposta
-	responses := bytes.Split(buffer[:n], []byte("\n"))
-	for _, resp := range responses {
+	responses := bytes.SplitSeq(buffer[:n], []byte("\n"))
+	for resp := range responses {
 		if len(bytes.TrimSpace(resp)) == 0 {
 			continue
 		}
-		var response map[string]interface{}
+		var response map[string]any
 		err = json.Unmarshal(resp, &response)
 		if err != nil {
 			if util.IsDebug {
@@ -872,7 +866,7 @@ func askForPlayOffline() bool {
 
 // ToggleSubtitle toggles subtitle visibility
 func ToggleSubtitle(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"cycle",
 		"sub-visibility",
 	})
@@ -880,8 +874,8 @@ func ToggleSubtitle(socketPath string) error {
 }
 
 // GetPlaybackStats returns current playback statistics
-func GetPlaybackStats(socketPath string) (map[string]interface{}, error) {
-	stats := make(map[string]interface{})
+func GetPlaybackStats(socketPath string) (map[string]any, error) {
+	stats := make(map[string]any)
 
 	// Get various playback properties
 	properties := []string{
@@ -894,7 +888,7 @@ func GetPlaybackStats(socketPath string) (map[string]interface{}, error) {
 	}
 
 	for _, prop := range properties {
-		value, err := mpvSendCommand(socketPath, []interface{}{"get_property", prop})
+		value, err := mpvSendCommand(socketPath, []any{"get_property", prop})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get %s: %w", prop, err)
 		}
@@ -906,7 +900,7 @@ func GetPlaybackStats(socketPath string) (map[string]interface{}, error) {
 
 // SetPlaybackSpeed sets the video playback speed
 func SetPlaybackSpeed(socketPath string, speed float64) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"set_property",
 		"speed",
 		speed,
@@ -916,7 +910,7 @@ func SetPlaybackSpeed(socketPath string, speed float64) error {
 
 // CycleAudioTrack cycles through available audio tracks
 func CycleAudioTrack(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"cycle",
 		"aid",
 	})
@@ -925,7 +919,7 @@ func CycleAudioTrack(socketPath string) error {
 
 // CycleSubtitleTrack cycles through available subtitle tracks
 func CycleSubtitleTrack(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"cycle",
 		"sid",
 	})
@@ -934,7 +928,7 @@ func CycleSubtitleTrack(socketPath string) error {
 
 // SetAudioTrack sets a specific audio track by ID
 func SetAudioTrack(socketPath string, trackID int) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"set_property",
 		"aid",
 		trackID,
@@ -944,7 +938,7 @@ func SetAudioTrack(socketPath string, trackID int) error {
 
 // SetSubtitleTrack sets a specific subtitle track by ID
 func SetSubtitleTrack(socketPath string, trackID int) error {
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"set_property",
 		"sid",
 		trackID,
@@ -953,20 +947,20 @@ func SetSubtitleTrack(socketPath string, trackID int) error {
 }
 
 // GetAudioTracks returns list of available audio tracks
-func GetAudioTracks(socketPath string) ([]map[string]interface{}, error) {
-	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+func GetAudioTracks(socketPath string) ([]map[string]any, error) {
+	result, err := mpvSendCommand(socketPath, []any{"get_property", "track-list"})
 	if err != nil {
 		return nil, err
 	}
 
-	tracks, ok := result.([]interface{})
+	tracks, ok := result.([]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected track-list format")
 	}
 
-	var audioTracks []map[string]interface{}
+	var audioTracks []map[string]any
 	for _, t := range tracks {
-		track, ok := t.(map[string]interface{})
+		track, ok := t.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -978,20 +972,20 @@ func GetAudioTracks(socketPath string) ([]map[string]interface{}, error) {
 }
 
 // GetSubtitleTracks returns list of available subtitle tracks
-func GetSubtitleTracks(socketPath string) ([]map[string]interface{}, error) {
-	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "track-list"})
+func GetSubtitleTracks(socketPath string) ([]map[string]any, error) {
+	result, err := mpvSendCommand(socketPath, []any{"get_property", "track-list"})
 	if err != nil {
 		return nil, err
 	}
 
-	tracks, ok := result.([]interface{})
+	tracks, ok := result.([]any)
 	if !ok {
 		return nil, fmt.Errorf("unexpected track-list format")
 	}
 
-	var subTracks []map[string]interface{}
+	var subTracks []map[string]any
 	for _, t := range tracks {
-		track, ok := t.(map[string]interface{})
+		track, ok := t.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1004,7 +998,7 @@ func GetSubtitleTracks(socketPath string) ([]map[string]interface{}, error) {
 
 // GetCurrentAudioTrack returns the current audio track ID
 func GetCurrentAudioTrack(socketPath string) (int, error) {
-	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "aid"})
+	result, err := mpvSendCommand(socketPath, []any{"get_property", "aid"})
 	if err != nil {
 		return 0, err
 	}
@@ -1016,7 +1010,7 @@ func GetCurrentAudioTrack(socketPath string) (int, error) {
 
 // GetCurrentSubtitleTrack returns the current subtitle track ID
 func GetCurrentSubtitleTrack(socketPath string) (int, error) {
-	result, err := mpvSendCommand(socketPath, []interface{}{"get_property", "sid"})
+	result, err := mpvSendCommand(socketPath, []any{"get_property", "sid"})
 	if err != nil {
 		return 0, err
 	}

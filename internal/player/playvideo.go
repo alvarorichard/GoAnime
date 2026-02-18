@@ -42,7 +42,7 @@ func waitForVideoReady(socketPath string) bool {
 	for time.Since(startTime) < maxWait {
 		// Try multiple properties to detect when video is ready
 		// Method 1: Check duration (most reliable for HLS)
-		durationResp, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+		durationResp, err := mpvSendCommand(socketPath, []any{"get_property", "duration"})
 		if err == nil {
 			if duration, ok := durationResp.(float64); ok && duration > 0 {
 				util.Debugf("HLS video ready (duration: %.0f seconds) after %.1fs", duration, time.Since(startTime).Seconds())
@@ -51,7 +51,7 @@ func waitForVideoReady(socketPath string) bool {
 		}
 
 		// Method 2: Check if time-pos is available (video playing)
-		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		posResp, posErr := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
 		if posErr == nil {
 			if pos, ok := posResp.(float64); ok && pos >= 0 {
 				util.Debugf("HLS video playing (position: %.1f seconds) after %.1fs", pos, time.Since(startTime).Seconds())
@@ -60,7 +60,7 @@ func waitForVideoReady(socketPath string) bool {
 		}
 
 		// Method 3: Check playback-time (alternative property)
-		playbackResp, playErr := mpvSendCommand(socketPath, []interface{}{"get_property", "playback-time"})
+		playbackResp, playErr := mpvSendCommand(socketPath, []any{"get_property", "playback-time"})
 		if playErr == nil {
 			if playback, ok := playbackResp.(float64); ok && playback >= 0 {
 				util.Debugf("HLS video playback started (time: %.1f seconds) after %.1fs", playback, time.Since(startTime).Seconds())
@@ -97,18 +97,18 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 		util.Debugf("HLS resume: seek attempt %d/%d to %d seconds", attempt, maxAttempts, resumeTime)
 
 		// Method 1: seek absolute (works best with HLS)
-		_, err := mpvSendCommand(socketPath, []interface{}{"seek", float64(resumeTime), "absolute"})
+		_, err := mpvSendCommand(socketPath, []any{"seek", float64(resumeTime), "absolute"})
 		if err != nil {
 			util.Debugf("HLS resume: seek absolute failed: %v, trying set_property", err)
 			// Method 2: set_property time-pos
-			_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "time-pos", float64(resumeTime)})
+			_, _ = mpvSendCommand(socketPath, []any{"set_property", "time-pos", float64(resumeTime)})
 		}
 
 		// Wait for seek to complete (HLS can be slow)
 		time.Sleep(800 * time.Millisecond)
 
 		// Verify position
-		posResp, posErr := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+		posResp, posErr := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
 		if posErr == nil {
 			if pos, ok := posResp.(float64); ok {
 				// Allow 10 second tolerance for HLS streams
@@ -145,7 +145,7 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 
 	if len(opts) > 0 {
 		combinedOpts := strings.Join(opts, ",")
-		_, cmdErr := mpvSendCommand(socketPath, []interface{}{"set_property", "script-opts", combinedOpts})
+		_, cmdErr := mpvSendCommand(socketPath, []any{"set_property", "script-opts", combinedOpts})
 		if cmdErr != nil {
 			util.Debugf("Failed to apply skip times: %v. Command: set_property script-opts %s", cmdErr, combinedOpts)
 		} else {
@@ -638,7 +638,7 @@ func showShaderOSD(socketPath string) {
 	message := fmt.Sprintf("Anime4K Upscaling: %s\\nPress Shift+I twice for stats", modeName)
 
 	// Show OSD message for 4 seconds
-	_, err := mpvSendCommand(socketPath, []interface{}{
+	_, err := mpvSendCommand(socketPath, []any{
 		"show-text", message, 4000,
 	})
 	if err != nil {
@@ -684,8 +684,8 @@ func initDiscordPresence(updater *discord.RichPresenceUpdater, socketPath string
 // waitForPlaybackStart waits for playback to start
 func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdater) {
 	maxAttempts := 30 // Max 30 seconds to wait
-	for i := 0; i < maxAttempts; i++ {
-		timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+	for range maxAttempts {
+		timePos, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
 		if err == nil && timePos != nil && !updater.IsEpisodeStarted() {
 			updater.SetEpisodeStarted(true)
 			return
@@ -699,7 +699,7 @@ func waitForPlaybackStart(socketPath string, updater *discord.RichPresenceUpdate
 // updateEpisodeDuration updates the episode duration
 func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdater, tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int) {
 	maxAttempts := 10 // Only try 10 times to get duration
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		if !updater.IsEpisodeStarted() {
 			time.Sleep(2 * time.Second)
 			continue
@@ -712,7 +712,7 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 			return
 		}
 
-		durationPos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "duration"})
+		durationPos, err := mpvSendCommand(socketPath, []any{"get_property", "duration"})
 		if err != nil || durationPos == nil {
 			time.Sleep(2 * time.Second)
 			continue
@@ -865,7 +865,7 @@ func startTrackingRoutine(tracker *tracking.LocalTracker, socketPath string, ani
 
 // updateTracking updates tracking
 func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID int, episode *models.Episode, episodeNum int, updater *discord.RichPresenceUpdater) {
-	timePos, err := mpvSendCommand(socketPath, []interface{}{"get_property", "time-pos"})
+	timePos, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
 	if err != nil || timePos == nil {
 		return
 	}
@@ -968,17 +968,17 @@ func handleUserInput(
 		switch choice {
 		case "download_options":
 			// Stop playback and go back to download options
-			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		case "next":
 			return playNextEpisode(currentIndex+1, episodes, anilistID, updater, stopTracking, socketPath)
 		case "previous":
 			return playPreviousEpisode(currentIndex-1, episodes, anilistID, updater, stopTracking, socketPath)
 		case "quit":
-			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrUserQuit
 		case "change":
-			_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrChangeAnime
 		case "select":
 			return selectEpisode(episodes, anilistID, updater, stopTracking, socketPath)
@@ -1062,7 +1062,7 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	}
 
 	close(stopTracking)
-	_, _ = mpvSendCommand(socketPath, []interface{}{"quit"})
+	_, _ = mpvSendCommand(socketPath, []any{"quit"})
 
 	var newUpdater *discord.RichPresenceUpdater
 	if updater != nil {
@@ -1085,7 +1085,7 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 // skipIntro skips the intro
 func skipIntro(socketPath string, episode *models.Episode) {
 	if episode.SkipTimes.Op.End > 0 {
-		_, _ = mpvSendCommand(socketPath, []interface{}{"seek", episode.SkipTimes.Op.End, "absolute"})
+		_, _ = mpvSendCommand(socketPath, []any{"seek", episode.SkipTimes.Op.End, "absolute"})
 		fmt.Printf("Intro skipped to %ds\n", episode.SkipTimes.Op.End)
 	} else {
 		fmt.Println("Intro skip data not available")
@@ -1246,7 +1246,7 @@ func selectSubtitleTrack(socketPath string) {
 
 	if selected == 0 {
 		// Disable subtitles
-		_, _ = mpvSendCommand(socketPath, []interface{}{"set_property", "sid", "no"})
+		_, _ = mpvSendCommand(socketPath, []any{"set_property", "sid", "no"})
 		fmt.Println("Subtitles disabled")
 	} else {
 		if err := SetSubtitleTrack(socketPath, selected); err != nil {

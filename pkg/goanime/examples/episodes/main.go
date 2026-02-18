@@ -43,12 +43,9 @@ func main() {
 	fmt.Printf("\nFound %d episodes:\n\n", len(episodes))
 
 	// Display first 10 episodes
-	displayCount := 10
-	if len(episodes) < displayCount {
-		displayCount = len(episodes)
-	}
+	displayCount := min(len(episodes), 10)
 
-	for i := 0; i < displayCount; i++ {
+	for i := range displayCount {
 		ep := episodes[i]
 		title := "N/A"
 		if ep.Title != nil {

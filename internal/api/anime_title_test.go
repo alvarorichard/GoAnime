@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -175,7 +176,6 @@ func TestCleanTitle_BrazilianSources(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc // capture range variable
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := CleanTitle(tc.input)
@@ -247,7 +247,6 @@ func TestGenerateSearchVariations(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc // capture range variable
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			variations := generateSearchVariations(tc.input)
@@ -257,13 +256,7 @@ func TestGenerateSearchVariations(t *testing.T) {
 				tc.input, tc.minVariations, len(variations))
 
 			// Check that expected variation is present
-			found := false
-			for _, v := range variations {
-				if v == tc.expectedVariation {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(variations, tc.expectedVariation)
 			assert.True(t, found,
 				"generateSearchVariations(%q) should contain %q, got %v",
 				tc.input, tc.expectedVariation, variations)
@@ -339,7 +332,6 @@ func TestCleanTitle_RealAnimefireExamples(t *testing.T) {
 	}
 
 	for _, tc := range realWorldCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			result := CleanTitle(tc.animefireTitle)
@@ -389,7 +381,6 @@ func TestCleanTitle_And_GenerateVariations_Integration(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -400,13 +391,7 @@ func TestCleanTitle_And_GenerateVariations_Integration(t *testing.T) {
 			variations := generateSearchVariations(cleanedTitle)
 
 			// Step 3: Verify the expected search term is in the variations
-			found := false
-			for _, v := range variations {
-				if v == tc.mustContainSearch {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(variations, tc.mustContainSearch)
 
 			assert.True(t, found,
 				"Integration test failed for %q:\nCleaned title: %q\nVariations: %v\nMust contain: %q",
@@ -439,7 +424,6 @@ func TestCleanTitle_PreservesValidTitles(t *testing.T) {
 	}
 
 	for _, title := range validTitles {
-		title := title
 		t.Run(title, func(t *testing.T) {
 			t.Parallel()
 			result := CleanTitle(title)

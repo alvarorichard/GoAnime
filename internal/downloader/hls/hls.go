@@ -259,27 +259,27 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 	for i, line := range lines {
 		if strings.HasPrefix(line, "#EXTM3U") {
 			continue // Header
-		} else if strings.HasPrefix(line, "#EXT-X-VERSION:") {
-			playlist.Version = strings.TrimPrefix(line, "#EXT-X-VERSION:")
-		} else if strings.HasPrefix(line, "#EXT-X-TARGETDURATION:") {
-			durationStr := strings.TrimPrefix(line, "#EXT-X-TARGETDURATION:")
+		} else if after, ok := strings.CutPrefix(line, "#EXT-X-VERSION:"); ok {
+			playlist.Version = after
+		} else if after, ok := strings.CutPrefix(line, "#EXT-X-TARGETDURATION:"); ok {
+			durationStr := after
 			duration, err := strconv.ParseFloat(durationStr, 64)
 			if err == nil {
 				playlist.TargetDuration = duration
 			}
-		} else if strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:") {
-			seqStr := strings.TrimPrefix(line, "#EXT-X-MEDIA-SEQUENCE:")
+		} else if after, ok := strings.CutPrefix(line, "#EXT-X-MEDIA-SEQUENCE:"); ok {
+			seqStr := after
 			seq, err := strconv.Atoi(seqStr)
 			if err == nil {
 				playlist.MediaSequence = seq
 			}
-		} else if strings.HasPrefix(line, "#EXT-X-PLAYLIST-TYPE:") {
-			playlist.PlaylistType = strings.TrimPrefix(line, "#EXT-X-PLAYLIST-TYPE:")
+		} else if after, ok := strings.CutPrefix(line, "#EXT-X-PLAYLIST-TYPE:"); ok {
+			playlist.PlaylistType = after
 		} else if strings.HasPrefix(line, "#EXT-X-ENDLIST") {
 			playlist.EndList = true
-		} else if strings.HasPrefix(line, "#EXTINF:") {
+		} else if after, ok := strings.CutPrefix(line, "#EXTINF:"); ok {
 			// Parse duration and title
-			infLine := strings.TrimPrefix(line, "#EXTINF:")
+			infLine := after
 			parts := strings.SplitN(infLine, ",", 2)
 			var duration float64
 			if len(parts) > 0 {
@@ -438,10 +438,8 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 
 	// Start workers
 	var wg sync.WaitGroup
-	for i := 0; i < maxWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range maxWorkers {
+		wg.Go(func() {
 			for j := range jobs {
 				select {
 				case <-ctx.Done():
@@ -452,7 +450,7 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 				data, err := d.downloadSegment(ctx, j.segment.URL, headers)
 				results <- result{index: j.index, data: data, err: err}
 			}
-		}()
+		})
 	}
 
 	// Fill job queue
@@ -467,7 +465,7 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	var failedSegments int
 	var firstErr error
 
-	for i := 0; i < totalSegments; i++ {
+	for range totalSegments {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

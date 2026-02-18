@@ -251,8 +251,8 @@ func ExtractEpisodeNumber(episodeStr string) string {
 	}
 
 	// Handle simple numeric cases by splitting
-	parts := strings.Split(strings.TrimSpace(episodeStr), " ")
-	for _, part := range parts {
+	parts := strings.SplitSeq(strings.TrimSpace(episodeStr), " ")
+	for part := range parts {
 		// Clean common separators and try to parse
 		cleanPart := strings.Trim(part, "()[]{}:.-_")
 		if num, err := strconv.Atoi(cleanPart); err == nil && num > 0 {

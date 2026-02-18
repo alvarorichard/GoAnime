@@ -42,7 +42,7 @@ func GetMovieData(animeID int, anime *models.Anime) error {
 		return fmt.Errorf("error fetching data from Jikan (MyAnimeList) API: %w", err)
 	}
 
-	data, ok := response["data"].(map[string]interface{})
+	data, ok := response["data"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid response structure: missing or invalid 'data' field")
 	}
@@ -161,7 +161,7 @@ func FetchAnimeData(animeID int, episodeNo int, anime *models.Anime) error {
 		return fmt.Errorf("jikan API request failed: %w", err)
 	}
 
-	responseData, ok := data["data"].(map[string]interface{})
+	responseData, ok := data["data"].(map[string]any)
 	if !ok {
 		return errors.New("invalid response structure from Jikan API")
 	}
@@ -186,12 +186,12 @@ func FetchAnimeData(animeID int, episodeNo int, anime *models.Anime) error {
 }
 
 // Helper functions for map value extraction
-func getStringValue(data map[string]interface{}, field string) string {
+func getStringValue(data map[string]any, field string) string {
 	val, _ := data[field].(string)
 	return val
 }
 
-func getIntValue(data map[string]interface{}, field string) int {
+func getIntValue(data map[string]any, field string) int {
 	switch val := data[field].(type) {
 	case float64:
 		return int(val)
@@ -203,7 +203,7 @@ func getIntValue(data map[string]interface{}, field string) int {
 	return 0
 }
 
-func getBoolValue(data map[string]interface{}, field string) bool {
+func getBoolValue(data map[string]any, field string) bool {
 	val, _ := data[field].(bool)
 	return val
 }
@@ -320,9 +320,9 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	for _, searchTerm := range searchVariations {
 		util.Debugf("Trying AniList search with: '%s'", searchTerm)
 
-		jsonData, err := json.Marshal(map[string]interface{}{
+		jsonData, err := json.Marshal(map[string]any{
 			"query": query,
-			"variables": map[string]interface{}{
+			"variables": map[string]any{
 				"search": searchTerm,
 			},
 		})
@@ -436,7 +436,7 @@ func httpPostFast(url string, body []byte) (*http.Response, error) {
 	return util.GetFastClient().Do(req) // #nosec G704
 }
 
-func makeGetRequest(url string, headers map[string]string) (map[string]interface{}, error) {
+func makeGetRequest(url string, headers map[string]string) (map[string]any, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GET request: %w", err)
@@ -460,7 +460,7 @@ func makeGetRequest(url string, headers map[string]string) (map[string]interface
 		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	var responseData map[string]interface{}
+	var responseData map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
 		return nil, fmt.Errorf("JSON decode failed: %w", err)
 	}

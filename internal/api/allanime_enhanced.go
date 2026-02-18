@@ -135,8 +135,8 @@ func extractAllAnimeIDAPI(url string) string {
 
 	// Extract ID from full AllAnime URLs if needed
 	if strings.Contains(url, "allanime") {
-		parts := strings.Split(url, "/")
-		for _, part := range parts {
+		parts := strings.SplitSeq(url, "/")
+		for part := range parts {
 			if len(part) > 5 && len(part) < 30 &&
 				strings.ContainsAny(part, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") {
 				return part

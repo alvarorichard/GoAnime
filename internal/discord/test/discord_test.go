@@ -18,13 +18,13 @@ type MockMPVClient struct {
 }
 
 // MockMPVSendCommand é uma implementação mock de mpvSendCommand
-func (m *MockMPVClient) MockMPVSendCommand(socketPath string, args []interface{}) (interface{}, error) {
+func (m *MockMPVClient) MockMPVSendCommand(socketPath string, args []any) (any, error) {
 	callArgs := m.Called(socketPath, args)
 	return callArgs.Get(0), callArgs.Error(1)
 }
 
 // mockMPVSendCommand é uma função mock simples
-func mockMPVSendCommand(socketPath string, args []interface{}) (interface{}, error) {
+func mockMPVSendCommand(socketPath string, args []any) (any, error) {
 	// Simula a resposta do MPV para time-pos
 	if len(args) >= 2 && args[0] == "get_property" && args[1] == "time-pos" {
 		return 630.0, nil // 10 minutos e 30 segundos em segundos
@@ -95,7 +95,7 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 
 	t.Run("Should handle MPV send command error", func(t *testing.T) {
 		// Arrange
-		errorMockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+		errorMockFunc := func(socketPath string, args []any) (any, error) {
 			return nil, fmt.Errorf("connection failed")
 		}
 
@@ -249,7 +249,7 @@ func TestRichPresenceIntegration(t *testing.T) {
 func TestFetchDuration(t *testing.T) {
 	t.Run("Should fetch duration successfully", func(t *testing.T) {
 		// Arrange
-		mockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+		mockFunc := func(socketPath string, args []any) (any, error) {
 			if len(args) >= 2 && args[0] == "get_property" && args[1] == "duration" {
 				return 1440.0, nil // 24 minutes in seconds
 			}
@@ -286,7 +286,7 @@ func TestFetchDuration(t *testing.T) {
 
 	t.Run("Should handle MPV error gracefully", func(t *testing.T) {
 		// Arrange
-		errorMockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+		errorMockFunc := func(socketPath string, args []any) (any, error) {
 			return nil, fmt.Errorf("connection failed")
 		}
 
@@ -320,7 +320,7 @@ func TestFetchDuration(t *testing.T) {
 
 	t.Run("Should handle nil duration response", func(t *testing.T) {
 		// Arrange
-		nilMockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+		nilMockFunc := func(socketPath string, args []any) (any, error) {
 			return nil, nil // Simulate nil response
 		}
 
@@ -354,7 +354,7 @@ func TestFetchDuration(t *testing.T) {
 
 	t.Run("Should use instance socket path when parameter is empty", func(t *testing.T) {
 		// Arrange
-		mockFunc := func(socketPath string, args []interface{}) (interface{}, error) {
+		mockFunc := func(socketPath string, args []any) (any, error) {
 			if len(args) >= 2 && args[0] == "get_property" && args[1] == "duration" {
 				return 600.0, nil // 10 minutes in seconds
 			}

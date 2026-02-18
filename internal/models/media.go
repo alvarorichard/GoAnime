@@ -134,10 +134,7 @@ func (m *Media) GetGenresDisplay() string {
 	if len(m.Genres) == 0 {
 		return ""
 	}
-	maxGenres := 3
-	if len(m.Genres) < maxGenres {
-		maxGenres = len(m.Genres)
-	}
+	maxGenres := min(len(m.Genres), 3)
 	return strings.Join(m.Genres[:maxGenres], ", ")
 }
 

@@ -523,7 +523,7 @@ func TestCopyFile_Concurrent(t *testing.T) {
 	const numCopies = 5
 	done := make(chan error, numCopies)
 
-	for i := 0; i < numCopies; i++ {
+	for i := range numCopies {
 		go func(index int) {
 			dstFile := filepath.Join(tempDir, "dest_"+string(rune('A'+index))+".txt")
 			done <- copyFile(srcFile, dstFile)
@@ -531,7 +531,7 @@ func TestCopyFile_Concurrent(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < numCopies; i++ {
+	for range numCopies {
 		err := <-done
 		assert.NoError(t, err)
 	}

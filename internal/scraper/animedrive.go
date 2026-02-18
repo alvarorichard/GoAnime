@@ -318,7 +318,7 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 	var lastErr error
 	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		req, err := http.NewRequest("GET", searchURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)

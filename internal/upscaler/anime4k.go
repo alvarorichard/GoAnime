@@ -102,7 +102,7 @@ func (img *Anime4KImage) Process(passes int, sc, sg float64, fastMode bool) {
 	dstImg := image.NewRGBA(g.Bounds(img.data.Bounds()))
 	g.Draw(dstImg, img.data)
 
-	for i := 0; i < passes; i++ {
+	for range passes {
 		getGray(dstImg)
 		pushColor(dstImg, sc)
 		getGradient(dstImg, fastMode)
@@ -349,8 +349,8 @@ func changeEachPixel(img *image.RGBA, fun func(x, y int, p *color.RGBA) color.RG
 	imgInfo := img.Bounds()
 	temp := image.NewRGBA(imgInfo)
 	dx, dy := imgInfo.Dx(), imgInfo.Dy()
-	for i := 0; i < dx; i++ {
-		for j := 0; j < dy; j++ {
+	for i := range dx {
+		for j := range dy {
 			p := img.RGBAAt(i, j)
 			temp.SetRGBA(i, j, fun(i, j, &p))
 		}

@@ -825,7 +825,7 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 	done := make(chan bool, 1)
 	go func() {
 		// Simulate progress updates since yt-dlp doesn't give us real-time progress easily
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			select {
 			case <-done:
 				return

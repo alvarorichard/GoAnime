@@ -89,7 +89,7 @@ func combineParts(destPath string, numThreads int) error {
 			util.Logger.Warn("Error closing output file", "error", err)
 		}
 	}()
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		partFilePath, err := safePartPath(destPath, i)
 		if err != nil {
 			return err
@@ -160,7 +160,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	}
 	chunkSize = contentLength / int64(numThreads)
 	var downloadWg sync.WaitGroup
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		from := int64(i) * chunkSize
 		to := from + chunkSize - 1
 		if i == numThreads-1 {

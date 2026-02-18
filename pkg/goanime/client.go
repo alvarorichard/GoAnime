@@ -64,7 +64,7 @@ func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*type
 // GetStreamURL retrieves the streaming URL and headers for a specific episode.
 // The episodeURL should be obtained from GetAnimeEpisodes.
 // Deprecated: Use GetEpisodeStreamURL instead for better control over quality and mode.
-func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...interface{}) (string, map[string]string, error) {
+func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...any) (string, map[string]string, error) {
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return "", nil, err
