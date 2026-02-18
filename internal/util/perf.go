@@ -291,9 +291,9 @@ func (pt *PerfTracker) PrintReport() {
 		report.WriteString("\n")
 		for name, counter := range pt.counters {
 			value := atomic.LoadInt64(counter)
-			report.WriteString(fmt.Sprintf("   %-40s %s\n",
+			fmt.Fprintf(&report, "   %-40s %s\n",
 				perfMetricStyle.Render(name),
-				perfValueStyle.Render(fmt.Sprintf("%d", value))))
+				perfValueStyle.Render(fmt.Sprintf("%d", value)))
 		}
 		report.WriteString("\n")
 	}
@@ -312,12 +312,12 @@ func (pt *PerfTracker) PrintReport() {
 
 	report.WriteString(perfHeaderStyle.Render("📈 Summary"))
 	report.WriteString("\n")
-	report.WriteString(fmt.Sprintf("   Total Operations: %s\n", perfValueStyle.Render(fmt.Sprintf("%d", totalOps))))
-	report.WriteString(fmt.Sprintf("   Total Time Tracked: %s\n", perfValueStyle.Render(totalTime.Round(time.Millisecond).String())))
+	fmt.Fprintf(&report, "   Total Operations: %s\n", perfValueStyle.Render(fmt.Sprintf("%d", totalOps)))
+	fmt.Fprintf(&report, "   Total Time Tracked: %s\n", perfValueStyle.Render(totalTime.Round(time.Millisecond).String()))
 
 	if totalOps > 0 {
 		avgPerOp := totalTime / time.Duration(totalOps)
-		report.WriteString(fmt.Sprintf("   Average per Operation: %s\n", perfValueStyle.Render(avgPerOp.Round(time.Millisecond).String())))
+		fmt.Fprintf(&report, "   Average per Operation: %s\n", perfValueStyle.Render(avgPerOp.Round(time.Millisecond).String()))
 	}
 
 	report.WriteString(perfSeparatorStyle.Render(strings.Repeat("═", 80)))
