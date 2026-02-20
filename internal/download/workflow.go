@@ -2,6 +2,7 @@
 package download
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -68,11 +69,12 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			// Use player batch downloader with provided range to get consistent progress UI
 			eps, err := api.GetAnimeEpisodesEnhanced(anime)
 			if err == nil && len(eps) > 0 {
-				if err := player.HandleBatchDownloadRange(eps, anime.URL, request.StartEpisode, request.EndEpisode); err == nil {
+				dlErr := player.HandleBatchDownloadRange(eps, anime.URL, request.StartEpisode, request.EndEpisode)
+				if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 					return nil
 				}
 				// Fall through to API-based smart range if UI path fails
-				util.Infof("Progress UI path failed, falling back to API smart range: %v", err)
+				util.Infof("Progress UI path failed, falling back to API smart range: %v", dlErr)
 			} else if err != nil {
 				util.Infof("Enhanced episodes fetch failed for progress path: %v", err)
 			}
@@ -91,15 +93,21 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			return nil
 		}
 
-		// Try enhanced download first
-		if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
-			util.Infof("Enhanced download failed, falling back to legacy: %v", err)
-			// Fallback to legacy downloader
-			episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
-			dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-			return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
+		// Try batch downloader with progress UI first (works for AllAnime and other sources)
+		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		if err == nil && len(eps) > 0 {
+			dlErr := player.HandleBatchDownloadRange(eps, anime.URL, request.StartEpisode, request.EndEpisode)
+			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
+				return nil
+			}
+			util.Infof("Batch download path failed, falling back to legacy: %v", dlErr)
+		} else if err != nil {
+			util.Infof("Enhanced episodes fetch failed: %v", err)
 		}
-		return nil
+		// Fallback to legacy downloader
+		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+		return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 	} else {
 		util.Infof("Downloading episode %d of %s",
 			request.EpisodeNum, anime.Name)

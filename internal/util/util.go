@@ -292,7 +292,7 @@ func FlagParser() (string, error) {
 
 	// Handle download mode
 	if *downloadFlag {
-		return handleDownloadModeWithSmart(*rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
+		return handleDownloadModeWithSmart(fs.Args(), *rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
 	}
 
 	// Handle movie/TV download mode (FlixHQ/SFlix)
@@ -369,8 +369,7 @@ func TreatingAnimeName(animeName string) string {
 }
 
 // handleDownloadModeWithSmart processes download args with AllAnime Smart option
-func handleDownloadModeWithSmart(isRange bool, source, quality string, allanimeSmart bool) (string, error) {
-	args := flag.Args()
+func handleDownloadModeWithSmart(args []string, isRange bool, source, quality string, allanimeSmart bool) (string, error) {
 
 	if len(args) == 0 {
 		return "", fmt.Errorf("download mode requires anime name and episode number/range")

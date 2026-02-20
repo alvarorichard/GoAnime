@@ -50,8 +50,14 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		searchStart := time.Now()
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
-		util.Debugf("Searching for: %s (searching all sources)", currentName)
-		anime, searchErr := api.SearchAnimeEnhanced(currentName, "")
+		// Respect user's --source flag (e.g. --source allanime) via GlobalSource
+		source := util.GlobalSource
+		if source != "" {
+			util.Debugf("Searching for: %s (source: %s)", currentName, source)
+		} else {
+			util.Debugf("Searching for: %s (searching all sources)", currentName)
+		}
+		anime, searchErr := api.SearchAnimeEnhanced(currentName, source)
 
 		if searchErr == nil && anime != nil {
 			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))

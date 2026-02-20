@@ -169,12 +169,20 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	var animes []*models.Anime
+	// Collect results with episode counts for sorting
+	type searchResult struct {
+		anime   *models.Anime
+		epCount int
+	}
+	var results []searchResult
+
 	for _, edge := range response.Data.Shows.Edges {
 		var episodesStr string
+		var epCount int
 		if episodes, ok := edge.AvailableEpisodes.(map[string]any); ok {
 			if subEpisodes, ok := episodes["sub"].(float64); ok {
-				episodesStr = fmt.Sprintf("(%d episodes)", int(subEpisodes))
+				epCount = int(subEpisodes)
+				episodesStr = fmt.Sprintf("(%d episodes)", epCount)
 			} else {
 				episodesStr = "(Unknown episodes)"
 			}
@@ -190,7 +198,17 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 			Name: fmt.Sprintf("%s %s", displayName, episodesStr),
 			URL:  edge.ID, // For AllAnime, the "URL" is actually the anime ID
 		}
-		animes = append(animes, anime)
+		results = append(results, searchResult{anime: anime, epCount: epCount})
+	}
+
+	// Sort by episode count descending so the main series (most episodes) appears first
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].epCount > results[j].epCount
+	})
+
+	animes := make([]*models.Anime, len(results))
+	for i, r := range results {
+		animes[i] = r.anime
 	}
 
 	return animes, nil
