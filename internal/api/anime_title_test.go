@@ -432,3 +432,65 @@ func TestCleanTitle_PreservesValidTitles(t *testing.T) {
 		})
 	}
 }
+
+// TestCleanTitle_NineAnimeSources tests that CleanTitle properly handles
+// anime titles from 9Anime with multilanguage tags and episode info.
+func TestCleanTitle_NineAnimeSources(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "removes [Multilanguage] prefix",
+			input:    "[Multilanguage] Black Clover",
+			expected: "Black Clover",
+		},
+		{
+			name:     "removes 9Anime episode info (HD SUB DUB)",
+			input:    "Black Clover (HD SUB DUB Ep 170/170)",
+			expected: "Black Clover",
+		},
+		{
+			name:     "removes both [Multilanguage] and episode info",
+			input:    "[Multilanguage] Black Clover (HD SUB DUB Ep 170/170)",
+			expected: "Black Clover",
+		},
+		{
+			name:     "removes SUB only episode info",
+			input:    "[Multilanguage] Naruto Shippuden (SUB Ep 500/500)",
+			expected: "Naruto Shippuden",
+		},
+		{
+			name:     "removes DUB only episode info",
+			input:    "[Multilanguage] One Piece (DUB Ep 1100/1100)",
+			expected: "One Piece",
+		},
+		{
+			name:     "removes HD SUB episode info",
+			input:    "[Multilanguage] Attack on Titan (HD SUB Ep 25/25)",
+			expected: "Attack on Titan",
+		},
+		{
+			name:     "removes [9Anime] source tag",
+			input:    "[9Anime] Demon Slayer",
+			expected: "Demon Slayer",
+		},
+		{
+			name:     "full 9Anime title with all metadata",
+			input:    "[Multilanguage] Jujutsu Kaisen (HD SUB DUB Ep 24/24)",
+			expected: "Jujutsu Kaisen",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result := CleanTitle(tc.input)
+			assert.Equal(t, tc.expected, result,
+				"CleanTitle(%q) should equal %q", tc.input, tc.expected)
+		})
+	}
+}

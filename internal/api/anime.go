@@ -549,12 +549,12 @@ func CleanTitle(title string) string {
 	reMediaTags := regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
 	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
 
-	// Remove language tags like [English], [Portuguese], [Português] at the start
-	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese)\]\s*`)
+	// Remove language tags like [English], [Portuguese], [Português], [Multilanguage] at the start
+	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
 	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
 
-	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], or [AnimeDrive]
-	re1 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive)\]\s*`)
+	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], [AnimeDrive], or [9Anime]
+	re1 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive|9anime)\]\s*`)
 	cleaned = strings.TrimSpace(re1.ReplaceAllString(cleaned, ""))
 
 	// Remove everything after em-dash or en-dash (typically subtitles like "– Todos os Episódios")
@@ -599,6 +599,10 @@ func CleanTitle(title string) string {
 	// Remove episode count like "(171 episodes)" or "(1 eps)" or Portuguese equivalents
 	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?|epis[oó]dios?)\)`)
 	cleaned = strings.TrimSpace(re7.ReplaceAllString(cleaned, ""))
+
+	// Remove 9Anime-style episode info like "(HD SUB DUB Ep 170/170)" or "(SUB Ep 12/12)"
+	re9anime := regexp.MustCompile(`(?i)\s*\((?:HD\s+)?(?:(?:SUB|DUB)\s+)*Ep\s+\d+/\d+\)`)
+	cleaned = strings.TrimSpace(re9anime.ReplaceAllString(cleaned, ""))
 
 	// Remove special titles and additions after colon
 	re8 := regexp.MustCompile(`(?i):\s*(?:Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)

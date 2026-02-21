@@ -304,6 +304,7 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 			strings.Contains(anime.Name, "[Portuguese]") ||
 			strings.Contains(anime.Name, "[Português]") ||
+			strings.Contains(anime.Name, "[Multilanguage]") ||
 			strings.Contains(anime.Name, "[Movie]") ||
 			strings.Contains(anime.Name, "[TV]")
 
@@ -389,7 +390,7 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case SFlixType:
 		return "[Movies/TV]"
 	case NineAnimeType:
-		return "[English]"
+		return "[Multilanguage]"
 	default:
 		return "[Unknown]"
 	}
