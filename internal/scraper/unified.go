@@ -33,8 +33,9 @@ const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
 	AnimeDriveType
-	FlixHQType // Movies and TV Shows source
-	SFlixType  // Alternative Movies and TV Shows source
+	FlixHQType     // Movies and TV Shows source
+	SFlixType      // Alternative Movies and TV Shows source
+	NineAnimeType  // 9animetv.to anime source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -61,6 +62,7 @@ func NewScraperManager() *ScraperManager {
 	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
 	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
 	manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
+	manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
 
 	// AnimeDrive - Currently on standby
 	// Reason: Site is protected by Cloudflare, no bypass solution found yet
@@ -341,6 +343,7 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"allAnime", counts["AllAnime"],
 		"animeDrive", counts["AnimeDrive"],
 		"flixHQ", counts["FlixHQ"],
+		"9anime", counts["9Anime"],
 		"total", len(results))
 }
 
@@ -365,6 +368,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "FlixHQ"
 	case SFlixType:
 		return "SFlix"
+	case NineAnimeType:
+		return "9Anime"
 	default:
 		return "Desconhecido"
 	}
@@ -383,6 +388,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 		return "[Movies/TV]"
 	case SFlixType:
 		return "[Movies/TV]"
+	case NineAnimeType:
+		return "[English]"
 	default:
 		return "[Unknown]"
 	}
@@ -692,5 +699,33 @@ func (a *SFlixAdapter) GetType() ScraperType {
 
 // GetClient returns the underlying SFlix client for direct access
 func (a *SFlixAdapter) GetClient() *SFlixClient {
+	return a.client
+}
+
+// NineAnimeAdapter adapts NineAnimeClient to UnifiedScraper interface
+type NineAnimeAdapter struct {
+	client *NineAnimeClient
+}
+
+func (a *NineAnimeAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *NineAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *NineAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+	// episodeURL contains the episode data-id for 9anime
+	// options[0] = audio preference ("sub" or "dub")
+	return a.client.GetStreamURL(episodeURL, options...)
+}
+
+func (a *NineAnimeAdapter) GetType() ScraperType {
+	return NineAnimeType
+}
+
+// GetClient returns the underlying NineAnime client for direct access
+func (a *NineAnimeAdapter) GetClient() *NineAnimeClient {
 	return a.client
 }

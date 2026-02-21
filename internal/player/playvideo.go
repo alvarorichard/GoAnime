@@ -317,13 +317,36 @@ func playVideo(
 	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
 	// Many streaming servers require specific User-Agent and Referer headers
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+
+	// Determine the anime source for source-specific playback configuration
+	is9Anime := false
+	if updater != nil && updater.GetAnime() != nil {
+		is9Anime = updater.GetAnime().Source == "9Anime"
+	}
+
 	if isHLSStream {
-		// Add HTTP headers required by streaming servers
-		// Note: Only Referer is typically needed; some servers also require User-Agent
+		// Use the stored global referer if available (set by source-specific stream resolvers),
+		// otherwise fall back to the default referer for legacy sources
+		referer := util.GetGlobalReferer()
+		if referer == "" {
+			referer = "https://streameeeeee.site/"
+		}
 		mpvArgs = append(mpvArgs,
-			"--http-header-fields=Referer: https://streameeeeee.site/",
+			fmt.Sprintf("--http-header-fields=Referer: %s", referer),
 		)
-		util.Debugf("HLS stream detected - adding HTTP Referer header")
+		util.Debugf("HLS stream detected - Referer: %s", referer)
+
+		// For 9Anime (and other Cloudflare-protected CDNs), route playback through
+		// yt-dlp with Chrome TLS impersonation to bypass Cloudflare fingerprint checks.
+		// Without this, ffmpeg's TLS fingerprint is rejected and the stream never loads.
+		if is9Anime {
+			mpvArgs = append(mpvArgs,
+				"--script-opts=ytdl_hook-try_ytdl_first=yes",
+				"--ytdl-raw-options-append=impersonate=chrome",
+				fmt.Sprintf("--ytdl-raw-options-append=referer=%s", referer),
+			)
+			util.Debugf("9Anime stream detected - enabling yt-dlp with Chrome TLS impersonation")
+		}
 	}
 
 	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
@@ -352,9 +375,15 @@ func playVideo(
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--alang=%s", audioLang))
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--slang=%s", subsLang))
 		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
+	}
 
-		// Add external subtitle files if available (FlixHQ subtitles)
-		// This follows the lobster.sh implementation for external subtitles
+	// Add external subtitle files if available (FlixHQ / 9Anime subtitles)
+	// This follows the lobster.sh implementation for external subtitles
+	if isMovieOrTV || is9Anime {
+		// For 9Anime, let the user pick which subtitle tracks to load
+		if is9Anime && len(util.GlobalSubtitles) > 1 {
+			util.SelectSubtitles()
+		}
 		subArgs := util.GetSubtitleArgs()
 		if len(subArgs) > 0 {
 			mpvArgs = append(mpvArgs, subArgs...)
@@ -1046,7 +1075,10 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	// If no updater/anime context, try to synthesize from lastAnimeURL
 	if anime == nil && lastAnimeURL != "" {
 		guessedSource := ""
-		if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
+		// Check global referer to detect 9Anime (uses rapid-cloud referer)
+		if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
+			guessedSource = "9Anime"
+		} else if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
 			guessedSource = "AllAnime"
 		}
 		anime = &models.Anime{URL: lastAnimeURL, Source: guessedSource}

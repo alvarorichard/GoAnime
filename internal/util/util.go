@@ -72,6 +72,63 @@ func ClearGlobalReferer() {
 	GlobalReferer = ""
 }
 
+// SelectSubtitles displays an interactive menu for the user to choose which
+// subtitle tracks to load. It updates GlobalSubtitles in-place so that the
+// subsequent call to GetSubtitleArgs only includes the selected tracks.
+// If there are 0 or 1 subtitles available, no menu is shown.
+func SelectSubtitles() {
+	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
+		return
+	}
+
+	// Build options: "All", each individual track, "None"
+	type choice struct {
+		Value int // -1 = all, -2 = none, 0..N = track index
+	}
+
+	var options []huh.Option[int]
+	options = append(options, huh.NewOption("All subtitles", -1))
+	for i, sub := range GlobalSubtitles {
+		label := sub.Label
+		if label == "" {
+			label = sub.Language
+		}
+		if label == "" {
+			label = fmt.Sprintf("Subtitle %d", i+1)
+		}
+		options = append(options, huh.NewOption(label, i))
+	}
+	options = append(options, huh.NewOption("No subtitles", -2))
+
+	selected := -1 // default: all
+	menu := huh.NewSelect[int]().
+		Title("Subtitles").
+		Description(fmt.Sprintf("%d tracks available — pick one or all:", len(GlobalSubtitles))).
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		// On error/cancel keep all subtitles
+		return
+	}
+
+	switch {
+	case selected == -1:
+		// Keep all — no change needed
+		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+	case selected == -2:
+		// Disable subtitles
+		GlobalSubtitles = nil
+		Debugf("User disabled subtitles")
+	default:
+		if selected >= 0 && selected < len(GlobalSubtitles) {
+			kept := GlobalSubtitles[selected]
+			GlobalSubtitles = []SubtitleInfo{kept}
+			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
+		}
+	}
+}
+
 // GetSubtitleArgs returns mpv arguments for subtitles
 // Based on lobster.sh implementation:
 // - Single subtitle: --sub-file='URL'

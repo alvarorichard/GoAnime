@@ -40,6 +40,10 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.FlixHQType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "FlixHQ")
+	} else if strings.ToLower(source) == "9anime" || strings.ToLower(source) == "nineanime" {
+		t := scraper.NineAnimeType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "9Anime")
 	} else {
 		// Default behavior: search all sources simultaneously (including FlixHQ)
 		scraperType = nil
@@ -79,6 +83,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			} else if strings.Contains(anime.URL, "flixhq") {
 				anime.Source = "FlixHQ"
 			}
+			// Note: 9Anime uses numeric IDs which can't be identified by URL alone;
+			// the Source field is already set by the scraper
 		}
 
 		// Language tags are already added by unified.go, don't duplicate them here
@@ -91,6 +97,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	allanimeCount := 0
 	animedriveCount := 0
 	flixhqCount := 0
+	nineAnimeCount := 0
 	for _, anime := range animes {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
@@ -100,10 +107,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			animedriveCount++
 		} else if anime.Source == "FlixHQ" {
 			flixhqCount++
+		} else if anime.Source == "9Anime" {
+			nineAnimeCount++
 		}
 	}
 
-	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount)
+	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount)
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
@@ -185,6 +194,11 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		return GetFlixHQEpisodes(anime)
 	}
 
+	// Check if this is a 9Anime source
+	if anime.Source == "9Anime" {
+		return GetNineAnimeEpisodes(anime)
+	}
+
 	// Determine source type from multiple indicators with enhanced logic
 	var sourceName string
 
@@ -196,7 +210,9 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	} else if anime.Source == "AnimeDrive" {
 		sourceName = "AnimeDrive"
 	} else if strings.Contains(anime.Name, "[English]") {
-		// Priority 2: Check language tags (AllAnime = English)
+		// Priority 2: Check language tags
+		// Need to disambiguate between AllAnime and 9Anime both tagged [English]
+		// 9Anime source is already set above, so remaining [English] = AllAnime
 		sourceName = "AllAnime"
 		anime.Source = "AllAnime" // Update source field
 	} else if strings.Contains(anime.Name, "[Portuguese]") || strings.Contains(anime.Name, "[Português]") {
@@ -313,6 +329,11 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		}
 
 		return streamURL, nil
+	}
+
+	// Check if this is 9Anime content
+	if anime.Source == "9Anime" {
+		return GetNineAnimeStreamURL(anime, episode, quality)
 	}
 
 	scraperManager := scraper.NewScraperManager()
@@ -507,6 +528,96 @@ func downloadFromURL(_ string, _ string) error {
 // Legacy wrapper functions to maintain compatibility
 func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
+}
+
+// GetNineAnimeEpisodes handles episode fetching for 9anime sources
+func GetNineAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
+	nineAnimeClient := scraper.NewNineAnimeClient()
+
+	// anime.URL contains the 9anime anime ID
+	animeID := anime.URL
+	util.Debug("Getting 9Anime episodes", "animeID", animeID)
+
+	episodes, err := nineAnimeClient.GetAnimeEpisodes(animeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get episodes from 9Anime: %w", err)
+	}
+
+	util.Debug("9Anime episodes loaded", "count", len(episodes))
+	return episodes, nil
+}
+
+// GetNineAnimeStreamURL gets the stream URL for 9anime content
+func GetNineAnimeStreamURL(anime *models.Anime, episode *models.Episode, quality string) (string, error) {
+	util.ClearGlobalSubtitles()
+
+	nineAnimeClient := scraper.NewNineAnimeClient()
+
+	// episode.URL / episode.DataID contains the episode data-id
+	episodeID := episode.DataID
+	if episodeID == "" {
+		episodeID = episode.URL
+	}
+
+	util.Debug("Getting 9Anime stream", "episodeID", episodeID, "quality", quality)
+
+	// Use the unified GetStreamURL which tries multiple servers automatically
+	streamURL, metadata, err := nineAnimeClient.GetStreamURL(episodeID, "sub")
+	if err != nil {
+		return "", fmt.Errorf("failed to get stream URL from 9Anime: %w", err)
+	}
+
+	// Store referer globally for mpv playback
+	if referer, ok := metadata["referer"]; ok && referer != "" {
+		util.SetGlobalReferer(referer)
+	}
+
+	// Store subtitles globally for playback
+	if subtitleURLs, ok := metadata["subtitles"]; ok && subtitleURLs != "" && !util.GlobalNoSubs {
+		subURLs := strings.Split(subtitleURLs, ",")
+		var subLabels []string
+		if labels, ok := metadata["subtitle_labels"]; ok {
+			subLabels = strings.Split(labels, ",")
+		}
+
+		var subInfos []util.SubtitleInfo
+		for i, subURL := range subURLs {
+			label := "Unknown"
+			lang := "unknown"
+			if i < len(subLabels) {
+				label = subLabels[i]
+				// Try to extract language code from label
+				labelLower := strings.ToLower(label)
+				if strings.Contains(labelLower, "english") {
+					lang = "eng"
+				} else if strings.Contains(labelLower, "portuguese") {
+					lang = "por"
+				} else if strings.Contains(labelLower, "spanish") {
+					lang = "spa"
+				} else if strings.Contains(labelLower, "japanese") {
+					lang = "jpn"
+				} else if strings.Contains(labelLower, "french") {
+					lang = "fre"
+				} else if strings.Contains(labelLower, "german") {
+					lang = "ger"
+				} else if strings.Contains(labelLower, "italian") {
+					lang = "ita"
+				} else if strings.Contains(labelLower, "arabic") {
+					lang = "ara"
+				}
+			}
+			subInfos = append(subInfos, util.SubtitleInfo{
+				URL:      subURL,
+				Language: lang,
+				Label:    label,
+			})
+		}
+		util.SetGlobalSubtitles(subInfos)
+		util.Debug("9Anime subtitles loaded", "count", len(subInfos))
+	}
+
+	util.Debug("9Anime stream URL obtained", "url", streamURL[:min(len(streamURL), 80)])
+	return streamURL, nil
 }
 
 // GetFlixHQEpisodes handles episodes/content for FlixHQ movies and TV shows
