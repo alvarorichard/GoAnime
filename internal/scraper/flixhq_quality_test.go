@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -109,6 +110,9 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 
 	sources, err := client.GetSourcesWithContext(ctx, movie.ID, true)
 	if err != nil {
+		if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Bad Gateway") {
+			t.Skipf("Skipping - external streaming service unavailable: %v", err)
+		}
 		t.Fatalf("GetSources failed: %v", err)
 	}
 
@@ -145,6 +149,9 @@ func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
 
 	qualities, err := client.GetAvailableQualitiesWithContext(ctx, movie.ID, true)
 	if err != nil {
+		if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Bad Gateway") {
+			t.Skipf("Skipping - external streaming service unavailable: %v", err)
+		}
 		t.Fatalf("GetAvailableQualities failed: %v", err)
 	}
 

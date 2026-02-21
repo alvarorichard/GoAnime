@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -84,6 +85,9 @@ func TestFlixHQFullFlow(t *testing.T) {
 	t.Log("=== Step 5: Getting stream URL ===")
 	streamURL, err := GetEpisodeStreamURL(&modelEpisode, anime, "1080")
 	if err != nil {
+		if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Bad Gateway") {
+			t.Skipf("Skipping - external streaming service unavailable: %v", err)
+		}
 		t.Fatalf("Get stream URL error: %v", err)
 	}
 
