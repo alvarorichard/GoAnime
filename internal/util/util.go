@@ -82,10 +82,6 @@ func SelectSubtitles() {
 	}
 
 	// Build options: "All", each individual track, "None"
-	type choice struct {
-		Value int // -1 = all, -2 = none, 0..N = track index
-	}
-
 	var options []huh.Option[int]
 	options = append(options, huh.NewOption("All subtitles", -1))
 	for i, sub := range GlobalSubtitles {
@@ -112,11 +108,11 @@ func SelectSubtitles() {
 		return
 	}
 
-	switch {
-	case selected == -1:
+	switch selected {
+	case -1:
 		// Keep all — no change needed
 		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
-	case selected == -2:
+	case -2:
 		// Disable subtitles
 		GlobalSubtitles = nil
 		Debugf("User disabled subtitles")
