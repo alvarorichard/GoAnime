@@ -262,9 +262,9 @@ func filterMPVArgs(args []string) []string {
 		"--gpu-shader-cache-dir=", // Shader cache directory
 		"--gpu-api=",              // GPU API selection (auto, opengl, vulkan, d3d11)
 		// yt-dlp integration for Cloudflare-protected streams (9Anime, etc.)
-		"--script-opts=",              // mpv script options (e.g. ytdl_hook-try_ytdl_first)
-		"--ytdl-raw-options-append=",   // Pass raw options to yt-dlp backend
-		"--ytdl-format=",               // yt-dlp format / quality selection
+		"--script-opts=",             // mpv script options (e.g. ytdl_hook-try_ytdl_first)
+		"--ytdl-raw-options-append=", // Pass raw options to yt-dlp backend
+		"--ytdl-format=",             // yt-dlp format / quality selection
 		// Add more allowed prefixes here if needed in the future
 	}
 

@@ -33,9 +33,9 @@ const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
 	AnimeDriveType
-	FlixHQType     // Movies and TV Shows source
-	SFlixType      // Alternative Movies and TV Shows source
-	NineAnimeType  // 9animetv.to anime source
+	FlixHQType    // Movies and TV Shows source
+	SFlixType     // Alternative Movies and TV Shows source
+	NineAnimeType // 9animetv.to anime source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
