@@ -59,6 +59,27 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		return HandleMovieDownloadRequest(movieRequest)
 	}
 
+	// If this is 9Anime content, use the dedicated 9anime downloader
+	// 9Anime episodes use data-id based resolution that is incompatible with legacy downloaders
+	if anime.Source == "9Anime" {
+		util.Infof("Detected 9Anime content: %s — using 9Anime downloader", anime.Name)
+		nad := downloader.NewNineAnimeDownloader(downloader.NineAnimeDownloadConfig{
+			AnimeName:    anime.Name,
+			Quality:      quality,
+			OutputDir:    request.OutputDir,
+			Season:       season,
+			SubsLanguage: request.SubsLanguage,
+		})
+		if request.IsRange {
+			return nad.DownloadEpisodeRange(anime, request.StartEpisode, request.EndEpisode)
+		}
+		if request.EpisodeNum <= 0 {
+			// No specific episode requested — download all episodes
+			return nad.DownloadAllEpisodes(anime)
+		}
+		return nad.DownloadSingleEpisode(anime, request.EpisodeNum)
+	}
+
 	if request.IsRange {
 		util.Infof("Downloading episodes %d-%d of %s",
 			request.StartEpisode, request.EndEpisode, anime.Name)

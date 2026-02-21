@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -655,6 +656,12 @@ func downloadAndPlayEpisode(
 		}
 	}
 
+	// Prompt user to select subtitle language BEFORE download starts
+	// (stdin is free here — no Bubble Tea running yet)
+	if len(util.GlobalSubtitles) > 0 {
+		util.SelectSubtitles()
+	}
+
 	if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 		numThreads := 4 // Define the number of threads for downloading
 
@@ -736,6 +743,9 @@ func downloadAndPlayEpisode(
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 
+			// Download selected subtitles alongside the video file
+			downloadSubtitleFiles(episodePath)
+
 		} else {
 			// Initialize progress model
 			m := &model{
@@ -781,6 +791,9 @@ func downloadAndPlayEpisode(
 			if _, err := p.Run(); err != nil {
 				util.Fatal("Error running progress bar:", err)
 			}
+
+			// Download selected subtitles alongside the video file
+			downloadSubtitleFiles(episodePath)
 		}
 	} else {
 		fmt.Println("Video already downloaded.")
@@ -1135,4 +1148,181 @@ func handleUpscaleFromMenu() error {
 	}
 
 	return nil
+}
+
+// downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
+// the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
+// (already filtered by util.SelectSubtitles).
+func downloadSubtitleFiles(videoPath string) {
+	subs := util.GlobalSubtitles
+	if len(subs) == 0 {
+		return
+	}
+
+	// Check ffmpeg availability — required for muxing subtitles into the video
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		util.Warnf("ffmpeg not found — cannot embed subtitles into the video file")
+		return
+	}
+
+	dir := filepath.Dir(videoPath)
+	client := &http.Client{
+		Transport: api.SafeTransport(30 * time.Second),
+		Timeout:   60 * time.Second,
+	}
+
+	// Collect subtitle files to mux
+	type subEntry struct {
+		tmpPath  string
+		label    string
+		langCode string
+	}
+	var entries []subEntry
+
+	for _, sub := range subs {
+		if sub.URL == "" {
+			continue
+		}
+
+		// Determine extension
+		ext := "vtt"
+		lower := strings.ToLower(sub.URL)
+		if strings.Contains(lower, ".srt") {
+			ext = "srt"
+		} else if strings.Contains(lower, ".ass") {
+			ext = "ass"
+		}
+
+		lang := util.SanitizeForFilename(sub.Label)
+		if lang == "" {
+			lang = util.SanitizeForFilename(sub.Language)
+		}
+		if lang == "" {
+			lang = "unknown"
+		}
+
+		// Download to a temp file
+		tmpPath := filepath.Join(dir, fmt.Sprintf(".tmp_sub_%s.%s", lang, ext))
+		req, reqErr := http.NewRequest("GET", sub.URL, nil)
+		if reqErr != nil {
+			util.Warnf("Failed to create subtitle request (%s): %v", sub.Label, reqErr)
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+		resp, respErr := client.Do(req) // #nosec G107 G704
+		if respErr != nil {
+			util.Warnf("Failed to download subtitle (%s): %v", sub.Label, respErr)
+			continue
+		}
+
+		func() {
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusOK {
+				util.Warnf("Subtitle download failed (%s): HTTP %d", sub.Label, resp.StatusCode)
+				return
+			}
+			out, oErr := os.Create(filepath.Clean(tmpPath))
+			if oErr != nil {
+				util.Warnf("Failed to create temp subtitle file (%s): %v", sub.Label, oErr)
+				return
+			}
+			defer func() { _ = out.Close() }()
+			if _, cpErr := io.Copy(out, resp.Body); cpErr != nil {
+				util.Warnf("Failed to write subtitle (%s): %v", sub.Label, cpErr)
+				return
+			}
+			langCode := sub.Language
+			if langCode == "" {
+				langCode = lang
+			}
+			entries = append(entries, subEntry{tmpPath: tmpPath, label: sub.Label, langCode: langCode})
+		}()
+	}
+
+	if len(entries) == 0 {
+		return
+	}
+
+	// --- Mux subtitles into the video container ---
+	fmt.Printf("Embedding %d subtitle(s) into video...\n", len(entries))
+
+	// buildMuxArgs builds the ffmpeg arguments for a given subtitle codec and output path.
+	buildMuxArgs := func(subCodec, outPath string) []string {
+		a := []string{"-y", "-fflags", "+genpts", "-i", videoPath}
+		for _, e := range entries {
+			a = append(a, "-i", e.tmpPath)
+		}
+		// Map only video and audio from input — skip data streams like timed_id3
+		// which are present in MPEG-TS from HLS downloads and crash MP4/MKV muxing.
+		a = append(a, "-map", "0:v", "-map", "0:a")
+		for i := range entries {
+			a = append(a, "-map", fmt.Sprintf("%d", i+1))
+		}
+		a = append(a, "-c:v", "copy", "-c:a", "copy", "-c:s", subCodec)
+		for i, e := range entries {
+			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode))
+			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label))
+		}
+		a = append(a, outPath)
+		return a
+	}
+
+	// runMux executes ffmpeg and captures stderr for diagnostics.
+	runMux := func(subCodec, outPath string) error {
+		args := buildMuxArgs(subCodec, outPath)
+		util.Debugf("ffmpeg mux cmd: %s %v", ffmpegPath, args)
+		cmd := exec.Command(ffmpegPath, args...) // #nosec G204
+		var stderrBuf bytes.Buffer
+		cmd.Stdout = nil
+		cmd.Stderr = &stderrBuf
+		if err := cmd.Run(); err != nil {
+			util.Debugf("ffmpeg mux failed: %v\nstderr: %s", err, stderrBuf.String())
+			_ = os.Remove(outPath)
+			return err
+		}
+		return nil
+	}
+
+	embedded := false
+
+	// Attempt 1: MP4 container with mov_text subtitle codec
+	tmpMP4 := videoPath + ".muxing.mp4"
+	if err := runMux("mov_text", tmpMP4); err == nil {
+		if renErr := os.Rename(tmpMP4, videoPath); renErr != nil {
+			util.Warnf("Failed to replace video: %v", renErr)
+			_ = os.Remove(tmpMP4)
+		} else {
+			embedded = true
+		}
+	} else {
+		util.Debugf("MP4 mux failed: %v — trying MKV fallback", err)
+	}
+
+	// Attempt 2: MKV container (more tolerant of various subtitle formats / TS inputs)
+	if !embedded {
+		mkvPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".mkv"
+		tmpMKV := mkvPath + ".tmp.mkv"
+		if err := runMux("srt", tmpMKV); err == nil {
+			if renErr := os.Rename(tmpMKV, mkvPath); renErr != nil {
+				util.Warnf("Failed to save MKV: %v", renErr)
+				_ = os.Remove(tmpMKV)
+			} else {
+				embedded = true
+				fmt.Printf("Note: saved as .mkv for better subtitle compatibility\n")
+			}
+		}
+	}
+
+	if embedded {
+		fmt.Printf("Subtitles embedded successfully!\n")
+	} else {
+		util.Warnf("Could not embed subtitles — both MP4 and MKV muxing failed")
+	}
+
+	// Clean up temp subtitle files
+	for _, e := range entries {
+		_ = os.Remove(e.tmpPath)
+	}
 }
