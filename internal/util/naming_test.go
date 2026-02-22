@@ -23,6 +23,14 @@ func TestSanitizeForFilename(t *testing.T) {
 		{"[TV] Breaking Bad", "Breaking Bad"},
 		{"[English] Naruto", "Naruto"},
 		{"[Portuguese] One Piece", "One Piece"},
+		// 9anime-specific patterns
+		{"[Multilanguage] Boruto Naruto Next Generations (HD SUB DUB Ep 293/293)", "Boruto Naruto Next Generations"},
+		{"Naruto (SUB DUB Ep 220/220)", "Naruto"},
+		{"One Piece (HD SUB Ep 1100/1100)", "One Piece"},
+		{"Dragon Ball Super (Multilanguage DUB Ep 131)", "Dragon Ball Super"},
+		{"[HD] Bleach", "Bleach"},
+		{"[Multi Subs] Attack on Titan", "Attack on Titan"},
+		{"Demon Slayer (SUB DUB Ep 44/44)", "Demon Slayer"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.in, func(t *testing.T) {

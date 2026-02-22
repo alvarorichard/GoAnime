@@ -178,18 +178,8 @@ func (d *NineAnimeDownloader) buildOutputDir(anime *models.Anime) string {
 	if animeName == "" {
 		animeName = anime.Name
 	}
-	// Clean name: remove source tags
-	animeName = strings.ReplaceAll(animeName, "[English]", "")
-	animeName = strings.ReplaceAll(animeName, "[9Anime]", "")
-	animeName = strings.TrimSpace(animeName)
-	// Remove extra info in parentheses appended by search, e.g. "Naruto (SUB DUB Ep 220/220)"
-	if idx := strings.LastIndex(animeName, " ("); idx > 0 {
-		candidate := animeName[idx:]
-		// Only strip if it looks like metadata, not a real subtitle like "(Shippuuden)"
-		if strings.ContainsAny(candidate, "0123456789") || strings.Contains(strings.ToUpper(candidate), "SUB") || strings.Contains(strings.ToUpper(candidate), "DUB") {
-			animeName = strings.TrimSpace(animeName[:idx])
-		}
-	}
+	// SanitizeForFilename now handles all bracket tags, parenthesized 9anime
+	// metadata (HD, SUB, DUB, Multilanguage, Ep N/N), and trailing ratings.
 	safeName := util.SanitizeForFilename(animeName)
 	if safeName == "" {
 		safeName = fmt.Sprintf("9Anime_%s", anime.URL)
@@ -203,15 +193,7 @@ func (d *NineAnimeDownloader) episodeFilename(anime *models.Anime, epNum int) st
 	if animeName == "" {
 		animeName = anime.Name
 	}
-	animeName = strings.ReplaceAll(animeName, "[English]", "")
-	animeName = strings.ReplaceAll(animeName, "[9Anime]", "")
-	animeName = strings.TrimSpace(animeName)
-	if idx := strings.LastIndex(animeName, " ("); idx > 0 {
-		candidate := animeName[idx:]
-		if strings.ContainsAny(candidate, "0123456789") || strings.Contains(strings.ToUpper(candidate), "SUB") || strings.Contains(strings.ToUpper(candidate), "DUB") {
-			animeName = strings.TrimSpace(animeName[:idx])
-		}
-	}
+	// SanitizeForFilename handles all cleaning (bracket tags, parens metadata, ratings).
 	safeName := util.SanitizeForFilename(animeName)
 	if safeName == "" {
 		safeName = fmt.Sprintf("9Anime_%s", anime.URL)

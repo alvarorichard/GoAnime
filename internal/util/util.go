@@ -679,18 +679,19 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 // SanitizeForFilename removes characters that are not allowed in file/directory names
 // and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
 // It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
-// and language tags that many anime sources append to titles.
+// and language/source/metadata tags that many anime sources append to titles.
 func SanitizeForFilename(name string) string {
-	// Remove language/source tags in brackets
-	name = strings.ReplaceAll(name, "[English]", "")
-	name = strings.ReplaceAll(name, "[Portuguese]", "")
-	name = strings.ReplaceAll(name, "[Português]", "")
-	name = strings.ReplaceAll(name, "[Movies/TV]", "")
-	name = strings.ReplaceAll(name, "[MoviesTV]", "")
-	name = strings.ReplaceAll(name, "[Movie]", "")
-	name = strings.ReplaceAll(name, "[TV]", "")
-	name = strings.ReplaceAll(name, "[Unknown]", "")
+	// Remove bracketed tags: [English], [Multilanguage], [Movie], [9Anime], [HD], etc.
+	// This regex matches any [...] tag at the beginning or anywhere in the name.
+	bracketTagRe := regexp.MustCompile(`\[(?i:English|Portuguese|Português|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
+	name = bracketTagRe.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)
+
+	// Remove trailing parenthesized 9anime/source metadata.
+	// e.g. "Boruto (HD SUB DUB Ep 293/293)" → "Boruto"
+	// Matches if the parenthesized suffix contains episode numbers, SUB, DUB,
+	// HD, or Multilanguage — i.e. metadata, not a real subtitle like "(Shippuuden)".
+	name = strip9AnimeParenMeta(name)
 
 	// Remove trailing anime source metadata: ratings like "7.27" and age
 	// classifications like "A14", "A12", "A16", "A18", "L", "AL".
@@ -710,6 +711,35 @@ func SanitizeForFilename(name string) string {
 		name = strings.ReplaceAll(name, "  ", " ")
 	}
 	return strings.TrimSpace(name)
+}
+
+// strip9AnimeParenMeta removes trailing parenthesized metadata appended by 9anime
+// search results, e.g. "(HD SUB DUB Ep 293/293)" or "(Multilanguage SUB Ep 100)".
+// It only strips when the parenthesized part is at the END of the string and looks
+// like metadata (contains keywords like SUB, DUB, HD, Multilanguage, or episode numbers),
+// preserving legitimate subtitle parentheses like "(Shippuuden)" or "(Dublado)".
+func strip9AnimeParenMeta(name string) string {
+	idx := strings.LastIndex(name, " (")
+	if idx <= 0 {
+		return name
+	}
+	suffix := name[idx:]
+	// Only strip if the closing paren is at the very end of the string
+	closeIdx := strings.LastIndex(suffix, ")")
+	if closeIdx < 0 || closeIdx != len(suffix)-1 {
+		return name
+	}
+	candidate := strings.ToUpper(suffix)
+	isMetadata := strings.Contains(candidate, "SUB") ||
+		strings.Contains(candidate, "DUB") ||
+		strings.Contains(candidate, "HD") ||
+		strings.Contains(candidate, "MULTILANGUAGE") ||
+		strings.Contains(candidate, "MULTI") ||
+		strings.Contains(candidate, "EP ")
+	if isMetadata {
+		return strings.TrimSpace(name[:idx])
+	}
+	return name
 }
 
 // stripTrailingAnimeMetadata removes common metadata that anime sources append
