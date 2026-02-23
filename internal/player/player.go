@@ -1165,6 +1165,20 @@ func downloadSubtitleFiles(videoPath string) {
 		util.Warnf("ffmpeg not found — cannot embed subtitles into the video file")
 		return
 	}
+	// Resolve symlinks and validate the binary path to prevent PATH-based injection.
+	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
+	if err != nil {
+		util.Warnf("failed to resolve ffmpeg path: %v", err)
+		return
+	}
+	if !filepath.IsAbs(ffmpegPath) {
+		util.Warnf("ffmpeg resolved to a non-absolute path — refusing to execute")
+		return
+	}
+	if fi, statErr := os.Stat(ffmpegPath); statErr != nil || fi.IsDir() {
+		util.Warnf("ffmpeg path is not a valid file: %s", ffmpegPath)
+		return
+	}
 
 	dir := filepath.Dir(videoPath)
 	client := &http.Client{
@@ -1250,9 +1264,9 @@ func downloadSubtitleFiles(videoPath string) {
 
 	// buildMuxArgs builds the ffmpeg arguments for a given subtitle codec and output path.
 	buildMuxArgs := func(subCodec, outPath string) []string {
-		a := []string{"-y", "-fflags", "+genpts", "-i", videoPath}
+		a := []string{"-y", "-fflags", "+genpts", "-i", filepath.Clean(videoPath)}
 		for _, e := range entries {
-			a = append(a, "-i", e.tmpPath)
+			a = append(a, "-i", filepath.Clean(e.tmpPath))
 		}
 		// Map only video and audio from input — skip data streams like timed_id3
 		// which are present in MPEG-TS from HLS downloads and crash MP4/MKV muxing.
@@ -1265,7 +1279,7 @@ func downloadSubtitleFiles(videoPath string) {
 			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode))
 			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label))
 		}
-		a = append(a, outPath)
+		a = append(a, filepath.Clean(outPath))
 		return a
 	}
 
@@ -1273,7 +1287,7 @@ func downloadSubtitleFiles(videoPath string) {
 	runMux := func(subCodec, outPath string) error {
 		args := buildMuxArgs(subCodec, outPath)
 		util.Debugf("ffmpeg mux cmd: %s %v", ffmpegPath, args)
-		cmd := exec.Command(ffmpegPath, args...) // #nosec G204
+		cmd := exec.Command(ffmpegPath, args...) // #nosec G204 -- ffmpegPath is validated: resolved via EvalSymlinks, confirmed absolute and a regular file
 		var stderrBuf bytes.Buffer
 		cmd.Stdout = nil
 		cmd.Stderr = &stderrBuf
