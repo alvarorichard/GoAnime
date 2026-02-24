@@ -22,22 +22,24 @@ import (
 )
 
 const (
-	SFlixBase      = "https://sflix.ps"
-	SFlixAPI       = "https://dec.eatmynerds.live" // Same API as FlixHQ for extraction
-	SFlixUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+	SFlixBase        = "https://sflix.ps"
+	SFlixAPI         = "https://dec.eatmynerds.live" // Same API as FlixHQ for extraction
+	SFlixFallbackAPI = "https://decrypt.broggl.farm" // Fallback API when primary fails
+	SFlixUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 )
 
 // SFlixClient handles interactions with SFlix
 type SFlixClient struct {
-	client      *http.Client
-	baseURL     string
-	apiURL      string
-	userAgent   string
-	maxRetries  int
-	retryDelay  time.Duration
-	searchCache sync.Map
-	infoCache   sync.Map
-	serverCache sync.Map
+	client         *http.Client
+	baseURL        string
+	apiURL         string
+	fallbackAPIURL string
+	userAgent      string
+	maxRetries     int
+	retryDelay     time.Duration
+	searchCache    sync.Map
+	infoCache      sync.Map
+	serverCache    sync.Map
 }
 
 // SFlixMedia represents a movie or TV show from SFlix
@@ -134,12 +136,13 @@ type SFlixSource struct {
 // NewSFlixClient creates a new SFlix client
 func NewSFlixClient() *SFlixClient {
 	return &SFlixClient{
-		client:     util.GetFastClient(),
-		baseURL:    SFlixBase,
-		apiURL:     SFlixAPI,
-		userAgent:  SFlixUserAgent,
-		maxRetries: 2,
-		retryDelay: 300 * time.Millisecond,
+		client:         util.GetFastClient(),
+		baseURL:        SFlixBase,
+		apiURL:         SFlixAPI,
+		fallbackAPIURL: SFlixFallbackAPI,
+		userAgent:      SFlixUserAgent,
+		maxRetries:     2,
+		retryDelay:     300 * time.Millisecond,
 	}
 }
 
@@ -149,11 +152,12 @@ func NewSFlixClientWithContext(timeout time.Duration, maxRetries int) *SFlixClie
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		baseURL:    SFlixBase,
-		apiURL:     SFlixAPI,
-		userAgent:  SFlixUserAgent,
-		maxRetries: maxRetries,
-		retryDelay: 300 * time.Millisecond,
+		baseURL:        SFlixBase,
+		apiURL:         SFlixAPI,
+		fallbackAPIURL: SFlixFallbackAPI,
+		userAgent:      SFlixUserAgent,
+		maxRetries:     maxRetries,
+		retryDelay:     300 * time.Millisecond,
 	}
 }
 
@@ -953,8 +957,33 @@ func (c *SFlixClient) extractSourcesFromServer(ctx context.Context, server SFlix
 }
 
 // extractFromEmbedURL extracts video sources from an embed URL
+// Uses fallback API if primary fails
 func (c *SFlixClient) extractFromEmbedURL(ctx context.Context, embedURL string) (*SFlixVideoSources, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, embedURL)
+	// Try primary API first
+	sources, err := c.extractFromEmbedURLSingle(ctx, c.apiURL, embedURL)
+	if err == nil && sources != nil && len(sources.Sources) > 0 {
+		return sources, nil
+	}
+
+	// Try fallback if available
+	if c.fallbackAPIURL != "" && c.fallbackAPIURL != c.apiURL {
+		util.Debug("SFlix extractFromEmbedURL primary failed, trying fallback", "error", err)
+		sources, fallbackErr := c.extractFromEmbedURLSingle(ctx, c.fallbackAPIURL, embedURL)
+		if fallbackErr == nil && sources != nil && len(sources.Sources) > 0 {
+			return sources, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("both APIs failed: primary: %w; fallback: %v", err, fallbackErr)
+		}
+		return nil, fallbackErr
+	}
+
+	return nil, err
+}
+
+// extractFromEmbedURLSingle extracts video sources from a single API endpoint
+func (c *SFlixClient) extractFromEmbedURLSingle(ctx context.Context, apiBase string, embedURL string) (*SFlixVideoSources, error) {
+	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedURL))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -1249,8 +1278,34 @@ func (c *SFlixClient) ExtractStreamInfo(embedLink string, preferredQuality strin
 }
 
 // ExtractStreamInfoWithContext extracts stream info with context support
+// Uses fallback API URL if the primary API fails (matching lobster behavior)
 func (c *SFlixClient) ExtractStreamInfoWithContext(ctx context.Context, embedLink string, preferredQuality string, subsLanguage string) (*SFlixStreamInfo, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, embedLink)
+	// Try primary API first
+	streamInfo, err := c.extractStreamFromAPI(ctx, c.apiURL, embedLink, preferredQuality, subsLanguage)
+	if err == nil && streamInfo != nil && streamInfo.VideoURL != "" {
+		return streamInfo, nil
+	}
+
+	// If primary fails and we have a fallback, try it
+	if c.fallbackAPIURL != "" && c.fallbackAPIURL != c.apiURL {
+		util.Debug("SFlix primary API failed, trying fallback", "primary", c.apiURL, "fallback", c.fallbackAPIURL, "error", err)
+		streamInfo, fallbackErr := c.extractStreamFromAPI(ctx, c.fallbackAPIURL, embedLink, preferredQuality, subsLanguage)
+		if fallbackErr == nil && streamInfo != nil && streamInfo.VideoURL != "" {
+			return streamInfo, nil
+		}
+		// If both failed, return the original error
+		if err != nil {
+			return nil, fmt.Errorf("both APIs failed: primary: %w; fallback: %v", err, fallbackErr)
+		}
+		return nil, fallbackErr
+	}
+
+	return nil, err
+}
+
+// extractStreamFromAPI extracts stream info from a specific API URL
+func (c *SFlixClient) extractStreamFromAPI(ctx context.Context, apiBase string, embedLink string, preferredQuality string, subsLanguage string) (*SFlixStreamInfo, error) {
+	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedLink))
 
 	util.Debug("SFlix API request", "url", apiURL, "embed", embedLink)
 
@@ -1309,7 +1364,6 @@ func (c *SFlixClient) ExtractStreamInfoWithContext(ctx context.Context, embedLin
 	streamInfo := &SFlixStreamInfo{
 		Headers: make(map[string]string),
 	}
-	streamInfo.Headers["Referer"] = c.baseURL
 
 	// Build quality options
 	if result.File != "" {

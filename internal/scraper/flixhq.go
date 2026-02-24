@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	FlixHQBase      = "https://flixhq.to"
-	FlixHQAPI       = "https://dec.eatmynerds.live"
-	FlixHQUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+	FlixHQBase        = "https://flixhq.to"
+	FlixHQAPI         = "https://dec.eatmynerds.live"
+	FlixHQFallbackAPI = "https://decrypt.broggl.farm"
+	FlixHQUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 )
 
 // MediaType represents the type of media (movie or TV show)
@@ -76,15 +77,16 @@ var DefaultServerPriority = []ServerName{
 
 // FlixHQClient handles interactions with FlixHQ
 type FlixHQClient struct {
-	client      *http.Client
-	baseURL     string
-	apiURL      string
-	userAgent   string
-	maxRetries  int
-	retryDelay  time.Duration
-	searchCache sync.Map // Caches search results
-	infoCache   sync.Map // Caches media info
-	serverCache sync.Map // Caches server lists
+	client         *http.Client
+	baseURL        string
+	apiURL         string
+	fallbackAPIURL string
+	userAgent      string
+	maxRetries     int
+	retryDelay     time.Duration
+	searchCache    sync.Map // Caches search results
+	infoCache      sync.Map // Caches media info
+	serverCache    sync.Map // Caches server lists
 }
 
 // FlixHQMedia represents a movie or TV show from FlixHQ
@@ -180,12 +182,13 @@ type FlixHQSource struct {
 // NewFlixHQClient creates a new FlixHQ client
 func NewFlixHQClient() *FlixHQClient {
 	return &FlixHQClient{
-		client:     util.GetFastClient(), // Use shared fast client
-		baseURL:    FlixHQBase,
-		apiURL:     FlixHQAPI,
-		userAgent:  FlixHQUserAgent,
-		maxRetries: 2,
-		retryDelay: 300 * time.Millisecond,
+		client:         util.GetFastClient(), // Use shared fast client
+		baseURL:        FlixHQBase,
+		apiURL:         FlixHQAPI,
+		fallbackAPIURL: FlixHQFallbackAPI,
+		userAgent:      FlixHQUserAgent,
+		maxRetries:     2,
+		retryDelay:     300 * time.Millisecond,
 	}
 }
 
@@ -195,11 +198,12 @@ func NewFlixHQClientWithContext(timeout time.Duration, maxRetries int) *FlixHQCl
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		baseURL:    FlixHQBase,
-		apiURL:     FlixHQAPI,
-		userAgent:  FlixHQUserAgent,
-		maxRetries: maxRetries,
-		retryDelay: 300 * time.Millisecond,
+		baseURL:        FlixHQBase,
+		apiURL:         FlixHQAPI,
+		fallbackAPIURL: FlixHQFallbackAPI,
+		userAgent:      FlixHQUserAgent,
+		maxRetries:     maxRetries,
+		retryDelay:     300 * time.Millisecond,
 	}
 }
 
@@ -657,151 +661,7 @@ func (c *FlixHQClient) GetEmbedLink(episodeID string) (string, error) {
 
 // ExtractStreamInfo extracts video URL and subtitles from embed link
 func (c *FlixHQClient) ExtractStreamInfo(embedLink string, preferredQuality string, subsLanguage string) (*FlixHQStreamInfo, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, url.QueryEscape(embedLink))
-
-	util.Debug("FlixHQ API request", "url", apiURL, "embed", embedLink)
-
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	c.decorateRequest(req)
-
-	resp, err := c.client.Do(req) // #nosec G704
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status: %s", resp.Status)
-	}
-
-	// Read the full response body for better error handling
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	util.Debug("FlixHQ API response", "body", string(bodyBytes))
-
-	var result struct {
-		File    string `json:"file"`
-		Sources []struct {
-			File    string `json:"file"`
-			Type    string `json:"type"`
-			Quality string `json:"quality"`
-		} `json:"sources"`
-		Tracks []struct {
-			File    string `json:"file"`
-			Label   string `json:"label"`
-			Kind    string `json:"kind"`
-			Default bool   `json:"default"`
-		} `json:"tracks"`
-		// Additional fields that might be returned
-		Message string `json:"message"`
-		Error   string `json:"error"`
-	}
-
-	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w (body: %s)", err, string(bodyBytes))
-	}
-
-	// Check for error messages
-	if result.Error != "" {
-		return nil, fmt.Errorf("API error: %s", result.Error)
-	}
-	if result.Message != "" && result.File == "" && len(result.Sources) == 0 {
-		return nil, fmt.Errorf("API message: %s", result.Message)
-	}
-
-	streamInfo := &FlixHQStreamInfo{
-		Qualities: make([]FlixHQQualityOption, 0),
-	}
-
-	// Build quality options from sources
-	if result.File != "" {
-		streamInfo.Qualities = append(streamInfo.Qualities, FlixHQQualityOption{
-			Quality: QualityAuto,
-			URL:     result.File,
-			IsM3U8:  strings.Contains(result.File, ".m3u8"),
-		})
-	}
-	for _, source := range result.Sources {
-		streamInfo.Qualities = append(streamInfo.Qualities, FlixHQQualityOption{
-			Quality: parseQuality(source.Quality),
-			URL:     source.File,
-			IsM3U8:  strings.Contains(source.Type, "hls") || strings.Contains(source.File, ".m3u8"),
-		})
-	}
-
-	// Get video URL
-	if result.File != "" {
-		streamInfo.VideoURL = result.File
-		util.Debug("FlixHQ got file", "url", result.File)
-		// Apply quality preference
-		if preferredQuality != "" && preferredQuality != "auto" && preferredQuality != "best" {
-			streamInfo.VideoURL = strings.Replace(streamInfo.VideoURL, "/playlist.m3u8",
-				fmt.Sprintf("/%s/index.m3u8", preferredQuality), 1)
-		}
-	} else if len(result.Sources) > 0 {
-		util.Debug("FlixHQ got sources", "count", len(result.Sources))
-		// Find preferred quality or use first
-		for _, source := range result.Sources {
-			if source.Quality == preferredQuality {
-				streamInfo.VideoURL = source.File
-				break
-			}
-		}
-		if streamInfo.VideoURL == "" {
-			streamInfo.VideoURL = result.Sources[0].File
-		}
-	}
-
-	if streamInfo.VideoURL == "" {
-		return nil, errors.New("no video URL found")
-	}
-
-	// Get subtitles matching preferred language
-	for _, track := range result.Tracks {
-		if track.Kind == "captions" || track.Kind == "subtitles" {
-			sub := FlixHQSubtitle{
-				URL:      track.File,
-				Label:    track.Label,
-				Language: c.extractLanguageFromLabel(track.Label),
-			}
-			streamInfo.Subtitles = append(streamInfo.Subtitles, sub)
-		}
-	}
-
-	// Filter subtitles by preferred language if specified
-	if subsLanguage != "" && len(streamInfo.Subtitles) > 0 {
-		var filteredSubs []FlixHQSubtitle
-		for _, sub := range streamInfo.Subtitles {
-			if strings.Contains(strings.ToLower(sub.Language), strings.ToLower(subsLanguage)) ||
-				strings.Contains(strings.ToLower(sub.Label), strings.ToLower(subsLanguage)) {
-				filteredSubs = append(filteredSubs, sub)
-			}
-		}
-		if len(filteredSubs) > 0 {
-			streamInfo.Subtitles = filteredSubs
-		}
-	}
-
-	// Extract referer from the embed link - this is critical for avoiding 403 errors
-	// The streaming server expects the Referer to be the origin of the embed URL
-	// e.g., https://megacloud.tv/embed-2/abc123 -> https://megacloud.tv/
-	if parsedURL, parseErr := url.Parse(embedLink); parseErr == nil && parsedURL.Host != "" {
-		streamInfo.Referer = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
-		streamInfo.Headers = map[string]string{
-			"Referer": streamInfo.Referer,
-			"Origin":  strings.TrimSuffix(streamInfo.Referer, "/"),
-		}
-		util.Debug("FlixHQ set stream referer", "referer", streamInfo.Referer, "embedLink", embedLink)
-	}
-
-	return streamInfo, nil
+	return c.ExtractStreamInfoWithContext(context.Background(), embedLink, preferredQuality, subsLanguage)
 }
 
 // GetStreamURL is a convenience method that combines all steps to get a stream URL
@@ -1200,8 +1060,33 @@ func (c *FlixHQClient) extractSourcesFromServer(ctx context.Context, server Flix
 }
 
 // extractFromEmbedURL extracts video sources from an embed URL
+// Uses fallback API if primary fails
 func (c *FlixHQClient) extractFromEmbedURL(ctx context.Context, embedURL string) (*FlixHQVideoSources, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, url.QueryEscape(embedURL))
+	// Try primary API first
+	sources, err := c.extractFromEmbedURLSingle(ctx, c.apiURL, embedURL)
+	if err == nil && sources != nil && len(sources.Sources) > 0 {
+		return sources, nil
+	}
+
+	// Try fallback if available
+	if c.fallbackAPIURL != "" && c.fallbackAPIURL != c.apiURL {
+		util.Debug("FlixHQ extractFromEmbedURL primary failed, trying fallback", "error", err)
+		sources, fallbackErr := c.extractFromEmbedURLSingle(ctx, c.fallbackAPIURL, embedURL)
+		if fallbackErr == nil && sources != nil && len(sources.Sources) > 0 {
+			return sources, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("both APIs failed: primary: %w; fallback: %v", err, fallbackErr)
+		}
+		return nil, fallbackErr
+	}
+
+	return nil, err
+}
+
+// extractFromEmbedURLSingle extracts video sources from a single API endpoint
+func (c *FlixHQClient) extractFromEmbedURLSingle(ctx context.Context, apiBase string, embedURL string) (*FlixHQVideoSources, error) {
+	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedURL))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -1606,8 +1491,34 @@ func (c *FlixHQClient) ClearCache() {
 }
 
 // ExtractStreamInfoWithContext extracts stream info with context support
+// Uses fallback API URL if the primary API fails (matching lobster behavior)
 func (c *FlixHQClient) ExtractStreamInfoWithContext(ctx context.Context, embedLink string, preferredQuality string, subsLanguage string) (*FlixHQStreamInfo, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", c.apiURL, url.QueryEscape(embedLink))
+	// Try primary API first
+	streamInfo, err := c.extractStreamFromAPI(ctx, c.apiURL, embedLink, preferredQuality, subsLanguage)
+	if err == nil && streamInfo != nil && streamInfo.VideoURL != "" {
+		return streamInfo, nil
+	}
+
+	// If primary fails and we have a fallback, try it
+	if c.fallbackAPIURL != "" && c.fallbackAPIURL != c.apiURL {
+		util.Debug("FlixHQ primary API failed, trying fallback", "primary", c.apiURL, "fallback", c.fallbackAPIURL, "error", err)
+		streamInfo, fallbackErr := c.extractStreamFromAPI(ctx, c.fallbackAPIURL, embedLink, preferredQuality, subsLanguage)
+		if fallbackErr == nil && streamInfo != nil && streamInfo.VideoURL != "" {
+			return streamInfo, nil
+		}
+		// If both failed, return the original error
+		if err != nil {
+			return nil, fmt.Errorf("both APIs failed: primary: %w; fallback: %v", err, fallbackErr)
+		}
+		return nil, fallbackErr
+	}
+
+	return nil, err
+}
+
+// extractStreamFromAPI extracts stream info from a specific API URL
+func (c *FlixHQClient) extractStreamFromAPI(ctx context.Context, apiBase string, embedLink string, preferredQuality string, subsLanguage string) (*FlixHQStreamInfo, error) {
+	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedLink))
 
 	util.Debug("FlixHQ API request", "url", apiURL, "embed", embedLink)
 
@@ -1666,7 +1577,6 @@ func (c *FlixHQClient) ExtractStreamInfoWithContext(ctx context.Context, embedLi
 	streamInfo := &FlixHQStreamInfo{
 		Headers: make(map[string]string),
 	}
-	streamInfo.Headers["Referer"] = c.baseURL
 
 	// Build quality options
 	if result.File != "" {
@@ -1736,16 +1646,17 @@ func (c *FlixHQClient) ExtractStreamInfoWithContext(ctx context.Context, embedLi
 
 	// Filter subtitles by preferred language
 	if subsLanguage != "" && len(streamInfo.Subtitles) > 0 {
-		var filteredSubs []FlixHQSubtitle
-		for _, sub := range streamInfo.Subtitles {
-			if strings.Contains(strings.ToLower(sub.Language), strings.ToLower(subsLanguage)) ||
-				strings.Contains(strings.ToLower(sub.Label), strings.ToLower(subsLanguage)) {
-				filteredSubs = append(filteredSubs, sub)
-			}
-		}
-		if len(filteredSubs) > 0 {
-			streamInfo.Subtitles = filteredSubs
-		}
+		streamInfo.Subtitles = c.filterSubtitlesByLanguage(streamInfo.Subtitles, subsLanguage)
+	}
+
+	// Extract referer from the embed link - this is critical for avoiding 403 errors
+	// The streaming server expects the Referer to be the origin of the embed URL
+	// e.g., https://megacloud.tv/embed-2/abc123 -> https://megacloud.tv/
+	if parsedURL, parseErr := url.Parse(embedLink); parseErr == nil && parsedURL.Host != "" {
+		streamInfo.Referer = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
+		streamInfo.Headers["Referer"] = streamInfo.Referer
+		streamInfo.Headers["Origin"] = strings.TrimSuffix(streamInfo.Referer, "/")
+		util.Debug("FlixHQ set stream referer", "referer", streamInfo.Referer, "embedLink", embedLink)
 	}
 
 	return streamInfo, nil
