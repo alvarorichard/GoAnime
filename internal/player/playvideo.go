@@ -314,6 +314,14 @@ func playVideo(
 		)
 	}
 
+	// On Linux with Wayland, explicitly set the GPU context so mpv does not
+	// fall back to an X11 context (which may be unavailable on pure-Wayland
+	// sessions) and end up playing audio-only without a video window.
+	if runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != "" {
+		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
+		util.Debugf("Wayland session detected — forcing gpu-context=wayland")
+	}
+
 	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
 	// Many streaming servers require specific User-Agent and Referer headers
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")

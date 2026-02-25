@@ -134,6 +134,7 @@ func StartVideo(link string, args []string) (string, error) {
 	mpvArgs := []string{
 		"--no-terminal",
 		"--quiet",
+		"--force-window=yes",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 	}
 	// Validate and filter any additional args before passing to mpv
@@ -239,6 +240,7 @@ func filterMPVArgs(args []string) []string {
 	allowedWithValuePrefixes := []string{
 		"--hwdec=",
 		"--vo=",
+		"--gpu-context=",
 		"--profile=",
 		"--cache=",
 		"--demuxer-max-bytes=",
