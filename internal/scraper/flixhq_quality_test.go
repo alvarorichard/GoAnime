@@ -110,7 +110,10 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 
 	sources, err := client.GetSourcesWithContext(ctx, movie.ID, true)
 	if err != nil {
-		if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Bad Gateway") {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
+			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
 		}
 		t.Fatalf("GetSources failed: %v", err)
@@ -149,7 +152,10 @@ func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
 
 	qualities, err := client.GetAvailableQualitiesWithContext(ctx, movie.ID, true)
 	if err != nil {
-		if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "Bad Gateway") {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
+			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
 		}
 		t.Fatalf("GetAvailableQualities failed: %v", err)
