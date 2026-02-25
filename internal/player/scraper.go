@@ -762,6 +762,17 @@ func isValidVideoURL(url string) bool {
 	return false
 }
 
+// needsVideoExtraction returns true when the URL is an intermediate endpoint
+// (e.g. AnimeFire video JSON API or a Blogger embed page) that must be resolved
+// to the actual CDN video URL before it can be played by mpv.
+func needsVideoExtraction(videoURL string) bool {
+	lower := strings.ToLower(videoURL)
+	return strings.Contains(lower, "animefire.io/video/") ||
+		strings.Contains(lower, "animefire.plus/video/") ||
+		strings.Contains(lower, "blogger.com/video") ||
+		strings.Contains(lower, "blogspot.com/video")
+}
+
 // extractActualVideoURL processes the video source and allows the user to select quality
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
@@ -812,18 +823,21 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 				return videoResponse.Data[0].Src, nil
 			}
 
-			// Use global quality preference only if it's a specific quality (not "best")
+			// Auto-select quality only when the user has already picked a
+			// specific quality during this session (e.g. "720p").
+			// When GlobalQuality is "best" (the default) we still show the
+			// interactive prompt so the user can choose manually.
 			if util.GlobalQuality != "" && util.GlobalQuality != "best" {
 				selectedSrc := selectQualityFromOptions(videoResponse.Data, util.GlobalQuality)
 				if selectedSrc != "" {
 					if util.IsDebug {
-						util.Debugf("Using global quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
+						util.Debugf("Auto-selected quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
 					}
 					return selectedSrc, nil
 				}
 			}
 
-			// Always prompt user for quality selection to maintain the 360p, 720p, 1080p options
+			// Prompt user for quality selection
 			// Create options for huh.Select with back option first
 			var options []huh.Option[string]
 			options = append(options, huh.NewOption("← Back", "back"))

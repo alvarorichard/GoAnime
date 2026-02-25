@@ -860,9 +860,18 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 		return
 	}
 
+	// NOTE: We intentionally do NOT call GetVideoURLForEpisode here because it
+	// may invoke extractActualVideoURL which contains an interactive (huh.Select)
+	// quality picker. Running that in a background goroutine while the foreground
+	// showPlayerMenu is also using huh.Select causes terminal corruption and
+	// "user aborted" errors.  Preloading is a best-effort optimisation; if we
+	// can't do it safely we just skip it.
 	go func() {
-		_, _ = GetVideoURLForEpisode(episodes[currentIndex+1].URL)
-		// Preloading errors are ignored as this is not critical
+		// Only extract the intermediate video source URL (no interactive prompt).
+		url, err := extractVideoURL(nextEpisodeURL)
+		if err == nil && url != "" {
+			util.Debugf("Preloaded next episode source URL: %s", url)
+		}
 	}()
 }
 
@@ -997,9 +1006,21 @@ func handleUserInput(
 	}
 
 	for {
+		// Check if mpv is still running before showing the menu.
+		// If mpv exited (e.g., due to a bad URL), quit gracefully instead of
+		// showing a menu that the user cannot meaningfully interact with.
+		if _, pingErr := mpvSendCommand(socketPath, []any{"get_property", "pid"}); pingErr != nil {
+			util.Debugf("mpv process appears to have exited, returning to caller")
+			return ErrBackToDownloadOptions
+		}
+
 		choice, err := showPlayerMenu(animeName, currentEpisodeNum, isMovieOrTV)
 		if err != nil {
-			return fmt.Errorf("error showing menu: %w", err)
+			// If the menu was disrupted (e.g., by a concurrent terminal writer),
+			// treat it as "go back" rather than a fatal error.
+			util.Debugf("Player menu interrupted: %v", err)
+			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			return ErrBackToDownloadOptions
 		}
 
 		switch choice {

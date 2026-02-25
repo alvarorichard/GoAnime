@@ -505,23 +505,31 @@ func HandleDownloadAndPlay(
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
 
-			// For HLS streams, use directly
 			if isHLSStream {
+				// HLS streams are already resolved, play directly
 				videoURLToPlay = videoURL
 				if util.IsDebug {
 					util.Debugf("HLS stream detected, playing directly: %s", videoURLToPlay)
 				}
-			} else if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
-				strings.Contains(videoURL, "dropbox.com") ||
-				strings.Contains(videoURL, "wixmp.com") ||
-				strings.HasSuffix(videoURL, ".mp4")) {
-				// Use direct stream URL (SharePoint, Dropbox, etc.)
+			} else if videoURL != "" && needsVideoExtraction(videoURL) {
+				// Intermediate URL (e.g. animefire.io/video/) needs resolution
+				// to obtain the final CDN video URL.
+				if util.IsDebug {
+					util.Debugf("Intermediate URL detected, resolving: %s", videoURL)
+				}
+				if resolved, err := extractActualVideoURL(videoURL); err == nil && resolved != "" {
+					videoURLToPlay = resolved
+				}
+			} else if videoURL != "" && strings.HasPrefix(videoURL, "http") {
+				// The enhanced API already resolved a direct stream URL (CDN,
+				// mp4, etc.). Use it directly — re-extracting may trigger
+				// duplicate quality prompts or cause CDN URLs to expire.
 				videoURLToPlay = videoURL
 				if util.IsDebug {
-					util.Debugf("Using direct stream URL: %s", videoURLToPlay)
+					util.Debugf("Using resolved stream URL directly: %s", videoURLToPlay)
 				}
-			} else {
-				// Try to extract video URL from episode page
+			} else if videoURL != "" {
+				// Non-HTTP URL (e.g. episode ID). Try legacy extraction.
 				if len(episodes) > 0 && selectedEpisodeNum > 0 {
 					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
 					if found {
@@ -534,7 +542,7 @@ func HandleDownloadAndPlay(
 					}
 				}
 				// Fallback: try to extract from original videoURL
-				if videoURLToPlay == "" && videoURL != "" {
+				if videoURLToPlay == "" {
 					if util.IsDebug {
 						util.Debugf("Fallback: extracting from original URL: %s", videoURL)
 					}
