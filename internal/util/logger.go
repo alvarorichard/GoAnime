@@ -59,6 +59,7 @@ func GetLogDir() string {
 }
 
 // initFileLogger creates the log file and initializes the file-only logger.
+// Each run creates a unique log file (date + time) so logs are never overwritten or mixed.
 // Returns the file handle (caller must close) or nil on error.
 func initFileLogger() *os.File {
 	logDir := GetLogDir()
@@ -67,20 +68,38 @@ func initFileLogger() *os.File {
 		return nil
 	}
 
-	// Log file named with date for easy identification
-	filename := fmt.Sprintf("goanime_%s.log", time.Now().Format("2006-01-02"))
+	// Each session gets a unique file: goanime_2026-02-27_15-44-10.log
+	// This ensures multiple runs per day never collide or mix logs
+	now := time.Now()
+	filename := fmt.Sprintf("goanime_%s.log", now.Format("2006-01-02_15-04-05"))
 	logPath := filepath.Join(logDir, filename)
-	LogFilePath = logPath
 
-	// Open in append mode so multiple runs on the same day accumulate
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not open log file %s: %v\n", logPath, err)
-		return nil
+	// In the unlikely event of two runs in the same second, append a counter
+	if _, err := os.Stat(logPath); err == nil {
+		for i := 2; i <= 100; i++ {
+			candidate := filepath.Join(logDir, fmt.Sprintf("goanime_%s_%d.log", now.Format("2006-01-02_15-04-05"), i))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				logPath = candidate
+				break
+			}
+		}
 	}
 
-	// Write a session header to the file
-	header := fmt.Sprintf("\n===== GoAnime Debug Session — %s =====\n", time.Now().Format("2006-01-02 15:04:05"))
+	LogFilePath = logPath
+
+	// Create new file exclusively for this session (O_CREATE|O_WRONLY, no O_APPEND needed since it's a fresh file)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) // #nosec G304
+	if err != nil {
+		// Fallback to append mode if O_EXCL fails for any reason
+		f, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not open log file %s: %v\n", logPath, err)
+			return nil
+		}
+	}
+
+	// Write session header
+	header := fmt.Sprintf("===== GoAnime Debug Session — %s =====\n\n", now.Format("2006-01-02 15:04:05"))
 	_, _ = f.WriteString(header)
 
 	// Create a plain-text logger that writes to the file (no ANSI colors)
