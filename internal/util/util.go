@@ -192,9 +192,12 @@ func RunCleanup() {
 // ErrorHandler returns a string with the error message, if debug mode is enabled, it will return the full error with details.
 func ErrorHandler(err error) string {
 	if IsDebug {
+		if LogFilePath != "" {
+			return fmt.Sprintf("%+v\n\nDebug log saved to: %s", err, LogFilePath)
+		}
 		return fmt.Sprintf("%+v", err)
 	} else {
-		return fmt.Sprintf("%v -- run the program with -debug to see details", err)
+		return fmt.Sprintf("%v -- run the program with --debug to see details and save a log file", err)
 	}
 }
 

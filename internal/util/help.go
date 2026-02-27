@@ -97,7 +97,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString("\n")
 	helpContent.WriteString(sectionTitleStyle.Render("Options:"))
 	helpContent.WriteString("\n")
-	addOption(&helpContent, "--debug", "Enable debug mode for detailed error information and performance metrics.")
+	addOption(&helpContent, "--debug", "Enable debug mode for detailed error information and performance metrics. Logs are saved to a file for easy sharing.")
 	addOption(&helpContent, "--perf", "Enable performance profiling - shows timing metrics for all operations.")
 	addOption(&helpContent, "--help / -h", "Display this beautiful help message with detailed usage information.")
 	addOption(&helpContent, "--version", "Show version information and build details.")
