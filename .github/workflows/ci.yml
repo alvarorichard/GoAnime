@@ -71,6 +71,12 @@ jobs:
       - name: Run Gosec Security Scanner
         run: gosec ./...
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Scan for vulnerabilities
+        run: govulncheck ./...
+
       - name: Run tests
         shell: bash
         run: go test -v -coverprofile=coverage.out ./...
