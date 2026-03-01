@@ -236,14 +236,20 @@ jobs:
 
       - name: Download mpv for Windows
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Download latest mpv from zhongfly/mpv-winbuild GitHub releases
           # Using GitHub API to get the latest release and download x86_64-v3 build
           
           Write-Host "Fetching latest mpv release from zhongfly/mpv-winbuild..."
           
-          # Get the latest release info from GitHub API
-          $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers @{ "User-Agent" = "GoAnime-CI" }
+          # Get the latest release info from GitHub API (authenticated to avoid rate limits)
+          $headers = @{ "User-Agent" = "GoAnime-CI" }
+          if ($env:GITHUB_TOKEN) {
+            $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN"
+          }
+          $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers $headers
           
           Write-Host "Latest release: $($releaseInfo.tag_name)"
           

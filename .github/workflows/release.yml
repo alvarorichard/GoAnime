@@ -234,13 +234,19 @@ jobs:
 
       - name: Download MPV for Windows
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Create bin directory
           New-Item -ItemType Directory -Force -Path build/staging/bin
           
           # Get latest MPV release from GitHub (shinchiro builds - official recommended)
           Write-Host "Fetching latest MPV release..."
-          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers @{ "User-Agent" = "GoAnime-CI" }
+          $headers = @{ "User-Agent" = "GoAnime-CI" }
+          if ($env:GITHUB_TOKEN) {
+            $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN"
+          }
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers $headers
           
           # Find the 64-bit release asset
           $asset = $releases.assets | Where-Object { $_.name -match "mpv-x86_64-.*\.7z$" -and $_.name -notmatch "dev" } | Select-Object -First 1
