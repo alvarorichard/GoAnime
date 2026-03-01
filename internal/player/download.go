@@ -142,9 +142,7 @@ func safePartPath(destPath string, part int) (string, error) {
 // DownloadVideo downloads a video using multiple threads.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
-	if util.IsDebug {
-		util.Logger.Debug("DownloadVideo started", "url", url)
-	}
+	util.Debug("DownloadVideo started", "url", url)
 	destPath = filepath.Clean(destPath)
 	httpClient := &http.Client{
 		Transport: api.SafeTransport(10 * time.Second),
@@ -180,9 +178,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if err != nil {
 		return fmt.Errorf("failed to combine parts: %v", err)
 	}
-	if util.IsDebug {
-		util.Logger.Debug("DownloadVideo completed", "url", url, "duration", time.Since(start))
-	}
+	util.Debug("DownloadVideo completed", "url", url, "duration", time.Since(start))
 	return nil
 }
 
@@ -343,8 +339,8 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	if m != nil && util.IsDebug {
-		util.Logger.Debug("Starting native HLS download", "streamURL", safeURL)
+	if m != nil {
+		util.Debug("Starting native HLS download", "streamURL", safeURL)
 	}
 
 	// Get referer from global storage (set from embed URL in GetFlixHQStreamURL)
@@ -353,9 +349,7 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		referer = extractRefererFromURL(safeURL)
 	}
 
-	if util.IsDebug {
-		util.Logger.Debug("Native HLS download using referer", "referer", referer, "streamURL", safeURL)
-	}
+	util.Debug("Native HLS download using referer", "referer", referer, "streamURL", safeURL)
 
 	// Prepare headers with proper referer and origin
 	headers := map[string]string{
@@ -595,9 +589,7 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 // HandleBatchDownload performs batch download of episodes.
 func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 	start := time.Now()
-	if util.IsDebug {
-		util.Logger.Debug("HandleBatchDownload started", "animeURL", animeURL)
-	}
+	util.Debug("HandleBatchDownload started", "animeURL", animeURL)
 	startNum, endNum, err := getEpisodeRange()
 	if err != nil {
 		return fmt.Errorf("invalid episode range: %w", err)
@@ -763,9 +755,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 		return err
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
-	if util.IsDebug {
-		util.Logger.Debug("HandleBatchDownload completed", "animeURL", animeURL, "duration", time.Since(start))
-	}
+	util.Debug("HandleBatchDownload completed", "animeURL", animeURL, "duration", time.Since(start))
 
 	// Ask user which episode from the downloaded range they want to play
 	return askAndPlayDownloadedEpisode(episodes, animeURL, startNum, endNum)
@@ -776,9 +766,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 // AniSkip sidecar generation when AllAnime Smart is enabled.
 func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startNum, endNum int) error {
 	start := time.Now()
-	if util.IsDebug {
-		util.Logger.Debug("HandleBatchDownloadRange started", "animeURL", animeURL, "start", startNum, "end", endNum)
-	}
+	util.Debug("HandleBatchDownloadRange started", "animeURL", animeURL, "start", startNum, "end", endNum)
 
 	if startNum < 1 || endNum < startNum {
 		return fmt.Errorf("invalid episode range: %d-%d", startNum, endNum)
@@ -930,9 +918,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 		return err
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
-	if util.IsDebug {
-		util.Logger.Debug("HandleBatchDownloadRange completed", "animeURL", animeURL, "duration", time.Since(start))
-	}
+	util.Debug("HandleBatchDownloadRange completed", "animeURL", animeURL, "duration", time.Since(start))
 	// For programmatic range downloads, exit without further prompts
 	return ErrUserQuit
 }

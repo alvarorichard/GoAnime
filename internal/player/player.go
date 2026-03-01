@@ -147,9 +147,7 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 	mpvArgs = append(mpvArgs, safeLink)
 
-	if util.IsDebug {
-		fmt.Printf("[DEBUG] Starting mpv with arguments: %v\n", mpvArgs)
-	}
+	util.Debugf("Starting mpv with arguments: %v", mpvArgs)
 
 	// #nosec G204: mpvArgs are validated via filterMPVArgs and sanitizeMediaTarget
 	cmd := exec.Command(mpvPath, mpvArgs...)
@@ -164,9 +162,7 @@ func StartVideo(link string, args []string) (string, error) {
 		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
 	}
 
-	if util.IsDebug {
-		fmt.Printf("[DEBUG] mpv started, waiting for socket creation: %s\n", socketPath)
-	}
+	util.Debugf("mpv started, waiting for socket creation: %s", socketPath)
 
 	// Wait for socket creation with adaptive timeout and exponential backoff
 	// Total max wait time: ~10 seconds (accommodates slow network streams)
@@ -177,25 +173,18 @@ func StartVideo(link string, args []string) (string, error) {
 	currentInterval := initialInterval
 
 	for time.Since(startTime) < maxWaitTime {
-		if util.IsDebug {
-			elapsed := time.Since(startTime)
-			fmt.Printf("[DEBUG] Attempt at %.2fs: checking socket connection...\n", elapsed.Seconds())
-		}
+		util.Debugf("Attempt at %.2fs: checking socket connection...", time.Since(startTime).Seconds())
 
 		// Try to connect to the socket instead of checking file existence
 		// This works for both Unix sockets and Windows named pipes
 		conn, err := dialMPVSocket(socketPath)
 		if err == nil {
 			_ = conn.Close() // Close immediately, we just wanted to verify connectivity
-			if util.IsDebug {
-				fmt.Printf("[DEBUG] Socket connected successfully after %.2fs\n", time.Since(startTime).Seconds())
-			}
+			util.Debugf("Socket connected successfully after %.2fs", time.Since(startTime).Seconds())
 			return socketPath, nil
 		}
 
-		if util.IsDebug {
-			fmt.Printf("[DEBUG] Connection attempt failed: %v\n", err)
-		}
+		util.Debugf("Connection attempt failed: %v", err)
 
 		// Check if MPV process is still running
 		if cmd.Process == nil {
@@ -215,9 +204,7 @@ func StartVideo(link string, args []string) (string, error) {
 	}
 
 	elapsed := time.Since(startTime)
-	if util.IsDebug {
-		fmt.Printf("[DEBUG] Timeout after %.2fs waiting for mpv socket\n", elapsed.Seconds())
-	}
+	util.Debugf("Timeout after %.2fs waiting for mpv socket", elapsed.Seconds())
 
 	// Cleanup if timeout occurs
 	if killErr := cmd.Process.Kill(); killErr != nil {
@@ -376,9 +363,7 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 		return nil, err
 	}
 
-	if util.IsDebug {
-		fmt.Printf("[DEBUG]Raw response from mpv: %s\n", string(buffer[:n]))
-	}
+	util.Debugf("Raw response from mpv: %s", string(buffer[:n]))
 
 	// Tratar múltiplos JSONs na mesma resposta
 	responses := bytes.SplitSeq(buffer[:n], []byte("\n"))
@@ -389,16 +374,12 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 		var response map[string]any
 		err = json.Unmarshal(resp, &response)
 		if err != nil {
-			if util.IsDebug {
-				fmt.Printf("[DEBUG]Error when unmarshaling: %v\n", err)
-			}
+			util.Debugf("Error when unmarshaling: %v", err)
 			continue
 		}
 		if errStr, ok := response["error"].(string); ok && errStr == "property unavailable" {
 			// Propriedade ainda não disponível, ignore sem erro
-			if util.IsDebug {
-				fmt.Println("[DEBUG] Property not yet available, ignoring...")
-			}
+			util.Debugf("Property not yet available, ignoring...")
 			continue
 		}
 		// Check for success response (set_property returns {"error":"success"} without data)

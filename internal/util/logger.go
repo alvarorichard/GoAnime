@@ -116,34 +116,72 @@ func initFileLogger() *os.File {
 }
 
 // InitLogger initializes the beautiful charmbracelet logger.
-// When debug mode is enabled, logs are also written to a file on disk
+// When debug mode is enabled, logs are written to a file on disk
 // so users can easily share them for troubleshooting.
+// The console logger always stays at InfoLevel to avoid corrupting
+// interactive TUI components (menus, prompts, etc.).
 func InitLogger() {
 	Logger = log.NewWithOptions(os.Stderr, log.Options{
-		ReportCaller:    IsDebug,
 		ReportTimestamp: IsDebug,
 		TimeFormat:      "15:04:05",
 		Prefix:          getColoredPrefix(),
 	})
 
-	// Set the appropriate log level based on debug mode
-	if IsDebug {
-		Logger.SetLevel(log.DebugLevel)
-		Logger.SetColorProfile(termenv.TrueColor)
+	// Console logger is always InfoLevel to keep the terminal clean for TUI.
+	// Debug-level messages are routed exclusively to the log file.
+	Logger.SetLevel(log.InfoLevel)
+	Logger.SetColorProfile(termenv.TrueColor)
 
-		// Initialize file logging
+	if IsDebug {
+		// Initialize file logging — all debug output goes here
 		logFile = initFileLogger()
 		if logFile != nil {
-			// Register cleanup to close the file on exit
 			RegisterCleanup(CloseLogFile)
-			Logger.Debug("Debug logging enabled — logs are being saved to file", "path", LogFilePath)
+			showDebugBanner()
 		} else {
-			Logger.Debug("Debug logging enabled (file logging unavailable)")
+			Logger.Info("Debug mode enabled (file logging unavailable — logs will appear in console)")
+			// Fallback: if we can't write to a file, allow debug on console
+			Logger.SetLevel(log.DebugLevel)
+			Logger.SetReportCaller(true)
 		}
-	} else {
-		Logger.SetLevel(log.InfoLevel)
-		Logger.SetColorProfile(termenv.TrueColor)
 	}
+}
+
+// showDebugBanner prints a styled notice so the user knows where to find
+// the debug log and how to follow it in real-time from another terminal.
+// The follow command adapts to the user's OS.
+func showDebugBanner() {
+	banner := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#6366F1")).
+		Bold(true).
+		Padding(0, 1).
+		Render(" DEBUG ")
+
+	path := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#A78BFA")).
+		Italic(true).
+		Render(LogFilePath)
+
+	// Pick the right "follow file" command for each OS
+	var followCmd string
+	switch runtime.GOOS {
+	case "windows":
+		followCmd = fmt.Sprintf("Get-Content -Wait -Tail 50 \"%s\"", LogFilePath)
+	default: // linux, darwin, etc.
+		followCmd = fmt.Sprintf("tail -f \"%s\"", LogFilePath)
+	}
+
+	tailCmd := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FCD34D")).
+		Bold(true).
+		Render(followCmd)
+
+	hint := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Render("(run in another terminal to follow live)")
+
+	fmt.Fprintf(os.Stderr, "%s Debug log → %s\n       %s %s\n", banner, path, tailCmd, hint)
 }
 
 // CloseLogFile flushes and closes the debug log file
@@ -183,12 +221,18 @@ func GetLogFileWriter() io.Writer {
 	return logFile
 }
 
-// Debug logs a debug message (only when debug mode is enabled)
+// Debug logs a debug message (only when debug mode is enabled).
+// Debug messages are written exclusively to the log file to avoid
+// corrupting interactive TUI elements on the terminal.
 func Debug(msg any, keyvals ...any) {
-	if IsDebug && Logger != nil {
+	if IsDebug {
 		formatted := fmt.Sprintf("%v", msg)
-		Logger.Debug(formatted, keyvals...)
-		writeToFile(log.DebugLevel, formatted, keyvals...)
+		if fileLogger != nil {
+			writeToFile(log.DebugLevel, formatted, keyvals...)
+		} else if Logger != nil {
+			// Fallback: no log file, write to console
+			Logger.Debug(formatted, keyvals...)
+		}
 	}
 }
 
@@ -229,12 +273,17 @@ func Fatal(msg any, keyvals ...any) {
 	}
 }
 
-// Debugf logs a formatted debug message (only when debug mode is enabled)
+// Debugf logs a formatted debug message (only when debug mode is enabled).
+// Debug messages are written exclusively to the log file.
 func Debugf(format string, args ...any) {
-	if IsDebug && Logger != nil {
+	if IsDebug {
 		formatted := fmt.Sprintf(format, args...)
-		Logger.Debug(formatted)
-		writeToFile(log.DebugLevel, formatted)
+		if fileLogger != nil {
+			writeToFile(log.DebugLevel, formatted)
+		} else if Logger != nil {
+			// Fallback: no log file, write to console
+			Logger.Debug(formatted)
+		}
 	}
 }
 

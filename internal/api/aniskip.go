@@ -62,10 +62,7 @@ func ParseAniSkipResponse(responseText string, episode *models.Episode, timePrec
 		return fmt.Errorf("error unmarshalling response: %w", err)
 	}
 
-	if util.IsDebug {
-		// Log the raw response for debugging
-		fmt.Printf("AniSkip Raw Response: %s\n", responseText)
-	}
+	util.Debugf("AniSkip Raw Response: %s", responseText)
 
 	if !data.Found {
 		return fmt.Errorf("no skip times found")
