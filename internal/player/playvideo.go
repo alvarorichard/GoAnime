@@ -326,9 +326,12 @@ func playVideo(
 	// Many streaming servers require specific User-Agent and Referer headers
 	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
 
-	// Determine the anime source for source-specific playback configuration
-	is9Anime := false
-	if updater != nil && updater.GetAnime() != nil {
+	// Determine the anime source for source-specific playback configuration.
+	// Use the globally-stored anime source (set during stream resolution) so
+	// that 9Anime is detected reliably even when Discord (and hence the
+	// updater) is disabled.
+	is9Anime := util.Is9AnimeSource()
+	if !is9Anime && updater != nil && updater.GetAnime() != nil {
 		is9Anime = updater.GetAnime().Source == "9Anime"
 	}
 
@@ -388,8 +391,13 @@ func playVideo(
 	// Add external subtitle files if available (FlixHQ / 9Anime subtitles)
 	// This follows the lobster.sh implementation for external subtitles
 	if isMovieOrTV || is9Anime {
-		// For 9Anime, let the user pick which subtitle tracks to load
-		if is9Anime && len(util.GlobalSubtitles) > 1 {
+		// For 9Anime (multi-language platform), ALWAYS prompt the user to select
+		// their preferred subtitle language after every episode selection, without
+		// exception. This ensures the user explicitly chooses subtitles each time.
+		if is9Anime {
+			util.PromptSubtitleLanguage()
+		} else if len(util.GlobalSubtitles) > 1 {
+			// For other sources (FlixHQ), use the standard selection
 			util.SelectSubtitles()
 		}
 		subArgs := util.GetSubtitleArgs()
@@ -1104,8 +1112,11 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	// If no updater/anime context, try to synthesize from lastAnimeURL
 	if anime == nil && lastAnimeURL != "" {
 		guessedSource := ""
-		// Check global referer to detect 9Anime (uses rapid-cloud referer)
-		if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
+		// Check global anime source first (most reliable, set during stream resolution)
+		if src := util.GetGlobalAnimeSource(); src != "" {
+			guessedSource = src
+		} else if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
+			// Check global referer to detect 9Anime (uses rapid-cloud referer)
 			guessedSource = "9Anime"
 		} else if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
 			guessedSource = "AllAnime"

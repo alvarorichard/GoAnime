@@ -308,6 +308,11 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	// Clear any previous subtitles
 	util.ClearGlobalSubtitles()
 
+	// Track anime source globally for subtitle selection and other source-specific behavior
+	if anime != nil && anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+
 	// Check if this is FlixHQ content
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		streamURL, subtitles, err := GetFlixHQStreamURL(anime, episode, quality)
@@ -550,6 +555,7 @@ func GetNineAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 // GetNineAnimeStreamURL gets the stream URL for 9anime content
 func GetNineAnimeStreamURL(anime *models.Anime, episode *models.Episode, quality string) (string, error) {
 	util.ClearGlobalSubtitles()
+	util.SetGlobalAnimeSource("9Anime")
 
 	nineAnimeClient := scraper.NewNineAnimeClient()
 

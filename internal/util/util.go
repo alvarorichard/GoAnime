@@ -36,6 +36,7 @@ var (
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
+	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 )
 
 // SetGlobalSubtitles stores subtitles for the current playback session
@@ -70,6 +71,24 @@ func GetGlobalReferer() string {
 // ClearGlobalReferer clears the stored referer
 func ClearGlobalReferer() {
 	GlobalReferer = ""
+}
+
+// SetGlobalAnimeSource stores the current anime source (e.g. "9Anime", "AllAnime")
+func SetGlobalAnimeSource(source string) {
+	GlobalAnimeSource = source
+	if source != "" {
+		Debugf("Stored anime source: %s", source)
+	}
+}
+
+// GetGlobalAnimeSource returns the stored anime source
+func GetGlobalAnimeSource() string {
+	return GlobalAnimeSource
+}
+
+// Is9AnimeSource returns true if the current stream is from 9Anime
+func Is9AnimeSource() bool {
+	return GlobalAnimeSource == "9Anime"
 }
 
 // SelectSubtitles displays an interactive menu for the user to choose which
@@ -120,6 +139,117 @@ func SelectSubtitles() {
 		if selected >= 0 && selected < len(GlobalSubtitles) {
 			kept := GlobalSubtitles[selected]
 			GlobalSubtitles = []SubtitleInfo{kept}
+			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
+		}
+	}
+}
+
+// PromptSubtitleLanguage always prompts the user to select a subtitle language
+// for multi-language platforms (e.g., 9Anime). This MUST be called after every
+// episode selection, without exception. Unlike SelectSubtitles, this function
+// always shows the prompt regardless of the number of available tracks.
+// It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
+// the correct arguments for mpv.
+func PromptSubtitleLanguage() {
+	if GlobalNoSubs {
+		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
+		GlobalSubtitles = nil
+		return
+	}
+
+	tracks := GlobalSubtitles
+
+	// No tracks available — inform the user and continue without subtitles
+	if len(tracks) == 0 {
+		fmt.Println("\nNo subtitle tracks available for this episode.")
+		return
+	}
+
+	// Single track — still ask the user if they want it
+	if len(tracks) == 1 {
+		label := tracks[0].Label
+		if label == "" {
+			label = tracks[0].Language
+		}
+		if label == "" {
+			label = "Unknown"
+		}
+
+		fmt.Printf("\n1 subtitle track available: %s\n", label)
+
+		var options []huh.Option[int]
+		options = append(options, huh.NewOption(label, 0))
+		options = append(options, huh.NewOption("No subtitles", -2))
+
+		selected := 0 // default: the single track
+		menu := huh.NewSelect[int]().
+			Title("Select subtitle language").
+			Description("Choose subtitle track or disable:").
+			Options(options...).
+			Value(&selected)
+
+		if err := menu.Run(); err != nil {
+			// On error/cancel keep the track
+			fmt.Printf("Subtitles: %s\n", label)
+			return
+		}
+
+		if selected == -2 {
+			GlobalSubtitles = nil
+			fmt.Println("Subtitles: disabled")
+			Debugf("User disabled subtitles")
+		} else {
+			fmt.Printf("Subtitles: %s\n", label)
+			Debugf("User selected subtitle: %s", label)
+		}
+		return
+	}
+
+	// Multiple tracks — show full selection menu
+	fmt.Printf("\n%d subtitle language(s) available:\n", len(tracks))
+
+	var options []huh.Option[int]
+	options = append(options, huh.NewOption("All subtitles", -1))
+	for i, sub := range tracks {
+		label := sub.Label
+		if label == "" {
+			label = sub.Language
+		}
+		if label == "" {
+			label = fmt.Sprintf("Subtitle %d", i+1)
+		}
+		options = append(options, huh.NewOption(label, i))
+	}
+	options = append(options, huh.NewOption("No subtitles", -2))
+
+	selected := -1 // default: all
+	menu := huh.NewSelect[int]().
+		Title("Select subtitle language").
+		Description(fmt.Sprintf("%d tracks available — pick one, all, or none:", len(tracks))).
+		Options(options...).
+		Value(&selected)
+
+	if err := menu.Run(); err != nil {
+		// On error/cancel keep all subtitles
+		fmt.Println("Subtitles: all (default)")
+		return
+	}
+
+	switch selected {
+	case -1:
+		// Keep all — no change needed
+		fmt.Printf("Subtitles: all (%d tracks)\n", len(GlobalSubtitles))
+		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+	case -2:
+		// Disable subtitles
+		GlobalSubtitles = nil
+		fmt.Println("Subtitles: disabled")
+		Debugf("User disabled subtitles")
+	default:
+		if selected >= 0 && selected < len(GlobalSubtitles) {
+			kept := GlobalSubtitles[selected]
+			GlobalSubtitles = []SubtitleInfo{kept}
+			fmt.Printf("Subtitles: %s\n", kept.Label)
 			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
 		}
 	}
