@@ -118,29 +118,33 @@ func FetchAnimeDetails(anime *models.Anime) {
 				return
 			}
 
-			// ALWAYS enrich anime with AniList data
-			// This is essential for Discord integration, AniSkip, etc.
-			// The original system ALWAYS uses AniList images for anime
-
-			// Use the enrichment function from the original system
-			aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
-			if err != nil {
-				util.Debugf("Failed to fetch from AniList: %v", err)
+			// Skip AniList enrichment if already done during search (enrichAnimeData)
+			// This avoids a redundant network call since SearchAnimeEnhanced already
+			// calls enrichAnimeData after anime selection
+			if anime.AnilistID > 0 && anime.MalID > 0 && anime.ImageURL != "" {
+				util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
 			} else {
-				// Enrich the anime with AniList data
-				anime.AnilistID = aniListInfo.Data.Media.ID
-				anime.MalID = aniListInfo.Data.Media.IDMal
-				anime.Details = aniListInfo.Data.Media
-
-				// ALWAYS use AniList image (as in the original system)
-				if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
-					anime.ImageURL = cover
+				// Enrich anime with AniList data (only if not already enriched)
+				// This is essential for Discord integration, AniSkip, etc.
+				aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
+				if err != nil {
+					util.Debugf("Failed to fetch from AniList: %v", err)
 				} else {
-					util.Debugf("Cover image not found for: %s", anime.Name)
-				}
+					// Enrich the anime with AniList data
+					anime.AnilistID = aniListInfo.Data.Media.ID
+					anime.MalID = aniListInfo.Data.Media.IDMal
+					anime.Details = aniListInfo.Data.Media
 
-				util.Debugf("Anime enriched successfully with AniList data - ID: %d, MAL: %d, Image: %s",
-					anime.AnilistID, anime.MalID, anime.ImageURL)
+					// ALWAYS use AniList image (as in the original system)
+					if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+						anime.ImageURL = cover
+					} else {
+						util.Debugf("Cover image not found for: %s", anime.Name)
+					}
+
+					util.Debugf("Anime enriched successfully with AniList data - ID: %d, MAL: %d, Image: %s",
+						anime.AnilistID, anime.MalID, anime.ImageURL)
+				}
 			}
 
 			// Fallback: try to fetch source-specific details if needed

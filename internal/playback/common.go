@@ -34,18 +34,7 @@ func PlayEpisode(
 	}}
 	animeMutex.Unlock()
 
-	// Fetch episode metadata with spinner
-	_ = spinner.New().
-		Title("Fetching episode data...").
-		Type(spinner.Dots).
-		Action(func() {
-			if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-				util.Debugf("Error fetching episode data: %v", err)
-			}
-		}).
-		Run()
-
-	// Find the specific episode to pass to enhanced API
+	// Find the specific episode to pass to enhanced API (pure sync, no network)
 	var currentEpisode *models.Episode
 	util.Debug("PlayEpisode searching for episode", "episodeNumberStr", episodeNumberStr, "totalEpisodes", len(episodes))
 	for i := range episodes {
@@ -73,16 +62,33 @@ func PlayEpisode(
 		}
 	}
 
-	// Try enhanced API first, fallback to legacy if needed
+	// Fetch episode metadata and stream URL in parallel under a single spinner
+	// GetEpisodeData (Jikan/AniList metadata) and GetVideoURLForEpisodeEnhanced (scraper)
+	// are independent operations — running them concurrently saves a full round-trip
 	var videoURL string
 	var videoErr error
+	currentEpisodeCopy := currentEpisode // capture for goroutine
 
-	// Use spinner while fetching video URL
 	_ = spinner.New().
-		Title("Loading video stream...").
+		Title("Loading episode...").
 		Type(spinner.Dots).
 		Action(func() {
-			videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisode, anime)
+			var wg sync.WaitGroup
+			wg.Add(2)
+
+			go func() {
+				defer wg.Done()
+				if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
+					util.Debugf("Error fetching episode data: %v", err)
+				}
+			}()
+
+			go func() {
+				defer wg.Done()
+				videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
+			}()
+
+			wg.Wait()
 		}).
 		Run()
 

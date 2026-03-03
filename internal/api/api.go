@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"context"
@@ -138,21 +139,19 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 	}
 }
 
-// SafeGet performs an HTTP GET request to the specified URL using a custom HTTP client with a timeout.
-// The function returns the response or an error if the request fails.
-//
-// Parameters:
-// - url: the URL to send the GET request to.
-//
-// Returns:
-// - *http.Response: a pointer to the HTTP response object containing the server's response.
-// - error: an error if the request fails or if there is a problem during the request.
-func SafeGet(url string) (*http.Response, error) {
-	// Create an HTTP client with a custom transport that includes a 45-second timeout.
-	httpClient := &http.Client{
-		Transport: SafeTransport(45 * time.Second),
-	}
+// safeFetchClient is a singleton HTTP client with SSRF-safe transport
+var (
+	safeFetchClient     *http.Client
+	safeFetchClientOnce sync.Once
+)
 
-	// Perform the GET request using the custom HTTP client and return the response.
-	return httpClient.Get(url)
+// SafeGet performs an HTTP GET request using a shared safe HTTP client.
+// The client validates IPs to prevent SSRF attacks.
+func SafeGet(url string) (*http.Response, error) {
+	safeFetchClientOnce.Do(func() {
+		safeFetchClient = &http.Client{
+			Transport: SafeTransport(45 * time.Second),
+		}
+	})
+	return safeFetchClient.Get(url) // #nosec G107
 }

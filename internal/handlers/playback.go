@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/playback"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tracking"
@@ -19,6 +21,10 @@ func HandlePlaybackMode(animeName string) {
 
 	// Initialize the beautiful logger
 	util.InitLogger()
+
+	// Pre-warm connections to known API hosts in the background
+	// This runs DNS + TLS handshakes so the first real requests are faster
+	util.PreWarmConnections()
 
 	tracking.HandleTrackingNotice()
 	util.Debugf("[PERF] starting Goanime v%s", version.Version)
@@ -41,13 +47,29 @@ func HandlePlaybackMode(animeName string) {
 			return
 		}
 
-		detailsTimer := util.StartTimer("FetchAnimeDetails")
-		appflow.FetchAnimeDetails(anime)
-		detailsTimer.Stop()
+		// Fetch details and episodes in parallel — they are independent
+		// Details come from AniList/TMDB, episodes from the source scraper
+		var episodes []models.Episode
+		var wg sync.WaitGroup
 
-		episodesTimer := util.StartTimer("GetAnimeEpisodes")
-		episodes := appflow.GetAnimeEpisodes(anime)
-		episodesTimer.Stop()
+		parallelTimer := util.StartTimer("FetchDetails+Episodes:Parallel")
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			detailsTimer := util.StartTimer("FetchAnimeDetails")
+			appflow.FetchAnimeDetails(anime)
+			detailsTimer.Stop()
+		}()
+		go func() {
+			defer wg.Done()
+			episodesTimer := util.StartTimer("GetAnimeEpisodes")
+			episodes = appflow.GetAnimeEpisodes(anime)
+			episodesTimer.Stop()
+		}()
+
+		wg.Wait()
+		parallelTimer.Stop()
 
 		util.PerfCount("anime_loaded")
 

@@ -3,6 +3,7 @@ package util
 
 import (
 	"crypto/tls"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -51,15 +52,15 @@ func defaultConfig() httpClientConfig {
 // fastConfig returns configuration optimized for quick requests
 func fastConfig() httpClientConfig {
 	return httpClientConfig{
-		timeout:             30 * time.Second,
-		maxIdleConns:        150, // Increased for parallel scraper requests
-		maxIdleConnsPerHost: 25,  // More connections per host
-		maxConnsPerHost:     40,  // Allow more concurrent connections
+		timeout:             20 * time.Second,
+		maxIdleConns:        150,
+		maxIdleConnsPerHost: 25,
+		maxConnsPerHost:     40,
 		idleConnTimeout:     90 * time.Second,
-		tlsHandshakeTimeout: 10 * time.Second,
+		tlsHandshakeTimeout: 5 * time.Second,
 		expectContinue:      500 * time.Millisecond,
 		keepAlive:           30 * time.Second,
-		dialTimeout:         10 * time.Second,
+		dialTimeout:         5 * time.Second,
 	}
 }
 
@@ -318,4 +319,43 @@ func ParallelExecute(maxWorkers int, tasks ...func()) {
 	}
 
 	wg.Wait()
+}
+
+// knownHosts are API hosts that we know will be contacted, used for connection pre-warming.
+var knownHosts = []string{
+	"graphql.anilist.co:443",
+	"api.jikan.moe:443",
+	"allanime.day:443",
+	"animefire.plus:443",
+}
+
+var preWarmOnce sync.Once
+
+// PreWarmConnections initiates background DNS resolution and TLS handshakes
+// for known API hosts. Call this early (e.g., at startup) so that by the time
+// the first real request is made, connections are already pooled.
+func PreWarmConnections() {
+	preWarmOnce.Do(func() {
+		client := GetFastClient()
+		for _, host := range knownHosts {
+			go func() {
+				// HEAD request with very short timeout — we just want the TCP+TLS handshake
+				// to populate the connection pool. We don't care about the response.
+				req, err := http.NewRequest("HEAD", "https://"+host, nil)
+				if err != nil {
+					return
+				}
+				req.Header.Set("User-Agent", "GoAnime/1.0")
+				resp, err := client.Do(req) // #nosec G107
+				if err != nil {
+					// DNS or connect failure is fine — this is best-effort
+					Debugf("Pre-warm %s: %v", host, err)
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				Debugf("Pre-warmed connection to %s", host)
+			}()
+		}
+	})
 }

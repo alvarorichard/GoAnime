@@ -19,11 +19,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Common HTTP client instance with timeout to prevent indefinite hangs
-var httpClient = &http.Client{
-	Transport: SafeTransport(60 * time.Second),
-	Timeout:   60 * time.Second,
-}
+// Common HTTP client instance - reuse the shared singleton for connection pooling
+var httpClient = util.GetSharedClient()
 
 // GetEpisodeData fetches episode data using multiple providers with fallback support.
 // It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.

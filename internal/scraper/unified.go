@@ -19,12 +19,12 @@ type ScraperType int
 // Timeout configurations - balanced for multiple sources
 const (
 	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 12 * time.Second
+	searchTimeout = 10 * time.Second
 	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 10 * time.Second
+	perScraperTimeout = 8 * time.Second
 	// earlyReturnDelay is the time to wait after first results before returning
-	// Reduced from 3s since sources typically respond within 1s
-	earlyReturnDelay = 1500 * time.Millisecond
+	// Most sources respond within 1s; waiting longer delays the user
+	earlyReturnDelay = 1000 * time.Millisecond
 	// minResultsForEarlyReturn is the minimum results needed to trigger early return
 	minResultsForEarlyReturn = 5
 )
@@ -51,25 +51,35 @@ type ScraperManager struct {
 	scrapers map[ScraperType]UnifiedScraper
 }
 
-// NewScraperManager creates a new scraper manager
+// Singleton ScraperManager — scrapers are stateless HTTP clients, no need to recreate
+var (
+	globalScraperManager     *ScraperManager
+	globalScraperManagerOnce sync.Once
+)
+
+// NewScraperManager returns a cached scraper manager singleton.
+// Scrapers are stateless HTTP clients so a single instance is reused.
 func NewScraperManager() *ScraperManager {
-	manager := &ScraperManager{
-		scrapers: make(map[ScraperType]UnifiedScraper),
-	}
+	globalScraperManagerOnce.Do(func() {
+		manager := &ScraperManager{
+			scrapers: make(map[ScraperType]UnifiedScraper),
+		}
 
-	// Initialize scrapers
-	manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
-	manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
-	manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
-	manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
-	manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
+		// Initialize scrapers
+		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
+		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
+		manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
+		manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
+		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
 
-	// AnimeDrive - Currently on standby
-	// Reason: Site is protected by Cloudflare, no bypass solution found yet
-	// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
-	// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+		// AnimeDrive - Currently on standby
+		// Reason: Site is protected by Cloudflare, no bypass solution found yet
+		// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
+		// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
-	return manager
+		globalScraperManager = manager
+	})
+	return globalScraperManager
 }
 
 // SearchAnime searches across all available scrapers with enhanced Portuguese messaging
