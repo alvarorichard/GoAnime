@@ -81,7 +81,9 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber string, qual
 	scraperInstance, scErr := sm.GetScraper(scraper.AllAnimeType)
 	var client *scraper.AllAnimeClient
 	if scErr == nil {
-		if adapter, ok := scraperInstance.(interface{ Client() *scraper.AllAnimeClient }); ok {
+		if adapter, ok := scraperInstance.(interface {
+			Client() *scraper.AllAnimeClient
+		}); ok {
 			client = adapter.Client()
 		}
 	}
