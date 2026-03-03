@@ -649,7 +649,10 @@ func downloadAndPlayEpisode(
 
 	// Prompt user to select subtitle language BEFORE download starts
 	// (stdin is free here — no Bubble Tea running yet)
-	if len(util.GlobalSubtitles) > 0 {
+	// For 9Anime, ALWAYS use the mandatory language prompt regardless of track count.
+	if util.Is9AnimeSource() {
+		util.PromptSubtitleLanguage()
+	} else if len(util.GlobalSubtitles) > 0 {
 		util.SelectSubtitles()
 	}
 

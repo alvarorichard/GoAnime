@@ -2,6 +2,7 @@ package util
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -575,13 +576,7 @@ func TestSubtitleArgs_AppliedAfterUserSelection(t *testing.T) {
 	mpvArgs = append(mpvArgs, subArgs...)
 
 	// Verify the subtitle arg is in the final mpv command
-	found := false
-	for _, arg := range mpvArgs {
-		if arg == "--sub-file=https://cc.2cdns.com/pt-br.vtt" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(mpvArgs, "--sub-file=https://cc.2cdns.com/pt-br.vtt")
 	if !found {
 		t.Errorf("Expected mpv args to contain Portuguese subtitle file, got %v", mpvArgs)
 	}

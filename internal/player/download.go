@@ -650,6 +650,15 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 
 	fmt.Printf("Found %d episode(s) to download...\n", len(episodesToDownload))
 
+	// For 9Anime, prompt subtitle language selection BEFORE starting batch download.
+	// The user's choice is stored in GlobalSubtitles and used after each episode download
+	// to embed subtitles directly into the video file.
+	if util.Is9AnimeSource() {
+		util.PromptSubtitleLanguage()
+	} else if len(util.GlobalSubtitles) > 0 {
+		util.SelectSubtitles()
+	}
+
 	if totalBytes > 0 {
 		m = &model{
 			progress: progress.New(progress.WithDefaultGradient()),
@@ -725,6 +734,9 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 						util.Logger.Warn("Downloaded file too small, removing partial file",
 							"episode", epNum, "size_mb", fmt.Sprintf("%.1f", float64(stat.Size())/(1024*1024)))
 						_ = os.Remove(episodePath)
+					} else {
+						// Embed selected subtitles into the downloaded video file
+						downloadSubtitleFiles(episodePath)
 					}
 				}
 			}(epNum)
@@ -821,6 +833,15 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 
 	fmt.Printf("Found %d episode(s) to download...\n", len(episodesToDownload))
 
+	// For 9Anime, prompt subtitle language selection BEFORE starting batch download.
+	// The user's choice is stored in GlobalSubtitles and used after each episode download
+	// to embed subtitles directly into the video file.
+	if util.Is9AnimeSource() {
+		util.PromptSubtitleLanguage()
+	} else if len(util.GlobalSubtitles) > 0 {
+		util.SelectSubtitles()
+	}
+
 	if totalBytes > 0 {
 		m = &model{
 			progress:   progress.New(progress.WithDefaultGradient()),
@@ -885,6 +906,9 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 					util.Logger.Error("Failed episode download", "episode", epNum, "error", dlErr)
 					return
 				}
+
+				// Embed selected subtitles into the downloaded video file
+				downloadSubtitleFiles(episodePath)
 
 				// Optional: write AniSkip sidecar when AllAnime Smart is enabled
 				if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.AllAnimeSmart {
