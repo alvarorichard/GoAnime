@@ -30,6 +30,24 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Cached mpv path — avoids repeated filesystem searches on every episode play
+var (
+	cachedMPVPath     string
+	cachedMPVPathErr  error
+	cachedMPVPathOnce sync.Once
+)
+
+// PreWarmMPVPath looks up the mpv binary path in the background.
+// Call this early at startup so StartVideo doesn't block on the filesystem search.
+func PreWarmMPVPath() {
+	go cachedMPVPathOnce.Do(func() {
+		cachedMPVPath, cachedMPVPathErr = findMPVPath()
+		if cachedMPVPathErr == nil {
+			util.Debugf("Pre-warmed mpv path: %s", cachedMPVPath)
+		}
+	})
+}
+
 // lastAnimeURL stores the most recent anime URL/ID to support navigation when no updater is present
 var lastAnimeURL string
 
@@ -113,11 +131,14 @@ func (m *model) Init() tea.Cmd {
 // StartVideo opens mpv with a socket for IPC
 // Modify the StartVideo function in player.go
 func StartVideo(link string, args []string) (string, error) {
-	// Verify MPV is installed using platform-specific search
-	mpvPath, err := findMPVPath()
-	if err != nil {
-		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", err)
+	// Verify MPV is installed (cached after first lookup to avoid repeated filesystem searches)
+	cachedMPVPathOnce.Do(func() {
+		cachedMPVPath, cachedMPVPathErr = findMPVPath()
+	})
+	if cachedMPVPathErr != nil {
+		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", cachedMPVPathErr)
 	}
+	mpvPath := cachedMPVPath
 
 	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
 	var socketPath string
@@ -166,15 +187,13 @@ func StartVideo(link string, args []string) (string, error) {
 
 	// Wait for socket creation with adaptive timeout and exponential backoff
 	// Total max wait time: ~10 seconds (accommodates slow network streams)
-	// Initial intervals are short for fast local files, then back off for streams
+	// Initial intervals are very short for fast local files, then back off for streams
 	maxWaitTime := 10 * time.Second
-	initialInterval := 50 * time.Millisecond
-	maxInterval := 500 * time.Millisecond
+	initialInterval := 20 * time.Millisecond
+	maxInterval := 400 * time.Millisecond
 	currentInterval := initialInterval
 
 	for time.Since(startTime) < maxWaitTime {
-		util.Debugf("Attempt at %.2fs: checking socket connection...", time.Since(startTime).Seconds())
-
 		// Try to connect to the socket instead of checking file existence
 		// This works for both Unix sockets and Windows named pipes
 		conn, err := dialMPVSocket(socketPath)
@@ -184,23 +203,14 @@ func StartVideo(link string, args []string) (string, error) {
 			return socketPath, nil
 		}
 
-		util.Debugf("Connection attempt failed: %v", err)
-
 		// Check if MPV process is still running
 		if cmd.Process == nil {
 			return "", fmt.Errorf("mpv process not started properly: %s", stderr.String())
 		}
 
-		// Check if process exited prematurely
-		// Note: ProcessState is nil until the process exits, so we need a different check
-		select {
-		case <-time.After(currentInterval):
-			// Apply exponential backoff
-			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
-		default:
-			time.Sleep(currentInterval)
-			currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
-		}
+		time.Sleep(currentInterval)
+		// Apply exponential backoff
+		currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
 	}
 
 	elapsed := time.Since(startTime)

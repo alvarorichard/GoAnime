@@ -76,8 +76,19 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber string, qual
 		return "", nil, fmt.Errorf("this function is only for AllAnime sources")
 	}
 
-	// Create AllAnime client directly
-	client := scraper.NewAllAnimeClient()
+	// Use the cached scraper manager to get the AllAnime client (avoids re-creating each time)
+	sm := scraper.NewScraperManager()
+	scraperInstance, scErr := sm.GetScraper(scraper.AllAnimeType)
+	var client *scraper.AllAnimeClient
+	if scErr == nil {
+		if adapter, ok := scraperInstance.(interface{ Client() *scraper.AllAnimeClient }); ok {
+			client = adapter.Client()
+		}
+	}
+	if client == nil {
+		// Fallback: create directly (shouldn't happen with singleton manager)
+		client = scraper.NewAllAnimeClient()
+	}
 	animeID := extractAllAnimeIDAPI(anime.URL)
 
 	if animeID == "" {

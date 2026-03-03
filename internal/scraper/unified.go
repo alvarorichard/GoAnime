@@ -411,6 +411,11 @@ type AllAnimeAdapter struct {
 	client *AllAnimeClient
 }
 
+// Client returns the underlying AllAnimeClient for direct access to enhanced features.
+func (a *AllAnimeAdapter) Client() *AllAnimeClient {
+	return a.client
+}
+
 func (a *AllAnimeAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	// mode is now hardcoded in the new implementation
 	return a.client.SearchAnime(query)

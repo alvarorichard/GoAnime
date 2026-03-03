@@ -31,6 +31,9 @@ func main() {
 	// Initialize tracker early in background to avoid delays when playing movies
 	player.InitTrackerAsync()
 
+	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
+	player.PreWarmMPVPath()
+
 	animeName, err := util.FlagParser()
 	if err != nil {
 		// Check if error is update request

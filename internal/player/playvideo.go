@@ -676,43 +676,47 @@ func fetchAniSkipAsync(anilistID, episodeNum int, episode *models.Episode) chan 
 
 // showShaderOSD displays an OSD message confirming shaders are active
 func showShaderOSD(socketPath string) {
-	// Wait a bit for mpv to fully initialize
-	time.Sleep(500 * time.Millisecond)
+	// Run in background to avoid blocking the main playback flow
+	go func() {
+		// Give mpv a moment to initialize its OSD subsystem
+		time.Sleep(300 * time.Millisecond)
 
-	modeName := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
-	message := fmt.Sprintf("Anime4K Upscaling: %s\\nPress Shift+I twice for stats", modeName)
+		modeName := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+		message := fmt.Sprintf("Anime4K Upscaling: %s\\nPress Shift+I twice for stats", modeName)
 
-	// Show OSD message for 4 seconds
-	_, err := mpvSendCommand(socketPath, []any{
-		"show-text", message, 4000,
-	})
-	if err != nil {
-		util.Debugf("Failed to show shader OSD: %v", err)
-	}
+		// Show OSD message for 4 seconds
+		_, err := mpvSendCommand(socketPath, []any{
+			"show-text", message, 4000,
+		})
+		if err != nil {
+			util.Debugf("Failed to show shader OSD: %v", err)
+		}
+	}()
 }
 
-// applyAniSkipResults applies AniSkip results
-// Reduced timeout from 3s to 2s for faster playback start
+// applyAniSkipResults applies AniSkip results asynchronously so MPV is not blocked.
+// Skip times are applied as soon as the AniSkip data arrives (or after 2s timeout).
 func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episode, episodeNum int) {
-	select {
-	case err := <-ch:
-		if err == nil {
-			applySkipTimes(socketPath, episode)
+	go func() {
+		select {
+		case err := <-ch:
+			if err == nil {
+				applySkipTimes(socketPath, episode)
 
-			// For AllAnime episodes, also try to set chapter markers (like Curd does)
-			if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
-				// This looks like an AllAnime episode ID, try to apply chapter markers
-				allAnimeClient := scraper.NewAllAnimeClient()
-				if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
-					util.Debugf("Failed to set chapter markers: %v", chapterErr)
+				// For AllAnime episodes, also try to set chapter markers (like Curd does)
+				if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
+					allAnimeClient := scraper.NewAllAnimeClient()
+					if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
+						util.Debugf("Failed to set chapter markers: %v", chapterErr)
+					}
 				}
+			} else {
+				util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 			}
-		} else {
-			util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
+		case <-time.After(2 * time.Second):
+			util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
 		}
-	case <-time.After(2 * time.Second):
-		util.Debugf("Timeout fetching AniSkip data for episode %d", episodeNum)
-	}
+	}()
 }
 
 // initDiscordPresence initializes Discord presence
