@@ -64,7 +64,7 @@ jobs:
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
       - name: Run golangci-lint
-        run: golangci-lint run --timeout=5m ./...
+        run: golangci-lint run --timeout=10m ./...
 
       - name: Install Gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
