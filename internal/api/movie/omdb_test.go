@@ -1,12 +1,13 @@
 package movie
 
 import (
+	"os"
 	"testing"
 )
 
 func TestOMDbSearchByTitle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test - requires external OMDb API")
+	if os.Getenv("OMDB_API_KEY") == "" {
+		t.Skip("OMDB_API_KEY not set, skipping OMDb integration tests")
 	}
 	client := NewOMDbClient()
 
@@ -28,8 +29,8 @@ func TestOMDbSearchByTitle(t *testing.T) {
 }
 
 func TestOMDbGetByIMDBID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test - requires external OMDb API")
+	if os.Getenv("OMDB_API_KEY") == "" {
+		t.Skip("OMDB_API_KEY not set, skipping OMDb integration tests")
 	}
 	client := NewOMDbClient()
 
@@ -51,8 +52,8 @@ func TestOMDbGetByIMDBID(t *testing.T) {
 }
 
 func TestOMDbGetByTitle(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test - requires external OMDb API")
+	if os.Getenv("OMDB_API_KEY") == "" {
+		t.Skip("OMDB_API_KEY not set, skipping OMDb integration tests")
 	}
 	client := NewOMDbClient()
 
