@@ -12,13 +12,11 @@ jobs:
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
-        go-version: [ '1.26.x' ]
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
-          check-latest: true
+          go-version: '>=1.26.1'
 
       - name: Check out code
         uses: actions/checkout@v4
@@ -114,8 +112,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x'
-          check-latest: true
+          go-version: '>=1.26.1'
 
       - name: Check out code
         uses: actions/checkout@v4
@@ -194,8 +191,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x'
-          check-latest: true
+          go-version: '>=1.26.1'
 
       - name: Check out code
         uses: actions/checkout@v4
