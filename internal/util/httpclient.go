@@ -2,16 +2,16 @@
 package util
 
 import (
-	"crypto/tls"
 	"io"
-	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/enetx/surf"
 )
 
-// SharedHTTPClient is a global HTTP client with connection pooling
-// optimized for high-performance concurrent requests
+// SharedHTTPClient is a global HTTP client with Chrome TLS fingerprint
+// via enetx/surf for anti-bot bypass and connection pooling
 var (
 	sharedClient     *http.Client
 	sharedClientOnce sync.Once
@@ -21,92 +21,33 @@ var (
 	fastClientOnce sync.Once
 )
 
-// httpClientConfig holds configuration for creating optimized HTTP clients
-type httpClientConfig struct {
-	timeout             time.Duration
-	maxIdleConns        int
-	maxIdleConnsPerHost int
-	maxConnsPerHost     int
-	idleConnTimeout     time.Duration
-	tlsHandshakeTimeout time.Duration
-	expectContinue      time.Duration
-	keepAlive           time.Duration
-	dialTimeout         time.Duration
+// newSurfStdClient creates a *net/http.Client backed by surf with Chrome
+// browser impersonation and the given timeout.
+func newSurfStdClient(timeout time.Duration) *http.Client {
+	client := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Timeout(timeout).
+		Build().
+		Unwrap().
+		Std()
+	return client
 }
 
-// defaultConfig returns optimized default configuration
-func defaultConfig() httpClientConfig {
-	return httpClientConfig{
-		timeout:             60 * time.Second,
-		maxIdleConns:        200, // Increased for more parallel requests
-		maxIdleConnsPerHost: 20,  // Doubled for better concurrency
-		maxConnsPerHost:     50,  // Increased significantly
-		idleConnTimeout:     120 * time.Second,
-		tlsHandshakeTimeout: 10 * time.Second,
-		expectContinue:      1 * time.Second,
-		keepAlive:           30 * time.Second,
-		dialTimeout:         10 * time.Second,
-	}
-}
-
-// fastConfig returns configuration optimized for quick requests
-func fastConfig() httpClientConfig {
-	return httpClientConfig{
-		timeout:             20 * time.Second,
-		maxIdleConns:        150,
-		maxIdleConnsPerHost: 25,
-		maxConnsPerHost:     40,
-		idleConnTimeout:     90 * time.Second,
-		tlsHandshakeTimeout: 5 * time.Second,
-		expectContinue:      500 * time.Millisecond,
-		keepAlive:           30 * time.Second,
-		dialTimeout:         5 * time.Second,
-	}
-}
-
-// createTransport creates an optimized HTTP transport with the given config
-func createTransport(cfg httpClientConfig) *http.Transport {
-	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   cfg.dialTimeout,
-			KeepAlive: cfg.keepAlive,
-		}).DialContext,
-		MaxIdleConns:          cfg.maxIdleConns,
-		MaxIdleConnsPerHost:   cfg.maxIdleConnsPerHost,
-		MaxConnsPerHost:       cfg.maxConnsPerHost,
-		IdleConnTimeout:       cfg.idleConnTimeout,
-		TLSHandshakeTimeout:   cfg.tlsHandshakeTimeout,
-		ExpectContinueTimeout: cfg.expectContinue,
-		ForceAttemptHTTP2:     true,
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-}
-
-// GetSharedClient returns the shared HTTP client with connection pooling.
+// GetSharedClient returns the shared HTTP client with Chrome TLS fingerprint.
 // This client is optimized for general use with reasonable timeouts.
 func GetSharedClient() *http.Client {
 	sharedClientOnce.Do(func() {
-		cfg := defaultConfig()
-		sharedClient = &http.Client{
-			Transport: createTransport(cfg),
-			Timeout:   cfg.timeout,
-		}
+		sharedClient = newSurfStdClient(60 * time.Second)
 	})
 	return sharedClient
 }
 
 // GetFastClient returns an HTTP client optimized for quick API requests.
-// Use this for lightweight API calls where speed is critical.
+// Uses Chrome TLS fingerprint for anti-bot bypass.
 func GetFastClient() *http.Client {
 	fastClientOnce.Do(func() {
-		cfg := fastConfig()
-		fastClient = &http.Client{
-			Transport: createTransport(cfg),
-			Timeout:   cfg.timeout,
-		}
+		fastClient = newSurfStdClient(20 * time.Second)
 	})
 	return fastClient
 }

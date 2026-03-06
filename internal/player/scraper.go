@@ -1,25 +1,27 @@
 package player
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"os/exec"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
-	//"github.com/Microsoft/go-winio"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/charmbracelet/huh"
+	g "github.com/enetx/g"
+	"github.com/enetx/surf"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
@@ -613,25 +615,191 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
-// extractBloggerVideoURL starts a local Python proxy that uses curl_cffi
-// (Chrome TLS impersonation) to extract the googlevideo URL via Blogger's
-// batchexecute API and stream the video to mpv.
-// The entire chain (page load, batchexecute, video streaming) uses Chrome TLS
-// so that Google's CDN does not reject the requests.
-func extractBloggerVideoURL(bloggerURL string) (string, error) {
-	if util.IsDebug {
-		util.Debugf("Extracting actual video URL from Blogger page: %s", bloggerURL)
-	}
+// newSurfClient creates a surf HTTP client with Chrome browser impersonation.
+// Uses NotFollowRedirects for proxy streaming.
+func newSurfClient() *surf.Client {
+	return surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		NotFollowRedirects().
+		Build().
+		Unwrap()
+}
 
-	// Validate that it's a Blogger URL with a token
+// newSurfSessionClient creates a surf HTTP client that follows redirects
+// and maintains cookies across requests (needed for batchexecute flow).
+func newSurfSessionClient() *surf.Client {
+	return surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Build().
+		Unwrap()
+}
+
+// extractBloggerGoogleVideoURL uses surf with Chrome browser impersonation
+// to extract the googlevideo URL via Blogger's batchexecute API.
+func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 	tokenRe := regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
 	tokenMatch := tokenRe.FindStringSubmatch(bloggerURL)
 	if len(tokenMatch) < 2 {
 		return "", fmt.Errorf("could not extract token from Blogger URL: %s", bloggerURL)
 	}
+	token := tokenMatch[1]
 
-	// Start the proxy with the Blogger page URL; the Python script
-	// handles batchexecute extraction internally using curl_cffi.
+	// Use session client (follows redirects, keeps cookies) for the batchexecute flow
+	client := newSurfSessionClient()
+	defer func() { _ = client.Close() }()
+
+	// Step 1: Load the Blogger page to extract session params
+	result := client.Get(g.String(bloggerURL)).Do()
+	if result.IsErr() {
+		return "", fmt.Errorf("failed to load Blogger page: %w", result.Err())
+	}
+	resp := result.Ok()
+
+	pageBody, err := io.ReadAll(resp.Body.Stream())
+	if err != nil {
+		return "", fmt.Errorf("failed to read Blogger page: %w", err)
+	}
+	pageText := string(pageBody)
+
+	sidRe := regexp.MustCompile(`"FdrFJe"\s*:\s*"([^"]+)"`)
+	bhRe := regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
+	atRe := regexp.MustCompile(`"SNlM0e"\s*:\s*"([^"]+)"`)
+
+	sidMatch := sidRe.FindStringSubmatch(pageText)
+	bhMatch := bhRe.FindStringSubmatch(pageText)
+	atMatch := atRe.FindStringSubmatch(pageText)
+	if len(sidMatch) < 2 || len(bhMatch) < 2 {
+		return "", errors.New("failed to extract session params (FdrFJe/cfb2h) from Blogger page")
+	}
+	sid := sidMatch[1]
+	bh := bhMatch[1]
+	at := ""
+	if len(atMatch) >= 2 {
+		at = atMatch[1]
+	}
+	util.Debugf("Blogger extract: SID=%s, build=%s, at=%s", sid, bh, at)
+
+	// Step 2: Call batchexecute to get the googlevideo URL
+	inner, err := json.Marshal([]any{token, "", 0})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal inner data: %w", err)
+	}
+	freq, err := json.Marshal([][]any{{[]any{"WcwnYd", string(inner), nil, "generic"}}})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal freq data: %w", err)
+	}
+	postData := "f.req=" + url.QueryEscape(string(freq))
+	if at != "" {
+		postData += "&at=" + url.QueryEscape(at)
+	}
+
+	util.Debugf("Blogger batchexecute postBody: %s", postData)
+
+	batchURL := fmt.Sprintf(
+		"https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute?rpcids=WcwnYd&source-path=%%2Fvideo.g&f.sid=%s&bl=%s&hl=en-US&_reqid=100001&rt=c",
+		url.QueryEscape(sid), url.QueryEscape(bh),
+	)
+
+	util.Debugf("Blogger batchexecute URL: %s", batchURL)
+
+	batchResult := client.Post(g.String(batchURL)).
+		SetHeaders("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8").
+		AddHeaders("X-Same-Domain", "1").
+		AddHeaders("Origin", "https://www.blogger.com").
+		AddHeaders("Referer", bloggerURL).
+		Body(postData).
+		Do()
+	if batchResult.IsErr() {
+		return "", fmt.Errorf("batchexecute request failed: %w", batchResult.Err())
+	}
+	batchResp := batchResult.Ok()
+
+	batchBody, err := io.ReadAll(batchResp.Body.Stream())
+	if err != nil {
+		return "", fmt.Errorf("failed to read batchexecute response: %w", err)
+	}
+
+	if int(batchResp.StatusCode) != http.StatusOK {
+		util.Debugf("Blogger batchexecute failed with status %d, body: %s", batchResp.StatusCode, string(batchBody))
+		return "", fmt.Errorf("batchexecute returned status %d", batchResp.StatusCode)
+	}
+
+	// Step 3: Parse the batchexecute response to find the googlevideo URL
+	var videoURL string
+	for line := range strings.SplitSeq(string(batchBody), "\n") {
+		if !strings.Contains(line, "wrb.fr") {
+			continue
+		}
+		var outer []any
+		if err := json.Unmarshal([]byte(line), &outer); err != nil {
+			continue
+		}
+		for _, entry := range outer {
+			arr, ok := entry.([]any)
+			if !ok || len(arr) < 3 {
+				continue
+			}
+			if fmt.Sprint(arr[0]) != "wrb.fr" || fmt.Sprint(arr[1]) != "WcwnYd" {
+				continue
+			}
+			var data []any
+			if err := json.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
+				continue
+			}
+			if len(data) < 3 {
+				continue
+			}
+			streams, ok := data[2].([]any)
+			if !ok {
+				continue
+			}
+			for _, s := range streams {
+				stream, ok := s.([]any)
+				if !ok || len(stream) < 1 {
+					continue
+				}
+				u, ok := stream[0].(string)
+				if !ok {
+					continue
+				}
+				if strings.Contains(u, "mime=video%2Fmp4") || strings.Contains(u, "mime=video/mp4") {
+					videoURL = u
+					break
+				}
+			}
+			if videoURL == "" && len(streams) > 0 {
+				if first, ok := streams[0].([]any); ok && len(first) > 0 {
+					if u, ok := first[0].(string); ok {
+						videoURL = u
+					}
+				}
+			}
+			break
+		}
+		if videoURL != "" {
+			break
+		}
+	}
+
+	if videoURL == "" {
+		return "", errors.New("no video URL found in batchexecute response")
+	}
+
+	util.Debugf("Blogger extract: video URL obtained (%d chars)", len(videoURL))
+	return videoURL, nil
+}
+
+// extractBloggerVideoURL uses tls-client with Chrome TLS impersonation to
+// extract the googlevideo URL via Blogger's batchexecute API and starts a
+// local Go proxy that streams the video with the same TLS fingerprint.
+// The entire chain uses Chrome TLS so Google's CDN does not reject requests.
+func extractBloggerVideoURL(bloggerURL string) (string, error) {
+	if util.IsDebug {
+		util.Debugf("Extracting actual video URL from Blogger page: %s", bloggerURL)
+	}
+
 	proxyURL, err := startBloggerProxy(bloggerURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to start Blogger proxy: %w", err)
@@ -640,203 +808,122 @@ func extractBloggerVideoURL(bloggerURL string) (string, error) {
 	return proxyURL, nil
 }
 
-// bloggerProxy holds the state of the running proxy process.
+// bloggerProxy holds the state of the running Go HTTP proxy server.
 var bloggerProxy struct {
-	mu   sync.Mutex
-	cmd  *exec.Cmd
-	port string
+	mu     sync.Mutex
+	server *http.Server
+	port   string
 }
 
 // StopBloggerProxy terminates any running Blogger video proxy.
 func StopBloggerProxy() {
 	bloggerProxy.mu.Lock()
 	defer bloggerProxy.mu.Unlock()
-	if bloggerProxy.cmd != nil && bloggerProxy.cmd.Process != nil {
-		util.Debugf("Stopping Blogger proxy (PID %d)", bloggerProxy.cmd.Process.Pid)
-		_ = bloggerProxy.cmd.Process.Kill()
-		_ = bloggerProxy.cmd.Wait()
-		bloggerProxy.cmd = nil
+	if bloggerProxy.server != nil {
+		util.Debugf("Stopping Blogger proxy on port %s", bloggerProxy.port)
+		_ = bloggerProxy.server.Close()
+		bloggerProxy.server = nil
 		bloggerProxy.port = ""
 	}
 }
 
-// bloggerProxyScript is the Python script that:
-//  1. Loads the Blogger page and calls batchexecute (WcwnYd) to extract the
-//     googlevideo.com stream URL — all via curl_cffi Chrome TLS impersonation.
-//  2. Starts a local HTTP proxy that streams the video to mpv using the same
-//     Chrome TLS fingerprint.
-//
-// Using a single TLS identity end-to-end prevents Google's CDN from rejecting
-// requests with 403 due to fingerprint mismatch.
-const bloggerProxyScript = `
-import sys, os, re, json, socket
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn
-from urllib.parse import quote as urlquote
-from curl_cffi import requests as cffi_requests
-
-def extract_video_url(blogger_url):
-    s = cffi_requests.Session(impersonate='chrome')
-    r = s.get(blogger_url)
-    sid_m = re.search(r'"FdrFJe"\s*:\s*"([^"]+)"', r.text)
-    bh_m = re.search(r'"cfb2h"\s*:\s*"([^"]+)"', r.text)
-    tok_m = re.search(r'token=([A-Za-z0-9_-]+)', blogger_url)
-    if not sid_m or not bh_m or not tok_m:
-        raise RuntimeError('Failed to extract session params from Blogger page')
-    sid, bh, token = sid_m.group(1), bh_m.group(1), tok_m.group(1)
-    sys.stderr.write(f'PROXY extract: SID={sid}, build={bh}\n'); sys.stderr.flush()
-    inner = json.dumps([token, '', 0])
-    freq = json.dumps([[['WcwnYd', inner, None, 'generic']]])
-    post_body = 'f.req=' + urlquote(freq) + '&'
-    batch_url = (
-        'https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute'
-        '?rpcids=WcwnYd&source-path=%2Fvideo.g'
-        f'&f.sid={urlquote(sid)}&bl={urlquote(bh)}'
-        '&hl=en-US&_reqid=100001&rt=c'
-    )
-    r2 = s.post(batch_url, data=post_body, headers={
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        'X-Same-Domain': '1',
-        'Origin': 'https://www.blogger.com',
-        'Referer': 'https://www.blogger.com/',
-    })
-    if r2.status_code != 200:
-        raise RuntimeError(f'batchexecute returned {r2.status_code}')
-    video_url = None
-    for line in r2.text.split('\n'):
-        if 'wrb.fr' not in line:
-            continue
-        outer = json.loads(line)
-        for entry in outer:
-            if entry[0] != 'wrb.fr' or entry[1] != 'WcwnYd':
-                continue
-            data = json.loads(entry[2])
-            for stream in data[2]:
-                u = stream[0]
-                if 'mime=video%2Fmp4' in u or 'mime=video/mp4' in u:
-                    video_url = u
-                    break
-            if not video_url:
-                video_url = data[2][0][0]
-            break
-        break
-    if not video_url:
-        raise RuntimeError('No video URL found in batchexecute response')
-    sys.stderr.write(f'PROXY extract: video URL obtained ({len(video_url)} chars)\n')
-    sys.stderr.flush()
-    return video_url
-
-BLOGGER_URL = sys.argv[1]
-VIDEO_URL = extract_video_url(BLOGGER_URL)
-
-class TS(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-
-class H(BaseHTTPRequestHandler):
-    def _s(self):
-        return cffi_requests.Session(impersonate='chrome')
-    def do_HEAD(self):
-        try:
-            r = self._s().head(VIDEO_URL)
-            self.send_response(r.status_code)
-            for k in ('Content-Type','Content-Length','Accept-Ranges'):
-                v = r.headers.get(k)
-                if v: self.send_header(k, v)
-            self.end_headers()
-            sys.stderr.write(f'PROXY HEAD -> {r.status_code}\n'); sys.stderr.flush()
-        except Exception as e:
-            sys.stderr.write(f'PROXY HEAD err: {e}\n'); sys.stderr.flush()
-            self.send_error(502)
-    def do_GET(self):
-        try:
-            h = {}
-            rng = self.headers.get('Range')
-            if rng: h['Range'] = rng
-            r = self._s().get(VIDEO_URL, headers=h, stream=True)
-            self.send_response(r.status_code)
-            for k in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
-                v = r.headers.get(k)
-                if v: self.send_header(k, v)
-            self.end_headers()
-            sys.stderr.write(f'PROXY GET Range={rng} -> {r.status_code}\n'); sys.stderr.flush()
-            w = 0
-            for c in r.iter_content(chunk_size=65536):
-                self.wfile.write(c); w += len(c)
-            sys.stderr.write(f'PROXY GET done: {w}b\n'); sys.stderr.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            sys.stderr.write('PROXY GET: disconn\n'); sys.stderr.flush()
-        except Exception as e:
-            sys.stderr.write(f'PROXY GET err: {e}\n'); sys.stderr.flush()
-            try: self.send_error(502)
-            except Exception: pass
-    def log_message(self, *a): pass
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(('127.0.0.1', 0))
-port = sock.getsockname()[1]
-sock.close()
-srv = TS(('127.0.0.1', port), H)
-sys.stdout.write(f'{port}\n'); sys.stdout.flush()
-srv.serve_forever()
-`
-
-// startBloggerProxy starts a local Python proxy that extracts the video URL
-// from a Blogger page via batchexecute and streams it with Chrome TLS.
+// startBloggerProxy starts a local Go HTTP proxy that extracts the video URL
+// from a Blogger page via batchexecute and streams it with Chrome browser
+// impersonation using enetx/surf. No Python required.
 func startBloggerProxy(bloggerURL string) (string, error) {
 	// Stop any existing proxy
 	StopBloggerProxy()
 
+	// Extract the googlevideo URL before starting the proxy
+	videoURL, err := extractBloggerGoogleVideoURL(bloggerURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract video URL: %w", err)
+	}
+
+	// Find a free port
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("failed to listen on a free port: %w", err)
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+
+	// Create a shared surf client for the proxy (reused across requests)
+	proxyClient := newSurfClient().Std()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/blogger_proxy", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			upReq, err := http.NewRequest(http.MethodHead, videoURL, nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			upResp, err := proxyClient.Do(upReq)
+			if err != nil {
+				util.Debugf("BloggerProxy HEAD err: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = upResp.Body.Close() }()
+			for _, k := range []string{"Content-Type", "Content-Length", "Accept-Ranges"} {
+				if v := upResp.Header.Get(k); v != "" {
+					w.Header().Set(k, v)
+				}
+			}
+			w.WriteHeader(upResp.StatusCode)
+			util.Debugf("BloggerProxy HEAD -> %d", upResp.StatusCode)
+
+		case http.MethodGet:
+			upReq, err := http.NewRequest(http.MethodGet, videoURL, nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			if rng := r.Header.Get("Range"); rng != "" {
+				upReq.Header.Set("Range", rng)
+			}
+			upResp, err := proxyClient.Do(upReq)
+			if err != nil {
+				util.Debugf("BloggerProxy GET err: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = upResp.Body.Close() }()
+			for _, k := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+				if v := upResp.Header.Get(k); v != "" {
+					w.Header().Set(k, v)
+				}
+			}
+			w.WriteHeader(upResp.StatusCode)
+			util.Debugf("BloggerProxy GET Range=%s -> %d", r.Header.Get("Range"), upResp.StatusCode)
+			written, _ := io.Copy(w, upResp.Body)
+			util.Debugf("BloggerProxy GET done: %db", written)
+
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+
 	bloggerProxy.mu.Lock()
-	defer bloggerProxy.mu.Unlock()
+	bloggerProxy.server = srv
+	bloggerProxy.port = port
+	bloggerProxy.mu.Unlock()
 
-	// #nosec G204 -- bloggerURL comes from the trusted Blogger iframe src attribute
-	cmd := exec.Command("python3", "-c", bloggerProxyScript, bloggerURL)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	// Capture stderr from the proxy for debug logging
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start proxy: %w", err)
-	}
-
-	// Forward proxy stderr to debug log in background
 	go func() {
-		sc := bufio.NewScanner(stderrPipe)
-		for sc.Scan() {
-			util.Debugf("BloggerProxy: %s", sc.Text())
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			util.Debugf("BloggerProxy server error: %v", err)
 		}
 	}()
 
-	// Read the port number from the first line of stdout
-	scanner := bufio.NewScanner(stdout)
-	if !scanner.Scan() {
-		_ = cmd.Process.Kill()
-		return "", errors.New("proxy did not output port number")
-	}
-	port := strings.TrimSpace(scanner.Text())
-	if port == "" {
-		_ = cmd.Process.Kill()
-		return "", errors.New("proxy returned empty port")
-	}
-
-	bloggerProxy.cmd = cmd
-	bloggerProxy.port = port
-
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%s/blogger_proxy", port)
-	util.Debugf("Blogger proxy started on port %s (PID %d)", port, cmd.Process.Pid)
+	util.Debugf("Blogger proxy started on port %s", port)
 
-	// Readiness check: verify the proxy responds before returning
-	client := &http.Client{Timeout: 5 * 1000000000} // 5 seconds
-	headResp, headErr := client.Head(proxyURL)
+	// Readiness check
+	httpClient := &http.Client{Timeout: 5_000_000_000} // 5 seconds
+	headResp, headErr := httpClient.Head(proxyURL)
 	if headErr != nil {
 		util.Debugf("Proxy readiness check failed: %v", headErr)
 	} else {
