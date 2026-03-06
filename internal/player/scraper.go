@@ -1,14 +1,17 @@
 package player
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	//"github.com/Microsoft/go-winio"
 	"github.com/PuerkitoBio/goquery"
@@ -374,6 +377,18 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
 	}
 
+	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire
+	// video JSON API) that are not directly playable. Resolve them to actual
+	// CDN video URLs before returning.
+	if needsVideoExtraction(streamURL) {
+		resolved, err := extractActualVideoURL(streamURL)
+		if err == nil && resolved != "" {
+			return resolved, nil
+		}
+		// If resolution failed, fall back to the original URL so yt-dlp can try
+		util.Debug("Could not resolve intermediate URL, using as-is", "url", streamURL, "err", err)
+	}
+
 	return streamURL, nil
 }
 
@@ -598,168 +613,239 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
-// extractBloggerVideoURL extracts the actual video URL from a Blogger embed page
-// Blogger embeds contain the actual video URL in the page source, typically as a
-// direct video link or within JavaScript variables
+// extractBloggerVideoURL starts a local Python proxy that uses curl_cffi
+// (Chrome TLS impersonation) to extract the googlevideo URL via Blogger's
+// batchexecute API and stream the video to mpv.
+// The entire chain (page load, batchexecute, video streaming) uses Chrome TLS
+// so that Google's CDN does not reject the requests.
 func extractBloggerVideoURL(bloggerURL string) (string, error) {
 	if util.IsDebug {
 		util.Debugf("Extracting actual video URL from Blogger page: %s", bloggerURL)
 	}
 
-	// Create a custom request with necessary headers
-	req, err := http.NewRequest("GET", bloggerURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+	// Validate that it's a Blogger URL with a token
+	tokenRe := regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
+	tokenMatch := tokenRe.FindStringSubmatch(bloggerURL)
+	if len(tokenMatch) < 2 {
+		return "", fmt.Errorf("could not extract token from Blogger URL: %s", bloggerURL)
 	}
 
-	// Set headers to mimic a browser request
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	req.Header.Set("Referer", "https://www.blogger.com/")
-
-	client := util.GetFastClient()
-	resp, err := client.Do(req) // #nosec G704
+	// Start the proxy with the Blogger page URL; the Python script
+	// handles batchexecute extraction internally using curl_cffi.
+	proxyURL, err := startBloggerProxy(bloggerURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch Blogger page: %w", err)
+		return "", fmt.Errorf("failed to start Blogger proxy: %w", err)
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			util.Debugf("Failed to close response body: %v", closeErr)
+
+	return proxyURL, nil
+}
+
+// bloggerProxy holds the state of the running proxy process.
+var bloggerProxy struct {
+	mu   sync.Mutex
+	cmd  *exec.Cmd
+	port string
+}
+
+// StopBloggerProxy terminates any running Blogger video proxy.
+func StopBloggerProxy() {
+	bloggerProxy.mu.Lock()
+	defer bloggerProxy.mu.Unlock()
+	if bloggerProxy.cmd != nil && bloggerProxy.cmd.Process != nil {
+		util.Debugf("Stopping Blogger proxy (PID %d)", bloggerProxy.cmd.Process.Pid)
+		_ = bloggerProxy.cmd.Process.Kill()
+		_ = bloggerProxy.cmd.Wait()
+		bloggerProxy.cmd = nil
+		bloggerProxy.port = ""
+	}
+}
+
+// bloggerProxyScript is the Python script that:
+//  1. Loads the Blogger page and calls batchexecute (WcwnYd) to extract the
+//     googlevideo.com stream URL — all via curl_cffi Chrome TLS impersonation.
+//  2. Starts a local HTTP proxy that streams the video to mpv using the same
+//     Chrome TLS fingerprint.
+//
+// Using a single TLS identity end-to-end prevents Google's CDN from rejecting
+// requests with 403 due to fingerprint mismatch.
+const bloggerProxyScript = `
+import sys, os, re, json, socket
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+from urllib.parse import quote as urlquote
+from curl_cffi import requests as cffi_requests
+
+def extract_video_url(blogger_url):
+    s = cffi_requests.Session(impersonate='chrome')
+    r = s.get(blogger_url)
+    sid_m = re.search(r'"FdrFJe"\s*:\s*"([^"]+)"', r.text)
+    bh_m = re.search(r'"cfb2h"\s*:\s*"([^"]+)"', r.text)
+    tok_m = re.search(r'token=([A-Za-z0-9_-]+)', blogger_url)
+    if not sid_m or not bh_m or not tok_m:
+        raise RuntimeError('Failed to extract session params from Blogger page')
+    sid, bh, token = sid_m.group(1), bh_m.group(1), tok_m.group(1)
+    sys.stderr.write(f'PROXY extract: SID={sid}, build={bh}\n'); sys.stderr.flush()
+    inner = json.dumps([token, '', 0])
+    freq = json.dumps([[['WcwnYd', inner, None, 'generic']]])
+    post_body = 'f.req=' + urlquote(freq) + '&'
+    batch_url = (
+        'https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute'
+        '?rpcids=WcwnYd&source-path=%2Fvideo.g'
+        f'&f.sid={urlquote(sid)}&bl={urlquote(bh)}'
+        '&hl=en-US&_reqid=100001&rt=c'
+    )
+    r2 = s.post(batch_url, data=post_body, headers={
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'X-Same-Domain': '1',
+        'Origin': 'https://www.blogger.com',
+        'Referer': 'https://www.blogger.com/',
+    })
+    if r2.status_code != 200:
+        raise RuntimeError(f'batchexecute returned {r2.status_code}')
+    video_url = None
+    for line in r2.text.split('\n'):
+        if 'wrb.fr' not in line:
+            continue
+        outer = json.loads(line)
+        for entry in outer:
+            if entry[0] != 'wrb.fr' or entry[1] != 'WcwnYd':
+                continue
+            data = json.loads(entry[2])
+            for stream in data[2]:
+                u = stream[0]
+                if 'mime=video%2Fmp4' in u or 'mime=video/mp4' in u:
+                    video_url = u
+                    break
+            if not video_url:
+                video_url = data[2][0][0]
+            break
+        break
+    if not video_url:
+        raise RuntimeError('No video URL found in batchexecute response')
+    sys.stderr.write(f'PROXY extract: video URL obtained ({len(video_url)} chars)\n')
+    sys.stderr.flush()
+    return video_url
+
+BLOGGER_URL = sys.argv[1]
+VIDEO_URL = extract_video_url(BLOGGER_URL)
+
+class TS(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+class H(BaseHTTPRequestHandler):
+    def _s(self):
+        return cffi_requests.Session(impersonate='chrome')
+    def do_HEAD(self):
+        try:
+            r = self._s().head(VIDEO_URL)
+            self.send_response(r.status_code)
+            for k in ('Content-Type','Content-Length','Accept-Ranges'):
+                v = r.headers.get(k)
+                if v: self.send_header(k, v)
+            self.end_headers()
+            sys.stderr.write(f'PROXY HEAD -> {r.status_code}\n'); sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f'PROXY HEAD err: {e}\n'); sys.stderr.flush()
+            self.send_error(502)
+    def do_GET(self):
+        try:
+            h = {}
+            rng = self.headers.get('Range')
+            if rng: h['Range'] = rng
+            r = self._s().get(VIDEO_URL, headers=h, stream=True)
+            self.send_response(r.status_code)
+            for k in ('Content-Type','Content-Length','Content-Range','Accept-Ranges'):
+                v = r.headers.get(k)
+                if v: self.send_header(k, v)
+            self.end_headers()
+            sys.stderr.write(f'PROXY GET Range={rng} -> {r.status_code}\n'); sys.stderr.flush()
+            w = 0
+            for c in r.iter_content(chunk_size=65536):
+                self.wfile.write(c); w += len(c)
+            sys.stderr.write(f'PROXY GET done: {w}b\n'); sys.stderr.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            sys.stderr.write('PROXY GET: disconn\n'); sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f'PROXY GET err: {e}\n'); sys.stderr.flush()
+            try: self.send_error(502)
+            except Exception: pass
+    def log_message(self, *a): pass
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(('127.0.0.1', 0))
+port = sock.getsockname()[1]
+sock.close()
+srv = TS(('127.0.0.1', port), H)
+sys.stdout.write(f'{port}\n'); sys.stdout.flush()
+srv.serve_forever()
+`
+
+// startBloggerProxy starts a local Python proxy that extracts the video URL
+// from a Blogger page via batchexecute and streams it with Chrome TLS.
+func startBloggerProxy(bloggerURL string) (string, error) {
+	// Stop any existing proxy
+	StopBloggerProxy()
+
+	bloggerProxy.mu.Lock()
+	defer bloggerProxy.mu.Unlock()
+
+	// #nosec G204 -- bloggerURL comes from the trusted Blogger iframe src attribute
+	cmd := exec.Command("python3", "-c", bloggerProxyScript, bloggerURL)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	// Capture stderr from the proxy for debug logging
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start proxy: %w", err)
+	}
+
+	// Forward proxy stderr to debug log in background
+	go func() {
+		sc := bufio.NewScanner(stderrPipe)
+		for sc.Scan() {
+			util.Debugf("BloggerProxy: %s", sc.Text())
 		}
 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("blogger page returned status: %d", resp.StatusCode)
+	// Read the port number from the first line of stdout
+	scanner := bufio.NewScanner(stdout)
+	if !scanner.Scan() {
+		_ = cmd.Process.Kill()
+		return "", errors.New("proxy did not output port number")
+	}
+	port := strings.TrimSpace(scanner.Text())
+	if port == "" {
+		_ = cmd.Process.Kill()
+		return "", errors.New("proxy returned empty port")
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read Blogger page: %w", err)
+	bloggerProxy.cmd = cmd
+	bloggerProxy.port = port
+
+	proxyURL := fmt.Sprintf("http://127.0.0.1:%s/blogger_proxy", port)
+	util.Debugf("Blogger proxy started on port %s (PID %d)", port, cmd.Process.Pid)
+
+	// Readiness check: verify the proxy responds before returning
+	client := &http.Client{Timeout: 5 * 1000000000} // 5 seconds
+	headResp, headErr := client.Head(proxyURL)
+	if headErr != nil {
+		util.Debugf("Proxy readiness check failed: %v", headErr)
+	} else {
+		util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s",
+			headResp.StatusCode, headResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Length"))
+		_ = headResp.Body.Close()
 	}
 
-	content := string(body)
-
-	// Try multiple patterns to extract the actual video URL from Blogger page
-	// Pattern 1: Look for direct video URLs in VIDEO_CONFIG or similar JSON
-	videoPatterns := []string{
-		// Pattern for "video_url" or similar JSON fields
-		`"video_url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
-		`"url"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
-		`"contentUrl"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
-		// Pattern for URLs with videoplayback
-		`(https?://[^"'\s]+videoplayback[^"'\s]+)`,
-		// Pattern for googlevideo.com URLs
-		`(https?://[^"'\s]*googlevideo\.com[^"'\s]+)`,
-		// Pattern for blogger video URLs
-		`(https?://[^"'\s]*bp\.blogspot\.com[^"'\s]+\.mp4[^"'\s]*)`,
-		// Pattern for direct video URLs in various formats
-		`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`,
-		// Pattern for HLS streams
-		`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`,
-		// Pattern for video URLs in source tags
-		`<source[^>]+src=["']([^"']+)["']`,
-		// Pattern for data-src attributes
-		`data-src=["'](https?://[^"']+)["']`,
-	}
-
-	for _, pattern := range videoPatterns {
-		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(content)
-		if len(matches) > 1 {
-			videoURL := matches[1]
-			// Unescape any escaped characters in the URL
-			videoURL = strings.ReplaceAll(videoURL, `\u0026`, "&")
-			videoURL = strings.ReplaceAll(videoURL, `\/`, "/")
-			videoURL = strings.ReplaceAll(videoURL, `\\`, "")
-
-			// Validate it looks like a real video URL
-			if isValidVideoURL(videoURL) {
-				if util.IsDebug {
-					util.Debugf("Found video URL from Blogger: %s", videoURL)
-				}
-				return videoURL, nil
-			}
-		}
-	}
-
-	// Try to find VIDEO_CONFIG JavaScript object
-	configPattern := `VIDEO_CONFIG\s*=\s*(\{[^}]+\})`
-	configRe := regexp.MustCompile(configPattern)
-	configMatches := configRe.FindStringSubmatch(content)
-	if len(configMatches) > 1 {
-		configJSON := configMatches[1]
-		// Look for URL in the config
-		urlPattern := `"(?:url|video_url|contentUrl)"\s*:\s*"([^"]+)"`
-		urlRe := regexp.MustCompile(urlPattern)
-		urlMatches := urlRe.FindStringSubmatch(configJSON)
-		if len(urlMatches) > 1 {
-			videoURL := strings.ReplaceAll(urlMatches[1], `\u0026`, "&")
-			videoURL = strings.ReplaceAll(videoURL, `\/`, "/")
-			if isValidVideoURL(videoURL) {
-				if util.IsDebug {
-					util.Debugf("Found video URL from VIDEO_CONFIG: %s", videoURL)
-				}
-				return videoURL, nil
-			}
-		}
-	}
-
-	// Try to parse as HTML and look for video elements
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
-	if err == nil {
-		// Check video source elements
-		doc.Find("video source, video").Each(func(i int, s *goquery.Selection) {
-			if src, exists := s.Attr("src"); exists && isValidVideoURL(src) {
-				if util.IsDebug {
-					util.Debugf("Found video URL from HTML video element: %s", src)
-				}
-			}
-		})
-
-		// Check for data attributes
-		doc.Find("[data-video-url], [data-src], [data-url]").Each(func(i int, s *goquery.Selection) {
-			attrs := []string{"data-video-url", "data-src", "data-url"}
-			for _, attr := range attrs {
-				if src, exists := s.Attr(attr); exists && isValidVideoURL(src) {
-					if util.IsDebug {
-						util.Debugf("Found video URL from data attribute %s: %s", attr, src)
-					}
-				}
-			}
-		})
-	}
-
-	// If no direct video URL found, return the original Blogger URL
-	// This allows yt-dlp to handle it as a fallback
-	if util.IsDebug {
-		util.Debugf("Could not extract direct video URL from Blogger page, returning original URL for yt-dlp handling")
-	}
-	return bloggerURL, nil
-}
-
-// isValidVideoURL checks if a URL looks like a valid video URL
-func isValidVideoURL(url string) bool {
-	if url == "" {
-		return false
-	}
-	// Must start with http
-	if !strings.HasPrefix(url, "http") {
-		return false
-	}
-	// Should contain video-related keywords or file extensions
-	lowerURL := strings.ToLower(url)
-	validIndicators := []string{
-		".mp4", ".m3u8", ".webm", ".mkv", ".avi",
-		"videoplayback", "googlevideo.com", "video/",
-		"stream", "play", "media",
-	}
-	for _, indicator := range validIndicators {
-		if strings.Contains(lowerURL, indicator) {
-			return true
-		}
-	}
-	return false
+	return proxyURL, nil
 }
 
 // needsVideoExtraction returns true when the URL is an intermediate endpoint
@@ -780,12 +866,15 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	}
 
 	// If the URL is a Blogger video embed, extract the actual video URL
-	if strings.Contains(videoSrc, "blogger.com") {
+	if strings.Contains(videoSrc, "blogger.com") ||
+		strings.Contains(videoSrc, "blogspot.com") {
 		return extractBloggerVideoURL(videoSrc)
 	}
 
-	// If the URL is from animefire.io, fetch the content
-	if strings.Contains(videoSrc, "animefire.io/video/") {
+	// If the URL is from animefire, fetch the content
+	isAnimeFire := strings.Contains(videoSrc, "animefire.io/video/") ||
+		strings.Contains(videoSrc, "animefire.plus/video/")
+	if isAnimeFire {
 		if util.IsDebug {
 			util.Debugf("Found animefire.io video URL, fetching content...")
 		}
@@ -877,6 +966,16 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 
 			// Return the selected source URL
 			return selectedSrc, nil
+		}
+
+		// When Data is empty, check the Token field for a Blogger URL
+		if err == nil && len(videoResponse.Data) == 0 && videoResponse.Token != "" {
+			if util.IsDebug {
+				util.Debugf("AnimeFire returned empty data with token: %s", videoResponse.Token)
+			}
+			if strings.Contains(videoResponse.Token, "blogger.com") {
+				return extractBloggerVideoURL(videoResponse.Token)
+			}
 		}
 
 		// Fallback: Try to find a direct video URL in the content
@@ -992,5 +1091,6 @@ type VideoData struct {
 
 // VideoResponse represents the video response structure with a slice of VideoData
 type VideoResponse struct {
-	Data []VideoData `json:"data"`
+	Data  []VideoData `json:"data"`
+	Token string      `json:"token"`
 }

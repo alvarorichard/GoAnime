@@ -5,6 +5,9 @@ import (
 )
 
 func TestOMDbSearchByTitle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test - requires external OMDb API")
+	}
 	client := NewOMDbClient()
 
 	result, err := client.SearchByTitle("The Matrix", "movie")
@@ -25,6 +28,9 @@ func TestOMDbSearchByTitle(t *testing.T) {
 }
 
 func TestOMDbGetByIMDBID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test - requires external OMDb API")
+	}
 	client := NewOMDbClient()
 
 	media, err := client.GetByIMDBID("tt0133093")
@@ -45,6 +51,9 @@ func TestOMDbGetByIMDBID(t *testing.T) {
 }
 
 func TestOMDbGetByTitle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test - requires external OMDb API")
+	}
 	client := NewOMDbClient()
 
 	media, err := client.GetByTitle("The Matrix", "1999")

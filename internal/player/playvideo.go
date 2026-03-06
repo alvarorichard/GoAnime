@@ -264,6 +264,7 @@ func playVideo(
 ) error {
 	timer := util.StartTimer("playVideo:Total")
 	defer timer.Stop()
+	defer StopBloggerProxy() // Clean up any Blogger video proxy
 	util.PerfCount("video_plays")
 
 	// Log the episode number and URL for debugging
@@ -358,6 +359,13 @@ func playVideo(
 			)
 			util.Debugf("9Anime stream detected - enabling yt-dlp with Chrome TLS impersonation")
 		}
+	}
+
+	// For googlevideo.com URLs served through our local Blogger proxy,
+	// disable yt-dlp so mpv fetches from 127.0.0.1 directly.
+	if strings.Contains(videoURL, "127.0.0.1") && strings.Contains(videoURL, "blogger_proxy") {
+		mpvArgs = append(mpvArgs, "--ytdl=no")
+		util.Debugf("Blogger proxy URL detected - disabling yt-dlp")
 	}
 
 	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
