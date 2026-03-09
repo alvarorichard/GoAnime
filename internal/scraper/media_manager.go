@@ -46,6 +46,20 @@ func NewMediaManager() *MediaManager {
 	}
 }
 
+// Singleton pattern for MediaManager
+var (
+	mediaManagerInstance *MediaManager
+	mediaManagerOnce     sync.Once
+)
+
+// GetMediaManager returns a singleton MediaManager
+func GetMediaManager() *MediaManager {
+	mediaManagerOnce.Do(func() {
+		mediaManagerInstance = NewMediaManager()
+	})
+	return mediaManagerInstance
+}
+
 // SearchAll searches across all sources (anime + movies/TV)
 func (mm *MediaManager) SearchAll(query string) ([]*models.Anime, error) {
 	return mm.scraperManager.SearchAnime(query, nil)

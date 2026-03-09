@@ -23,7 +23,7 @@ type MediaHandler struct {
 // NewMediaHandler creates a new MediaHandler
 func NewMediaHandler() *MediaHandler {
 	return &MediaHandler{
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: scraper.GetMediaManager(),
 		provider:     "Vidcloud",
 		quality:      scraper.Quality1080,
 		subsLanguage: "english",

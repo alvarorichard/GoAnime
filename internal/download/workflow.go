@@ -191,7 +191,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	util.Infof("Searching for: %s (quality: %s)", request.AnimeName, quality)
 
 	// Create media manager and search
-	mediaManager := scraper.NewMediaManager()
+	mediaManager := scraper.GetMediaManager()
 	results, err := mediaManager.SearchMoviesAndTV(request.AnimeName)
 	if err != nil {
 		return fmt.Errorf("failed to search for movie/TV: %w", err)

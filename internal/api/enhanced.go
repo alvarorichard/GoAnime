@@ -17,6 +17,24 @@ import (
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
 
+// getSourceDisplayName returns a human-readable name for a scraper type
+func getSourceDisplayName(st scraper.ScraperType) string {
+	switch st {
+	case scraper.AllAnimeType:
+		return "AllAnime"
+	case scraper.AnimefireType:
+		return "AnimeFire"
+	case scraper.AnimeDriveType:
+		return "AnimeDrive"
+	case scraper.FlixHQType:
+		return "FlixHQ"
+	case scraper.NineAnimeType:
+		return "9Anime"
+	default:
+		return "Unknown"
+	}
+}
+
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
 func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
@@ -54,8 +72,17 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
+
+	// Show more informative loading message
+	searchTitle := "Searching for anime..."
+	if scraperType != nil {
+		searchTitle = fmt.Sprintf("Searching %s...", getSourceDisplayName(*scraperType))
+	} else {
+		searchTitle = "Searching all sources..."
+	}
+
 	_ = spinner.New().
-		Title("Searching for anime...").
+		Title(searchTitle).
 		Type(spinner.Dots).
 		Action(func() {
 			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
@@ -130,42 +157,30 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	var idx int
 	var err error
 
-	if util.IsDebug {
-		// In debug mode, show preview window with technical details
-		idx, err = fuzzyfinder.Find(
-			animesWithBack,
-			func(i int) string {
-				// Show the anime name with language tag as-is
-				return animesWithBack[i].Name
-			},
-			fuzzyfinder.WithPromptString("Select the anime you want: "),
-			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
-				if i >= 0 && i < len(animesWithBack) {
-					anime := animesWithBack[i]
-					if anime.Source == "__back__" {
-						return "Go back to perform a new search"
-					}
-					var preview string
-					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
-					if anime.ImageURL != "" {
-						preview += "\nImage: " + anime.ImageURL
-					}
-					return preview
+	// Always show preview window with useful info
+	idx, err = fuzzyfinder.Find(
+		animesWithBack,
+		func(i int) string {
+			// Show the anime name with language tag as-is
+			return animesWithBack[i].Name
+		},
+		fuzzyfinder.WithPromptString("Select the anime: "),
+		fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
+			if i >= 0 && i < len(animesWithBack) {
+				anime := animesWithBack[i]
+				if anime.Source == "__back__" {
+					return "← Back to search"
 				}
-				return ""
-			}),
-		)
-	} else {
-		// In normal mode, no preview window at all
-		idx, err = fuzzyfinder.Find(
-			animesWithBack,
-			func(i int) string {
-				// Show the anime name with language tag as-is
-				return animesWithBack[i].Name
-			},
-			fuzzyfinder.WithPromptString("Select the anime you want: "),
-		)
-	}
+				// Show useful info in preview
+				preview := fmt.Sprintf("📺 %s", anime.Source)
+				if anime.ImageURL != "" {
+					preview += " | 🖼️ Available"
+				}
+				return preview
+			}
+			return ""
+		}),
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("anime selection cancelled: %w", err)
@@ -628,7 +643,7 @@ func GetNineAnimeStreamURL(anime *models.Anime, episode *models.Episode, quality
 
 // GetFlixHQEpisodes handles episodes/content for FlixHQ movies and TV shows
 func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
-	flixhqClient := scraper.NewFlixHQClient()
+	flixhqClient := scraper.GetFlixHQClient()
 
 	// Extract media ID from URL
 	mediaID := extractMediaIDFromURL(media.URL)
@@ -732,7 +747,7 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 // GetFlixHQStreamURL gets the stream URL for FlixHQ content
 func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, []models.Subtitle, error) {
-	flixhqClient := scraper.NewFlixHQClient()
+	flixhqClient := scraper.GetFlixHQClient()
 	provider := "Vidcloud"
 	subsLanguage := util.GlobalSubsLanguage
 	if subsLanguage == "" {

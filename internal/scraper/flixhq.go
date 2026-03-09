@@ -192,6 +192,20 @@ func NewFlixHQClient() *FlixHQClient {
 	}
 }
 
+// Singleton pattern for FlixHQ client
+var (
+	flixHQClientInstance *FlixHQClient
+	flixHQClientOnce     sync.Once
+)
+
+// GetFlixHQClient returns a singleton FlixHQ client
+func GetFlixHQClient() *FlixHQClient {
+	flixHQClientOnce.Do(func() {
+		flixHQClientInstance = NewFlixHQClient()
+	})
+	return flixHQClientInstance
+}
+
 // NewFlixHQClientWithContext creates a new FlixHQ client with custom settings
 func NewFlixHQClientWithContext(timeout time.Duration, maxRetries int) *FlixHQClient {
 	return &FlixHQClient{

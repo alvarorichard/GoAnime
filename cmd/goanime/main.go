@@ -12,28 +12,8 @@ import (
 )
 
 func main() {
-	// Setup signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		util.RunCleanup()
-		os.Exit(0)
-	}()
-
-	// Ensure cleanup runs on normal exit
-	defer util.RunCleanup()
-
-	// Start total execution timer
-	timer := util.StartTimer("TotalExecution")
-	defer timer.Stop()
-
-	// Initialize tracker early in background to avoid delays when playing movies
-	player.InitTrackerAsync()
-
-	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
-	player.PreWarmMPVPath()
-
+	// FIRST: Parse flags and get user input IMMEDIATELY
+	// This ensures UI appears as fast as possible
 	animeName, err := util.FlagParser()
 	if err != nil {
 		// Check if error is update request
@@ -42,7 +22,6 @@ func main() {
 				log.Fatalln(util.ErrorHandler(updateErr))
 			}
 			return
-
 		}
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
@@ -71,6 +50,29 @@ func main() {
 		}
 		log.Fatalln(util.ErrorHandler(err))
 	}
+
+	// Setup signal handling for graceful shutdown (after UI is shown)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		util.RunCleanup()
+		os.Exit(0)
+	}()
+
+	// Ensure cleanup runs on normal exit
+	defer util.RunCleanup()
+
+	// Start total execution timer (after UI is shown)
+	timer := util.StartTimer("TotalExecution")
+	defer timer.Stop()
+
+	// NOW: Initialize heavy stuff AFTER UI is shown
+	// Initialize tracker early in background to avoid delays when playing movies
+	player.InitTrackerAsync()
+
+	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
+	player.PreWarmMPVPath()
 
 	// Handle normal playback mode
 	handlers.HandlePlaybackMode(animeName)

@@ -27,6 +27,7 @@ const (
 // NineAnimeClient handles interactions with 9animetv.to
 type NineAnimeClient struct {
 	client      *http.Client
+	fetcher     *HTMLFetcher
 	baseURL     string
 	userAgent   string
 	maxRetries  int
@@ -93,15 +94,25 @@ var (
 
 func NewNineAnimeClient() *NineAnimeClient {
 	nineAnimeClientOnce.Do(func() {
-		nineAnimeClientInstance = &NineAnimeClient{
-			client:     util.GetFastClient(),
-			baseURL:    NineAnimeBase,
-			userAgent:  NineAnimeUserAgent,
-			maxRetries: 2,
-			retryDelay: 300 * time.Millisecond,
-		}
+		nineAnimeClientInstance = NewNineAnimeClientWithBrowser(false)
 	})
 	return nineAnimeClientInstance
+}
+
+func NewNineAnimeClientWithBrowser(useBrowser bool) *NineAnimeClient {
+	fetcher := NewHTMLFetcher(WithBrowser(useBrowser), WithFallback(true))
+	return &NineAnimeClient{
+		client:     util.GetFastClient(),
+		fetcher:    fetcher,
+		baseURL:    NineAnimeBase,
+		userAgent:  NineAnimeUserAgent,
+		maxRetries: 2,
+		retryDelay: 300 * time.Millisecond,
+	}
+}
+
+func (c *NineAnimeClient) SetFetcher(fetcher *HTMLFetcher) {
+	c.fetcher = fetcher
 }
 
 // decorateRequest adds standard headers to a request
@@ -117,6 +128,26 @@ func (c *NineAnimeClient) decorateAJAXRequest(req *http.Request) {
 	c.decorateRequest(req)
 	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+}
+
+func (c *NineAnimeClient) fetchHTML(ctx context.Context, url string) (io.Reader, error) {
+	if c.fetcher != nil {
+		return c.fetcher.GetHTML(ctx, url)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.decorateRequest(req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("server returned: %s", resp.Status)
+	}
+	return resp.Body, nil
 }
 
 func (c *NineAnimeClient) shouldRetry(attempt int) bool {

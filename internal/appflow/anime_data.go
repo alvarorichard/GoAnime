@@ -162,8 +162,22 @@ func FetchAnimeDetails(anime *models.Anime) {
 func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
 	episodesStart := time.Now()
 
+	// Check cache first using anime URL as key
+	cacheKey := anime.Source + ":" + anime.URL
+	if cached, ok := util.GetEpisodeCache().Get(cacheKey); ok {
+		util.Debugf("Using cached episodes for: %s", anime.Name)
+		episodes := util.DecodeEpisodes(cached)
+		if len(episodes) > 0 {
+			util.Debugf("[PERF] GetAnimeEpisodes (cached) completed in %v", time.Since(episodesStart))
+			return episodes
+		}
+	}
+
 	var episodes []models.Episode
 	var fetchErr error
+
+	// Show source-specific loading message
+	loadingTitle := fmt.Sprintf("Loading episodes from %s...", anime.Source)
 
 	// For FlixHQ content, don't wrap in spinner here because GetFlixHQEpisodes
 	// has UI interactions (season selection) and handles its own spinners for network calls
@@ -172,7 +186,7 @@ func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
 	} else {
 		// Use spinner while fetching episodes for non-FlixHQ content
 		_ = spinner.New().
-			Title("Loading episodes...").
+			Title(loadingTitle).
 			Type(spinner.Dots).
 			Action(func() {
 				// Use enhanced API for episode fetching
@@ -183,6 +197,11 @@ func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
 
 	if fetchErr != nil || len(episodes) == 0 {
 		log.Fatalln("The selected anime does not have episodes on the server.")
+	}
+
+	// Cache the results
+	if encoded, err := util.EncodeEpisodes(episodes); err == nil {
+		util.GetEpisodeCache().Set(cacheKey, encoded)
 	}
 
 	util.Debugf("[PERF] GetAnimeEpisodes completed in %v", time.Since(episodesStart))

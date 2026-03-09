@@ -52,7 +52,7 @@ func NewMovieDownloader() *MovieDownloader {
 			SubsLanguage: "english",
 			Provider:     "Vidcloud",
 		},
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: scraper.GetMediaManager(),
 	}
 }
 
@@ -74,7 +74,7 @@ func NewMovieDownloaderWithConfig(config MovieDownloadConfig) *MovieDownloader {
 
 	return &MovieDownloader{
 		config:       config,
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: scraper.GetMediaManager(),
 	}
 }
 

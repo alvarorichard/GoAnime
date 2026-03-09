@@ -25,6 +25,20 @@ func NewManager() *Manager {
 	}
 }
 
+// Singleton pattern for Discord Manager
+var (
+	discordManagerInstance *Manager
+	discordManagerOnce     sync.Once
+)
+
+// GetDiscordManager returns a singleton Discord Manager
+func GetDiscordManager() *Manager {
+	discordManagerOnce.Do(func() {
+		discordManagerInstance = NewManager()
+	})
+	return discordManagerInstance
+}
+
 // Initialize initializes the Discord Rich Presence (non-blocking, runs in background)
 func (m *Manager) Initialize() error {
 	m.initMutex.Lock()

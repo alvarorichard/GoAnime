@@ -154,12 +154,16 @@ var (
 	// SearchCache caches search results (2 minute TTL)
 	SearchCache     *ResponseCache
 	searchCacheOnce sync.Once
+
+	// EpisodeCache caches episode lists (5 minute TTL)
+	EpisodeCache     *ResponseCache
+	episodeCacheOnce sync.Once
 )
 
 // GetAniListCache returns the global AniList cache
 func GetAniListCache() *ResponseCache {
 	aniListCacheOnce.Do(func() {
-		AniListCache = NewResponseCache(5*time.Minute, 200) // Increased cache size
+		AniListCache = NewResponseCache(5*time.Minute, 200)
 	})
 	return AniListCache
 }
@@ -167,9 +171,17 @@ func GetAniListCache() *ResponseCache {
 // GetSearchCache returns the global search cache
 func GetSearchCache() *ResponseCache {
 	searchCacheOnce.Do(func() {
-		SearchCache = NewResponseCache(2*time.Minute, 100) // Increased cache size
+		SearchCache = NewResponseCache(2*time.Minute, 100)
 	})
 	return SearchCache
+}
+
+// GetEpisodeCache returns the global episode cache
+func GetEpisodeCache() *ResponseCache {
+	episodeCacheOnce.Do(func() {
+		EpisodeCache = NewResponseCache(5*time.Minute, 200)
+	})
+	return EpisodeCache
 }
 
 // WorkerPool provides a safe way to run multiple goroutines with a limit

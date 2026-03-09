@@ -24,13 +24,19 @@ func HandlePlaybackMode(animeName string) {
 
 	// Pre-warm connections to known API hosts in the background
 	// This runs DNS + TLS handshakes so the first real requests are faster
-	util.PreWarmConnections()
+	// We defer this to run AFTER the first search for faster UI startup
+	preWarmDone := make(chan struct{})
+	go func() {
+		defer close(preWarmDone)
+		util.PreWarmConnections()
+	}()
 
 	tracking.HandleTrackingNotice()
 	util.Debugf("[PERF] starting Goanime v%s", version.Version)
 
 	// Discord init runs in background - doesn't block startup
-	discordManager := discord.NewManager()
+	// Use singleton to avoid creating new instances
+	discordManager := discord.GetDiscordManager()
 	_ = discordManager.Initialize() // Non-blocking, runs async
 	defer discordManager.Shutdown()
 

@@ -197,7 +197,19 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {
-		displayList[i+1] = ep.Number
+		// Show episode number with title if available
+		epTitle := ep.Title.English
+		if epTitle == "" {
+			epTitle = ep.Title.Romaji
+		}
+		if epTitle != "" && len(epTitle) > 40 {
+			epTitle = epTitle[:40] + "..."
+		}
+		if epTitle != "" {
+			displayList[i+1] = fmt.Sprintf("Ep %s - %s", ep.Number, epTitle)
+		} else {
+			displayList[i+1] = fmt.Sprintf("Episode %s", ep.Number)
+		}
 	}
 
 	idx, err := fuzzyfinder.Find(
@@ -205,7 +217,14 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		func(i int) string {
 			return displayList[i]
 		},
-		fuzzyfinder.WithPromptString("Select the episode: "),
+		fuzzyfinder.WithPromptString(fmt.Sprintf("Select episode (%d total): ", len(episodes))),
+		fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
+			if i > 0 && i <= len(episodes) {
+				ep := episodes[i-1]
+				return fmt.Sprintf("Episode: %s\nTitle: %s", ep.Number, ep.Title.English)
+			}
+			return ""
+		}),
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
