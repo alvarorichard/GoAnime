@@ -773,6 +773,10 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 			return "", nil, fmt.Errorf("failed to get movie stream: %w", streamErr)
 		}
 
+		if streamInfo == nil {
+			return "", nil, fmt.Errorf("failed to get movie stream: no stream info returned")
+		}
+
 		// If we have multiple quality options, let user choose (UI - no spinner needed)
 		if len(streamInfo.Qualities) > 1 {
 			selectedQuality, selectErr := selectFlixHQQualityOptions(streamInfo.Qualities)
@@ -809,6 +813,10 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 
 		if streamErr != nil {
 			return "", nil, fmt.Errorf("failed to get episode stream: %w", streamErr)
+		}
+
+		if streamInfo == nil {
+			return "", nil, fmt.Errorf("failed to get episode stream: no stream info returned")
 		}
 
 		// If we have multiple quality options, let user choose (UI - no spinner needed)
