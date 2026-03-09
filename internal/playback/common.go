@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh/spinner"
 )
 
 func PlayEpisode(

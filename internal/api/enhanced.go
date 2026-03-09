@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
 )

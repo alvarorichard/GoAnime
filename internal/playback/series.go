@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"sync"
 
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh"
 )
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {

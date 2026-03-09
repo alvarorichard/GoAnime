@@ -15,14 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lrstanley/go-ytdlp"
 )
 
@@ -318,7 +318,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 
 	// Create progress model
 	m := &movieProgressModel{
-		progress: progress.New(progress.WithDefaultGradient()),
+		progress: progress.New(progress.WithDefaultBlend()),
 		title:    title,
 	}
 
@@ -908,7 +908,7 @@ func (m *movieProgressModel) Init() tea.Cmd {
 
 func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			m.done = true
 			return m, tea.Quit
@@ -940,14 +940,13 @@ func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case progress.FrameMsg:
 		var cmd tea.Cmd
-		newModel, cmd := m.progress.Update(msg)
-		m.progress = newModel.(progress.Model)
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 	}
 	return m, nil
 }
 
-func (m *movieProgressModel) View() string {
+func (m *movieProgressModel) View() tea.View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -966,8 +965,8 @@ func (m *movieProgressModel) View() string {
 		title = "downloading..."
 	}
 
-	return fmt.Sprintf("%s\n%s\n\nPress Ctrl+C to cancel\n%s",
+	return tea.NewView(fmt.Sprintf("%s\n%s\n\nPress Ctrl+C to cancel\n%s",
 		title,
 		m.progress.View(),
-		status)
+		status))
 }

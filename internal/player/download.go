@@ -15,14 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/manifoldco/promptui"
 )
@@ -661,7 +661,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 
 	if totalBytes > 0 {
 		m = &model{
-			progress: progress.New(progress.WithDefaultGradient()),
+			progress: progress.New(progress.WithDefaultBlend()),
 			keys: keyMap{
 				quit: key.NewBinding(
 					key.WithKeys("ctrl+c"),
@@ -844,7 +844,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 
 	if totalBytes > 0 {
 		m = &model{
-			progress:   progress.New(progress.WithDefaultGradient()),
+			progress:   progress.New(progress.WithDefaultBlend()),
 			keys:       keyMap{quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))},
 			totalBytes: totalBytes,
 		}

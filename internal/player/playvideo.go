@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -18,7 +19,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application

@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lrstanley/go-ytdlp"
 )
 
@@ -177,7 +177,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 
 	// Create progress model for overall progress
 	m := &progressModel{
-		progress: progress.New(progress.WithDefaultGradient()),
+		progress: progress.New(progress.WithDefaultBlend()),
 	}
 
 	// Calculate total bytes for all episodes
@@ -590,7 +590,7 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, episodeNum int) error {
 	// Create progress model
 	m := &progressModel{
-		progress: progress.New(progress.WithDefaultGradient()),
+		progress: progress.New(progress.WithDefaultBlend()),
 	}
 
 	// Get content length for progress tracking
@@ -1080,7 +1080,7 @@ func (m *progressModel) Init() tea.Cmd {
 
 func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			m.done = true
 			return m, tea.Quit
@@ -1113,14 +1113,13 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case progress.FrameMsg:
 		var cmd tea.Cmd
-		newModel, cmd := m.progress.Update(msg)
-		m.progress = newModel.(progress.Model)
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 	}
 	return m, nil
 }
 
-func (m *progressModel) View() string {
+func (m *progressModel) View() tea.View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1134,8 +1133,8 @@ func (m *progressModel) View() string {
 		status = fmt.Sprintf("Progress: %.1f%%", percent)
 	}
 
-	return fmt.Sprintf("Source: %s\n%s\n\nPress Ctrl+C to cancel\n%s",
+	return tea.NewView(fmt.Sprintf("Source: %s\n%s\n\nPress Ctrl+C to cancel\n%s",
 		"downloading...", // We'll update this with actual URL if needed
 		m.progress.View(),
-		status)
+		status))
 }

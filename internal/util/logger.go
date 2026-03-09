@@ -8,9 +8,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"charm.land/log/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 var Logger *log.Logger
@@ -110,7 +110,7 @@ func initFileLogger() *os.File {
 		Prefix:          "GoAnime",
 	})
 	fileLogger.SetLevel(log.DebugLevel)
-	fileLogger.SetColorProfile(termenv.Ascii) // no colors in the file
+	fileLogger.SetColorProfile(colorprofile.ASCII) // no colors in the file
 
 	return f
 }
@@ -130,7 +130,7 @@ func InitLogger() {
 	// Console logger is always InfoLevel to keep the terminal clean for TUI.
 	// Debug-level messages are routed exclusively to the log file.
 	Logger.SetLevel(log.InfoLevel)
-	Logger.SetColorProfile(termenv.TrueColor)
+	Logger.SetColorProfile(colorprofile.TrueColor)
 
 	if IsDebug {
 		// Initialize file logging — all debug output goes here

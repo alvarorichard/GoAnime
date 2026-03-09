@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
 	"github.com/ktr0731/go-fuzzyfinder"

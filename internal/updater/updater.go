@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/version"
-	"github.com/charmbracelet/huh"
 )
 
 const (

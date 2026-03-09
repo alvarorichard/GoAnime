@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Update handles updates to the Bubble Tea model.
@@ -77,12 +77,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case progress.FrameMsg:
 		var cmd tea.Cmd
-		var newModel tea.Model
-		newModel, cmd = m.progress.Update(msg)
-		m.progress = newModel.(progress.Model)
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if key.Matches(msg, m.keys.quit) {
 			m.done = true
 			return m, tea.Quit
@@ -108,7 +106,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // Returns:
 // - A formatted string that represents the UI for the current state of the model.
-func (m *model) View() string {
+func (m *model) View() tea.View {
 	// Creates padding spaces for consistent layout
 	pad := strings.Repeat(" ", padding)
 
@@ -124,10 +122,10 @@ func (m *model) View() string {
 		bar = m.progress.View()
 	}
 
-	return "\n" +
+	return tea.NewView("\n" +
 		pad + statusStyle.Render(m.status) + "\n\n" + // Render the styled status message
 		pad + bar + "\n\n" + // Render the progress bar
-		pad + "Press Ctrl+C to quit" // Show quit instruction
+		pad + "Press Ctrl+C to quit") // Show quit instruction
 }
 
 // tickCmd returns a command that triggers a "tick" every 25 milliseconds.

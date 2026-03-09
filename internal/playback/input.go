@@ -1,8 +1,8 @@
 package playback
 
 import (
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh"
 )
 
 func GetUserInput() string {

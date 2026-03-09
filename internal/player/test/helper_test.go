@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,7 +16,7 @@ func TestProgressBarFormatting(t *testing.T) {
 	t.Run("Progress bar should render correctly", func(t *testing.T) {
 		// Create a progress model
 		p := progress.New(
-			progress.WithDefaultGradient(),
+			progress.WithDefaultBlend(),
 			progress.WithWidth(40),
 		)
 
@@ -135,7 +135,7 @@ func TestTeaModel(t *testing.T) {
 
 		// Check the view
 		view := updatedModel.View()
-		assert.Equal(t, "new value", view)
+		assert.Equal(t, "new value", view.Content)
 	})
 }
 
@@ -158,6 +158,6 @@ func (m *testModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *testModel) View() string {
-	return m.value
+func (m *testModel) View() tea.View {
+	return tea.NewView(m.value)
 }

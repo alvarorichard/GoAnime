@@ -18,15 +18,15 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 	"github.com/pkg/errors"
 )
 
@@ -677,7 +677,7 @@ func downloadAndPlayEpisode(
 			strings.Contains(videoURL, "sharepoint.com") {
 			// Use yt-dlp with progress bar
 			m := &model{
-				progress: progress.New(progress.WithDefaultGradient()),
+				progress: progress.New(progress.WithDefaultBlend()),
 				keys: keyMap{
 					quit: key.NewBinding(
 						key.WithKeys("ctrl+c"),
@@ -754,7 +754,7 @@ func downloadAndPlayEpisode(
 		} else {
 			// Initialize progress model
 			m := &model{
-				progress: progress.New(progress.WithDefaultGradient()),
+				progress: progress.New(progress.WithDefaultBlend()),
 				keys: keyMap{
 					quit: key.NewBinding(
 						key.WithKeys("ctrl+c"),

@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // VideoUpscaleConfig holds configuration for video upscaling
@@ -315,7 +315,7 @@ func (v *VideoUpscaler) upscaleFrames(ctx context.Context, inputDir, outputDir s
 	util.Infof("Processing %d frames with %d workers...", totalFrames, v.config.Workers)
 
 	// Create progress model
-	p := progress.New(progress.WithDefaultGradient())
+	p := progress.New(progress.WithDefaultBlend())
 	model := &upscaleProgressModel{
 		progress:    p,
 		totalFrames: totalFrames,
@@ -514,7 +514,7 @@ func (m *upscaleProgressModel) Init() tea.Cmd {
 
 func (m *upscaleProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			return m, tea.Quit
 		}
@@ -527,25 +527,25 @@ func (m *upscaleProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 	case progress.FrameMsg:
-		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
+		var cmd tea.Cmd
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 	}
 	return m, nil
 }
 
-func (m *upscaleProgressModel) View() string {
+func (m *upscaleProgressModel) View() tea.View {
 	m.mu.Lock()
 	completed := m.completed
 	m.mu.Unlock()
 
 	percent := float64(completed) / float64(m.totalFrames)
 	if m.done {
-		return fmt.Sprintf("\n✓ Upscaled %d/%d frames (100%%)\n\n", m.totalFrames, m.totalFrames)
+		return tea.NewView(fmt.Sprintf("\n✓ Upscaled %d/%d frames (100%%)\n\n", m.totalFrames, m.totalFrames))
 	}
-	return fmt.Sprintf("\n%s\nUpscaling: %d/%d frames (%.1f%%)\n",
+	return tea.NewView(fmt.Sprintf("\n%s\nUpscaling: %d/%d frames (%.1f%%)\n",
 		m.progress.ViewAs(percent),
-		completed, m.totalFrames, percent*100)
+		completed, m.totalFrames, percent*100))
 }
 
 // UpscaleVideoFile is a convenience function to upscale a video file

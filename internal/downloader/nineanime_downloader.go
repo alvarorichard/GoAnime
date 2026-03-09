@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/manifoldco/promptui"
 )
@@ -583,7 +583,7 @@ func (d *NineAnimeDownloader) downloadEpisodeWithProgress(anime *models.Anime, e
 	estimatedSize := int64(400 * 1024 * 1024) // 400MB default for HLS
 
 	m := &progressModel{
-		progress:   progress.New(progress.WithDefaultGradient()),
+		progress:   progress.New(progress.WithDefaultBlend()),
 		totalBytes: estimatedSize,
 	}
 

@@ -9,10 +9,10 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api"
 
+	"charm.land/huh/v2"
+	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/huh/spinner"
 )
 
 func SearchAnime(name string) *models.Anime {
