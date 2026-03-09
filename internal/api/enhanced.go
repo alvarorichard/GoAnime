@@ -4,6 +4,8 @@ package api
 import (
 	"errors"
 	"fmt"
+	"math"
+	"os"
 	"strings"
 
 	"charm.land/huh/v2/spinner"
@@ -12,7 +14,25 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
+	"golang.org/x/term"
 )
+
+// runWithSpinner runs the action with a spinner if stdout is a terminal,
+// otherwise runs the action directly. This ensures CI and non-interactive
+// environments work correctly since huh/v2 spinner may skip the Action
+// callback when no terminal is attached.
+func runWithSpinner(title string, action func()) {
+	fd := os.Stdout.Fd()
+	if fd <= math.MaxInt && term.IsTerminal(int(fd)) {
+		_ = spinner.New().
+			Title(title).
+			Type(spinner.Dots).
+			Action(action).
+			Run()
+	} else {
+		action()
+	}
+}
 
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
@@ -54,13 +74,9 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
-	_ = spinner.New().
-		Title("Searching for anime...").
-		Type(spinner.Dots).
-		Action(func() {
-			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
-		}).
-		Run()
+	runWithSpinner("Searching for anime...", func() {
+		animes, searchErr = scraperManager.SearchAnime(name, scraperType)
+	})
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)
 	}
@@ -660,13 +676,9 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading seasons (network call)
 	var seasons []scraper.FlixHQSeason
 	var seasonsErr error
-	_ = spinner.New().
-		Title("Loading seasons...").
-		Type(spinner.Dots).
-		Action(func() {
-			seasons, seasonsErr = flixhqClient.GetSeasons(mediaID)
-		}).
-		Run()
+	runWithSpinner("Loading seasons...", func() {
+		seasons, seasonsErr = flixhqClient.GetSeasons(mediaID)
+	})
 	if seasonsErr != nil {
 		return nil, fmt.Errorf("failed to get seasons: %w", seasonsErr)
 	}
@@ -699,13 +711,9 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading episodes (network call)
 	var flixEpisodes []scraper.FlixHQEpisode
 	var episodesErr error
-	_ = spinner.New().
-		Title("Loading episodes...").
-		Type(spinner.Dots).
-		Action(func() {
-			flixEpisodes, episodesErr = flixhqClient.GetEpisodes(selectedSeason.ID)
-		}).
-		Run()
+	runWithSpinner("Loading episodes...", func() {
+		flixEpisodes, episodesErr = flixhqClient.GetEpisodes(selectedSeason.ID)
+	})
 	if episodesErr != nil {
 		return nil, fmt.Errorf("failed to get episodes: %w", episodesErr)
 	}
@@ -749,25 +757,21 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		mediaID := episode.URL
 		util.Debug("Getting movie stream", "mediaID", mediaID)
 
-		// Use spinner for all network calls (server ID, embed link, stream extraction)
-		_ = spinner.New().
-			Title("Loading movie stream...").
-			Type(spinner.Dots).
-			Action(func() {
-				episodeID, streamErr = flixhqClient.GetMovieServerID(mediaID, provider)
-				if streamErr != nil {
-					return
-				}
+		// Run network calls (server ID, embed link, stream extraction) with optional spinner
+		runWithSpinner("Loading movie stream...", func() {
+			episodeID, streamErr = flixhqClient.GetMovieServerID(mediaID, provider)
+			if streamErr != nil {
+				return
+			}
 
-				embedLink, streamErr = flixhqClient.GetEmbedLink(episodeID)
-				if streamErr != nil {
-					return
-				}
+			embedLink, streamErr = flixhqClient.GetEmbedLink(episodeID)
+			if streamErr != nil {
+				return
+			}
 
-				// Extract stream info to get available qualities
-				streamInfo, streamErr = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
-			}).
-			Run()
+			// Extract stream info to get available qualities
+			streamInfo, streamErr = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
+		})
 
 		if streamErr != nil {
 			return "", nil, fmt.Errorf("failed to get movie stream: %w", streamErr)
@@ -791,25 +795,21 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		dataID := episode.URL
 		util.Debug("Getting TV episode stream", "dataID", dataID)
 
-		// Use spinner for all network calls (server ID, embed link, stream extraction)
-		_ = spinner.New().
-			Title("Loading episode stream...").
-			Type(spinner.Dots).
-			Action(func() {
-				episodeID, streamErr = flixhqClient.GetEpisodeServerID(dataID, provider)
-				if streamErr != nil {
-					return
-				}
+		// Run network calls (server ID, embed link, stream extraction) with optional spinner
+		runWithSpinner("Loading episode stream...", func() {
+			episodeID, streamErr = flixhqClient.GetEpisodeServerID(dataID, provider)
+			if streamErr != nil {
+				return
+			}
 
-				embedLink, streamErr = flixhqClient.GetEmbedLink(episodeID)
-				if streamErr != nil {
-					return
-				}
+			embedLink, streamErr = flixhqClient.GetEmbedLink(episodeID)
+			if streamErr != nil {
+				return
+			}
 
-				// Extract stream info to get available qualities
-				streamInfo, streamErr = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
-			}).
-			Run()
+			// Extract stream info to get available qualities
+			streamInfo, streamErr = flixhqClient.ExtractStreamInfo(embedLink, "auto", subsLanguage)
+		})
 
 		if streamErr != nil {
 			return "", nil, fmt.Errorf("failed to get episode stream: %w", streamErr)
