@@ -297,7 +297,7 @@ func (c *AnimefireClient) parseEpisodes(doc *goquery.Document) []models.Episode 
 		episodeNum := s.Text()
 		episodeURL, _ := s.Attr("href")
 
-		num := 1
+		num := i + 1 // default to index-based numbering
 		matches := re.FindStringSubmatch(episodeNum)
 		if len(matches) >= 2 {
 			parsed, err := strconv.Atoi(matches[1])
