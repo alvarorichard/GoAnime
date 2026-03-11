@@ -299,12 +299,27 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 	for _, anime := range results {
 		// Check if the anime name already has any language tag
 		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
+			strings.Contains(anime.Name, "[PT-BR]") ||
 			strings.Contains(anime.Name, "[Portuguese]") ||
 			strings.Contains(anime.Name, "[Português]")
 
 		if !hasLanguageTag {
 			anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 		}
+
+		// Add audio type for PT-BR sources
+		if scraperType == AnimefireType || scraperType == AnimeDriveType {
+			lowerName := strings.ToLower(anime.Name)
+			lowerURL := strings.ToLower(anime.URL)
+			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
+				if !strings.Contains(anime.Name, "(Dublado)") {
+					anime.Name = anime.Name + " (Dublado)"
+				}
+			} else if !strings.Contains(anime.Name, "(Legendado)") && !strings.Contains(anime.Name, "(Dublado)") {
+				anime.Name = anime.Name + " (Legendado)"
+			}
+		}
+
 		anime.Source = sourceName
 	}
 }
@@ -326,6 +341,12 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"animeDrive", counts["AnimeDrive"],
 		"flixHQ", counts["FlixHQ"],
 		"total", len(results))
+}
+
+// SearchAnimePTBR searches only PT-BR sources (AnimeFire, and Goyabu when available)
+func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
+	// For now, only AnimeFire. Goyabu will be added later.
+	return sm.searchSpecificScraper(query, AnimefireType)
 }
 
 // GetScraper returns a specific scraper by type
@@ -358,9 +379,9 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AllAnimeType:
 		return "[English]"
 	case AnimefireType:
-		return "[Portuguese]"
+		return "[PT-BR]"
 	case AnimeDriveType:
-		return "[Portuguese]"
+		return "[PT-BR]"
 	case FlixHQType:
 		return "[Movies/TV]"
 	default:

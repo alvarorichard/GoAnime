@@ -382,7 +382,7 @@ func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) 
 	idx, err := fuzzyfinder.Find(animes, func(i int) string {
 		name := animes[i].Name
 		name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
-		name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
+		name = strings.ReplaceAll(name, "[AnimeFire]", "[PT-BR]")
 		return name
 	})
 	if err != nil {
@@ -541,8 +541,8 @@ func CleanTitle(title string) string {
 	reMediaTags := regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
 	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
 
-	// Remove language tags like [English], [Portuguese], [Português] at the start
-	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese)\]\s*`)
+	// Remove language tags like [English], [PT-BR], [Portuguese], [Português] at the start
+	reLangTags := regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese)\]\s*`)
 	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
 
 	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], or [AnimeDrive]

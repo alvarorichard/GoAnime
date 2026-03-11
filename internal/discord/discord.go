@@ -452,7 +452,7 @@ func (rpu *RichPresenceUpdater) getTitle(isMovieOrTV bool) string {
 
 // cleanMediaTags removes [Movies/TV], [Movie], [TV] and similar tags from titles
 func cleanMediaTags(name string) string {
-	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[Portuguese]", "[Português]"}
+	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[PT-BR]", "[Portuguese]", "[Português]"}
 	for _, tag := range tags {
 		name = strings.ReplaceAll(name, tag, "")
 	}
