@@ -4,6 +4,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -318,11 +319,60 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 	}
 }
 
+// ptbrTitleCleanRe are compiled regexes for cleaning PT-BR anime titles
+var (
+	ptbrSpaceRe      = regexp.MustCompile(`\s+`)
+	ptbrAgeRatingRe  = regexp.MustCompile(`\bA\d{2}\b`)
+	ptbrNumRatingRe  = regexp.MustCompile(`\b\d+[.,]\d+\b|\bN/A\b`)
+	ptbrTypeSuffixRe = regexp.MustCompile(`(?i)\s*\((TV\s*Short|TV|Movie|OVA|ONA|Special|Filme|Especial|Longa-?Metragem)\)`)
+	ptbrDubLegRe     = regexp.MustCompile(`(?i)\s*[\(\[]?(dublado|legendado)[\)\]]?`)
+)
+
+// cleanPTBRTitle removes noise from PT-BR anime titles such as ratings ("8.39"),
+// age ratings ("A16"), type suffixes ("(TV)"), and extra whitespace.
+func cleanPTBRTitle(title string) string {
+	// Detect dub/leg before stripping so we can restore it after
+	lowerTitle := strings.ToLower(title)
+	isDublado := strings.Contains(lowerTitle, "dublado")
+	isLegendado := strings.Contains(lowerTitle, "legendado")
+
+	// Strip dublado/legendado labels — they will be re-added by tagResults
+	title = ptbrDubLegRe.ReplaceAllString(title, "")
+
+	// Normalise whitespace (handles newlines / tabs from goquery.Text())
+	title = ptbrSpaceRe.ReplaceAllString(strings.TrimSpace(title), " ")
+
+	// Remove age ratings like A14, A16, A18
+	title = ptbrAgeRatingRe.ReplaceAllString(title, "")
+
+	// Remove numeric ratings like 8.39, N/A
+	title = ptbrNumRatingRe.ReplaceAllString(title, "")
+
+	// Remove media-type suffixes like (TV), (Movie), (OVA)
+	title = ptbrTypeSuffixRe.ReplaceAllString(title, "")
+
+	// Final whitespace cleanup
+	title = strings.TrimSpace(ptbrSpaceRe.ReplaceAllString(title, " "))
+
+	// Restore dub/leg hint so tagResults can pick it up via URL check
+	// (we keep it in a way that tagResults will re-detect from URL)
+	_ = isDublado
+	_ = isLegendado
+
+	return title
+}
+
 // tagResults adds language tags and source metadata to results
 func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
 	sourceName := sm.getScraperDisplayName(scraperType)
+	isPTBR := scraperType == AnimefireType || scraperType == AnimeDriveType || scraperType == GoyabuType
 
 	for _, anime := range results {
+		// Clean PT-BR titles before tagging
+		if isPTBR {
+			anime.Name = cleanPTBRTitle(anime.Name)
+		}
+
 		// Check if the anime name already has any language tag
 		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 			strings.Contains(anime.Name, "[PT-BR]") ||
@@ -350,9 +400,9 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 		}
 
 		// Add audio type for PT-BR sources
-		if scraperType == AnimefireType || scraperType == AnimeDriveType || scraperType == GoyabuType {
-			lowerName := strings.ToLower(anime.Name)
+		if isPTBR {
 			lowerURL := strings.ToLower(anime.URL)
+			lowerName := strings.ToLower(anime.Name)
 			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
 				if !strings.Contains(anime.Name, "(Dublado)") {
 					anime.Name = anime.Name + " (Dublado)"
