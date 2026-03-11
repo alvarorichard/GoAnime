@@ -671,7 +671,63 @@ func downloadAndPlayEpisode(
 		numThreads := 4 // Define the number of threads for downloading
 
 		// Check URL type and use appropriate download method
-		if strings.Contains(videoURL, "blogger.com") ||
+		if isBloggerProxyURL(videoURL) {
+			// Download directly from googlevideo CDN, bypassing the proxy.
+			// Uses independent surf clients per chunk for parallel download
+			// with Chrome TLS and automatic resume on connection drops.
+			directURL := GetBloggerVideoURL()
+			if directURL == "" {
+				return fmt.Errorf("blogger video URL not available")
+			}
+
+			m := &model{
+				progress: progress.New(progress.WithDefaultBlend()),
+				keys: keyMap{
+					quit: key.NewBinding(
+						key.WithKeys("ctrl+c"),
+						key.WithHelp("ctrl+c", "quit"),
+					),
+				},
+			}
+			p := tea.NewProgram(m)
+
+			go func() {
+				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
+				dlErr := downloadBloggerDirect(directURL, episodePath, numThreads, m)
+				if dlErr != nil {
+					util.Fatal("Failed to download video:", dlErr)
+				}
+				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
+					m.mu.Lock()
+					m.totalBytes = fi.Size()
+					m.received = fi.Size()
+					m.mu.Unlock()
+				}
+				m.mu.Lock()
+				m.done = true
+				m.mu.Unlock()
+				p.Send(statusMsg("Download completed!"))
+			}()
+
+			if _, err := p.Run(); err != nil {
+				util.Fatal("Error running progress bar:", err)
+			}
+
+			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
+				return fmt.Errorf("download failed: file was not created")
+			}
+
+			const minEpisodeSize int64 = 10 * 1024 * 1024
+			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < minEpisodeSize {
+				_ = os.Remove(episodePath)
+				return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
+					stat.Size(), float64(stat.Size())/(1024*1024), float64(minEpisodeSize)/(1024*1024))
+			}
+
+			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
+			downloadSubtitleFiles(episodePath)
+
+		} else if strings.Contains(videoURL, "blogger.com") ||
 			strings.Contains(videoURL, ".m3u8") ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {

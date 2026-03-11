@@ -833,9 +833,17 @@ func extractBloggerVideoURL(bloggerURL string) (string, error) {
 
 // bloggerProxy holds the state of the running Go HTTP proxy server.
 var bloggerProxy struct {
-	mu     sync.Mutex
-	server *http.Server
-	port   string
+	mu       sync.Mutex
+	server   *http.Server
+	port     string
+	videoURL string // direct googlevideo CDN URL
+}
+
+// GetBloggerVideoURL returns the extracted googlevideo URL, or empty string if unavailable.
+func GetBloggerVideoURL() string {
+	bloggerProxy.mu.Lock()
+	defer bloggerProxy.mu.Unlock()
+	return bloggerProxy.videoURL
 }
 
 // StopBloggerProxy terminates any running Blogger video proxy.
@@ -863,6 +871,11 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 		return "", fmt.Errorf("failed to extract video URL: %w", err)
 	}
 
+	// Store the direct URL for download bypass
+	bloggerProxy.mu.Lock()
+	bloggerProxy.videoURL = videoURL
+	bloggerProxy.mu.Unlock()
+
 	// Find a free port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -870,8 +883,19 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	}
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 
-	// Create a shared surf client for the proxy (reused across requests)
-	proxyClient := newSurfClient().Std()
+	// Create a shared surf client for the proxy (reused across requests).
+	// surf defaults to a 30s timeout which maps to http.Client.Timeout —
+	// a full-request deadline that kills streaming for large files.
+	// Zero it out after converting to *http.Client so the Chrome TLS
+	// transport is preserved but there's no request-level deadline.
+	proxyClient := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		NotFollowRedirects().
+		Build().
+		Unwrap().
+		Std()
+	proxyClient.Timeout = 0
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/blogger_proxy", func(w http.ResponseWriter, r *http.Request) {

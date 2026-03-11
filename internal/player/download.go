@@ -145,6 +145,165 @@ func safePartPath(destPath string, part int) (string, error) {
 	return joined, nil
 }
 
+// isBloggerProxyURL returns true if the URL points to the local Blogger proxy.
+// The proxy runs on 127.0.0.1 and is safe to access without SSRF protection.
+func isBloggerProxyURL(u string) bool {
+	return strings.Contains(u, "127.0.0.1") && strings.Contains(u, "blogger_proxy")
+}
+
+// downloadBloggerDirect downloads a video directly from googlevideo CDN
+// using multiple independent surf clients with Chrome TLS impersonation.
+// Each thread creates its own TCP+TLS connection, avoiding HTTP/2 multiplexing
+// and surf's internal 30s timeout that kills single long-lived connections.
+func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model) error {
+	start := time.Now()
+	util.Debug("downloadBloggerDirect started", "url_len", len(directURL), "threads", numThreads)
+	destPath = filepath.Clean(destPath)
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Get content length with a quick HEAD request
+	headClient := newSurfClient().Std()
+	contentLength, err := getContentLength(directURL, headClient)
+	if err != nil {
+		return fmt.Errorf("failed to get content length: %w", err)
+	}
+	if contentLength == 0 {
+		return fmt.Errorf("content length is zero")
+	}
+
+	if m != nil {
+		m.mu.Lock()
+		m.totalBytes = contentLength
+		m.mu.Unlock()
+	}
+
+	chunkSize := contentLength / int64(numThreads)
+	var downloadWg sync.WaitGroup
+	errChan := make(chan error, numThreads)
+
+	for i := range numThreads {
+		from := int64(i) * chunkSize
+		to := from + chunkSize - 1
+		if i == numThreads-1 {
+			to = contentLength - 1
+		}
+		downloadWg.Add(1)
+		go func(from, to int64, part int) {
+			defer downloadWg.Done()
+			if err := downloadBloggerChunk(directURL, from, to, part, destPath, m); err != nil {
+				util.Logger.Error("Blogger download chunk failed", "thread", part, "error", err)
+				errChan <- err
+			}
+		}(from, to, i)
+	}
+
+	downloadWg.Wait()
+	close(errChan)
+
+	// Check if any chunk failed
+	for err := range errChan {
+		if err != nil {
+			return fmt.Errorf("chunk download failed: %w", err)
+		}
+	}
+
+	if err := combineParts(destPath, numThreads); err != nil {
+		return fmt.Errorf("failed to combine parts: %w", err)
+	}
+
+	util.Debug("downloadBloggerDirect completed", "duration", time.Since(start))
+	return nil
+}
+
+// downloadBloggerChunk downloads a single chunk from googlevideo CDN.
+// Creates its own independent surf client (fresh TCP+TLS connection) to avoid
+// HTTP/2 multiplexing and surf's per-client timeout.
+// Automatically retries with resume on connection drops.
+func downloadBloggerChunk(url string, from, to int64, part int, destPath string, m *model) error {
+	partFilePath, err := safePartPath(destPath, part)
+	if err != nil {
+		return err
+	}
+
+	// Create/truncate the part file
+	file, err := os.Create(partFilePath) /* #nosec G304 -- path validated by safePartPath (traversal checked) */
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	current := from
+	maxRetries := 20 // Allow many retries for chunked CDN downloads
+
+	for attempt := 0; current <= to; attempt++ {
+		if attempt >= maxRetries {
+			return fmt.Errorf("chunk %d: max retries (%d) exceeded at offset %d/%d", part, maxRetries, current, to)
+		}
+		if attempt > 0 {
+			util.Debugf("Blogger chunk %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
+			time.Sleep(500 * time.Millisecond) // Brief pause before retry
+		}
+
+		// Fresh surf client per attempt — new TCP+TLS connection
+		client := newSurfClient().Std()
+
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
+
+		resp, err := client.Do(req)
+		if err != nil {
+			util.Debugf("Blogger chunk %d: request error: %v", part, err)
+			continue // Retry
+		}
+
+		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			util.Debugf("Blogger chunk %d: unexpected status %d", part, resp.StatusCode)
+			continue
+		}
+
+		// Read data from this connection until it drops
+		buf := make([]byte, 64*1024) // 64KB buffer
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
+					_ = resp.Body.Close()
+					return writeErr
+				}
+				current += int64(n)
+				if m != nil {
+					m.mu.Lock()
+					m.received += int64(n)
+					m.mu.Unlock()
+				}
+			}
+			if readErr == io.EOF {
+				_ = resp.Body.Close()
+				break // Done with this connection
+			}
+			if readErr != nil {
+				_ = resp.Body.Close()
+				util.Debugf("Blogger chunk %d: read error after %d bytes: %v", part, current-from, readErr)
+				break // Will retry from current offset
+			}
+		}
+
+		// Check if we got all the data
+		if current > to {
+			break
+		}
+	}
+
+	return nil
+}
+
 // DownloadVideo downloads a video using multiple threads.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
@@ -725,9 +884,19 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", err)
 						err = downloadWithYtDlp(videoURL, episodePath, m)
 					}
-				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
+				} else if strings.Contains(videoURL, "blogger.com") {
+					// Blogger URLs: extract googlevideo CDN URL and download directly
+					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
+					if extractErr != nil {
+						util.Logger.Error("Blogger extraction failed", "episode", epNum, "error", extractErr)
+						err = extractErr
+					} else {
+						err = downloadBloggerDirect(cdnURL, episodePath, 4, m)
+					}
+				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") {
 					err = downloadWithYtDlp(videoURL, episodePath, m)
 				} else {
+					// Plain MP4 (including blogger proxy) — multi-threaded Range download
 					err = DownloadVideo(videoURL, episodePath, 4, m)
 				}
 				if err != nil {
@@ -902,9 +1071,19 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", dlErr)
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 					}
-				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") || strings.Contains(videoURL, "blogger.com") {
+				} else if strings.Contains(videoURL, "blogger.com") {
+					// Blogger URLs: extract googlevideo CDN URL and download directly
+					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
+					if extractErr != nil {
+						util.Logger.Error("Blogger extraction failed", "episode", epNum, "error", extractErr)
+						dlErr = extractErr
+					} else {
+						dlErr = downloadBloggerDirect(cdnURL, episodePath, 4, m)
+					}
+				} else if strings.Contains(videoURL, ".mpd") || strings.Contains(videoURL, "repackager.wixmp.com") {
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 				} else {
+					// Plain MP4 (including blogger proxy) — multi-threaded Range download
 					dlErr = DownloadVideo(videoURL, episodePath, 4, m)
 				}
 				if dlErr != nil {

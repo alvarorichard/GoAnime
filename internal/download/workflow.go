@@ -144,35 +144,35 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 // Example usage functions for documentation
 
 // ExampleSingleDownload demonstrates single episode download
-func ExampleSingleDownload() {
-	// Command: goanime -d "My Hero Academia" 15
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:  "My Hero Academia",
-		EpisodeNum: 15,
-		IsRange:    false,
-	}
+//func ExampleSingleDownload() {
+//	// Command: goanime -d "My Hero Academia" 15
+//	// This would create a DownloadRequest like:
+//	request := &util.DownloadRequest{
+//		AnimeName:  "My Hero Academia",
+//		EpisodeNum: 15,
+//		IsRange:    false,
+//	}
+//
+//	if err := HandleDownloadRequest(request); err != nil {
+//		log.Printf("Download failed: %v", err)
+//	}
+//}
 
-	if err := HandleDownloadRequest(request); err != nil {
-		log.Printf("Download failed: %v", err)
-	}
-}
-
-// ExampleRangeDownload demonstrates episode range download
-func ExampleRangeDownload() {
-	// Command: goanime -d -r "Attack on Titan" 1-5
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:    "Attack on Titan",
-		IsRange:      true,
-		StartEpisode: 1,
-		EndEpisode:   5,
-	}
-
-	if err := HandleDownloadRequest(request); err != nil {
-		log.Printf("Range download failed: %v", err)
-	}
-}
+//// ExampleRangeDownload demonstrates episode range download
+//func ExampleRangeDownload() {
+//	// Command: goanime -d -r "Attack on Titan" 1-5
+//	// This would create a DownloadRequest like:
+//	request := &util.DownloadRequest{
+//		AnimeName:    "Attack on Titan",
+//		IsRange:      true,
+//		StartEpisode: 1,
+//		EndEpisode:   5,
+//	}
+//
+//	if err := HandleDownloadRequest(request); err != nil {
+//		log.Printf("Range download failed: %v", err)
+//	}
+//}
 
 // HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ and SFlix
 func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
