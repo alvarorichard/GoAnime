@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 
 	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -17,13 +19,26 @@ import (
 	"golang.org/x/term"
 )
 
+// Cached terminal detection (checked once, reused)
+var (
+	stdoutIsTerminal     bool
+	stdoutIsTerminalOnce sync.Once
+)
+
+func isStdoutTerminal() bool {
+	stdoutIsTerminalOnce.Do(func() {
+		fd := os.Stdout.Fd()
+		stdoutIsTerminal = fd <= math.MaxInt && term.IsTerminal(int(fd))
+	})
+	return stdoutIsTerminal
+}
+
 // runWithSpinner runs the action with a spinner if stdout is a terminal,
 // otherwise runs the action directly. This ensures CI and non-interactive
 // environments work correctly since huh/v2 spinner may skip the Action
 // callback when no terminal is attached.
 func runWithSpinner(title string, action func()) {
-	fd := os.Stdout.Fd()
-	if fd <= math.MaxInt && term.IsTerminal(int(fd)) {
+	if isStdoutTerminal() {
 		_ = spinner.New().
 			Title(title).
 			Type(spinner.Dots).
@@ -129,6 +144,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	}
 
 	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount)
+
+	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
+	sort.SliceStable(animes, func(i, j int) bool {
+		return languagePriority(animes[i].Name) < languagePriority(animes[j].Name)
+	})
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
@@ -437,7 +457,8 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
 	case scraper.AnimeDriveType:
 		util.Debug("Processing through AnimeDrive")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
+		// Use "auto" to skip interactive server selection (this runs inside a spinner)
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, "auto")
 	default:
 		util.Debug("Processing through Animefire.io")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
@@ -893,4 +914,22 @@ func extractMediaIDFromURL(urlStr string) string {
 
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return GetAnimeEpisodesEnhanced(anime)
+}
+
+// languagePriority returns a sort key for language-based ordering.
+// Lower values sort first: Portuguese → Multilanguage → English → Movies/TV → Unknown.
+func languagePriority(name string) int {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
+		return 0
+	case strings.HasPrefix(lower, "[multilanguage]"):
+		return 1
+	case strings.HasPrefix(lower, "[english]"):
+		return 2
+	case strings.HasPrefix(lower, "[movie]") || strings.HasPrefix(lower, "[tv]") || strings.HasPrefix(lower, "[movies/tv]"):
+		return 3
+	default:
+		return 4
+	}
 }

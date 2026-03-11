@@ -12,6 +12,9 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Pre-compiled regex for episode number parsing
+var episodeNumRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
+
 // GetAnimeEpisodes fetches and parses the list of episodes for a given anime.
 // It returns a sorted slice of Episode structs, ordered by episode number.
 //
@@ -94,8 +97,7 @@ func parseEpisodes(doc *goquery.Document) []models.Episode {
 // - int: the parsed episode number.
 // - error: an error if the string cannot be converted to an integer.
 func parseEpisodeNumber(episodeStr string) (int, error) {
-	re := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
-	matches := re.FindStringSubmatch(episodeStr)
+	matches := episodeNumRe.FindStringSubmatch(episodeStr)
 	if len(matches) >= 2 {
 		return strconv.Atoi(matches[1])
 	}

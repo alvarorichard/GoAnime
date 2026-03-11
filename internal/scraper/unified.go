@@ -16,17 +16,19 @@ import (
 // ScraperType represents different scraper types
 type ScraperType int
 
-// Timeout configurations - balanced for multiple sources
+// Timeout configurations - optimized to include results from ALL available sources
 const (
 	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 10 * time.Second
+	searchTimeout = 12 * time.Second
 	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 8 * time.Second
-	// earlyReturnDelay is the time to wait after first results before returning
-	// Most sources respond within 1s; waiting longer delays the user
-	earlyReturnDelay = 1000 * time.Millisecond
-	// minResultsForEarlyReturn is the minimum results needed to trigger early return
-	minResultsForEarlyReturn = 5
+	perScraperTimeout = 10 * time.Second
+	// earlyReturnDelay is the time to wait after first results before returning.
+	// Generous enough to let all sources respond before returning.
+	earlyReturnDelay = 3 * time.Second
+	// minSourcesForEarlyReturn is the minimum number of distinct sources that
+	// must have returned results before early return is allowed.
+	// Set high to ensure all sources contribute results.
+	minSourcesForEarlyReturn = 4
 )
 
 const (
@@ -57,6 +59,12 @@ var (
 	globalScraperManagerOnce sync.Once
 )
 
+// PreWarmScraperManager triggers background initialization of the scraper
+// manager singleton so it's ready when the first search happens.
+func PreWarmScraperManager() {
+	go func() { NewScraperManager() }()
+}
+
 // NewScraperManager returns a cached scraper manager singleton.
 // Scrapers are stateless HTTP clients so a single instance is reused.
 func NewScraperManager() *ScraperManager {
@@ -72,10 +80,7 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
 		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
 
-		// AnimeDrive - Currently on standby
-		// Reason: Site is protected by Cloudflare, no bypass solution found yet
-		// TODO: Revisit when Cloudflare protection is removed or bypass method is discovered
-		// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+		manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
 		globalScraperManager = manager
 	})
@@ -137,11 +142,13 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 
 	// Thread-safe result collection
 	var (
-		allResults   []*models.Anime
-		resultsMutex sync.Mutex
-		searchErrors []string
-		errorsMutex  sync.Mutex
+		allResults         []*models.Anime
+		resultsMutex       sync.Mutex
+		searchErrors       []string
+		errorsMutex        sync.Mutex
+		sourcesWithResults map[ScraperType]bool
 	)
+	sourcesWithResults = make(map[ScraperType]bool)
 
 	// Track completion for early return
 	var (
@@ -199,10 +206,12 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 
 				resultsMutex.Lock()
 				allResults = append(allResults, res.results...)
+				sourcesWithResults[res.scraperType] = true
 				currentCount := len(allResults)
+				sourceCount := len(sourcesWithResults)
 				resultsMutex.Unlock()
 
-				util.Debug("Search results received", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results), "total", currentCount)
+				util.Debug("Search results received", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results), "total", currentCount, "sources", sourceCount)
 
 				// Start early return timer on first results
 				firstResultOnce.Do(func() {
@@ -212,15 +221,17 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 			}
 
 		case <-earlyReturnTimer:
-			// Early return: we have results and waited long enough for other sources
+			// Early return: only if enough distinct sources have responded
 			resultsMutex.Lock()
 			currentCount := len(allResults)
+			sourceCount := len(sourcesWithResults)
 			resultsMutex.Unlock()
 
 			completed := atomic.LoadInt32(&completedCount)
-			if currentCount >= minResultsForEarlyReturn && completed < totalScrapers {
+			if sourceCount >= minSourcesForEarlyReturn && completed < totalScrapers {
 				util.Debug("Early return triggered",
 					"results", currentCount,
+					"sources", sourceCount,
 					"completed", completed,
 					"total", totalScrapers,
 					"waitTime", time.Since(firstResultTime))

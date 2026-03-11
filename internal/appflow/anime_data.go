@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -109,8 +110,6 @@ func FetchAnimeDetails(anime *models.Anime) {
 			// For FlixHQ movies/TV shows, use TMDB enrichment instead of AniList
 			if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 				util.Debugf("Skipping AniList enrichment for FlixHQ content: %s", anime.Name)
-				// The anime already has ImageURL from FlixHQ scraping
-				// Optionally enrich with TMDB for more metadata (IMDB ID, rating, etc.)
 				if err := api.FetchAnimeDetails(anime); err != nil {
 					util.Debugf("Failed to enrich FlixHQ content with TMDB: %v", err)
 				}
@@ -119,38 +118,57 @@ func FetchAnimeDetails(anime *models.Anime) {
 			}
 
 			// Skip AniList enrichment if already done during search (enrichAnimeData)
-			// This avoids a redundant network call since SearchAnimeEnhanced already
-			// calls enrichAnimeData after anime selection
-			if anime.AnilistID > 0 && anime.MalID > 0 && anime.ImageURL != "" {
-				util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
-			} else {
-				// Enrich anime with AniList data (only if not already enriched)
-				// This is essential for Discord integration, AniSkip, etc.
+			needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
+			needsSourceDetails := anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to")
+
+			if needsAniList && needsSourceDetails {
+				// Both needed — run in parallel
+				var wg sync.WaitGroup
+				wg.Add(2)
+
+				go func() {
+					defer wg.Done()
+					aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
+					if err != nil {
+						util.Debugf("Failed to fetch from AniList: %v", err)
+						return
+					}
+					anime.AnilistID = aniListInfo.Data.Media.ID
+					anime.MalID = aniListInfo.Data.Media.IDMal
+					anime.Details = aniListInfo.Data.Media
+					if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+						anime.ImageURL = cover
+					}
+					util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
+				}()
+
+				go func() {
+					defer wg.Done()
+					if err := api.FetchAnimeDetails(anime); err != nil {
+						util.Debugf("Failed to fetch anime details from source: %v", err)
+					}
+				}()
+
+				wg.Wait()
+			} else if needsAniList {
 				aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
 				if err != nil {
 					util.Debugf("Failed to fetch from AniList: %v", err)
 				} else {
-					// Enrich the anime with AniList data
 					anime.AnilistID = aniListInfo.Data.Media.ID
 					anime.MalID = aniListInfo.Data.Media.IDMal
 					anime.Details = aniListInfo.Data.Media
-
-					// ALWAYS use AniList image (as in the original system)
 					if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
 						anime.ImageURL = cover
-					} else {
-						util.Debugf("Cover image not found for: %s", anime.Name)
 					}
-
-					util.Debugf("Anime enriched successfully with AniList data - ID: %d, MAL: %d, Image: %s",
-						anime.AnilistID, anime.MalID, anime.ImageURL)
+					util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
 				}
-			}
-
-			// Fallback: try to fetch source-specific details if needed
-			if anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to") {
-				if err := api.FetchAnimeDetails(anime); err != nil {
-					util.Debugf("Failed to fetch anime details from source: %v", err)
+			} else {
+				util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
+				if needsSourceDetails {
+					if err := api.FetchAnimeDetails(anime); err != nil {
+						util.Debugf("Failed to fetch anime details from source: %v", err)
+					}
 				}
 			}
 		}).

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -437,28 +436,45 @@ func defaultProviders() []EpisodeDataProvider {
 	}
 }
 
-// GetEpisodeDataWithFallback fetches episode data trying multiple providers
+// GetEpisodeDataWithFallback fetches episode data trying multiple providers concurrently.
+// All providers are launched in parallel and the first successful result is used.
 func GetEpisodeDataWithFallback(animeID int, episodeNo int, anime *models.Anime) error {
 	providers := defaultProviders()
-	var lastErr error
-	var errors []string
+
+	type providerResult struct {
+		name string
+		err  error
+		data models.Anime // snapshot of populated data
+	}
+
+	resultCh := make(chan providerResult, len(providers))
 
 	for _, provider := range providers {
-		util.Debugf("Trying episode data provider: %s", provider.Name())
+		go func(p EpisodeDataProvider) {
+			util.Debugf("Trying episode data provider: %s", p.Name())
+			// Work on a copy so concurrent writes don't conflict
+			animeCopy := *anime
+			err := p.FetchEpisodeData(animeID, episodeNo, &animeCopy)
+			resultCh <- providerResult{name: p.Name(), err: err, data: animeCopy}
+		}(provider)
+	}
 
-		err := provider.FetchEpisodeData(animeID, episodeNo, anime)
-		if err == nil {
-			util.Debugf("Successfully fetched episode data from %s", provider.Name())
+	var errors []string
+	var lastErr error
+
+	for range providers {
+		res := <-resultCh
+		if res.err == nil {
+			util.Debugf("Successfully fetched episode data from %s", res.name)
+			// Copy episode data from the successful result
+			anime.Episodes = res.data.Episodes
 			return nil
 		}
 
-		lastErr = err
-		errMsg := fmt.Sprintf("%s: %v", provider.Name(), err)
+		lastErr = res.err
+		errMsg := fmt.Sprintf("%s: %v", res.name, res.err)
 		errors = append(errors, errMsg)
-		util.Debugf("Provider %s failed: %v", provider.Name(), err)
-
-		// Add a small delay to avoid rate limiting between providers
-		time.Sleep(100 * time.Millisecond)
+		util.Debugf("Provider %s failed: %v", res.name, res.err)
 	}
 
 	// All providers failed

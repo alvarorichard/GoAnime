@@ -186,11 +186,11 @@ func StartVideo(link string, args []string) (string, error) {
 	util.Debugf("mpv started, waiting for socket creation: %s", socketPath)
 
 	// Wait for socket creation with adaptive timeout and exponential backoff
-	// Total max wait time: ~10 seconds (accommodates slow network streams)
+	// Total max wait time: ~8 seconds (accommodates slow network streams)
 	// Initial intervals are very short for fast local files, then back off for streams
-	maxWaitTime := 10 * time.Second
-	initialInterval := 20 * time.Millisecond
-	maxInterval := 400 * time.Millisecond
+	maxWaitTime := 8 * time.Second
+	initialInterval := 10 * time.Millisecond
+	maxInterval := 150 * time.Millisecond
 	currentInterval := initialInterval
 
 	for time.Since(startTime) < maxWaitTime {
@@ -209,8 +209,8 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 
 		time.Sleep(currentInterval)
-		// Apply exponential backoff
-		currentInterval = min(time.Duration(float64(currentInterval)*1.5), maxInterval)
+		// Apply exponential backoff with gentler growth
+		currentInterval = min(time.Duration(float64(currentInterval)*1.3), maxInterval)
 	}
 
 	elapsed := time.Since(startTime)

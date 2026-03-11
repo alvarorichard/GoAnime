@@ -25,6 +25,27 @@ import (
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
+// Pre-compiled regexes for player scraper (avoid per-call compilation)
+var (
+	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
+	isNumericRe         = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+	hasLetterRe         = regexp.MustCompile(`[A-Za-z]`)
+	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
+	bloggerPatternRe    = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
+	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
+	sidRe               = regexp.MustCompile(`"FdrFJe"\s*:\s*"([^"]+)"`)
+	bhRe                = regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
+	atRe                = regexp.MustCompile(`"SNlM0e"\s*:\s*"([^"]+)"`)
+	extractResolutionRe = regexp.MustCompile(`(\d+)p?`)
+	episodePatternREs   = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`),
+		regexp.MustCompile(`(?i)episode\s+(\d+)`),
+		regexp.MustCompile(`(?i)ep\.?\s*(\d+)`),
+		regexp.MustCompile(`(?i)cap[íi]tulo\s+(\d+)`),
+		regexp.MustCompile(`\b(\d+)\b`),
+	}
+)
+
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
 // This function extracts a specific part of the anime video URL to use it as the name
@@ -44,10 +65,7 @@ import (
 // - A string representing the formatted folder name, or an empty string if no match is found.
 func DownloadFolderFormatter(str string) string {
 	// Regular expression to capture the unique part after "/video/"
-	regex := regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-
-	// Apply the regex to the input URL
-	match := regex.FindStringSubmatch(str)
+	match := downloadFolderRe.FindStringSubmatch(str)
 
 	// If a match is found, return the captured group (folder name)
 	if len(match) > 1 {
@@ -197,7 +215,15 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 	displayList := make([]string, len(episodes)+1)
 	displayList[0] = backOption
 	for i, ep := range episodes {
-		displayList[i+1] = ep.Number
+		title := ep.Title.Romaji
+		if title == "" {
+			title = ep.Title.English
+		}
+		if title != "" {
+			displayList[i+1] = fmt.Sprintf("%s - %s", ep.Number, title)
+		} else {
+			displayList[i+1] = ep.Number
+		}
 	}
 
 	idx, err := fuzzyfinder.Find(
@@ -238,17 +264,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 
 // ExtractEpisodeNumber extracts the episode number from the episode string
 func ExtractEpisodeNumber(episodeStr string) string {
-	// Try to extract numeric episode number from various patterns
-	patterns := []string{
-		`(?i)epis[oó]dio\s+(\d+)`, // "Episódio 1"
-		`(?i)episode\s+(\d+)`,     // "Episode 1"
-		`(?i)ep\.?\s*(\d+)`,       // "Ep 1" or "Ep. 1"
-		`(?i)cap[íi]tulo\s+(\d+)`, // "Capítulo 1"
-		`\b(\d+)\b`,               // Any standalone number
-	}
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range episodePatternREs {
 		matches := re.FindStringSubmatch(episodeStr)
 		if len(matches) >= 2 {
 			return matches[1]
@@ -337,7 +353,19 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	if isAnimeDriveSourcePlayer(anime) {
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
-			return streamURL, nil
+			// Validate the URL is a playable video, not an iframe/embed page
+			if isPlayableVideoURL(streamURL) {
+				return streamURL, nil
+			}
+			// Try to extract actual video from intermediate URL
+			if needsVideoExtraction(streamURL) {
+				resolved, resolveErr := extractActualVideoURL(streamURL)
+				if resolveErr == nil && resolved != "" {
+					return resolved, nil
+				}
+			}
+			util.Debug("AnimeDrive returned non-playable URL", "url", streamURL)
+			return "", fmt.Errorf("AnimeDrive returned non-playable URL: %s", streamURL)
 		}
 		// Check if user requested to go back from server selection
 		if errors.Is(err, scraper.ErrBackRequested) {
@@ -456,8 +484,7 @@ func isNumericString(s string) bool {
 	if s == "" {
 		return false
 	}
-	re := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-	return re.MatchString(s)
+	return isNumericRe.MatchString(s)
 }
 
 // Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
@@ -471,8 +498,7 @@ func isLikelyAllAnimeID(s string) bool {
 	// Typical AllAnime IDs are short-ish alphanumeric strings
 	if len(s) >= 6 && len(s) < 30 {
 		// Must contain at least one letter
-		re := regexp.MustCompile(`[A-Za-z]`)
-		return re.MatchString(s)
+		return hasLetterRe.MatchString(s)
 	}
 	return false
 }
@@ -565,9 +591,7 @@ func extractVideoURL(url string) (string, error) {
 	}
 
 	// Try to find direct video URL in content
-	videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
-	re := regexp.MustCompile(videoURLPattern)
-	matches := re.FindString(urlBody)
+	matches := videoURLPatternRe.FindString(urlBody)
 	if matches != "" {
 		if util.IsDebug {
 			util.Debugf("Found direct video URL: %s", matches)
@@ -603,10 +627,7 @@ func fetchContent(url string) (string, error) {
 }
 
 func findBloggerLink(content string) (string, error) {
-	pattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
-
-	re := regexp.MustCompile(pattern)
-	matches := re.FindStringSubmatch(content)
+	matches := bloggerPatternRe.FindStringSubmatch(content)
 
 	if len(matches) > 0 {
 		return matches[0], nil
@@ -626,29 +647,35 @@ func newSurfClient() *surf.Client {
 		Unwrap()
 }
 
-// newSurfSessionClient creates a surf HTTP client that follows redirects
-// and maintains cookies across requests (needed for batchexecute flow).
-func newSurfSessionClient() *surf.Client {
-	return surf.NewClient().
-		Builder().
-		Impersonate().Chrome().
-		Build().
-		Unwrap()
+// bloggerSessionClient is a reusable surf session client for Blogger batchexecute.
+// Creating a new TLS-impersonated client per request adds ~200-400ms of handshake overhead.
+var (
+	bloggerSessionClient     *surf.Client
+	bloggerSessionClientOnce sync.Once
+)
+
+func getBloggerSessionClient() *surf.Client {
+	bloggerSessionClientOnce.Do(func() {
+		bloggerSessionClient = surf.NewClient().
+			Builder().
+			Impersonate().Chrome().
+			Build().
+			Unwrap()
+	})
+	return bloggerSessionClient
 }
 
 // extractBloggerGoogleVideoURL uses surf with Chrome browser impersonation
 // to extract the googlevideo URL via Blogger's batchexecute API.
 func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
-	tokenRe := regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
 	tokenMatch := tokenRe.FindStringSubmatch(bloggerURL)
 	if len(tokenMatch) < 2 {
 		return "", fmt.Errorf("could not extract token from Blogger URL: %s", bloggerURL)
 	}
 	token := tokenMatch[1]
 
-	// Use session client (follows redirects, keeps cookies) for the batchexecute flow
-	client := newSurfSessionClient()
-	defer func() { _ = client.Close() }()
+	// Use cached session client (follows redirects, keeps cookies) for the batchexecute flow
+	client := getBloggerSessionClient()
 
 	// Step 1: Load the Blogger page to extract session params
 	result := client.Get(g.String(bloggerURL)).Do()
@@ -662,10 +689,6 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 		return "", fmt.Errorf("failed to read Blogger page: %w", err)
 	}
 	pageText := string(pageBody)
-
-	sidRe := regexp.MustCompile(`"FdrFJe"\s*:\s*"([^"]+)"`)
-	bhRe := regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
-	atRe := regexp.MustCompile(`"SNlM0e"\s*:\s*"([^"]+)"`)
 
 	sidMatch := sidRe.FindStringSubmatch(pageText)
 	bhMatch := bhRe.FindStringSubmatch(pageText)
@@ -921,18 +944,39 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%s/blogger_proxy", port)
 	util.Debugf("Blogger proxy started on port %s", port)
 
-	// Readiness check
-	httpClient := &http.Client{Timeout: 5_000_000_000} // 5 seconds
-	headResp, headErr := httpClient.Head(proxyURL)
-	if headErr != nil {
-		util.Debugf("Proxy readiness check failed: %v", headErr)
-	} else {
-		util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s",
-			headResp.StatusCode, headResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Length"))
-		_ = headResp.Body.Close()
+	// Readiness check with fast polling — exit as soon as proxy responds
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.After(3 * time.Second)
+	interval := 30 * time.Millisecond
+	for {
+		select {
+		case <-deadline:
+			util.Debugf("Proxy readiness check timed out")
+			return proxyURL, nil // proceed anyway — mpv will retry
+		default:
+			headResp, headErr := httpClient.Head(proxyURL)
+			if headErr == nil {
+				util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s",
+					headResp.StatusCode, headResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Length"))
+				_ = headResp.Body.Close()
+				return proxyURL, nil
+			}
+			time.Sleep(interval)
+		}
 	}
+}
 
-	return proxyURL, nil
+// isPlayableVideoURL returns true when the URL points to a directly playable
+// video resource (e.g. .mp4, .m3u8, .webm) that mpv can handle without further extraction.
+func isPlayableVideoURL(videoURL string) bool {
+	lower := strings.ToLower(videoURL)
+	return strings.HasSuffix(lower, ".mp4") ||
+		strings.Contains(lower, ".mp4?") ||
+		strings.HasSuffix(lower, ".m3u8") ||
+		strings.Contains(lower, ".m3u8?") ||
+		strings.HasSuffix(lower, ".webm") ||
+		strings.Contains(lower, ".webm?") ||
+		strings.Contains(lower, "source=")
 }
 
 // needsVideoExtraction returns true when the URL is an intermediate endpoint
@@ -1066,9 +1110,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 
 		// Fallback: Try to find a direct video URL in the content
-		videoURLPattern := `https?://[^\s<>"]+?\.(?:mp4|m3u8)`
-		re := regexp.MustCompile(videoURLPattern)
-		matches := re.FindString(string(body))
+		matches := videoURLPatternRe.FindString(string(body))
 		if matches != "" {
 			if util.IsDebug {
 				util.Debugf("Found direct video URL: %s", matches)
@@ -1152,8 +1194,7 @@ func selectQualityFromOptions(videoData []VideoData, preferredQuality string) st
 
 // extractResolution extracts numeric resolution from quality label (e.g., "1080p" -> 1080)
 func extractResolution(label string) int {
-	re := regexp.MustCompile(`(\d+)p?`)
-	matches := re.FindStringSubmatch(strings.ToLower(label))
+	matches := extractResolutionRe.FindStringSubmatch(strings.ToLower(label))
 	if len(matches) > 1 {
 		if res, err := strconv.Atoi(matches[1]); err == nil {
 			return res

@@ -25,6 +25,13 @@ const (
 	UserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 )
 
+// Pre-compiled regexes for AllAnime scraper (avoid per-call compilation)
+var (
+	allAnimeSourceURLFallbackRe = regexp.MustCompile(`"sourceUrl":"--([^"]*)".*?"sourceName":"([^"]*)"`)
+	allAnimeVideoLinkRe         = regexp.MustCompile(`"link":"([^"]*)".*?"resolutionStr":"([^"]*)"`)
+	allAnimeM3U8Re              = regexp.MustCompile(`"hls":true.*?"link":"([^"]*)"`)
+)
+
 // AllAnimeClient handles interactions with AllAnime API
 type AllAnimeClient struct {
 	client    *http.Client
@@ -524,10 +531,6 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	results := make(chan result, len(sourceURLs))
 
-	// Rate limiter like in Curd
-	rateLimiter := time.NewTicker(50 * time.Millisecond)
-	defer rateLimiter.Stop()
-
 	// Launch goroutines for concurrent processing
 	type highPriorityResult struct {
 		url      string
@@ -537,7 +540,6 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	for i, sourceURL := range sourceURLs {
 		go func(idx int, url string) {
-			<-rateLimiter.C // Rate limit the requests
 
 			links, err := c.getLinks(url)
 			if err != nil {
@@ -567,12 +569,12 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 		hp.metadata["episode"] = episodeNo
 		hp.metadata["priority"] = "high"
 		return hp.url, hp.metadata, nil
-	case <-time.After(2 * time.Second): // Wait briefly for high priority link
+	case <-time.After(500 * time.Millisecond): // Wait briefly for high priority link
 		// No high priority link found quickly, proceed with normal collection
 	}
 
 	// Collect results with timeout
-	timeout := time.After(10 * time.Second)
+	timeout := time.After(6 * time.Second)
 	successCount := 0
 	var bestURL string
 	var bestMetadata map[string]string
@@ -650,8 +652,7 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 	}
 
 	// Fallback to regex-based extraction if JSON parsing fails
-	re := regexp.MustCompile(`"sourceUrl":"--([^"]*)".*?"sourceName":"([^"]*)"`)
-	matches := re.FindAllStringSubmatch(response, -1)
+	matches := allAnimeSourceURLFallbackRe.FindAllStringSubmatch(response, -1)
 
 	var urls []string
 	for _, match := range matches {
@@ -684,9 +685,11 @@ func (c *AllAnimeClient) decodeSourceURL(encoded string) string {
 		"51": "i",
 	}
 
-	// Split the string into pairs of characters
-	re := regexp.MustCompile("..")
-	pairs := re.FindAllString(mainPart, -1)
+	// Split the string into pairs of characters (no regex needed)
+	var pairs []string
+	for i := 0; i+1 < len(mainPart); i += 2 {
+		pairs = append(pairs, mainPart[i:i+2])
+	}
 
 	// Perform the replacement
 	for i, pair := range pairs {
@@ -792,8 +795,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 	}
 
 	// Fallback: Extract mp4 links with quality information using regex
-	re := regexp.MustCompile(`"link":"([^"]*)".*?"resolutionStr":"([^"]*)"`)
-	matches := re.FindAllStringSubmatch(response, -1)
+	matches := allAnimeVideoLinkRe.FindAllStringSubmatch(response, -1)
 
 	for _, match := range matches {
 		if len(match) >= 3 {
@@ -807,8 +809,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 	}
 
 	// Extract m3u8 links
-	m3u8Re := regexp.MustCompile(`"hls":true.*?"link":"([^"]*)"`)
-	m3u8Matches := m3u8Re.FindAllStringSubmatch(response, -1)
+	m3u8Matches := allAnimeM3U8Re.FindAllStringSubmatch(response, -1)
 
 	for _, match := range m3u8Matches {
 		if len(match) >= 2 {

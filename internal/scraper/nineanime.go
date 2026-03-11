@@ -24,6 +24,15 @@ const (
 	NineAnimeUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+// Pre-compiled regexes for NineAnime scraper (avoid per-call compilation)
+var (
+	nineAnimeIDRe     = regexp.MustCompile(`-(\d+)$`)
+	nineAnimeRCRe     = regexp.MustCompile(`/embed-2/v2/e-1/([^?/]+)`)
+	nineAnimeDomainRe = regexp.MustCompile(`^(https?://[^/]+)`)
+	nineAnimeM3U8Re   = regexp.MustCompile(`(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)`)
+	nineAnimeFileRe   = regexp.MustCompile(`"file"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"`)
+)
+
 // NineAnimeClient handles interactions with 9animetv.to
 type NineAnimeClient struct {
 	client      *http.Client
@@ -98,7 +107,7 @@ func NewNineAnimeClient() *NineAnimeClient {
 			baseURL:    NineAnimeBase,
 			userAgent:  NineAnimeUserAgent,
 			maxRetries: 2,
-			retryDelay: 300 * time.Millisecond,
+			retryDelay: 100 * time.Millisecond,
 		}
 	})
 	return nineAnimeClientInstance
@@ -244,8 +253,6 @@ func (c *NineAnimeClient) SearchAnimeWithContext(ctx context.Context, query stri
 // extractSearchResults parses search result HTML
 func (c *NineAnimeClient) extractSearchResults(doc *goquery.Document) []NineAnimeResult {
 	var results []NineAnimeResult
-	animeIDRegex := regexp.MustCompile(`-(\d+)$`)
-
 	doc.Find(".film_list-wrap .flw-item").Each(func(i int, item *goquery.Selection) {
 		linkTag := item.Find("h3.film-name a, .film-name a").First()
 		if linkTag.Length() == 0 {
@@ -256,7 +263,7 @@ func (c *NineAnimeClient) extractSearchResults(doc *goquery.Document) []NineAnim
 		href, _ := linkTag.Attr("href")
 
 		animeID := ""
-		if matches := animeIDRegex.FindStringSubmatch(href); len(matches) > 1 {
+		if matches := nineAnimeIDRe.FindStringSubmatch(href); len(matches) > 1 {
 			animeID = matches[1]
 		}
 
@@ -528,11 +535,9 @@ func (c *NineAnimeClient) GetStreamInfoWithContext(ctx context.Context, embedURL
 	}
 
 	// Attempt 1: rapid-cloud getSources API
-	rcRegex := regexp.MustCompile(`/embed-2/v2/e-1/([^?/]+)`)
-	if matches := rcRegex.FindStringSubmatch(embedURL); len(matches) > 1 {
+	if matches := nineAnimeRCRe.FindStringSubmatch(embedURL); len(matches) > 1 {
 		videoID := matches[1]
-		domainRegex := regexp.MustCompile(`^(https?://[^/]+)`)
-		domainMatches := domainRegex.FindStringSubmatch(embedURL)
+		domainMatches := nineAnimeDomainRe.FindStringSubmatch(embedURL)
 		baseDomain := "https://rapid-cloud.co"
 		if len(domainMatches) > 1 {
 			baseDomain = domainMatches[1]
@@ -668,8 +673,7 @@ func (c *NineAnimeClient) scrapeEmbedPage(ctx context.Context, embedURL string) 
 	text := string(body)
 
 	// Try direct m3u8 URL pattern
-	m3u8Regex := regexp.MustCompile(`(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)`)
-	if matches := m3u8Regex.FindStringSubmatch(text); len(matches) > 1 {
+	if matches := nineAnimeM3U8Re.FindStringSubmatch(text); len(matches) > 1 {
 		util.Debug("9anime m3u8 found via regex scrape", "url", matches[1][:min(len(matches[1]), 80)])
 		return &NineAnimeStreamInfo{
 			M3U8URL:  matches[1],
@@ -678,8 +682,7 @@ func (c *NineAnimeClient) scrapeEmbedPage(ctx context.Context, embedURL string) 
 	}
 
 	// Try JSON "file" pattern
-	fileRegex := regexp.MustCompile(`"file"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"`)
-	if matches := fileRegex.FindStringSubmatch(text); len(matches) > 1 {
+	if matches := nineAnimeFileRe.FindStringSubmatch(text); len(matches) > 1 {
 		util.Debug("9anime m3u8 found via JSON file pattern", "url", matches[1][:min(len(matches[1]), 80)])
 		return &NineAnimeStreamInfo{
 			M3U8URL:  matches[1],

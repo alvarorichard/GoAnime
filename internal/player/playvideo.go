@@ -35,40 +35,40 @@ var ErrBackToDownloadOptions = errors.New("back to download options")
 func waitForVideoReady(socketPath string) bool {
 	util.Debugf("Waiting for HLS video to be ready...")
 
-	maxWait := 45 * time.Second // Increased for slow HLS streams
-	pollInterval := 500 * time.Millisecond
+	maxWait := 45 * time.Second // Generous for slow HLS streams
+	pollInterval := 50 * time.Millisecond
+	maxPollInterval := 200 * time.Millisecond
 	startTime := time.Now()
 
+	// Alternate between two reliable properties each iteration
+	// to reduce IPC overhead while covering both cases
+	check := 0
 	for time.Since(startTime) < maxWait {
-		// Try multiple properties to detect when video is ready
-		// Method 1: Check duration (most reliable for HLS)
-		durationResp, err := mpvSendCommand(socketPath, []any{"get_property", "duration"})
-		if err == nil {
-			if duration, ok := durationResp.(float64); ok && duration > 0 {
-				util.Debugf("HLS video ready (duration: %.0f seconds) after %.1fs", duration, time.Since(startTime).Seconds())
-				return true
+		switch check % 2 {
+		case 0:
+			// Check duration (most reliable for HLS)
+			if resp, err := mpvSendCommand(socketPath, []any{"get_property", "duration"}); err == nil {
+				if d, ok := resp.(float64); ok && d > 0 {
+					util.Debugf("HLS video ready (duration: %.0fs) after %.1fs", d, time.Since(startTime).Seconds())
+					return true
+				}
+			}
+		case 1:
+			// Check time-pos (video is actually playing)
+			if resp, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"}); err == nil {
+				if pos, ok := resp.(float64); ok && pos >= 0 {
+					util.Debugf("HLS video playing (pos: %.1fs) after %.1fs", pos, time.Since(startTime).Seconds())
+					return true
+				}
 			}
 		}
-
-		// Method 2: Check if time-pos is available (video playing)
-		posResp, posErr := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
-		if posErr == nil {
-			if pos, ok := posResp.(float64); ok && pos >= 0 {
-				util.Debugf("HLS video playing (position: %.1f seconds) after %.1fs", pos, time.Since(startTime).Seconds())
-				return true
-			}
-		}
-
-		// Method 3: Check playback-time (alternative property)
-		playbackResp, playErr := mpvSendCommand(socketPath, []any{"get_property", "playback-time"})
-		if playErr == nil {
-			if playback, ok := playbackResp.(float64); ok && playback >= 0 {
-				util.Debugf("HLS video playback started (time: %.1f seconds) after %.1fs", playback, time.Since(startTime).Seconds())
-				return true
-			}
-		}
+		check++
 
 		time.Sleep(pollInterval)
+		// Grow poll interval gradually to reduce IPC chatter
+		if pollInterval < maxPollInterval {
+			pollInterval = min(pollInterval*13/10, maxPollInterval)
+		}
 	}
 	util.Debugf("Timeout waiting for HLS video (%.1fs)", time.Since(startTime).Seconds())
 	return false
@@ -88,11 +88,11 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 		util.Debugf("HLS resume: video not ready after timeout, attempting seek anyway")
 	}
 
-	// Give mpv a moment to stabilize after video is ready
-	time.Sleep(300 * time.Millisecond)
+	// Short stabilize pause after video is ready
+	time.Sleep(100 * time.Millisecond)
 
-	// Try multiple seek methods with verification - more attempts, longer waits
-	maxAttempts := 5
+	// Try seek with verification — 3 attempts is sufficient for HLS
+	maxAttempts := 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		util.Debugf("HLS resume: seek attempt %d/%d to %d seconds", attempt, maxAttempts, resumeTime)
 
@@ -104,8 +104,8 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 			_, _ = mpvSendCommand(socketPath, []any{"set_property", "time-pos", float64(resumeTime)})
 		}
 
-		// Wait for seek to complete (HLS can be slow)
-		time.Sleep(800 * time.Millisecond)
+		// Wait for seek to settle
+		time.Sleep(time.Duration(200*attempt) * time.Millisecond)
 
 		// Verify position
 		posResp, posErr := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
@@ -122,11 +122,9 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 			util.Debugf("HLS resume: could not get position: %v", posErr)
 		}
 
-		// Wait before retry, increasing delay
+		// Brief wait before retry
 		if attempt < maxAttempts {
-			waitTime := time.Duration(attempt) * 500 * time.Millisecond
-			util.Debugf("HLS resume: waiting %v before retry", waitTime)
-			time.Sleep(waitTime)
+			time.Sleep(300 * time.Millisecond)
 		}
 	}
 

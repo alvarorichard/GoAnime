@@ -27,6 +27,13 @@ const (
 	FlixHQUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 )
 
+// Pre-compiled regexes for FlixHQ scraper (avoid per-call compilation)
+var (
+	flixhqNonWordRe   = regexp.MustCompile(`[\W_]+`)
+	flixhqTrailIDRe   = regexp.MustCompile(`-(\d+)$`)
+	flixhqDotDigitsRe = regexp.MustCompile(`\.(\d+)$`)
+)
+
 // MediaType represents the type of media (movie or TV show)
 type MediaType string
 
@@ -188,7 +195,7 @@ func NewFlixHQClient() *FlixHQClient {
 		fallbackAPIURL: FlixHQFallbackAPI,
 		userAgent:      FlixHQUserAgent,
 		maxRetries:     2,
-		retryDelay:     300 * time.Millisecond,
+		retryDelay:     100 * time.Millisecond,
 	}
 }
 
@@ -203,7 +210,7 @@ func NewFlixHQClientWithContext(timeout time.Duration, maxRetries int) *FlixHQCl
 		fallbackAPIURL: FlixHQFallbackAPI,
 		userAgent:      FlixHQUserAgent,
 		maxRetries:     maxRetries,
-		retryDelay:     300 * time.Millisecond,
+		retryDelay:     100 * time.Millisecond,
 	}
 }
 
@@ -221,8 +228,7 @@ func (c *FlixHQClient) SearchMediaWithContext(ctx context.Context, query string)
 	}
 
 	// Replace non-word characters with hyphens (matching greg implementation)
-	re := regexp.MustCompile(`[\W_]+`)
-	cleanQuery := re.ReplaceAllString(query, "-")
+	cleanQuery := flixhqNonWordRe.ReplaceAllString(query, "-")
 	searchURL := fmt.Sprintf("%s/search/%s", c.baseURL, url.PathEscape(cleanQuery))
 
 	util.Debug("FlixHQ search", "query", query, "url", searchURL)
@@ -402,7 +408,7 @@ func (c *FlixHQClient) GetSeasons(mediaID string) ([]FlixHQSeason, error) {
 		dataID, _ := s.Attr("data-id")
 		if dataID == "" {
 			// Try to extract from href
-			re := regexp.MustCompile(`-(\d+)$`)
+			re := flixhqTrailIDRe
 			matches := re.FindStringSubmatch(href)
 			if len(matches) > 1 {
 				dataID = matches[1]
@@ -576,8 +582,7 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 
 			if strings.EqualFold(serverTitle, prov) {
 				// Extract episode ID from href like /watch-movie-123.456
-				re := regexp.MustCompile(`\.(\d+)$`)
-				matches := re.FindStringSubmatch(href)
+				matches := flixhqDotDigitsRe.FindStringSubmatch(href)
 				if len(matches) > 1 {
 					episodeID = matches[1]
 					util.Debug("FlixHQ found movie server", "provider", serverTitle, "id", episodeID)
@@ -593,8 +598,7 @@ func (c *FlixHQClient) GetMovieServerID(mediaID, provider string) (string, error
 		// Fallback to first available server
 		doc.Find("a").First().Each(func(i int, s *goquery.Selection) {
 			href, _ := s.Attr("href")
-			re := regexp.MustCompile(`\.(\d+)$`)
-			matches := re.FindStringSubmatch(href)
+			matches := flixhqDotDigitsRe.FindStringSubmatch(href)
 			if len(matches) > 1 {
 				episodeID = matches[1]
 				title, _ := s.Attr("title")
@@ -891,8 +895,7 @@ func (c *FlixHQClient) parseMovieServers(htmlContent string) ([]FlixHQServer, er
 		href, exists := s.Attr("href")
 
 		if exists && serverName != "" && href != "" {
-			re := regexp.MustCompile(`\.(\d+)$`)
-			if matches := re.FindStringSubmatch(href); len(matches) > 1 {
+			if matches := flixhqDotDigitsRe.FindStringSubmatch(href); len(matches) > 1 {
 				servers = append(servers, FlixHQServer{
 					Name: ServerName(serverName),
 					ID:   matches[1],
@@ -1792,8 +1795,7 @@ func (c *FlixHQClient) parseMediaItem(s *goquery.Selection) *FlixHQMedia {
 	}
 
 	// Extract ID from URL (e.g., /movie/watch-movie-name-12345 -> 12345)
-	re := regexp.MustCompile(`-(\d+)$`)
-	matches := re.FindStringSubmatch(href)
+	matches := flixhqTrailIDRe.FindStringSubmatch(href)
 	if len(matches) > 1 {
 		mediaID = matches[1]
 	}

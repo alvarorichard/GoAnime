@@ -19,6 +19,13 @@ const (
 	AnimefireBase = "https://animefire.io"
 )
 
+// Pre-compiled regexes for AnimeFire scraper (avoid per-call compilation)
+var (
+	animefireBloggerRe = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
+	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
+	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
+)
+
 // AnimefireClient handles interactions with Animefire.io
 type AnimefireClient struct {
 	client     *http.Client
@@ -35,7 +42,7 @@ func NewAnimefireClient() *AnimefireClient {
 		baseURL:    AnimefireBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
-		retryDelay: 250 * time.Millisecond, // Reduced from 350ms
+		retryDelay: 100 * time.Millisecond,
 	}
 }
 
@@ -339,20 +346,15 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	html, err := doc.Html()
 	if err == nil {
 		// Look for Blogger video links
-		bloggerPattern := `https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`
-		if re := regexp.MustCompile(bloggerPattern); re.MatchString(html) {
-			if matches := re.FindString(html); matches != "" {
+		if animefireBloggerRe.MatchString(html) {
+			if matches := animefireBloggerRe.FindString(html); matches != "" {
 				return matches, nil
 			}
 		}
 
 		// Look for direct video URLs
-		videoPatterns := []string{
-			`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`,
-			`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`,
-		}
-		for _, pattern := range videoPatterns {
-			if re := regexp.MustCompile(pattern); re.MatchString(html) {
+		for _, re := range []*regexp.Regexp{animefireMp4Re, animefireM3U8Re} {
+			if re.MatchString(html) {
 				if matches := re.FindString(html); matches != "" {
 					return matches, nil
 				}

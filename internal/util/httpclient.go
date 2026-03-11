@@ -38,7 +38,7 @@ func newSurfStdClient(timeout time.Duration) *http.Client {
 // This client is optimized for general use with reasonable timeouts.
 func GetSharedClient() *http.Client {
 	sharedClientOnce.Do(func() {
-		sharedClient = newSurfStdClient(60 * time.Second)
+		sharedClient = newSurfStdClient(30 * time.Second)
 	})
 	return sharedClient
 }
@@ -47,9 +47,17 @@ func GetSharedClient() *http.Client {
 // Uses Chrome TLS fingerprint for anti-bot bypass.
 func GetFastClient() *http.Client {
 	fastClientOnce.Do(func() {
-		fastClient = newSurfStdClient(20 * time.Second)
+		fastClient = newSurfStdClient(12 * time.Second)
 	})
 	return fastClient
+}
+
+// PreWarmClients triggers background initialization of the shared surf HTTP
+// clients so that the first real request doesn't pay the Chrome TLS setup cost.
+// Call this as early as possible (e.g., in main before user input).
+func PreWarmClients() {
+	go func() { GetFastClient() }()
+	go func() { GetSharedClient() }()
 }
 
 // ResponseCache provides a simple in-memory cache for API responses
@@ -159,7 +167,7 @@ var (
 // GetAniListCache returns the global AniList cache
 func GetAniListCache() *ResponseCache {
 	aniListCacheOnce.Do(func() {
-		AniListCache = NewResponseCache(5*time.Minute, 200) // Increased cache size
+		AniListCache = NewResponseCache(10*time.Minute, 500)
 	})
 	return AniListCache
 }
@@ -167,7 +175,7 @@ func GetAniListCache() *ResponseCache {
 // GetSearchCache returns the global search cache
 func GetSearchCache() *ResponseCache {
 	searchCacheOnce.Do(func() {
-		SearchCache = NewResponseCache(2*time.Minute, 100) // Increased cache size
+		SearchCache = NewResponseCache(3*time.Minute, 300)
 	})
 	return SearchCache
 }
@@ -267,7 +275,12 @@ var knownHosts = []string{
 	"graphql.anilist.co:443",
 	"api.jikan.moe:443",
 	"allanime.day:443",
-	"animefire.plus:443",
+	"animefire.io:443",
+	"animesdrive.online:443",
+	"flixhq.to:443",
+	"sflix.to:443",
+	"9animetv.to:443",
+	"kitsu.io:443",
 }
 
 var preWarmOnce sync.Once

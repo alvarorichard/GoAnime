@@ -5,10 +5,18 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+// navigatorCache caches AllAnimeNavigator instances keyed by anime ID
+// so that episode lists are fetched once and reused across next/prev calls.
+var (
+	navigatorCache   = make(map[string]*AllAnimeNavigator)
+	navigatorCacheMu sync.Mutex
 )
 
 // AllAnimeNavigator handles navigation between episodes for AllAnime content
@@ -135,12 +143,25 @@ func extractAllAnimeID(url string) string {
 
 // HandleAllAnimeEpisodeNavigation handles episode navigation for AllAnime
 func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber string, direction string) (*models.Episode, error) {
-	navigator, err := NewAllAnimeNavigator(anime)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create AllAnime navigator: %w", err)
+	// Use cached navigator to avoid re-fetching the entire episode list
+	animeID := extractAllAnimeID(anime.URL)
+	navigatorCacheMu.Lock()
+	navigator, ok := navigatorCache[animeID]
+	navigatorCacheMu.Unlock()
+
+	if !ok {
+		var err error
+		navigator, err = NewAllAnimeNavigator(anime)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create AllAnime navigator: %w", err)
+		}
+		navigatorCacheMu.Lock()
+		navigatorCache[animeID] = navigator
+		navigatorCacheMu.Unlock()
 	}
 
 	var targetEpisodeNumber string
+	var err error
 	switch direction {
 	case "next":
 		targetEpisodeNumber, err = navigator.GetNextEpisode(currentEpisodeNumber)

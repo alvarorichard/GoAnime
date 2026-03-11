@@ -136,6 +136,10 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		},
 		// Set the timeout for the TLS handshake process.
 		TLSHandshakeTimeout: timeout,
+		// Connection pooling for better performance on repeated requests
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 25,
+		IdleConnTimeout:     120 * time.Second,
 	}
 }
 
@@ -150,7 +154,7 @@ var (
 func SafeGet(url string) (*http.Response, error) {
 	safeFetchClientOnce.Do(func() {
 		safeFetchClient = &http.Client{
-			Transport: SafeTransport(45 * time.Second),
+			Transport: SafeTransport(20 * time.Second),
 		}
 	})
 	return safeFetchClient.Get(url) // #nosec G107

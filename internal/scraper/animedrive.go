@@ -1,4 +1,4 @@
-// Package scraper provides web scraping functionality for animesdrive.blog
+// Package scraper provides web scraping functionality for animesdrive.online
 package scraper
 
 import (
@@ -20,7 +20,19 @@ import (
 )
 
 const (
-	AnimeDriveBase = "https://animesdrive.blog"
+	AnimeDriveBase = "https://animesdrive.online"
+)
+
+// Pre-compiled regexes for AnimeDrive scraper (avoid per-call compilation)
+var (
+	animeDriveEpRe     = regexp.MustCompile(`(?i)episodio[s]?[-_]?(\d+)`)
+	animeDriveDigitRe  = regexp.MustCompile(`(\d+)`)
+	animeDriveSourceRe = regexp.MustCompile(`source=([^&]+)`)
+	animeDriveTityosRe = regexp.MustCompile(`https?://tityos\.feralhosting\.com/[^\s<>"]+\.mp4`)
+	animeDriveMp4Re    = regexp.MustCompile(`https?://[^\s<>"]+\.mp4`)
+	animeDriveFileRe   = regexp.MustCompile(`(?i)(?:file|source|src|url)\s*[=:]\s*["']([^"']+\.mp4)`)
+	animeDriveHLSRe    = regexp.MustCompile(`["']([^"']+\.m3u8[^"']*)["']`)
+	animeDriveM3U8Re   = regexp.MustCompile(`https?://[^\s<>"]+\.m3u8`)
 )
 
 // VideoQuality represents video quality options
@@ -208,7 +220,7 @@ type AnimeDriveDetails struct {
 	Episodes  []AnimeDriveEpisode
 }
 
-// AnimeDriveClient handles interactions with animesdrive.blog
+// AnimeDriveClient handles interactions with animesdrive.online
 type AnimeDriveClient struct {
 	client     *http.Client
 	baseURL    string
@@ -222,12 +234,12 @@ type AnimeDriveClient struct {
 func NewAnimeDriveClient() *AnimeDriveClient {
 	return &AnimeDriveClient{
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 15 * time.Second,
 		},
 		baseURL:    AnimeDriveBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
-		retryDelay: 350 * time.Millisecond,
+		retryDelay: 100 * time.Millisecond,
 		totalPages: 371,
 	}
 }
@@ -372,48 +384,60 @@ func (c *AnimeDriveClient) extractSearchResults(doc *goquery.Document) []*models
 	var animes []*models.Anime
 
 	// Search for result cards - multiple selectors to cover theme variations
+	// Priority 1: div.result-item article (DooPlay search results)
+	// Priority 2: article.w_item_a (widget/featured items)
+	// Priority 3: legacy selectors
 	selectors := []string{
+		"div.result-item article",
+		"article.w_item_a",
 		"article.item",
-		"div.result-item",
 		"div.search-page .item",
 	}
 
 	for _, selector := range selectors {
 		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
-			// Try to extract title and URL
-			titleElement := s.Find("h3 a, h2 a, .title a, a.tip").First()
-			imageElement := s.Find("img").First()
+			var title, urlPath, imgURL string
 
-			if titleElement.Length() > 0 {
-				title := strings.TrimSpace(titleElement.Text())
-				urlPath, exists := titleElement.Attr("href")
-				if !exists {
-					return
-				}
-
-				// Only include anime URLs
-				if !strings.Contains(urlPath, "/anime/") {
-					return
-				}
-
-				if title == "" {
-					return
-				}
-
-				imgURL, _ := imageElement.Attr("src")
-				if imgURL == "" {
-					imgURL, _ = imageElement.Attr("data-src")
-				}
-				if imgURL == "" {
-					imgURL, _ = imageElement.Attr("data-lazy-src")
-				}
-
-				animes = append(animes, &models.Anime{
-					Name:     title,
-					URL:      c.resolveURL(urlPath),
-					ImageURL: imgURL,
-				})
+			// Try DooPlay search result structure: div.title > a
+			titleLink := s.Find("div.title a, div.details .title a").First()
+			if titleLink.Length() > 0 {
+				title = strings.TrimSpace(titleLink.Text())
+				urlPath, _ = titleLink.Attr("href")
 			}
+
+			// Fallback: direct link + h3 structure (w_item_a / widget)
+			if urlPath == "" {
+				linkElement := s.Find("a").First()
+				urlPath, _ = linkElement.Attr("href")
+				titleEl := s.Find("h3, h2, .data h3").First()
+				title = strings.TrimSpace(titleEl.Text())
+				if title == "" {
+					title, _ = linkElement.Attr("title")
+					title = strings.TrimSpace(title)
+				}
+			}
+
+			if urlPath == "" || !strings.Contains(urlPath, "/anime/") {
+				return
+			}
+			if title == "" {
+				return
+			}
+
+			imageElement := s.Find("img").First()
+			imgURL, _ = imageElement.Attr("src")
+			if imgURL == "" {
+				imgURL, _ = imageElement.Attr("data-src")
+			}
+			if imgURL == "" {
+				imgURL, _ = imageElement.Attr("data-lazy-src")
+			}
+
+			animes = append(animes, &models.Anime{
+				Name:     title,
+				URL:      c.resolveURL(urlPath),
+				ImageURL: imgURL,
+			})
 		})
 
 		if len(animes) > 0 {
@@ -468,9 +492,9 @@ func (c *AnimeDriveClient) GetAnimesByPage(page int) ([]AnimeDriveShow, error) {
 	})
 
 	// Extract animes - multiple selectors to cover theme variations
-	selectors := "article.item, .items article, #archive-content article, .content article, .movies-list .ml-item, .animation-2 .item"
+	selectors := "article.w_item_a, article.item, .items article, #archive-content article, .content article, .movies-list .ml-item, .animation-2 .item"
 	doc.Find(selectors).Each(func(i int, item *goquery.Selection) {
-		linkElement := item.Find("a[href*='/anime/']").First()
+		linkElement := item.Find("a[href*='/anime/'], a").First()
 		titleElement := item.Find("h3, h2, .data h3, .title, .mli-info h2").First()
 		imageElement := item.Find("img").First()
 		ratingElement := item.Find(".rating, .score, .imdb").First()
@@ -557,8 +581,8 @@ func (c *AnimeDriveClient) GetAnimesByLetter(letter string, page int) ([]AnimeDr
 
 	var results []AnimeDriveShow
 
-	doc.Find("article.item, .items article, #archive-content article").Each(func(i int, item *goquery.Selection) {
-		linkElement := item.Find("a[href*='/anime/']").First()
+	doc.Find("article.w_item_a, article.item, .items article, #archive-content article").Each(func(i int, item *goquery.Selection) {
+		linkElement := item.Find("a[href*='/anime/'], a").First()
 		titleElement := item.Find("h3, h2, .data h3, .title").First()
 		imageElement := item.Find("img").First()
 
@@ -683,8 +707,8 @@ func (c *AnimeDriveClient) GetAnimesByGenre(genreURL string, page int) ([]AnimeD
 
 	var results []AnimeDriveShow
 
-	doc.Find("article.item, .items article").Each(func(i int, item *goquery.Selection) {
-		linkElement := item.Find("a[href*='/anime/']").First()
+	doc.Find("article.w_item_a, article.item, .items article").Each(func(i int, item *goquery.Selection) {
+		linkElement := item.Find("a[href*='/anime/'], a").First()
 		titleElement := item.Find("h3, h2, .title").First()
 		imageElement := item.Find("img").First()
 
@@ -694,6 +718,10 @@ func (c *AnimeDriveClient) GetAnimesByGenre(genreURL string, page int) ([]AnimeD
 		}
 
 		title := strings.TrimSpace(titleElement.Text())
+		if title == "" {
+			title, _ = linkElement.Attr("title")
+			title = strings.TrimSpace(title)
+		}
 		if title == "" {
 			return
 		}
@@ -743,9 +771,13 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// Extract title
-	titleElement := doc.Find("h1.entry-title, h1, .sheader .data h1").First()
+	// Extract title - prioritize specific DooPlay selectors over generic h1
+	titleElement := doc.Find(".sheader .data h1, h1.entry-title").First()
 	title := strings.TrimSpace(titleElement.Text())
+	if title == "" {
+		title = doc.Find("h1").First().Text()
+		title = strings.TrimSpace(title)
+	}
 	if title == "" {
 		title = "Unknown"
 	}
@@ -774,11 +806,11 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 
 		// Extract episode number
 		epNumber := "0"
-		epMatch := regexp.MustCompile(`(?i)episodio[s]?[-_]?(\d+)`).FindStringSubmatch(epURL)
+		epMatch := animeDriveEpRe.FindStringSubmatch(epURL)
 		if len(epMatch) > 1 {
 			epNumber = epMatch[1]
 		} else {
-			numMatch := regexp.MustCompile(`(\d+)`).FindStringSubmatch(epTitle)
+			numMatch := animeDriveDigitRe.FindStringSubmatch(epTitle)
 			if len(numMatch) > 1 {
 				epNumber = numMatch[1]
 			}
@@ -997,7 +1029,7 @@ func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (string, 
 
 	// If it's MP4 type, extract the source
 	if apiData.Type == "mp4" {
-		sourceMatch := regexp.MustCompile(`source=([^&]+)`).FindStringSubmatch(apiData.EmbedURL)
+		sourceMatch := animeDriveSourceRe.FindStringSubmatch(apiData.EmbedURL)
 		if len(sourceMatch) > 1 {
 			decodedSource, err := url.QueryUnescape(sourceMatch[1])
 			if err == nil {
@@ -1090,7 +1122,7 @@ func (c *AnimeDriveClient) GetVideoURL(episodeURL string) (string, error) {
 		return c.getVideoURLFallback(episodeURL)
 	}
 
-	// Collect all available MP4 links
+	// Collect all available MP4 and HLS links
 	type mp4Link struct {
 		url         string
 		option      VideoOption
@@ -1102,14 +1134,14 @@ func (c *AnimeDriveClient) GetVideoURL(episodeURL string) (string, error) {
 
 	for _, option := range options {
 		videoURL, videoType, err := c.ResolveVideoURLWithType(option)
-		if err == nil && videoType == "mp4" && videoURL != "" {
+		if err == nil && videoURL != "" && (videoType == "mp4" || videoType == "hls") {
 			allMP4Links = append(allMP4Links, mp4Link{
 				url:         videoURL,
 				option:      option,
 				preferred:   isPreferredDomain(videoURL),
 				problematic: isProblematicDomain(videoURL),
 			})
-			util.Debug("AnimeDrive found MP4", "label", option.Label, "url", videoURL, "preferred", isPreferredDomain(videoURL))
+			util.Debug("AnimeDrive found playable URL", "label", option.Label, "type", videoType, "url", videoURL, "preferred", isPreferredDomain(videoURL))
 		}
 	}
 
@@ -1224,7 +1256,7 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 							util.Debug("AnimeDrive got embed URL", "url", apiData.EmbedURL)
 
 							// Extract source from embed URL
-							sourceMatch := regexp.MustCompile(`source=([^&]+)`).FindStringSubmatch(apiData.EmbedURL)
+							sourceMatch := animeDriveSourceRe.FindStringSubmatch(apiData.EmbedURL)
 							if len(sourceMatch) > 1 {
 								decodedSource, err := url.QueryUnescape(sourceMatch[1])
 								if err == nil {
@@ -1233,7 +1265,11 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 								}
 							}
 
-							return apiData.EmbedURL, nil
+							// Only return embed URL if it's a direct video, not an iframe page
+							if strings.HasSuffix(apiData.EmbedURL, ".mp4") || strings.Contains(apiData.EmbedURL, ".m3u8") {
+								return apiData.EmbedURL, nil
+							}
+							util.Debug("AnimeDrive skipping non-playable embed URL", "url", apiData.EmbedURL)
 						}
 					}
 				}
@@ -1242,7 +1278,11 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 	}
 
 	// Try all player options
+	var fallbackURL string
 	doc.Find("[data-post][data-nume], .dooplay_player_option").Each(func(i int, s *goquery.Selection) {
+		if fallbackURL != "" {
+			return // already found a URL
+		}
 		dataPost, hasPost := s.Attr("data-post")
 		dataType := "tv"
 		if dt, exists := s.Attr("data-type"); exists {
@@ -1276,31 +1316,40 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 				}
 
 				if err := json.NewDecoder(apiResp.Body).Decode(&apiData); err == nil && apiData.EmbedURL != "" {
-					sourceMatch := regexp.MustCompile(`source=([^&]+)`).FindStringSubmatch(apiData.EmbedURL)
+					sourceMatch := animeDriveSourceRe.FindStringSubmatch(apiData.EmbedURL)
 					if len(sourceMatch) > 1 {
 						decodedSource, _ := url.QueryUnescape(sourceMatch[1])
 						if decodedSource != "" {
 							util.Debug("AnimeDrive extracted MP4 from option", "url", decodedSource)
-							// Can't return from here, but could store the result
+							fallbackURL = decodedSource
+							return
 						}
+					}
+					// Use embed URL if it's a direct video, not an iframe page
+					if strings.HasSuffix(apiData.EmbedURL, ".mp4") || strings.Contains(apiData.EmbedURL, ".m3u8") {
+						fallbackURL = apiData.EmbedURL
 					}
 				}
 			}
 		}
 	})
 
+	if fallbackURL != "" {
+		return fallbackURL, nil
+	}
+
 	// Get HTML content for regex searches
 	html, _ := doc.Html()
 
 	// Fallback: search for tityos URL directly
-	tityosMatch := regexp.MustCompile(`https?://tityos\.feralhosting\.com/[^\s<>"]+\.mp4`).FindString(html)
+	tityosMatch := animeDriveTityosRe.FindString(html)
 	if tityosMatch != "" {
 		util.Debug("AnimeDrive found tityos URL", "url", tityosMatch)
 		return tityosMatch, nil
 	}
 
 	// Method 2: search for any direct MP4 link
-	mp4Match := regexp.MustCompile(`https?://[^\s<>"]+\.mp4`).FindString(html)
+	mp4Match := animeDriveMp4Re.FindString(html)
 	if mp4Match != "" {
 		util.Debug("AnimeDrive found MP4 URL", "url", mp4Match)
 		return mp4Match, nil
@@ -1324,14 +1373,14 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 		scriptContent := s.Text()
 
 		// Search for file: "url" or source: "url" common in players
-		fileMatch := regexp.MustCompile(`(?i)(?:file|source|src|url)\s*[=:]\s*["']([^"']+\.mp4)`).FindStringSubmatch(scriptContent)
+		fileMatch := animeDriveFileRe.FindStringSubmatch(scriptContent)
 		if len(fileMatch) > 1 {
 			util.Debug("AnimeDrive found in script", "url", fileMatch[1])
 			// Could return this
 		}
 
 		// Search for HLS/M3U8 links
-		hlsMatch := regexp.MustCompile(`["']([^"']+\.m3u8[^"']*)["']`).FindStringSubmatch(scriptContent)
+		hlsMatch := animeDriveHLSRe.FindStringSubmatch(scriptContent)
 		if len(hlsMatch) > 1 {
 			util.Debug("AnimeDrive found HLS", "url", hlsMatch[1])
 			// Could return this
@@ -1389,13 +1438,13 @@ func (c *AnimeDriveClient) extractFromIframe(iframeURL string) (string, error) {
 	html, _ := doc.Html()
 
 	// Search for MP4
-	mp4Match := regexp.MustCompile(`https?://[^\s<>"]+\.mp4`).FindString(html)
+	mp4Match := animeDriveMp4Re.FindString(html)
 	if mp4Match != "" {
 		return mp4Match, nil
 	}
 
 	// Search for M3U8
-	m3u8Match := regexp.MustCompile(`https?://[^\s<>"]+\.m3u8`).FindString(html)
+	m3u8Match := animeDriveM3U8Re.FindString(html)
 	if m3u8Match != "" {
 		return m3u8Match, nil
 	}
@@ -1431,7 +1480,7 @@ func (c *AnimeDriveClient) GetLatestReleases() ([]AnimeDriveShow, error) {
 
 	var results []AnimeDriveShow
 
-	selectors := ".items article, .animation-2 .item, #archive-content article, .content article.item"
+	selectors := "article.w_item_a, .items article, .animation-2 .item, #archive-content article, .content article.item"
 	doc.Find(selectors).Each(func(i int, item *goquery.Selection) {
 		linkElement := item.Find("a").First()
 		titleElement := item.Find("h3, .data h3, .title").First()
@@ -1517,8 +1566,8 @@ func (c *AnimeDriveClient) GetFilms(page int) ([]AnimeDriveShow, error) {
 
 	var results []AnimeDriveShow
 
-	doc.Find("article.item, .items article").Each(func(i int, item *goquery.Selection) {
-		linkElement := item.Find("a[href*='/filme/']").First()
+	doc.Find("article.w_item_a, article.item, .items article").Each(func(i int, item *goquery.Selection) {
+		linkElement := item.Find("a[href*='/filme/'], a").First()
 		titleElement := item.Find("h3, h2, .title").First()
 		imageElement := item.Find("img").First()
 		ratingElement := item.Find(".rating, .score").First()

@@ -809,14 +809,19 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 	}
 }
 
+// Pre-compiled regexes for SanitizeForFilename and related functions (hot path)
+var (
+	bracketTagRe = regexp.MustCompile(`\[(?i:English|Portuguese|Português|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
+	ageClassRe   = regexp.MustCompile(`\s+(A\d{1,2}|AL|L)\s*$`)
+	scoreRe      = regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
+)
+
 // SanitizeForFilename removes characters that are not allowed in file/directory names
 // and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
 // It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
 // and language/source/metadata tags that many anime sources append to titles.
 func SanitizeForFilename(name string) string {
 	// Remove bracketed tags: [English], [Multilanguage], [Movie], [9Anime], [HD], etc.
-	// This regex matches any [...] tag at the beginning or anywhere in the name.
-	bracketTagRe := regexp.MustCompile(`\[(?i:English|Portuguese|Português|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
 	name = bracketTagRe.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)
 
@@ -881,19 +886,11 @@ func strip9AnimeParenMeta(name string) string {
 //
 // Example: "Black Clover (Dublado) 7.27 A14" → "Black Clover (Dublado)"
 func stripTrailingAnimeMetadata(name string) string {
-	// Regex that matches trailing tokens which look like:
-	//   - Decimal ratings: 7.27, 8.5, 10.0, etc.
-	//   - Age classifications: A14, A12, A16, A18, AL, L (Brazilian/Portuguese ratings)
-	//   - Generic trailing numbers that aren't part of a title (standalone "14", "18")
-	// We repeatedly strip from the right so "Name 7.27 A14" becomes "Name".
-	ageRe := regexp.MustCompile(`\s+(A\d{1,2}|AL|L)\s*$`)
-	scoreRe := regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
-
 	changed := true
 	for changed {
 		changed = false
 		// Strip trailing age classification
-		if loc := ageRe.FindStringIndex(name); loc != nil {
+		if loc := ageClassRe.FindStringIndex(name); loc != nil {
 			name = strings.TrimSpace(name[:loc[0]])
 			changed = true
 		}

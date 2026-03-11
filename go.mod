@@ -15,7 +15,7 @@ require (
 require (
 	charm.land/bubbles/v2 v2.0.0
 	charm.land/bubbletea/v2 v2.0.2
-	charm.land/huh/v2 v2.0.1
+	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.1
 	charm.land/log/v2 v2.0.0
 	github.com/disintegration/gift v1.2.1
@@ -57,7 +57,7 @@ require (
 require (
 	github.com/ProtonMail/go-crypto v1.4.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
-	github.com/charmbracelet/colorprofile v0.4.2
+	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect; indirectn
 	github.com/charmbracelet/x/term v0.2.2 // indirect

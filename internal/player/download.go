@@ -27,6 +27,12 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+// Pre-compiled regexes for download quality parsing
+var (
+	digitsRe        = regexp.MustCompile(`\d+`)
+	resolutionMp4Re = regexp.MustCompile(`(\d{3,4})p?\.mp4`)
+)
+
 // downloadPart downloads a part of the video file using HTTP Range Requests.
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
 	req, err := http.NewRequest("GET", url, nil)
@@ -461,7 +467,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 				URL     string
 			}
 			for _, v := range videoResponse.Data {
-				labelDigits := regexp.MustCompile(`\d+`).FindString(v.Label)
+				labelDigits := digitsRe.FindString(v.Label)
 				q := 0
 				if labelDigits != "" {
 					q, _ = strconv.Atoi(labelDigits)
@@ -486,7 +492,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 			URL     string
 		}
 		for _, v := range respStruct.Data {
-			labelDigits := regexp.MustCompile(`\d+`).FindString(v.Label)
+			labelDigits := digitsRe.FindString(v.Label)
 			q := 0
 			if labelDigits != "" {
 				q, _ = strconv.Atoi(labelDigits)
@@ -498,8 +504,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 		}
 		return sources, nil
 	}
-	re := regexp.MustCompile(`(\d{3,4})p?\\.mp4`)
-	matches := re.FindStringSubmatch(videoSrc)
+	matches := resolutionMp4Re.FindStringSubmatch(videoSrc)
 	if len(matches) > 1 {
 		q, _ := strconv.Atoi(matches[1])
 		return []struct {

@@ -51,22 +51,35 @@ func (mm *MediaManager) SearchAll(query string) ([]*models.Anime, error) {
 	return mm.scraperManager.SearchAnime(query, nil)
 }
 
-// SearchAnimeOnly searches only anime sources
+// SearchAnimeOnly searches only anime sources concurrently
 func (mm *MediaManager) SearchAnimeOnly(query string) ([]*models.Anime, error) {
-	var allResults []*models.Anime
-
-	// Search AllAnime
-	allAnimeType := AllAnimeType
-	animeResults, err := mm.scraperManager.SearchAnime(query, &allAnimeType)
-	if err == nil {
-		allResults = append(allResults, animeResults...)
+	type sourceResult struct {
+		results []*models.Anime
+		err     error
 	}
 
+	ch := make(chan sourceResult, 2)
+
+	// Search AllAnime
+	go func() {
+		allAnimeType := AllAnimeType
+		results, err := mm.scraperManager.SearchAnime(query, &allAnimeType)
+		ch <- sourceResult{results: results, err: err}
+	}()
+
 	// Search AnimeFire
-	animefireType := AnimefireType
-	animefireResults, err := mm.scraperManager.SearchAnime(query, &animefireType)
-	if err == nil {
-		allResults = append(allResults, animefireResults...)
+	go func() {
+		animefireType := AnimefireType
+		results, err := mm.scraperManager.SearchAnime(query, &animefireType)
+		ch <- sourceResult{results: results, err: err}
+	}()
+
+	var allResults []*models.Anime
+	for range 2 {
+		res := <-ch
+		if res.err == nil {
+			allResults = append(allResults, res.results...)
+		}
 	}
 
 	if len(allResults) == 0 {

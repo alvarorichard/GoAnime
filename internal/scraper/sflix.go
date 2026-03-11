@@ -28,6 +28,12 @@ const (
 	SFlixUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 )
 
+// Pre-compiled regexes for SFlix scraper (avoid per-call compilation)
+var (
+	sflixYearRe     = regexp.MustCompile(`\d{4}`)
+	sflixWatchNowRe = regexp.MustCompile(`(?i)\s*Watch\s*now\s*$`)
+)
+
 // SFlixClient handles interactions with SFlix
 type SFlixClient struct {
 	client         *http.Client
@@ -142,7 +148,7 @@ func NewSFlixClient() *SFlixClient {
 		fallbackAPIURL: SFlixFallbackAPI,
 		userAgent:      SFlixUserAgent,
 		maxRetries:     2,
-		retryDelay:     300 * time.Millisecond,
+		retryDelay:     100 * time.Millisecond,
 	}
 }
 
@@ -157,7 +163,7 @@ func NewSFlixClientWithContext(timeout time.Duration, maxRetries int) *SFlixClie
 		fallbackAPIURL: SFlixFallbackAPI,
 		userAgent:      SFlixUserAgent,
 		maxRetries:     maxRetries,
-		retryDelay:     300 * time.Millisecond,
+		retryDelay:     100 * time.Millisecond,
 	}
 }
 
@@ -538,8 +544,7 @@ func (c *SFlixClient) GetInfoWithContext(ctx context.Context, id string) (*SFlix
 			// Extract year from release date
 			if len(info.ReleaseDate) >= 4 {
 				// Try to find a 4-digit year
-				re := regexp.MustCompile(`\d{4}`)
-				if match := re.FindString(info.ReleaseDate); match != "" {
+				if match := sflixYearRe.FindString(info.ReleaseDate); match != "" {
 					info.Year = match
 				}
 			}
@@ -1650,8 +1655,7 @@ func (c *SFlixClient) parseMediaItem(s *goquery.Selection) *SFlixMedia {
 	}
 
 	// Clean up title - remove "Watch now" and similar patterns using regex
-	watchNowRegex := regexp.MustCompile(`(?i)\s*Watch\s*now\s*$`)
-	title = watchNowRegex.ReplaceAllString(title, "")
+	title = sflixWatchNowRe.ReplaceAllString(title, "")
 	title = strings.TrimSpace(title)
 
 	if title == "" {

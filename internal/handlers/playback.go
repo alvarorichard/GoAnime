@@ -22,8 +22,8 @@ func HandlePlaybackMode(animeName string) {
 	// Initialize the beautiful logger
 	util.InitLogger()
 
-	// Pre-warm connections to known API hosts in the background
-	// This runs DNS + TLS handshakes so the first real requests are faster
+	// Pre-warm connections are now started in main() so they run while the
+	// user is still typing the anime name. This call is a noop (sync.Once).
 	util.PreWarmConnections()
 
 	tracking.HandleTrackingNotice()
