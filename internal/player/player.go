@@ -419,23 +419,15 @@ func HandleDownloadAndPlay(
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
 
-			// For HLS streams, use directly
-			if isHLSStream {
+			// If we already have a resolved video URL (passed from upstream resolution),
+			// use it directly to avoid showing a duplicate quality-selection menu.
+			if videoURL != "" {
 				videoURLToPlay = videoURL
 				if util.IsDebug {
-					util.Debugf("🎯 HLS stream detected, playing directly: %s", videoURLToPlay)
-				}
-			} else if videoURL != "" && (strings.Contains(videoURL, "sharepoint.com") ||
-				strings.Contains(videoURL, "dropbox.com") ||
-				strings.Contains(videoURL, "wixmp.com") ||
-				strings.HasSuffix(videoURL, ".mp4")) {
-				// Use direct stream URL (SharePoint, Dropbox, etc.)
-				videoURLToPlay = videoURL
-				if util.IsDebug {
-					util.Debugf("🎯 Using direct stream URL: %s", videoURLToPlay)
+					util.Debugf("🎯 Using pre-resolved video URL: %s", videoURLToPlay)
 				}
 			} else {
-				// Try to extract video URL from episode page
+				// No URL yet — try to extract from episode page (shows quality menu once)
 				if len(episodes) > 0 && selectedEpisodeNum > 0 {
 					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
 					if found {
@@ -445,15 +437,6 @@ func HandleDownloadAndPlay(
 						if url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL); err == nil && url != "" {
 							videoURLToPlay = url
 						}
-					}
-				}
-				// Fallback: try to extract from original videoURL
-				if videoURLToPlay == "" && videoURL != "" {
-					if util.IsDebug {
-						util.Debugf("🔄 Fallback: extracting from original URL: %s", videoURL)
-					}
-					if url, err := ExtractVideoSourcesWithPrompt(videoURL); err == nil && url != "" {
-						videoURLToPlay = url
 					}
 				}
 			}
