@@ -79,8 +79,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.NineAnimeType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "9Anime")
+	} else if strings.ToLower(source) == "goyabu" {
+		t := scraper.GoyabuType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "Goyabu")
 	} else if strings.ToLower(source) == "ptbr" || strings.ToLower(source) == "pt-br" {
-		// Search all PT-BR sources (currently AnimeFire)
+		// Search all PT-BR sources (AnimeFire + Goyabu)
 		t := scraper.AnimefireType
 		scraperType = &t
 		util.Debug("Searching PT-BR sources")
@@ -116,6 +120,8 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "Animefire.io"
 			} else if strings.Contains(anime.URL, "animesdrive") {
 				anime.Source = "AnimeDrive"
+			} else if strings.Contains(anime.URL, "goyabu") {
+				anime.Source = "Goyabu"
 			} else if strings.Contains(anime.URL, "flixhq") {
 				anime.Source = "FlixHQ"
 			}
@@ -250,6 +256,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "Animefire.io"
 	} else if anime.Source == "AnimeDrive" {
 		sourceName = "AnimeDrive"
+	} else if anime.Source == "Goyabu" {
+		sourceName = "Goyabu"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags
 		// Need to disambiguate between AllAnime and 9Anime both tagged [English]
@@ -262,6 +270,9 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		if strings.Contains(anime.URL, "animesdrive") {
 			sourceName = "AnimeDrive"
 			anime.Source = "AnimeDrive"
+		} else if strings.Contains(anime.URL, "goyabu") {
+			sourceName = "Goyabu"
+			anime.Source = "Goyabu"
 		} else {
 			sourceName = "Animefire.io"
 			anime.Source = "Animefire.io"
@@ -323,6 +334,14 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimefireType)
 		if scErr != nil {
 			return nil, fmt.Errorf("failed to get AnimeFire scraper: %w", scErr)
+		}
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
+	} else if sourceName == "Goyabu" {
+		// For Goyabu, use the scraper directly
+		scraperManager := scraper.NewScraperManager()
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.GoyabuType)
+		if scErr != nil {
+			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else {
@@ -406,16 +425,22 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if anime.Source == "AnimeDrive" {
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
+	} else if anime.Source == "Goyabu" {
+		scraperType = scraper.GoyabuType
+		sourceName = "Goyabu"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
 	} else if strings.Contains(anime.Name, "[PT-BR]") || strings.Contains(anime.Name, "[Português]") {
-		// AnimeFire or AnimeDrive = Portuguese
+		// AnimeFire, Goyabu, or AnimeDrive = Portuguese
 		// Check URL to determine which one
 		if strings.Contains(anime.URL, "animesdrive") {
 			scraperType = scraper.AnimeDriveType
 			sourceName = "AnimeDrive"
+		} else if strings.Contains(anime.URL, "goyabu") {
+			scraperType = scraper.GoyabuType
+			sourceName = "Goyabu"
 		} else {
 			scraperType = scraper.AnimefireType
 			sourceName = "Animefire.io"
@@ -432,6 +457,10 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		// Priority 5: URL analysis for AnimeDrive
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
+	} else if strings.Contains(anime.URL, "goyabu") {
+		// Priority 5b: URL analysis for Goyabu
+		scraperType = scraper.GoyabuType
+		sourceName = "Goyabu"
 	} else if strings.Contains(anime.URL, "allanime") {
 		// Priority 6: AllAnime full URLs
 		scraperType = scraper.AllAnimeType
@@ -472,6 +501,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		util.Debug("Processing through AnimeDrive")
 		// Use "auto" to skip interactive server selection (this runs inside a spinner)
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, "auto")
+	case scraper.GoyabuType:
+		util.Debug("Processing through Goyabu")
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
 	default:
 		util.Debug("Processing through Animefire.io")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)

@@ -38,6 +38,7 @@ const (
 	FlixHQType    // Movies and TV Shows source
 	SFlixType     // Alternative Movies and TV Shows source
 	NineAnimeType // 9animetv.to anime source
+	GoyabuType    // PT-BR anime source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -79,6 +80,7 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
 		manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
 		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
+		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
 
 		manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
@@ -348,7 +350,7 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 		}
 
 		// Add audio type for PT-BR sources
-		if scraperType == AnimefireType || scraperType == AnimeDriveType {
+		if scraperType == AnimefireType || scraperType == AnimeDriveType || scraperType == GoyabuType {
 			lowerName := strings.ToLower(anime.Name)
 			lowerURL := strings.ToLower(anime.URL)
 			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
@@ -381,13 +383,28 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"animeDrive", counts["AnimeDrive"],
 		"flixHQ", counts["FlixHQ"],
 		"9anime", counts["9Anime"],
+		"goyabu", counts["Goyabu"],
 		"total", len(results))
 }
 
-// SearchAnimePTBR searches only PT-BR sources (AnimeFire, and Goyabu when available)
+// SearchAnimePTBR searches only PT-BR sources (AnimeFire and Goyabu) concurrently
 func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
-	// For now, only AnimeFire. Goyabu will be added later.
-	return sm.searchSpecificScraper(query, AnimefireType)
+	ptbrTypes := []ScraperType{AnimefireType, GoyabuType}
+	var allResults []*models.Anime
+
+	for _, st := range ptbrTypes {
+		results, err := sm.searchSpecificScraper(query, st)
+		if err != nil {
+			util.Debug("PT-BR search error", "source", sm.getScraperDisplayName(st), "error", err)
+			continue
+		}
+		allResults = append(allResults, results...)
+	}
+
+	if len(allResults) == 0 {
+		return nil, fmt.Errorf("no PT-BR results found for: %s", query)
+	}
+	return allResults, nil
 }
 
 // GetScraper returns a specific scraper by type
@@ -413,6 +430,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "SFlix"
 	case NineAnimeType:
 		return "9Anime"
+	case GoyabuType:
+		return "Goyabu"
 	default:
 		return "Desconhecido"
 	}
@@ -433,6 +452,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 		return "[Movies/TV]"
 	case NineAnimeType:
 		return "[Multilanguage]"
+	case GoyabuType:
+		return "[PT-BR]"
 	default:
 		return "[Unknown]"
 	}
@@ -776,4 +797,28 @@ func (a *NineAnimeAdapter) GetType() ScraperType {
 // GetClient returns the underlying NineAnime client for direct access
 func (a *NineAnimeAdapter) GetClient() *NineAnimeClient {
 	return a.client
+}
+
+// GoyabuAdapter adapts GoyabuClient to UnifiedScraper interface
+type GoyabuAdapter struct {
+	client *GoyabuClient
+}
+
+func (a *GoyabuAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *GoyabuAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+	url, err := a.client.GetEpisodeStreamURL(episodeURL)
+	metadata := make(map[string]string)
+	metadata["source"] = "goyabu"
+	return url, metadata, err
+}
+
+func (a *GoyabuAdapter) GetType() ScraperType {
+	return GoyabuType
 }
