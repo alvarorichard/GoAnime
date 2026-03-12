@@ -19,16 +19,16 @@ type ScraperType int
 // Timeout configurations - optimized to include results from ALL available sources
 const (
 	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 12 * time.Second
+	searchTimeout = 10 * time.Second
 	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 10 * time.Second
+	perScraperTimeout = 8 * time.Second
 	// earlyReturnDelay is the time to wait after first results before returning.
-	// Generous enough to let all sources respond before returning.
-	earlyReturnDelay = 3 * time.Second
+	// Kept short so the user sees the fuzzy finder quickly; slower sources
+	// that miss this window simply won't appear in this search.
+	earlyReturnDelay = 1500 * time.Millisecond
 	// minSourcesForEarlyReturn is the minimum number of distinct sources that
 	// must have returned results before early return is allowed.
-	// Set high to ensure all sources contribute results.
-	minSourcesForEarlyReturn = 4
+	minSourcesForEarlyReturn = 2
 )
 
 const (
@@ -218,6 +218,12 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 					firstResultTime = time.Now()
 					earlyReturnTimer = time.After(earlyReturnDelay)
 				})
+			}
+
+			// If all scrapers have responded (success or error), return immediately
+			if atomic.LoadInt32(&completedCount) >= totalScrapers {
+				util.Debug("All scrapers completed, returning immediately")
+				goto done
 			}
 
 		case <-earlyReturnTimer:

@@ -300,7 +300,7 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 		}
 	}
 
-	// Try multiple search variations for better matching
+	// Try multiple search variations in parallel — first success wins
 	searchVariations := generateSearchVariations(cleanedName)
 
 	query := `query ($search: String) {
@@ -313,63 +313,83 @@ func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
         }
     }`
 
-	var lastErr error
+	type aniListResult struct {
+		resp *models.AniListResponse
+		body []byte
+		err  error
+	}
+
+	resultCh := make(chan aniListResult, len(searchVariations))
+
 	for _, searchTerm := range searchVariations {
-		util.Debugf("Trying AniList search with: '%s'", searchTerm)
+		go func(term string) {
+			util.Debugf("Trying AniList search with: '%s'", term)
 
-		jsonData, err := json.Marshal(map[string]any{
-			"query": query,
-			"variables": map[string]any{
-				"search": searchTerm,
-			},
-		})
-		if err != nil {
-			lastErr = fmt.Errorf("JSON marshal failed: %w", err)
-			continue
-		}
+			jsonData, err := json.Marshal(map[string]any{
+				"query": query,
+				"variables": map[string]any{
+					"search": term,
+				},
+			})
+			if err != nil {
+				resultCh <- aniListResult{err: fmt.Errorf("JSON marshal failed: %w", err)}
+				return
+			}
 
-		resp, err := httpPostFast("https://graphql.anilist.co", jsonData)
-		if err != nil {
-			lastErr = fmt.Errorf("AniList request failed: %w", err)
-			continue
-		}
+			resp, err := httpPostFast("https://graphql.anilist.co", jsonData)
+			if err != nil {
+				resultCh <- aniListResult{err: fmt.Errorf("AniList request failed: %w", err)}
+				return
+			}
 
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-		safeClose(resp.Body, "AniList response body")
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+			safeClose(resp.Body, "AniList response body")
 
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response: %w", err)
-			continue
-		}
+			if err != nil {
+				resultCh <- aniListResult{err: fmt.Errorf("failed to read response: %w", err)}
+				return
+			}
 
-		util.Debugf("AniList response status: %d", resp.StatusCode)
+			util.Debugf("AniList response status: %d for '%s'", resp.StatusCode, term)
 
-		if resp.StatusCode != http.StatusOK {
-			util.Debugf("AniList error response: %s", string(body))
-			lastErr = fmt.Errorf("AniList returned: %s", resp.Status)
-			continue
-		}
+			if resp.StatusCode != http.StatusOK {
+				util.Debugf("AniList error response: %s", string(body))
+				resultCh <- aniListResult{err: fmt.Errorf("AniList returned: %s", resp.Status)}
+				return
+			}
 
-		var result models.AniListResponse
-		if err := json.Unmarshal(body, &result); err != nil {
-			lastErr = fmt.Errorf("JSON decode failed: %w", err)
-			continue
-		}
+			var result models.AniListResponse
+			if err := json.Unmarshal(body, &result); err != nil {
+				resultCh <- aniListResult{err: fmt.Errorf("JSON decode failed: %w", err)}
+				return
+			}
 
-		if result.Data.Media.ID == 0 {
-			lastErr = errors.New("no matching anime found on AniList")
+			if result.Data.Media.ID == 0 {
+				resultCh <- aniListResult{err: errors.New("no matching anime found on AniList")}
+				return
+			}
+
+			resultCh <- aniListResult{resp: &result, body: body}
+		}(searchTerm)
+	}
+
+	var lastErr error
+	for range searchVariations {
+		res := <-resultCh
+		if res.err != nil {
+			lastErr = res.err
 			continue
 		}
 
 		// Cache the successful result
-		cache.Set(cacheKey, body)
+		cache.Set(cacheKey, res.body)
 
 		util.Debugf("AniList found: ID=%d, MAL=%d, Title=%s",
-			result.Data.Media.ID,
-			result.Data.Media.IDMal,
-			result.Data.Media.Title.Romaji)
+			res.resp.Data.Media.ID,
+			res.resp.Data.Media.IDMal,
+			res.resp.Data.Media.Title.Romaji)
 
-		return &result, nil
+		return res.resp, nil
 	}
 
 	return nil, lastErr

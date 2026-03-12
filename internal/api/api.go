@@ -154,7 +154,7 @@ var (
 func SafeGet(url string) (*http.Response, error) {
 	safeFetchClientOnce.Do(func() {
 		safeFetchClient = &http.Client{
-			Transport: SafeTransport(20 * time.Second),
+			Transport: SafeTransport(15 * time.Second),
 		}
 	})
 	return safeFetchClient.Get(url) // #nosec G107

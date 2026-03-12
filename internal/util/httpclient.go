@@ -38,7 +38,7 @@ func newSurfStdClient(timeout time.Duration) *http.Client {
 // This client is optimized for general use with reasonable timeouts.
 func GetSharedClient() *http.Client {
 	sharedClientOnce.Do(func() {
-		sharedClient = newSurfStdClient(30 * time.Second)
+		sharedClient = newSurfStdClient(20 * time.Second)
 	})
 	return sharedClient
 }
@@ -47,7 +47,7 @@ func GetSharedClient() *http.Client {
 // Uses Chrome TLS fingerprint for anti-bot bypass.
 func GetFastClient() *http.Client {
 	fastClientOnce.Do(func() {
-		fastClient = newSurfStdClient(12 * time.Second)
+		fastClient = newSurfStdClient(8 * time.Second)
 	})
 	return fastClient
 }
@@ -293,9 +293,9 @@ func PreWarmConnections() {
 		client := GetFastClient()
 		for _, host := range knownHosts {
 			go func() {
-				// HEAD request with very short timeout — we just want the TCP+TLS handshake
-				// to populate the connection pool. We don't care about the response.
-				req, err := http.NewRequest("HEAD", "https://"+host, nil)
+				// GET request with short timeout — triggers full TCP+TLS handshake
+				// to populate the connection pool. HEAD may not establish full TLS.
+				req, err := http.NewRequest("GET", "https://"+host, nil)
 				if err != nil {
 					return
 				}

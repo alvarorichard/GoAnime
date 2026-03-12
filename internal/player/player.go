@@ -189,8 +189,8 @@ func StartVideo(link string, args []string) (string, error) {
 	// Total max wait time: ~8 seconds (accommodates slow network streams)
 	// Initial intervals are very short for fast local files, then back off for streams
 	maxWaitTime := 8 * time.Second
-	initialInterval := 10 * time.Millisecond
-	maxInterval := 150 * time.Millisecond
+	initialInterval := 5 * time.Millisecond
+	maxInterval := 100 * time.Millisecond
 	currentInterval := initialInterval
 
 	for time.Since(startTime) < maxWaitTime {
@@ -209,8 +209,8 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 
 		time.Sleep(currentInterval)
-		// Apply exponential backoff with gentler growth
-		currentInterval = min(time.Duration(float64(currentInterval)*1.3), maxInterval)
+		// Apply exponential backoff with faster growth — reaches max sooner
+		currentInterval = min(currentInterval*2, maxInterval)
 	}
 
 	elapsed := time.Since(startTime)
