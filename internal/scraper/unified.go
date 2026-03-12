@@ -220,12 +220,6 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				})
 			}
 
-			// If all scrapers have responded (success or error), return immediately
-			if atomic.LoadInt32(&completedCount) >= totalScrapers {
-				util.Debug("All scrapers completed, returning immediately")
-				goto done
-			}
-
 		case <-earlyReturnTimer:
 			// Early return: only if enough distinct sources have responded
 			resultsMutex.Lock()
