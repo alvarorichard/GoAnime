@@ -168,14 +168,62 @@ func NewPlayer(config Config) (*Player, error) {
 
 ## Quality Assurance
 
+### Mandatory Security & Static Analysis Tools
+
+⚠️ **Running the following tools is a mandatory requirement for all contributions.
+Pull requests that do not pass these checks will NOT be accepted.**
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `go vet` | Built-in static analysis for common mistakes | Included with Go |
+| `staticcheck` | Advanced static analysis for Go code | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
+| `gosec` | Security-focused linter (OWASP-style checks) | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+| `govulncheck` | Detects known vulnerabilities in dependencies | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+
+Run **all** of them before submitting any contribution:
+
+```bash
+# Static analysis (built-in)
+go vet ./...
+
+# Advanced static analysis
+staticcheck ./...
+
+# Security scanner — flags insecure code patterns
+gosec ./...
+
+# Vulnerability check on dependencies
+govulncheck ./...
+```
+
+Every issue reported by these tools must be resolved or explicitly justified in
+the pull request description. No exceptions.
+
+### Mandatory Testing Requirements
+
+⚠️ **Depending on the nature of the contribution, tests may be required.**
+
+- **New features**: Must include unit tests covering the main functionality and
+  edge cases.
+- **Bug fixes**: Must include a test that reproduces the bug and verifies the fix.
+- **Refactoring / modifications**: If the change alters existing behavior or
+  touches core logic, tests must be added or updated to reflect the new behavior.
+- **Documentation-only changes**: Tests are not required.
+
+Pull requests that add or modify functionality **without adequate test coverage**
+may be rejected. When in doubt, add tests — reviewers will let you know if they
+are unnecessary.
+
 ### Automated Code Quality Checks
 
 We use automated quality verification bots and tools:
 
 1. **Go Linting**: `golangci-lint` for comprehensive code analysis
-2. **Code Coverage**: Maintain minimum test coverage
-3. **Security Scanning**: Automated vulnerability detection
-4. **Dependency Updates**: Automated dependency security updates
+2. **Static Analysis**: `go vet` and `staticcheck` for correctness checks
+3. **Security Scanning**: `gosec` for insecure code patterns and `govulncheck`
+   for known dependency vulnerabilities
+4. **Code Coverage**: Maintain minimum test coverage
+5. **Dependency Updates**: Automated dependency security updates
 
 ### Pre-commit Checks
 
@@ -185,14 +233,23 @@ Before committing, ensure your code passes:
 # Format code
 go fmt ./...
 
+# Built-in static analysis
+go vet ./...
+
+# Advanced static analysis
+staticcheck ./...
+
+# Security scanner
+gosec ./...
+
+# Vulnerability check
+govulncheck ./...
+
 # Run linter
 golangci-lint run
 
 # Run tests
 go test ./...
-
-# Check for vulnerabilities
-go list -json -m all | nancy sleuth
 ```
 
 ### CI/CD Pipeline
@@ -200,10 +257,12 @@ go list -json -m all | nancy sleuth
 Our continuous integration pipeline automatically:
 
 - Runs `go fmt` checks
+- Runs `go vet` and `staticcheck` analysis
+- Runs `gosec` security scanning
+- Runs `govulncheck` dependency vulnerability checks
 - Executes linting with `golangci-lint`
 - Runs the full test suite
 - Checks code coverage
-- Performs security scans
 - Builds for multiple platforms
 
 ## Testing
@@ -432,4 +491,4 @@ computers to execute!
 
 ---
 
-Happy coding! 🚀
+Happy coding! 
