@@ -109,7 +109,8 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 	}
 
 	if len(animes) == 0 {
-		return []*models.Anime{}, nil
+		util.Debug("Goyabu JSON API returned 0 results, trying HTML fallback", "query", query)
+		return c.searchAnimeHTML(query)
 	}
 
 	return animes, nil
@@ -322,11 +323,14 @@ func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 	var episodes []models.Episode
 
 	// Try to find the episodes JSON array in the page source
-	// Pattern: episodes data in various JS formats
+	// Goyabu uses several formats depending on the page version
 	patterns := []string{
 		`episodes\s*[:=]\s*(\[[\s\S]*?\])`,
 		`"episodes"\s*:\s*(\[[\s\S]*?\])`,
 		`episodeList\s*[:=]\s*(\[[\s\S]*?\])`,
+		`var\s+eps\s*=\s*(\[[\s\S]*?\])`,
+		`episodios\s*[:=]\s*(\[[\s\S]*?\])`,
+		`data-episodes\s*=\s*'(\[[\s\S]*?\])'`,
 	}
 
 	for _, pattern := range patterns {
@@ -354,7 +358,8 @@ func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 					}
 				}
 
-				epURL := fmt.Sprintf("%s/%s", c.baseURL, ep.ID)
+				// Goyabu episode IDs are WordPress post IDs; use /?p=ID
+				epURL := fmt.Sprintf("%s/?p=%s", c.baseURL, ep.ID)
 
 				episodes = append(episodes, models.Episode{
 					Number: fmt.Sprintf("Episódio %d", num),
@@ -375,14 +380,27 @@ func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 		return episodes
 	}
 
-	doc.Find(".episode-item, .boxEP").Each(func(i int, s *goquery.Selection) {
-		epNum, _ := s.Attr("data-episode-number")
-		link := s.Find("a")
-		href, exists := link.Attr("href")
-		if !exists {
+	// Try multiple selectors used by different Goyabu page versions
+	doc.Find(".episode-item, .boxEP, .epo a, .episodebox a, .eps a, article.episode a").Each(func(i int, s *goquery.Selection) {
+		var href string
+		var exists bool
+
+		// Some selectors land on the <a> directly, others on a container
+		if s.Is("a") {
+			href, exists = s.Attr("href")
+		} else {
+			link := s.Find("a")
+			href, exists = link.Attr("href")
+		}
+		if !exists || href == "" {
+			return
+		}
+		// Only follow episode URLs
+		if !strings.Contains(href, c.baseURL) && !strings.HasPrefix(href, "/") {
 			return
 		}
 
+		epNum, _ := s.Attr("data-episode-number")
 		num := i + 1
 		if epNum != "" {
 			if parsed, err := strconv.Atoi(epNum); err == nil {

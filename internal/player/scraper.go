@@ -1086,7 +1086,11 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			var options []huh.Option[string]
 			options = append(options, huh.NewOption("← Back", "back"))
 			for _, v := range videoResponse.Data {
-				options = append(options, huh.NewOption(v.Label, v.Src))
+				label := v.Label
+				if label == "" {
+					label = v.Src
+				}
+				options = append(options, huh.NewOption(label, v.Src))
 			}
 
 			// Present quality options to the user

@@ -57,6 +57,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
 
 	var scraperType *scraper.ScraperType
+	isPTBR := false
 
 	// If a specific source is requested, honor it
 	if strings.ToLower(source) == "allanime" {
@@ -84,22 +85,25 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "Goyabu")
 	} else if strings.ToLower(source) == "ptbr" || strings.ToLower(source) == "pt-br" {
-		// Search all PT-BR sources (AnimeFire + Goyabu)
-		t := scraper.AnimefireType
-		scraperType = &t
-		util.Debug("Searching PT-BR sources")
+		// Search only PT-BR sources (AnimeFire + Goyabu) via dedicated method
+		isPTBR = true
+		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu)")
 	} else {
 		// Default behavior: search all sources simultaneously (including FlixHQ)
 		scraperType = nil
 		util.Debug("Searching all sources", "query", name)
 	}
 
-	// Perform the search - this will search all sources if scraperType is nil
+	// Perform the search
 	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
 	runWithSpinner("Searching for anime...", func() {
-		animes, searchErr = scraperManager.SearchAnime(name, scraperType)
+		if isPTBR {
+			animes, searchErr = scraperManager.SearchAnimePTBR(name)
+		} else {
+			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
+		}
 	})
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)
