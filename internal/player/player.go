@@ -266,6 +266,7 @@ func filterMPVArgs(args []string) []string {
 		"--ytdl-raw-options-append=", // Pass raw options to yt-dlp backend
 		"--ytdl-format=",             // yt-dlp format / quality selection
 		"--ytdl=",                    // Enable/disable yt-dlp (e.g. --ytdl=no for local proxy URLs)
+		"--force-media-title=",       // Override media title shown in MPV window
 		// Add more allowed prefixes here if needed in the future
 	}
 

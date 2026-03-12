@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 
 // ErrBackToDownloadOptions is returned when user wants to go back to download options
 var ErrBackToDownloadOptions = errors.New("back to download options")
+
+// dubSubTagRe strips parenthesized dub/sub tags from anime names for display
+var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|Dubbed)\)\s*`)
 
 // waitForVideoReady waits for the HLS video to be ready for playback
 // Returns true if video is ready, false if timeout
@@ -364,6 +368,16 @@ func playVideo(
 	if strings.Contains(videoURL, "127.0.0.1") && strings.Contains(videoURL, "blogger_proxy") {
 		mpvArgs = append(mpvArgs, "--ytdl=no")
 		util.Debugf("Blogger proxy URL detected - disabling yt-dlp")
+	}
+
+	// Set MPV window title to clean anime name + season/episode
+	if lastAnimeName != "" {
+		cleanName := util.SanitizeForFilename(lastAnimeName)
+		// Also strip parenthesized dub/sub tags like (Dublado), (Legendado), (SUB)
+		cleanName = dubSubTagRe.ReplaceAllString(cleanName, " ")
+		cleanName = strings.TrimSpace(cleanName)
+		title := fmt.Sprintf("%s S%02dE%02d", cleanName, lastAnimeSeason, currentEpisodeNum)
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--force-media-title=%s", title))
 	}
 
 	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
