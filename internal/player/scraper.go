@@ -351,6 +351,13 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
 	}
 
+	// If URL needs further resolution (e.g., animefire.io/video/ returns JSON with quality options,
+	// or blogger.com URLs that need to be resolved to actual video streams),
+	// process it through extractActualVideoURL().
+	if strings.Contains(streamURL, "animefire.io/video/") || strings.Contains(streamURL, "blogger.com") {
+		return extractActualVideoURL(streamURL)
+	}
+
 	return streamURL, nil
 }
 
@@ -550,6 +557,142 @@ func findBloggerLink(content string) (string, error) {
 	}
 }
 
+// resolveBloggerVideoURL fetches a blogger.com/video.g URL and extracts the actual
+// video stream URL from the response. Blogger video pages contain JavaScript with
+// the real video URL (typically on Google's video CDN).
+func resolveBloggerVideoURL(bloggerURL string) (string, error) {
+	if util.IsDebug {
+		util.Debugf("Resolving Blogger video URL: %s", bloggerURL)
+	}
+
+	client := &http.Client{
+		// Don't follow redirects automatically - we want to check for redirect URLs
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	req, err := http.NewRequest("GET", bloggerURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://animefire.io/")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch blogger URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check for redirect - the Location header might contain the actual video URL
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		location := resp.Header.Get("Location")
+		if location != "" && (strings.Contains(location, ".mp4") || strings.Contains(location, ".m3u8") ||
+			strings.Contains(location, "googlevideo.com") || strings.Contains(location, "googleusercontent.com")) {
+			if util.IsDebug {
+				util.Debugf("Blogger redirect to video URL: %s", location)
+			}
+			return location, nil
+		}
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read blogger response: %w", err)
+	}
+
+	content := string(body)
+
+	if util.IsDebug {
+		util.Debugf("Blogger response length: %d bytes, status: %d", len(body), resp.StatusCode)
+	}
+
+	// Pattern 1: play_url in VIDEO_CONFIG or JSON
+	playURLPatterns := []string{
+		`"play_url"\s*:\s*"([^"]+)"`,
+		`"url"\s*:\s*"(https?://[^"]*(?:googlevideo|googleusercontent|blogspot)[^"]*)"`,
+		`"src"\s*:\s*"(https?://[^"]*(?:googlevideo|googleusercontent|blogspot)[^"]*)"`,
+		`"video_url"\s*:\s*"([^"]+)"`,
+		`"stream_url"\s*:\s*"([^"]+)"`,
+	}
+
+	for _, pattern := range playURLPatterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(content)
+		if len(matches) > 1 {
+			videoURL := strings.ReplaceAll(matches[1], `\/`, `/`)
+			videoURL = strings.ReplaceAll(videoURL, `\u003d`, `=`)
+			videoURL = strings.ReplaceAll(videoURL, `\u0026`, `&`)
+			if util.IsDebug {
+				util.Debugf("Resolved Blogger video URL (pattern match): %s", videoURL)
+			}
+			return videoURL, nil
+		}
+	}
+
+	// Pattern 2: Direct video URLs in the content (mp4, m3u8)
+	directVideoPattern := `(https?://[^\s"'<>\\]+\.(?:mp4|m3u8)[^\s"'<>\\]*)`
+	re := regexp.MustCompile(directVideoPattern)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) > 1 {
+		videoURL := strings.ReplaceAll(matches[1], `\/`, `/`)
+		if util.IsDebug {
+			util.Debugf("Resolved Blogger video URL (direct URL): %s", videoURL)
+		}
+		return videoURL, nil
+	}
+
+	// Pattern 3: Google video CDN URLs
+	googleVideoPattern := `(https?://(?:redirector\.googlevideo\.com|[a-z0-9-]+\.googlevideo\.com|[a-z0-9-]+\.googleusercontent\.com)[^\s"'<>\\]+)`
+	re = regexp.MustCompile(googleVideoPattern)
+	matches = re.FindStringSubmatch(content)
+	if len(matches) > 1 {
+		videoURL := strings.ReplaceAll(matches[1], `\/`, `/`)
+		videoURL = strings.ReplaceAll(videoURL, `\u003d`, `=`)
+		videoURL = strings.ReplaceAll(videoURL, `\u0026`, `&`)
+		if util.IsDebug {
+			util.Debugf("Resolved Blogger video URL (Google CDN): %s", videoURL)
+		}
+		return videoURL, nil
+	}
+
+	// Pattern 4: video/source elements in HTML
+	if strings.Contains(content, "<video") || strings.Contains(content, "<source") {
+		doc, docErr := goquery.NewDocumentFromReader(strings.NewReader(content))
+		if docErr == nil {
+			for _, attr := range []string{"src", "data-src"} {
+				if src, exists := doc.Find("video source").Attr(attr); exists && src != "" {
+					if util.IsDebug {
+						util.Debugf("Resolved Blogger video URL (HTML source): %s", src)
+					}
+					return src, nil
+				}
+				if src, exists := doc.Find("video").Attr(attr); exists && src != "" {
+					if util.IsDebug {
+						util.Debugf("Resolved Blogger video URL (HTML video): %s", src)
+					}
+					return src, nil
+				}
+			}
+		}
+	}
+
+	if util.IsDebug {
+		// Log a snippet of the response for debugging
+		snippet := content
+		if len(snippet) > 500 {
+			snippet = snippet[:500]
+		}
+		util.Debugf("Could not resolve Blogger URL. Response snippet: %s", snippet)
+	}
+
+	// Return original URL as fallback - mpv might handle it via ytdl-hook
+	return bloggerURL, nil
+}
+
 // extractActualVideoURL processes the video source and allows the user to select quality
 func extractActualVideoURL(videoSrc string) (string, error) {
 	if util.IsDebug {
@@ -557,7 +700,14 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 	}
 
 	if strings.Contains(videoSrc, "blogger.com") {
-		return videoSrc, nil
+		resolved, err := resolveBloggerVideoURL(videoSrc)
+		if err != nil {
+			if util.IsDebug {
+				util.Debugf("Blogger resolution failed, using original URL: %v", err)
+			}
+			return videoSrc, nil
+		}
+		return resolved, nil
 	}
 
 	// If the URL is from animefire.io, fetch the content
@@ -663,13 +813,13 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			return matches, nil
 		}
 
-		// Try to find a blogger link
-		videoSrc, err := findBloggerLink(string(body))
-		if err == nil && videoSrc != "" {
+		// Try to find a blogger link and resolve it
+		bloggerURL, blogErr := findBloggerLink(string(body))
+		if blogErr == nil && bloggerURL != "" {
 			if util.IsDebug {
-				util.Debugf("Found blogger link: %s", videoSrc)
+				util.Debugf("Found blogger link in animefire.io/video/ response, resolving: %s", bloggerURL)
 			}
-			return videoSrc, nil
+			return resolveBloggerVideoURL(bloggerURL)
 		}
 	}
 
