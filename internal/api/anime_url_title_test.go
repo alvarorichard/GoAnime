@@ -6,6 +6,32 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestGenerateSearchVariations_IncludesURLRomaji(t *testing.T) {
+	t.Parallel()
+
+	variations := generateSearchVariationsWithURL(
+		"Os Sete Pecados Capitais",
+		"https://goyabu.io/anime/nanatsu-no-taizai",
+	)
+
+	assert.Contains(t, variations, "Os Sete Pecados Capitais", "should include original title")
+	assert.Contains(t, variations, "nanatsu no taizai", "should include romaji from URL")
+}
+
+func TestGenerateSearchVariationsWithURL_EmptyURL(t *testing.T) {
+	t.Parallel()
+
+	variations := generateSearchVariationsWithURL("Naruto", "")
+	assert.Contains(t, variations, "Naruto")
+}
+
+func TestGenerateSearchVariationsWithURL_NoSlug(t *testing.T) {
+	t.Parallel()
+
+	variations := generateSearchVariationsWithURL("Naruto", "https://example.com/")
+	assert.Contains(t, variations, "Naruto")
+}
+
 func TestExtractRomajiFromURL(t *testing.T) {
 	t.Parallel()
 

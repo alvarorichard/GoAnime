@@ -213,7 +213,7 @@ func enrichAnimeData(anime *models.Anime) error {
 		return movie.EnrichMedia(anime)
 	}
 
-	aniListInfo, err := FetchAnimeFromAniList(anime.Name)
+	aniListInfo, err := FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
 	if err != nil {
 		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)
 		return fmt.Errorf("AniList enrichment failed: %w", err)
