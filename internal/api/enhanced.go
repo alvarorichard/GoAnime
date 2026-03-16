@@ -303,13 +303,12 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 
 	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
 
+	scraperManager := scraper.NewScraperManager()
 	var episodes []models.Episode
 	var err error
 
 	// Use different approaches based on source
 	if strings.Contains(sourceName, "AllAnime") {
-		// For AllAnime, use the scraper directly with AniSkip support
-		scraperManager := scraper.NewScraperManager()
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.AllAnimeType)
 		if scErr != nil {
 			return nil, fmt.Errorf("failed to get AllAnime scraper: %w", scErr)
@@ -317,32 +316,24 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 
 		// Cast to AllAnime client to access enhanced features
 		if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
-			// Use AniSkip enhanced version like Curd does
 			episodes, err = allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
 			util.Debug("AniSkip integration enabled", "malID", anime.MalID)
 		} else {
-			// Fallback to regular episodes
 			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 		}
 	} else if sourceName == "AnimeDrive" {
-		// For AnimeDrive, use the AnimeDrive scraper
-		scraperManager := scraper.NewScraperManager()
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimeDriveType)
 		if scErr != nil {
 			return nil, fmt.Errorf("failed to get AnimeDrive scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else if sourceName == "Animefire.io" {
-		// For AnimeFire, use the scraper directly
-		scraperManager := scraper.NewScraperManager()
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimefireType)
 		if scErr != nil {
 			return nil, fmt.Errorf("failed to get AnimeFire scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else if sourceName == "Goyabu" {
-		// For Goyabu, use the scraper directly
-		scraperManager := scraper.NewScraperManager()
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.GoyabuType)
 		if scErr != nil {
 			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)

@@ -22,3 +22,6 @@ build/goanime-local
 
 #Ignore vscode AI rules
 .github/copilot-instructions.md
+
+#Ignore MacOS system files junk
+.DS_Store
