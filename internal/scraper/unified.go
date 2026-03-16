@@ -331,11 +331,6 @@ var (
 // cleanPTBRTitle removes noise from PT-BR anime titles such as ratings ("8.39"),
 // age ratings ("A16"), type suffixes ("(TV)"), and extra whitespace.
 func cleanPTBRTitle(title string) string {
-	// Detect dub/leg before stripping so we can restore it after
-	lowerTitle := strings.ToLower(title)
-	isDublado := strings.Contains(lowerTitle, "dublado")
-	isLegendado := strings.Contains(lowerTitle, "legendado")
-
 	// Strip dublado/legendado labels — they will be re-added by tagResults
 	title = ptbrDubLegRe.ReplaceAllString(title, "")
 
@@ -353,11 +348,6 @@ func cleanPTBRTitle(title string) string {
 
 	// Final whitespace cleanup
 	title = strings.TrimSpace(ptbrSpaceRe.ReplaceAllString(title, " "))
-
-	// Restore dub/leg hint so tagResults can pick it up via URL check
-	// (we keep it in a way that tagResults will re-detect from URL)
-	_ = isDublado
-	_ = isLegendado
 
 	return title
 }
@@ -399,7 +389,7 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			}
 		}
 
-		// Add audio type for PT-BR sources
+		// Add audio type for PT-BR sources only when detectable
 		if isPTBR {
 			lowerURL := strings.ToLower(anime.URL)
 			lowerName := strings.ToLower(anime.Name)
@@ -407,8 +397,10 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 				if !strings.Contains(anime.Name, "(Dublado)") {
 					anime.Name = anime.Name + " (Dublado)"
 				}
-			} else if !strings.Contains(anime.Name, "(Legendado)") && !strings.Contains(anime.Name, "(Dublado)") {
-				anime.Name = anime.Name + " (Legendado)"
+			} else if strings.Contains(lowerName, "legendado") || strings.Contains(lowerURL, "legendado") {
+				if !strings.Contains(anime.Name, "(Legendado)") {
+					anime.Name = anime.Name + " (Legendado)"
+				}
 			}
 		}
 
@@ -437,19 +429,32 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"total", len(results))
 }
 
-// SearchAnimePTBR searches only PT-BR sources (AnimeFire and Goyabu) concurrently
+// SearchAnimePTBR searches PT-BR sources (AnimeFire and Goyabu) concurrently
 func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
 	ptbrTypes := []ScraperType{AnimefireType, GoyabuType}
-	var allResults []*models.Anime
+
+	var (
+		allResults []*models.Anime
+		mu         sync.Mutex
+		wg         sync.WaitGroup
+	)
 
 	for _, st := range ptbrTypes {
-		results, err := sm.searchSpecificScraper(query, st)
-		if err != nil {
-			util.Debug("PT-BR search error", "source", sm.getScraperDisplayName(st), "error", err)
-			continue
-		}
-		allResults = append(allResults, results...)
+		wg.Add(1)
+		go func(scraperType ScraperType) {
+			defer wg.Done()
+			results, err := sm.searchSpecificScraper(query, scraperType)
+			if err != nil {
+				util.Debug("PT-BR search error", "source", sm.getScraperDisplayName(scraperType), "error", err)
+				return
+			}
+			mu.Lock()
+			allResults = append(allResults, results...)
+			mu.Unlock()
+		}(st)
 	}
+
+	wg.Wait()
 
 	if len(allResults) == 0 {
 		return nil, fmt.Errorf("no PT-BR results found for: %s", query)

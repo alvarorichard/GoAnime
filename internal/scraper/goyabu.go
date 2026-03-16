@@ -23,6 +23,39 @@ const (
 	GoyabuBase = "https://goyabu.io"
 )
 
+// Pre-compiled regexes for Goyabu scraping (package-level like other scrapers)
+var (
+	// Episode extraction patterns — ordered by likelihood
+	goyabuEpisodePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?:const|let|var)\s+allEpisodes\s*=\s*(\[[\s\S]*?\])\s*;`),
+		regexp.MustCompile(`episodes\s*[:=]\s*(\[[\s\S]*?\])`),
+		regexp.MustCompile(`"episodes"\s*:\s*(\[[\s\S]*?\])`),
+		regexp.MustCompile(`episodeList\s*[:=]\s*(\[[\s\S]*?\])`),
+		regexp.MustCompile(`episodios\s*[:=]\s*(\[[\s\S]*?\])`),
+	}
+	// Cleanup regex: matches unquoted JS keys, preserving the delimiter before them.
+	// Group 1 = delimiter ({, [, , or start), Group 2 = key name.
+	goyabuUnquotedKeyRe = regexp.MustCompile(`([,{\[\s]|^)(\w+)\s*:`)
+	// Nonce extraction
+	goyabuNonceRe = regexp.MustCompile(`"nonce"\s*:\s*"([a-f0-9]+)"`)
+	// Blogger token patterns
+	goyabuBloggerPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`blogger_token\s*[:=]\s*["']([^"']+)["']`),
+		regexp.MustCompile(`data-blogger-token\s*=\s*["']([^"']+)["']`),
+		regexp.MustCompile(`"blogger_token"\s*:\s*"([^"]+)"`),
+	}
+	// Video URL patterns
+	goyabuVideoPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`"file"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"`),
+		regexp.MustCompile(`"file"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`),
+		regexp.MustCompile(`src\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)"`),
+		regexp.MustCompile(`src\s*[:=]\s*["'](https?://[^"']+\.mp4[^"']*)"`),
+		regexp.MustCompile(`source\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)"`),
+	}
+	// playersData extraction: Goyabu embeds a JS array with player info including Blogger URLs
+	goyabuPlayersDataRe = regexp.MustCompile(`var\s+playersData\s*=\s*(\[.*?\])\s*;`)
+)
+
 // GoyabuClient handles interactions with goyabu.io
 type GoyabuClient struct {
 	client     *http.Client
@@ -43,16 +76,26 @@ func NewGoyabuClient() *GoyabuClient {
 	}
 }
 
-// goyabuSearchResult represents a search result from the WP REST API
+// goyabuSearchResult represents a search result from the WP REST API.
+// The API returns a map keyed by post ID, with "img" for the image field.
 type goyabuSearchResult struct {
 	Title string `json:"title"`
 	URL   string `json:"url"`
-	Image string `json:"image"`
+	Image string `json:"img"`
 }
 
 // SearchAnime searches for anime on goyabu.io
 // Uses the WordPress REST API search endpoint
 func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
+	// Normalize query: replace hyphens/underscores with spaces for WordPress search
+	// (CLI args arrive hyphenated like "cavaleiro-do-zodiaco" but Goyabu needs spaces)
+	query = strings.TrimSpace(query)
+	query = strings.ReplaceAll(query, "-", " ")
+	query = strings.ReplaceAll(query, "_", " ")
+	for strings.Contains(query, "  ") {
+		query = strings.ReplaceAll(query, "  ", " ")
+	}
+
 	util.Debug("Goyabu search", "query", query)
 
 	// First, fetch the homepage to get the nonce for API authentication
@@ -78,7 +121,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 		util.Debug("Goyabu API search failed, trying HTML fallback", "error", err)
 		return c.searchAnimeHTML(query)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		util.Debug("Goyabu API returned non-200, trying HTML fallback", "status", resp.StatusCode)
@@ -90,15 +133,25 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var results []goyabuSearchResult
-	if err := json.Unmarshal(body, &results); err != nil {
-		// API might return a different structure, try HTML fallback
+	// The API returns an object keyed by post ID, not an array.
+	// Error responses mix string values (e.g. {"error":"no_posts","title":"Sem resultados"})
+	// with the same map shape, so decode to json.RawMessage first and skip non-object entries.
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawMap); err != nil {
 		util.Debug("Goyabu API parse failed, trying HTML fallback", "error", err)
 		return c.searchAnimeHTML(query)
 	}
 
 	var animes []*models.Anime
-	for _, r := range results {
+	for _, raw := range rawMap {
+		// Skip string values like "no_posts" or "Sem resultados"
+		if len(raw) == 0 || raw[0] == '"' {
+			continue
+		}
+		var r goyabuSearchResult
+		if err := json.Unmarshal(raw, &r); err != nil {
+			continue
+		}
 		if r.Title != "" && r.URL != "" {
 			animes = append(animes, &models.Anime{
 				Name:     r.Title,
@@ -128,7 +181,7 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -136,8 +189,7 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 	}
 
 	// Extract nonce from glosAP config: "nonce":"xxxxx"
-	re := regexp.MustCompile(`"nonce"\s*:\s*"([a-f0-9]+)"`)
-	matches := re.FindSubmatch(body)
+	matches := goyabuNonceRe.FindSubmatch(body)
 	if len(matches) >= 2 {
 		return string(matches[1]), nil
 	}
@@ -153,7 +205,7 @@ func (c *GoyabuClient) searchAnimeHTML(query string) ([]*models.Anime, error) {
 	var lastErr error
 	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		req, err := http.NewRequest("GET", searchURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
@@ -254,11 +306,13 @@ func (c *GoyabuClient) extractSearchResults(doc *goquery.Document) []*models.Ani
 	return unique
 }
 
-// goyabuEpisode represents episode data from the page's JavaScript
+// goyabuEpisode represents episode data from the page's JavaScript.
+// The API returns ID as an integer, so we use json.Number for flexibility.
 type goyabuEpisode struct {
-	ID       string `json:"id"`
-	Episodio string `json:"episodio"`
-	Thumb    string `json:"thumb"`
+	ID       json.Number `json:"id"`
+	Episodio string      `json:"episodio"`
+	Link     string      `json:"link"`
+	Thumb    string      `json:"thumb"`
 }
 
 // GetAnimeEpisodes fetches the episode list for a given anime page
@@ -268,7 +322,7 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 	var lastErr error
 	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range attempts {
 		req, err := http.NewRequest("GET", animeURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
@@ -317,92 +371,78 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 	return nil, errors.New("failed to retrieve episodes from Goyabu")
 }
 
-// parseEpisodesFromJS extracts episode data from the page's JavaScript
-// The episodes are stored as a JS array like: episodes = [{id:"69013",episodio:"1",...}]
+// parseEpisodesFromJS extracts episode data from the page's JavaScript.
+// Goyabu stores episodes as: const allEpisodes = [{"id":41414,"episodio":"1",...}]
 func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 	var episodes []models.Episode
 
-	// Try to find the episodes JSON array in the page source
-	// Goyabu uses several formats depending on the page version
-	patterns := []string{
-		`episodes\s*[:=]\s*(\[[\s\S]*?\])`,
-		`"episodes"\s*:\s*(\[[\s\S]*?\])`,
-		`episodeList\s*[:=]\s*(\[[\s\S]*?\])`,
-		`var\s+eps\s*=\s*(\[[\s\S]*?\])`,
-		`episodios\s*[:=]\s*(\[[\s\S]*?\])`,
-		`data-episodes\s*=\s*'(\[[\s\S]*?\])'`,
-	}
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	// Try to find the episodes JSON array in the page source.
+	// The site uses `const allEpisodes = [...]` with valid JSON.
+	for _, re := range goyabuEpisodePatterns {
 		matches := re.FindStringSubmatch(html)
-		if len(matches) >= 2 {
-			jsonStr := matches[1]
-			// Clean up JS object notation to valid JSON
-			// Convert unquoted keys: {id:"69013"} -> {"id":"69013"}
-			jsonStr = regexp.MustCompile(`(\w+)\s*:`).ReplaceAllString(jsonStr, `"$1":`)
-			// Fix single quotes to double quotes
-			jsonStr = strings.ReplaceAll(jsonStr, "'", "\"")
+		if len(matches) < 2 {
+			continue
+		}
 
-			var epData []goyabuEpisode
-			if err := json.Unmarshal([]byte(jsonStr), &epData); err != nil {
-				util.Debug("Goyabu episode JSON parse error", "error", err)
+		jsonStr := matches[1]
+
+		// Try parsing as valid JSON first (Goyabu returns proper JSON)
+		var epData []goyabuEpisode
+		if err := json.Unmarshal([]byte(jsonStr), &epData); err != nil {
+			// Only if direct parse fails, try cleaning JS notation to JSON:
+			// Convert unquoted keys ({id:1} -> {"id":1}) but skip already-quoted ones
+			cleaned := goyabuUnquotedKeyRe.ReplaceAllString(jsonStr, `$1"$2":`)
+			cleaned = strings.ReplaceAll(cleaned, "'", "\"")
+			if err2 := json.Unmarshal([]byte(cleaned), &epData); err2 != nil {
+				util.Debug("Goyabu episode JSON parse error", "error", err2)
 				continue
 			}
+		}
 
-			for i, ep := range epData {
-				num := i + 1
-				if ep.Episodio != "" {
-					if parsed, err := strconv.Atoi(ep.Episodio); err == nil {
-						num = parsed
-					}
+		for i, ep := range epData {
+			num := i + 1
+			if ep.Episodio != "" {
+				if parsed, err := strconv.Atoi(ep.Episodio); err == nil {
+					num = parsed
 				}
-
-				// Goyabu episode IDs are WordPress post IDs; use /?p=ID
-				epURL := fmt.Sprintf("%s/?p=%s", c.baseURL, ep.ID)
-
-				episodes = append(episodes, models.Episode{
-					Number: fmt.Sprintf("Episódio %d", num),
-					Num:    num,
-					URL:    epURL,
-				})
 			}
 
-			if len(episodes) > 0 {
-				return episodes
-			}
+			// Goyabu episode IDs are WordPress post IDs; use /?p=ID
+			epURL := fmt.Sprintf("%s/?p=%s", c.baseURL, ep.ID.String())
+
+			episodes = append(episodes, models.Episode{
+				Number: fmt.Sprintf("Episódio %d", num),
+				Num:    num,
+				URL:    epURL,
+			})
+		}
+
+		if len(episodes) > 0 {
+			return episodes
 		}
 	}
 
-	// Fallback: parse episode-item elements if present in static HTML
+	// Fallback: parse episode link elements from static HTML
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
 		return episodes
 	}
 
-	// Try multiple selectors used by different Goyabu page versions
-	doc.Find(".episode-item, .boxEP, .epo a, .episodebox a, .eps a, article.episode a").Each(func(i int, s *goquery.Selection) {
-		var href string
-		var exists bool
-
-		// Some selectors land on the <a> directly, others on a container
-		if s.Is("a") {
-			href, exists = s.Attr("href")
-		} else {
-			link := s.Find("a")
-			href, exists = link.Attr("href")
-		}
-		if !exists || href == "" {
+	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		if href == "" {
 			return
 		}
-		// Only follow episode URLs
+		// Only follow links that look like episode pages (contain /?p= or /episode/)
+		if !strings.Contains(href, "/?p=") && !strings.Contains(href, "/episode/") {
+			return
+		}
 		if !strings.Contains(href, c.baseURL) && !strings.HasPrefix(href, "/") {
 			return
 		}
 
-		epNum, _ := s.Attr("data-episode-number")
-		num := i + 1
-		if epNum != "" {
+		num := len(episodes) + 1
+		if epNum, _ := s.Attr("data-episode-number"); epNum != "" {
 			if parsed, err := strconv.Atoi(epNum); err == nil {
 				num = parsed
 			}
@@ -434,7 +474,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch episode page: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("server returned: %s", resp.Status)
@@ -464,8 +504,8 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 		}
 	}
 
-	// Strategy 2: Extract blogger token and decode via AJAX
-	bloggerToken := c.extractBloggerToken(pageHTML)
+	// Strategy 2: Extract playersData JSON and decode blogger token via AJAX
+	bloggerToken, bloggerURL := c.extractPlayerData(pageHTML)
 	if bloggerToken != "" {
 		streamURL, err := c.decodeBloggerToken(bloggerToken)
 		if err == nil && streamURL != "" {
@@ -475,50 +515,59 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	}
 
 	// Strategy 3: Look for direct video URLs in script tags
-	videoURLPatterns := []string{
-		`"file"\s*:\s*"(https?://[^"]+\.m3u8[^"]*)"`,
-		`"file"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"`,
-		`src\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)"`,
-		`src\s*[:=]\s*["'](https?://[^"']+\.mp4[^"']*)"`,
-		`source\s*[:=]\s*["'](https?://[^"']+\.m3u8[^"']*)"`,
-	}
-
-	for _, pattern := range videoURLPatterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range goyabuVideoPatterns {
 		matches := re.FindStringSubmatch(pageHTML)
 		if len(matches) >= 2 {
 			return matches[1], nil
 		}
 	}
 
+	// Strategy 4: Return Blogger embed URL as last resort (video player can handle it)
+	if bloggerURL != "" {
+		util.Debug("Using Blogger embed URL as fallback", "url", bloggerURL)
+		return bloggerURL, nil
+	}
+
 	return "", fmt.Errorf("could not find stream URL in episode page")
 }
 
-// extractBloggerToken extracts the blogger_token from the page HTML
-func (c *GoyabuClient) extractBloggerToken(html string) string {
-	patterns := []string{
-		`blogger_token\s*[:=]\s*["']([^"']+)["']`,
-		`data-blogger-token\s*=\s*["']([^"']+)["']`,
-		`"blogger_token"\s*:\s*"([^"]+)"`,
-	}
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(html)
-		if len(matches) >= 2 {
-			return matches[1]
+// extractPlayerData extracts the blogger_token and Blogger embed URL from the page.
+// It first tries the structured playersData JS variable, then falls back to regex patterns.
+func (c *GoyabuClient) extractPlayerData(html string) (token, bloggerURL string) {
+	// Try structured playersData first: var playersData = [{...}];
+	if matches := goyabuPlayersDataRe.FindStringSubmatch(html); len(matches) >= 2 {
+		var players []struct {
+			BloggerToken string `json:"blogger_token"`
+			URL          string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(matches[1]), &players); err == nil && len(players) > 0 {
+			token = players[0].BloggerToken
+			bloggerURL = players[0].URL
+			util.Debug("Extracted playersData", "hasToken", token != "", "hasURL", bloggerURL != "")
 		}
 	}
-	return ""
+
+	// Fallback: extract blogger_token from other patterns if not found
+	if token == "" {
+		for _, re := range goyabuBloggerPatterns {
+			if m := re.FindStringSubmatch(html); len(m) >= 2 {
+				token = m[1]
+				break
+			}
+		}
+	}
+	return token, bloggerURL
 }
 
-// decodeBloggerToken calls the AJAX endpoint to decode the blogger video token
+// decodeBloggerToken calls the AJAX endpoint to decode the blogger video token.
+// The server expects action=decode_blogger_video with token=<base64> and returns
+// {"success":true,"data":{"play":[{"src":"url","size":720,"type":"video/mp4"},...]}}.
 func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 	ajaxURL := fmt.Sprintf("%s/wp-admin/admin-ajax.php", c.baseURL)
 
 	data := url.Values{}
 	data.Set("action", "decode_blogger_video")
-	data.Set("blogger_token", token)
+	data.Set("token", token)
 
 	req, err := http.NewRequest("POST", ajaxURL, strings.NewReader(data.Encode()))
 	if err != nil {
@@ -533,7 +582,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("AJAX request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -541,7 +590,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 	}
 
 	// Try to parse the response as JSON with video URLs
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
 		// Maybe it returned a direct URL string
 		urlStr := strings.TrimSpace(string(body))
@@ -551,27 +600,37 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 		return "", fmt.Errorf("failed to parse AJAX response: %w", err)
 	}
 
-	// Look for video URL in response
-	for _, key := range []string{"url", "file", "src", "video_url", "stream_url"} {
-		if val, ok := result[key]; ok {
-			if urlStr, ok := val.(string); ok && urlStr != "" {
-				return urlStr, nil
+	// Goyabu wraps the response in {"success":bool,"data":{...}}
+	dataObj, _ := result["data"].(map[string]any)
+
+	// Check for play array: data.play[].src (Goyabu's actual response format)
+	if dataObj != nil {
+		if play, ok := dataObj["play"].([]any); ok {
+			bestURL, bestSize := "", float64(0)
+			for _, item := range play {
+				if m, ok := item.(map[string]any); ok {
+					src, _ := m["src"].(string)
+					size, _ := m["size"].(float64)
+					if src != "" && size >= bestSize {
+						bestURL, bestSize = src, size
+					}
+				}
+			}
+			if bestURL != "" {
+				return bestURL, nil
 			}
 		}
 	}
 
-	// Check for quality options array
-	if qualities, ok := result["qualities"]; ok {
-		if qArr, ok := qualities.([]interface{}); ok && len(qArr) > 0 {
-			// Pick highest quality
-			for _, q := range qArr {
-				if qMap, ok := q.(map[string]interface{}); ok {
-					if src, ok := qMap["src"].(string); ok && src != "" {
-						return src, nil
-					}
-					if file, ok := qMap["file"].(string); ok && file != "" {
-						return file, nil
-					}
+	// Fallback: look for video URL at top level or in data
+	for _, obj := range []map[string]any{result, dataObj} {
+		if obj == nil {
+			continue
+		}
+		for _, key := range []string{"url", "file", "src", "video_url", "stream_url"} {
+			if val, ok := obj[key]; ok {
+				if urlStr, ok := val.(string); ok && strings.HasPrefix(urlStr, "http") {
+					return urlStr, nil
 				}
 			}
 		}
