@@ -1,3 +1,4 @@
+// Package api provides enhanced anime search and streaming capabilities.
 package api
 
 import (
