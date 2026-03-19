@@ -9,6 +9,33 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// isTransientError checks if an error is caused by network issues or
+// unavailable external services that should cause the test to skip.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	transient := []string{
+		"context deadline exceeded",
+		"connection refused",
+		"no such host",
+		"timeout",
+		"502", "503", "530", "405",
+		"Bad Gateway",
+		"Method Not Allowed",
+		"both APIs failed",
+		"i/o timeout",
+		"TLS handshake timeout",
+	}
+	for _, s := range transient {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFlixHQFullFlow(t *testing.T) {
 	util.IsDebug = true
 
@@ -18,6 +45,9 @@ func TestFlixHQFullFlow(t *testing.T) {
 	flixhqType := scraper.FlixHQType
 	results, err := sm.SearchAnime("dexter", &flixhqType)
 	if err != nil {
+		if isTransientError(err) {
+			t.Skipf("Skipping - external service unavailable: %v", err)
+		}
 		t.Fatalf("Search error: %v", err)
 	}
 
@@ -48,6 +78,9 @@ func TestFlixHQFullFlow(t *testing.T) {
 
 	seasons, err := flixhqClient.GetSeasons(mediaID)
 	if err != nil {
+		if isTransientError(err) {
+			t.Skipf("Skipping - external service unavailable: %v", err)
+		}
 		t.Fatalf("Get seasons error: %v", err)
 	}
 
@@ -62,6 +95,9 @@ func TestFlixHQFullFlow(t *testing.T) {
 	t.Log("=== Step 4: Getting episodes for Season 1 ===")
 	episodes, err := flixhqClient.GetEpisodes(seasons[0].ID)
 	if err != nil {
+		if isTransientError(err) {
+			t.Skipf("Skipping - external service unavailable: %v", err)
+		}
 		t.Fatalf("Get episodes error: %v", err)
 	}
 
@@ -85,10 +121,7 @@ func TestFlixHQFullFlow(t *testing.T) {
 	t.Log("=== Step 5: Getting stream URL ===")
 	streamURL, err := GetEpisodeStreamURL(&modelEpisode, anime, "1080")
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "530") ||
-			strings.Contains(errMsg, "405") || strings.Contains(errMsg, "Bad Gateway") ||
-			strings.Contains(errMsg, "Method Not Allowed") || strings.Contains(errMsg, "both APIs failed") {
+		if isTransientError(err) {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
 		}
 		t.Fatalf("Get stream URL error: %v", err)
