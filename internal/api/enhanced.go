@@ -963,7 +963,7 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 func languagePriority(name string) int {
 	lower := strings.ToLower(name)
 	switch {
-	case strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
+	case strings.HasPrefix(lower, "[pt-br]") || strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
 		return 0
 	case strings.HasPrefix(lower, "[multilanguage]"):
 		return 1

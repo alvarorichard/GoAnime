@@ -811,7 +811,7 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 
 // Pre-compiled regexes for SanitizeForFilename and related functions (hot path)
 var (
-	bracketTagRe = regexp.MustCompile(`\[(?i:English|Portuguese|Português|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
+	bracketTagRe = regexp.MustCompile(`\[(?i:English|Portuguese|Português|PT-BR|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
 	ageClassRe   = regexp.MustCompile(`\s+(A\d{1,2}|AL|L)\s*$`)
 	scoreRe      = regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
 )

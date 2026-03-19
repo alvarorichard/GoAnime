@@ -26,6 +26,7 @@ var (
 	animefireBloggerRe = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
 	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
+	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
 )
 
 // AnimefireClient handles interactions with Animefire.io
@@ -291,14 +292,12 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 // parseEpisodes extracts a list of Episode structs from the given goquery.Document.
 func (c *AnimefireClient) parseEpisodes(doc *goquery.Document) []models.Episode {
 	var episodes []models.Episode
-	re := regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
-
 	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
 		episodeNum := s.Text()
 		episodeURL, _ := s.Attr("href")
 
 		num := i + 1 // default to index-based numbering
-		matches := re.FindStringSubmatch(episodeNum)
+		matches := animefireEpisodeRe.FindStringSubmatch(episodeNum)
 		if len(matches) >= 2 {
 			parsed, err := strconv.Atoi(matches[1])
 			if err != nil {
