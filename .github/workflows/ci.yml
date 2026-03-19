@@ -52,6 +52,7 @@ jobs:
         with:
           version: v2.1.6
           args: --timeout=15m
+          install-mode: goinstall
 
       - name: Install Gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
