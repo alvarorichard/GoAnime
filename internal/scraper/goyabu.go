@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	GoyabuBase = "https://goyabu.io"
+	goyabuBase = "https://goyabu.io"
 )
 
 // Pre-compiled regexes for Goyabu scraping (package-level like other scrapers)
@@ -69,7 +69,7 @@ type GoyabuClient struct {
 func NewGoyabuClient() *GoyabuClient {
 	return &GoyabuClient{
 		client:     util.GetFastClient(),
-		baseURL:    GoyabuBase,
+		baseURL:    goyabuBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
 		retryDelay: 300 * time.Millisecond,
@@ -252,7 +252,7 @@ func (c *GoyabuClient) extractSearchResults(doc *goquery.Document) []*models.Ani
 	var animes []*models.Anime
 
 	// Look for anime card links with images and titles
-	doc.Find("article a, .anime-item a, .post a").Each(func(i int, s *goquery.Selection) {
+	doc.Find("article a, .anime-item a, .post a").Each(func(_ int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if !exists || href == "" {
 			return
@@ -428,7 +428,7 @@ func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 		return episodes
 	}
 
-	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, _ := s.Attr("href")
 		if href == "" {
 			return
