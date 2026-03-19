@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
-	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/pkg/errors v0.9.1
@@ -20,8 +20,8 @@ require (
 	charm.land/log/v2 v2.0.0
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.0.222
-	github.com/enetx/surf v1.0.196
-	github.com/lrstanley/go-ytdlp v1.3.3
+	github.com/enetx/surf v1.0.197
+	github.com/lrstanley/go-ytdlp v1.3.5
 	github.com/tr1xem/go-discordrpc v1.0.0
 )
 
@@ -29,7 +29,7 @@ require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260309091805-903bfd0cf188 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260316091819-b93f6a3b8502 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.1.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -41,21 +41,21 @@ require (
 	github.com/enetx/http2 v1.0.26 // indirect
 	github.com/enetx/http3 v1.0.7 // indirect
 	github.com/enetx/iter v0.0.0-20250912135656-f1583323588f // indirect
-	github.com/enetx/utls v0.0.0-20260115181616-c525a7d559c8 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/wzshiming/socks5 v0.7.0 // indirect
-	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 )
 
 require (
-	github.com/ProtonMail/go-crypto v1.4.0 // indirect
+	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
@@ -69,7 +69,7 @@ require (
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-runewidth v0.0.21 // indirect
-	github.com/mattn/go-sqlite3 v1.14.34
+	github.com/mattn/go-sqlite3 v1.14.37
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nsf/termbox-go v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
