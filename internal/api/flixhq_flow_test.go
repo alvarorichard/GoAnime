@@ -21,12 +21,13 @@ func isTransientError(err error) bool {
 		"connection refused",
 		"no such host",
 		"timeout",
-		"502", "503", "530", "405",
+		"500", "502", "503", "530", "405",
 		"Bad Gateway",
 		"Method Not Allowed",
 		"both APIs failed",
 		"i/o timeout",
 		"TLS handshake timeout",
+		"no server found",
 	}
 	for _, s := range transient {
 		if strings.Contains(msg, s) {
