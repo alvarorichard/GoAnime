@@ -223,10 +223,26 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				})
 			}
 
-			// If all scrapers have responded (success or error), return immediately
+			// If all scrapers have completed and no more results pending, drain channel
 			if atomic.LoadInt32(&completedCount) >= totalScrapers {
-				util.Debug("All scrapers completed, returning immediately")
-				goto done
+				// Drain any remaining results from the channel before returning
+				for {
+					select {
+					case remaining, ok := <-resultChan:
+						if !ok {
+							goto done
+						}
+						if remaining.err == nil && len(remaining.results) > 0 {
+							sm.tagResults(remaining.results, remaining.scraperType)
+							resultsMutex.Lock()
+							allResults = append(allResults, remaining.results...)
+							sourcesWithResults[remaining.scraperType] = true
+							resultsMutex.Unlock()
+						}
+					default:
+						goto done
+					}
+				}
 			}
 
 		case <-earlyReturnTimer:
