@@ -2,6 +2,7 @@
 package scraper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,6 +95,33 @@ type FlixHQClient struct {
 	searchCache    sync.Map // Caches search results
 	infoCache      sync.Map // Caches media info
 	serverCache    sync.Map // Caches server lists
+	mediaPath      string   // Media path for decryption API (e.g. "tv/watch-dexter-39448")
+}
+
+// SetMediaPath sets the media path used by the decryption API.
+// The path should be the FlixHQ URL path component, e.g. "tv/watch-dexter-39448".
+func (c *FlixHQClient) SetMediaPath(path string) {
+	c.mediaPath = path
+}
+
+// ExtractMediaPath extracts the media path from a full FlixHQ URL.
+// e.g. "https://flixhq.to/tv/watch-dexter-39448" → "tv/watch-dexter-39448"
+func ExtractMediaPath(fullURL string) string {
+	for _, base := range []string{"https://flixhq.to/", "https://sflix.to/", "http://flixhq.to/", "http://sflix.to/"} {
+		if strings.HasPrefix(fullURL, base) {
+			return strings.TrimPrefix(fullURL, base)
+		}
+	}
+	if strings.HasPrefix(fullURL, "movie/") || strings.HasPrefix(fullURL, "tv/") {
+		return fullURL
+	}
+	if idx := strings.Index(fullURL, "://"); idx != -1 {
+		rest := fullURL[idx+3:]
+		if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+			return rest[slashIdx+1:]
+		}
+	}
+	return fullURL
 }
 
 // FlixHQMedia represents a movie or TV show from FlixHQ
@@ -675,6 +703,11 @@ func (c *FlixHQClient) GetStreamURL(media *FlixHQMedia, episode *FlixHQEpisode, 
 
 // GetStreamURLWithContext is a convenience method with context support
 func (c *FlixHQClient) GetStreamURLWithContext(ctx context.Context, media *FlixHQMedia, episode *FlixHQEpisode, provider, quality, subsLanguage string) (*FlixHQStreamInfo, error) {
+	// Set media path for decryption API
+	if media.URL != "" {
+		c.SetMediaPath(ExtractMediaPath(media.URL))
+	}
+
 	var episodeID string
 	var err error
 
@@ -1089,14 +1122,18 @@ func (c *FlixHQClient) extractFromEmbedURL(ctx context.Context, embedURL string)
 
 // extractFromEmbedURLSingle extracts video sources from a single API endpoint
 func (c *FlixHQClient) extractFromEmbedURLSingle(ctx context.Context, apiBase string, embedURL string) (*FlixHQVideoSources, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedURL))
+	jsonBody, err := json.Marshal(map[string]string{"url": embedURL, "mediaId": c.mediaPath})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiBase, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.decorateRequest(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
@@ -1521,16 +1558,20 @@ func (c *FlixHQClient) ExtractStreamInfoWithContext(ctx context.Context, embedLi
 
 // extractStreamFromAPI extracts stream info from a specific API URL
 func (c *FlixHQClient) extractStreamFromAPI(ctx context.Context, apiBase string, embedLink string, preferredQuality string, subsLanguage string) (*FlixHQStreamInfo, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedLink))
+	util.Debug("FlixHQ API request", "url", apiBase, "embed", embedLink, "mediaPath", c.mediaPath)
 
-	util.Debug("FlixHQ API request", "url", apiURL, "embed", embedLink)
+	jsonBody, err := json.Marshal(map[string]string{"url": embedLink, "mediaId": c.mediaPath})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiBase, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.decorateRequest(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {

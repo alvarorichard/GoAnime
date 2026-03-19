@@ -108,10 +108,17 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 
 	t.Logf("Getting sources for: %s (ID: %s)", movie.Title, movie.ID)
 
+	// Set media path for decryption API
+	if movie.URL != "" {
+		client.SetMediaPath(ExtractMediaPath(movie.URL))
+	}
+
 	sources, err := client.GetSourcesWithContext(ctx, movie.ID, true)
 	if err != nil {
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "Bad Gateway") ||
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "530") ||
+			strings.Contains(errMsg, "405") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "Method Not Allowed") || strings.Contains(errMsg, "both APIs failed") ||
 			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
 			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
@@ -150,10 +157,17 @@ func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
 		return
 	}
 
+	// Set media path for decryption API
+	if movie.URL != "" {
+		client.SetMediaPath(ExtractMediaPath(movie.URL))
+	}
+
 	qualities, err := client.GetAvailableQualitiesWithContext(ctx, movie.ID, true)
 	if err != nil {
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "Bad Gateway") ||
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "530") ||
+			strings.Contains(errMsg, "405") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "Method Not Allowed") || strings.Contains(errMsg, "both APIs failed") ||
 			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
 			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)

@@ -2,6 +2,7 @@
 package scraper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,12 @@ type SFlixClient struct {
 	searchCache    sync.Map
 	infoCache      sync.Map
 	serverCache    sync.Map
+	mediaPath      string // Media path for decryption API
+}
+
+// SetMediaPath sets the media path used by the decryption API.
+func (c *SFlixClient) SetMediaPath(path string) {
+	c.mediaPath = path
 }
 
 // SFlixMedia represents a movie or TV show from SFlix
@@ -988,14 +995,18 @@ func (c *SFlixClient) extractFromEmbedURL(ctx context.Context, embedURL string) 
 
 // extractFromEmbedURLSingle extracts video sources from a single API endpoint
 func (c *SFlixClient) extractFromEmbedURLSingle(ctx context.Context, apiBase string, embedURL string) (*SFlixVideoSources, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedURL))
+	jsonBody, err := json.Marshal(map[string]string{"url": embedURL, "mediaId": c.mediaPath})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiBase, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.decorateRequest(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
@@ -1310,16 +1321,20 @@ func (c *SFlixClient) ExtractStreamInfoWithContext(ctx context.Context, embedLin
 
 // extractStreamFromAPI extracts stream info from a specific API URL
 func (c *SFlixClient) extractStreamFromAPI(ctx context.Context, apiBase string, embedLink string, preferredQuality string, subsLanguage string) (*SFlixStreamInfo, error) {
-	apiURL := fmt.Sprintf("%s/?url=%s", apiBase, url.QueryEscape(embedLink))
+	util.Debug("SFlix API request", "url", apiBase, "embed", embedLink, "mediaPath", c.mediaPath)
 
-	util.Debug("SFlix API request", "url", apiURL, "embed", embedLink)
+	jsonBody, err := json.Marshal(map[string]string{"url": embedLink, "mediaId": c.mediaPath})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiBase, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	c.decorateRequest(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req) // #nosec G704
 	if err != nil {
@@ -1467,6 +1482,11 @@ func (c *SFlixClient) GetStreamURL(media *SFlixMedia, episode *SFlixEpisode, pro
 
 // GetStreamURLWithContext is a convenience method with context support
 func (c *SFlixClient) GetStreamURLWithContext(ctx context.Context, media *SFlixMedia, episode *SFlixEpisode, provider, quality, subsLanguage string) (*SFlixStreamInfo, error) {
+	// Set media path for decryption API
+	if media.URL != "" {
+		c.SetMediaPath(ExtractMediaPath(media.URL))
+	}
+
 	var episodeID string
 	var err error
 

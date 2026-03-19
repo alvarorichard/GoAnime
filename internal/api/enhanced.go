@@ -804,6 +804,10 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 // GetFlixHQStreamURL gets the stream URL for FlixHQ content
 func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, []models.Subtitle, error) {
 	flixhqClient := scraper.NewFlixHQClient()
+	// Set media path for decryption API
+	if media.URL != "" {
+		flixhqClient.SetMediaPath(scraper.ExtractMediaPath(media.URL))
+	}
 	provider := "Vidcloud"
 	subsLanguage := util.GlobalSubsLanguage
 	if subsLanguage == "" {

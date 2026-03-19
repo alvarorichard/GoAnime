@@ -262,6 +262,11 @@ func TestFlixHQClient_GetTVShowStream(t *testing.T) {
 
 	t.Logf("Found TV show: %s (ID: %s)", tvShow.Title, tvShow.ID)
 
+	// Set media path for decryption API
+	if tvShow.URL != "" {
+		client.SetMediaPath(ExtractMediaPath(tvShow.URL))
+	}
+
 	// Get seasons
 	seasons, err := client.GetSeasons(tvShow.ID)
 	if err != nil {
