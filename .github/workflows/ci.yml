@@ -21,16 +21,6 @@ jobs:
         with:
           go-version: '1.26.1'
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-1.26.1-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.26.1-
-
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -54,17 +44,14 @@ jobs:
           echo "TMPDIR=$TMPDIR"
           go test -v ./internal/player/test/... -run "Socket|MacOS" -count=1
 
-      - name: Clean Go build cache
-        run: go clean -cache
-
       - name: Get dependencies
-        run: go get -v -t -d ./...
-
-      - name: Install golangci-lint (built with runner Go)
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+        run: go mod download
 
       - name: Run golangci-lint
-        run: golangci-lint run --timeout=10m ./...
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.1.6
+          args: --timeout=15m
 
       - name: Install Gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@latest
@@ -117,21 +104,8 @@ jobs:
         with:
           go-version: '1.26.1'
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-1.26.1-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.26.1-
-
-      - name: Clean Go build cache
-        run: go clean -cache
-
       - name: Get dependencies
-        run: go get -v -t -d ./...
+        run: go mod download
 
       - name: Build binary
         shell: bash
@@ -196,21 +170,8 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Clean Go build cache
-        run: go clean -cache
-
       - name: Get dependencies
-        run: go get -v -t -d ./...
+        run: go mod download
 
       - name: Install GCC for CGO (SQLite support)
         shell: pwsh

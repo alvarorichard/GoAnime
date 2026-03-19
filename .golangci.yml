@@ -1,0 +1,24 @@
+version: "2"
+
+run:
+  timeout: 15m
+  modules-download-mode: readonly
+
+linters:
+  default: standard
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - dupl
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3

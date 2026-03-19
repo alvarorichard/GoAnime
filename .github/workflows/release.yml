@@ -40,10 +40,10 @@ jobs:
           go mod download
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
-          args: --timeout=5m
+          version: v2.1.6
+          args: --timeout=15m
         continue-on-error: true
 
       - name: Run tests
