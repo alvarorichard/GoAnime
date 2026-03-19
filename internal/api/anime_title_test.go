@@ -31,6 +31,11 @@ func TestCleanTitle_BrazilianSources(t *testing.T) {
 			expected: "Naruto Shippuden",
 		},
 		{
+			name:     "removes [PT-BR] prefix",
+			input:    "[PT-BR] One Piece Dublado",
+			expected: "One Piece",
+		},
+		{
 			name:     "removes [English] prefix",
 			input:    "[English] One Piece",
 			expected: "One Piece",

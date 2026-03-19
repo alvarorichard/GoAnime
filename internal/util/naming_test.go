@@ -23,6 +23,7 @@ func TestSanitizeForFilename(t *testing.T) {
 		{"[TV] Breaking Bad", "Breaking Bad"},
 		{"[English] Naruto", "Naruto"},
 		{"[Portuguese] One Piece", "One Piece"},
+		{"[PT-BR] Dragon Ball Super Dublado", "Dragon Ball Super Dublado"},
 		// 9anime-specific patterns
 		{"[Multilanguage] Boruto Naruto Next Generations (HD SUB DUB Ep 293/293)", "Boruto Naruto Next Generations"},
 		{"Naruto (SUB DUB Ep 220/220)", "Naruto"},

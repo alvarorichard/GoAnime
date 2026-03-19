@@ -272,6 +272,16 @@ func playVideo(
 	// Log the episode number and URL for debugging
 	util.Debugf("Playing video for episode %d, URL: %s", currentEpisodeNum, videoURL)
 
+	// Resolve Blogger video URLs to actual video streams
+	if strings.Contains(videoURL, "blogger.com/video.g") {
+		util.Debugf("Resolving Blogger video URL before playback...")
+		resolved, err := extractBloggerGoogleVideoURL(videoURL)
+		if err == nil && resolved != videoURL {
+			util.Debugf("Blogger URL resolved to: %s", resolved)
+			videoURL = resolved
+		}
+	}
+
 	// Normalize video URL if necessary
 	videoURL = strings.Replace(videoURL, "720pp.mp4", "720p.mp4", 1)
 

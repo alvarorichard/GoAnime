@@ -213,7 +213,7 @@ func enrichAnimeData(anime *models.Anime) error {
 		return movie.EnrichMedia(anime)
 	}
 
-	aniListInfo, err := FetchAnimeFromAniList(anime.Name)
+	aniListInfo, err := FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
 	if err != nil {
 		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)
 		return fmt.Errorf("AniList enrichment failed: %w", err)
@@ -286,113 +286,7 @@ func ParseAnimes(doc *goquery.Document) []models.Anime {
 }
 
 func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
-	cleanedName := CleanTitle(animeName)
-	util.Debugf("Querying AniList for: '%s' (original: '%s')", cleanedName, animeName)
-
-	// Check cache first
-	cache := util.GetAniListCache()
-	cacheKey := "anilist:" + strings.ToLower(cleanedName)
-	if cached, found := cache.Get(cacheKey); found {
-		var result models.AniListResponse
-		if err := json.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
-			util.Debugf("AniList cache hit for: '%s'", cleanedName)
-			return &result, nil
-		}
-	}
-
-	// Try multiple search variations in parallel — first success wins
-	searchVariations := generateSearchVariations(cleanedName)
-
-	query := `query ($search: String) {
-        Media(search: $search, type: ANIME) {
-            id
-            title { romaji english native }
-            idMal
-            coverImage { large }
-            synonyms
-        }
-    }`
-
-	type aniListResult struct {
-		resp *models.AniListResponse
-		body []byte
-		err  error
-	}
-
-	resultCh := make(chan aniListResult, len(searchVariations))
-
-	for _, searchTerm := range searchVariations {
-		go func(term string) {
-			util.Debugf("Trying AniList search with: '%s'", term)
-
-			jsonData, err := json.Marshal(map[string]any{
-				"query": query,
-				"variables": map[string]any{
-					"search": term,
-				},
-			})
-			if err != nil {
-				resultCh <- aniListResult{err: fmt.Errorf("JSON marshal failed: %w", err)}
-				return
-			}
-
-			resp, err := httpPostFast("https://graphql.anilist.co", jsonData)
-			if err != nil {
-				resultCh <- aniListResult{err: fmt.Errorf("AniList request failed: %w", err)}
-				return
-			}
-
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-			safeClose(resp.Body, "AniList response body")
-
-			if err != nil {
-				resultCh <- aniListResult{err: fmt.Errorf("failed to read response: %w", err)}
-				return
-			}
-
-			util.Debugf("AniList response status: %d for '%s'", resp.StatusCode, term)
-
-			if resp.StatusCode != http.StatusOK {
-				util.Debugf("AniList error response: %s", string(body))
-				resultCh <- aniListResult{err: fmt.Errorf("AniList returned: %s", resp.Status)}
-				return
-			}
-
-			var result models.AniListResponse
-			if err := json.Unmarshal(body, &result); err != nil {
-				resultCh <- aniListResult{err: fmt.Errorf("JSON decode failed: %w", err)}
-				return
-			}
-
-			if result.Data.Media.ID == 0 {
-				resultCh <- aniListResult{err: errors.New("no matching anime found on AniList")}
-				return
-			}
-
-			resultCh <- aniListResult{resp: &result, body: body}
-		}(searchTerm)
-	}
-
-	var lastErr error
-	for range searchVariations {
-		res := <-resultCh
-		if res.err != nil {
-			lastErr = res.err
-			continue
-		}
-
-		// Cache the successful result
-		cache.Set(cacheKey, res.body)
-
-		util.Debugf("AniList found: ID=%d, MAL=%d, Title=%s",
-			res.resp.Data.Media.ID,
-			res.resp.Data.Media.IDMal,
-			res.resp.Data.Media.Title.Romaji)
-
-		return res.resp, nil
-	}
-
-	return nil, lastErr
+	return FetchAnimeFromAniListWithURL(animeName, "")
 }
 
 func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) {
@@ -407,7 +301,7 @@ func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) 
 	idx, err := fuzzyfinder.Find(animes, func(i int) string {
 		name := animes[i].Name
 		name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
-		name = strings.ReplaceAll(name, "[AnimeFire]", "[Portuguese]")
+		name = strings.ReplaceAll(name, "[AnimeFire]", "[PT-BR]")
 		return name
 	})
 	if err != nil {
@@ -566,8 +460,8 @@ func CleanTitle(title string) string {
 	reMediaTags := regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
 	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
 
-	// Remove language tags like [English], [Portuguese], [Português], [Multilanguage] at the start
-	reLangTags := regexp.MustCompile(`^\s*\[(?:English|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
+	// Remove language tags like [English], [PT-BR], [Portuguese], [Português], [Multilanguage] at the start
+	reLangTags := regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
 	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
 
 	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], [AnimeDrive], or [9Anime]

@@ -836,9 +836,15 @@ func extractMediaIDFromURL(urlStr string) string {
 }
 
 func sanitizeFileName(name string) string {
+	// Remove language tags
+	result := name
+	for _, tag := range []string{"[PT-BR]", "[Portuguese]", "[Português]", "[English]", "[Multilanguage]", "[Movie]", "[TV]", "[Movies/TV]"} {
+		result = strings.ReplaceAll(result, tag, "")
+	}
+	result = strings.TrimSpace(result)
+
 	// Replace invalid characters with underscore
 	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
-	result := name
 	for _, char := range invalid {
 		result = strings.ReplaceAll(result, char, "_")
 	}

@@ -778,6 +778,8 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 			if !ok {
 				continue
 			}
+			// Collect all MP4 stream URLs and prefer higher quality (itag=22 is 720p, itag=18 is 360p)
+			var mp4URLs []string
 			for _, s := range streams {
 				stream, ok := s.([]any)
 				if !ok || len(stream) < 1 {
@@ -788,9 +790,18 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 					continue
 				}
 				if strings.Contains(u, "mime=video%2Fmp4") || strings.Contains(u, "mime=video/mp4") {
+					mp4URLs = append(mp4URLs, u)
+				}
+			}
+			// Prefer 720p (itag=22) over 360p (itag=18)
+			for _, u := range mp4URLs {
+				if strings.Contains(u, "itag=22") {
 					videoURL = u
 					break
 				}
+			}
+			if videoURL == "" && len(mp4URLs) > 0 {
+				videoURL = mp4URLs[0]
 			}
 			if videoURL == "" && len(streams) > 0 {
 				if first, ok := streams[0].([]any); ok && len(first) > 0 {
@@ -1086,7 +1097,11 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			var options []huh.Option[string]
 			options = append(options, huh.NewOption("← Back", "back"))
 			for _, v := range videoResponse.Data {
-				options = append(options, huh.NewOption(v.Label, v.Src))
+				label := v.Label
+				if label == "" {
+					label = v.Src
+				}
+				options = append(options, huh.NewOption(label, v.Src))
 			}
 
 			// Present quality options to the user

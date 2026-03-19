@@ -404,7 +404,7 @@ func FlagParser() (string, error) {
 	downloadFlag := fs.Bool("d", false, "download mode")
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
-	sourceFlag := fs.String("source", "", "specify anime source (allanime, animefire)")
+	sourceFlag := fs.String("source", "", "specify anime source (allanime, animefire, ptbr, flixhq)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	allanimeSmartFlag := fs.Bool("allanime-smart", false, "enable AllAnime Smart Range: auto-skip intros/outros and use priority mirrors")
 	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
@@ -811,7 +811,7 @@ func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage,
 
 // Pre-compiled regexes for SanitizeForFilename and related functions (hot path)
 var (
-	bracketTagRe = regexp.MustCompile(`\[(?i:English|Portuguese|Português|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
+	bracketTagRe = regexp.MustCompile(`\[(?i:English|Portuguese|Português|PT-BR|Movies?(?:/TV)?|TV|MoviesTV|Unknown|Multilanguage|Multi[ _-]?Subs?|HD|9Anime|SUB|DUB)\]`)
 	ageClassRe   = regexp.MustCompile(`\s+(A\d{1,2}|AL|L)\s*$`)
 	scoreRe      = regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
 )

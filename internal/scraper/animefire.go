@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ var (
 	animefireBloggerRe = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
 	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
+	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
 )
 
 // AnimefireClient handles interactions with Animefire.io
@@ -214,9 +217,104 @@ func (c *AnimefireClient) resolveURL(base, ref string) string {
 	return base + "/" + ref
 }
 
-// GetAnimeEpisodes - placeholder method, actual episodes are fetched by API layer
+// GetAnimeEpisodes fetches and parses the list of episodes for a given anime.
+// It returns a sorted slice of Episode structs, ordered by episode number.
 func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	return nil, fmt.Errorf("episodes should be fetched using API layer, not scraper")
+	util.Debug("AnimeFire episodes", "url", animeURL)
+
+	var lastErr error
+	attempts := c.maxRetries + 1
+
+	for attempt := range attempts {
+		req, err := http.NewRequest("GET", animeURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		c.decorateRequest(req)
+
+		resp, err := c.client.Do(req) // #nosec G704
+		if err != nil {
+			lastErr = fmt.Errorf("failed to make request: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = c.handleStatusError(resp)
+			_ = resp.Body.Close()
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to parse HTML: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if c.isChallengePage(doc) {
+			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		episodes := c.parseEpisodes(doc)
+
+		// Sort episodes by number ascending
+		sort.Slice(episodes, func(i, j int) bool {
+			return episodes[i].Num < episodes[j].Num
+		})
+
+		return episodes, nil
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("failed to retrieve episodes from AnimeFire")
+}
+
+// parseEpisodes extracts a list of Episode structs from the given goquery.Document.
+func (c *AnimefireClient) parseEpisodes(doc *goquery.Document) []models.Episode {
+	var episodes []models.Episode
+	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
+		episodeNum := s.Text()
+		episodeURL, _ := s.Attr("href")
+
+		num := i + 1 // default to index-based numbering
+		matches := animefireEpisodeRe.FindStringSubmatch(episodeNum)
+		if len(matches) >= 2 {
+			parsed, err := strconv.Atoi(matches[1])
+			if err != nil {
+				util.Debug("Error parsing episode number", "text", episodeNum, "error", err)
+				return
+			}
+			num = parsed
+		}
+
+		episodes = append(episodes, models.Episode{
+			Number: episodeNum,
+			Num:    num,
+			URL:    c.resolveURL(c.baseURL, episodeURL),
+		})
+	})
+
+	return episodes
 }
 
 // GetEpisodeStreamURL gets the streaming URL for a specific episode from AnimeFire

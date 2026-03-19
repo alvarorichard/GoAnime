@@ -177,7 +177,7 @@ func EnrichWithOMDb(media *models.Media) error {
 // CleanMediaName removes tags and cleans the media name for search
 func CleanMediaName(name string) string {
 	// Remove common tags
-	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[Portuguese]", "[Português]"}
+	tags := []string{"[Movies/TV]", "[Movie]", "[TV]", "[English]", "[PT-BR]", "[Portuguese]", "[Português]"}
 	for _, tag := range tags {
 		name = strings.ReplaceAll(name, tag, "")
 	}
