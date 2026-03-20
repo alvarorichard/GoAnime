@@ -320,7 +320,7 @@ func (c *SFlixClient) GetSeasons(mediaID string) ([]SFlixSeason, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -381,7 +381,7 @@ func (c *SFlixClient) GetEpisodes(seasonID string) ([]SFlixEpisode, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -656,7 +656,7 @@ func (c *SFlixClient) fetchTVEpisodes(showID string, mediaID string) ([]SFlixEpi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	seasonBody, err := io.ReadAll(resp.Body)
+	seasonBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read season list response: %w", err)
 	}
@@ -795,7 +795,7 @@ func (c *SFlixClient) GetServersWithContext(ctx context.Context, episodeID strin
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -946,7 +946,7 @@ func (c *SFlixClient) extractSourcesFromServer(ctx context.Context, server SFlix
 		return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1018,7 +1018,7 @@ func (c *SFlixClient) extractFromEmbedURLSingle(ctx context.Context, apiBase str
 		return nil, fmt.Errorf("API returned status: %s", resp.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1104,7 +1104,7 @@ func (c *SFlixClient) GetEmbedLink(episodeID string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1153,7 +1153,7 @@ func (c *SFlixClient) GetMovieServerID(mediaID, provider string) (string, error)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1229,7 +1229,7 @@ func (c *SFlixClient) GetEpisodeServerID(dataID, provider string) (string, error
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1346,7 +1346,7 @@ func (c *SFlixClient) extractStreamFromAPI(ctx context.Context, apiBase string, 
 		return nil, fmt.Errorf("API returned status: %s", resp.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

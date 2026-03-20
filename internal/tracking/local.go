@@ -132,7 +132,7 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		// Use URI format with escape for Windows
 		escapedPath := strings.ReplaceAll(dbPath, "\\", "/")
 		dsn = fmt.Sprintf(
-			"file:%s?_journal_mode=WAL&_synchronous=OFF&_wal_autocheckpoint=%d&"+
+			"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_wal_autocheckpoint=%d&"+
 				"_busy_timeout=%d&_cache_size=%d&_mmap_size=%d&_mode=rwc&_temp_store=MEMORY",
 			escapedPath,
 			walAutoCheckpoint,
@@ -142,7 +142,7 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		)
 	} else {
 		dsn = fmt.Sprintf(
-			"file:%s?_journal_mode=WAL&_synchronous=OFF&_wal_autocheckpoint=%d&"+
+			"file:%s?_journal_mode=WAL&_synchronous=NORMAL&_wal_autocheckpoint=%d&"+
 				"_busy_timeout=%d&_cache_size=%d&_mmap_size=%d&_temp_store=MEMORY",
 			dbPath,
 			walAutoCheckpoint,

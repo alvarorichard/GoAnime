@@ -194,7 +194,7 @@ func (c *OMDbClient) makeRequest(endpoint string) ([]byte, error) {
 		return nil, fmt.Errorf("OMDb API returned status: %s", resp.Status)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 }
 
 // GetRuntimeMinutes parses runtime string to minutes

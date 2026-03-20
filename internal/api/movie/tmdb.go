@@ -316,7 +316,7 @@ func (c *TMDBClient) makeRequest(endpoint string) ([]byte, error) {
 		return nil, fmt.Errorf("TMDB API returned status: %s", resp.Status)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 }
 
 // GetImageURL returns the full URL for a TMDB image

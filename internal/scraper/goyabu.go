@@ -128,7 +128,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 		return c.searchAnimeHTML(query)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -183,7 +183,7 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", err
 	}
@@ -349,7 +349,7 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 			return nil, lastErr
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response: %w", err)
@@ -480,7 +480,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 		return "", fmt.Errorf("server returned: %s", resp.Status)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -584,7 +584,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read AJAX response: %w", err)
 	}

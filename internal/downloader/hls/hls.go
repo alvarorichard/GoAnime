@@ -349,7 +349,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 			return nil, err
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		_ = resp.Body.Close()
 
 		if err != nil {

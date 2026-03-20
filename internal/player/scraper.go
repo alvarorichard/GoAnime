@@ -684,7 +684,7 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 	}
 	resp := result.Ok()
 
-	pageBody, err := io.ReadAll(resp.Body.Stream())
+	pageBody, err := io.ReadAll(io.LimitReader(resp.Body.Stream(), 10*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read Blogger page: %w", err)
 	}
@@ -739,7 +739,7 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 	}
 	batchResp := batchResult.Ok()
 
-	batchBody, err := io.ReadAll(batchResp.Body.Stream())
+	batchBody, err := io.ReadAll(io.LimitReader(batchResp.Body.Stream(), 5*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read batchexecute response: %w", err)
 	}
@@ -1057,7 +1057,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}()
 
 		// Read the response body
-		body, err := io.ReadAll(response.Body)
+		body, err := io.ReadAll(io.LimitReader(response.Body, 10*1024*1024))
 		if err != nil {
 			return "", fmt.Errorf("failed to read video page: %w", err)
 		}

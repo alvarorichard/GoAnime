@@ -108,17 +108,17 @@ func (c *FlixHQClient) SetMediaPath(path string) {
 // e.g. "https://flixhq.to/tv/watch-dexter-39448" → "tv/watch-dexter-39448"
 func ExtractMediaPath(fullURL string) string {
 	for _, base := range []string{"https://flixhq.to/", "https://sflix.to/", "http://flixhq.to/", "http://sflix.to/"} {
-		if strings.HasPrefix(fullURL, base) {
-			return strings.TrimPrefix(fullURL, base)
+		if after, ok := strings.CutPrefix(fullURL, base); ok {
+			return after
 		}
 	}
 	if strings.HasPrefix(fullURL, "movie/") || strings.HasPrefix(fullURL, "tv/") {
 		return fullURL
 	}
-	if idx := strings.Index(fullURL, "://"); idx != -1 {
-		rest := fullURL[idx+3:]
-		if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
-			return rest[slashIdx+1:]
+	if _, after, ok := strings.Cut(fullURL, "://"); ok {
+		rest := after
+		if _, after, ok := strings.Cut(rest, "/"); ok {
+			return after
 		}
 	}
 	return fullURL
@@ -662,7 +662,7 @@ func (c *FlixHQClient) GetEmbedLink(episodeID string) (string, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read full body for debugging
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
@@ -881,7 +881,7 @@ func (c *FlixHQClient) GetServersWithContext(ctx context.Context, episodeID stri
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1068,7 +1068,7 @@ func (c *FlixHQClient) extractSourcesFromServer(ctx context.Context, server Flix
 		return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1145,7 +1145,7 @@ func (c *FlixHQClient) extractFromEmbedURLSingle(ctx context.Context, apiBase st
 		return nil, fmt.Errorf("API returned status: %s", resp.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -1583,7 +1583,7 @@ func (c *FlixHQClient) extractStreamFromAPI(ctx context.Context, apiBase string,
 		return nil, fmt.Errorf("API returned status: %s", resp.Status)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
