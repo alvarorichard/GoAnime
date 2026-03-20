@@ -48,53 +48,100 @@ func PreWarmMPVPath() {
 	})
 }
 
-// lastAnimeURL stores the most recent anime URL/ID to support navigation when no updater is present
-var lastAnimeURL string
+// mediaState groups mutable per-session media metadata behind a lock so that
+// concurrent goroutines (batch downloads, etc.) can safely read while the main
+// flow writes.
+type mediaState struct {
+	mu          sync.RWMutex
+	animeURL    string
+	animeName   string
+	animeSeason int
+	isMovieOrTV bool
+	mediaType   string // "movie", "tv", or "anime"
+}
 
-// lastAnimeName stores the most recent anime name for Plex-compatible download naming
-var lastAnimeName string
-
-// lastAnimeSeason stores the most recent anime season number for download naming
-var lastAnimeSeason int
-
-// lastIsMovieOrTV indicates whether the current content is a movie/TV show (non-anime)
-var lastIsMovieOrTV bool
-
-// lastMediaType stores the exact media type for intelligent path organization
-var lastMediaType string // "movie", "tv", or "anime"
+var gMedia mediaState
 
 // SetAnimeName sets the anime name and season for Plex-compatible download file naming.
 // Call this before any download operations to ensure proper naming.
 func SetAnimeName(name string, season int) {
-	lastAnimeName = name
-	lastAnimeSeason = season
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.animeName = name
+	gMedia.animeSeason = season
 	if season < 1 {
-		lastAnimeSeason = 1
+		gMedia.animeSeason = 1
 	}
 }
 
 // SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
 // This determines whether downloads go to the movies or anime directory.
 func SetMediaType(isMovieOrTV bool) {
-	lastIsMovieOrTV = isMovieOrTV
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.isMovieOrTV = isMovieOrTV
 }
 
 // SetExactMediaType stores the exact media type ("movie", "tv", "anime") for
 // intelligent download path organization. Movies get flat paths, TV shows and
 // anime get season/episode structures.
 func SetExactMediaType(mediaType string) {
-	lastMediaType = mediaType
-	lastIsMovieOrTV = (mediaType == "movie" || mediaType == "tv")
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.mediaType = mediaType
+	gMedia.isMovieOrTV = (mediaType == "movie" || mediaType == "tv")
 }
 
 // GetExactMediaType returns the current exact media type.
 func GetExactMediaType() string {
-	return lastMediaType
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return gMedia.mediaType
 }
 
 // IsCurrentMediaMovie returns true if the current content is a standalone movie.
 func IsCurrentMediaMovie() bool {
-	return lastMediaType == "movie"
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return gMedia.mediaType == "movie"
+}
+
+// setLastAnimeURL stores the most recent anime URL for navigation support.
+func setLastAnimeURL(u string) {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.animeURL = u
+}
+
+// getLastAnimeURL returns the stored anime URL.
+func getLastAnimeURL() string {
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return gMedia.animeURL
+}
+
+// mediaSnapshot is a read-only copy of all media metadata fields, obtained
+// atomically under a single RLock so batch-download goroutines always see a
+// consistent view of the state.
+type mediaSnapshot struct {
+	AnimeName   string
+	AnimeSeason int
+	IsMovieOrTV bool
+	MediaType   string
+	AnimeURL    string
+}
+
+// snapshotMedia returns a consistent point-in-time copy of the global media state.
+func snapshotMedia() mediaSnapshot {
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return mediaSnapshot{
+		AnimeName:   gMedia.animeName,
+		AnimeSeason: gMedia.animeSeason,
+		IsMovieOrTV: gMedia.isMovieOrTV,
+		MediaType:   gMedia.mediaType,
+		AnimeURL:    gMedia.animeURL,
+	}
 }
 
 const (
@@ -439,7 +486,7 @@ func HandleDownloadAndPlay(
 	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
 
 	// Persist the anime URL/ID to aid episode switching when updater is nil (e.g., Discord disabled)
-	lastAnimeURL = animeURL
+	setLastAnimeURL(animeURL)
 
 	// Store anime name for Plex-compatible download file naming
 	if animeName != "" {
@@ -607,23 +654,24 @@ func downloadAndPlayEpisode(
 
 	// Use Plex-compatible naming when anime name is available
 	var downloadPath, episodePath string
-	if lastAnimeName != "" {
+	snap := snapshotMedia()
+	if snap.AnimeName != "" {
 		// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
 		var baseDir string
-		if lastIsMovieOrTV {
+		if snap.IsMovieOrTV {
 			baseDir = util.DefaultMovieDownloadDir()
 		} else {
 			baseDir = util.DefaultDownloadDir()
 		}
 
 		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
-		if IsCurrentMediaMovie() {
+		if snap.MediaType == "movie" {
 			// Movies: flat structure <baseDir>/<MovieName>/
-			downloadPath = util.FormatPlexMovieDir(baseDir, lastAnimeName)
-			episodePath = util.FormatPlexMoviePath(baseDir, lastAnimeName, "")
+			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName)
+			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := lastAnimeSeason
+			season := snap.AnimeSeason
 			if season < 1 {
 				season = 1
 			}
@@ -637,14 +685,14 @@ func downloadAndPlayEpisode(
 					epNum = 1
 				}
 			}
-			downloadPath = util.FormatPlexEpisodeDir(baseDir, lastAnimeName, season)
-			episodePath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
+			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season)
+			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
 		}
-		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", lastMediaType, lastIsMovieOrTV, baseDir, episodePath)
+		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
 	} else {
 		// Fallback: route based on media type even without anime name
 		var fallbackBase string
-		if lastIsMovieOrTV {
+		if snap.IsMovieOrTV {
 			fallbackBase = util.DefaultMovieDownloadDir()
 		} else {
 			fallbackBase = filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime")

@@ -1186,28 +1186,32 @@ func findEpisode(episodes []models.Episode, episodeNum int) (models.Episode, boo
 //   - TV Shows: <baseDir>/<ShowName>/Season XX/<ShowName> - sXXeXX.mp4
 //   - Anime: <baseDir>/<AnimeName>/Season XX/<AnimeName> - sXXeXX.mp4
 func createEpisodePath(animeURL string, epNum int) (string, error) {
+	// Snapshot all media state atomically — this function is called from
+	// concurrent batch-download goroutines.
+	snap := snapshotMedia()
+
 	// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
 	var baseDir string
-	if lastIsMovieOrTV {
+	if snap.IsMovieOrTV {
 		baseDir = util.DefaultMovieDownloadDir()
 	} else {
 		baseDir = util.DefaultDownloadDir()
 	}
 
 	// Use Plex-compatible naming when anime name is available
-	if lastAnimeName != "" {
+	if snap.AnimeName != "" {
 		var fullPath string
 		// Check if this is a standalone movie (no season/episode hierarchy)
-		if IsCurrentMediaMovie() {
+		if snap.MediaType == "movie" {
 			// Movies: flat structure  <baseDir>/<MovieName>/<MovieName>.mp4
-			fullPath = util.FormatPlexMoviePath(baseDir, lastAnimeName, "")
+			fullPath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := lastAnimeSeason
+			season := snap.AnimeSeason
 			if season < 1 {
 				season = 1
 			}
-			fullPath = util.FormatPlexEpisodePath(baseDir, lastAnimeName, season, epNum)
+			fullPath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
 		}
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -1223,7 +1227,7 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 	}
 	safeAnimeName := strings.ReplaceAll(DownloadFolderFormatter(animeURL), " ", "_")
 	var fallbackBase string
-	if lastIsMovieOrTV {
+	if snap.IsMovieOrTV {
 		fallbackBase = filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
 	} else {
 		fallbackBase = filepath.Join(userHome, ".local", "goanime", "downloads", "anime")

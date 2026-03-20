@@ -381,12 +381,13 @@ func playVideo(
 	}
 
 	// Set MPV window title to clean anime name + season/episode
-	if lastAnimeName != "" {
-		cleanName := util.SanitizeForFilename(lastAnimeName)
+	titleSnap := snapshotMedia()
+	if titleSnap.AnimeName != "" {
+		cleanName := util.SanitizeForFilename(titleSnap.AnimeName)
 		// Also strip parenthesized dub/sub tags like (Dublado), (Legendado), (SUB)
 		cleanName = dubSubTagRe.ReplaceAllString(cleanName, " ")
 		cleanName = strings.TrimSpace(cleanName)
-		title := fmt.Sprintf("%s S%02dE%02d", cleanName, lastAnimeSeason, currentEpisodeNum)
+		title := fmt.Sprintf("%s S%02dE%02d", cleanName, titleSnap.AnimeSeason, currentEpisodeNum)
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--force-media-title=%s", title))
 	}
 
@@ -397,7 +398,7 @@ func playVideo(
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
 		// Update exact media type for download path organization
-		if anime.MediaType != "" && lastMediaType == "" {
+		if anime.MediaType != "" && titleSnap.MediaType == "" {
 			SetExactMediaType(string(anime.MediaType))
 		}
 	}
@@ -1144,7 +1145,8 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	}
 
 	// If no updater/anime context, try to synthesize from lastAnimeURL
-	if anime == nil && lastAnimeURL != "" {
+	storedURL := getLastAnimeURL()
+	if anime == nil && storedURL != "" {
 		guessedSource := ""
 		// Check global anime source first (most reliable, set during stream resolution)
 		if src := util.GetGlobalAnimeSource(); src != "" {
@@ -1152,10 +1154,10 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 		} else if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
 			// Check global referer to detect 9Anime (uses rapid-cloud referer)
 			guessedSource = "9Anime"
-		} else if (len(lastAnimeURL) < 30 && !strings.Contains(lastAnimeURL, "http")) || strings.Contains(lastAnimeURL, "allanime") {
+		} else if (len(storedURL) < 30 && !strings.Contains(storedURL, "http")) || strings.Contains(storedURL, "allanime") {
 			guessedSource = "AllAnime"
 		}
-		anime = &models.Anime{URL: lastAnimeURL, Source: guessedSource}
+		anime = &models.Anime{URL: storedURL, Source: guessedSource}
 	}
 
 	targetURL, err := GetVideoURLForEpisodeEnhanced(&target, anime)
