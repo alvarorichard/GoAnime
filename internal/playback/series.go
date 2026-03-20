@@ -14,19 +14,31 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// printEpisodeNotFoundMsg prints a user-friendly error message when the
+// selected episode doesn't exist. Shows both PT-BR and EN messages.
+func printEpisodeNotFoundMsg() {
+	fmt.Println("\n\033[1;31m  ⚠  Episódio escolhido não existe nesta fonte. Tente outro episódio.\033[0m")
+	fmt.Print("\033[1;31m  ⚠  This episode does not exist in this source. Try another episode.\033[0m\n\n")
+}
+
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
-	selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err := SelectInitialEpisode(episodes)
-	if err != nil {
-		// If user selected back at initial episode selection, return to anime selection
-		if errors.Is(err, player.ErrBackRequested) {
-			return player.ErrBackToAnimeSelection
+	var selectedEpisodeURL, episodeNumberStr string
+	var selectedEpisodeNum int
+	for {
+		var err error
+		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
+		if err != nil {
+			if errors.Is(err, player.ErrBackRequested) {
+				return player.ErrBackToAnimeSelection
+			}
+			printEpisodeNotFoundMsg()
+			continue
 		}
-		log.Printf("Episode selection error: %v", util.ErrorHandler(err))
-		return err
+		break
 	}
 
 	for {
@@ -165,19 +177,27 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			continue
 		}
 
-		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = handleUserNavigationEnhanced(
+		newURL, newNumStr, newNum := handleUserNavigationEnhanced(
 			userInput,
 			episodes,
 			selectedEpisodeNum,
 			totalEpisodes,
 			anime,
 		)
+		if newURL == "" {
+			// Navigation failed (e.g. fuzzy finder error) — retry selection
+			log.Println("Episode navigation failed, please select again.")
+			continue
+		}
+		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 	}
 	return nil
 }
 
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
+	util.Debugf("[TRACE] SelectInitialEpisode: calling SelectEpisodeWithFuzzyFinder with %d episodes", len(episodes))
 	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", selectedEpisodeURL, episodeNumberStr, err)
 	if err != nil {
 		// Propagate back request error
 		if errors.Is(err, player.ErrBackRequested) {
@@ -193,16 +213,25 @@ func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error
 }
 
 func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (string, string, int) {
+	var url, numStr string
+	var epNum int
+	var err error
+
 	switch input {
 	case "e":
-		return SelectEpisodeWithFuzzy(episodes)
+		url, numStr, epNum, err = SelectEpisodeWithFuzzy(episodes)
 	case "p":
 		newNum := max(currentNum-1, 1)
-		return FindEpisodeByNumber(episodes, newNum)
+		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
 	default: // 'n' or default
 		newNum := min(currentNum+1, totalEpisodes)
-		return FindEpisodeByNumber(episodes, newNum)
+		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
 	}
+	if err != nil {
+		log.Printf("Navigation error: %v", err)
+		return "", "", currentNum
+	}
+	return url, numStr, epNum
 }
 
 // Enhanced navigation handler that supports AllAnime-specific navigation
@@ -234,7 +263,12 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 
 	switch input {
 	case "e":
-		return SelectEpisodeWithFuzzy(episodes)
+		url, numStr, epNum, err := SelectEpisodeWithFuzzy(episodes)
+		if err != nil {
+			log.Printf("Episode selection error: %v", err)
+			return "", "", currentNum
+		}
+		return url, numStr, epNum
 	case "p":
 		// Use AllAnime navigator for previous episode
 		nextEp, err := HandleAllAnimeEpisodeNavigation(anime, currentEpisodeStr, "previous")

@@ -105,7 +105,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 					// Fallback to legacy downloader
-					episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					if legacyErr != nil {
+						return fmt.Errorf("legacy episode fetch also failed: %w", legacyErr)
+					}
 					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 				}
@@ -126,7 +129,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			util.Infof("Enhanced episodes fetch failed: %v", err)
 		}
 		// Fallback to legacy downloader
-		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		if legacyErr != nil {
+			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
+		}
 		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 	} else {
@@ -135,7 +141,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		// Enhanced download is a placeholder - use legacy downloader
 		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
-		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		if legacyErr != nil {
+			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
+		}
 		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadSingleEpisode(request.EpisodeNum)
 	}

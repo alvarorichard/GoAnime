@@ -3,7 +3,6 @@ package appflow
 import (
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -16,31 +15,31 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-func SearchAnime(name string) *models.Anime {
+func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Use enhanced API with source selection (spinner is inside api.SearchAnimeEnhanced)
 	anime, err := api.SearchAnimeEnhanced(name, util.GlobalSource)
 	if err != nil {
-		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
+		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
 
 	util.Debugf("[PERF] SearchAnime completed in %v", time.Since(searchStart))
-	return anime
+	return anime, nil
 }
 
 // SearchAnimeEnhanced - busca em ambas as fontes (AllAnime e AnimeFire) simultaneamente
-func SearchAnimeEnhanced(name string) *models.Anime {
+func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Buscar em ambas as fontes (spinner is inside api.SearchAnimeEnhanced)
 	anime, err := api.SearchAnimeEnhanced(name, "")
 	if err != nil {
-		log.Fatalln("Failed to search for anime:", util.ErrorHandler(err))
+		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
 
 	util.Debugf("[PERF] SearchAnimeEnhanced completed in %v", time.Since(searchStart))
-	return anime
+	return anime, nil
 }
 
 // SearchAnimeWithRetry - searches for anime with retry logic on failure
@@ -177,7 +176,7 @@ func FetchAnimeDetails(anime *models.Anime) {
 	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
 }
 
-func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
+func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
 	var episodes []models.Episode
@@ -199,16 +198,19 @@ func GetAnimeEpisodes(anime *models.Anime) []models.Episode {
 			Run()
 	}
 
-	if fetchErr != nil || len(episodes) == 0 {
-		log.Fatalln("The selected anime does not have episodes on the server.")
+	if fetchErr != nil {
+		return nil, fmt.Errorf("failed to fetch episodes: %w", fetchErr)
+	}
+	if len(episodes) == 0 {
+		return nil, fmt.Errorf("the selected anime does not have episodes on the server")
 	}
 
 	util.Debugf("[PERF] GetAnimeEpisodes completed in %v", time.Since(episodesStart))
-	return episodes
+	return episodes, nil
 }
 
 // GetAnimeEpisodesLegacy - compatibility function for old URL-based calls
-func GetAnimeEpisodesLegacy(url string) []models.Episode {
+func GetAnimeEpisodesLegacy(url string) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
 	var episodes []models.Episode
@@ -223,10 +225,13 @@ func GetAnimeEpisodesLegacy(url string) []models.Episode {
 		}).
 		Run()
 
-	if fetchErr != nil || len(episodes) == 0 {
-		log.Fatalln("The selected anime does not have episodes on the server.")
+	if fetchErr != nil {
+		return nil, fmt.Errorf("failed to fetch episodes: %w", fetchErr)
+	}
+	if len(episodes) == 0 {
+		return nil, fmt.Errorf("the selected anime does not have episodes on the server")
 	}
 
 	util.Debugf("[PERF] GetAnimeEpisodesLegacy completed in %v", time.Since(episodesStart))
-	return episodes
+	return episodes, nil
 }

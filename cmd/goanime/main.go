@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/alvarorichard/Goanime/internal/handlers"
@@ -13,6 +15,15 @@ import (
 )
 
 func main() {
+	// Catch panics and log them instead of crashing silently
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
+			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
+		}
+	}()
+
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)

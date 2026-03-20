@@ -162,6 +162,7 @@ type model struct {
 	done       bool
 	doneFrames int // frames elapsed since done; allows 100% to render before quit
 	status     string
+	err        error // download error propagated from goroutine
 	mu         sync.Mutex
 	keys       keyMap
 }
@@ -649,7 +650,7 @@ func downloadAndPlayEpisode(
 
 	currentUser, err := user.Current()
 	if err != nil {
-		util.Fatal("Failed to get current user:", err)
+		return fmt.Errorf("failed to get current user: %w", err)
 	}
 
 	// Use Plex-compatible naming when anime name is available
@@ -703,7 +704,7 @@ func downloadAndPlayEpisode(
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, 0700); err != nil {
-			util.Fatal("Failed to create download directory:", err)
+			return fmt.Errorf("failed to create download directory: %w", err)
 		}
 	}
 
@@ -744,7 +745,12 @@ func downloadAndPlayEpisode(
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				dlErr := downloadBloggerDirect(directURL, episodePath, numThreads, m)
 				if dlErr != nil {
-					util.Fatal("Failed to download video:", dlErr)
+					m.mu.Lock()
+					m.err = fmt.Errorf("failed to download video: %w", dlErr)
+					m.done = true
+					m.mu.Unlock()
+					p.Send(statusMsg("Download failed"))
+					return
 				}
 				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
 					m.mu.Lock()
@@ -759,7 +765,10 @@ func downloadAndPlayEpisode(
 			}()
 
 			if _, err := p.Run(); err != nil {
-				util.Fatal("Error running progress bar:", err)
+				return fmt.Errorf("error running progress bar: %w", err)
+			}
+			if m.err != nil {
+				return m.err
 			}
 
 			if _, err := os.Stat(episodePath); os.IsNotExist(err) {
@@ -817,7 +826,12 @@ func downloadAndPlayEpisode(
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 				}
 				if dlErr != nil {
-					util.Fatal("Failed to download video:", dlErr)
+					m.mu.Lock()
+					m.err = fmt.Errorf("failed to download video: %w", dlErr)
+					m.done = true
+					m.mu.Unlock()
+					p.Send(statusMsg("Download failed"))
+					return
 				}
 				// Update progress to reflect real file size so bar shows accurate 100%
 				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
@@ -833,7 +847,10 @@ func downloadAndPlayEpisode(
 			}()
 
 			if _, err := p.Run(); err != nil {
-				util.Fatal("Error running progress bar:", err)
+				return fmt.Errorf("error running progress bar: %w", err)
+			}
+			if m.err != nil {
+				return m.err
 			}
 
 			// Verify the file was actually downloaded
@@ -885,8 +902,13 @@ func downloadAndPlayEpisode(
 				// Update status
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 
-				if err := DownloadVideo(videoURL, episodePath, numThreads, m); err != nil {
-					util.Fatal("Failed to download video:", err)
+				if dlErr := DownloadVideo(videoURL, episodePath, numThreads, m); dlErr != nil {
+					m.mu.Lock()
+					m.err = fmt.Errorf("failed to download video: %w", dlErr)
+					m.done = true
+					m.mu.Unlock()
+					p.Send(statusMsg("Download failed"))
+					return
 				}
 
 				m.mu.Lock()
@@ -899,7 +921,10 @@ func downloadAndPlayEpisode(
 
 			// Run the Bubble Tea program in the main goroutine
 			if _, err := p.Run(); err != nil {
-				util.Fatal("Error running progress bar:", err)
+				return fmt.Errorf("error running progress bar: %w", err)
+			}
+			if m.err != nil {
+				return m.err
 			}
 
 			// Download selected subtitles alongside the video file
