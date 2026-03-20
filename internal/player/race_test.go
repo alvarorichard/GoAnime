@@ -14,22 +14,18 @@ func TestRaceOnGlobalMediaVars(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Writer goroutine — simulates what HandleDownloadAndPlay / download workflow does
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 1000 {
 			SetAnimeName("Naruto", i%5+1)
 			SetExactMediaType("anime")
 			SetMediaType(false)
 			setLastAnimeURL("https://example.com/anime/" + string(rune('A'+i%26)))
 		}
-	}()
+	})
 
 	// Reader goroutines — simulate what createEpisodePath / batch download goroutines do
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 1000 {
 				_ = GetExactMediaType()
 				_ = IsCurrentMediaMovie()
@@ -38,7 +34,7 @@ func TestRaceOnGlobalMediaVars(t *testing.T) {
 				_ = snap.AnimeName
 				_ = snap.AnimeSeason
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

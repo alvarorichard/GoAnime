@@ -226,6 +226,7 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		}
 	}
 
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: calling fuzzyfinder.Find with %d items", len(displayList))
 	idx, err := fuzzyfinder.Find(
 		displayList,
 		func(i int) string {
@@ -233,7 +234,12 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		},
 		fuzzyfinder.WithPromptString("Select the episode: "),
 	)
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: fuzzyfinder returned idx=%d, err=%v", idx, err)
 	if err != nil {
+		// Treat abort (no selection / Escape / no match) as back request
+		if errors.Is(err, fuzzyfinder.ErrAbort) {
+			return "", "", ErrBackRequested
+		}
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
 	}
 

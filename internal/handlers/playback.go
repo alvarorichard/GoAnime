@@ -64,12 +64,21 @@ func HandlePlaybackMode(animeName string) {
 		go func() {
 			defer wg.Done()
 			episodesTimer := util.StartTimer("GetAnimeEpisodes")
-			episodes = appflow.GetAnimeEpisodes(anime)
+			var epErr error
+			episodes, epErr = appflow.GetAnimeEpisodes(anime)
+			if epErr != nil {
+				util.Errorf("Failed to get episodes: %v", epErr)
+			}
 			episodesTimer.Stop()
 		}()
 
 		wg.Wait()
 		parallelTimer.Stop()
+
+		if len(episodes) == 0 {
+			util.Errorf("No episodes found for this anime. Try a different search.")
+			return
+		}
 
 		util.PerfCount("anime_loaded")
 
