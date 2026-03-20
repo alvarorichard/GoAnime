@@ -15,6 +15,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// SearchAnime searches for an anime by name using the globally configured source.
 func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
@@ -176,6 +177,7 @@ func FetchAnimeDetails(anime *models.Anime) {
 	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
 }
 
+// GetAnimeEpisodes fetches the episode list for the given anime from its source.
 func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
