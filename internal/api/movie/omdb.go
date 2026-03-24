@@ -77,7 +77,8 @@ func NewOMDbClient() *OMDbClient {
 
 	return &OMDbClient{
 		client: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout:   15 * time.Second,
+			Transport: safeMovieTransport(15 * time.Second),
 		},
 		apiKey:  apiKey,
 		baseURL: OMDbBaseURL,

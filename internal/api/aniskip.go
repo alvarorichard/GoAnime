@@ -18,7 +18,8 @@ func GetAniSkipData(animeMalId int, episode int) (string, error) {
 
 	url := fmt.Sprintf("%s/%d/%d?types=op&types=ed", baseURL, animeMalId, episode)
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
+		Transport: SafeTransport(10 * time.Second),
 	}
 
 	resp, err := client.Get(url)

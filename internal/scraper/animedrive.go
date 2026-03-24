@@ -233,12 +233,27 @@ type AnimeDriveClient struct {
 // NewAnimeDriveClient creates a new AnimeDrive client
 func NewAnimeDriveClient() *AnimeDriveClient {
 	return &AnimeDriveClient{
-		client: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		client:     util.GetFastClient(),
 		baseURL:    AnimeDriveBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
+		retryDelay: 100 * time.Millisecond,
+		totalPages: 371,
+	}
+}
+
+// NewAnimeDriveClientWithContext creates a new AnimeDrive client with custom
+// settings and SSRF-safe transport for use when the base URL may not be the
+// hardcoded default.
+func NewAnimeDriveClientWithContext(timeout time.Duration, maxRetries int) *AnimeDriveClient {
+	return &AnimeDriveClient{
+		client: &http.Client{
+			Timeout:   timeout,
+			Transport: safeScraperTransport(timeout),
+		},
+		baseURL:    AnimeDriveBase,
+		userAgent:  UserAgent,
+		maxRetries: maxRetries,
 		retryDelay: 100 * time.Millisecond,
 		totalPages: 371,
 	}

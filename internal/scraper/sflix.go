@@ -163,7 +163,8 @@ func NewSFlixClient() *SFlixClient {
 func NewSFlixClientWithContext(timeout time.Duration, maxRetries int) *SFlixClient {
 	return &SFlixClient{
 		client: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: safeScraperTransport(timeout),
 		},
 		baseURL:        SFlixBase,
 		apiURL:         SFlixAPI,

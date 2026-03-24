@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -158,4 +160,49 @@ func SafeGet(url string) (*http.Response, error) {
 		}
 	})
 	return safeFetchClient.Get(url) // #nosec G107
+}
+
+// ValidateExternalURL resolves the hostname of the given URL and rejects it if
+// any resolved IP is private, loopback, or otherwise disallowed.  Use this to
+// guard HTTP clients (e.g. surf/Chrome-impersonation) whose transport cannot be
+// replaced with SafeTransport.
+func ValidateExternalURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no hostname: %s", rawURL)
+	}
+
+	// If the host is already an IP literal, check it directly.
+	if ip := net.ParseIP(host); ip != nil {
+		if IsDisallowedIP(host) {
+			return fmt.Errorf("URL resolves to disallowed IP %s", host)
+		}
+		return nil
+	}
+
+	// Resolve hostname and check every returned address.
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("DNS lookup failed for %s: %w", host, err)
+	}
+	for _, addr := range addrs {
+		if IsDisallowedIP(addr) {
+			return fmt.Errorf("URL %s resolves to disallowed IP %s", host, addr)
+		}
+	}
+	return nil
+}
+
+// SafeDialContext returns a DialContext function that validates resolved IPs
+// against the SSRF allow-list. Inject this into custom http.Transport structs
+// that need their own TLS settings (e.g. HTTP/1.1-only HLS downloads) but
+// still require SSRF protection.
+func SafeDialContext(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialFunc(network, addr, timeout, nil)
+	}
 }

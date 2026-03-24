@@ -160,6 +160,12 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 	util.Debug("downloadBloggerDirect started", "url_len", len(directURL), "threads", numThreads)
 	destPath = filepath.Clean(destPath)
 
+	// SSRF protection: validate the URL resolves to a public IP before using
+	// the Chrome-impersonation surf client (whose transport we cannot replace).
+	if err := api.ValidateExternalURL(directURL); err != nil {
+		return fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -223,6 +229,11 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 // HTTP/2 multiplexing and surf's per-client timeout.
 // Automatically retries with resume on connection drops.
 func downloadBloggerChunk(url string, from, to int64, part int, destPath string, m *model) error {
+	// SSRF protection: reject URLs that resolve to private/internal IPs.
+	if err := api.ValidateExternalURL(url); err != nil {
+		return fmt.Errorf("SSRF blocked: %w", err)
+	}
+
 	partFilePath, err := safePartPath(destPath, part)
 	if err != nil {
 		return err

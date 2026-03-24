@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -59,10 +59,8 @@ func NewDownloader() *Downloader {
 		MaxIdleConns:        10,
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     90 * time.Second,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		// SSRF protection: validates resolved IPs before connecting
+		DialContext: api.SafeDialContext(30 * time.Second),
 	}
 
 	return &Downloader{

@@ -231,7 +231,8 @@ func NewFlixHQClient() *FlixHQClient {
 func NewFlixHQClientWithContext(timeout time.Duration, maxRetries int) *FlixHQClient {
 	return &FlixHQClient{
 		client: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: safeScraperTransport(timeout),
 		},
 		baseURL:        FlixHQBase,
 		apiURL:         FlixHQAPI,
