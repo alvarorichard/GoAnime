@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -74,7 +75,7 @@ func TestFlixHQFullFlow(t *testing.T) {
 	flixhqClient := scraper.NewFlixHQClient()
 
 	// Extract media ID from URL (get last number from URL like "watch-dexter-39448")
-	mediaID := extractMediaIDFromURL(anime.URL)
+	mediaID := providers.ExtractMediaIDFromURL(anime.URL)
 	t.Logf("Extracted mediaID: %s from URL: %s", mediaID, anime.URL)
 
 	seasons, err := flixhqClient.GetSeasons(mediaID)

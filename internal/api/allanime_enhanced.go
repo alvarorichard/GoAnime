@@ -5,54 +5,22 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// GetEpisodeStreamURLEnhanced gets streaming URL with AllAnime navigation support
+// GetEpisodeStreamURLEnhanced gets streaming URL with AllAnime navigation support.
+// Uses the provider registry for source detection, then applies AllAnime-specific
+// direct resolution when applicable.
 func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	// Determine source type and use appropriate method
-	sourceName := "Unknown"
-	scraperType := scraper.AllAnimeType // Default
-
-	// Enhanced source detection like in enhanced.go
-	if anime.Source != "" {
-		sourceName = anime.Source
-		if strings.Contains(anime.Source, "AllAnime") {
-			scraperType = scraper.AllAnimeType
-		} else if strings.Contains(anime.Source, "AnimeFire") {
-			scraperType = scraper.AnimefireType
-		}
-	} else if strings.Contains(anime.Name, "[AllAnime]") {
-		// Priority 1: Name tag detection
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "[AnimeFire]") {
-		// Priority 2: AnimeFire tag detection
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
-		// Priority 3: URL analysis for AllAnime (short IDs)
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.URL, "animefire") {
-		// Priority 4: URL analysis for AnimeFire
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	} else if strings.Contains(anime.URL, "allanime") {
-		// Priority 5: AllAnime full URLs
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	}
-
 	util.Debug("Enhanced episode URL fetch",
-		"source", sourceName,
+		"source", providers.ResolveSourceName(anime),
 		"episode", episode.Number,
 		"quality", quality)
 
-	// Use AllAnime enhanced navigation if applicable
-	if scraperType == scraper.AllAnimeType {
+	if providers.IsAllAnime(anime) {
 		url, metadata, err := GetAllAnimeEpisodeURLDirect(anime, episode.Number, quality)
 		if err != nil {
 			return "", fmt.Errorf("failed to get AllAnime episode URL: %w", err)
@@ -66,7 +34,6 @@ func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, q
 		return url, nil
 	}
 
-	// Fallback to regular enhanced API
 	return GetEpisodeStreamURL(episode, anime, quality)
 }
 

@@ -17,6 +17,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -308,34 +309,27 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
+// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support.
+// Uses the provider registry for source detection instead of local is*Source helpers.
 func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
 	util.Debug("GetVideoURLForEpisodeEnhanced called", "episodeURL", episode.URL, "episodeNum", episode.Number)
 	if anime != nil {
 		util.Debug("Anime context", "name", anime.Name, "source", anime.Source, "mediaType", anime.MediaType, "url", anime.URL)
 	}
 
-	// If we don't have anime context, decide safely how to resolve
 	if anime == nil {
-		// If it's a normal HTTP URL, use legacy extraction
 		if strings.Contains(episode.URL, "http") {
-			if util.IsDebug {
-				util.Debugf("No anime context; using legacy extraction for HTTP URL, episode %s", episode.Number)
-			}
+			util.Debug("No anime context; using legacy extraction for HTTP URL")
 			return GetVideoURLForEpisode(episode.URL)
 		}
 
-		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
 		if isLikelyAllAnimeID(episode.URL) {
-			if util.IsDebug {
-				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
-			}
+			util.Debug("No anime context; detected AllAnime ID, using synthetic context")
 			tmpAnime := &models.Anime{
 				URL:    episode.URL,
 				Source: "AllAnime",
 				Name:   "[AllAnime]",
 			}
-			// Ensure episode number is set
 			if episode.Number == "" && episode.Num > 0 {
 				episode.Number = fmt.Sprintf("%d", episode.Num)
 			}
@@ -345,19 +339,15 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
 		}
 
-		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
-	// Try AnimeDrive enhanced navigation if applicable
-	if isAnimeDriveSourcePlayer(anime) {
+	if providers.IsAnimeDrive(anime) {
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
-			// Validate the URL is a playable video, not an iframe/embed page
 			if isPlayableVideoURL(streamURL) {
 				return streamURL, nil
 			}
-			// Try to extract actual video from intermediate URL
 			if needsVideoExtraction(streamURL) {
 				resolved, resolveErr := extractActualVideoURL(streamURL)
 				if resolveErr == nil && resolved != "" {
@@ -367,116 +357,45 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 			util.Debug("AnimeDrive returned non-playable URL", "url", streamURL)
 			return "", fmt.Errorf("AnimeDrive returned non-playable URL: %s", streamURL)
 		}
-		// Check if user requested to go back from server selection
 		if errors.Is(err, scraper.ErrBackRequested) {
 			return "", ErrBackToEpisodeSelection
 		}
-		// For AnimeDrive, return the error instead of trying legacy method
 		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
 	}
 
-	// Try FlixHQ for movies/TV shows
-	if isFlixHQSourcePlayer(anime) {
-		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType, "episodeURL", episode.URL)
+	if providers.IsFlixHQ(anime) {
+		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType)
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
-			util.Debug("FlixHQ stream URL obtained", "url", streamURL)
 			return streamURL, nil
 		}
-		util.Debug("FlixHQ stream URL failed", "error", err)
-		// For FlixHQ, return the error - legacy method won't work with DataIDs
 		return "", fmt.Errorf("failed to get FlixHQ stream URL: %w", err)
 	}
 
-	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
+	if providers.IsAllAnime(anime) {
 		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
 		if err == nil {
 			return streamURL, nil
 		}
 	}
 
-	// Use the regular enhanced API to get stream URL
 	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 	if err != nil {
-		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
+		if !providers.IsAllAnime(anime) {
 			return GetVideoURLForEpisode(episode.URL)
 		}
-		// For AllAnime, return the error instead of trying legacy method
 		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
 	}
 
-	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire
-	// video JSON API) that are not directly playable. Resolve them to actual
-	// CDN video URLs before returning.
 	if needsVideoExtraction(streamURL) {
 		resolved, err := extractActualVideoURL(streamURL)
 		if err == nil && resolved != "" {
 			return resolved, nil
 		}
-		// If resolution failed, fall back to the original URL so yt-dlp can try
 		util.Debug("Could not resolve intermediate URL, using as-is", "url", streamURL, "err", err)
 	}
 
 	return streamURL, nil
-}
-
-// Helper function to check if anime is from AllAnime source (player module)
-func isAllAnimeSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") &&
-		!strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if anime is from AnimeDrive source (player module)
-func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AnimeDrive" {
-		return true
-	}
-	if strings.Contains(anime.Name, "[AnimeDrive]") {
-		return true
-	}
-	if strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-	return false
-}
-
-// Helper function to check if anime is from FlixHQ source (player module)
-func isFlixHQSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "FlixHQ" {
-		return true
-	}
-	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		return true
-	}
-	if strings.Contains(anime.URL, "flixhq") {
-		return true
-	}
-	return false
 }
 
 // Helper: detect if a string is purely numeric (e.g., "12" or "12.5")

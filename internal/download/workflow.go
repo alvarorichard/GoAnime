@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
 	"github.com/alvarorichard/Goanime/internal/player"
@@ -61,7 +62,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	// If this is 9Anime content, use the dedicated 9anime downloader
 	// 9Anime episodes use data-id based resolution that is incompatible with legacy downloaders
-	if anime.Source == "9Anime" {
+	if providers.Is9Anime(anime) {
 		util.Infof("Detected 9Anime content: %s — using 9Anime downloader", anime.Name)
 		nad := downloader.NewNineAnimeDownloader(downloader.NineAnimeDownloadConfig{
 			AnimeName:    anime.Name,
@@ -85,7 +86,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			request.StartEpisode, request.EndEpisode, anime.Name)
 
 		// Exclusive AllAnime Smart Range
-		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
+		if request.AllAnimeSmart && (providers.IsAllAnime(anime) || strings.EqualFold(source, "allanime")) {
 			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
 			// Use player batch downloader with provided range to get consistent progress UI
 			eps, err := api.GetAnimeEpisodesEnhanced(anime)

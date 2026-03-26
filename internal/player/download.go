@@ -20,6 +20,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -689,9 +690,8 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 }
 
 // getBestQualityURL returns the best available quality for an episode.
-// For AllAnime episodes (non-HTTP identifiers), resolve via enhanced API using episode.Number and animeID.
+// For non-HTTP identifiers, resolves via the provider registry.
 func getBestQualityURL(episode models.Episode, animeURL string) (string, error) {
-	// Non-AllAnime HTTP page URL path
 	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
 		sources, err := ExtractVideoSources(episode.URL)
 		if err != nil {
@@ -709,24 +709,20 @@ func getBestQualityURL(episode models.Episode, animeURL string) (string, error) 
 		return best.URL, nil
 	}
 
-	// AllAnime path: animeURL is AllAnime ID/URL, episode.Number is episode string
-	isAllAnime := func(u string) bool {
-		return strings.Contains(u, "allanime") || (len(u) < 30 && !strings.Contains(u, "http") && len(u) > 0)
-	}
-	if isAllAnime(animeURL) {
-		anime := &models.Anime{URL: animeURL, Source: "AllAnime", Name: "AllAnime"}
-		// Build minimal episode with proper number and AllAnime context URL
-		ep := &models.Episode{Number: episode.Number, URL: animeURL}
+	anime := &models.Anime{URL: animeURL}
+	provider := providers.ForSource(anime)
+	ep := &models.Episode{Number: episode.Number, URL: animeURL}
+
+	if providers.IsAllAnime(anime) {
 		if url, err := api.GetEpisodeStreamURLEnhanced(ep, anime, util.GlobalQuality); err == nil && url != "" {
 			return url, nil
 		}
-		if url, err := api.GetEpisodeStreamURL(ep, anime, util.GlobalQuality); err == nil && url != "" {
-			return url, nil
-		}
-		return "", fmt.Errorf("failed to resolve AllAnime stream URL")
+	}
+	if url, err := api.GetEpisodeStreamURL(ep, anime, util.GlobalQuality); err == nil && url != "" {
+		return url, nil
 	}
 
-	return "", fmt.Errorf("unsupported episode identifier: %s", episode.URL)
+	return "", fmt.Errorf("failed to resolve stream URL via %s", provider.Name())
 }
 
 // ExtractVideoSourcesWithPrompt allows the user to choose video quality.
