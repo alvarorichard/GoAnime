@@ -50,6 +50,7 @@ func HandlePlaybackMode(animeName string) {
 		// Fetch details and episodes in parallel — they are independent
 		// Details come from AniList/TMDB, episodes from the source scraper
 		var episodes []models.Episode
+		var epErr error
 		var wg sync.WaitGroup
 
 		parallelTimer := util.StartTimer("FetchDetails+Episodes:Parallel")
@@ -64,7 +65,6 @@ func HandlePlaybackMode(animeName string) {
 		go func() {
 			defer wg.Done()
 			episodesTimer := util.StartTimer("GetAnimeEpisodes")
-			var epErr error
 			episodes, epErr = appflow.GetAnimeEpisodes(anime)
 			if epErr != nil {
 				util.Errorf("Failed to get episodes: %v", epErr)
@@ -74,6 +74,10 @@ func HandlePlaybackMode(animeName string) {
 
 		wg.Wait()
 		parallelTimer.Stop()
+
+		if epErr != nil {
+			return
+		}
 
 		if len(episodes) == 0 {
 			util.Errorf("No episodes found for this anime. Try a different search.")

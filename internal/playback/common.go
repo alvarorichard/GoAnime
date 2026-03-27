@@ -93,12 +93,12 @@ func PlayEpisode(
 		Run()
 
 	if videoErr != nil {
-		// Check if user requested to go back to episode selection
-		if errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
-			return player.ErrBackToEpisodeSelection
+		// Any video URL failure means the episode is not available on this source.
+		// Route user back to episode selection so they can pick another one.
+		if !errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
+			util.Warnf("Failed to extract video URL: %v", videoErr)
 		}
-		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
-		return fmt.Errorf("failed to extract video URL: %w", videoErr)
+		return player.ErrBackToEpisodeSelection
 	}
 
 	// Guard against empty or missing durations

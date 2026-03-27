@@ -14,11 +14,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// printEpisodeNotFoundMsg prints a user-friendly error message when the
-// selected episode doesn't exist. Shows both PT-BR and EN messages.
+// printEpisodeNotFoundMsg prints a user-friendly warning when the selected
+// episode doesn't exist on the current source.
 func printEpisodeNotFoundMsg() {
-	fmt.Println("\n\033[1;31m  ⚠  Episódio escolhido não existe nesta fonte. Tente outro episódio.\033[0m")
-	fmt.Print("\033[1;31m  ⚠  This episode does not exist in this source. Try another episode.\033[0m\n\n")
+	util.Warnf("This episode does not exist in this source. Try another episode.")
 }
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
@@ -28,17 +27,21 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	var selectedEpisodeURL, episodeNumberStr string
 	var selectedEpisodeNum int
-	for {
-		var err error
-		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
-		if err != nil {
-			if errors.Is(err, player.ErrBackRequested) {
-				return player.ErrBackToAnimeSelection
-			}
-			printEpisodeNotFoundMsg()
-			continue
+	const maxEpisodeRetries = 3
+	var selErr error
+	for attempt := range maxEpisodeRetries {
+		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, selErr = SelectInitialEpisode(episodes)
+		if selErr == nil {
+			break
 		}
-		break
+		if errors.Is(selErr, player.ErrBackRequested) {
+			return player.ErrBackToAnimeSelection
+		}
+		printEpisodeNotFoundMsg()
+		util.Warnf("Episode selection failed (attempt %d/%d): %v", attempt+1, maxEpisodeRetries, selErr)
+	}
+	if selErr != nil {
+		return fmt.Errorf("episode selection failed after %d attempts: %w", maxEpisodeRetries, selErr)
 	}
 
 	for {
