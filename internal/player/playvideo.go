@@ -1002,7 +1002,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 }
 
 // showPlayerMenu displays an interactive menu for player controls
-func showPlayerMenu(animeName string, currentEpisodeNum int, isMovieOrTV bool) (string, error) {
+func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 
 	// Build title and options based on media type
 	var title string
@@ -1067,13 +1067,10 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display and check if movie/TV
+	// Get anime name for display
 	var animeName string
-	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
-		anime := updater.GetAnime()
-		animeName = anime.Name
-		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
+		animeName = updater.GetAnime().Name
 	}
 
 	for {
@@ -1085,7 +1082,7 @@ func handleUserInput(
 			return ErrBackToDownloadOptions
 		}
 
-		choice, err := showPlayerMenu(animeName, currentEpisodeNum, isMovieOrTV)
+		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
 		if err != nil {
 			// If the menu was disrupted (e.g., by a concurrent terminal writer),
 			// treat it as "go back" rather than a fatal error.
