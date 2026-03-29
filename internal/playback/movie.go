@@ -93,10 +93,10 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series using already-fetched episodes
+			// Check if new anime is a series using media type first, then episode count as fallback
 			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
 			totalEpisodes := len(newEpisodes)
-			series := totalEpisodes > 1
+			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
@@ -117,7 +117,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		}
 
 		// Ask user what to do next after movie finishes
-		userInput := GetUserInput()
+		userInput := GetUserInput(true)
 		if userInput == "q" {
 			log.Println("Quitting application as per user request.")
 			break
@@ -135,10 +135,10 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series using already-fetched episodes
+			// Check if new anime is a series using media type first, then episode count as fallback
 			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
 			totalEpisodes := len(newEpisodes)
-			series := totalEpisodes > 1
+			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)

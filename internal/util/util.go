@@ -13,7 +13,9 @@ import (
 	"sync"
 
 	"charm.land/huh/v2"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/version"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // SubtitleInfo represents a single subtitle track
@@ -91,6 +93,12 @@ func Is9AnimeSource() bool {
 	return GlobalAnimeSource == "9Anime"
 }
 
+// subtitleOption maps a display label to a sentinel value for subtitle selection.
+type subtitleOption struct {
+	Label string
+	Value int
+}
+
 // SelectSubtitles displays an interactive menu for the user to choose which
 // subtitle tracks to load. It updates GlobalSubtitles in-place so that the
 // subsequent call to GetSubtitleArgs only includes the selected tracks.
@@ -101,8 +109,8 @@ func SelectSubtitles() {
 	}
 
 	// Build options: "All", each individual track, "None"
-	var options []huh.Option[int]
-	options = append(options, huh.NewOption("All subtitles", -1))
+	var items []subtitleOption
+	items = append(items, subtitleOption{"All subtitles", -1})
 	for i, sub := range GlobalSubtitles {
 		label := sub.Label
 		if label == "" {
@@ -111,22 +119,19 @@ func SelectSubtitles() {
 		if label == "" {
 			label = fmt.Sprintf("Subtitle %d", i+1)
 		}
-		options = append(options, huh.NewOption(label, i))
+		items = append(items, subtitleOption{label, i})
 	}
-	options = append(options, huh.NewOption("No subtitles", -2))
+	items = append(items, subtitleOption{"No subtitles", -2})
 
-	selected := -1 // default: all
-	menu := huh.NewSelect[int]().
-		Title("Subtitles").
-		Description(fmt.Sprintf("%d tracks available — pick one or all:", len(GlobalSubtitles))).
-		Options(options...).
-		Value(&selected)
-
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i].Label
+	}, fuzzyfinder.WithPromptString("Subtitles: "))
+	if err != nil {
 		// On error/cancel keep all subtitles
 		return
 	}
 
+	selected := items[idx].Value
 	switch selected {
 	case -1:
 		// Keep all — no change needed
@@ -177,24 +182,21 @@ func PromptSubtitleLanguage() {
 
 		fmt.Printf("\n1 subtitle track available: %s\n", label)
 
-		var options []huh.Option[int]
-		options = append(options, huh.NewOption(label, 0))
-		options = append(options, huh.NewOption("No subtitles", -2))
+		items := []subtitleOption{
+			{label, 0},
+			{"No subtitles", -2},
+		}
 
-		selected := 0 // default: the single track
-		menu := huh.NewSelect[int]().
-			Title("Select subtitle language").
-			Description("Choose subtitle track or disable:").
-			Options(options...).
-			Value(&selected)
-
-		if err := menu.Run(); err != nil {
+		idx, err := tui.Find(items, func(i int) string {
+			return items[i].Label
+		}, fuzzyfinder.WithPromptString("Select subtitle language: "))
+		if err != nil {
 			// On error/cancel keep the track
 			fmt.Printf("Subtitles: %s\n", label)
 			return
 		}
 
-		if selected == -2 {
+		if items[idx].Value == -2 {
 			GlobalSubtitles = nil
 			fmt.Println("Subtitles: disabled")
 			Debugf("User disabled subtitles")
@@ -208,8 +210,8 @@ func PromptSubtitleLanguage() {
 	// Multiple tracks — show full selection menu
 	fmt.Printf("\n%d subtitle language(s) available:\n", len(tracks))
 
-	var options []huh.Option[int]
-	options = append(options, huh.NewOption("All subtitles", -1))
+	var items []subtitleOption
+	items = append(items, subtitleOption{"All subtitles", -1})
 	for i, sub := range tracks {
 		label := sub.Label
 		if label == "" {
@@ -218,23 +220,20 @@ func PromptSubtitleLanguage() {
 		if label == "" {
 			label = fmt.Sprintf("Subtitle %d", i+1)
 		}
-		options = append(options, huh.NewOption(label, i))
+		items = append(items, subtitleOption{label, i})
 	}
-	options = append(options, huh.NewOption("No subtitles", -2))
+	items = append(items, subtitleOption{"No subtitles", -2})
 
-	selected := -1 // default: all
-	menu := huh.NewSelect[int]().
-		Title("Select subtitle language").
-		Description(fmt.Sprintf("%d tracks available — pick one, all, or none:", len(tracks))).
-		Options(options...).
-		Value(&selected)
-
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i].Label
+	}, fuzzyfinder.WithPromptString("Select subtitle language: "))
+	if err != nil {
 		// On error/cancel keep all subtitles
 		fmt.Println("Subtitles: all (default)")
 		return
 	}
 
+	selected := items[idx].Value
 	switch selected {
 	case -1:
 		// Keep all — no change needed

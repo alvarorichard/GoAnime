@@ -22,9 +22,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/lrstanley/go-ytdlp"
-	"github.com/manifoldco/promptui"
 )
 
 // Pre-compiled regexes for download quality parsing
@@ -745,14 +746,13 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 	for _, s := range sources {
 		items = append(items, fmt.Sprintf("%dp", s.Quality))
 	}
-	prompt := promptui.Select{
-		Label: "Select video quality",
-		Items: items,
-	}
-	_, result, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select video quality: "))
 	if err != nil {
 		return sources[0].URL, nil
 	}
+	result := items[idx]
 	for _, s := range sources {
 		if fmt.Sprintf("%dp", s.Quality) == result {
 			return s.URL, nil
@@ -1284,7 +1284,11 @@ func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum
 	}
 
 	// Create options for the interactive menu
-	var options []huh.Option[string]
+	type menuOption struct {
+		Label string
+		Value string
+	}
+	var menuItems []menuOption
 	for _, ep := range existingEpisodes {
 		title := fmt.Sprintf("Episode %d", ep.Num)
 		if ep.Title.English != "" {
@@ -1292,23 +1296,21 @@ func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum
 		} else if ep.Title.Romaji != "" {
 			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
 		}
-		options = append(options, huh.NewOption(title, strconv.Itoa(ep.Num)))
+		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
 	}
 
 	// Add option to not watch anything
-	options = append(options, huh.NewOption("Don't watch anything", "exit"))
+	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
 
-	var selectedEpisode string
-	err := huh.NewSelect[string]().
-		Title("Which episode would you like to watch?").
-		Options(options...).
-		Value(&selectedEpisode).
-		Run()
+	idx, err := tui.Find(menuItems, func(i int) string {
+		return menuItems[i].Label
+	}, fuzzyfinder.WithPromptString("Which episode would you like to watch? "))
 
 	if err != nil {
 		return fmt.Errorf("episode selection error: %w", err)
 	}
 
+	selectedEpisode := menuItems[idx].Value
 	if selectedEpisode == "exit" {
 		fmt.Println("No episode selected.")
 		return ErrUserQuit
@@ -1366,7 +1368,11 @@ func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, sta
 	}
 
 	// Create options for the interactive menu
-	var options []huh.Option[string]
+	type menuOption struct {
+		Label string
+		Value string
+	}
+	var menuItems []menuOption
 	for _, ep := range downloadedEpisodes {
 		title := fmt.Sprintf("Episode %d", ep.Num)
 		if ep.Title.English != "" {
@@ -1374,23 +1380,21 @@ func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, sta
 		} else if ep.Title.Romaji != "" {
 			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
 		}
-		options = append(options, huh.NewOption(title, strconv.Itoa(ep.Num)))
+		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
 	}
 
 	// Add option to not watch anything
-	options = append(options, huh.NewOption("Don't watch anything", "exit"))
+	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
 
-	var selectedEpisode string
-	err := huh.NewSelect[string]().
-		Title("Which episode would you like to watch?").
-		Options(options...).
-		Value(&selectedEpisode).
-		Run()
+	idx, err := tui.Find(menuItems, func(i int) string {
+		return menuItems[i].Label
+	}, fuzzyfinder.WithPromptString("Which episode would you like to watch? "))
 
 	if err != nil {
 		return fmt.Errorf("episode selection error: %w", err)
 	}
 
+	selectedEpisode := menuItems[idx].Value
 	if selectedEpisode == "exit" {
 		fmt.Println("No episode selected.")
 		return ErrUserQuit

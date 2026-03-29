@@ -21,7 +21,11 @@ func printEpisodeNotFoundMsg() {
 }
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
-	fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
+	if anime.IsTV() {
+		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
+	} else {
+		fmt.Printf("The selected anime is a series with %d episodes.\n", totalEpisodes)
+	}
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
@@ -87,11 +91,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series using already-fetched episodes
+			// Check if new anime is a series using media type first, then episode count as fallback
 			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
 			newTotalEpisodes := len(newEpisodes)
 			totalEpisodes = newTotalEpisodes
-			series := newTotalEpisodes > 1
+			series := !newAnime.IsMovie() && newTotalEpisodes > 1
 
 			if !series {
 				// If new anime is a movie, handle it differently
@@ -138,11 +142,11 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			anime = newAnime
 			episodes = newEpisodes
 
-			// Check if new anime is a series using already-fetched episodes
+			// Check if new anime is a series using media type first, then episode count as fallback
 			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
 			newTotalEpisodes := len(newEpisodes)
 			totalEpisodes = newTotalEpisodes
-			series := newTotalEpisodes > 1
+			series := !newAnime.IsMovie() && newTotalEpisodes > 1
 
 			if !series {
 				// If new anime is a movie, handle it differently

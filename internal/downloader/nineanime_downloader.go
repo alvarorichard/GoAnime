@@ -23,9 +23,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/lrstanley/go-ytdlp"
-	"github.com/manifoldco/promptui"
 )
 
 // NineAnimeDownloadConfig holds configuration for 9anime downloads
@@ -315,13 +316,9 @@ func (d *NineAnimeDownloader) promptSubtitleLanguage(tracks []scraper.NineAnimeS
 
 	fmt.Printf("\n%d subtitle language(s) available:\n", len(tracks))
 
-	prompt := promptui.Select{
-		Label: "Select subtitle language",
-		Items: items,
-		Size:  len(items),
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select subtitle language: "))
 	d.subLangResolved = true
 
 	if err != nil {

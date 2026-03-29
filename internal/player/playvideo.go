@@ -18,8 +18,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application
@@ -380,14 +382,21 @@ func playVideo(
 		util.Debugf("Blogger proxy URL detected - disabling yt-dlp")
 	}
 
-	// Set MPV window title to clean anime name + season/episode
+	// Set MPV window title to clean anime name + season/episode (or just name for movies)
 	titleSnap := snapshotMedia()
 	if titleSnap.AnimeName != "" {
 		cleanName := util.SanitizeForFilename(titleSnap.AnimeName)
 		// Also strip parenthesized dub/sub tags like (Dublado), (Legendado), (SUB)
 		cleanName = dubSubTagRe.ReplaceAllString(cleanName, " ")
 		cleanName = strings.TrimSpace(cleanName)
-		title := fmt.Sprintf("%s S%02dE%02d", cleanName, titleSnap.AnimeSeason, currentEpisodeNum)
+		var title string
+		if titleSnap.MediaType == "movie" {
+			// Movies: just show the movie name (no S01E01)
+			title = cleanName
+		} else {
+			// TV shows and anime: show season/episode
+			title = fmt.Sprintf("%s S%02dE%02d", cleanName, titleSnap.AnimeSeason, currentEpisodeNum)
+		}
 		mpvArgs = append(mpvArgs, fmt.Sprintf("--force-media-title=%s", title))
 	}
 
@@ -992,40 +1001,59 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 	}
 }
 
-// showPlayerMenu displays an interactive menu using huh.Select
+// showPlayerMenu displays an interactive menu for player controls
 func showPlayerMenu(animeName string, currentEpisodeNum int, isMovieOrTV bool) (string, error) {
-	var choice string
 
-	title := "GoAnime Player Controls"
-	if animeName != "" {
-		title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
+	// Build title and options based on media type
+	var title string
+
+	type menuOption struct {
+		Label string
+		Value string
+	}
+	var menuItems []menuOption
+
+	isMovie := IsCurrentMediaMovie()
+
+	if isMovie {
+		// Movie: show movie name without episode number
+		title = "GoAnime Player Controls"
+		if animeName != "" {
+			title = fmt.Sprintf("Now playing: %s", animeName)
+		}
+		menuItems = []menuOption{
+			{"← Back", "download_options"},
+			{"Replay movie", "next"},
+			{"Change movie", "change"},
+			{"Exit", "quit"},
+		}
+	} else {
+		// TV series / anime: show episode navigation
+		title = "GoAnime Player Controls"
+		if animeName != "" {
+			title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
+		}
+		menuItems = []menuOption{
+			{"← Back", "download_options"},
+			{"Next episode", "next"},
+			{"Previous episode", "previous"},
+			{"Select episode", "select"},
+			{"Change anime", "change"},
+			{"Skip intro", "skip"},
+			{"Exit", "quit"},
+		}
 	}
 
-	// Build menu options
-	options := []huh.Option[string]{
-		huh.NewOption("← Back ", "download_options"),
-		huh.NewOption("Next episode", "next"),
-		huh.NewOption("Previous episode", "previous"),
-		huh.NewOption("Select episode", "select"),
-		huh.NewOption("Change anime", "change"),
-		huh.NewOption("Skip intro", "skip"),
-		huh.NewOption("Exit", "quit"),
-	}
+	_ = title // title is informational for the prompt string
+	idx, err := tui.Find(menuItems, func(i int) string {
+		return menuItems[i].Label
+	}, fuzzyfinder.WithPromptString(title+": "))
 
-	// isMovieOrTV parameter kept for future use but not currently adding extra options
-	_ = isMovieOrTV
-
-	menu := huh.NewSelect[string]().
-		Title(title).
-		Description("Choose an action:").
-		Options(options...).
-		Value(&choice)
-
-	if err := menu.Run(); err != nil {
+	if err != nil {
 		return "", fmt.Errorf("error showing menu: %w", err)
 	}
 
-	return choice, nil
+	return menuItems[idx].Value, nil
 }
 
 // handleUserInput manages user input
@@ -1215,7 +1243,11 @@ func selectAudioTrack(socketPath string) {
 
 	currentID, _ := GetCurrentAudioTrack(socketPath)
 
-	var options []huh.Option[int]
+	type trackOption struct {
+		Label string
+		ID    int
+	}
+	var trackItems []trackOption
 	for _, track := range tracks {
 		id := int(track["id"].(float64))
 
@@ -1268,20 +1300,17 @@ func selectAudioTrack(socketPath string) {
 		if id == currentID {
 			label = "* " + label + " (current)"
 		}
-		options = append(options, huh.NewOption(label, id))
+		trackItems = append(trackItems, trackOption{Label: label, ID: id})
 	}
 
-	var selected int
-	menu := huh.NewSelect[int]().
-		Title("Select Audio Track").
-		Description("Choose the audio language/track:").
-		Options(options...).
-		Value(&selected)
-
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(trackItems, func(i int) string {
+		return trackItems[i].Label
+	}, fuzzyfinder.WithPromptString("Select Audio Track: "))
+	if err != nil {
 		return
 	}
 
+	selected := trackItems[idx].ID
 	if err := SetAudioTrack(socketPath, selected); err != nil {
 		fmt.Printf("Error setting audio track: %v\n", err)
 	} else {
@@ -1299,13 +1328,17 @@ func selectSubtitleTrack(socketPath string) {
 
 	currentID, _ := GetCurrentSubtitleTrack(socketPath)
 
-	var options []huh.Option[int]
+	type trackOption struct {
+		Label string
+		ID    int
+	}
+	var trackItems []trackOption
 	// Add option to disable subtitles
 	disableLabel := "Disable subtitles"
 	if currentID == 0 {
 		disableLabel = "* " + disableLabel + " (current)"
 	}
-	options = append(options, huh.NewOption(disableLabel, 0))
+	trackItems = append(trackItems, trackOption{Label: disableLabel, ID: 0})
 
 	for _, track := range tracks {
 		id := int(track["id"].(float64))
@@ -1338,20 +1371,17 @@ func selectSubtitleTrack(socketPath string) {
 		if id == currentID {
 			label = "* " + label + " (current)"
 		}
-		options = append(options, huh.NewOption(label, id))
+		trackItems = append(trackItems, trackOption{Label: label, ID: id})
 	}
 
-	var selected int
-	menu := huh.NewSelect[int]().
-		Title("Select Subtitle Track").
-		Description("Choose the subtitle language:").
-		Options(options...).
-		Value(&selected)
-
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(trackItems, func(i int) string {
+		return trackItems[i].Label
+	}, fuzzyfinder.WithPromptString("Select Subtitle Track: "))
+	if err != nil {
 		return
 	}
 
+	selected := trackItems[idx].ID
 	if selected == 0 {
 		// Disable subtitles
 		_, _ = mpvSendCommand(socketPath, []any{"set_property", "sid", "no"})

@@ -21,12 +21,13 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
 )
 
@@ -956,31 +957,32 @@ func downloadAndPlayEpisode(
 
 // askForDownload presents a prompt for the user to choose a download option.
 func askForDownload() int {
-	var choice string
-
 	// Build the upscale option label with current status
 	upscaleStatus := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
 	upscaleLabel := fmt.Sprintf("Real-time Upscale [%s]", upscaleStatus)
 
-	menu := huh.NewSelect[string]().
-		Title("Download Options").
-		Description("Choose how you want to proceed:").
-		Options(
-			huh.NewOption("← Back", "back"),
-			huh.NewOption("Download this episode", "download_single"),
-			huh.NewOption("Download episodes in a range", "download_range"),
-			huh.NewOption(upscaleLabel, "upscale"),
-			huh.NewOption("No download (play online)", "play_online"),
-		).
-		Value(&choice)
+	type menuOption struct {
+		Label string
+		Value string
+	}
+	items := []menuOption{
+		{"← Back", "back"},
+		{"Download this episode", "download_single"},
+		{"Download episodes in a range", "download_range"},
+		{upscaleLabel, "upscale"},
+		{"No download (play online)", "play_online"},
+	}
 
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i].Label
+	}, fuzzyfinder.WithPromptString("Download Options: "))
+	if err != nil {
 		util.Errorf("Error showing download menu: %v", err)
 		return 4 // Default to play online on error
 	}
 
 	// Determines the selected option based on the choice value
-	switch choice {
+	switch items[idx].Value {
 	case "back":
 		return 0
 	case "download_single":
@@ -995,23 +997,16 @@ func askForDownload() int {
 }
 
 func askForPlayOffline() bool {
-	var choice string
-
-	menu := huh.NewSelect[string]().
-		Title("Offline Playback").
-		Description("Do you want to play the downloaded version offline?").
-		Options(
-			huh.NewOption("Yes", "yes"),
-			huh.NewOption("No", "no"),
-		).
-		Value(&choice)
-
-	if err := menu.Run(); err != nil {
+	items := []string{"Yes", "No"}
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Play downloaded version offline? "))
+	if err != nil {
 		util.Errorf("Error showing offline playback menu: %v", err)
 		return false // Default to no on error
 	}
 
-	return choice == "yes"
+	return idx == 0 // "Yes" is index 0
 }
 
 // playVideo has been moved to playvideo.go
@@ -1178,59 +1173,60 @@ func GetCurrentSubtitleTrack(socketPath string) (int, error) {
 
 // handleUpscaleFromMenu shows the real-time upscaling options menu
 func handleUpscaleFromMenu() error {
-	var choice string
-
 	// Check if shaders are installed
 	shadersInstalled := upscaler.ShadersInstalled()
 	currentMode := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
 
-	description := fmt.Sprintf("Current: %s", currentMode)
+	prompt := fmt.Sprintf("Upscaling [%s]: ", currentMode)
 	if !shadersInstalled {
-		description = "Shaders not installed - select 'Setup shaders' first"
+		prompt = "Upscaling (install shaders first): "
 	}
 
-	options := []huh.Option[string]{
-		huh.NewOption("Back", "back"),
-		huh.NewOption("Off (no upscaling)", "off"),
+	type menuOption struct {
+		Label string
+		Value string
+	}
+
+	items := []menuOption{
+		{"Back", "back"},
+		{"Off (no upscaling)", "off"},
 	}
 
 	if shadersInstalled {
-		options = append(options,
-			huh.NewOption("Performance (weak GPU)", "performance"),
-			huh.NewOption("Fast (Mode A - text-heavy)", "fast"),
-			huh.NewOption("Balanced (Mode B - general)", "balanced"),
-			huh.NewOption("Quality (Mode C - films)", "quality"),
-			huh.NewOption("Ultra (Max Enhancement - SD sources)", "ultra"),
-			huh.NewOption("--- Advanced Modes ---", "separator"),
-			huh.NewOption("A+A (Max Perceptual - 1080p)", "advanced_aa"),
-			huh.NewOption("B+B (720p Optimized)", "advanced_bb"),
-			huh.NewOption("C+A (Upscaled/Downscaled Content)", "advanced_ca"),
+		items = append(items,
+			menuOption{"Performance (weak GPU)", "performance"},
+			menuOption{"Fast (Mode A - text-heavy)", "fast"},
+			menuOption{"Balanced (Mode B - general)", "balanced"},
+			menuOption{"Quality (Mode C - films)", "quality"},
+			menuOption{"Ultra (Max Enhancement - SD sources)", "ultra"},
+			menuOption{"--- Advanced Modes ---", "separator"},
+			menuOption{"A+A (Max Perceptual - 1080p)", "advanced_aa"},
+			menuOption{"B+B (720p Optimized)", "advanced_bb"},
+			menuOption{"C+A (Upscaled/Downscaled Content)", "advanced_ca"},
 		)
 
 		// Add GAN UUL option (check if GAN shaders are installed)
 		if upscaler.GANShadersInstalled() {
-			options = append(options,
-				huh.NewOption("GAN UUL (360p to 4K - HEAVY)", "gan_uul"),
+			items = append(items,
+				menuOption{"GAN UUL (360p to 4K - HEAVY)", "gan_uul"},
 			)
 		} else {
-			options = append(options,
-				huh.NewOption("GAN UUL (not installed)", "setup_gan"),
+			items = append(items,
+				menuOption{"GAN UUL (not installed)", "setup_gan"},
 			)
 		}
 	}
 
-	options = append(options, huh.NewOption("Setup shaders (download)", "setup"))
+	items = append(items, menuOption{"Setup shaders (download)", "setup"})
 
-	menu := huh.NewSelect[string]().
-		Title("Real-time Anime4K Upscaling").
-		Description(description).
-		Options(options...).
-		Value(&choice)
-
-	if err := menu.Run(); err != nil {
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i].Label
+	}, fuzzyfinder.WithPromptString(prompt))
+	if err != nil {
 		return fmt.Errorf("cancelled: %w", err)
 	}
 
+	choice := items[idx].Value
 	switch choice {
 	case "back":
 		return nil

@@ -426,17 +426,23 @@ func (c *FlixHQClient) GetSeasons(mediaID string) ([]FlixHQSeason, error) {
 	}
 
 	var seasons []FlixHQSeason
+	seen := make(map[string]bool) // Deduplicate by data-id
 	seasonNum := 1
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		href, exists := s.Attr("href")
-		if !exists {
-			return
-		}
 
-		// Extract season ID from href pattern like "javascript:;" data-id="123"
+	// Use a specific selector for season items; fall back to all <a> tags
+	// if the specific class isn't found.
+	sel := doc.Find("a.ss-item")
+	if sel.Length() == 0 {
+		sel = doc.Find("a[data-id]")
+	}
+
+	sel.Each(func(i int, s *goquery.Selection) {
 		dataID, _ := s.Attr("data-id")
 		if dataID == "" {
-			// Try to extract from href
+			href, exists := s.Attr("href")
+			if !exists {
+				return
+			}
 			re := flixhqTrailIDRe
 			matches := re.FindStringSubmatch(href)
 			if len(matches) > 1 {
@@ -444,15 +450,27 @@ func (c *FlixHQClient) GetSeasons(mediaID string) ([]FlixHQSeason, error) {
 			}
 		}
 
-		title := strings.TrimSpace(s.Text())
-		if title != "" && dataID != "" {
-			seasons = append(seasons, FlixHQSeason{
-				ID:     dataID,
-				Number: seasonNum,
-				Title:  title,
-			})
-			seasonNum++
+		if dataID == "" {
+			return
 		}
+
+		// Skip duplicate seasons (same data-id)
+		if seen[dataID] {
+			return
+		}
+		seen[dataID] = true
+
+		title := strings.TrimSpace(s.Text())
+		if title == "" {
+			return
+		}
+
+		seasons = append(seasons, FlixHQSeason{
+			ID:     dataID,
+			Number: seasonNum,
+			Title:  title,
+		})
+		seasonNum++
 	})
 
 	return seasons, nil
