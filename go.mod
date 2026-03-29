@@ -13,13 +13,13 @@ require (
 )
 
 require (
-	charm.land/bubbles/v2 v2.0.0
+	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.2
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.2
 	charm.land/log/v2 v2.0.0
 	github.com/disintegration/gift v1.2.1
-	github.com/enetx/g v1.0.222
+	github.com/enetx/g v1.0.223
 	github.com/enetx/surf v1.0.197
 	github.com/lrstanley/go-ytdlp v1.3.5
 	github.com/tr1xem/go-discordrpc v1.0.0
@@ -67,7 +67,7 @@ require (
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.8 // indirect
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-runewidth v0.0.21 // indirect
 	github.com/mattn/go-sqlite3 v1.14.37
 	github.com/muesli/cancelreader v0.2.2 // indirect

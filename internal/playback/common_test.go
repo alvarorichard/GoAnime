@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"os"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -19,6 +20,13 @@ func TestSelectEpisodeWithFuzzy_EmptyList(t *testing.T) {
 // TestFindEpisodeByNumber_NotFound verifies that searching for a non-existent
 // episode number returns an error instead of fataling.
 func TestFindEpisodeByNumber_NotFound(t *testing.T) {
+	// This test falls back to SelectEpisodeWithFuzzy which opens an interactive
+	// fuzzy finder (tcell-based TUI). On CI there is no TTY, so the fuzzy finder
+	// either panics (Windows) or hangs indefinitely waiting for terminal input.
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive fuzzy-finder test in CI (no TTY available)")
+	}
+
 	episodes := []models.Episode{
 		{URL: "https://example.com/ep1", Number: "1"},
 		{URL: "https://example.com/ep2", Number: "2"},

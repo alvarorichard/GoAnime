@@ -1,5 +1,5 @@
-charm.land/bubbles/v2 v2.0.0 h1:tE3eK/pHjmtrDiRdoC9uGNLgpopOd8fjhEe31B/ai5s=
-charm.land/bubbles/v2 v2.0.0/go.mod h1:rCHoleP2XhU8um45NTuOWBPNVHxnkXKTiZqcclL/qOI=
+charm.land/bubbles/v2 v2.1.0 h1:YSnNh5cPYlYjPxRrzs5VEn3vwhtEn3jVGRBT3M7/I0g=
+charm.land/bubbles/v2 v2.1.0/go.mod h1:l97h4hym2hvWBVfmJDtrEHHCtkIKeTEb3TTJ4ZOB3wY=
 charm.land/bubbletea/v2 v2.0.2 h1:4CRtRnuZOdFDTWSff9r8QFt/9+z6Emubz3aDMnf/dx0=
 charm.land/bubbletea/v2 v2.0.2/go.mod h1:3LRff2U4WIYXy7MTxfbAQ+AdfM3D8Xuvz2wbsOD9OHQ=
 charm.land/huh/v2 v2.0.3 h1:2cJsMqEPwSywGHvdlKsJyQKPtSJLVnFKyFbsYZTlLkU=
@@ -76,8 +76,8 @@ github.com/disintegration/gift v1.2.1 h1:Y005a1X4Z7Uc+0gLpSAsKhWi4qLtsdEcMIbbdvd
 github.com/disintegration/gift v1.2.1/go.mod h1:Jh2i7f7Q2BM7Ezno3PhfezbR1xpUg9dUg3/RlKGr4HI=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
-github.com/enetx/g v1.0.222 h1:LEG4vX9ZFwjGQaC2qcdqYv2raAmvkC5NKd61b3dc5Go=
-github.com/enetx/g v1.0.222/go.mod h1:7WJVidg+Qj6+R6DOvrZenFwxGkmrITPWzqc88MPQIF4=
+github.com/enetx/g v1.0.223 h1:9J8y76uiBLvNlMDyaLyCBUWELKNaHsRST+93Zxm2+No=
+github.com/enetx/g v1.0.223/go.mod h1:dxOHnNkhdZkwwOvgbJKcniq187TqyLO3DuTJpmk1tLQ=
 github.com/enetx/http v1.0.28 h1:IaNSSDFlAVVdHnYhNIR9wAN7GY4TWL/kkvYC3jOaueY=
 github.com/enetx/http v1.0.28/go.mod h1:1f4mytfF/SfjATEJnynpwGS6aa1ALjb8DtmYgFVblY0=
 github.com/enetx/http2 v1.0.26 h1:wy3lYGVwnIUY4Q+gyPPQCJ1a+BMXD1B7Unpyc/Csrxc=
@@ -111,8 +111,8 @@ github.com/ktr0731/go-fuzzyfinder v0.9.0 h1:JV8S118RABzRl3Lh/RsPhXReJWc2q0rbuipz
 github.com/ktr0731/go-fuzzyfinder v0.9.0/go.mod h1:uybx+5PZFCgMCSDHJDQ9M3nNKx/vccPmGffsXPn2ad8=
 github.com/lrstanley/go-ytdlp v1.3.5 h1:eT+29mK3Lp+XPMQOH25+jVerrrjifYW1o3IkTYJ9SMs=
 github.com/lrstanley/go-ytdlp v1.3.5/go.mod h1:VgjnTrvkTf+23JuySjyPq1iQ8ijSovBtTPpXH5XrLtI=
-github.com/lucasb-eyer/go-colorful v1.3.0 h1:2/yBRLdWBZKrf7gB40FoiKfAWYQ0lqNcbuQwVHXptag=
-github.com/lucasb-eyer/go-colorful v1.3.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
+github.com/lucasb-eyer/go-colorful v1.4.0 h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=
+github.com/lucasb-eyer/go-colorful v1.4.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/manifoldco/promptui v0.9.0 h1:3V4HzJk1TtXW1MTZMP7mdlwbBpIinw3HztaIlYthEiA=
 github.com/manifoldco/promptui v0.9.0/go.mod h1:ka04sppxSGFAtxX0qhlYQjISsg9mR4GWtQEhdbn6Pgg=
 github.com/mattn/go-runewidth v0.0.9/go.mod h1:H031xJmbD/WCDINGzjvQ9THkh0rPKHF+m2gUSrubnMI=
