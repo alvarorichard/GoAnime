@@ -1,3 +1,4 @@
+// Package providers defines the EpisodeProvider interface and its implementations.
 package providers
 
 import "github.com/alvarorichard/Goanime/internal/models"

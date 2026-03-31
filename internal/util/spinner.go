@@ -1,3 +1,4 @@
+// Package util provides utility functions like spinners and UI helpers.
 package util
 
 import (

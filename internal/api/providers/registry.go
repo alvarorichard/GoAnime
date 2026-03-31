@@ -1,3 +1,4 @@
+// Package providers contains the registry for managing different anime sources.
 package providers
 
 import (
@@ -112,7 +113,7 @@ func normalizeSource(source string) string {
 	return ""
 }
 
-func detectFromTags(name string) string {
+func detectFromTags(_ string) string {
 	return ""
 }
 
