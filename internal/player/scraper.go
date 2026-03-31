@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/huh/v2"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
@@ -226,14 +226,20 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		}
 	}
 
-	idx, err := fuzzyfinder.Find(
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: calling fuzzyfinder.Find with %d items", len(displayList))
+	idx, err := tui.Find(
 		displayList,
 		func(i int) string {
 			return displayList[i]
 		},
 		fuzzyfinder.WithPromptString("Select the episode: "),
 	)
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: fuzzyfinder returned idx=%d, err=%v", idx, err)
 	if err != nil {
+		// Treat abort (no selection / Escape / no match) as back request
+		if errors.Is(err, fuzzyfinder.ErrAbort) {
+			return "", "", ErrBackRequested
+		}
 		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
 	}
 
@@ -1093,27 +1099,30 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			}
 
 			// Prompt user for quality selection
-			// Create options for huh.Select with back option first
-			var options []huh.Option[string]
-			options = append(options, huh.NewOption("← Back", "back"))
+			// Create items list with back option first
+			type qualityOption struct {
+				Label string
+				Value string
+			}
+			var qualityItems []qualityOption
+			qualityItems = append(qualityItems, qualityOption{Label: "← Back", Value: "back"})
 			for _, v := range videoResponse.Data {
 				label := v.Label
 				if label == "" {
 					label = v.Src
 				}
-				options = append(options, huh.NewOption(label, v.Src))
+				qualityItems = append(qualityItems, qualityOption{Label: label, Value: v.Src})
 			}
 
 			// Present quality options to the user
-			var selectedSrc string
-			err := huh.NewSelect[string]().
-				Title("Select Video Quality").
-				Options(options...).
-				Value(&selectedSrc).
-				Run()
+			qIdx, err := tui.Find(qualityItems, func(i int) string {
+				return qualityItems[i].Label
+			}, fuzzyfinder.WithPromptString("Select Video Quality: "))
 			if err != nil {
 				return "", fmt.Errorf("failed to select quality: %w", err)
 			}
+
+			selectedSrc := qualityItems[qIdx].Value
 
 			// Handle back selection
 			if selectedSrc == "back" {

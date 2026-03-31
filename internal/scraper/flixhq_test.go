@@ -1,9 +1,28 @@
 package scraper
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// newFlixHQClientForTest creates a FlixHQClient pointing at a test server,
+// bypassing the real FlixHQ endpoints.
+func newFlixHQClientForTest(baseURL string) *FlixHQClient {
+	return &FlixHQClient{
+		client:         &http.Client{},
+		baseURL:        baseURL,
+		apiURL:         baseURL,
+		fallbackAPIURL: baseURL,
+		userAgent:      FlixHQUserAgent,
+		maxRetries:     0,
+	}
+}
 
 func TestFlixHQClient_SearchMedia(t *testing.T) {
 	client := NewFlixHQClient()
@@ -238,87 +257,94 @@ func TestUnifiedScraperManager_FlixHQIntegration(t *testing.T) {
 	}
 }
 
+// TestFlixHQClient_GetTVShowStream verifies the full TV show scraping flow
+// (search → seasons → episodes → server ID → embed link) using a local
+// httptest server instead of the real FlixHQ API.
 func TestFlixHQClient_GetTVShowStream(t *testing.T) {
-	// Skip if network is unavailable
-	client := NewFlixHQClient()
+	mux := http.NewServeMux()
 
-	// Search for a TV show
+	// Search results: one TV show item with the expected HTML structure.
+	mux.HandleFunc("/search/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body>
+			<div class="flw-item">
+				<div class="film-name">
+					<a href="/tv/watch-dexter-39448" title="Dexter">Dexter</a>
+				</div>
+				<span class="fdi-item">2006</span>
+			</div>
+		</body></html>`)
+	})
+
+	// Seasons for media ID 39448.
+	mux.HandleFunc("/ajax/v2/tv/seasons/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body>
+			<a data-id="s1id" href="javascript:;">Season 1</a>
+		</body></html>`)
+	})
+
+	// Episodes for season s1id.
+	mux.HandleFunc("/ajax/v2/season/episodes/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body>
+			<div class="nav-item"><a data-id="ep1data" title="Pilot">Ep 1</a></div>
+		</body></html>`)
+	})
+
+	// Available streaming servers for episode ep1data.
+	mux.HandleFunc("/ajax/v2/episode/servers/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body>
+			<div class="nav-item"><a data-id="srv1id" title="Vidcloud">Vidcloud</a></div>
+		</body></html>`)
+	})
+
+	// Embed link JSON for server srv1id.
+	mux.HandleFunc("/ajax/episode/sources/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"link": "https://example.com/embed/mock123"}`)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := newFlixHQClientForTest(srv.URL)
+
+	// Step 1: search.
 	results, err := client.SearchMedia("dexter")
-	if err != nil {
-		t.Skipf("Skipping test due to network error: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, results, "search should return at least one result")
 
-	if len(results) == 0 {
-		t.Skip("No search results found for 'dexter'")
-		return
-	}
-
-	// Find a TV show in the results
 	tvShow := findTVShowInFlixHQResults(results)
-	if tvShow == nil {
-		t.Skip("No TV show found in search results")
-		return
-	}
+	require.NotNil(t, tvShow, "search should return a TV show")
+	assert.Equal(t, "Dexter", tvShow.Title)
+	assert.Equal(t, MediaTypeTV, tvShow.Type)
+	assert.Equal(t, "39448", tvShow.ID)
 
-	t.Logf("Found TV show: %s (ID: %s)", tvShow.Title, tvShow.ID)
-
-	// Set media path for decryption API
-	if tvShow.URL != "" {
-		client.SetMediaPath(ExtractMediaPath(tvShow.URL))
-	}
-
-	// Get seasons
+	// Step 2: seasons.
 	seasons, err := client.GetSeasons(tvShow.ID)
-	if err != nil {
-		t.Fatalf("Failed to get seasons: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, seasons, "GetSeasons should return at least one season")
+	assert.Equal(t, "s1id", seasons[0].ID)
+	assert.Equal(t, "Season 1", seasons[0].Title)
 
-	if len(seasons) == 0 {
-		t.Fatal("No seasons found")
-	}
-
-	t.Logf("Found %d seasons", len(seasons))
-
-	// Get episodes for first season
+	// Step 3: episodes.
 	episodes, err := client.GetEpisodes(seasons[0].ID)
-	if err != nil {
-		t.Fatalf("Failed to get episodes: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, episodes, "GetEpisodes should return at least one episode")
+	assert.Equal(t, "ep1data", episodes[0].DataID)
+	assert.Equal(t, "Pilot", episodes[0].Title)
 
-	if len(episodes) == 0 {
-		t.Fatal("No episodes found")
-	}
-
-	t.Logf("Found %d episodes in season 1", len(episodes))
-
-	// Get server ID for first episode
+	// Step 4: server ID.
 	serverID, err := client.GetEpisodeServerID(episodes[0].DataID, "Vidcloud")
-	if err != nil {
-		t.Fatalf("Failed to get server ID: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "srv1id", serverID)
 
-	t.Logf("Got server ID: %s", serverID)
-
-	// Get embed link
+	// Step 5: embed link.
 	embedLink, err := client.GetEmbedLink(serverID)
-	if err != nil {
-		t.Fatalf("Failed to get embed link: %v", err)
-	}
-
-	t.Logf("Got embed link: %s", embedLink)
-
-	// Extract stream info (depends on third-party embed services which may change)
-	streamInfo, err := client.ExtractStreamInfo(embedLink, "", "english")
-	if err != nil {
-		t.Skipf("Skipping stream extraction - external embed service unavailable: %v", err)
-	}
-
-	if streamInfo.VideoURL == "" {
-		t.Skip("Skipping - video URL empty (external embed service may have changed)")
-	}
-
-	t.Logf("Got video URL: %s", streamInfo.VideoURL)
-	t.Logf("Found %d subtitle tracks", len(streamInfo.Subtitles))
+	require.NoError(t, err)
+	assert.Equal(t, "https://example.com/embed/mock123", embedLink)
 }
 
 // findTVShowInFlixHQResults finds the first TV show in FlixHQ search results

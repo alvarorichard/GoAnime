@@ -12,8 +12,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/downloader"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/manifoldco/promptui"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // HandleDownloadRequest processes a download request from command line
@@ -105,7 +106,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 					// Fallback to legacy downloader
-					episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					if legacyErr != nil {
+						return fmt.Errorf("legacy episode fetch also failed: %w", legacyErr)
+					}
 					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 				}
@@ -126,7 +130,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			util.Infof("Enhanced episodes fetch failed: %v", err)
 		}
 		// Fallback to legacy downloader
-		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		if legacyErr != nil {
+			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
+		}
 		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 	} else {
@@ -135,7 +142,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		// Enhanced download is a placeholder - use legacy downloader
 		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
-		episodes := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		if legacyErr != nil {
+			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
+		}
 		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadSingleEpisode(request.EpisodeNum)
 	}
@@ -312,13 +322,9 @@ func selectMovieFromResults(results []*scraper.FlixHQMedia, preferMovie, preferT
 		items = append(items, fmt.Sprintf("%s %s%s%s", typeTag, r.Title, year, source))
 	}
 
-	prompt := promptui.Select{
-		Label: "Select movie/TV show to download",
-		Items: items,
-		Size:  15,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select movie/TV show to download: "))
 	if err != nil {
 		return nil, err
 	}
@@ -346,12 +352,9 @@ func selectSeason(mm *scraper.MediaManager, mediaID string) (int, error) {
 		items = append(items, s.Title)
 	}
 
-	prompt := promptui.Select{
-		Label: "Select season",
-		Items: items,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select season: "))
 	if err != nil {
 		return 0, err
 	}
@@ -385,13 +388,9 @@ func selectEpisode(mm *scraper.MediaManager, mediaID string, seasonNum int) (int
 		items = append(items, fmt.Sprintf("Episode %d: %s", e.Number, e.Title))
 	}
 
-	prompt := promptui.Select{
-		Label: "Select episode",
-		Items: items,
-		Size:  15,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select episode: "))
 	if err != nil {
 		return 0, err
 	}

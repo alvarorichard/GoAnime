@@ -93,12 +93,12 @@ func PlayEpisode(
 		Run()
 
 	if videoErr != nil {
-		// Check if user requested to go back to episode selection
-		if errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
-			return player.ErrBackToEpisodeSelection
+		// Any video URL failure means the episode is not available on this source.
+		// Route user back to episode selection so they can pick another one.
+		if !errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
+			util.Warnf("Failed to extract video URL: %v", videoErr)
 		}
-		// Bubble up so callers can handle (e.g., prompt to change anime) instead of exiting the app
-		return fmt.Errorf("failed to extract video URL: %w", videoErr)
+		return player.ErrBackToEpisodeSelection
 	}
 
 	// Guard against empty or missing durations
@@ -130,26 +130,26 @@ func PlayEpisode(
 	return playErr
 }
 
-func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int) {
+func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, error) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
 		// If user selected back, return empty values to signal back request
 		if errors.Is(err, player.ErrBackRequested) {
-			return "", "back", -1
+			return "", "back", -1, nil
 		}
-		log.Fatalln(util.ErrorHandler(err))
+		return "", "", 0, fmt.Errorf("episode selection failed: %w", err)
 	}
 	epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(numStr))
 	if err != nil {
-		log.Fatalln("Error converting episode number:", util.ErrorHandler(err))
+		return "", "", 0, fmt.Errorf("error converting episode number: %w", err)
 	}
-	return url, numStr, epNum
+	return url, numStr, epNum, nil
 }
 
-func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, int) {
+func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, int, error) {
 	for _, ep := range episodes {
 		if epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(ep.Number)); err == nil && epNum == num {
-			return ep.URL, ep.Number, num
+			return ep.URL, ep.Number, num, nil
 		}
 	}
 	log.Printf("Warning: Episode number %d not found. Re-selecting.", num)

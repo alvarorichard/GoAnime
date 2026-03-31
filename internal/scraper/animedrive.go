@@ -15,6 +15,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
@@ -158,7 +159,7 @@ func SelectServerWithFuzzyFinder(options []VideoOption) (*VideoOption, error) {
 		}
 	}
 
-	idx, err := fuzzyfinder.Find(
+	idx, err := tui.Find(
 		displayList,
 		func(i int) string {
 			return displayList[i]

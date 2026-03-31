@@ -47,36 +47,78 @@ func HandlePlaybackMode(animeName string) {
 			return
 		}
 
-		// Fetch details and episodes in parallel — they are independent
-		// Details come from AniList/TMDB, episodes from the source scraper
+		// Fetch details and episodes.
+		// For FlixHQ/movie/TV content, GetAnimeEpisodes may show interactive
+		// UI (season selection fuzzyfinder), so we CANNOT run it concurrently
+		// with FetchAnimeDetails (which runs a Bubble Tea spinner).  Two
+		// programs fighting over the terminal at the same time corrupts
+		// terminal state and causes arrow-key escape sequences to be printed
+		// as raw text.  For regular anime the episodes fetch is non-interactive,
+		// so parallelism is safe there.
 		var episodes []models.Episode
-		var wg sync.WaitGroup
+		var epErr error
 
-		parallelTimer := util.StartTimer("FetchDetails+Episodes:Parallel")
+		needsInteractiveEpisodes := anime.Source == "FlixHQ" ||
+			anime.MediaType == models.MediaTypeMovie ||
+			anime.MediaType == models.MediaTypeTV
 
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
+		if needsInteractiveEpisodes {
+			// Sequential: details first (spinner), then episodes (may show fuzzyfinder)
+			parallelTimer := util.StartTimer("FetchDetails+Episodes:Sequential")
+
 			detailsTimer := util.StartTimer("FetchAnimeDetails")
 			appflow.FetchAnimeDetails(anime)
 			detailsTimer.Stop()
-		}()
-		go func() {
-			defer wg.Done()
-			episodesTimer := util.StartTimer("GetAnimeEpisodes")
-			episodes = appflow.GetAnimeEpisodes(anime)
-			episodesTimer.Stop()
-		}()
 
-		wg.Wait()
-		parallelTimer.Stop()
+			episodesTimer := util.StartTimer("GetAnimeEpisodes")
+			episodes, epErr = appflow.GetAnimeEpisodes(anime)
+			if epErr != nil {
+				util.Errorf("Failed to get episodes: %v", epErr)
+			}
+			episodesTimer.Stop()
+
+			parallelTimer.Stop()
+		} else {
+			// Parallel: safe because GetAnimeEpisodes only uses a spinner (no fuzzyfinder)
+			var wg sync.WaitGroup
+			parallelTimer := util.StartTimer("FetchDetails+Episodes:Parallel")
+
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				detailsTimer := util.StartTimer("FetchAnimeDetails")
+				appflow.FetchAnimeDetails(anime)
+				detailsTimer.Stop()
+			}()
+			go func() {
+				defer wg.Done()
+				episodesTimer := util.StartTimer("GetAnimeEpisodes")
+				episodes, epErr = appflow.GetAnimeEpisodes(anime)
+				if epErr != nil {
+					util.Errorf("Failed to get episodes: %v", epErr)
+				}
+				episodesTimer.Stop()
+			}()
+
+			wg.Wait()
+			parallelTimer.Stop()
+		}
+
+		if epErr != nil {
+			return
+		}
+
+		if len(episodes) == 0 {
+			util.Errorf("No episodes found for this anime. Try a different search.")
+			return
+		}
 
 		util.PerfCount("anime_loaded")
 
-		// Use length of already-fetched episodes to determine if it's a series
-		// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
+		// Determine if this is a movie or series using the media type first,
+		// then fall back to episode count for anime sources that don't set media type.
 		totalEpisodes := len(episodes)
-		series := totalEpisodes > 1
+		series := !anime.IsMovie() && totalEpisodes > 1
 		var playbackErr error
 
 		playbackTimer := util.StartTimer("Playback:Handle")

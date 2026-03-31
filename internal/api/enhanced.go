@@ -10,9 +10,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
-	"github.com/manifoldco/promptui"
+
 )
 
 // ErrBackToSearch is returned when user selects the back option to search again
@@ -152,11 +153,16 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	if util.IsDebug {
 		// In debug mode, show preview window with technical details
-		idx, err = fuzzyfinder.Find(
+		idx, err = tui.Find(
 			animesWithBack,
 			func(i int) string {
-				// Show the anime name with language tag as-is
-				return animesWithBack[i].Name
+				a := animesWithBack[i]
+				name := a.Name
+				// Append release year if available and not already in the name
+				if a.Year != "" && !strings.Contains(name, "("+a.Year+")") {
+					name += " (" + a.Year + ")"
+				}
+				return name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
@@ -177,11 +183,16 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		)
 	} else {
 		// In normal mode, no preview window at all
-		idx, err = fuzzyfinder.Find(
+		idx, err = tui.Find(
 			animesWithBack,
 			func(i int) string {
-				// Show the anime name with language tag as-is
-				return animesWithBack[i].Name
+				a := animesWithBack[i]
+				name := a.Name
+				// Append release year if available and not already in the name
+				if a.Year != "" && !strings.Contains(name, "("+a.Year+")") {
+					name += " (" + a.Year + ")"
+				}
+				return name
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
 		)
@@ -733,26 +744,18 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 		return nil, fmt.Errorf("no seasons found for TV show")
 	}
 
-	// Let user select a season
-	seasonNames := make([]string, len(seasons))
-	for i, s := range seasons {
-		seasonNames[i] = s.Title
-	}
-
-	seasonIdx, err := fuzzyfinder.Find(
-		seasonNames,
-		func(i int) string { return seasonNames[i] },
-		fuzzyfinder.WithPromptString("Select season: "),
-	)
+	// Let user select a season using fuzzyfinder (same library as anime
+	// selection, so it manages its own terminal state via tcell and avoids
+	// the readline/escape-sequence issues that plague promptui after tcell).
+	seasonIdx, err := tui.Find(seasons, func(i int) string {
+		return seasons[i].Title
+	}, fuzzyfinder.WithPromptString("Select season: "))
 	if err != nil {
 		return nil, fmt.Errorf("season selection cancelled: %w", err)
 	}
 
 	selectedSeason := seasons[seasonIdx]
 	util.Debug("Selected season", "season", selectedSeason.Title, "id", selectedSeason.ID)
-
-	// Clear the fuzzy finder output before showing the spinner
-	fmt.Print("\033[2K\033[1A\033[2K\r")
 
 	// Use spinner for loading episodes (network call)
 	var flixEpisodes []scraper.FlixHQEpisode
@@ -916,13 +919,9 @@ func selectFlixHQQualityOptions(qualities []scraper.FlixHQQualityOption) (scrape
 		items = append(items, client.QualityToLabel(q.Quality))
 	}
 
-	prompt := promptui.Select{
-		Label: "Select video quality",
-		Items: items,
-		Size:  10,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select video quality: "))
 	if err != nil {
 		// On error/cancel, return first (auto) quality
 		return qualities[0], err

@@ -14,8 +14,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
 )
 
@@ -298,10 +298,14 @@ func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) 
 		return animes[i].Name < animes[j].Name
 	})
 
-	idx, err := fuzzyfinder.Find(animes, func(i int) string {
+	idx, err := tui.Find(animes, func(i int) string {
 		name := animes[i].Name
 		name = strings.ReplaceAll(name, "[AllAnime]", "[English]")
 		name = strings.ReplaceAll(name, "[AnimeFire]", "[PT-BR]")
+		// Append release year if available and not already in the name
+		if animes[i].Year != "" && !strings.Contains(name, "("+animes[i].Year+")") {
+			name += " (" + animes[i].Year + ")"
+		}
 		return name
 	})
 	if err != nil {

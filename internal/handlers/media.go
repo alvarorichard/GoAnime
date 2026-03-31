@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/manifoldco/promptui"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // MediaHandler handles media selection and playback operations
@@ -61,12 +63,10 @@ func (mh *MediaHandler) SearchMedia(query string, contentType models.MediaType) 
 
 // SelectMediaType prompts user to select media type
 func (mh *MediaHandler) SelectMediaType() (models.MediaType, error) {
-	prompt := promptui.Select{
-		Label: "Select content type",
-		Items: []string{"Anime", "Movies", "TV Shows", "Search All"},
-	}
-
-	idx, _, err := prompt.Run()
+	items := []string{"Anime", "Movies", "TV Shows", "Search All"}
+	idx, err := tui.Find(items, func(i int) string {
+		return items[i]
+	}, fuzzyfinder.WithPromptString("Select content type: "))
 	if err != nil {
 		return "", err
 	}
@@ -89,9 +89,8 @@ func (mh *MediaHandler) SelectMedia(results []*models.Anime) (*models.Anime, err
 		return nil, fmt.Errorf("no results to select from")
 	}
 
-	// Prepare display items
-	var items []string
-	for _, r := range results {
+	idx, err := tui.Find(results, func(i int) string {
+		r := results[i]
 		typeTag := ""
 		switch r.MediaType {
 		case models.MediaTypeMovie:
@@ -105,16 +104,8 @@ func (mh *MediaHandler) SelectMedia(results []*models.Anime) (*models.Anime, err
 		if r.Year != "" {
 			year = fmt.Sprintf(" (%s)", r.Year)
 		}
-		items = append(items, fmt.Sprintf("%s %s%s - %s", typeTag, r.Name, year, r.Source))
-	}
-
-	prompt := promptui.Select{
-		Label: "Select media",
-		Items: items,
-		Size:  15,
-	}
-
-	idx, _, err := prompt.Run()
+		return fmt.Sprintf("%s %s%s - %s", typeTag, r.Name, year, r.Source)
+	}, fuzzyfinder.WithPromptString("Select media: "))
 	if err != nil {
 		return nil, err
 	}
@@ -133,17 +124,9 @@ func (mh *MediaHandler) SelectSeason(mediaID string) (*scraper.FlixHQSeason, err
 		return nil, fmt.Errorf("no seasons found")
 	}
 
-	var items []string
-	for _, s := range seasons {
-		items = append(items, s.Title)
-	}
-
-	prompt := promptui.Select{
-		Label: "Select season",
-		Items: items,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(seasons, func(i int) string {
+		return seasons[i].Title
+	}, fuzzyfinder.WithPromptString("Select season: "))
 	if err != nil {
 		return nil, err
 	}
@@ -162,18 +145,9 @@ func (mh *MediaHandler) SelectEpisode(seasonID string) (*scraper.FlixHQEpisode, 
 		return nil, fmt.Errorf("no episodes found")
 	}
 
-	var items []string
-	for _, e := range episodes {
-		items = append(items, fmt.Sprintf("Episode %d: %s", e.Number, e.Title))
-	}
-
-	prompt := promptui.Select{
-		Label: "Select episode",
-		Items: items,
-		Size:  15,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(episodes, func(i int) string {
+		return fmt.Sprintf("Episode %d: %s", episodes[i].Number, episodes[i].Title)
+	}, fuzzyfinder.WithPromptString("Select episode: "))
 	if err != nil {
 		return nil, err
 	}
@@ -232,17 +206,9 @@ func (mh *MediaHandler) SelectQuality(episodeID string, isMovie bool) (scraper.Q
 		return scraper.QualityAuto, nil
 	}
 
-	var items []string
-	for _, q := range qualities {
-		items = append(items, string(q))
-	}
-
-	prompt := promptui.Select{
-		Label: "Select quality",
-		Items: items,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(qualities, func(i int) string {
+		return string(qualities[i])
+	}, fuzzyfinder.WithPromptString("Select quality: "))
 	if err != nil {
 		return scraper.QualityAuto, err
 	}
@@ -274,14 +240,14 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 
 	// Get search query if not provided
 	if query == "" {
-		searchPrompt := promptui.Prompt{
-			Label: "Search",
-		}
-		var err error
-		query, err = searchPrompt.Run()
-		if err != nil {
+		var searchQuery string
+		prompt := huh.NewInput().
+			Title("Search").
+			Value(&searchQuery)
+		if err := prompt.Run(); err != nil {
 			return nil, err
 		}
+		query = searchQuery
 	}
 
 	// Search for media
@@ -393,18 +359,9 @@ func (mh *MediaHandler) selectMovieQuality(qualities []scraper.QualityOption) (s
 		return mh.quality, nil
 	}
 
-	var items []string
-	for _, q := range qualities {
-		items = append(items, q.Label)
-	}
-
-	prompt := promptui.Select{
-		Label: "Select video quality",
-		Items: items,
-		Size:  10,
-	}
-
-	idx, _, err := prompt.Run()
+	idx, err := tui.Find(qualities, func(i int) string {
+		return qualities[i].Label
+	}, fuzzyfinder.WithPromptString("Select video quality: "))
 	if err != nil {
 		return mh.quality, err
 	}
@@ -414,22 +371,28 @@ func (mh *MediaHandler) selectMovieQuality(qualities []scraper.QualityOption) (s
 
 func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackInfo) (*PlaybackInfo, error) {
 	// For anime, we need to select an episode
-	episodePrompt := promptui.Prompt{
-		Label:   "Episode number",
-		Default: "1",
-	}
+	var episodeNum string
+	prompt := huh.NewInput().
+		Title("Episode number").
+		Value(&episodeNum).
+		Validate(func(v string) error {
+			if len(v) == 0 {
+				return fmt.Errorf("episode number is required")
+			}
+			return nil
+		})
 
-	episodeNum, err := episodePrompt.Run()
-	if err != nil {
+	if err := prompt.Run(); err != nil {
 		return nil, err
 	}
-
-	modePrompt := promptui.Select{
-		Label: "Select audio",
-		Items: []string{"Sub (Subtitled)", "Dub (English Dubbed)"},
+	if episodeNum == "" {
+		episodeNum = "1"
 	}
 
-	modeIdx, _, err := modePrompt.Run()
+	modeItems := []string{"Sub (Subtitled)", "Dub (English Dubbed)"}
+	modeIdx, err := tui.Find(modeItems, func(i int) string {
+		return modeItems[i]
+	}, fuzzyfinder.WithPromptString("Select audio: "))
 	if err != nil {
 		return nil, err
 	}
