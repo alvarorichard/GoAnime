@@ -24,6 +24,17 @@ var logFile *os.File
 // LogFilePath stores the path to the current debug log file (exported for user visibility)
 var LogFilePath string
 
+// PrintSavedLocation prints a colored message showing where a downloaded file
+// or directory was saved. The label is shown in purple and the path in light purple.
+func PrintSavedLocation(label, path string) {
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6366F1")).
+		Bold(true)
+	pathStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#A78BFA"))
+	fmt.Printf("%s %s\n", labelStyle.Render(label), pathStyle.Render(path))
+}
+
 // getColoredPrefix returns a styled prefix with colors
 func getColoredPrefix() string {
 	style := lipgloss.NewStyle().

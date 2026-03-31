@@ -386,6 +386,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 	}
 
 	fmt.Printf("\n%s downloaded successfully!\n", title)
+	printDownloadLocation(destPath)
 	return md.promptPlayDownloaded(destPath, title)
 }
 
@@ -545,8 +546,11 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
-		SocketTimeout(30).
-		Impersonate("chrome")
+		SocketTimeout(30)
+
+	if util.YtdlpCanImpersonate() {
+		dl.Impersonate("chrome")
+	}
 
 	if referer != "" {
 		dl.AddHeaders("Referer:" + referer)
@@ -593,6 +597,10 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 	_, runErr := dl.Run(ctx, videoURL, "--hls-use-mpegts")
 
 	if runErr != nil {
+		// yt-dlp rejects unusual extensions (.aspx) — not retryable
+		if isUnsafeExtError(runErr) {
+			return fmt.Errorf("yt-dlp rejected URL extension: %w", runErr)
+		}
 		return fmt.Errorf("yt-dlp download failed: %w", runErr)
 	}
 

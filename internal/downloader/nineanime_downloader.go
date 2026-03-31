@@ -623,6 +623,7 @@ func (d *NineAnimeDownloader) downloadEpisodeWithProgress(anime *models.Anime, e
 	}
 
 	fmt.Printf("Episode %d downloaded successfully!\n", episode.Number)
+	printDownloadLocation(epPath)
 	return nil
 }
 
@@ -687,7 +688,11 @@ func (d *NineAnimeDownloader) downloadBatchWithProgress(anime *models.Anime, epi
 		fmt.Printf("  ✗ Failed:  %d\n", failCount)
 	}
 	fmt.Printf("  📦 Total:  %.1f MB\n", totalSizeMB)
-	fmt.Printf("  📁 Path:   %s\n", outputDir)
+	absOutputDir, _ := filepath.Abs(outputDir)
+	if absOutputDir == "" {
+		absOutputDir = outputDir
+	}
+	util.PrintSavedLocation("  Output directory:", absOutputDir)
 	fmt.Printf("%s\n", strings.Repeat("═", 60))
 
 	if failCount > 0 {
@@ -793,8 +798,11 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
-		SocketTimeout(30).
-		Impersonate("chrome")
+		SocketTimeout(30)
+
+	if util.YtdlpCanImpersonate() {
+		dl.Impersonate("chrome")
+	}
 
 	if referer != "" {
 		dl.AddHeaders("Referer:" + referer)
@@ -857,6 +865,10 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 	}
 
 	if runErr != nil {
+		// yt-dlp rejects unusual extensions (.aspx) — not retryable
+		if isUnsafeExtError(runErr) {
+			return fmt.Errorf("yt-dlp rejected URL extension: %w", runErr)
+		}
 		return fmt.Errorf("yt-dlp download failed: %w", runErr)
 	}
 

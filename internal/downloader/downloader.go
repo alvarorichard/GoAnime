@@ -250,6 +250,10 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	}
 
 	fmt.Printf("\nAll %d episodes downloaded successfully!\n", len(episodeNums))
+	if len(episodeNums) > 0 {
+		epPath := filepath.Join(d.config.OutputDir, d.episodeFilename(episodeNums[0]))
+		printDownloadLocation(filepath.Dir(epPath))
+	}
 	return d.promptPlayDownloadedRangeHuh(episodeNums)
 }
 
@@ -411,6 +415,15 @@ func (d *EpisodeDownloader) findEpisodeByNumber(num int) (models.Episode, bool) 
 		}
 	}
 	return models.Episode{}, false
+}
+
+// printDownloadLocation prints the absolute path of the downloaded file/directory.
+func printDownloadLocation(filePath string) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath
+	}
+	util.PrintSavedLocation("File saved at:", absPath)
 }
 
 func (d *EpisodeDownloader) fileExists(path string) bool {
@@ -656,6 +669,7 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 	}
 
 	fmt.Printf("\nEpisode %d downloaded successfully!\n", episodeNum)
+	printDownloadLocation(episodePath)
 	return d.promptPlayDownloaded(episodeNum, episodePath)
 }
 
@@ -933,6 +947,17 @@ func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 	}
 
 	return nil
+}
+
+// isUnsafeExtError returns true if yt-dlp rejected the URL due to an unusual file extension.
+func isUnsafeExtError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "is unusual and will be skipped")
 }
 
 func (d *EpisodeDownloader) promptPlayExisting(episodeNum int, episodePath string) error {
