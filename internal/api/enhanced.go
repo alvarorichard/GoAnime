@@ -4,50 +4,16 @@ package api
 import (
 	"errors"
 	"fmt"
-	"math"
-	"os"
 	"sort"
 	"strings"
-	"sync"
 
-	"charm.land/huh/v2/spinner"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/manifoldco/promptui"
-	"golang.org/x/term"
 )
-
-// Cached terminal detection (checked once, reused)
-var (
-	stdoutIsTerminal     bool
-	stdoutIsTerminalOnce sync.Once
-)
-
-func isStdoutTerminal() bool {
-	stdoutIsTerminalOnce.Do(func() {
-		fd := os.Stdout.Fd()
-		stdoutIsTerminal = fd <= math.MaxInt && term.IsTerminal(int(fd))
-	})
-	return stdoutIsTerminal
-}
-
-// runWithSpinner runs the action with a spinner if stdout is a terminal,
-// otherwise runs the action directly. This ensures CI and non-interactive
-// environments work correctly since huh/v2 spinner may skip the Action
-// callback when no terminal is attached.
-func runWithSpinner(title string, action func()) {
-	if isStdoutTerminal() {
-		_ = spinner.New().
-			Title(title).
-			Type(spinner.Dots).
-			Action(action).
-			Run()
-	} else {
-		action()
-	}
-}
 
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
@@ -98,7 +64,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
-	runWithSpinner("Searching for anime...", func() {
+	util.RunWithSpinner("Searching for anime...", func() {
 		if isPTBR {
 			animes, searchErr = scraperManager.SearchAnimePTBR(name)
 		} else {
@@ -144,6 +110,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	animedriveCount := 0
 	flixhqCount := 0
 	nineAnimeCount := 0
+	goyabuCount := 0
 	for _, anime := range animes {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
@@ -155,10 +122,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			flixhqCount++
 		} else if anime.Source == "9Anime" {
 			nineAnimeCount++
+		} else if anime.Source == "Goyabu" {
+			goyabuCount++
 		}
 	}
 
-	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount)
+	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount, "Goyabu", goyabuCount)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
 	sort.SliceStable(animes, func(i, j int) bool {
@@ -238,8 +207,41 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	return selectedAnime, nil
 }
 
+// logEpisodesDebug provides consistent debug output for episode fetching results
+func logEpisodesDebug(episodesCount int, sourceName string) {
+	if episodesCount > 0 {
+		util.Debug("Episodes found", "count", episodesCount, "source", sourceName)
+
+		// Provide additional info for user based on source (debug only)
+		if strings.Contains(sourceName, "AllAnime") {
+			util.Debug("Source info", "type", "AllAnime", "quality", "high")
+		} else if strings.Contains(sourceName, "AnimeDrive") {
+			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
+		} else if strings.Contains(sourceName, "Animefire") {
+			util.Debug("Source info", "type", "Animefire.io", "features", "dubbed/subtitled")
+		} else {
+			util.Debug("Source info", "type", sourceName, "features", "standard")
+		}
+	} else {
+		util.Warn("No episodes found", "source", sourceName)
+	}
+}
+
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
+	// --- NEW ARCHITECTURE: Provider Registry ---
+	if provider := providers.ForSource(anime); provider != nil {
+		cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[English]", ""), "[PT-BR]", ""))
+		util.Debug("Getting episodes via registry", "source", provider.Name(), "resolved", providers.ResolveSourceName(anime), "anime", cleanName)
+		
+		episodes, err := provider.FetchEpisodes(anime)
+		if err == nil {
+			logEpisodesDebug(len(episodes), provider.Name())
+		}
+		return episodes, err
+	}
+	// --- END NEW ARCHITECTURE ---
+
 	// Check if this is a FlixHQ movie/TV show
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		return GetFlixHQEpisodes(anime)
@@ -274,9 +276,6 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		if strings.Contains(anime.URL, "animesdrive") {
 			sourceName = "AnimeDrive"
 			anime.Source = "AnimeDrive"
-		} else if strings.Contains(anime.URL, "goyabu") {
-			sourceName = "Goyabu"
-			anime.Source = "Goyabu"
 		} else {
 			sourceName = "Animefire.io"
 			anime.Source = "Animefire.io"
@@ -333,12 +332,6 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			return nil, fmt.Errorf("failed to get AnimeFire scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	} else if sourceName == "Goyabu" {
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.GoyabuType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	} else {
 		// For others, use the original API function
 		episodes, err = GetAnimeEpisodes(anime.URL)
@@ -348,20 +341,7 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		return nil, fmt.Errorf("failed to get episodes from %s: %w", sourceName, err)
 	}
 
-	if len(episodes) > 0 {
-		util.Debug("Episodes found", "count", len(episodes), "source", sourceName)
-
-		// Provide additional info for user based on source (debug only)
-		if strings.Contains(sourceName, "AllAnime") {
-			util.Debug("Source info", "type", "AllAnime", "quality", "high")
-		} else if sourceName == "AnimeDrive" {
-			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
-		} else {
-			util.Debug("Source info", "type", "Animefire.io", "features", "dubbed/subtitled")
-		}
-	} else {
-		util.Warn("No episodes found", "source", sourceName)
-	}
+	logEpisodesDebug(len(episodes), sourceName)
 
 	return episodes, nil
 }
@@ -375,6 +355,19 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	if anime != nil && anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)
 	}
+
+	// --- NEW ARCHITECTURE: Provider Registry ---
+	if provider := providers.ForSource(anime); provider != nil {
+		util.Debug("Getting stream URL via registry",
+			"source", provider.Name(),
+			"resolved", providers.ResolveSourceName(anime),
+			"animeURL", anime.URL,
+			"episodeURL", episode.URL,
+			"episodeNumber", episode.Number,
+			"quality", quality)
+		return provider.GetStreamURL(episode, anime, quality)
+	}
+	// --- END NEW ARCHITECTURE ---
 
 	// Check if this is FlixHQ content
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
@@ -420,9 +413,6 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	} else if anime.Source == "AnimeDrive" {
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
-	} else if anime.Source == "Goyabu" {
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
 	} else if strings.Contains(anime.Name, "[English]") {
 		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
@@ -433,9 +423,6 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		if strings.Contains(anime.URL, "animesdrive") {
 			scraperType = scraper.AnimeDriveType
 			sourceName = "AnimeDrive"
-		} else if strings.Contains(anime.URL, "goyabu") {
-			scraperType = scraper.GoyabuType
-			sourceName = "Goyabu"
 		} else {
 			scraperType = scraper.AnimefireType
 			sourceName = "Animefire.io"
@@ -452,10 +439,6 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		// Priority 5: URL analysis for AnimeDrive
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
-	} else if strings.Contains(anime.URL, "goyabu") {
-		// Priority 5b: URL analysis for Goyabu
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
 	} else if strings.Contains(anime.URL, "allanime") {
 		// Priority 6: AllAnime full URLs
 		scraperType = scraper.AllAnimeType
@@ -739,7 +722,7 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading seasons (network call)
 	var seasons []scraper.FlixHQSeason
 	var seasonsErr error
-	runWithSpinner("Loading seasons...", func() {
+	util.RunWithSpinner("Loading seasons...", func() {
 		seasons, seasonsErr = flixhqClient.GetSeasons(mediaID)
 	})
 	if seasonsErr != nil {
@@ -774,7 +757,7 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading episodes (network call)
 	var flixEpisodes []scraper.FlixHQEpisode
 	var episodesErr error
-	runWithSpinner("Loading episodes...", func() {
+	util.RunWithSpinner("Loading episodes...", func() {
 		flixEpisodes, episodesErr = flixhqClient.GetEpisodes(selectedSeason.ID)
 	})
 	if episodesErr != nil {
@@ -825,7 +808,7 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		util.Debug("Getting movie stream", "mediaID", mediaID)
 
 		// Run network calls (server ID, embed link, stream extraction) with optional spinner
-		runWithSpinner("Loading movie stream...", func() {
+		util.RunWithSpinner("Loading movie stream...", func() {
 			episodeID, streamErr = flixhqClient.GetMovieServerID(mediaID, provider)
 			if streamErr != nil {
 				return
@@ -863,7 +846,7 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		util.Debug("Getting TV episode stream", "dataID", dataID)
 
 		// Run network calls (server ID, embed link, stream extraction) with optional spinner
-		runWithSpinner("Loading episode stream...", func() {
+		util.RunWithSpinner("Loading episode stream...", func() {
 			episodeID, streamErr = flixhqClient.GetEpisodeServerID(dataID, provider)
 			if streamErr != nil {
 				return

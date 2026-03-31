@@ -104,7 +104,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--update", "Check for updates and update automatically to the latest version.")
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d).")
-	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
+	addOption(&helpContent, "--source", "Specify anime source (see Available Sources below). Default: search all sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	addOption(&helpContent, "--type", "Specify media type (anime, movie, tv). Default: anime.")
@@ -112,6 +112,21 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--no-subs", "Disable subtitles for movies/TV shows (FlixHQ only).")
 	addOption(&helpContent, "--audio", "Specify preferred audio language for movies/TV (FlixHQ only: pt-BR,english,spanish).")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
+	helpContent.WriteString("\n")
+
+	// Available Sources section
+	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(sectionTitleStyle.Render("Available Sources (--source):"))
+	helpContent.WriteString("\n")
+	addOption(&helpContent, "allanime", "English subbed/dubbed anime (AllAnime)")
+	addOption(&helpContent, "animefire", "Portuguese anime - dubbed and subbed (AnimeFire)")
+	addOption(&helpContent, "animedrive", "Portuguese anime with multiple servers (AnimeDrive)")
+	addOption(&helpContent, "goyabu", "Portuguese anime (Goyabu)")
+	addOption(&helpContent, "9anime", "Multilanguage anime with subtitles (9Anime)")
+	addOption(&helpContent, "flixhq", "Movies and TV shows in English (FlixHQ)")
+	addOption(&helpContent, "sflix", "Movies and TV shows - alternative (SFlix)")
+	addOption(&helpContent, "ptbr", "Search all Portuguese sources (AnimeFire + Goyabu)")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -136,7 +151,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, and FlixHQ (movies/TV) with automatic fallback.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, AnimeDrive, Goyabu, 9Anime, and FlixHQ (movies/TV) with automatic fallback.")
 	addFeature(&helpContent, "Movies & TV Shows", "Watch movies and TV series alongside anime using FlixHQ integration.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
