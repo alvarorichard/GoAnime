@@ -152,6 +152,23 @@ func isBloggerProxyURL(u string) bool {
 	return strings.Contains(u, "127.0.0.1") && strings.Contains(u, "blogger_proxy")
 }
 
+// hasUnsafeExtension returns true if the URL has a file extension that yt-dlp
+// will reject as unusual (e.g. .aspx from SharePoint/AllAnime CDNs).
+func hasUnsafeExtension(u string) bool {
+	// Extract path from URL, ignore query string
+	path := u
+	if idx := strings.IndexByte(u, '?'); idx >= 0 {
+		path = u[:idx]
+	}
+	lower := strings.ToLower(path)
+	for _, ext := range []string{".aspx", ".asp", ".php", ".jsp", ".cgi"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // downloadBloggerDirect downloads a video directly from googlevideo CDN
 // using multiple independent surf clients with Chrome TLS impersonation.
 // Each thread creates its own TCP+TLS connection, avoiding HTTP/2 multiplexing
@@ -381,7 +398,7 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	defer cancel()
 
 	if m != nil && util.IsDebug {
-		fmt.Println("Preparing yt-dlp engine (first run may take a moment)...")
+		util.Debugf("Preparing yt-dlp engine (first run may take a moment)...")
 	}
 
 	// Try to install yt-dlp with timeout and error handling
@@ -391,7 +408,7 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	if m != nil && util.IsDebug {
-		fmt.Println("Starting yt-dlp download...")
+		util.Debugf("Starting yt-dlp download...")
 	}
 
 	// Use typed API for ALL flags so they are placed before the URL by go-ytdlp.
@@ -407,8 +424,11 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
-		SocketTimeout(30).
-		Impersonate("chrome")
+		SocketTimeout(30)
+
+	if util.YtdlpCanImpersonate() {
+		dl.Impersonate("chrome")
+	}
 
 	// Forward the stored referer/origin so the CDN accepts the request
 	if ref := util.GetGlobalReferer(); ref != "" {
@@ -456,7 +476,7 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			if m != nil && util.IsDebug {
-				fmt.Printf("Retrying download (attempt %d/%d)...\n", attempt+1, maxRetries+1)
+				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, maxRetries+1)
 			}
 			time.Sleep(time.Duration(attempt*2) * time.Second)
 			lastReportedBytes = 0
@@ -477,13 +497,28 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	if runErr != nil {
+		// yt-dlp rejects URLs with unusual extensions (.aspx, etc.) as a security
+		// measure (CVE-2024-38519). Fall back to direct HTTP download.
+		if isUnsafeExtensionError(runErr) {
+			util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
+			return downloadDirectHTTP(safeURL, safePath, m)
+		}
 		return fmt.Errorf("go-ytdlp download failed: %w", runErr)
 	}
 
 	return nil
 }
 
-// isRetryableError checks if an error is retryable (network timeouts, connection issues)
+// isUnsafeExtensionError returns true if the error is yt-dlp's unsafe extension check.
+func isUnsafeExtensionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "is unusual and will be skipped")
+}
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
@@ -584,6 +619,83 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 			m.totalBytes = fi.Size()
 			m.received = fi.Size()
 			m.mu.Unlock()
+		}
+	}
+
+	return nil
+}
+
+// downloadDirectHTTP downloads a video via plain HTTP streaming.
+// Used as a last-resort fallback when both native HLS and yt-dlp fail
+// (e.g. SharePoint .aspx URLs that serve direct video content).
+func downloadDirectHTTP(videoURL, path string, m *model) error {
+	safeURL, err := sanitizeMediaTarget(videoURL)
+	if err != nil {
+		return fmt.Errorf("invalid download URL: %w", err)
+	}
+	safePath, err := sanitizeOutputPath(path)
+	if err != nil {
+		return fmt.Errorf("invalid output path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(safePath), 0o700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	util.Debug("Starting direct HTTP download", "url", safeURL)
+
+	client := &http.Client{
+		Transport: api.SafeTransport(10 * time.Minute),
+	}
+	req, err := http.NewRequest("GET", safeURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	if ref := util.GetGlobalReferer(); ref != "" {
+		req.Header.Set("Referer", ref)
+	}
+
+	resp, err := client.Do(req) // #nosec G107 -- URL validated above
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	if m != nil && resp.ContentLength > 0 {
+		m.mu.Lock()
+		m.totalBytes = resp.ContentLength
+		m.mu.Unlock()
+	}
+
+	// #nosec G304: path validated by sanitizeOutputPath
+	out, err := os.Create(safePath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, wErr := out.Write(buf[:n]); wErr != nil {
+				return wErr
+			}
+			if m != nil {
+				m.mu.Lock()
+				m.received += int64(n)
+				m.mu.Unlock()
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
 		}
 	}
 
@@ -889,10 +1001,15 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				}
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
-				if strings.Contains(videoURL, ".m3u8") {
+				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
+				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
 					err = downloadWithNativeHLS(videoURL, episodePath, m)
 					if err != nil {
-						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", err)
+						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, err)
+						err = downloadDirectHTTP(videoURL, episodePath, m)
+					}
+					if err != nil {
+						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, err)
 						err = downloadWithYtDlp(videoURL, episodePath, m)
 					}
 				} else if strings.Contains(videoURL, "blogger.com") {
@@ -1076,10 +1193,15 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 				var dlErr error
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
-				if strings.Contains(videoURL, ".m3u8") {
+				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
+				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil {
-						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "episode", epNum, "error", dlErr)
+						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, dlErr)
+						dlErr = downloadDirectHTTP(videoURL, episodePath, m)
+					}
+					if dlErr != nil {
+						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, dlErr)
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 					}
 				} else if strings.Contains(videoURL, "blogger.com") {

@@ -935,6 +935,17 @@ func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 	return nil
 }
 
+// isUnsafeExtError returns true if yt-dlp rejected the URL due to an unusual file extension.
+func isUnsafeExtError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "is unusual and will be skipped")
+}
+
 func (d *EpisodeDownloader) promptPlayExisting(episodeNum int, episodePath string) error {
 	fmt.Printf("Would you like to play episode %d? (y/n): ", episodeNum)
 	var response string

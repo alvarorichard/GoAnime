@@ -368,9 +368,11 @@ func playVideo(
 		if is9Anime {
 			mpvArgs = append(mpvArgs,
 				"--script-opts=ytdl_hook-try_ytdl_first=yes",
-				"--ytdl-raw-options-append=impersonate=chrome",
 				fmt.Sprintf("--ytdl-raw-options-append=referer=%s", referer),
 			)
+			if util.YtdlpCanImpersonate() {
+				mpvArgs = append(mpvArgs, "--ytdl-raw-options-append=impersonate=chrome")
+			}
 			util.Debugf("9Anime stream detected - enabling yt-dlp with Chrome TLS impersonation")
 		}
 	}

@@ -100,10 +100,17 @@ func smartDownload(url, dest string) error {
 			DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
 			ConcurrentFragments(4).
 			FragmentRetries("5").
-			Retries("5").
-			Impersonate("chrome")
+			Retries("5")
+		if util.YtdlpCanImpersonate() {
+			dl.Impersonate("chrome")
+		}
 		_, err := dl.Run(ctx, url, "--hls-use-mpegts")
 		if err != nil {
+			// yt-dlp rejects unusual extensions (.aspx, etc.) — fall back to direct HTTP download
+			if isUnsafeExtensionError(err) {
+				util.Logger.Warn("yt-dlp rejected URL extension, falling back to direct download", "url", url)
+				return smartDownloadDirect(url, safeDest)
+			}
 			return fmt.Errorf("yt-dlp failed: %w", err)
 		}
 		// Verify
@@ -264,6 +271,50 @@ func shouldUseYtDlp(u string) bool {
 		strings.Contains(l, "blogger.com") ||
 		strings.Contains(l, "sharepoint.com") ||
 		strings.Contains(l, "allanime") || strings.Contains(l, "allmanga")
+}
+
+// isUnsafeExtensionError returns true if yt-dlp rejected the URL due to an unusual file extension.
+func isUnsafeExtensionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
+		strings.Contains(s, "is unusual and will be skipped")
+}
+
+// smartDownloadDirect downloads a URL directly via HTTP when yt-dlp cannot handle it.
+func smartDownloadDirect(url, safeDest string) error {
+	client := &http.Client{
+		Transport: SafeTransport(10 * time.Minute),
+	}
+	resp, err := client.Get(url) // #nosec G107 -- URL validated by caller
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			util.Logger.Warn("Error closing response body", "error", err)
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+	// #nosec G304: path validated by sanitizeSmartDest
+	out, err := os.Create(safeDest)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			util.Logger.Warn("Error closing output file", "error", err)
+		}
+	}()
+	if _, err := io.Copy(out, io.LimitReader(resp.Body, 5*1024*1024*1024)); err != nil {
+		return err
+	}
+	return nil
 }
 
 // alreadyDownloaded checks if the file exists and seems valid (>1KB)

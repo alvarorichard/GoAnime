@@ -122,7 +122,20 @@ func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	// Peek at the response to verify it's an M3U8 playlist before scanning.
+	// Non-HLS responses (binary video, HTML) cause "bufio.Scanner: token too long".
+	peekBuf := make([]byte, 64)
+	peekN, _ := io.ReadFull(resp.Body, peekBuf)
+	peek := string(peekBuf[:peekN])
+	if peekN > 0 && !strings.Contains(peek, "#EXTM3U") && !strings.Contains(peek, "#EXT-X-") {
+		snip := peek
+		if len(snip) > 32 {
+			snip = snip[:32]
+		}
+		return nil, fmt.Errorf("response is not an HLS playlist (starts with %q)", snip)
+	}
+	body := io.MultiReader(strings.NewReader(peek), resp.Body)
+	scanner := bufio.NewScanner(body)
 
 	// Check if this is a master playlist by looking for STREAM-INF tags
 	isMasterPlaylist := false
@@ -234,7 +247,19 @@ func (d *Downloader) parseMediaPlaylist(ctx context.Context, url string, headers
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
+	// Peek at the response to verify it's an M3U8 playlist.
+	peekBuf := make([]byte, 64)
+	peekN, _ := io.ReadFull(resp.Body, peekBuf)
+	peek := string(peekBuf[:peekN])
+	if peekN > 0 && !strings.Contains(peek, "#EXTM3U") && !strings.Contains(peek, "#EXT-X-") {
+		snip := peek
+		if len(snip) > 32 {
+			snip = snip[:32]
+		}
+		return nil, fmt.Errorf("response is not an HLS playlist (starts with %q)", snip)
+	}
+	body := io.MultiReader(strings.NewReader(peek), resp.Body)
+	scanner := bufio.NewScanner(body)
 	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, strings.TrimSpace(scanner.Text()))

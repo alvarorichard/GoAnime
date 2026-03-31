@@ -83,7 +83,9 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
 		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
 
-		manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+		// AnimeDrive disabled — Cloudflare protection blocks all requests.
+		// Kept on standby until a bypass/solution is found.
+		// manager.scrapers[AnimeDriveType] = &AnimeDriveAdapter{client: NewAnimeDriveClient()}
 
 		globalScraperManager = manager
 	})

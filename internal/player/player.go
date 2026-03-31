@@ -815,12 +815,16 @@ func downloadAndPlayEpisode(
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
-				// yt-dlp is only used for non-HLS streams.
+				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if strings.Contains(videoURL, ".m3u8") {
+				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil {
-						util.Logger.Warn("Native HLS failed, falling back to yt-dlp", "error", dlErr)
+						util.Debugf("Native HLS failed, trying direct HTTP: %v", dlErr)
+						dlErr = downloadDirectHTTP(videoURL, episodePath, m)
+					}
+					if dlErr != nil {
+						util.Debugf("Direct HTTP failed, falling back to yt-dlp: %v", dlErr)
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 					}
 				} else {
