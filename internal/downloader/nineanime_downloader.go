@@ -623,6 +623,7 @@ func (d *NineAnimeDownloader) downloadEpisodeWithProgress(anime *models.Anime, e
 	}
 
 	fmt.Printf("Episode %d downloaded successfully!\n", episode.Number)
+	printDownloadLocation(epPath)
 	return nil
 }
 
@@ -687,7 +688,11 @@ func (d *NineAnimeDownloader) downloadBatchWithProgress(anime *models.Anime, epi
 		fmt.Printf("  ✗ Failed:  %d\n", failCount)
 	}
 	fmt.Printf("  📦 Total:  %.1f MB\n", totalSizeMB)
-	fmt.Printf("  📁 Path:   %s\n", outputDir)
+	absOutputDir, _ := filepath.Abs(outputDir)
+	if absOutputDir == "" {
+		absOutputDir = outputDir
+	}
+	util.PrintSavedLocation("  Output directory:", absOutputDir)
 	fmt.Printf("%s\n", strings.Repeat("═", 60))
 
 	if failCount > 0 {

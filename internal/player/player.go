@@ -784,6 +784,7 @@ func downloadAndPlayEpisode(
 			}
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
+			printDownloadLocation(episodePath)
 			downloadSubtitleFiles(episodePath)
 
 		} else if strings.Contains(videoURL, "blogger.com") ||
@@ -874,6 +875,7 @@ func downloadAndPlayEpisode(
 			}
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
+			printDownloadLocation(episodePath)
 
 			// Download selected subtitles alongside the video file
 			downloadSubtitleFiles(episodePath)
@@ -933,6 +935,7 @@ func downloadAndPlayEpisode(
 			}
 
 			// Download selected subtitles alongside the video file
+			printDownloadLocation(episodePath)
 			downloadSubtitleFiles(episodePath)
 		}
 	} else {
@@ -1283,6 +1286,16 @@ func handleUpscaleFromMenu() error {
 	}
 
 	return nil
+}
+
+// printDownloadLocation prints the absolute path of the downloaded file so
+// the user knows where the file was saved (works on macOS, Linux, Windows).
+func printDownloadLocation(filePath string) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath
+	}
+	util.PrintSavedLocation("File saved at:", absPath)
 }
 
 // downloadSubtitleFiles downloads the user-selected subtitle tracks alongside

@@ -386,6 +386,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 	}
 
 	fmt.Printf("\n%s downloaded successfully!\n", title)
+	printDownloadLocation(destPath)
 	return md.promptPlayDownloaded(destPath, title)
 }
 

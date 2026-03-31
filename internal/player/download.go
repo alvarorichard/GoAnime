@@ -1069,6 +1069,7 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 		return err
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
+	printBatchDownloadLocation(animeURL, startNum)
 	util.Debug("HandleBatchDownload completed", "animeURL", animeURL, "duration", time.Since(start))
 
 	// Ask user which episode from the downloaded range they want to play
@@ -1259,6 +1260,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 		return err
 	}
 	fmt.Println("\nAll episodes downloaded successfully!")
+	printBatchDownloadLocation(animeURL, startNum)
 	util.Debug("HandleBatchDownloadRange completed", "animeURL", animeURL, "duration", time.Since(start))
 	// For programmatic range downloads, exit without further prompts
 	return ErrUserQuit
@@ -1370,6 +1372,21 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 		return "", err
 	}
 	return filepath.Join(downloadDir, fmt.Sprintf("%d.mp4", epNum)), nil
+}
+
+// printBatchDownloadLocation prints the directory where batch-downloaded episodes
+// were saved, derived from the episode path builder.
+func printBatchDownloadLocation(animeURL string, sampleEpNum int) {
+	ep, err := createEpisodePath(animeURL, sampleEpNum)
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(ep)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
+	util.PrintSavedLocation("Episodes saved at:", absDir)
 }
 
 // fileExists verifica se o arquivo existe.
