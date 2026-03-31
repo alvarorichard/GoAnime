@@ -25,3 +25,6 @@ build/goanime-local
 
 #Ignore MacOS system files junk
 .DS_Store
+
+# Ignore IntelliJ run files
+.run
