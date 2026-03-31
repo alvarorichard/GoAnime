@@ -65,7 +65,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
-	util.RunWithSpinner("Searching for anime...", func() {
+	tui.RunWithSpinner("Searching for anime...", func() {
 		if isPTBR {
 			animes, searchErr = scraperManager.SearchAnimePTBR(name)
 		} else {
@@ -733,7 +733,7 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading seasons (network call)
 	var seasons []scraper.FlixHQSeason
 	var seasonsErr error
-	util.RunWithSpinner("Loading seasons...", func() {
+	tui.RunWithSpinner("Loading seasons...", func() {
 		seasons, seasonsErr = flixhqClient.GetSeasons(mediaID)
 	})
 	if seasonsErr != nil {
@@ -760,7 +760,7 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Use spinner for loading episodes (network call)
 	var flixEpisodes []scraper.FlixHQEpisode
 	var episodesErr error
-	util.RunWithSpinner("Loading episodes...", func() {
+	tui.RunWithSpinner("Loading episodes...", func() {
 		flixEpisodes, episodesErr = flixhqClient.GetEpisodes(selectedSeason.ID)
 	})
 	if episodesErr != nil {
@@ -811,7 +811,7 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		util.Debug("Getting movie stream", "mediaID", mediaID)
 
 		// Run network calls (server ID, embed link, stream extraction) with optional spinner
-		util.RunWithSpinner("Loading movie stream...", func() {
+		tui.RunWithSpinner("Loading movie stream...", func() {
 			episodeID, streamErr = flixhqClient.GetMovieServerID(mediaID, provider)
 			if streamErr != nil {
 				return
@@ -849,7 +849,7 @@ func GetFlixHQStreamURL(media *models.Anime, episode *models.Episode, quality st
 		util.Debug("Getting TV episode stream", "dataID", dataID)
 
 		// Run network calls (server ID, embed link, stream extraction) with optional spinner
-		util.RunWithSpinner("Loading episode stream...", func() {
+		tui.RunWithSpinner("Loading episode stream...", func() {
 			episodeID, streamErr = flixhqClient.GetEpisodeServerID(dataID, provider)
 			if streamErr != nil {
 				return

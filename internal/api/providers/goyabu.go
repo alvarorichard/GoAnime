@@ -39,7 +39,7 @@ func (p *GoyabuProvider) FetchEpisodes(anime *models.Anime) ([]models.Episode, e
 }
 
 // GetStreamURL fetches the stream URL for an episode.
-func (p *GoyabuProvider) GetStreamURL(episode *models.Episode, _ *models.Anime, quality string) (string, error) {
+func (p *GoyabuProvider) GetStreamURL(episode *models.Episode, _ *models.Anime, _ string) (string, error) {
 	scraperInstance, err := p.manager.GetScraper(scraper.GoyabuType)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Goyabu scraper: %w", err)

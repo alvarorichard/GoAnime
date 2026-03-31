@@ -1,5 +1,5 @@
-// Package util provides utility functions like spinners and UI helpers.
-package util
+// Package tui provides utility functions like spinners and UI helpers.
+package tui
 
 import (
 	"math"
