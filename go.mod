@@ -19,13 +19,13 @@ require (
 	charm.land/log/v2 v2.0.0
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.0.223
-	github.com/enetx/surf v1.0.197
+	github.com/enetx/surf v1.0.198
 	github.com/lrstanley/go-ytdlp v1.3.5
 	github.com/tr1xem/go-discordrpc v1.0.0
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260330092749-0f94982c930b // indirect

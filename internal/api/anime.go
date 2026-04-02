@@ -389,6 +389,25 @@ func resolveURL(base, ref string) string {
 	return baseURL.ResolveReference(refURL).String()
 }
 
+// normalizeAccents replaces common accented characters with their ASCII equivalents.
+func normalizeAccents(s string) string {
+	replacer := strings.NewReplacer(
+		"á", "a", "à", "a", "ã", "a", "â", "a", "ä", "a",
+		"é", "e", "è", "e", "ê", "e", "ë", "e",
+		"í", "i", "ì", "i", "î", "i", "ï", "i",
+		"ó", "o", "ò", "o", "õ", "o", "ô", "o", "ö", "o",
+		"ú", "u", "ù", "u", "û", "u", "ü", "u",
+		"ç", "c", "ñ", "n",
+		"Á", "A", "À", "A", "Ã", "A", "Â", "A", "Ä", "A",
+		"É", "E", "È", "E", "Ê", "E", "Ë", "E",
+		"Í", "I", "Ì", "I", "Î", "I", "Ï", "I",
+		"Ó", "O", "Ò", "O", "Õ", "O", "Ô", "O", "Ö", "O",
+		"Ú", "U", "Ù", "U", "Û", "U", "Ü", "U",
+		"Ç", "C", "Ñ", "N",
+	)
+	return replacer.Replace(s)
+}
+
 // generateSearchVariations creates multiple search term variations for better AniList matching
 // This is especially important for Brazilian sources that have localized titles
 func generateSearchVariations(cleanedName string) []string {
@@ -442,6 +461,19 @@ func generateSearchVariations(cleanedName string) []string {
 	// Some anime have "The" prefix in English but not in romaji
 	if strings.HasPrefix(strings.ToLower(cleanedName), "the ") {
 		addVariation(cleanedName[4:])
+	}
+
+	// Variation: Remove common PT-BR descriptive suffixes (Clássico, Classic, etc.)
+	// These are used by Brazilian sites to distinguish series (e.g. "Naruto Clássico" vs "Naruto Shippuden")
+	rePtBRSuffix := regexp.MustCompile(`(?i)\s+(?:cl[aá]ssico|classic|shippuuden|next\s+generations?)\s*$`)
+	if rePtBRSuffix.MatchString(cleanedName) {
+		addVariation(strings.TrimSpace(rePtBRSuffix.ReplaceAllString(cleanedName, "")))
+	}
+
+	// Variation: Normalize accented characters to ASCII (e.g. Clássico → Classico)
+	normalized := normalizeAccents(cleanedName)
+	if normalized != cleanedName {
+		addVariation(normalized)
 	}
 
 	// Variation: For very long titles, try first few words

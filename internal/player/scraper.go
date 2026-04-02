@@ -653,6 +653,18 @@ func newSurfClient() *surf.Client {
 		Unwrap()
 }
 
+// newSurfDownloadClient creates a surf client for downloading large files.
+// Unlike newSurfClient, it follows redirects (googlevideo CDN uses 302s)
+// and has a 10-minute timeout to handle large video chunks.
+func newSurfDownloadClient() *surf.Client {
+	return surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Timeout(10 * time.Minute).
+		Build().
+		Unwrap()
+}
+
 // bloggerSessionClient is a reusable surf session client for Blogger batchexecute.
 // Creating a new TLS-impersonated client per request adds ~200-400ms of handshake overhead.
 var (
@@ -835,17 +847,28 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 // extract the googlevideo URL via Blogger's batchexecute API and starts a
 // local Go proxy that streams the video with the same TLS fingerprint.
 // The entire chain uses Chrome TLS so Google's CDN does not reject requests.
+// Retries up to 3 times since the first batchexecute call often fails before
+// the session cookies are fully established.
 func extractBloggerVideoURL(bloggerURL string) (string, error) {
 	if util.IsDebug {
 		util.Debugf("Extracting actual video URL from Blogger page: %s", bloggerURL)
 	}
 
-	proxyURL, err := startBloggerProxy(bloggerURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to start Blogger proxy: %w", err)
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		proxyURL, err := startBloggerProxy(bloggerURL)
+		if err == nil {
+			return proxyURL, nil
+		}
+		lastErr = err
+		if attempt < maxRetries {
+			util.Debugf("Blogger extraction attempt %d/%d failed: %v, retrying...", attempt, maxRetries, err)
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
 	}
 
-	return proxyURL, nil
+	return "", fmt.Errorf("failed to start Blogger proxy after %d attempts: %w", maxRetries, lastErr)
 }
 
 // bloggerProxy holds the state of the running Go HTTP proxy server.

@@ -188,8 +188,8 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Get content length with a quick HEAD request
-	headClient := newSurfClient().Std()
+	// Use download client that follows redirects (googlevideo uses 302s)
+	headClient := newSurfDownloadClient().Std()
 	contentLength, err := getContentLength(directURL, headClient)
 	if err != nil {
 		return fmt.Errorf("failed to get content length: %w", err)
@@ -276,8 +276,8 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 			time.Sleep(500 * time.Millisecond) // Brief pause before retry
 		}
 
-		// Fresh surf client per attempt — new TCP+TLS connection
-		client := newSurfClient().Std()
+		// Fresh download client per attempt — follows redirects and has a long timeout
+		client := newSurfDownloadClient().Std()
 
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {

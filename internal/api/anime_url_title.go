@@ -17,8 +17,9 @@ import (
 
 // ptbrURLSuffixes are noise suffixes commonly appended to anime URL slugs
 // on Brazilian streaming sites like Goyabu and AnimeFire.
+// The optional trailing \d+ handles Goyabu internal IDs (e.g. naruto-classico-online-hd-4).
 var ptbrURLSuffixes = regexp.MustCompile(
-	`(?i)-(?:dublado|legendado|online|hd|completo|todos-os-episodios)(?:-(?:dublado|legendado|online|hd|completo|todos-os-episodios))*$`,
+	`(?i)(?:-(?:dublado|legendado|online|hd|completo|todos-os-episodios))+(?:-\d+)?$`,
 )
 
 // extractRomajiFromURL extracts a romaji anime title from a Goyabu or AnimeFire URL slug.
