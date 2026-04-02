@@ -548,11 +548,12 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 			return fmt.Errorf("download incomplete: %d/%d segments failed (%.0f%%): %w",
 				failedSegments, totalSegments, failRatio*100, firstErr)
 		}
-		// Log minor losses but don't fail
-		if util.IsDebug {
-			fmt.Printf("Note: %d/%d segments could not be downloaded (%.1f%%), minor glitches possible\n",
-				failedSegments, totalSegments, failRatio*100)
-		}
+		// Log minor losses but don't fail — use structured logger instead of
+		// fmt.Printf because bubbletea's progress bar owns stdout at this point.
+		util.Debug("HLS segments partially failed",
+			"failed", failedSegments,
+			"total", totalSegments,
+			"failPercent", fmt.Sprintf("%.1f%%", failRatio*100))
 	}
 
 	return nil

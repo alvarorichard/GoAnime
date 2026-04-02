@@ -35,21 +35,8 @@ var (
 )
 
 // downloadPart downloads a part of the video file using HTTP Range Requests.
+// Automatically retries with resume on connection drops (up to 20 stale retries).
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", from, to))
-	resp, err := client.Do(req) // #nosec G704
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			util.Logger.Warn("Error closing response body", "error", err)
-		}
-	}()
 	partFilePath, err := safePartPath(destPath, part)
 	if err != nil {
 		return err
@@ -64,24 +51,87 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 			util.Logger.Warn("Error closing file", "error", err)
 		}
 	}()
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			if _, err := file.Write(buf[:n]); err != nil {
-				return err
-			}
-			m.mu.Lock()
-			m.received += int64(n)
-			m.mu.Unlock()
+
+	current := from
+	maxStaleRetries := 20
+	staleRetries := 0
+
+	for attempt := 0; current <= to; attempt++ {
+		if staleRetries >= maxStaleRetries {
+			return fmt.Errorf("part %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
 		}
-		if err == io.EOF {
-			break
+		if attempt > 0 {
+			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
+			time.Sleep(500 * time.Millisecond)
 		}
+
+		beforeRead := current
+
+		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
 			return err
 		}
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
+
+		resp, err := client.Do(req) // #nosec G704
+		if err != nil {
+			util.Debugf("Download part %d: request error: %v", part, err)
+			staleRetries++
+			continue
+		}
+
+		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+			if cErr := resp.Body.Close(); cErr != nil {
+				util.Logger.Warn("Error closing response body", "error", cErr)
+			}
+			util.Debugf("Download part %d: unexpected status %d", part, resp.StatusCode)
+			staleRetries++
+			continue
+		}
+
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
+					if cErr := resp.Body.Close(); cErr != nil {
+						util.Logger.Warn("Error closing response body", "error", cErr)
+					}
+					return writeErr
+				}
+				current += int64(n)
+				if m != nil {
+					m.mu.Lock()
+					m.received += int64(n)
+					m.mu.Unlock()
+				}
+			}
+			if readErr == io.EOF {
+				if cErr := resp.Body.Close(); cErr != nil {
+					util.Logger.Warn("Error closing response body", "error", cErr)
+				}
+				break
+			}
+			if readErr != nil {
+				if cErr := resp.Body.Close(); cErr != nil {
+					util.Logger.Warn("Error closing response body", "error", cErr)
+				}
+				util.Debugf("Download part %d: read error after %d bytes: %v", part, current-from, readErr)
+				break
+			}
+		}
+
+		if current > to {
+			break
+		}
+
+		if current == beforeRead {
+			staleRetries++
+		} else {
+			staleRetries = 0
+		}
 	}
+
 	return nil
 }
 
@@ -262,19 +312,26 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			util.Logger.Warn("Error closing part file", "error", err)
+		}
+	}()
 
 	current := from
-	maxRetries := 20 // Allow many retries for chunked CDN downloads
+	maxStaleRetries := 20 // Only count retries where no data was received
+	staleRetries := 0
 
 	for attempt := 0; current <= to; attempt++ {
-		if attempt >= maxRetries {
-			return fmt.Errorf("chunk %d: max retries (%d) exceeded at offset %d/%d", part, maxRetries, current, to)
+		if staleRetries >= maxStaleRetries {
+			return fmt.Errorf("chunk %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
 		}
 		if attempt > 0 {
 			util.Debugf("Blogger chunk %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
 			time.Sleep(500 * time.Millisecond) // Brief pause before retry
 		}
+
+		beforeRead := current
 
 		// Fresh download client per attempt — follows redirects and has a long timeout
 		client := newSurfDownloadClient().Std()
@@ -328,6 +385,13 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 		if current > to {
 			break
 		}
+
+		// Only count as stale retry if no progress was made
+		if current == beforeRead {
+			staleRetries++
+		} else {
+			staleRetries = 0 // Reset on progress
+		}
 	}
 
 	return nil
@@ -352,6 +416,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	}
 	chunkSize = contentLength / int64(numThreads)
 	var downloadWg sync.WaitGroup
+	errChan := make(chan error, numThreads)
 	for i := range numThreads {
 		from := int64(i) * chunkSize
 		to := from + chunkSize - 1
@@ -361,13 +426,22 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 		downloadWg.Add(1)
 		go func(from, to int64, part int, httpClient *http.Client) {
 			defer downloadWg.Done()
-			err := downloadPart(url, from, to, part, httpClient, destPath, m)
-			if err != nil {
+			if err := downloadPart(url, from, to, part, httpClient, destPath, m); err != nil {
 				util.Logger.Error("Download part failed", "thread", part, "error", err)
+				errChan <- err
 			}
 		}(from, to, i, httpClient)
 	}
 	downloadWg.Wait()
+	close(errChan)
+
+	// Check if any chunk failed
+	for err := range errChan {
+		if err != nil {
+			return fmt.Errorf("chunk download failed: %w", err)
+		}
+	}
+
 	err = combineParts(destPath, numThreads)
 	if err != nil {
 		return fmt.Errorf("failed to combine parts: %v", err)
@@ -592,12 +666,19 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		// Update received with real bytes on disk
 		m.received = bytesWritten
 
-		// Dynamically estimate total file size from average bytes per segment
+		// Dynamically estimate total file size from average bytes per segment.
+		// After only a few segments, only increase the estimate (to avoid the bar
+		// going backwards due to a single outlier segment). Once we have enough
+		// segments for a reliable average (10+), allow the estimate to shrink too
+		// so the progress bar tracks reality instead of sitting at e.g. 39%.
 		if segmentsWritten >= 3 {
 			avgBytesPerSeg := bytesWritten / int64(segmentsWritten)
 			estimatedTotal := avgBytesPerSeg * int64(totalSegments)
-			// Only increase estimate (never shrink it to prevent bar going backwards)
-			if estimatedTotal > m.totalBytes {
+			if segmentsWritten >= 10 {
+				// Reliable average — use directly
+				m.totalBytes = estimatedTotal
+			} else if estimatedTotal > m.totalBytes {
+				// Early estimate — only grow to avoid flicker
 				m.totalBytes = estimatedTotal
 			}
 		}
@@ -612,15 +693,10 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 		return fmt.Errorf("native HLS download failed: %w", err)
 	}
 
-	// Set real 100% from actual file size now that download is truly complete
-	if m != nil {
-		if fi, statErr := os.Stat(safePath); statErr == nil && fi.Size() > 0 {
-			m.mu.Lock()
-			m.totalBytes = fi.Size()
-			m.received = fi.Size()
-			m.mu.Unlock()
-		}
-	}
+	// NOTE: Do NOT set m.received = m.totalBytes here.
+	// The caller goroutine sets final 100% together with m.done in a single
+	// lock, preventing the tick handler from seeing 100% before done=true
+	// (which would cause a visual jump in the progress bar).
 
 	return nil
 }
@@ -659,7 +735,11 @@ func downloadDirectHTTP(videoURL, path string, m *model) error {
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			util.Logger.Warn("Error closing response body", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -919,13 +999,15 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 
 		// Episode needs downloading
 		episodesToDownload = append(episodesToDownload, episodeNum)
-		// Include HLS estimate when Content-Length is not available so progress accumulates realistically
+		// Include HLS estimate when Content-Length is not available so progress accumulates realistically.
+		// Use 150MB for HLS (typical ~24min anime episode at moderate bitrate) instead of 500MB.
+		// The actual total is dynamically adjusted during download from real segment sizes.
 		if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 			totalBytes += sz
 		} else if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") || strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
-			totalBytes += 500 * 1024 * 1024
+			totalBytes += 150 * 1024 * 1024
 		} else {
-			totalBytes += 200 * 1024 * 1024
+			totalBytes += 100 * 1024 * 1024
 		}
 	}
 
@@ -1124,9 +1206,9 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 		if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 			totalBytes += sz
 		} else if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") || strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
-			totalBytes += 500 * 1024 * 1024
+			totalBytes += 150 * 1024 * 1024
 		} else {
-			totalBytes += 200 * 1024 * 1024
+			totalBytes += 100 * 1024 * 1024
 		}
 	}
 

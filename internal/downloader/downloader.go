@@ -189,15 +189,18 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	})
 
 	fmt.Println("Calculating download sizes...")
+	var skippedEpisodes []int
 	for _, epNum := range episodeNums {
 		episode, found := d.findEpisodeByNumber(epNum)
 		if !found {
+			skippedEpisodes = append(skippedEpisodes, epNum)
 			continue
 		}
 
 		videoURL, err := d.getBestQualityURL(episode.URL)
 		if err != nil {
 			util.Warnf("Failed to get video URL for episode %d: %v", epNum, err)
+			skippedEpisodes = append(skippedEpisodes, epNum)
 			continue
 		}
 
@@ -217,6 +220,14 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 		}{videoURL, episodePath, size}
 
 		totalBytes += size
+	}
+
+	if len(skippedEpisodes) > 0 {
+		fmt.Printf("Warning: %d episode(s) could not be resolved and will be skipped: %v\n", len(skippedEpisodes), skippedEpisodes)
+	}
+
+	if len(episodeInfos) == 0 {
+		return fmt.Errorf("no episodes could be resolved for download (failed: %v)", skippedEpisodes)
 	}
 
 	m.totalBytes = totalBytes

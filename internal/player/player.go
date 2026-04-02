@@ -753,13 +753,13 @@ func downloadAndPlayEpisode(
 					p.Send(statusMsg("Download failed"))
 					return
 				}
+				// Set final size + done in a single lock to prevent the tick
+				// handler from seeing 100% with done=false (causes visual jump).
+				m.mu.Lock()
 				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
-					m.mu.Lock()
 					m.totalBytes = fi.Size()
 					m.received = fi.Size()
-					m.mu.Unlock()
 				}
-				m.mu.Lock()
 				m.done = true
 				m.mu.Unlock()
 				p.Send(statusMsg("Download completed!"))
@@ -809,7 +809,7 @@ func downloadAndPlayEpisode(
 				m.totalBytes = sz
 			} else {
 				// Fallback for HLS
-				m.totalBytes = 500 * 1024 * 1024
+				m.totalBytes = 150 * 1024 * 1024
 			}
 
 			go func() {
@@ -839,14 +839,13 @@ func downloadAndPlayEpisode(
 					p.Send(statusMsg("Download failed"))
 					return
 				}
-				// Update progress to reflect real file size so bar shows accurate 100%
+				// Set final size + done in a single lock to prevent the tick
+				// handler from seeing 100% with done=false (causes visual jump).
+				m.mu.Lock()
 				if fi, statErr := os.Stat(episodePath); statErr == nil && fi.Size() > 0 {
-					m.mu.Lock()
 					m.totalBytes = fi.Size()
 					m.received = fi.Size()
-					m.mu.Unlock()
 				}
-				m.mu.Lock()
 				m.done = true
 				m.mu.Unlock()
 				p.Send(statusMsg("Download completed!"))
