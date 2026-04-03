@@ -54,7 +54,12 @@ jobs:
           $mpvExe = Get-ChildItem -Path mpv_tmp -Recurse -Filter "mpv.exe" | Select-Object -First 1
           echo $mpvExe.DirectoryName | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           & $mpvExe.FullName --version
-          choco install yt-dlp -y
+          # Install yt-dlp directly from GitHub releases (Chocolatey is unreliable)
+          $ytRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest" -Headers $headers
+          $ytAsset = $ytRelease.assets | Where-Object { $_.name -eq "yt-dlp.exe" } | Select-Object -First 1
+          Invoke-WebRequest -Uri $ytAsset.browser_download_url -OutFile "$env:USERPROFILE\yt-dlp.exe"
+          echo "$env:USERPROFILE" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & "$env:USERPROFILE\yt-dlp.exe" --version
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'

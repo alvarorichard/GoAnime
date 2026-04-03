@@ -191,15 +191,28 @@ jobs:
       - name: Install GCC for CGO (SQLite support)
         shell: pwsh
         run: |
-          # Install TDM-GCC for Windows CGO builds with SQLite
-          Write-Host "Installing TDM-GCC for CGO support..."
-          choco install mingw -y
-          
-          # Verify GCC is available
-          $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
+          # Check if mingw/gcc is already available on the runner
+          $gccPaths = @("C:\ProgramData\mingw64\mingw64\bin", "C:\mingw64\bin", "C:\msys64\mingw64\bin")
+          $found = $false
+          foreach ($p in $gccPaths) {
+            if (Test-Path "$p\gcc.exe") {
+              echo $p | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+              $env:PATH = "$p;$env:PATH"
+              $found = $true
+              Write-Host "Found existing GCC at $p"
+              break
+            }
+          }
+          if (-not $found) {
+            Write-Host "Installing MinGW via Chocolatey..."
+            for ($i = 1; $i -le 3; $i++) {
+              choco install mingw -y --no-progress && break
+              Write-Host "Retry $i/3..."; Start-Sleep -Seconds 10
+            }
+            $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
+          }
           gcc --version
-          
-          Write-Host "GCC installed successfully for CGO builds"
+          Write-Host "GCC available for CGO builds"
 
       - name: Build GoAnime binary with SQLite
         shell: pwsh
@@ -309,17 +322,21 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          # Install Inno Setup via Chocolatey (more reliable in CI)
-          Write-Host "Installing Inno Setup via Chocolatey..."
-          choco install innosetup -y --no-progress
-          
-          # Verify installation
+          # Check if Inno Setup is already installed
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (Test-Path $iscc) {
-            Write-Host "Inno Setup installed successfully at: $iscc"
+            Write-Host "Inno Setup already installed at: $iscc"
           } else {
-            Write-Error "Inno Setup installation failed - ISCC.exe not found"
-            exit 1
+            Write-Host "Installing Inno Setup via Chocolatey..."
+            for ($i = 1; $i -le 3; $i++) {
+              choco install innosetup -y --no-progress && break
+              Write-Host "Retry $i/3..."; Start-Sleep -Seconds 10
+            }
+            if (-not (Test-Path $iscc)) {
+              Write-Error "Inno Setup installation failed - ISCC.exe not found"
+              exit 1
+            }
+            Write-Host "Inno Setup installed successfully"
           }
 
       - name: Create dist directory
