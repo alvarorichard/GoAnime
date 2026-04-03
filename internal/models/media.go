@@ -34,13 +34,14 @@ type Media struct {
 	Details   AniListDetails
 
 	// Movie/TV-specific fields (TMDB/OMDb)
-	TMDBID      int          // TMDB ID
-	IMDBID      string       // IMDB ID
-	TMDBDetails *TMDBDetails // Detailed TMDB information
-	Rating      float64      // Rating (0-10)
-	Overview    string       // Description/synopsis
-	Genres      []string     // Genre list
-	Runtime     int          // Runtime in minutes (for movies)
+	TMDBID        int          // TMDB ID
+	IMDBID        string       // IMDB ID
+	TMDBDetails   *TMDBDetails // Detailed TMDB information
+	Rating        float64      // Rating (0-10)
+	Overview      string       // Description/synopsis
+	Genres        []string     // Genre list
+	Runtime       int          // Runtime in minutes (for movies)
+	CurrentSeason int          // Currently selected season number (for TV shows)
 }
 
 // Season represents a TV show season

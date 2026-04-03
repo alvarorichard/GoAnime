@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.26.1'
   BINARY_NAME: goanime
 
 jobs:
@@ -42,9 +42,8 @@ jobs:
       - name: Run linter
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          version: v2.11.4
           args: --timeout=15m
-        continue-on-error: true
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./... || true
@@ -64,6 +63,7 @@ jobs:
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: coverage
           path: coverage.out

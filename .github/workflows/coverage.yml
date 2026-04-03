@@ -49,7 +49,7 @@ jobs:
           brew install mpv yt-dlp
 
       - name: Get dependencies
-        run: go get -v -t -d ./...
+        run: go mod download
 
       - name: Run tests with coverage
         shell: bash

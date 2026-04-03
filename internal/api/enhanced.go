@@ -771,7 +771,8 @@ func GetFlixHQEpisodes(media *models.Anime) ([]models.Episode, error) {
 	}
 
 	selectedSeason := seasons[seasonIdx]
-	util.Debug("Selected season", "season", selectedSeason.Title, "id", selectedSeason.ID)
+	media.CurrentSeason = selectedSeason.Number
+	util.Debug("Selected season", "season", selectedSeason.Title, "id", selectedSeason.ID, "number", selectedSeason.Number)
 
 	// Use spinner for loading episodes (network call)
 	var flixEpisodes []scraper.FlixHQEpisode

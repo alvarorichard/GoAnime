@@ -207,8 +207,8 @@ func isBloggerProxyURL(u string) bool {
 func hasUnsafeExtension(u string) bool {
 	// Extract path from URL, ignore query string
 	path := u
-	if idx := strings.IndexByte(u, '?'); idx >= 0 {
-		path = u[:idx]
+	if before, _, ok := strings.Cut(u, "?"); ok {
+		path = before
 	}
 	lower := strings.ToLower(path)
 	for _, ext := range []string{".aspx", ".asp", ".php", ".jsp", ".cgi"} {

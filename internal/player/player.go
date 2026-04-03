@@ -484,6 +484,7 @@ func HandleDownloadAndPlay(
 	animeMalID int,
 	updater *discord.RichPresenceUpdater,
 	animeName string,
+	animeSeason int,
 ) error {
 	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
 
@@ -492,7 +493,10 @@ func HandleDownloadAndPlay(
 
 	// Store anime name for Plex-compatible download file naming
 	if animeName != "" {
-		season := 1
+		season := animeSeason
+		if season < 1 {
+			season = 1
+		}
 		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
 			season = util.GlobalDownloadRequest.SeasonNum
 		}

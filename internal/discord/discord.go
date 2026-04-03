@@ -290,7 +290,11 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 		if rpu.anime.IsMovie() || rpu.anime.MediaType == "movie" {
 			state = "Watching a movie"
 		} else {
-			state = fmt.Sprintf("Episode %s", episodeNumber)
+			if rpu.anime.CurrentSeason > 0 {
+				state = fmt.Sprintf("S%02dE%s", rpu.anime.CurrentSeason, episodeNumber)
+			} else {
+				state = fmt.Sprintf("Episode %s", episodeNumber)
+			}
 		}
 	} else {
 		state = fmt.Sprintf("Episode %s", episodeNumber)

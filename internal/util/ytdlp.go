@@ -20,7 +20,7 @@ func YtdlpCanImpersonate() bool {
 			Debugf("yt-dlp impersonation check failed: %v", err)
 			return
 		}
-		for _, line := range strings.Split(string(out), "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			lower := strings.ToLower(line)
 			if strings.Contains(lower, "chrome") && !strings.Contains(lower, "unavailable") {
 				ytdlpImpersonateResult = true
