@@ -39,9 +39,22 @@ jobs:
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          choco install mpv
-          choco install yt-dlp
+          $headers = @{ "User-Agent" = "GoAnime-CI" }
+          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers $headers
+          $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-v3-*.7z" } | Select-Object -First 1
+          if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" } | Select-Object -First 1 }
+          Write-Host "Downloading $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv.7z -Headers @{ "Accept"="application/octet-stream"; "User-Agent"="GoAnime-CI" }
+          7z x mpv.7z -ompv_tmp -y
+          $mpvExe = Get-ChildItem -Path mpv_tmp -Recurse -Filter "mpv.exe" | Select-Object -First 1
+          echo $mpvExe.DirectoryName | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & $mpvExe.FullName --version
+          choco install yt-dlp -y
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
