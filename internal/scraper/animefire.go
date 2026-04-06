@@ -210,11 +210,78 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	return nil, fmt.Errorf("episodes should be fetched using API layer, not scraper")
 }
 
-// GetEpisodeStreamURL gets the streaming URL for a specific episode
-// This is specific to scraper functionality, not duplicated from API
+// qualityOrder maps common AnimeFire quality labels to a numeric rank.
+// Higher is better.
+var qualityOrder = map[string]int{
+	"1080p": 5, "720p": 4, "480p": 3, "360p": 2, "240p": 1,
+}
+
+// qualityRank returns the numeric rank for a quality string, defaulting to 0.
+func qualityRank(q string) int {
+	if r, ok := qualityOrder[strings.ToLower(q)]; ok {
+		return r
+	}
+	return 0
+}
+
+// GetEpisodeStreamURL fetches the episode page, reads all [data-video-src]
+// elements and returns the URL with the highest quality label.
+// Returns ErrSourceUnavailable if the page is a challenge / block page.
 func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
-	// Implementation for getting stream URLs - specific to scraper
-	return "", fmt.Errorf("stream URL extraction not implemented")
+	req, err := http.NewRequest("GET", episodeURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	c.decorateRequest(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch episode page: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", c.handleStatusError(resp)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse episode page: %w", err)
+	}
+
+	if c.isChallengePage(doc) {
+		return "", fmt.Errorf("animefire episode page blocked: %w", ErrSourceUnavailable)
+	}
+
+	type videoSource struct {
+		url     string
+		quality string
+	}
+
+	var sources []videoSource
+	doc.Find("[data-video-src]").Each(func(_ int, s *goquery.Selection) {
+		src, exists := s.Attr("data-video-src")
+		if !exists || src == "" {
+			return
+		}
+		quality, _ := s.Attr("data-quality")
+		sources = append(sources, videoSource{url: src, quality: quality})
+	})
+
+	if len(sources) == 0 {
+		return "", errors.New("no video sources found on episode page (data-video-src missing)")
+	}
+
+	// Pick the highest-quality source.
+	best := sources[0]
+	for _, s := range sources[1:] {
+		if qualityRank(s.quality) > qualityRank(best.quality) {
+			best = s
+		}
+	}
+
+	util.Debugf("AnimeFire stream: selected %s (%s) from %d sources", best.url, best.quality, len(sources))
+	return best.url, nil
 }
 
 // GetAnimeDetails - placeholder method, details are fetched by API layer
