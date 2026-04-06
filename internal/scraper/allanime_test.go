@@ -12,17 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestAllAnimeClient creates a fresh (non-singleton) client for unit tests
-// so that overriding apiBase does not leak into other tests.
-func newTestAllAnimeClient(apiBase string) *AllAnimeClient {
-	return &AllAnimeClient{
-		client:    util.GetFastClient(),
-		referer:   AllAnimeReferer,
-		apiBase:   apiBase,
-		userAgent: UserAgent,
-	}
-}
-
 // TestAllAnimeSearchAnimeClassifiesHTMLPayloadAsSourceUnavailable verifies that
 // when AllAnime returns an HTML page (block / challenge page) instead of JSON,
 // the error is wrapped as ErrSourceUnavailable rather than a raw parse error.
@@ -36,7 +25,12 @@ func TestAllAnimeSearchAnimeClassifiesHTMLPayloadAsSourceUnavailable(t *testing.
 	}))
 	defer server.Close()
 
-	client := newTestAllAnimeClient(server.URL)
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
 
 	_, err := client.SearchAnime("One Piece")
 	require.Error(t, err)
@@ -56,7 +50,12 @@ func TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable(t *test
 	}))
 	defer server.Close()
 
-	client := newTestAllAnimeClient(server.URL)
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
 
 	_, err := client.GetEpisodesList("some-id", "sub")
 	require.Error(t, err)
