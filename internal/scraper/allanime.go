@@ -160,6 +160,10 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 		} `json:"data"`
 	}
 
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("allanime returned HTML instead of JSON (source blocked?): %w", ErrSourceUnavailable)
+	}
+
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
@@ -232,6 +236,10 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 				AvailableEpisodesDetail map[string]interface{} `json:"availableEpisodesDetail"`
 			} `json:"show"`
 		} `json:"data"`
+	}
+
+	if len(body) > 0 && body[0] == '<' {
+		return nil, fmt.Errorf("allanime returned HTML instead of JSON (source blocked?): %w", ErrSourceUnavailable)
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
