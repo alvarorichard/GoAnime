@@ -521,27 +521,6 @@ func generateSearchVariations(cleanedName string) []string {
 		addVariation(cleanedName[4:])
 	}
 
-	// Variation: Strip trailing season qualifiers in two passes so both the
-	// intermediate form and the base title are produced as search fallbacks.
-	//
-	// Pass 1 – strip a trailing "Part N" / "Parte N" suffix:
-	//   "Attack on Titan Final Season Part 2" → "Attack on Titan Final Season"
-	rePartSuffix := regexp.MustCompile(`(?i)\s+(?:part|parte)\s*\d+\s*$`)
-	withoutPart := strings.TrimSpace(rePartSuffix.ReplaceAllString(cleanedName, ""))
-	if withoutPart != cleanedName {
-		addVariation(withoutPart)
-	}
-	// Pass 2 – strip a trailing season qualifier from both the original title and
-	// the part-stripped form:
-	//   "Attack on Titan Final Season" → "Attack on Titan"
-	//   "My Hero Academia Season 6"   → "My Hero Academia"
-	reSeasonQualifier := regexp.MustCompile(`(?i)\s+(?:final\s+season|season\s+\d+|\d+(?:st|nd|rd|th)\s+season|cour\s*\d+)\s*$`)
-	for _, candidate := range []string{cleanedName, withoutPart} {
-		if base := strings.TrimSpace(reSeasonQualifier.ReplaceAllString(candidate, "")); base != "" && base != candidate {
-			addVariation(base)
-		}
-	}
-
 	// Variation: For very long titles, try first few words
 	words := strings.Fields(cleanedName)
 	if len(words) > 4 {
@@ -593,19 +572,13 @@ func CleanTitle(title string) string {
 	reCompleto := regexp.MustCompile(`(?i)\s+(?:completo|episodio\s*\d+|ep\s*\d+)\s*$`)
 	cleaned = strings.TrimSpace(reCompleto.ReplaceAllString(cleaned, ""))
 
-	// Remove season indicators like "X Temporada", "Season X", "Temporada X", "Xª Temporada",
-	// "Cour N", and ordinal forms like "4th Season".
-	// NOTE: "Final Season" is intentionally excluded here because it is part of the canonical
-	// title for some anime (e.g. "Shingeki no Kyojin: The Final Season"). Search fallbacks for
-	// "Final Season" are handled in generateSearchVariations instead.
-	reSeasonPt := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:\d+[ªº]?\s*temporada|temporada\s*\d+|season\s*\d+|\d+(?:st|nd|rd|th)\s*season|cour\s*\d+)\s*$`)
+	// Remove season indicators like "X Temporada", "Season X", "Temporada X", "Xª Temporada"
+	reSeasonPt := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:\d+[ªº]?\s*temporada|temporada\s*\d+|season\s*\d+|\d+(?:st|nd|rd|th)\s*season)\s*$`)
 	cleaned = strings.TrimSpace(reSeasonPt.ReplaceAllString(cleaned, ""))
 
-	// Remove "Parte X" or "Part X" suffixes (including combined "Season N Part N" leftovers).
+	// Remove "Parte X" (Part X) common in Brazilian titles
 	rePart := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:parte\s*\d+|part\s*\d+)\s*$`)
 	cleaned = strings.TrimSpace(rePart.ReplaceAllString(cleaned, ""))
-	// Re-apply season strip in case "Season N Part N" left a dangling season token.
-	cleaned = strings.TrimSpace(reSeasonPt.ReplaceAllString(cleaned, ""))
 
 	// Remove season/episode indicators like "2.0 A2" at the end (but NOT plain season numbers)
 	re4 := regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
