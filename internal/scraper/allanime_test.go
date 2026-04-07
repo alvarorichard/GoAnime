@@ -66,6 +66,29 @@ func TestAllAnimeSearchAnimeValidJSONParsesCorrectly(t *testing.T) {
 	assert.Contains(t, results[0].Name, "One Piece")
 }
 
+// TestAllAnimeSearchAnimeClassifies403AsSourceUnavailable verifies that a 403
+// Forbidden response is wrapped as ErrSourceUnavailable (source blocked).
+func TestAllAnimeSearchAnimeClassifies403AsSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
+
+	_, err := client.SearchAnime("One Piece")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable),
+		"expected ErrSourceUnavailable for 403, got: %v", err)
+}
+
 // TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable verifies
 // the same classification for the episodes-list endpoint.
 func TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable(t *testing.T) {

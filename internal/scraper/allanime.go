@@ -141,6 +141,10 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if err := checkHTTPStatus(resp, "allanime search"); err != nil {
+		return nil, err
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
@@ -222,6 +226,10 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if err := checkHTTPStatus(resp, "allanime episodes"); err != nil {
+		return nil, err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -461,6 +469,10 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if err := checkHTTPStatus(resp, "allanime episode"); err != nil {
+		return "", nil, err
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read response: %w", err)
@@ -695,6 +707,10 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if err := checkHTTPStatus(resp, "allanime links"); err != nil {
+		return nil, err
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
