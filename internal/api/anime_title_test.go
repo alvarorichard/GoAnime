@@ -448,3 +448,73 @@ func TestCleanTitle_PreservesValidTitles(t *testing.T) {
 		})
 	}
 }
+
+// TestCleanTitle_SeasonReleaseVariants covers the multi-part / cour / ordinal
+// season patterns that appear on AllAnime and AnimeFire titles.
+// NOTE: "Final Season" is deliberately NOT stripped by CleanTitle because it
+// forms part of the canonical title (e.g. "The Final Season"). Fallback search
+// variations for "Final Season" are tested in TestGenerateSearchVariations_SeasonFallbacks.
+func TestCleanTitle_SeasonReleaseVariants(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		// "Cour N" suffix should be stripped
+		{"Mushoku Tensei Cour 2", "Mushoku Tensei"},
+		// Ordinal season ("4th Season")
+		{"Black Clover 4th Season", "Black Clover"},
+		// "Season N Part N" combined form – Part N stripped first, then Season N
+		{"Demon Slayer Season 3 Part 2", "Demon Slayer"},
+		// "2nd Season" ordinal
+		{"Re:Zero 2nd Season", "Re:Zero"},
+		// Plain "Season N" still works
+		{"My Hero Academia Season 6", "My Hero Academia"},
+		// "Final Season" is preserved as part of canonical title
+		{"Attack on Titan: The Final Season", "Attack on Titan: The Final Season"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.expected, CleanTitle(tc.input),
+				"CleanTitle(%q)", tc.input)
+		})
+	}
+}
+
+// TestGenerateSearchVariations_SeasonFallbacks ensures that season-qualified
+// titles produce the base title as a search fallback variation so AniList can
+// match even when the database entry has no season suffix.
+func TestGenerateSearchVariations_SeasonFallbacks(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		cleaned  string
+		mustHave string
+	}{
+		// "Final Season" qualifier stripped → base title
+		{"Attack on Titan Final Season", "Attack on Titan"},
+		// "Part 2" stripped first → intermediate with "Final Season"
+		{"Attack on Titan Final Season Part 2", "Attack on Titan Final Season"},
+		// "Cour N" stripped → base title
+		{"Mushoku Tensei Cour 2", "Mushoku Tensei"},
+		// "Season N" stripped → base title
+		{"My Hero Academia Season 6", "My Hero Academia"},
+		// "Part N" stripped first → intermediate with "Season N"
+		{"Demon Slayer Season 3 Part 2", "Demon Slayer Season 3"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.cleaned, func(t *testing.T) {
+			t.Parallel()
+			variations := generateSearchVariations(tc.cleaned)
+			assert.Contains(t, variations, tc.mustHave,
+				"generateSearchVariations(%q) should include %q\ngot: %v",
+				tc.cleaned, tc.mustHave, variations)
+		})
+	}
+}
