@@ -38,6 +38,34 @@ func TestAllAnimeSearchAnimeClassifiesHTMLPayloadAsSourceUnavailable(t *testing.
 		"expected ErrSourceUnavailable, got: %v", err)
 }
 
+// TestAllAnimeSearchAnimeValidJSONParsesCorrectly confirms that a valid JSON
+// response still passes through checkHTMLResponse and is parsed successfully.
+func TestAllAnimeSearchAnimeValidJSONParsesCorrectly(t *testing.T) {
+	t.Parallel()
+
+	// Minimal valid GraphQL response that SearchAnime expects.
+	const validJSON = `{"data":{"shows":{"edges":[{"_id":"abc","name":"One Piece","englishName":"One Piece","availableEpisodes":{"sub":1100}}]}}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, validJSON)
+	}))
+	defer server.Close()
+
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
+
+	results, err := client.SearchAnime("One Piece")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Contains(t, results[0].Name, "One Piece")
+}
+
 // TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable verifies
 // the same classification for the episodes-list endpoint.
 func TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable(t *testing.T) {

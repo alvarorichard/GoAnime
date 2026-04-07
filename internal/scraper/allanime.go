@@ -160,7 +160,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...interface{}) ([]*m
 		} `json:"data"`
 	}
 
-	if err := checkHTMLResponse(body, "allanime"); err != nil {
+	if err := checkHTMLResponse(resp, body, "allanime"); err != nil {
 		return nil, err
 	}
 
@@ -238,7 +238,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 		} `json:"data"`
 	}
 
-	if err := checkHTMLResponse(body, "allanime"); err != nil {
+	if err := checkHTMLResponse(resp, body, "allanime"); err != nil {
 		return nil, err
 	}
 
@@ -464,6 +464,10 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime episode"); err != nil {
+		return "", nil, err
 	}
 
 	// Parse the response to extract source URLs
@@ -695,6 +699,10 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime links"); err != nil {
+		return nil, err
 	}
 
 	links := c.extractVideoLinks(string(body))
