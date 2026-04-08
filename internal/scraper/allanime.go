@@ -2,12 +2,12 @@
 package scraper
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	AllAnimeReferer = "https://allanime.to"
+	AllAnimeReferer = "https://allmanga.to"
 	AllAnimeBase    = "allanime.day"
 	AllAnimeAPI     = "https://api.allanime.day/api"
 	UserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
@@ -132,14 +132,21 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 		return nil, fmt.Errorf("failed to marshal variables: %w", err)
 	}
 
-	// Build the request URL exactly like Curd
-	reqURL := fmt.Sprintf("%s?variables=%s&query=%s", c.apiBase, url.QueryEscape(string(variablesJSON)), url.QueryEscape(searchGql))
+	// Build the POST request body with variables and query
+	reqBody, err := json.Marshal(map[string]any{
+		"variables": json.RawMessage(variablesJSON),
+		"query":     searchGql,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
 
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequest("POST", c.apiBase, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Referer", c.referer)
 
@@ -234,15 +241,21 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal variables: %w", err)
 	}
-	reqURL := fmt.Sprintf("%s?variables=%s&query=%s",
-		c.apiBase,
-		url.QueryEscape(string(varsBytes)),
-		url.QueryEscape(episodesListGql))
 
-	req, err := http.NewRequest("GET", reqURL, nil)
+	// Build the POST request body
+	reqBody, err := json.Marshal(map[string]any{
+		"variables": json.RawMessage(varsBytes),
+		"query":     episodesListGql,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.apiBase, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Referer", c.referer)
 
@@ -480,18 +493,22 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to marshal variables: %w", err)
 	}
-	variables := string(varsBytes)
 
-	req, err := http.NewRequest("GET", c.apiBase+"/api", nil)
+	// Build the POST request body
+	reqBody, err := json.Marshal(map[string]any{
+		"variables": json.RawMessage(varsBytes),
+		"query":     episodeEmbedGQL,
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", c.apiBase, bytes.NewReader(reqBody))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	q := req.URL.Query()
-	q.Add("variables", variables)
-	q.Add("query", episodeEmbedGQL)
-	req.URL.RawQuery = q.Encode()
-
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Referer", c.referer)
 	req.Header.Set("User-Agent", c.userAgent)
 
