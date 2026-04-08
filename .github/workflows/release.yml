@@ -606,7 +606,7 @@ jobs:
 
       - name: Publish to AUR
         if: steps.check-secrets.outputs.has_secrets == 'true'
-        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
         with:
           pkgname: goanime
           pkgbuild: ./aur/goanime/PKGBUILD
