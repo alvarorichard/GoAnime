@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.1'
+          go-version: '1.26.2'
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -27,9 +27,9 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-1.26.1-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-1.26.2-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-1.26.1-
+            ${{ runner.os }}-go-1.26.2-
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'

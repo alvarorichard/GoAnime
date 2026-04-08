@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.26.1'
+  GO_VERSION: '1.26.2'
   BINARY_NAME: goanime
 
 jobs:
