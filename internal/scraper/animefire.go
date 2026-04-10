@@ -100,7 +100,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 		}
 
 		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			lastErr = fmt.Errorf("animefire challenge page blocked: %w", ErrSourceUnavailable)
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -265,7 +265,7 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 		}
 
 		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			lastErr = fmt.Errorf("animefire challenge page blocked: %w", ErrSourceUnavailable)
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -365,7 +365,7 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 		}
 
 		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+			lastErr = fmt.Errorf("animefire episode page blocked: %w", ErrSourceUnavailable)
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -395,9 +395,31 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 
 // extractVideoURL extracts the video URL from an AnimeFire episode page
 func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error) {
-	// Method 1: Look for video element with data-video-src attribute
-	if videoSrc, exists := doc.Find("video[data-video-src]").Attr("data-video-src"); exists && videoSrc != "" {
-		return videoSrc, nil
+	// Method 1: Collect all [data-video-src] elements and return the highest-quality URL.
+	// qualityRanks maps common AnimeFire quality labels to a numeric rank (higher = better).
+	qualityRanks := map[string]int{"1080p": 5, "720p": 4, "480p": 3, "360p": 2, "240p": 1}
+	type videoSource struct {
+		url     string
+		quality int
+	}
+	var sources []videoSource
+	doc.Find("[data-video-src]").Each(func(_ int, s *goquery.Selection) {
+		src, exists := s.Attr("data-video-src")
+		if !exists || src == "" {
+			return
+		}
+		label, _ := s.Attr("data-quality")
+		sources = append(sources, videoSource{url: src, quality: qualityRanks[strings.ToLower(label)]})
+	})
+	if len(sources) > 0 {
+		best := sources[0]
+		for _, s := range sources[1:] {
+			if s.quality > best.quality {
+				best = s
+			}
+		}
+		util.Debugf("AnimeFire: selected quality rank %d url %s from %d sources", best.quality, best.url, len(sources))
+		return best.url, nil
 	}
 
 	// Method 2: Look for video element with src attribute
@@ -422,15 +444,15 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		return iframeSrc, nil
 	}
 
-	// Method 4: Look for data-video, data-src, data-url attributes in various elements
+	// Method 4: Look for data-video, data-src, data-url attributes in various elements.
+	// Note: div[data-video-src] is already handled by Method 1 with quality ranking.
 	selectors := []string{
-		"div[data-video-src]",
 		"div[data-video]",
 		"div[data-src]",
 		"div[data-url]",
 		"[data-player]",
 	}
-	attrs := []string{"data-video-src", "data-video", "data-src", "data-url", "data-player"}
+	attrs := []string{"data-video", "data-src", "data-url", "data-player"}
 
 	for i, selector := range selectors {
 		if elem := doc.Find(selector); elem.Length() > 0 {
