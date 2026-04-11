@@ -1,6 +1,7 @@
 package goanime_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/pkg/goanime"
@@ -102,6 +103,9 @@ func TestSearchAnime_Integration(t *testing.T) {
 	// Test search across all sources
 	results, err := client.SearchAnime("Naruto", nil)
 	if err != nil {
+		if errors.Is(err, goanime.ErrSourceUnavailable) {
+			t.Skipf("Skipping integration test while upstream source is unavailable: %v", err)
+		}
 		t.Fatalf("SearchAnime failed: %v", err)
 	}
 
@@ -133,6 +137,9 @@ func TestSearchAnimeSpecificSource_Integration(t *testing.T) {
 
 	results, err := client.SearchAnime("One Piece", &source)
 	if err != nil {
+		if errors.Is(err, goanime.ErrSourceUnavailable) {
+			t.Skipf("Skipping source-specific integration test while upstream source is unavailable: %v", err)
+		}
 		t.Fatalf("SearchAnime with specific source failed: %v", err)
 	}
 
