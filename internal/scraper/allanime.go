@@ -59,22 +59,6 @@ func NewAllAnimeClient() *AllAnimeClient {
 	return allAnimeClientInstance
 }
 
-// SearchResponse represents the API response structure for anime search
-type SearchResponse struct {
-	Data struct {
-		Shows struct {
-			Edges []struct {
-				ID                string `json:"_id"`
-				Name              string `json:"name"`
-				AvailableEpisodes struct {
-					Sub int `json:"sub"`
-					Dub int `json:"dub"`
-				} `json:"availableEpisodes"`
-			} `json:"edges"`
-		} `json:"shows"`
-	} `json:"data"`
-}
-
 // EpisodeResponse represents the API response for episode details
 type EpisodeResponse struct {
 	Data struct {
@@ -85,16 +69,6 @@ type EpisodeResponse struct {
 				SourceUrl  string `json:"sourceUrl"`
 			} `json:"sourceUrls"`
 		} `json:"episode"`
-	} `json:"data"`
-}
-
-// EpisodesListResponse represents the API response for episodes list
-type EpisodesListResponse struct {
-	Data struct {
-		Show struct {
-			ID                      string         `json:"_id"`
-			AvailableEpisodesDetail map[string]any `json:"availableEpisodesDetail"`
-		} `json:"show"`
 	} `json:"data"`
 }
 
@@ -156,13 +130,17 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search request returned status %d", resp.StatusCode)
+	if err := checkHTTPStatus(resp, "allanime search"); err != nil {
+		return nil, err
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime search"); err != nil {
+		return nil, err
 	}
 
 	// Parse using a simple structure like Curd
@@ -229,7 +207,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 }
 
 // GetEpisodesList gets the list of available episodes for an anime (based on Curd implementation)
-func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string, error) {
+func (c *AllAnimeClient) GetEpisodesList(animeID, mode string) ([]string, error) {
 	if mode == "" {
 		mode = "sub"
 	}
@@ -265,13 +243,17 @@ func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("episodes list request returned status %d", resp.StatusCode)
+	if err := checkHTTPStatus(resp, "allanime episodes"); err != nil {
+		return nil, err
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime episodes"); err != nil {
+		return nil, err
 	}
 
 	// Use the same response structure as Curd
@@ -473,7 +455,7 @@ var LinkPriorities = []string{
 }
 
 // GetEpisodeURL gets the streaming URL for a specific episode using priority-based selection
-func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode string, quality string) (string, map[string]string, error) {
+func (c *AllAnimeClient) GetEpisodeURL(animeID, episodeNo, mode, quality string) (string, map[string]string, error) {
 	if mode == "" {
 		mode = "sub"
 	}
@@ -518,13 +500,17 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("episode URL request returned status %d", resp.StatusCode)
+	if err := checkHTTPStatus(resp, "allanime episode"); err != nil {
+		return "", nil, err
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime episode"); err != nil {
+		return "", nil, err
 	}
 
 	// Parse the response to extract source URLs
@@ -538,7 +524,7 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 }
 
 // processSourceURLsConcurrent processes source URLs with concurrent requests and priority-based selection
-func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality string, animeID string, episodeNo string) (string, map[string]string, error) {
+func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality, animeID, episodeNo string) (string, map[string]string, error) {
 	type result struct {
 		index     int
 		links     map[string]string
@@ -746,13 +732,17 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("links request returned status %d", resp.StatusCode)
+	if err := checkHTTPStatus(resp, "allanime links"); err != nil {
+		return nil, err
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if err := checkHTMLResponse(resp, body, "allanime links"); err != nil {
+		return nil, err
 	}
 
 	links := c.extractVideoLinks(string(body))
