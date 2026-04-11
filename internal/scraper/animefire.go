@@ -23,7 +23,6 @@ const (
 
 // Pre-compiled regexes for AnimeFire scraper (avoid per-call compilation)
 var (
-	animefireBloggerRe = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
 	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
 	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
@@ -466,10 +465,8 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	html, err := doc.Html()
 	if err == nil {
 		// Look for Blogger video links
-		if animefireBloggerRe.MatchString(html) {
-			if matches := animefireBloggerRe.FindString(html); matches != "" {
-				return matches, nil
-			}
+		if matches := extractAnimefireBloggerURL(html); matches != "" {
+			return matches, nil
 		}
 
 		// Look for direct video URLs
@@ -483,6 +480,61 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	}
 
 	return "", errors.New("no video source found in the page")
+}
+
+func extractAnimefireBloggerURL(html string) string {
+	const marker = "https://www.blogger.com/video.g?token="
+
+	search := html
+	offset := 0
+	for {
+		start := strings.Index(search, marker)
+		if start < 0 {
+			return ""
+		}
+
+		start += offset
+		candidate := html[start:]
+		if end := strings.IndexAny(candidate, "\"' <>\r\n\t"); end >= 0 {
+			candidate = candidate[:end]
+		}
+
+		if isValidAnimefireBloggerURL(candidate) {
+			return candidate
+		}
+
+		next := start + len(marker)
+		if next >= len(html) {
+			return ""
+		}
+		search = html[next:]
+		offset = next
+	}
+}
+
+func isValidAnimefireBloggerURL(rawValue string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawValue))
+	if err != nil {
+		return false
+	}
+
+	if parsed.Scheme != "https" || parsed.Host != "www.blogger.com" || parsed.Path != "/video.g" {
+		return false
+	}
+
+	token := parsed.Query().Get("token")
+	if token == "" {
+		return false
+	}
+
+	for _, r := range token {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+
+	return true
 }
 
 // GetAnimeDetails - placeholder method, details are fetched by API layer
