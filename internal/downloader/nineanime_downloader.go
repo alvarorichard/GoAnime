@@ -793,8 +793,6 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		Downloader("ffmpeg").
-		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
@@ -812,9 +810,11 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 		}
 	}
 
-	// Real-time progress via yt-dlp callback
+	// Real-time progress via yt-dlp callback.
+	// Track per-file totals so video+audio sizes are summed correctly.
 	var lastReportedBytes int64
 	var lastProgressFile string
+	fileTotals := make(map[string]int64)
 	if m != nil {
 		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 			if update.Status == ytdlp.ProgressStatusPostProcessing ||
@@ -836,8 +836,26 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 				lastReportedBytes = downloaded
 			}
 
-			if update.TotalBytes > 0 && m.totalBytes < int64(update.TotalBytes) {
-				m.totalBytes = int64(update.TotalBytes)
+			// Sum totals across all files (video + audio) for accurate progress.
+			if update.TotalBytes > 0 {
+				fname := update.Filename
+				if fname == "" {
+					fname = "_default"
+				}
+				fileTotals[fname] = int64(update.TotalBytes)
+				var sum int64
+				for _, v := range fileTotals {
+					sum += v
+				}
+				m.totalBytes = sum
+			} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
+				pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+				if pct > 0.99 {
+					pct = 0.99
+				}
+				if pct > m.peakPct {
+					m.peakPct = pct
+				}
 			}
 		})
 	}

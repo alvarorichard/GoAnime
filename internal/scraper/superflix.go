@@ -535,7 +535,7 @@ func (c *SuperFlixClient) ExtractPlayerExtras(html string) (defaultAudio []strin
 	}
 
 	if m := sfSubtitleRe.FindStringSubmatch(html); len(m) > 1 {
-		for _, part := range strings.Split(m[1], ",") {
+		for part := range strings.SplitSeq(m[1], ",") {
 			sm := sfSubPartRe.FindStringSubmatch(part)
 			if len(sm) > 2 {
 				subtitles = append(subtitles, SuperFlixSubtitle{

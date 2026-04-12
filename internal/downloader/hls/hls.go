@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,12 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// ErrSeparateAudioTracks is returned when a master playlist contains separate
+// audio tracks (#EXT-X-MEDIA:TYPE=AUDIO with a URI). The native HLS downloader
+// only handles muxed streams; callers should fall back to yt-dlp which properly
+// merges separate video and audio tracks.
+var ErrSeparateAudioTracks = errors.New("master playlist has separate audio tracks; use yt-dlp for proper audio/video merging")
 
 // Segment represents a single HLS segment
 type Segment struct {
@@ -44,7 +51,9 @@ type Downloader struct {
 	client *http.Client
 }
 
-// NewDownloader creates a new HLS downloader
+// NewDownloader creates a new HLS downloader with a plain Go HTTP client.
+// Prefer NewDownloaderWithClient to supply a surf-backed client with Chrome
+// TLS fingerprinting, which is required by most CDNs.
 func NewDownloader() *Downloader {
 	// Force HTTP/1.1 by disabling HTTP/2.  CDN servers often reset
 	// multiplexed HTTP/2 streams with INTERNAL_ERROR when many segments
@@ -71,8 +80,20 @@ func NewDownloader() *Downloader {
 	}
 }
 
+// NewDownloaderWithClient creates an HLS downloader using the provided
+// *http.Client. Pass a surf-backed client (surf.NewClient().…Build().…Std())
+// so that requests carry a real browser TLS fingerprint and bypass CDN
+// anti-bot checks that reject plain Go clients.
+func NewDownloaderWithClient(client *http.Client) *Downloader {
+	return &Downloader{client: client}
+}
+
 // sanitizeOutputPath validates and cleans the output path to prevent directory traversal
 func sanitizeOutputPath(path string) (string, error) {
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("path contains directory traversal: %s", path)
+	}
+
 	// Clean the path
 	cleanPath := filepath.Clean(path)
 
@@ -80,11 +101,6 @@ func sanitizeOutputPath(path string) (string, error) {
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-
-	// Ensure no directory traversal attempts
-	if strings.Contains(absPath, "..") {
-		return "", fmt.Errorf("path contains directory traversal")
 	}
 
 	return absPath, nil
@@ -156,6 +172,15 @@ func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[
 	}
 
 	if isMasterPlaylist {
+		// Check for separate audio tracks — these require ffmpeg muxing that
+		// only yt-dlp handles. Downloading just the video playlist would
+		// produce a file without audio.
+		for _, line := range masterPlaylistLines {
+			if strings.HasPrefix(line, "#EXT-X-MEDIA:") && strings.Contains(line, "TYPE=AUDIO") && strings.Contains(line, "URI=") {
+				return nil, ErrSeparateAudioTracks
+			}
+		}
+
 		// For master playlists, select the highest quality stream (largest bandwidth)
 		selectedMediaPlaylistURL := d.selectBestStream(masterPlaylistLines, url)
 		if selectedMediaPlaylistURL != "" {
@@ -562,5 +587,12 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 // DownloadToFile is a convenience function to download HLS to a file
 func DownloadToFile(ctx context.Context, streamURL, outputPath string, headers map[string]string, progressCallback ProgressCallback) error {
 	downloader := NewDownloader()
+	return downloader.DownloadWithProgress(ctx, streamURL, outputPath, headers, progressCallback)
+}
+
+// DownloadToFileWithClient is like DownloadToFile but uses the provided
+// *http.Client (e.g. a surf-backed client with Chrome TLS fingerprinting).
+func DownloadToFileWithClient(ctx context.Context, client *http.Client, streamURL, outputPath string, headers map[string]string, progressCallback ProgressCallback) error {
+	downloader := NewDownloaderWithClient(client)
 	return downloader.DownloadWithProgress(ctx, streamURL, outputPath, headers, progressCallback)
 }

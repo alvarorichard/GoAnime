@@ -3,6 +3,7 @@ package player
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
+	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -160,6 +162,7 @@ type model struct {
 	progress   progress.Model
 	totalBytes int64
 	received   int64
+	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	done       bool
 	doneFrames int // frames elapsed since done; allows 100% to render before quit
 	status     string
@@ -504,7 +507,7 @@ func HandleDownloadAndPlay(
 	}
 
 	// Check if this is an HLS stream (for proper handling later)
-	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	isHLSStream := LooksLikeHLS(videoURL)
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
@@ -792,7 +795,7 @@ func downloadAndPlayEpisode(
 			downloadSubtitleFiles(episodePath)
 
 		} else if strings.Contains(videoURL, "blogger.com") ||
-			strings.Contains(videoURL, ".m3u8") ||
+			LooksLikeHLS(videoURL) ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {
 			// Use yt-dlp with progress bar
@@ -807,30 +810,53 @@ func downloadAndPlayEpisode(
 			}
 			p := tea.NewProgram(m)
 
-			// Estimate/obtain total size for progress percentage
-			httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
-			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
-				m.totalBytes = sz
+			// Estimate/obtain total size for progress percentage.
+			// For HLS streams, do NOT pre-seed a large estimate (like 500 MB)
+			// because the native HLS or yt-dlp callbacks will set the real
+			// total dynamically. A wrong initial value makes the bar stuck.
+			if LooksLikeHLS(videoURL) {
+				m.totalBytes = 0 // let download callbacks set the real value
 			} else {
-				// Fallback for HLS
-				m.totalBytes = 150 * 1024 * 1024
+				httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+				if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
+					m.totalBytes = sz
+				} else {
+					m.totalBytes = 150 * 1024 * 1024
+				}
 			}
 
 			go func() {
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
-				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
+				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
+				if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
-					if dlErr != nil {
-						util.Debugf("Native HLS failed, trying direct HTTP: %v", dlErr)
-						dlErr = downloadDirectHTTP(videoURL, episodePath, m)
-					}
-					if dlErr != nil {
-						util.Debugf("Direct HTTP failed, falling back to yt-dlp: %v", dlErr)
+					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
+						// Separate audio tracks need yt-dlp for proper audio/video merging
+						util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", dlErr)
+						// Reset progress — native HLS didn't produce output
+						m.mu.Lock()
+						m.received = 0
+						m.totalBytes = 0
+						m.peakPct = 0
+						m.mu.Unlock()
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+					} else if dlErr != nil {
+						// Native HLS failed for another reason — try yt-dlp, then direct HTTP
+						util.Debugf("Native HLS failed, trying yt-dlp: %v", dlErr)
+						// Reset progress for yt-dlp fallback
+						m.mu.Lock()
+						m.received = 0
+						m.totalBytes = 0
+						m.peakPct = 0
+						m.mu.Unlock()
+						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+						if dlErr != nil {
+							util.Debugf("yt-dlp failed, trying direct HTTP: %v", dlErr)
+							dlErr = downloadDirectHTTP(videoURL, episodePath, m)
+						}
 					}
 				} else {
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)

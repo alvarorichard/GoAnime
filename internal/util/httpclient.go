@@ -19,6 +19,10 @@ var (
 	// FastClient is optimized for quick API requests with shorter timeouts
 	fastClient     *http.Client
 	fastClientOnce sync.Once
+
+	// downloadClient is optimized for large file downloads with long timeout
+	downloadClient     *http.Client
+	downloadClientOnce sync.Once
 )
 
 // newSurfStdClient creates a *net/http.Client backed by surf with Chrome
@@ -50,6 +54,15 @@ func GetFastClient() *http.Client {
 		fastClient = newSurfStdClient(8 * time.Second)
 	})
 	return fastClient
+}
+
+// GetDownloadClient returns an HTTP client optimized for large file downloads.
+// Uses Chrome TLS fingerprint for anti-bot bypass with a 5-minute timeout.
+func GetDownloadClient() *http.Client {
+	downloadClientOnce.Do(func() {
+		downloadClient = newSurfStdClient(5 * time.Minute)
+	})
+	return downloadClient
 }
 
 // PreWarmClients triggers background initialization of the shared surf HTTP

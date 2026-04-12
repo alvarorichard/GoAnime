@@ -4,6 +4,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -322,15 +323,22 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 		title:    title,
 	}
 
-	// Get content length for progress tracking
-	contentLength, err := md.getContentLength(videoURL)
-	if err != nil {
-		util.Warnf("Failed to get content length: %v, using fallback", err)
-		contentLength = 500 * 1024 * 1024 // 500MB fallback for movies
+	// Get content length for progress tracking.
+	// For HLS streams, don't pre-seed a fixed estimate — the download
+	// callbacks will dynamically compute the real total from segment data
+	// or yt-dlp's reported TotalBytes.
+	if isM3U8 || player.LooksLikeHLS(videoURL) {
+		m.totalBytes = 0 // let download callbacks set the real value
+		fmt.Println("Download setup - HLS stream (size determined during download)")
+	} else {
+		contentLength, err := md.getContentLength(videoURL)
+		if err != nil {
+			util.Warnf("Failed to get content length: %v, using fallback", err)
+			contentLength = 500 * 1024 * 1024 // 500MB fallback for direct downloads
+		}
+		m.totalBytes = contentLength
+		fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 	}
-	m.totalBytes = contentLength
-
-	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
 	p := tea.NewProgram(m)
 
@@ -338,7 +346,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 	downloadComplete := make(chan error, 1)
 	go func() {
 		var err error
-		if isM3U8 || strings.Contains(videoURL, ".m3u8") {
+		if isM3U8 || player.LooksLikeHLS(videoURL) {
 			err = md.downloadM3U8WithYtDlp(videoURL, destPath, referer, m, p)
 		} else {
 			err = md.downloadHTTPWithProgress(videoURL, destPath, referer, headers, m, p)
@@ -513,11 +521,24 @@ func (md *MovieDownloader) downloadM3U8WithYtDlp(videoURL, destPath, referer str
 
 	// Native HLS first — handles obfuscated segment extensions (.jpg, .png) and
 	// "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp's ffmpeg downloader.
+	// However, if the master playlist has separate audio tracks, skip native HLS
+	// and go straight to yt-dlp which properly merges video+audio.
 	nativeErr := md.downloadM3U8WithNativeHLS(videoURL, destPath, referer, progressModel, program)
 	if nativeErr == nil {
 		return nil
 	}
-	util.Logger.Warn("Native HLS failed for movie, falling back to yt-dlp", "error", nativeErr)
+	if errors.Is(nativeErr, hls.ErrSeparateAudioTracks) {
+		util.Logger.Info("HLS has separate audio tracks, using yt-dlp for proper audio/video merging")
+	} else {
+		util.Logger.Warn("Native HLS failed for movie, falling back to yt-dlp", "error", nativeErr)
+	}
+
+	// Reset progress — native HLS didn't produce output, let yt-dlp set real values
+	progressModel.mu.Lock()
+	progressModel.received = 0
+	progressModel.totalBytes = 0
+	progressModel.mu.Unlock()
+	program.Send(movieProgressMsg{received: 0, totalBytes: 0})
 
 	// Fallback to yt-dlp
 	return md.downloadM3U8WithYtDlpDirect(videoURL, destPath, referer, progressModel, program)
@@ -536,13 +557,11 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
 	}
 
-	// Use typed API for ALL flags so they are placed before the URL
-	// (critical for --downloader-args to be processed correctly by yt-dlp).
+	// Use yt-dlp's native HLS downloader (not ffmpeg) so that obfuscated
+	// segment extensions (.js, .html, .jpg) from CDNs are accepted.
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		Downloader("ffmpeg").
-		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
@@ -561,9 +580,12 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 		}
 	}
 
-	// Real-time progress via yt-dlp's native callback
+	// Real-time progress via yt-dlp's native callback.
+	// Track per-file totals so video+audio sizes are summed correctly
+	// (yt-dlp downloads them as separate files then merges).
 	var lastReportedBytes int64
 	var lastProgressFile string
+	fileTotals := make(map[string]int64)
 	dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 		if update.Status == ytdlp.ProgressStatusPostProcessing ||
 			update.Status == ytdlp.ProgressStatusFinished {
@@ -584,13 +606,32 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 			lastReportedBytes = downloaded
 		}
 
-		if update.TotalBytes > 0 && progressModel.totalBytes < int64(update.TotalBytes) {
-			progressModel.totalBytes = int64(update.TotalBytes)
+		// Sum totals across all files (video + audio) for accurate progress.
+		if update.TotalBytes > 0 {
+			fname := update.Filename
+			if fname == "" {
+				fname = "_default"
+			}
+			fileTotals[fname] = int64(update.TotalBytes)
+			var sum int64
+			for _, v := range fileTotals {
+				sum += v
+			}
+			progressModel.totalBytes = sum
+		} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
+			pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			if pct > progressModel.peakPct {
+				progressModel.peakPct = pct
+			}
 		}
 
 		program.Send(movieProgressMsg{
 			received:   progressModel.received,
 			totalBytes: progressModel.totalBytes,
+			peakPct:    progressModel.peakPct,
 		})
 	})
 
@@ -643,8 +684,12 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 	// Create context for the download
 	ctx := context.Background()
 
+	// Use a surf-backed HTTP client with Chrome TLS fingerprinting so the CDN
+	// does not reject requests from a plain Go client.
+	surfClient := util.GetDownloadClient()
+
 	// Use the native HLS downloader with byte-based progress callback
-	err := hls.DownloadToFile(ctx, videoURL, destPath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
+	err := hls.DownloadToFileWithClient(ctx, surfClient, videoURL, destPath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
 		if totalSegments <= 0 {
 			return
 		}
@@ -653,11 +698,15 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 		// Update received with real bytes on disk
 		progressModel.received = bytesWritten
 
-		// Dynamically estimate total from average bytes per written segment
+		// Dynamically estimate total from average bytes per written segment.
+		// After 10+ segments the average is reliable — allow shrinking so the
+		// bar tracks reality instead of sitting at a low percentage.
 		if segmentsWritten >= 3 {
 			avgBytesPerSeg := bytesWritten / int64(segmentsWritten)
 			estimatedTotal := avgBytesPerSeg * int64(totalSegments)
-			if estimatedTotal > progressModel.totalBytes {
+			if segmentsWritten >= 10 {
+				progressModel.totalBytes = estimatedTotal
+			} else if estimatedTotal > progressModel.totalBytes {
 				progressModel.totalBytes = estimatedTotal
 			}
 		}
@@ -733,7 +782,7 @@ func extractRefererFromStreamURL(streamURL string) string {
 
 // getContentLength gets the content length of a URL
 func (md *MovieDownloader) getContentLength(url string) (int64, error) {
-	if strings.Contains(url, ".m3u8") {
+	if player.LooksLikeHLS(url) {
 		return 500 * 1024 * 1024, nil // 500MB estimate for HLS
 	}
 
@@ -898,12 +947,14 @@ type movieStatusMsg string
 type movieProgressMsg struct {
 	received   int64
 	totalBytes int64
+	peakPct    float64
 }
 
 type movieProgressModel struct {
 	progress   progress.Model
 	totalBytes int64
 	received   int64
+	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	status     string
 	title      string
 	done       bool
@@ -932,8 +983,21 @@ func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.mu.Lock()
+		pct := 0.0
 		if m.totalBytes > 0 && m.received > 0 {
-			cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		// Monotonic: never go backward
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		if pct > 0 {
+			cmd := m.progress.SetPercent(pct)
 			m.mu.Unlock()
 			return m, tea.Batch(cmd, movieTickCmd())
 		}
@@ -946,9 +1010,25 @@ func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
-		var cmd tea.Cmd
+		if msg.peakPct > m.peakPct {
+			m.peakPct = msg.peakPct
+		}
+		// Compute pct with monotonic guarantee
+		pct := 0.0
 		if m.totalBytes > 0 {
-			cmd = m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		var cmd tea.Cmd
+		if pct > 0 {
+			cmd = m.progress.SetPercent(pct)
 		}
 		m.mu.Unlock()
 		return m, cmd

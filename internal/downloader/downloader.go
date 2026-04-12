@@ -1098,6 +1098,7 @@ type progressModel struct {
 	progress   progress.Model
 	totalBytes int64
 	received   int64
+	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	status     string
 	done       bool
 	mu         sync.Mutex
@@ -1126,8 +1127,21 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.mu.Lock()
+		pct := 0.0
 		if m.totalBytes > 0 && m.received > 0 {
-			cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		// Monotonic: never go backward
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		if pct > 0 {
+			cmd := m.progress.SetPercent(pct)
 			m.mu.Unlock()
 			return m, tea.Batch(cmd, tickCmd())
 		}
@@ -1140,10 +1154,22 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
-		// Immediately update the progress bar when we get a progress message
-		var cmd tea.Cmd
+		// Compute pct with monotonic guarantee
+		pct := 0.0
 		if m.totalBytes > 0 {
-			cmd = m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		var cmd tea.Cmd
+		if pct > 0 {
+			cmd = m.progress.SetPercent(pct)
 		}
 		m.mu.Unlock()
 		return m, cmd

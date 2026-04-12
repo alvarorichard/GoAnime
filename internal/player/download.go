@@ -3,6 +3,7 @@ package player
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,6 +201,16 @@ func safePartPath(destPath string, part int) (string, error) {
 // The proxy runs on 127.0.0.1 and is safe to access without SSRF protection.
 func isBloggerProxyURL(u string) bool {
 	return strings.Contains(u, "127.0.0.1") && strings.Contains(u, "blogger_proxy")
+}
+
+// LooksLikeHLS returns true if the URL appears to be an HLS stream.
+// Matches .m3u8 extensions and /hls/ path segments commonly used by CDNs
+// that serve HLS playlists without a .m3u8 extension.
+func LooksLikeHLS(u string) bool {
+	lower := strings.ToLower(u)
+	return strings.Contains(lower, ".m3u8") ||
+		strings.Contains(lower, "m3u8") ||
+		strings.Contains(lower, "/hls/")
 }
 
 // hasUnsafeExtension returns true if the URL has a file extension that yt-dlp
@@ -467,8 +478,10 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Use go-ytdlp library (no external binary required on PATH)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Use go-ytdlp library (no external binary required on PATH).
+	// 60-minute timeout: movies from SuperFlix/FlixHQ can be 2+ hours of video;
+	// a 10-minute timeout was killing yt-dlp mid-download ("signal: killed").
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
 
 	if m != nil && util.IsDebug {
@@ -485,16 +498,12 @@ func downloadWithYtDlp(url, path string, m *model) error {
 		util.Debugf("Starting yt-dlp download...")
 	}
 
-	// Use typed API for ALL flags so they are placed before the URL by go-ytdlp.
-	// This is critical for --downloader-args to be processed correctly.
-	// We need --downloader ffmpeg for "live" HLS streams (no #EXT-X-ENDLIST),
-	// and --downloader-args with -allowed_extensions ALL to make ffmpeg accept
-	// obfuscated segment extensions (.jpg, .png) from CDNs like AllAnime.
+	// Use yt-dlp's native HLS downloader (not ffmpeg) so that obfuscated
+	// segment extensions (.js, .html, .jpg) from CDNs are accepted without
+	// issues. ffmpeg's allowed_segment_extensions check rejects them.
 	dl := ytdlp.New().
 		Output(safePath).
 		Format("bestvideo+bestaudio/best").
-		Downloader("ffmpeg").
-		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
 		ConcurrentFragments(4).
 		FragmentRetries("5").
 		Retries("5").
@@ -515,8 +524,11 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	// Real-time progress via yt-dlp's native callback.
+	// Track per-file totals so video+audio sizes are summed correctly
+	// (yt-dlp downloads them as separate files then merges).
 	var lastReportedBytes int64
 	var lastProgressFile string
+	fileTotals := make(map[string]int64)
 	if m != nil {
 		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 			if update.Status == ytdlp.ProgressStatusPostProcessing ||
@@ -538,8 +550,29 @@ func downloadWithYtDlp(url, path string, m *model) error {
 				lastReportedBytes = downloaded
 			}
 
-			if update.TotalBytes > 0 && m.totalBytes < int64(update.TotalBytes) {
-				m.totalBytes = int64(update.TotalBytes)
+			// Sum totals across all files (video + audio) for accurate progress.
+			if update.TotalBytes > 0 {
+				fname := update.Filename
+				if fname == "" {
+					fname = "_default"
+				}
+				fileTotals[fname] = int64(update.TotalBytes)
+				var sum int64
+				for _, v := range fileTotals {
+					sum += v
+				}
+				m.totalBytes = sum
+			} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
+				// HLS streams: TotalBytes is 0 because the size is unknown
+				// upfront. Use fragment index/count as a monotonically
+				// increasing progress ratio so the bar never goes backward.
+				pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+				if pct > 0.99 {
+					pct = 0.99 // reserve 100% for actual completion
+				}
+				if pct > m.peakPct {
+					m.peakPct = pct
+				}
 			}
 		})
 	}
@@ -650,12 +683,16 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 
 	ctx := context.Background()
 
+	// Use a surf-backed HTTP client with Chrome TLS fingerprinting so the CDN
+	// does not reject requests from a plain Go client.
+	surfClient := util.GetDownloadClient()
+
 	// Real byte-based progress via the HLS callback.
 	// The callback now reports (bytesWritten, segmentsWritten, totalSegments).
 	// bytesWritten = actual bytes flushed to disk.
 	// We use bytesWritten directly for m.received, and dynamically estimate
 	// m.totalBytes from the average bytes per written segment.
-	err = hls.DownloadToFile(ctx, safeURL, safePath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
+	err = hls.DownloadToFileWithClient(ctx, surfClient, safeURL, safePath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
 		if m == nil || totalSegments <= 0 {
 			return
 		}
@@ -1086,7 +1123,10 @@ func HandleBatchDownload(episodes []models.Episode, animeURL string) error {
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
 				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
 					err = downloadWithNativeHLS(videoURL, episodePath, m)
-					if err != nil {
+					if err != nil && errors.Is(err, hls.ErrSeparateAudioTracks) {
+						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, err)
+						err = downloadWithYtDlp(videoURL, episodePath, m)
+					} else if err != nil {
 						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, err)
 						err = downloadDirectHTTP(videoURL, episodePath, m)
 					}
@@ -1279,7 +1319,10 @@ func HandleBatchDownloadRange(episodes []models.Episode, animeURL string, startN
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
 				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
-					if dlErr != nil {
+					if dlErr != nil && errors.Is(dlErr, hls.ErrSeparateAudioTracks) {
+						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, dlErr)
+						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+					} else if dlErr != nil {
 						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, dlErr)
 						dlErr = downloadDirectHTTP(videoURL, episodePath, m)
 					}
