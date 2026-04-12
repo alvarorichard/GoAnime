@@ -305,6 +305,12 @@ func TestDiscordRPC_SuperFlix_StreamThumbAsLastResort(t *testing.T) {
 	assert.Equal(t, "https://image.tmdb.org/t/p/w500/stream_thumb.jpg", anime.ImageURL,
 		"stream thumbnail should be used as last-resort cover for Discord")
 
+	// Verify setup fields are preserved
+	assert.Equal(t, "Obscure Movie", anime.Name)
+	assert.Equal(t, "88888", anime.URL)
+	assert.Equal(t, "SuperFlix", anime.Source)
+	assert.Equal(t, models.MediaTypeMovie, anime.MediaType)
+
 	// Verify it passes through Discord normalization cleanly
 	imageURL := anime.ImageURL
 	if idx := strings.Index(imageURL, "https://image.tmdb.org/t/p/"); idx > 0 {

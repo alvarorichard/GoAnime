@@ -601,11 +601,12 @@ jobs:
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: docker://archlinux:latest
         with:
-          args: bash -c "pacman -Sy --noconfirm pacman-contrib base-devel && useradd -m builder && chown -R builder:builder /github/workspace && su builder -c 'cd /github/workspace/aur/goanime && makepkg --printsrcinfo > .SRCINFO && cat .SRCINFO'"
+          entrypoint: bash
+          args: -c "pacman -Sy --noconfirm pacman-contrib base-devel && useradd -m builder && chown -R builder:builder /github/workspace && su builder -c 'cd /github/workspace/aur/goanime && makepkg --printsrcinfo > .SRCINFO && cat .SRCINFO'"
 
       - name: Publish to AUR
         if: steps.check-secrets.outputs.has_secrets == 'true'
-        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
         with:
           pkgname: goanime
           pkgbuild: ./aur/goanime/PKGBUILD
