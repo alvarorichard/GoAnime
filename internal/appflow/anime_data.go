@@ -107,13 +107,16 @@ func FetchAnimeDetails(anime *models.Anime) {
 		Title("Fetching anime details...").
 		Type(spinner.Dots).
 		Action(func() {
-			// For FlixHQ movies/TV shows, use TMDB enrichment instead of AniList
-			if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-				util.Debugf("Skipping AniList enrichment for FlixHQ content: %s", anime.Name)
-				if err := api.FetchAnimeDetails(anime); err != nil {
-					util.Debugf("Failed to enrich FlixHQ content with TMDB: %v", err)
+			// For FlixHQ/SuperFlix movies/TV shows, use TMDB enrichment instead of AniList
+			if anime.Source == "FlixHQ" || anime.Source == "SuperFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+				util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
+				// SuperFlix stores TMDB ID in URL, not a web page URL, so skip the old page scraping
+				if anime.Source != "SuperFlix" {
+					if err := api.FetchAnimeDetails(anime); err != nil {
+						util.Debugf("Failed to enrich content with TMDB: %v", err)
+					}
 				}
-				util.Debugf("[PERF] FetchAnimeDetails (FlixHQ) completed in %v", time.Since(detailsStart))
+				util.Debugf("[PERF] FetchAnimeDetails (movie/TV) completed in %v", time.Since(detailsStart))
 				return
 			}
 

@@ -1123,6 +1123,12 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 		util.SetGlobalReferer(result.Referer)
 	}
 
+	// Update cover image from stream thumbnail if not already set
+	if media.ImageURL == "" && result.Thumb != "" {
+		media.ImageURL = result.Thumb
+		util.Debug("SuperFlix cover set from stream thumbnail", "url", result.Thumb)
+	}
+
 	// Store subtitles globally for playback
 	if len(result.Subtitles) > 0 && !util.GlobalNoSubs {
 		var subInfos []util.SubtitleInfo

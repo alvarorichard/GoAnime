@@ -24,6 +24,45 @@ func EnrichMedia(media *models.Media) error {
 		return EnrichWithOMDb(media)
 	}
 
+	// If we already have a TMDB ID, fetch details directly instead of searching
+	if media.TMDBID > 0 {
+		util.Debug("Using existing TMDB ID for enrichment", "id", media.TMDBID)
+		var details *models.TMDBDetails
+		var err error
+		if media.MediaType == models.MediaTypeMovie {
+			details, err = tmdbClient.GetMovieDetails(media.TMDBID)
+		} else {
+			details, err = tmdbClient.GetTVDetails(media.TMDBID)
+		}
+		if err == nil && details != nil {
+			media.TMDBDetails = details
+			media.Rating = details.VoteAverage
+			media.Overview = details.Overview
+			if details.IMDBID != "" {
+				media.IMDBID = details.IMDBID
+			}
+			media.Runtime = details.Runtime
+			var genres []string
+			for _, g := range details.Genres {
+				genres = append(genres, g.Name)
+			}
+			media.Genres = genres
+			if details.PosterPath != "" {
+				media.ImageURL = tmdbClient.GetImageURL(details.PosterPath, "w500")
+			}
+			if media.Year == "" {
+				if details.ReleaseDate != "" && len(details.ReleaseDate) >= 4 {
+					media.Year = details.ReleaseDate[:4]
+				} else if details.FirstAirDate != "" && len(details.FirstAirDate) >= 4 {
+					media.Year = details.FirstAirDate[:4]
+				}
+			}
+			util.Debug("TMDB enrichment by ID successful", "id", media.TMDBID, "rating", media.Rating)
+			return nil
+		}
+		util.Debug("TMDB fetch by ID failed, falling back to search", "error", err)
+	}
+
 	// Clean the name for search
 	cleanName := CleanMediaName(media.Name)
 	util.Debug("Searching TMDB for", "name", cleanName)

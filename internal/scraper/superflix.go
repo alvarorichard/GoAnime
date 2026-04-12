@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,12 +77,13 @@ type SuperFlixEpisode struct {
 
 // SuperFlixMedia represents a search result from SuperFlix
 type SuperFlixMedia struct {
-	Title  string
-	Year   string
-	Type   string // "Filme", "Série", etc.
-	SFType string // "filme" or "serie"
-	TMDBID string
-	IMDBID string
+	Title    string
+	Year     string
+	Type     string // "Filme", "Série", etc.
+	SFType   string // "filme" or "serie"
+	TMDBID   string
+	IMDBID   string
+	ImageURL string // Cover image URL from search results
 }
 
 // SuperFlixClient handles interactions with SuperFlix
@@ -92,6 +94,30 @@ type SuperFlixClient struct {
 	maxRetries  int
 	retryDelay  time.Duration
 	searchCache sync.Map
+}
+
+// NormalizeSuperFlixImageURL converts SuperFlix CloudFront proxy URLs to direct TMDB image URLs.
+// Discord's image proxy cannot handle the double-URL format used by SuperFlix:
+//
+//	https://d1muf25xaso8hp.cloudfront.net/https://image.tmdb.org/t/p/w342/poster.jpg
+//
+// This extracts the embedded TMDB URL and upgrades to w500 quality:
+//
+//	https://image.tmdb.org/t/p/w500/poster.jpg
+func NormalizeSuperFlixImageURL(imageURL string) string {
+	if imageURL == "" {
+		return ""
+	}
+	const tmdbPrefix = "https://image.tmdb.org/t/p/"
+	if idx := strings.Index(imageURL, tmdbPrefix); idx > 0 {
+		direct := imageURL[idx:]
+		// Upgrade thumbnail size for Discord display
+		direct = strings.Replace(direct, "/w342/", "/w500/", 1)
+		direct = strings.Replace(direct, "/w185/", "/w500/", 1)
+		direct = strings.Replace(direct, "/w154/", "/w500/", 1)
+		return direct
+	}
+	return imageURL
 }
 
 // NewSuperFlixClient creates a new SuperFlix client
@@ -167,9 +193,27 @@ func (c *SuperFlixClient) parseCards(doc *goquery.Document) []*SuperFlixMedia {
 	seen := make(map[string]bool)
 
 	doc.Find("div.group\\/card").Each(func(i int, card *goquery.Selection) {
-		var title string
+		var title, imageURL string
 		if img := card.Find("img"); img.Length() > 0 {
 			title, _ = img.Attr("alt")
+			// Extract cover image URL from src, data-src, or srcset
+			if src, ok := img.Attr("src"); ok && src != "" && !strings.HasPrefix(src, "data:") {
+				imageURL = src
+			}
+			if imageURL == "" {
+				if dataSrc, ok := img.Attr("data-src"); ok && dataSrc != "" {
+					imageURL = dataSrc
+				}
+			}
+			if imageURL == "" {
+				if srcset, ok := img.Attr("srcset"); ok && srcset != "" {
+					// Take the first URL from srcset (format: "url size, url size, ...")
+					parts := strings.Fields(strings.Split(srcset, ",")[0])
+					if len(parts) > 0 {
+						imageURL = parts[0]
+					}
+				}
+			}
 		}
 		if title == "" {
 			if h3 := card.Find("h3"); h3.Length() > 0 {
@@ -230,12 +274,13 @@ func (c *SuperFlixClient) parseCards(doc *goquery.Document) []*SuperFlixMedia {
 		}
 
 		results = append(results, &SuperFlixMedia{
-			Title:  title,
-			Year:   year,
-			Type:   tipo,
-			SFType: sfType,
-			TMDBID: tmdbID,
-			IMDBID: imdbID,
+			Title:    title,
+			Year:     year,
+			Type:     tipo,
+			SFType:   sfType,
+			TMDBID:   tmdbID,
+			IMDBID:   imdbID,
+			ImageURL: NormalizeSuperFlixImageURL(imageURL),
 		})
 	})
 
@@ -624,7 +669,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		StreamURL: streamURL,
 		Title:     tokens.Title,
 		Referer:   playerBaseURL + "/",
-		Thumb:     thumbURL,
+		Thumb:     NormalizeSuperFlixImageURL(thumbURL),
 	}
 
 	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)
@@ -646,10 +691,11 @@ func (c *SuperFlixClient) GetEpisodes(ctx context.Context, tmdbID string) (map[s
 // ToAnimeModel converts SuperFlixMedia to models.Anime for compatibility
 func (m *SuperFlixMedia) ToAnimeModel() *models.Anime {
 	anime := &models.Anime{
-		Name:   m.Title,
-		URL:    m.TMDBID, // Store TMDB ID as URL identifier
-		Source: "SuperFlix",
-		Year:   m.Year,
+		Name:     m.Title,
+		URL:      m.TMDBID, // Store TMDB ID as URL identifier
+		Source:   "SuperFlix",
+		Year:     m.Year,
+		ImageURL: m.ImageURL,
 	}
 
 	if m.SFType == "filme" {
@@ -661,6 +707,15 @@ func (m *SuperFlixMedia) ToAnimeModel() *models.Anime {
 	if m.IMDBID != "" {
 		anime.IMDBID = m.IMDBID
 	}
+
+	// Parse TMDB ID for direct API lookups during enrichment
+	if m.TMDBID != "" {
+		if id, err := strconv.Atoi(m.TMDBID); err == nil {
+			anime.TMDBID = id
+		}
+	}
+
+	util.Debug("SuperFlix ToAnimeModel", "title", m.Title, "tmdbID", m.TMDBID, "imageURL", anime.ImageURL)
 
 	return anime
 }
