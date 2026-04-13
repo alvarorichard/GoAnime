@@ -25,7 +25,7 @@ const (
 var (
 	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
 	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
-	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oÃ³]dio\s+(\d+)`)
+	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
 )
 
 // AnimefireClient handles interactions with Animefire.io

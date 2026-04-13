@@ -207,7 +207,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 }
 
 // GetEpisodesList gets the list of available episodes for an anime (based on Curd implementation)
-func (c *AllAnimeClient) GetEpisodesList(animeID string, mode string) ([]string, error) {
+func (c *AllAnimeClient) GetEpisodesList(animeID, mode string) ([]string, error) {
 	if mode == "" {
 		mode = "sub"
 	}
@@ -455,7 +455,7 @@ var LinkPriorities = []string{
 }
 
 // GetEpisodeURL gets the streaming URL for a specific episode using priority-based selection
-func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode string, quality string) (string, map[string]string, error) {
+func (c *AllAnimeClient) GetEpisodeURL(animeID, episodeNo, mode, quality string) (string, map[string]string, error) {
 	if mode == "" {
 		mode = "sub"
 	}
@@ -524,7 +524,7 @@ func (c *AllAnimeClient) GetEpisodeURL(animeID string, episodeNo string, mode st
 }
 
 // processSourceURLsConcurrent processes source URLs with concurrent requests and priority-based selection
-func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality string, animeID string, episodeNo string) (string, map[string]string, error) {
+func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality, animeID, episodeNo string) (string, map[string]string, error) {
 	type result struct {
 		index     int
 		links     map[string]string

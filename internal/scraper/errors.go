@@ -69,7 +69,7 @@ func checkChallengeDocument(doc *goquery.Document, source string) error {
 }
 
 // validateStreamURL ensures extracted playback URLs are absolute HTTP(S) URLs.
-func validateStreamURL(rawURL string, source string) (string, error) {
+func validateStreamURL(rawURL, source string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return "", fmt.Errorf("%s returned malformed stream URL: %w", source, ErrInvalidStreamURL)
