@@ -197,11 +197,8 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 		return "", err
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-	if err == nil {
-		if err := checkChallengeDocument(doc, "Goyabu homepage"); err != nil {
-			return "", err
-		}
+	if err := checkHTMLResponse(resp, body, "Goyabu homepage"); err != nil {
+		return "", err
 	}
 
 	// Extract nonce from glosAP config: "nonce":"xxxxx"
@@ -380,16 +377,13 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 			return nil, fmt.Errorf("failed to read response: %w", err)
 		}
 
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-		if err == nil {
-			if err := checkChallengeDocument(doc, "Goyabu episodes"); err != nil {
-				lastErr = err
-				if c.shouldRetry(attempt) {
-					c.sleep()
-					continue
-				}
-				return nil, lastErr
+		if err := checkHTMLResponse(resp, body, "Goyabu episodes"); err != nil {
+			lastErr = err
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
 			}
+			return nil, lastErr
 		}
 
 		episodes := c.parseEpisodesFromJS(string(body))

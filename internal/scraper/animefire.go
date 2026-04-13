@@ -50,6 +50,7 @@ func NewAnimefireClient() *AnimefireClient {
 
 // SearchAnime searches for anime on Animefire.io using the original logic.
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
+	// AnimeFire expects spaces as hyphens in the URL
 	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
 	searchURL := fmt.Sprintf("%s/pesquisar/%s", c.baseURL, url.PathEscape(normalizedQuery))
 
@@ -108,6 +109,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 
 		animes := c.extractSearchResults(doc)
 		if len(animes) == 0 {
+			// Legitimate empty result set – return without error
 			return []*models.Anime{}, nil
 		}
 
@@ -372,6 +374,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		quality int
 	}
 
+	// Method 1: Look for video element with data-video-src attribute
 	var sources []videoSource
 	doc.Find("[data-video-src]").Each(func(_ int, s *goquery.Selection) {
 		src, exists := s.Attr("data-video-src")
@@ -398,6 +401,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		return best.url, nil
 	}
 
+	// Method 2: Look for video element with src attribute
 	if videoSrc, exists := doc.Find("video source").Attr("src"); exists && videoSrc != "" {
 		return validateStreamURL(videoSrc, "AnimeFire")
 	}
@@ -405,6 +409,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		return validateStreamURL(videoSrc, "AnimeFire")
 	}
 
+	// Method 3: Look for iframe with Blogger video
 	iframeSrc := ""
 	doc.Find("iframe").Each(func(_ int, s *goquery.Selection) {
 		if src, exists := s.Attr("src"); exists {
@@ -418,6 +423,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		return validateStreamURL(iframeSrc, "AnimeFire")
 	}
 
+	// Method 4: Look for data-video, data-src, data-url attributes in various elements
 	selectors := []string{
 		"div[data-video]",
 		"div[data-src]",
@@ -434,6 +440,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 		}
 	}
 
+	// Method 5: Search in HTML content for video URLs
 	html, err := doc.Html()
 	if err == nil {
 		if matches := extractAnimefireBloggerURL(html); matches != "" {

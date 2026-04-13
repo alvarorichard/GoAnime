@@ -27,7 +27,7 @@ func checkHTTPStatus(resp *http.Response, source string) error {
 	case http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable:
 		return fmt.Errorf("%s returned status %d (source blocked?): %w", source, resp.StatusCode, ErrSourceUnavailable)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("%s returned status %d", source, resp.StatusCode)
 	}
 	return nil
