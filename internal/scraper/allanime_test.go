@@ -163,3 +163,46 @@ func TestCheckHTTPStatusNonBlockingCodeReturnsPlainError(t *testing.T) {
 	assert.False(t, errors.Is(err, ErrSourceUnavailable), "404 should not be ErrSourceUnavailable, got: %v", err)
 	assert.Contains(t, err.Error(), "404")
 }
+
+func TestAllAnimeGetLinksClassifiesHTMLContentTypeAsSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><div id="cf-wrapper"></div></body></html>`)
+	}))
+	defer server.Close()
+
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
+
+	_, err := client.getLinks(server.URL + "/links")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable for HTML content-type, got: %v", err)
+}
+
+func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<html><body>Access Denied</body></html>`)
+	}))
+	defer server.Close()
+
+	client := &AllAnimeClient{
+		client:    util.GetFastClient(),
+		referer:   AllAnimeReferer,
+		apiBase:   server.URL,
+		userAgent: UserAgent,
+	}
+
+	_, err := client.getLinks(server.URL + "/links")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable for HTML body, got: %v", err)
+}
