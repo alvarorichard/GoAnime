@@ -296,6 +296,7 @@ drainLoop:
 				sourceName := sm.getScraperDisplayName(res.scraperType)
 				util.Debug("Late search error", "source", sourceName, "error", res.err)
 				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
+				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
 				errorsMutex.Unlock()
 				continue
 			}

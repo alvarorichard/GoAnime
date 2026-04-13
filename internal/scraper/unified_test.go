@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -653,6 +654,34 @@ func TestSearchAnime_QueryPassedCorrectly(t *testing.T) {
 	assert.Len(t, capturedQueries, 2)
 	assert.Contains(t, capturedQueries, "allanime:Shingeki no Kyojin")
 	assert.Contains(t, capturedQueries, "animefire:Shingeki no Kyojin")
+}
+
+// =============================================================================
+// Test: ErrSourceUnavailable sentinel is preserved through errors.Join
+// =============================================================================
+
+func TestSearchAnime_AllSourcesUnavailable_SentinelChainPreserved(t *testing.T) {
+	t.Parallel()
+
+	unavailableErr := fmt.Errorf("blocked by Cloudflare: %w", ErrSourceUnavailable)
+
+	allAnimeMock := &MockScraper{
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, unavailableErr
+		},
+	}
+	animefireMock := &MockScraper{
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, unavailableErr
+		},
+	}
+
+	manager := createTestManager(allAnimeMock, animefireMock)
+	_, err := manager.SearchAnime("one piece", nil)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable),
+		"errors.Is should find ErrSourceUnavailable in the chain, got: %v", err)
 }
 
 // =============================================================================
