@@ -807,7 +807,11 @@ func TestSanitizeOutputPath_DirectoryTraversal(t *testing.T) {
 func TestSanitizeOutputPath_Valid(t *testing.T) {
 	t.Parallel()
 
-	result, err := sanitizeOutputPath("/tmp/test/output.ts")
+	dir := t.TempDir()
+	input := filepath.Join(dir, "output.ts")
+	result, err := sanitizeOutputPath(input)
 	require.NoError(t, err)
-	assert.Equal(t, "/tmp/test/output.ts", result)
+
+	expected, _ := filepath.Abs(input)
+	assert.Equal(t, expected, result)
 }
