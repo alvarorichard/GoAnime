@@ -90,7 +90,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 			continue
 		}
 
-		buf := make([]byte, 32*1024)
+		buf := make([]byte, 256*1024)
 		for {
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
@@ -504,7 +504,8 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	dl := ytdlp.New().
 		Output(safePath).
 		Format("bestvideo+bestaudio/best").
-		ConcurrentFragments(4).
+		ConcurrentFragments(24).
+		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)
@@ -795,7 +796,7 @@ func downloadDirectHTTP(videoURL, path string, m *model) error {
 	}
 	defer func() { _ = out.Close() }()
 
-	buf := make([]byte, 64*1024)
+	buf := make([]byte, 256*1024)
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
@@ -1467,10 +1468,7 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 			fullPath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := snap.AnimeSeason
-			if season < 1 {
-				season = 1
-			}
+			season := max(snap.AnimeSeason, 1)
 			fullPath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
 		}
 		dir := filepath.Dir(fullPath)

@@ -461,7 +461,7 @@ func (md *MovieDownloader) downloadHTTPWithProgress(videoURL, destPath, referer 
 	}
 
 	// Copy with progress tracking
-	buffer := make([]byte, 32*1024)
+	buffer := make([]byte, 256*1024)
 	var totalReceived int64
 
 	for {
@@ -562,7 +562,8 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		ConcurrentFragments(4).
+		ConcurrentFragments(24).
+		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)

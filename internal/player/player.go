@@ -71,10 +71,7 @@ func SetAnimeName(name string, season int) {
 	gMedia.mu.Lock()
 	defer gMedia.mu.Unlock()
 	gMedia.animeName = name
-	gMedia.animeSeason = season
-	if season < 1 {
-		gMedia.animeSeason = 1
-	}
+	gMedia.animeSeason = max(season, 1)
 }
 
 // SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
@@ -496,10 +493,7 @@ func HandleDownloadAndPlay(
 
 	// Store anime name for Plex-compatible download file naming
 	if animeName != "" {
-		season := animeSeason
-		if season < 1 {
-			season = 1
-		}
+		season := max(animeSeason, 1)
 		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
 			season = util.GlobalDownloadRequest.SeasonNum
 		}
@@ -680,10 +674,7 @@ func downloadAndPlayEpisode(
 			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := snap.AnimeSeason
-			if season < 1 {
-				season = 1
-			}
+			season := max(snap.AnimeSeason, 1)
 			// Use the int episode number directly; fall back to parsing the string only if needed
 			epNum := selectedEpisodeNum
 			if epNum < 1 {

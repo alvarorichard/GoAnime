@@ -65,8 +65,8 @@ func NewDownloader() *Downloader {
 		},
 		// Setting TLSNextProto to an empty map disables HTTP/2
 		TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
-		MaxIdleConns:        10,
-		MaxIdleConnsPerHost: 4,
+		MaxIdleConns:        48,
+		MaxIdleConnsPerHost: 24,
 		IdleConnTimeout:     90 * time.Second,
 		// SSRF protection: validates resolved IPs before connecting
 		DialContext: api.SafeDialContext(30 * time.Second),
@@ -397,7 +397,7 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 			return nil, err
 		}
 
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 30*1024*1024))
 		_ = resp.Body.Close()
 
 		if err != nil {
@@ -451,12 +451,14 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Open the output file for writing
+	// Open the output file for writing with buffered I/O for better throughput
 	outFile, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) // #nosec G304 - path sanitized above
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer func() { _ = outFile.Close() }()
+	bufferedWriter := bufio.NewWriterSize(outFile, 512*1024) // 512KB write buffer
+	defer func() { _ = bufferedWriter.Flush() }()
 
 	totalSegments := len(playlist.Segments)
 	var downloadedSegments int32
@@ -468,8 +470,8 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	}
 
 	// Concurrent download configuration
-	// 8 workers provides good parallelism without triggering most CDN rate limits
-	const maxWorkers = 8
+	// 16 workers provides high parallelism for fast downloads
+	const maxWorkers = 24
 
 	type job struct {
 		index   int
@@ -541,7 +543,7 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 				}
 
 				if data != nil {
-					n, werr := outFile.Write(data)
+					n, werr := bufferedWriter.Write(data)
 					if werr != nil {
 						if firstErr == nil {
 							firstErr = fmt.Errorf("failed to write segment %d: %w", nextIndex, werr)

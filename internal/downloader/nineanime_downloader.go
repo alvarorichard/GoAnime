@@ -793,7 +793,8 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		ConcurrentFragments(4).
+		ConcurrentFragments(24).
+		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)

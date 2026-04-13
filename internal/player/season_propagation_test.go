@@ -166,10 +166,7 @@ func TestHandleDownloadAndPlay_SeasonFromAnime(t *testing.T) {
 		// season := animeSeason (from anime.CurrentSeason)
 		// if season < 1 { season = 1 }
 		animeSeason := anime.CurrentSeason
-		season := animeSeason
-		if season < 1 {
-			season = 1
-		}
+		season := max(animeSeason, 1)
 		SetAnimeName(anime.Name, season)
 		SetExactMediaType(string(anime.MediaType))
 
@@ -204,10 +201,7 @@ func TestHandleDownloadAndPlay_SeasonFromAnime(t *testing.T) {
 
 		// Simulate the HandleDownloadAndPlay logic with GlobalDownloadRequest
 		animeSeason := anime.CurrentSeason
-		season := animeSeason
-		if season < 1 {
-			season = 1
-		}
+		season := max(animeSeason, 1)
 		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
 			season = util.GlobalDownloadRequest.SeasonNum
 		}
@@ -230,10 +224,7 @@ func TestHandleDownloadAndPlay_SeasonFromAnime(t *testing.T) {
 		assert.True(t, anime.IsAnime())
 
 		animeSeason := anime.CurrentSeason
-		season := animeSeason
-		if season < 1 {
-			season = 1
-		}
+		season := max(animeSeason, 1)
 		SetAnimeName(anime.Name, season)
 
 		snap := snapshotMedia()
@@ -370,10 +361,7 @@ func TestEndToEndSeasonPipeline(t *testing.T) {
 
 	// Step 4: HandleDownloadAndPlay receives anime.CurrentSeason
 	animeSeason := anime.CurrentSeason
-	season := animeSeason
-	if season < 1 {
-		season = 1
-	}
+	season := max(animeSeason, 1)
 	SetAnimeName(anime.Name, season)
 	SetExactMediaType(string(anime.MediaType))
 
