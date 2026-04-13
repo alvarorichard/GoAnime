@@ -638,6 +638,14 @@ func getTrackerDBPath() string {
 	return cachedDBPath
 }
 
+// trackingKey builds an episode-specific tracking key so that each episode
+// gets its own row in the database. Without this, sources like AllAnime
+// (where episode.URL is the anime ID, not the episode ID) would share a
+// single tracking row across all episodes, causing stale resume times.
+func trackingKey(episodeURL string, episodeNum int) string {
+	return fmt.Sprintf("%s:ep%d", episodeURL, episodeNum)
+}
+
 // initTracking inicializa o sistema de rastreamento
 func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
 	if !tracking.IsCgoEnabled {
@@ -662,14 +670,25 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		}
 	}
 
-	// Debug: log what we're looking up
-	util.Debugf("Tracking lookup: anilistID=%d, episode.URL=%s", anilistID, episode.URL)
+	key := trackingKey(episode.URL, episodeNum)
+	util.Debugf("Tracking lookup: anilistID=%d, key=%s", anilistID, key)
 
-	progress, err := tracker.GetAnime(anilistID, episode.URL)
+	// Try episode-specific key first
+	progress, err := tracker.GetAnime(anilistID, key)
 	if err != nil {
 		util.Debugf("Tracking lookup error: %v", err)
 		return tracker, 0
 	}
+
+	// Fallback: try legacy key (without episode number) for backward compatibility
+	if progress == nil {
+		progress, err = tracker.GetAnime(anilistID, episode.URL)
+		if err != nil {
+			util.Debugf("Tracking legacy lookup error: %v", err)
+			return tracker, 0
+		}
+	}
+
 	if progress == nil {
 		util.Debugf("Tracking lookup: no progress found")
 		return tracker, 0
@@ -679,9 +698,17 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 		return tracker, 0
 	}
 
-	util.Debugf("Tracking found: PlaybackTime=%d seconds", progress.PlaybackTime)
+	// Safety check: verify the saved progress belongs to the current episode.
+	// This prevents offering a resume from episode 3's position when the user
+	// has switched to episode 4 (e.g., AllAnime shares the same URL across episodes).
+	if progress.EpisodeNumber != episodeNum {
+		util.Debugf("Tracking: saved progress is for episode %d, current is %d - skipping resume",
+			progress.EpisodeNumber, episodeNum)
+		return tracker, 0
+	}
 
-	// Usa o episodeNum selecionado para o diálogo, mas mantém o PlaybackTime do rastreamento
+	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
+
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
 		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
 		return tracker, progress.PlaybackTime
@@ -990,7 +1017,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 
 	anime := tracking.Anime{
 		AnilistID:     anilistID,
-		AllanimeID:    episode.URL,
+		AllanimeID:    trackingKey(episode.URL, episodeNum),
 		EpisodeNumber: episodeNum,
 		PlaybackTime:  int(position),
 		Duration:      duration,
