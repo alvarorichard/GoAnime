@@ -438,8 +438,19 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			// For FlixHQ/SFlix/SuperFlix, use specific [Movie] or [TV] tag based on media type
-			if scraperType == FlixHQType || scraperType == SFlixType || scraperType == SuperFlixType {
+			switch scraperType {
+			case SuperFlixType:
+				// SuperFlix: media type tag + [PT-BR] since it's a PT-BR source
+				switch anime.MediaType {
+				case models.MediaTypeMovie:
+					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
+				case models.MediaTypeTV:
+					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
+				default:
+					anime.Name = fmt.Sprintf("[Movies/TV] [PT-BR] %s", anime.Name)
+				}
+			case FlixHQType, SFlixType:
+				// FlixHQ/SFlix: specific [Movie] or [TV] tag based on media type
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
 					anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
@@ -448,7 +459,7 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 				default:
 					anime.Name = fmt.Sprintf("[Movies/TV] %s", anime.Name)
 				}
-			} else {
+			default:
 				languageTag := sm.getLanguageTag(scraperType)
 				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 			}
