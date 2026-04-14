@@ -23,7 +23,6 @@ const (
 
 // Pre-compiled regexes for AnimeFire scraper (avoid per-call compilation)
 var (
-	animefireBloggerRe = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	animefireMp4Re     = regexp.MustCompile(`(https?://[^"'\s<>]+\.mp4(?:\?[^"'\s<>]*)?)`)
 	animefireM3U8Re    = regexp.MustCompile(`(https?://[^"'\s<>]+\.m3u8(?:\?[^"'\s<>]*)?)`)
 	animefireEpisodeRe = regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`)
@@ -41,7 +40,7 @@ type AnimefireClient struct {
 // NewAnimefireClient creates a new Animefire client
 func NewAnimefireClient() *AnimefireClient {
 	return &AnimefireClient{
-		client:     util.GetFastClient(), // Use shared fast client
+		client:     util.GetFastClient(),
 		baseURL:    AnimefireBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
@@ -49,7 +48,7 @@ func NewAnimefireClient() *AnimefireClient {
 	}
 }
 
-// SearchAnime searches for anime on Animefire.io using the original logic
+// SearchAnime searches for anime on Animefire.io using the original logic.
 func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 	// AnimeFire expects spaces as hyphens in the URL
 	normalizedQuery := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(query)), " ", "-")
@@ -78,8 +77,8 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			lastErr = c.handleStatusError(resp)
+		if err := checkHTTPStatus(resp, "AnimeFire search"); err != nil {
+			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -99,8 +98,8 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+		if err := checkChallengeDocument(doc, "AnimeFire search"); err != nil {
+			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -132,13 +131,6 @@ func (c *AnimefireClient) decorateRequest(req *http.Request) {
 	req.Header.Set("Referer", c.baseURL+"/")
 }
 
-func (c *AnimefireClient) handleStatusError(resp *http.Response) error {
-	if resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("access restricted: VPN may be required")
-	}
-	return fmt.Errorf("server returned: %s", resp.Status)
-}
-
 func (c *AnimefireClient) shouldRetry(attempt int) bool {
 	return attempt < c.maxRetries
 }
@@ -150,24 +142,10 @@ func (c *AnimefireClient) sleep() {
 	time.Sleep(c.retryDelay)
 }
 
-func (c *AnimefireClient) isChallengePage(doc *goquery.Document) bool {
-	title := strings.ToLower(strings.TrimSpace(doc.Find("title").First().Text()))
-	if strings.Contains(title, "just a moment") {
-		return true
-	}
-
-	if doc.Find("#cf-wrapper").Length() > 0 || doc.Find("#challenge-form").Length() > 0 {
-		return true
-	}
-
-	body := strings.ToLower(doc.Text())
-	return strings.Contains(body, "cf-error") || strings.Contains(body, "cloudflare")
-}
-
 func (c *AnimefireClient) extractSearchResults(doc *goquery.Document) []*models.Anime {
 	var animes []*models.Anime
 
-	doc.Find(".row.ml-1.mr-1 a").Each(func(i int, s *goquery.Selection) {
+	doc.Find(".row.ml-1.mr-1 a").Each(func(_ int, s *goquery.Selection) {
 		if urlPath, exists := s.Attr("href"); exists {
 			name := strings.TrimSpace(s.Text())
 			if name != "" {
@@ -183,7 +161,7 @@ func (c *AnimefireClient) extractSearchResults(doc *goquery.Document) []*models.
 		return animes
 	}
 
-	doc.Find(".card_ani").Each(func(i int, s *goquery.Selection) {
+	doc.Find(".card_ani").Each(func(_ int, s *goquery.Selection) {
 		titleElem := s.Find(".ani_name a")
 		title := strings.TrimSpace(titleElem.Text())
 		link, exists := titleElem.Attr("href")
@@ -206,7 +184,7 @@ func (c *AnimefireClient) extractSearchResults(doc *goquery.Document) []*models.
 	return animes
 }
 
-// resolveURL resolves relative URLs to absolute URLs
+// resolveURL resolves relative URLs to absolute URLs.
 func (c *AnimefireClient) resolveURL(base, ref string) string {
 	if strings.HasPrefix(ref, "http") {
 		return ref
@@ -218,7 +196,6 @@ func (c *AnimefireClient) resolveURL(base, ref string) string {
 }
 
 // GetAnimeEpisodes fetches and parses the list of episodes for a given anime.
-// It returns a sorted slice of Episode structs, ordered by episode number.
 func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 	util.Debug("AnimeFire episodes", "url", animeURL)
 
@@ -243,8 +220,8 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 			return nil, lastErr
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			lastErr = c.handleStatusError(resp)
+		if err := checkHTTPStatus(resp, "AnimeFire episodes"); err != nil {
+			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -264,8 +241,8 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 			return nil, lastErr
 		}
 
-		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+		if err := checkChallengeDocument(doc, "AnimeFire episodes"); err != nil {
+			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -274,8 +251,6 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 		}
 
 		episodes := c.parseEpisodes(doc)
-
-		// Sort episodes by number ascending
 		sort.Slice(episodes, func(i, j int) bool {
 			return episodes[i].Num < episodes[j].Num
 		})
@@ -289,14 +264,14 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	return nil, errors.New("failed to retrieve episodes from AnimeFire")
 }
 
-// parseEpisodes extracts a list of Episode structs from the given goquery.Document.
+// parseEpisodes extracts a list of Episode structs from the given document.
 func (c *AnimefireClient) parseEpisodes(doc *goquery.Document) []models.Episode {
 	var episodes []models.Episode
 	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
 		episodeNum := s.Text()
 		episodeURL, _ := s.Attr("href")
 
-		num := i + 1 // default to index-based numbering
+		num := i + 1
 		matches := animefireEpisodeRe.FindStringSubmatch(episodeNum)
 		if len(matches) >= 2 {
 			parsed, err := strconv.Atoi(matches[1])
@@ -317,8 +292,7 @@ func (c *AnimefireClient) parseEpisodes(doc *goquery.Document) []models.Episode 
 	return episodes
 }
 
-// GetEpisodeStreamURL gets the streaming URL for a specific episode from AnimeFire
-// This handles various video sources including Blogger embeds
+// GetEpisodeStreamURL gets the streaming URL for a specific episode from AnimeFire.
 func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	util.Debug("AnimeFire stream URL extraction", "episodeURL", episodeURL)
 
@@ -343,8 +317,8 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 			return "", lastErr
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			lastErr = c.handleStatusError(resp)
+		if err := checkHTTPStatus(resp, "AnimeFire episode page"); err != nil {
+			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -364,8 +338,8 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 			return "", lastErr
 		}
 
-		if c.isChallengePage(doc) {
-			lastErr = errors.New("animefire returned a challenge page (try VPN or wait)")
+		if err := checkChallengeDocument(doc, "AnimeFire episode page"); err != nil {
+			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -373,7 +347,6 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 			return "", lastErr
 		}
 
-		// Try to find video URL using multiple methods
 		videoURL, err := c.extractVideoURL(doc)
 		if err == nil && videoURL != "" {
 			util.Debug("AnimeFire video URL found", "url", videoURL)
@@ -393,24 +366,52 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 	return "", errors.New("failed to extract video URL from AnimeFire")
 }
 
-// extractVideoURL extracts the video URL from an AnimeFire episode page
+// extractVideoURL extracts the video URL from an AnimeFire episode page.
 func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error) {
+	qualityRanks := map[string]int{"1080p": 5, "720p": 4, "480p": 3, "360p": 2, "240p": 1}
+	type videoSource struct {
+		url     string
+		quality int
+	}
+
 	// Method 1: Look for video element with data-video-src attribute
-	if videoSrc, exists := doc.Find("video[data-video-src]").Attr("data-video-src"); exists && videoSrc != "" {
-		return videoSrc, nil
+	var sources []videoSource
+	doc.Find("[data-video-src]").Each(func(_ int, s *goquery.Selection) {
+		src, exists := s.Attr("data-video-src")
+		if !exists || src == "" {
+			return
+		}
+
+		validatedURL, err := validateStreamURL(src, "AnimeFire")
+		if err != nil {
+			return
+		}
+
+		label, _ := s.Attr("data-quality")
+		sources = append(sources, videoSource{url: validatedURL, quality: qualityRanks[strings.ToLower(label)]})
+	})
+	if len(sources) > 0 {
+		best := sources[0]
+		for _, source := range sources[1:] {
+			if source.quality > best.quality {
+				best = source
+			}
+		}
+		util.Debugf("AnimeFire: selected quality rank %d url %s from %d sources", best.quality, best.url, len(sources))
+		return best.url, nil
 	}
 
 	// Method 2: Look for video element with src attribute
 	if videoSrc, exists := doc.Find("video source").Attr("src"); exists && videoSrc != "" {
-		return videoSrc, nil
+		return validateStreamURL(videoSrc, "AnimeFire")
 	}
 	if videoSrc, exists := doc.Find("video").Attr("src"); exists && videoSrc != "" {
-		return videoSrc, nil
+		return validateStreamURL(videoSrc, "AnimeFire")
 	}
 
 	// Method 3: Look for iframe with Blogger video
 	iframeSrc := ""
-	doc.Find("iframe").Each(func(i int, s *goquery.Selection) {
+	doc.Find("iframe").Each(func(_ int, s *goquery.Selection) {
 		if src, exists := s.Attr("src"); exists {
 			if strings.Contains(src, "blogger.com") || strings.Contains(src, "blogspot.com") {
 				iframeSrc = src
@@ -419,23 +420,22 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	})
 	if iframeSrc != "" {
 		util.Debug("Found Blogger iframe", "src", iframeSrc)
-		return iframeSrc, nil
+		return validateStreamURL(iframeSrc, "AnimeFire")
 	}
 
 	// Method 4: Look for data-video, data-src, data-url attributes in various elements
 	selectors := []string{
-		"div[data-video-src]",
 		"div[data-video]",
 		"div[data-src]",
 		"div[data-url]",
 		"[data-player]",
 	}
-	attrs := []string{"data-video-src", "data-video", "data-src", "data-url", "data-player"}
+	attrs := []string{"data-video", "data-src", "data-url", "data-player"}
 
 	for i, selector := range selectors {
 		if elem := doc.Find(selector); elem.Length() > 0 {
 			if val, exists := elem.Attr(attrs[i]); exists && val != "" {
-				return val, nil
+				return validateStreamURL(val, "AnimeFire")
 			}
 		}
 	}
@@ -443,18 +443,14 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	// Method 5: Search in HTML content for video URLs
 	html, err := doc.Html()
 	if err == nil {
-		// Look for Blogger video links
-		if animefireBloggerRe.MatchString(html) {
-			if matches := animefireBloggerRe.FindString(html); matches != "" {
-				return matches, nil
-			}
+		if matches := extractAnimefireBloggerURL(html); matches != "" {
+			return validateStreamURL(matches, "AnimeFire")
 		}
 
-		// Look for direct video URLs
 		for _, re := range []*regexp.Regexp{animefireMp4Re, animefireM3U8Re} {
 			if re.MatchString(html) {
 				if matches := re.FindString(html); matches != "" {
-					return matches, nil
+					return validateStreamURL(matches, "AnimeFire")
 				}
 			}
 		}
@@ -463,7 +459,62 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	return "", errors.New("no video source found in the page")
 }
 
-// GetAnimeDetails - placeholder method, details are fetched by API layer
+func extractAnimefireBloggerURL(html string) string {
+	const marker = "https://www.blogger.com/video.g?token="
+
+	search := html
+	offset := 0
+	for {
+		start := strings.Index(search, marker)
+		if start < 0 {
+			return ""
+		}
+
+		start += offset
+		candidate := html[start:]
+		if end := strings.IndexAny(candidate, "\"' <>\r\n\t"); end >= 0 {
+			candidate = candidate[:end]
+		}
+
+		if isValidAnimefireBloggerURL(candidate) {
+			return candidate
+		}
+
+		next := start + len(marker)
+		if next >= len(html) {
+			return ""
+		}
+		search = html[next:]
+		offset = next
+	}
+}
+
+func isValidAnimefireBloggerURL(rawValue string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawValue))
+	if err != nil {
+		return false
+	}
+
+	if parsed.Scheme != "https" || parsed.Host != "www.blogger.com" || parsed.Path != "/video.g" {
+		return false
+	}
+
+	token := parsed.Query().Get("token")
+	if token == "" {
+		return false
+	}
+
+	for _, r := range token {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+
+	return true
+}
+
+// GetAnimeDetails is a placeholder method; details are fetched by the API layer.
 func (c *AnimefireClient) GetAnimeDetails(animeURL string) (*models.Anime, error) {
 	return nil, fmt.Errorf("anime details should be fetched using API layer, not scraper")
 }

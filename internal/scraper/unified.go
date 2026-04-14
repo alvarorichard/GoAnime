@@ -3,6 +3,7 @@ package scraper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -154,6 +155,7 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		allResults         []*models.Anime
 		resultsMutex       sync.Mutex
 		searchErrors       []string
+		searchSourceErrors []error
 		errorsMutex        sync.Mutex
 		sourcesWithResults map[ScraperType]bool
 	)
@@ -205,6 +207,7 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				sourceName := sm.getScraperDisplayName(res.scraperType)
 				util.Debug("Search error", "source", sourceName, "error", res.err)
 				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
+				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
 				errorsMutex.Unlock()
 				continue
 			}
@@ -293,6 +296,7 @@ drainLoop:
 				sourceName := sm.getScraperDisplayName(res.scraperType)
 				util.Debug("Late search error", "source", sourceName, "error", res.err)
 				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
+				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
 				errorsMutex.Unlock()
 				continue
 			}
@@ -327,7 +331,7 @@ drainLoop:
 		errorsMutex.Lock()
 		defer errorsMutex.Unlock()
 		if len(searchErrors) > 0 {
-			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s)", query, strings.Join(searchErrors, "; "))
+			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s): %w", query, strings.Join(searchErrors, "; "), errors.Join(searchSourceErrors...))
 		}
 		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}

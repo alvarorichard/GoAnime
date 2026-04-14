@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -335,4 +336,75 @@ func TestGoyabuParseEpisodesFromJS_NoEpisodes(t *testing.T) {
 	episodes, err := client.GetAnimeEpisodes(server.URL + "/anime/test")
 	require.NoError(t, err)
 	assert.Empty(t, episodes)
+}
+
+func TestGoyabuSearchAnimeClassifiesBlockedHTMLAsSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/" && r.URL.Query().Get("s") == "":
+			w.WriteHeader(http.StatusForbidden)
+		case r.URL.Query().Get("s") != "":
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, `<html><head><title>Just a moment...</title></head><body><div id="cf-wrapper"></div></body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	_, err := client.SearchAnime("naruto")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+}
+
+func TestGoyabuGetEpisodeStreamURLBlockedPage(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<html><head><title>Just a moment...</title></head><body><div id="cf-wrapper"></div></body></html>`)
+	}))
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	_, err := client.GetEpisodeStreamURL(server.URL + "/episode/blocked")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+}
+
+func TestGoyabuDecodeBloggerTokenClassifiesHTMLAsSourceUnavailable(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/wp-admin/admin-ajax.php", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<html><body>blocked</body></html>`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	_, err := client.decodeBloggerToken("token123")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
 }
