@@ -698,9 +698,13 @@ func (m *SuperFlixMedia) ToAnimeModel() *models.Anime {
 		ImageURL: m.ImageURL,
 	}
 
-	if m.SFType == "filme" {
+	lowerType := strings.ToLower(m.Type)
+	switch {
+	case m.SFType == "filme":
 		anime.MediaType = models.MediaTypeMovie
-	} else {
+	case lowerType == "anime" || lowerType == "dorama":
+		anime.MediaType = models.MediaTypeAnime
+	default:
 		anime.MediaType = models.MediaTypeTV
 	}
 

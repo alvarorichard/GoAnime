@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -336,6 +337,9 @@ drainLoop:
 		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}
 
+	// Sort results: PT-BR first, then everything else
+	sortPTBRFirst(finalResults)
+
 	sm.logSearchSummary(finalResults)
 	return finalResults, nil
 }
@@ -382,6 +386,17 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 			err:         fmt.Errorf("search timed out after %v", perScraperTimeout),
 		}
 	}
+}
+
+// sortPTBRFirst reorders results so that PT-BR entries appear before all others,
+// preserving the relative order within each group.
+func sortPTBRFirst(results []*models.Anime) {
+	sort.SliceStable(results, func(i, j int) bool {
+		iPTBR := strings.Contains(results[i].Name, "[PT-BR]")
+		jPTBR := strings.Contains(results[j].Name, "[PT-BR]")
+		// PT-BR entries come first; within the same group, keep original order.
+		return iPTBR && !jPTBR
+	})
 }
 
 // ptbrTitleCleanRe are compiled regexes for cleaning PT-BR anime titles
@@ -467,8 +482,16 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 		if !hasLanguageTag {
 			switch scraperType {
 			case SuperFlixType:
-				// SuperFlix is a PT-BR source — only language tag, no media type.
-				anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
+				// SuperFlix is PT-BR. Movies get [Movie], TV series get [TV],
+				// but anime/dorama only need [PT-BR].
+				switch anime.MediaType {
+				case models.MediaTypeMovie:
+					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
+				case models.MediaTypeTV:
+					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
+				default:
+					anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
+				}
 			case FlixHQType, SFlixType:
 				// FlixHQ/SFlix: add [Movie]/[TV] only when disambiguation is needed.
 				key := strings.ToLower(strings.TrimSpace(anime.Name))

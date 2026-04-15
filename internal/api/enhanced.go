@@ -1152,9 +1152,11 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 // Lower values sort first: Portuguese → Multilanguage → English → Movies/TV → Unknown.
 func languagePriority(name string) int {
 	lower := strings.ToLower(name)
-	switch {
-	case strings.HasPrefix(lower, "[pt-br]") || strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
+	// Check for [PT-BR] anywhere (covers "[Movie] [PT-BR] ...", "[TV] [PT-BR] ...", etc.)
+	if strings.Contains(lower, "[pt-br]") || strings.Contains(lower, "[portuguese]") || strings.Contains(lower, "[português]") {
 		return 0
+	}
+	switch {
 	case strings.HasPrefix(lower, "[multilanguage]"):
 		return 1
 	case strings.HasPrefix(lower, "[english]"):

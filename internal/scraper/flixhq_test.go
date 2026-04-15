@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -252,8 +251,8 @@ func TestUnifiedScraperManager_FlixHQIntegration(t *testing.T) {
 	}
 
 	languageTag := sm.getLanguageTag(FlixHQType)
-	if !strings.Contains(languageTag, "Movies") && !strings.Contains(languageTag, "TV") {
-		t.Errorf("Language tag should mention Movies/TV: got %s", languageTag)
+	if languageTag != "[English]" {
+		t.Errorf("Language tag should be [English]: got %s", languageTag)
 	}
 }
 
