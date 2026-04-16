@@ -1093,3 +1093,9 @@ func (a *SuperFlixAdapter) GetType() ScraperType {
 func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
 	return a.client
 }
+
+// NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
+// Useful for testing with mock servers.
+func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
+	return &SuperFlixAdapter{client: client}
+}

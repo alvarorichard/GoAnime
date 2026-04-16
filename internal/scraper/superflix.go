@@ -146,6 +146,15 @@ func (c *SuperFlixClient) decorateRequest(req *http.Request) {
 	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
 }
 
+// SetTestConfig overrides the base URL and HTTP client for testing.
+// This should only be used in test code.
+func (c *SuperFlixClient) SetTestConfig(baseURL string, httpClient *http.Client) {
+	c.baseURL = baseURL
+	c.client = httpClient
+	c.maxRetries = 0
+	c.retryDelay = 0
+}
+
 // SearchMedia searches SuperFlix for movies/series/animes
 func (c *SuperFlixClient) SearchMedia(query string) ([]*SuperFlixMedia, error) {
 	return c.SearchMediaWithContext(context.Background(), query)
@@ -457,10 +466,16 @@ func (c *SuperFlixClient) GetSourceURL(ctx context.Context, videoID string, toke
 
 // ResolveRedirect follows the SuperFlix redirect to get the external player URL
 func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL string) (baseURL, videoHash, playerHTML string, err error) {
+	// Use the client's transport if available, otherwise fall back to safe transport
+	transport := c.client.Transport
+	if transport == nil {
+		transport = safeScraperTransport(30 * time.Second)
+	}
+
 	// Use a client that does NOT follow redirects automatically
 	noRedirectClient := &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: safeScraperTransport(30 * time.Second),
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -497,7 +512,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 
 	followClient := &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: safeScraperTransport(30 * time.Second),
+		Transport: transport,
 	}
 	resp2, err := followClient.Do(req2)
 	if err != nil {
