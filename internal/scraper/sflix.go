@@ -149,7 +149,7 @@ type SFlixSource struct {
 // NewSFlixClient creates a new SFlix client
 func NewSFlixClient() *SFlixClient {
 	return &SFlixClient{
-		client:         util.GetFastClient(),
+		client:         util.NewFastClient(),
 		baseURL:        SFlixBase,
 		apiURL:         SFlixAPI,
 		fallbackAPIURL: SFlixFallbackAPI,

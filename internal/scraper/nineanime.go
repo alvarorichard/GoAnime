@@ -103,7 +103,7 @@ var (
 func NewNineAnimeClient() *NineAnimeClient {
 	nineAnimeClientOnce.Do(func() {
 		nineAnimeClientInstance = &NineAnimeClient{
-			client:     util.GetFastClient(),
+			client:     util.NewFastClient(),
 			baseURL:    NineAnimeBase,
 			userAgent:  NineAnimeUserAgent,
 			maxRetries: 2,

@@ -40,7 +40,7 @@ type AnimefireClient struct {
 // NewAnimefireClient creates a new Animefire client
 func NewAnimefireClient() *AnimefireClient {
 	return &AnimefireClient{
-		client:     util.GetFastClient(),
+		client:     util.NewFastClient(),
 		baseURL:    AnimefireBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,

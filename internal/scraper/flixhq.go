@@ -217,7 +217,7 @@ type FlixHQSource struct {
 // NewFlixHQClient creates a new FlixHQ client
 func NewFlixHQClient() *FlixHQClient {
 	return &FlixHQClient{
-		client:         util.GetFastClient(), // Use shared fast client
+		client:         util.NewFastClient(), // Own client to avoid http2 transport race
 		baseURL:        FlixHQBase,
 		apiURL:         FlixHQAPI,
 		fallbackAPIURL: FlixHQFallbackAPI,

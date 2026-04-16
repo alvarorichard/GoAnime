@@ -56,6 +56,14 @@ func GetFastClient() *http.Client {
 	return fastClient
 }
 
+// NewFastClient creates a NEW fast HTTP client with its own connection pool.
+// Use this instead of GetFastClient when the caller will be used concurrently
+// with other clients (e.g., scrapers running in parallel goroutines) to avoid
+// data races in the underlying http2 transport.
+func NewFastClient() *http.Client {
+	return newSurfStdClient(8 * time.Second)
+}
+
 // GetDownloadClient returns an HTTP client optimized for large file downloads.
 // Uses Chrome TLS fingerprint for anti-bot bypass with a 5-minute timeout.
 func GetDownloadClient() *http.Client {
