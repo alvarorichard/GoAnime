@@ -44,8 +44,10 @@ func (allAnimeSourceProvider) FetchEpisodes(anime *models.Anime) ([]models.Episo
 		return nil, err
 	}
 
-	if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
-		return allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
+	if adapter, ok := scraperInstance.(interface {
+		Client() *scraper.AllAnimeClient
+	}); ok && anime.MalID > 0 {
+		return adapter.Client().GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
 	}
 
 	return scraperInstance.GetAnimeEpisodes(anime.URL)
@@ -56,6 +58,7 @@ func (allAnimeSourceProvider) FetchStreamURL(anime *models.Anime, episode *model
 	if err != nil {
 		return "", err
 	}
+
 	return streamURL, nil
 }
 
@@ -73,6 +76,7 @@ func (p scraperBackedSourceProvider) FetchEpisodes(anime *models.Anime) ([]model
 	if err != nil {
 		return nil, err
 	}
+
 	return scraperInstance.GetAnimeEpisodes(anime.URL)
 }
 
@@ -100,6 +104,7 @@ func getScraperForKind(kind SourceKind) (scraper.UnifiedScraper, error) {
 	if !ok {
 		return nil, fmt.Errorf("source %s does not map to a scraper", kind)
 	}
+
 	return scraper.NewScraperManager().GetScraper(scraperType)
 }
 
@@ -114,12 +119,7 @@ func fetchEpisodesWithResolvedSource(anime *models.Anime, resolved ResolvedSourc
 		return nil, fmt.Errorf("no source provider registered for %s", resolved.Name)
 	}
 
-	episodes, err := provider.FetchEpisodes(anime)
-	if err != nil {
-		return nil, err
-	}
-
-	return episodes, nil
+	return provider.FetchEpisodes(anime)
 }
 
 func fetchStreamURLWithResolvedSource(anime *models.Anime, episode *models.Episode, quality string, resolved ResolvedSource, lookup sourceProviderLookup) (string, error) {
@@ -128,12 +128,7 @@ func fetchStreamURLWithResolvedSource(anime *models.Anime, episode *models.Episo
 		return "", fmt.Errorf("no source provider registered for %s", resolved.Name)
 	}
 
-	streamURL, err := provider.FetchStreamURL(anime, episode, quality)
-	if err != nil {
-		return "", err
-	}
-
-	return streamURL, nil
+	return provider.FetchStreamURL(anime, episode, quality)
 }
 
 func normalizeStreamQuality(quality string) string {

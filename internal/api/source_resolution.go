@@ -9,11 +9,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper"
 )
 
-// SourceKind represents the canonical scraper/media source for an anime entry.
+// SourceKind represents the canonical source for an anime entry.
 type SourceKind string
 
 const (
-	// SourceUnknown marks entries whose source could not be resolved safely.
 	SourceUnknown    SourceKind = "Unknown"
 	SourceAllAnime   SourceKind = "AllAnime"
 	SourceAnimefire  SourceKind = "Animefire.io"
@@ -21,7 +20,6 @@ const (
 	SourceGoyabu     SourceKind = "Goyabu"
 	SourceNineAnime  SourceKind = "9Anime"
 	SourceFlixHQ     SourceKind = "FlixHQ"
-	SourceSuperFlix  SourceKind = "SuperFlix"
 )
 
 // ResolvedSource is the normalized source resolution result for an anime entry.
@@ -31,20 +29,16 @@ type ResolvedSource struct {
 	Reason string
 }
 
-// Apply normalizes the source field on the provided anime when a source was resolved.
+// Apply normalizes the source field when a source was resolved.
 func (r ResolvedSource) Apply(anime *models.Anime) {
 	if anime == nil || r.Name == "" {
 		return
 	}
+
 	anime.Source = r.Name
 }
 
-// IsProviderBacked returns true when this source should dispatch through the source-provider registry.
-func (r ResolvedSource) IsProviderBacked() bool {
-	return r.Kind.IsProviderBacked()
-}
-
-// IsProviderBacked returns true when this source should dispatch through the source-provider registry.
+// IsProviderBacked returns true when the source dispatches through the provider registry.
 func (k SourceKind) IsProviderBacked() bool {
 	switch k {
 	case SourceAllAnime, SourceAnimefire, SourceAnimeDrive, SourceGoyabu:
@@ -54,7 +48,7 @@ func (k SourceKind) IsProviderBacked() bool {
 	}
 }
 
-// ScraperType returns the unified scraper type when the source maps directly to one.
+// ScraperType returns the scraper type when the source maps directly to one.
 func (k SourceKind) ScraperType() (scraper.ScraperType, bool) {
 	switch k {
 	case SourceAllAnime:
@@ -69,8 +63,6 @@ func (k SourceKind) ScraperType() (scraper.ScraperType, bool) {
 		return scraper.NineAnimeType, true
 	case SourceFlixHQ:
 		return scraper.FlixHQType, true
-	case SourceSuperFlix:
-		return scraper.SuperFlixType, true
 	default:
 		return 0, false
 	}
@@ -181,10 +173,8 @@ func resolveSourceFromExplicit(source string) (ResolvedSource, bool) {
 		return newResolvedSource(SourceGoyabu, "explicit source"), true
 	case lower == strings.ToLower(string(SourceNineAnime)) || strings.Contains(lower, "9anime") || strings.Contains(lower, "nineanime"):
 		return newResolvedSource(SourceNineAnime, "explicit source"), true
-	case lower == strings.ToLower(string(SourceFlixHQ)) || lower == "movie" || lower == "tv" || strings.Contains(lower, "flixhq"):
+	case lower == strings.ToLower(string(SourceFlixHQ)) || lower == "movie" || lower == "tv" || strings.Contains(lower, "flixhq") || strings.Contains(lower, "sflix"):
 		return newResolvedSource(SourceFlixHQ, "explicit source"), true
-	case lower == strings.ToLower(string(SourceSuperFlix)) || strings.Contains(lower, "superflix"):
-		return newResolvedSource(SourceSuperFlix, "explicit source"), true
 	default:
 		return ResolvedSource{}, false
 	}
@@ -199,9 +189,7 @@ func resolveSourceFromTags(name, url string) (ResolvedSource, bool, error) {
 		return newResolvedSource(SourceAnimefire, "legacy AnimeFire tag"), true, nil
 	case strings.Contains(lowerName, "[multilanguage]"):
 		return newResolvedSource(SourceNineAnime, "language tag"), true, nil
-	case strings.Contains(lowerName, "[pt-br]") ||
-		strings.Contains(lowerName, "[portuguese]") ||
-		strings.Contains(lowerName, "[português]"):
+	case hasPTBRTag(lowerName):
 		if resolved, ok := resolvePTBRSource(url); ok {
 			resolved.Reason = "PT-BR tag + URL"
 			return resolved, true, nil
@@ -228,8 +216,6 @@ func resolveSourceFromURL(url string) (ResolvedSource, bool) {
 		return newResolvedSource(SourceAllAnime, "URL"), true
 	case strings.Contains(lowerURL, "flixhq") || strings.Contains(lowerURL, "sflix"):
 		return newResolvedSource(SourceFlixHQ, "URL"), true
-	case strings.Contains(lowerURL, "superflix"):
-		return newResolvedSource(SourceSuperFlix, "URL"), true
 	case strings.Contains(lowerURL, "9anime"):
 		return newResolvedSource(SourceNineAnime, "URL"), true
 	default:
@@ -244,7 +230,7 @@ func resolvePTBRSource(url string) (ResolvedSource, bool) {
 	}
 
 	switch resolved.Kind {
-	case SourceAnimefire, SourceAnimeDrive, SourceGoyabu, SourceSuperFlix:
+	case SourceAnimefire, SourceAnimeDrive, SourceGoyabu:
 		return resolved, true
 	default:
 		return ResolvedSource{}, false
@@ -285,7 +271,6 @@ func containsASCIILetter(value string) bool {
 func hasPTBRTag(name string) bool {
 	lowerName := strings.ToLower(name)
 	return strings.Contains(lowerName, "[pt-br]") ||
-		strings.Contains(lowerName, "[portuguese]") ||
-		strings.Contains(lowerName, "[portugu\u00eas]") ||
+		strings.Contains(lowerName, "[portugu") ||
 		strings.Contains(lowerName, "[animefire]")
 }

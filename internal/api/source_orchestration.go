@@ -4,6 +4,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
@@ -13,11 +14,12 @@ import (
 func getEpisodesByResolvedSource(anime *models.Anime, resolved ResolvedSource) ([]models.Episode, error) {
 	resolved.Apply(anime)
 
+	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[English]", ""), "[PT-BR]", ""))
+	util.Debug("Getting episodes", "source", resolved.Name, "anime", cleanName)
+
 	var episodes []models.Episode
 	var err error
 	switch resolved.Kind {
-	case SourceSuperFlix:
-		episodes, err = GetSuperFlixEpisodes(anime)
 	case SourceFlixHQ:
 		episodes, err = GetFlixHQEpisodes(anime)
 	case SourceNineAnime:
@@ -31,6 +33,8 @@ func getEpisodesByResolvedSource(anime *models.Anime, resolved ResolvedSource) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to get episodes from %s: %w", resolved.Name, err)
 	}
+
+	logEpisodeSourceDebug(resolved.Name, len(episodes))
 	return episodes, nil
 }
 
@@ -52,8 +56,6 @@ func getStreamURLByResolvedSource(anime *models.Anime, episode *models.Episode, 
 	util.SetGlobalAnimeSource(resolved.Name)
 
 	switch resolved.Kind {
-	case SourceSuperFlix:
-		return GetSuperFlixStreamURL(anime, episode, quality)
 	case SourceFlixHQ:
 		streamURL, subtitles, streamErr := GetFlixHQStreamURL(anime, episode, quality)
 		if streamErr != nil {
@@ -71,6 +73,7 @@ func getStreamURLByResolvedSource(anime *models.Anime, episode *models.Episode, 
 			}
 			util.SetGlobalSubtitles(subInfos)
 		}
+
 		return streamURL, nil
 	case SourceNineAnime:
 		return GetNineAnimeStreamURL(anime, episode, quality)
@@ -98,4 +101,21 @@ func getStreamURLByResolvedSource(anime *models.Anime, episode *models.Episode, 
 		util.Debug("Stream URL details", "url", streamURL)
 		return streamURL, nil
 	}
+}
+
+func logEpisodeSourceDebug(sourceName string, episodesCount int) {
+	if episodesCount > 0 {
+		util.Debug("Episodes found", "count", episodesCount, "source", sourceName)
+		switch sourceName {
+		case string(SourceAllAnime):
+			util.Debug("Source info", "type", "AllAnime", "quality", "high")
+		case string(SourceAnimeDrive):
+			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
+		default:
+			util.Debug("Source info", "type", sourceName, "features", "standard")
+		}
+		return
+	}
+
+	util.Warn("No episodes found", "source", sourceName)
 }

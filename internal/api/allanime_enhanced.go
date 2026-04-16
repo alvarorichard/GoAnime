@@ -9,7 +9,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// GetEpisodeStreamURLEnhanced gets streaming URL with AllAnime navigation support
+// GetEpisodeStreamURLEnhanced gets streaming URL with AllAnime navigation support.
 func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	resolved, err := ResolveSource(anime)
 	if err != nil {
@@ -38,13 +38,12 @@ func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, q
 	return url, nil
 }
 
-// GetAllAnimeEpisodeURLDirect gets streaming URL directly without circular dependencies
+// GetAllAnimeEpisodeURLDirect gets streaming URL directly without circular dependencies.
 func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber, quality string) (string, map[string]string, error) {
 	if !IsAllAnimeSource(anime) {
 		return "", nil, fmt.Errorf("this function is only for AllAnime sources")
 	}
 
-	// Use the cached scraper manager to get the AllAnime client (avoids re-creating each time)
 	scraperInstance, scErr := getScraperForKind(SourceAllAnime)
 	var client *scraper.AllAnimeClient
 	if scErr == nil {
@@ -55,16 +54,15 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber, quality str
 		}
 	}
 	if client == nil {
-		// Fallback: create directly (shouldn't happen with singleton manager)
 		client = scraper.NewAllAnimeClient()
 	}
-	animeID := ExtractAllAnimeID(anime.URL)
 
+	animeID := ExtractAllAnimeID(anime.URL)
 	if animeID == "" {
 		return "", nil, fmt.Errorf("could not extract anime ID from URL: %s", anime.URL)
 	}
 
-	mode := "sub" // Default
+	mode := "sub"
 	if quality == "" {
 		quality = "best"
 	}
@@ -74,7 +72,6 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber, quality str
 		return "", nil, fmt.Errorf("failed to get episode URL: %w", err)
 	}
 
-	// Add additional metadata
 	metadata["navigator"] = "allanime"
 	metadata["anime_id"] = animeID
 	metadata["mode"] = mode

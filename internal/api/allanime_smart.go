@@ -96,6 +96,8 @@ func smartDownload(url, dest string) error {
 		dl := ytdlp.New().
 			Output(safeDest).
 			Format("bestvideo+bestaudio/best").
+			Downloader("ffmpeg").
+			DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
 			ConcurrentFragments(4).
 			FragmentRetries("5").
 			Retries("5")
