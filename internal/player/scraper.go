@@ -28,10 +28,7 @@ import (
 // Pre-compiled regexes for player scraper (avoid per-call compilation)
 var (
 	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-	isNumericRe         = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-	hasLetterRe         = regexp.MustCompile(`[A-Za-z]`)
 	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
-	bloggerPatternRe    = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
 	sidRe               = regexp.MustCompile(`"FdrFJe"\s*:\s*"([^"]+)"`)
 	bhRe                = regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
@@ -421,159 +418,6 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	}
 
 	return resolvedStreamURL, nil
-
-	// Try AnimeDrive enhanced navigation if applicable
-	if isAnimeDriveSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			// Validate the URL is a playable video, not an iframe/embed page
-			if isPlayableVideoURL(streamURL) {
-				return streamURL, nil
-			}
-			// Try to extract actual video from intermediate URL
-			if needsVideoExtraction(streamURL) {
-				resolved, resolveErr := extractActualVideoURL(streamURL)
-				if resolveErr == nil && resolved != "" {
-					return resolved, nil
-				}
-			}
-			util.Debug("AnimeDrive returned non-playable URL", "url", streamURL)
-			return "", fmt.Errorf("AnimeDrive returned non-playable URL: %s", streamURL)
-		}
-		// Check if user requested to go back from server selection
-		if errors.Is(err, scraper.ErrBackRequested) {
-			return "", ErrBackToEpisodeSelection
-		}
-		// For AnimeDrive, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
-	}
-
-	// Try FlixHQ for movies/TV shows
-	if isFlixHQSourcePlayer(anime) {
-		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType, "episodeURL", episode.URL)
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			util.Debug("FlixHQ stream URL obtained", "url", streamURL)
-			return streamURL, nil
-		}
-		util.Debug("FlixHQ stream URL failed", "error", err)
-		// For FlixHQ, return the error - legacy method won't work with DataIDs
-		return "", fmt.Errorf("failed to get FlixHQ stream URL: %w", err)
-	}
-
-	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
-		if err == nil {
-			return streamURL, nil
-		}
-	}
-
-	// Use the regular enhanced API to get stream URL
-	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-	if err != nil {
-		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
-			return GetVideoURLForEpisode(episode.URL)
-		}
-		// For AllAnime, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
-	}
-
-	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire
-	// video JSON API) that are not directly playable. Resolve them to actual
-	// CDN video URLs before returning.
-	if needsVideoExtraction(streamURL) {
-		resolved, err := extractActualVideoURL(streamURL)
-		if err == nil && resolved != "" {
-			return resolved, nil
-		}
-		// If resolution failed, fall back to the original URL so yt-dlp can try
-		util.Debug("Could not resolve intermediate URL, using as-is", "url", streamURL, "err", err)
-	}
-
-	return streamURL, nil
-}
-
-// Helper function to check if anime is from AllAnime source (player module)
-func isAllAnimeSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") &&
-		!strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if anime is from AnimeDrive source (player module)
-func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AnimeDrive" {
-		return true
-	}
-	if strings.Contains(anime.Name, "[AnimeDrive]") {
-		return true
-	}
-	if strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-	return false
-}
-
-// Helper function to check if anime is from FlixHQ source (player module)
-func isFlixHQSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "FlixHQ" {
-		return true
-	}
-	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		return true
-	}
-	if strings.Contains(anime.URL, "flixhq") {
-		return true
-	}
-	return false
-}
-
-// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
-func isNumericString(s string) bool {
-	if s == "" {
-		return false
-	}
-	return isNumericRe.MatchString(s)
-}
-
-// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
-func isLikelyAllAnimeID(s string) bool {
-	if strings.Contains(s, "http") {
-		return false
-	}
-	if isNumericString(s) {
-		return false
-	}
-	// Typical AllAnime IDs are short-ish alphanumeric strings
-	if len(s) >= 6 && len(s) < 30 {
-		// Must contain at least one letter
-		return hasLetterRe.MatchString(s)
-	}
-	return false
 }
 
 func extractVideoURL(url string) (string, error) {
@@ -716,14 +560,6 @@ func findBloggerLink(content string) (string, error) {
 	}
 
 	return content[start:tokenEnd], nil
-
-	matches := bloggerPatternRe.FindStringSubmatch(content)
-
-	if len(matches) > 0 {
-		return matches[0], nil
-	} else {
-		return "", errors.New("no blogger video link found in the content")
-	}
 }
 
 func isBloggerTokenChar(char byte) bool {
