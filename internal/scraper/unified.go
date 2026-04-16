@@ -69,7 +69,7 @@ var (
 // PreWarmScraperManager triggers background initialization of the scraper
 // manager singleton so it's ready when the first search happens.
 func PreWarmScraperManager() {
-	go NewScraperManager()
+	go NewScraperManager() // skipcq: GO-E1007
 }
 
 // NewScraperManager returns a cached scraper manager singleton.

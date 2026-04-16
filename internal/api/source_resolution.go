@@ -1,3 +1,4 @@
+// Package api coordinates source resolution and playback-oriented orchestration.
 package api
 
 import (
@@ -12,6 +13,7 @@ import (
 type SourceKind string
 
 const (
+	// SourceUnknown marks entries whose source could not be resolved safely.
 	SourceUnknown    SourceKind = "Unknown"
 	SourceAllAnime   SourceKind = "AllAnime"
 	SourceAnimefire  SourceKind = "Animefire.io"

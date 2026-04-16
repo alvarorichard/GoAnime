@@ -1,3 +1,4 @@
+// Package api coordinates source resolution and playback-oriented orchestration.
 package api
 
 import (
