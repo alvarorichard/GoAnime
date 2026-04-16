@@ -100,16 +100,6 @@ func (nav *AllAnimeNavigator) ListAllEpisodes() []string {
 	return result
 }
 
-// Helper function to check if anime is from AllAnime source
-func isAllAnimeSource(anime *models.Anime) bool {
-	return api.IsAllAnimeSource(anime)
-}
-
-// Helper function to extract AllAnime ID from URL
-func extractAllAnimeID(url string) string {
-	return api.ExtractAllAnimeID(url)
-}
-
 // HandleAllAnimeEpisodeNavigation handles episode navigation for AllAnime
 func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber string, direction string) (*models.Episode, error) {
 	// Use cached navigator to avoid re-fetching the entire episode list

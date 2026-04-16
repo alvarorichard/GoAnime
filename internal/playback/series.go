@@ -244,7 +244,7 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 // Enhanced navigation handler that supports AllAnime-specific navigation
 func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
 	// Check if this is an AllAnime source and use enhanced navigation
-	if isAllAnimeSource(anime) {
+	if api.IsAllAnimeSource(anime) {
 		return handleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
 	}
 
