@@ -101,7 +101,7 @@ func (nav *AllAnimeNavigator) ListAllEpisodes() []string {
 }
 
 // HandleAllAnimeEpisodeNavigation handles episode navigation for AllAnime
-func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber string, direction string) (*models.Episode, error) {
+func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber, direction string) (*models.Episode, error) {
 	// Use cached navigator to avoid re-fetching the entire episode list
 	animeID := api.ExtractAllAnimeID(anime.URL)
 	navigatorCacheMu.Lock()

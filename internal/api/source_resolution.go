@@ -188,7 +188,7 @@ func resolveSourceFromExplicit(source string) (ResolvedSource, bool) {
 	}
 }
 
-func resolveSourceFromTags(name string, url string) (ResolvedSource, bool, error) {
+func resolveSourceFromTags(name, url string) (ResolvedSource, bool, error) {
 	lowerName := strings.ToLower(name)
 	switch {
 	case strings.Contains(lowerName, "[allanime]") || strings.Contains(lowerName, "[english]"):

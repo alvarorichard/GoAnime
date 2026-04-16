@@ -29,7 +29,6 @@ import (
 var (
 	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
 	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
-	bloggerPatternRe    = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
 	sidRe               = regexp.MustCompile(`"FdrFJe"\s*:\s*"([^"]+)"`)
 	bhRe                = regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
@@ -43,6 +42,8 @@ var (
 		regexp.MustCompile(`\b(\d+)\b`),
 	}
 )
+
+const bloggerVideoPrefix = "https://www.blogger.com/video.g?token="
 
 // DownloadFolderFormatter formats the anime URL to create a download folder name.
 //
@@ -558,13 +559,30 @@ func fetchContent(url string) (string, error) {
 }
 
 func findBloggerLink(content string) (string, error) {
-	matches := bloggerPatternRe.FindStringSubmatch(content)
-
-	if len(matches) > 0 {
-		return matches[0], nil
-	} else {
+	start := strings.Index(content, bloggerVideoPrefix)
+	if start == -1 {
 		return "", errors.New("no blogger video link found in the content")
 	}
+
+	tokenStart := start + len(bloggerVideoPrefix)
+	tokenEnd := tokenStart
+	for tokenEnd < len(content) && isBloggerTokenChar(content[tokenEnd]) {
+		tokenEnd++
+	}
+
+	if tokenEnd == tokenStart {
+		return "", errors.New("no blogger video link found in the content")
+	}
+
+	return content[start:tokenEnd], nil
+}
+
+func isBloggerTokenChar(char byte) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '_' ||
+		char == '-'
 }
 
 // newSurfClient creates a surf HTTP client with Chrome browser impersonation.

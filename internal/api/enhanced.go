@@ -55,7 +55,7 @@ func runWithSpinner(title string, action func()) {
 var ErrBackToSearch = errors.New("back to search requested")
 
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
-func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
+func SearchAnimeEnhanced(name, source string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
 
 	var scraperType *scraper.ScraperType
@@ -342,14 +342,14 @@ func sanitizeFilename(name string) string {
 }
 
 // Basic download function (placeholder - integrate with your existing downloader)
-func downloadFromURL(_ string, _ string) error {
+func downloadFromURL(_, _ string) error {
 	// This is a placeholder that should fail to trigger fallback to the proper downloader
 	util.Debugf("Enhanced API downloadFromURL is a placeholder - returning error to trigger fallback")
 	return fmt.Errorf("enhanced download not implemented - use legacy downloader")
 }
 
 // Legacy wrapper functions to maintain compatibility
-func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
+func SearchAnimeWithSource(name, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
 }
 

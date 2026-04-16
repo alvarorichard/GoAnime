@@ -39,7 +39,7 @@ func GetEpisodeStreamURLEnhanced(episode *models.Episode, anime *models.Anime, q
 }
 
 // GetAllAnimeEpisodeURLDirect gets streaming URL directly without circular dependencies
-func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber string, quality string) (string, map[string]string, error) {
+func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber, quality string) (string, map[string]string, error) {
 	if !IsAllAnimeSource(anime) {
 		return "", nil, fmt.Errorf("this function is only for AllAnime sources")
 	}
