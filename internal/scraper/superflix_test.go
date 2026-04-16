@@ -136,16 +136,16 @@ func TestExtractEpisodes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		html        string
-		expectNil   bool
-		expectError bool
-		expectKeys  []string
+		name         string
+		html         string
+		expectNil    bool
+		expectError  bool
+		expectKeys   []string
 		expectCounts map[string]int
 	}{
 		{
-			name: "valid ALL_EPISODES JSON",
-			html: `var ALL_EPISODES = {"1":[{"epi_num":"1","title":"Pilot","air_date":"2008-01-20"},{"epi_num":"2","title":"Cat's in the Bag","air_date":"2008-01-27"}],"2":[{"epi_num":"1","title":"Seven Thirty-Seven","air_date":"2009-03-08"}]};`,
+			name:         "valid ALL_EPISODES JSON",
+			html:         `var ALL_EPISODES = {"1":[{"epi_num":"1","title":"Pilot","air_date":"2008-01-20"},{"epi_num":"2","title":"Cat's in the Bag","air_date":"2008-01-27"}],"2":[{"epi_num":"1","title":"Seven Thirty-Seven","air_date":"2009-03-08"}]};`,
 			expectKeys:   []string{"1", "2"},
 			expectCounts: map[string]int{"1": 2, "2": 1},
 		},
@@ -243,8 +243,8 @@ func TestExtractPlayerExtras(t *testing.T) {
 			expectSubCount: 0,
 		},
 		{
-			name: "only subtitles, no audio",
-			html: `var playerjsSubtitle = "[Spanish]https://subs.example.com/es.vtt";`,
+			name:           "only subtitles, no audio",
+			html:           `var playerjsSubtitle = "[Spanish]https://subs.example.com/es.vtt";`,
 			expectSubCount: 1,
 			expectSubs: []SuperFlixSubtitle{
 				{Lang: "Spanish", URL: "https://subs.example.com/es.vtt"},
