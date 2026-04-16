@@ -248,7 +248,7 @@ func sanitizeSmartDest(p string) (string, error) {
 
 // validateSmartRangeInputs ensures correct source and quality defaulting
 func validateSmartRangeInputs(anime *models.Anime, startEp, endEp int, quality *string) error {
-	if !isAllAnimeSourceAPI(anime) {
+	if !IsAllAnimeSource(anime) {
 		return fmt.Errorf("AllAnime Smart Range is only available for AllAnime sources")
 	}
 	if quality != nil && *quality == "" {

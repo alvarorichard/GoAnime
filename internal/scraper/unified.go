@@ -206,8 +206,7 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				errorsMutex.Lock()
 				sourceName := sm.getScraperDisplayName(res.scraperType)
 				util.Debug("Search error", "source", sourceName, "error", res.err)
-				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
-				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
+				sm.appendSearchError(&searchErrors, &searchSourceErrors, res.scraperType, res.err)
 				errorsMutex.Unlock()
 				continue
 			}
@@ -283,35 +282,7 @@ done:
 	// The channel is buffered (size = number of scrapers), so results from in-flight
 	// goroutines may already be waiting. We also wait a short grace period for
 	// goroutines that are just about to finish.
-	graceTimer := time.After(postDrainGrace)
-drainLoop:
-	for {
-		select {
-		case res, ok := <-resultChan:
-			if !ok {
-				break drainLoop
-			}
-			if res.err != nil {
-				errorsMutex.Lock()
-				sourceName := sm.getScraperDisplayName(res.scraperType)
-				util.Debug("Late search error", "source", sourceName, "error", res.err)
-				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
-				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
-				errorsMutex.Unlock()
-				continue
-			}
-			if len(res.results) > 0 {
-				sm.tagResults(res.results, res.scraperType)
-				resultsMutex.Lock()
-				allResults = append(allResults, res.results...)
-				sourcesWithResults[res.scraperType] = true
-				resultsMutex.Unlock()
-				util.Debug("Late result captured", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results))
-			}
-		case <-graceTimer:
-			break drainLoop
-		}
-	}
+	sm.drainPendingSearchResults(resultChan, &allResults, sourcesWithResults, &searchErrors, &searchSourceErrors, postDrainGrace)
 
 	// Log warnings for failed sources
 	errorsMutex.Lock()
@@ -338,6 +309,47 @@ drainLoop:
 
 	sm.logSearchSummary(finalResults)
 	return finalResults, nil
+}
+
+func (sm *ScraperManager) appendSearchError(searchErrors *[]string, searchSourceErrors *[]error, scraperType ScraperType, err error) {
+	sourceName := sm.getScraperDisplayName(scraperType)
+	*searchErrors = append(*searchErrors, fmt.Sprintf("%s: %v", sourceName, err))
+	*searchSourceErrors = append(*searchSourceErrors, fmt.Errorf("%s: %w", sourceName, err))
+}
+
+func (sm *ScraperManager) drainPendingSearchResults(
+	resultChan <-chan searchResult,
+	allResults *[]*models.Anime,
+	sourcesWithResults map[ScraperType]bool,
+	searchErrors *[]string,
+	searchSourceErrors *[]error,
+	gracePeriod time.Duration,
+) {
+	graceTimer := time.After(gracePeriod)
+
+drainLoop:
+	for {
+		select {
+		case res, ok := <-resultChan:
+			if !ok {
+				break drainLoop
+			}
+			if res.err != nil {
+				sourceName := sm.getScraperDisplayName(res.scraperType)
+				util.Debug("Late search error", "source", sourceName, "error", res.err)
+				sm.appendSearchError(searchErrors, searchSourceErrors, res.scraperType, res.err)
+				continue
+			}
+			if len(res.results) > 0 {
+				sm.tagResults(res.results, res.scraperType)
+				*allResults = append(*allResults, res.results...)
+				sourcesWithResults[res.scraperType] = true
+				util.Debug("Late result captured", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results))
+			}
+		case <-graceTimer:
+			break drainLoop
+		}
+	}
 }
 
 // searchWithTimeout executes a single scraper search with timeout

@@ -332,7 +332,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		}
 
 		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
-		if isLikelyAllAnimeID(episode.URL) {
+		if api.IsAllAnimeShortID(episode.URL) {
 			if util.IsDebug {
 				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
 			}
@@ -355,8 +355,16 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
+	resolvedSource, resolveErr := api.ResolveSource(anime)
+	if resolveErr != nil {
+		if strings.Contains(episode.URL, "http") {
+			return GetVideoURLForEpisode(episode.URL)
+		}
+		return "", resolveErr
+	}
+
 	// Try AnimeDrive enhanced navigation if applicable
-	if isAnimeDriveSourcePlayer(anime) {
+	if resolvedSource.Kind == api.SourceAnimeDrive {
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
 			// Validate the URL is a playable video, not an iframe/embed page
@@ -382,7 +390,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	}
 
 	// Try FlixHQ for movies/TV shows
-	if isFlixHQSourcePlayer(anime) {
+	if resolvedSource.Kind == api.SourceFlixHQ {
 		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType, "episodeURL", episode.URL)
 		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 		if err == nil {
@@ -395,7 +403,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	}
 
 	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
+	if resolvedSource.Kind == api.SourceAllAnime {
 		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
 		if err == nil {
 			return streamURL, nil
@@ -406,7 +414,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
 	if err != nil {
 		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
+		if resolvedSource.Kind != api.SourceAllAnime {
 			return GetVideoURLForEpisode(episode.URL)
 		}
 		// For AllAnime, return the error instead of trying legacy method

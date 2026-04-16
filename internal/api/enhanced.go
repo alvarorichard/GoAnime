@@ -119,27 +119,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		return nil, fmt.Errorf("no results found for: %s", name)
 	}
 
-	// Enhance source identification - names already have language tags from unified.go
+	// Normalize source identification once so downstream flows share the same rules.
 	for _, anime := range animes {
-		// Ensure proper source identification (for internal use only)
-		if anime.Source == "" {
-			// Fallback source identification by URL analysis
-			if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
-				anime.Source = "AllAnime"
-			} else if strings.Contains(anime.URL, "animefire") {
-				anime.Source = "Animefire.io"
-			} else if strings.Contains(anime.URL, "animesdrive") {
-				anime.Source = "AnimeDrive"
-			} else if strings.Contains(anime.URL, "goyabu") {
-				anime.Source = "Goyabu"
-			} else if strings.Contains(anime.URL, "flixhq") {
-				anime.Source = "FlixHQ"
-			}
-			// Note: 9Anime uses numeric IDs which can't be identified by URL alone;
-			// the Source field is already set by the scraper
+		if resolved, err := ResolveSource(anime); err == nil {
+			resolved.Apply(anime)
 		}
-
-		// Language tags are already added by unified.go, don't duplicate them here
 	}
 
 	util.Debug("Search results summary", "total", len(animes))
@@ -152,17 +136,23 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	nineAnimeCount := 0
 	superflixCount := 0
 	for _, anime := range animes {
-		if strings.Contains(anime.Source, "AnimeFire") {
+		resolved, err := ResolveSource(anime)
+		if err != nil {
+			continue
+		}
+
+		switch resolved.Kind {
+		case SourceAnimefire:
 			animefireCount++
-		} else if anime.Source == "AllAnime" {
+		case SourceAllAnime:
 			allanimeCount++
-		} else if anime.Source == "AnimeDrive" {
+		case SourceAnimeDrive:
 			animedriveCount++
-		} else if anime.Source == "FlixHQ" {
+		case SourceFlixHQ:
 			flixhqCount++
-		} else if anime.Source == "9Anime" {
+		case SourceNineAnime:
 			nineAnimeCount++
-		} else if anime.Source == "SuperFlix" {
+		case SourceSuperFlix:
 			superflixCount++
 		}
 	}
@@ -176,7 +166,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	// Create a special "back" option as the first item
 	backOption := &models.Anime{
-		Name:   "← Back",
+		Name:   "<- Back",
 		URL:    "__back__",
 		Source: "__back__",
 	}
@@ -259,296 +249,16 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
-	// Check if this is a SuperFlix source
-	if anime.Source == "SuperFlix" {
-		return GetSuperFlixEpisodes(anime)
+	resolved, resolveErr := ResolveSource(anime)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
-
-	// Check if this is a FlixHQ movie/TV show
-	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		return GetFlixHQEpisodes(anime)
-	}
-
-	// Check if this is a 9Anime source
-	if anime.Source == "9Anime" {
-		return GetNineAnimeEpisodes(anime)
-	}
-
-	// Determine source type from multiple indicators with enhanced logic
-	var sourceName string
-
-	// Priority 1: Check the Source field (most reliable)
-	if anime.Source == "AllAnime" {
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Source, "AnimeFire") {
-		sourceName = "Animefire.io"
-	} else if anime.Source == "AnimeDrive" {
-		sourceName = "AnimeDrive"
-	} else if anime.Source == "Goyabu" {
-		sourceName = "Goyabu"
-	} else if strings.Contains(anime.Name, "[English]") {
-		// Priority 2: Check language tags
-		// Need to disambiguate between AllAnime and 9Anime both tagged [English]
-		// 9Anime source is already set above, so remaining [English] = AllAnime
-		sourceName = "AllAnime"
-		anime.Source = "AllAnime" // Update source field
-	} else if strings.Contains(anime.Name, "[PT-BR]") || strings.Contains(anime.Name, "[Português]") {
-		// AnimeFire or AnimeDrive = Portuguese
-		// Check URL to determine which one
-		if strings.Contains(anime.URL, "animesdrive") {
-			sourceName = "AnimeDrive"
-			anime.Source = "AnimeDrive"
-		} else if strings.Contains(anime.URL, "goyabu") {
-			sourceName = "Goyabu"
-			anime.Source = "Goyabu"
-		} else {
-			sourceName = "Animefire.io"
-			anime.Source = "Animefire.io"
-		}
-	} else if strings.Contains(anime.URL, "allanime") || (len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http")) {
-		// Priority 3: URL analysis for AllAnime (short IDs or allanime URLs)
-		sourceName = "AllAnime"
-		anime.Source = "AllAnime" // Update source field
-	} else if strings.Contains(anime.URL, "animefire") {
-		// Priority 4: URL analysis for AnimeFire
-		sourceName = "Animefire.io"
-		anime.Source = "Animefire.io" // Update source field
-	} else if strings.Contains(anime.URL, "animesdrive") {
-		// Priority 5: URL analysis for AnimeDrive
-		sourceName = "AnimeDrive"
-		anime.Source = "AnimeDrive" // Update source field
-	} else {
-		// Default to AllAnime for unknown sources
-		sourceName = "AllAnime (default)"
-		anime.Source = "AllAnime"
-	}
-
-	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[English]", ""), "[PT-BR]", ""))
-
-	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
-
-	scraperManager := scraper.NewScraperManager()
-	var episodes []models.Episode
-	var err error
-
-	// Use different approaches based on source
-	if strings.Contains(sourceName, "AllAnime") {
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.AllAnimeType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get AllAnime scraper: %w", scErr)
-		}
-
-		// Cast to AllAnime client to access enhanced features
-		if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
-			episodes, err = allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
-			util.Debug("AniSkip integration enabled", "malID", anime.MalID)
-		} else {
-			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-		}
-	} else if sourceName == "AnimeDrive" {
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimeDriveType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get AnimeDrive scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	} else if sourceName == "Animefire.io" {
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimefireType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get AnimeFire scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	} else if sourceName == "Goyabu" {
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.GoyabuType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	} else {
-		// For others, use the original API function
-		episodes, err = GetAnimeEpisodes(anime.URL)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get episodes from %s: %w", sourceName, err)
-	}
-
-	if len(episodes) > 0 {
-		util.Debug("Episodes found", "count", len(episodes), "source", sourceName)
-
-		// Provide additional info for user based on source (debug only)
-		if strings.Contains(sourceName, "AllAnime") {
-			util.Debug("Source info", "type", "AllAnime", "quality", "high")
-		} else if sourceName == "AnimeDrive" {
-			util.Debug("Source info", "type", "AnimeDrive", "features", "multiple qualities")
-		} else {
-			util.Debug("Source info", "type", "Animefire.io", "features", "dubbed/subtitled")
-		}
-	} else {
-		util.Warn("No episodes found", "source", sourceName)
-	}
-
-	return episodes, nil
+	return getEpisodesByResolvedSource(anime, resolved)
 }
 
 // Enhanced episode URL fetching with improved source detection
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	// Clear any previous subtitles
-	util.ClearGlobalSubtitles()
-
-	// Track anime source globally for subtitle selection and other source-specific behavior
-	if anime != nil && anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
-	}
-
-	// Check if this is SuperFlix content
-	if anime.Source == "SuperFlix" {
-		return GetSuperFlixStreamURL(anime, episode, quality)
-	}
-
-	// Check if this is FlixHQ content
-	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		streamURL, subtitles, err := GetFlixHQStreamURL(anime, episode, quality)
-		if err != nil {
-			return "", err
-		}
-
-		// Store subtitles globally for playback
-		if len(subtitles) > 0 && !util.GlobalNoSubs {
-			var subInfos []util.SubtitleInfo
-			for _, sub := range subtitles {
-				subInfos = append(subInfos, util.SubtitleInfo{
-					URL:      sub.URL,
-					Language: sub.Language,
-					Label:    sub.Label,
-				})
-			}
-			util.SetGlobalSubtitles(subInfos)
-		}
-
-		return streamURL, nil
-	}
-
-	// Check if this is 9Anime content
-	if anime.Source == "9Anime" {
-		return GetNineAnimeStreamURL(anime, episode, quality)
-	}
-
-	scraperManager := scraper.NewScraperManager()
-
-	// Determine source type with enhanced logic
-	var scraperType scraper.ScraperType
-	var sourceName string
-
-	// Priority 1: Check the Source field (most reliable)
-	if anime.Source == "AllAnime" {
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Source, "AnimeFire") {
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	} else if anime.Source == "AnimeDrive" {
-		scraperType = scraper.AnimeDriveType
-		sourceName = "AnimeDrive"
-	} else if anime.Source == "Goyabu" {
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
-	} else if strings.Contains(anime.Name, "[English]") {
-		// Priority 2: Check language tags (AllAnime = English)
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Name, "[PT-BR]") || strings.Contains(anime.Name, "[Português]") {
-		// AnimeFire, Goyabu, or AnimeDrive = Portuguese
-		// Check URL to determine which one
-		if strings.Contains(anime.URL, "animesdrive") {
-			scraperType = scraper.AnimeDriveType
-			sourceName = "AnimeDrive"
-		} else if strings.Contains(anime.URL, "goyabu") {
-			scraperType = scraper.GoyabuType
-			sourceName = "Goyabu"
-		} else {
-			scraperType = scraper.AnimefireType
-			sourceName = "Animefire.io"
-		}
-	} else if len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http") {
-		// Priority 3: URL analysis for AllAnime (short IDs)
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else if strings.Contains(anime.URL, "animefire") {
-		// Priority 4: URL analysis for AnimeFire
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	} else if strings.Contains(anime.URL, "animesdrive") {
-		// Priority 5: URL analysis for AnimeDrive
-		scraperType = scraper.AnimeDriveType
-		sourceName = "AnimeDrive"
-	} else if strings.Contains(anime.URL, "goyabu") {
-		// Priority 5b: URL analysis for Goyabu
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
-	} else if strings.Contains(anime.URL, "allanime") {
-		// Priority 6: AllAnime full URLs
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	} else {
-		// Default to AllAnime
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime (default)"
-	}
-
-	util.Debug("Getting stream URL", "source", sourceName, "episode", episode.Number)
-
-	util.Debug("Source details",
-		"scraperType", scraperType,
-		"animeURL", anime.URL,
-		"episodeURL", episode.URL,
-		"episodeNumber", episode.Number,
-		"quality", quality)
-
-	scraperInstance, err := scraperManager.GetScraper(scraperType)
-	if err != nil {
-		return "", fmt.Errorf("failed to get scraper for %s: %w", sourceName, err)
-	}
-
-	if quality == "" {
-		quality = "best"
-	}
-
-	var streamURL string
-	var streamErr error
-
-	// Handle different scraper types with appropriate parameters
-	switch scraperType {
-	case scraper.AllAnimeType:
-		util.Debug("Processing through AllAnime")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
-	case scraper.AnimeDriveType:
-		util.Debug("Processing through AnimeDrive")
-		// Use "auto" to skip interactive server selection (this runs inside a spinner)
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, "auto")
-	case scraper.GoyabuType:
-		util.Debug("Processing through Goyabu")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
-	default:
-		util.Debug("Processing through Animefire.io")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
-	}
-
-	if streamErr != nil {
-		// Propagate back request error without wrapping
-		if errors.Is(streamErr, scraper.ErrBackRequested) {
-			return "", streamErr
-		}
-		return "", fmt.Errorf("failed to get stream URL from %s: %w", sourceName, streamErr)
-	}
-
-	if streamURL == "" {
-		return "", fmt.Errorf("empty stream URL returned from %s", sourceName)
-	}
-
-	util.Debug("Stream URL obtained", "source", sourceName)
-	util.Debug("Stream URL details", "url", streamURL)
-
-	return streamURL, nil
+	return getStreamURLByResolvedSource(anime, episode, quality)
 }
 
 // Enhanced download support
@@ -617,7 +327,7 @@ func sanitizeFilename(name string) string {
 	// Remove language tags
 	name = strings.ReplaceAll(name, "[English]", "")
 	name = strings.ReplaceAll(name, "[PT-BR]", "")
-	name = strings.ReplaceAll(name, "[Português]", "")
+	name = strings.ReplaceAll(name, "[Portugu\u00eas]", "")
 	name = strings.ReplaceAll(name, "(Legendado)", "")
 	name = strings.ReplaceAll(name, "(Dublado)", "")
 	name = strings.TrimSpace(name)
@@ -1149,11 +859,11 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 }
 
 // languagePriority returns a sort key for language-based ordering.
-// Lower values sort first: Portuguese → Multilanguage → English → Movies/TV → Unknown.
+// Lower values sort first: Portuguese -> Multilanguage -> English -> Movies/TV -> Unknown.
 func languagePriority(name string) int {
 	lower := strings.ToLower(name)
 	switch {
-	case strings.HasPrefix(lower, "[pt-br]") || strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
+	case strings.HasPrefix(lower, "[pt-br]") || strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[portugu\u00eas]"):
 		return 0
 	case strings.HasPrefix(lower, "[multilanguage]"):
 		return 1
