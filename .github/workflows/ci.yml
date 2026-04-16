@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "=== Testing macOS-specific socket path handling ==="
           echo "TMPDIR=$TMPDIR"
-          go test -v ./internal/player/test/... -run "Socket|MacOS" -count=1
+          go test -race -v ./internal/player/test/... -run "Socket|MacOS" -count=1
 
       - name: Get dependencies
         run: go mod download
@@ -82,7 +82,7 @@ jobs:
 
       - name: Run tests
         shell: bash
-        run: go test -v -coverprofile=coverage.out ./...
+        run: go test -race -v -coverprofile=coverage.out ./...
 
   build-binaries:
     needs: test
