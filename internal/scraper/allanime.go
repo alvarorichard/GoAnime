@@ -50,7 +50,7 @@ var (
 func NewAllAnimeClient() *AllAnimeClient {
 	allAnimeClientOnce.Do(func() {
 		allAnimeClientInstance = &AllAnimeClient{
-			client:    util.GetFastClient(), // Use shared fast client for API requests
+			client:    util.NewFastClient(), // Own client to avoid http2 transport race
 			referer:   AllAnimeReferer,
 			apiBase:   AllAnimeAPI,
 			userAgent: UserAgent,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -307,6 +308,9 @@ done:
 		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}
 
+	// Sort results: PT-BR first, then everything else
+	sortPTBRFirst(finalResults)
+
 	sm.logSearchSummary(finalResults)
 	return finalResults, nil
 }
@@ -396,6 +400,17 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 	}
 }
 
+// sortPTBRFirst reorders results so that PT-BR entries appear before all others,
+// preserving the relative order within each group.
+func sortPTBRFirst(results []*models.Anime) {
+	sort.SliceStable(results, func(i, j int) bool {
+		iPTBR := strings.Contains(results[i].Name, "[PT-BR]")
+		jPTBR := strings.Contains(results[j].Name, "[PT-BR]")
+		// PT-BR entries come first; within the same group, keep original order.
+		return iPTBR && !jPTBR
+	})
+}
+
 // ptbrTitleCleanRe are compiled regexes for cleaning PT-BR anime titles
 var (
 	ptbrSpaceRe      = regexp.MustCompile(`\s+`)
@@ -429,10 +444,37 @@ func cleanPTBRTitle(title string) string {
 	return title
 }
 
+// needsMediaTypeDisambig pre-scans results and returns a set of lowercased
+// titles that appear with more than one MediaType in the batch.  Only those
+// entries need an explicit [Movie]/[TV] disambiguation tag.
+func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
+	titleTypes := make(map[string]models.MediaType, len(results))
+	ambiguous := make(map[string]bool)
+	for _, a := range results {
+		key := strings.ToLower(strings.TrimSpace(a.Name))
+		if prev, exists := titleTypes[key]; exists {
+			if prev != a.MediaType {
+				ambiguous[key] = true
+			}
+		} else {
+			titleTypes[key] = a.MediaType
+		}
+	}
+	return ambiguous
+}
+
 // tagResults adds language tags and source metadata to results
 func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
 	sourceName := sm.getScraperDisplayName(scraperType)
 	isPTBR := scraperType == AnimefireType || scraperType == AnimeDriveType || scraperType == GoyabuType
+
+	// For FlixHQ/SFlix, pre-scan to find titles that need a [Movie]/[TV]
+	// disambiguation tag (same title appears as both movie and TV show).
+	// SuperFlix always shows media type since it mixes movies/series/animes/doramas.
+	var disambig map[string]bool
+	if scraperType == FlixHQType || scraperType == SFlixType {
+		disambig = needsMediaTypeDisambig(results)
+	}
 
 	for _, anime := range results {
 		// Clean PT-BR titles before tagging
@@ -450,17 +492,34 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			// For FlixHQ/SFlix/SuperFlix, use specific [Movie] or [TV] tag based on media type
-			if scraperType == FlixHQType || scraperType == SFlixType || scraperType == SuperFlixType {
+			switch scraperType {
+			case SuperFlixType:
+				// SuperFlix is PT-BR. Movies get [Movie], TV series get [TV],
+				// but anime/dorama only need [PT-BR].
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
-					anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
 				case models.MediaTypeTV:
-					anime.Name = fmt.Sprintf("[TV] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
 				default:
-					anime.Name = fmt.Sprintf("[Movies/TV] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
 				}
-			} else {
+			case FlixHQType, SFlixType:
+				// FlixHQ/SFlix: add [Movie]/[TV] only when disambiguation is needed.
+				key := strings.ToLower(strings.TrimSpace(anime.Name))
+				if disambig[key] {
+					switch anime.MediaType {
+					case models.MediaTypeMovie:
+						anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
+					case models.MediaTypeTV:
+						anime.Name = fmt.Sprintf("[TV] %s", anime.Name)
+					default:
+						anime.Name = fmt.Sprintf("[English] %s", anime.Name)
+					}
+				} else {
+					anime.Name = fmt.Sprintf("[English] %s", anime.Name)
+				}
+			default:
 				languageTag := sm.getLanguageTag(scraperType)
 				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 			}
@@ -582,9 +641,9 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AnimeDriveType:
 		return "[PT-BR]"
 	case FlixHQType:
-		return "[Movies/TV]"
+		return "[English]"
 	case SFlixType:
-		return "[Movies/TV]"
+		return "[English]"
 	case NineAnimeType:
 		return "[Multilanguage]"
 	case GoyabuType:
@@ -1045,4 +1104,10 @@ func (a *SuperFlixAdapter) GetType() ScraperType {
 // GetClient returns the underlying SuperFlix client for direct access
 func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
 	return a.client
+}
+
+// NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
+// Useful for testing with mock servers.
+func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
+	return &SuperFlixAdapter{client: client}
 }

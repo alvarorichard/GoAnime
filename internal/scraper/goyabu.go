@@ -68,7 +68,7 @@ type GoyabuClient struct {
 // NewGoyabuClient creates a new Goyabu client
 func NewGoyabuClient() *GoyabuClient {
 	return &GoyabuClient{
-		client:     util.GetFastClient(),
+		client:     util.NewFastClient(),
 		baseURL:    goyabuBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,
