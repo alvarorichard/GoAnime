@@ -4,9 +4,9 @@ package playback
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -28,11 +28,11 @@ type AllAnimeNavigator struct {
 
 // NewAllAnimeNavigator creates a new navigator for AllAnime content
 func NewAllAnimeNavigator(anime *models.Anime) (*AllAnimeNavigator, error) {
-	if !isAllAnimeSource(anime) {
+	if !api.IsAllAnimeSource(anime) {
 		return nil, fmt.Errorf("this navigator only works with AllAnime sources")
 	}
 
-	animeID := extractAllAnimeID(anime.URL)
+	animeID := api.ExtractAllAnimeID(anime.URL)
 	if animeID == "" {
 		return nil, fmt.Errorf("could not extract anime ID from URL: %s", anime.URL)
 	}
@@ -100,51 +100,10 @@ func (nav *AllAnimeNavigator) ListAllEpisodes() []string {
 	return result
 }
 
-// Helper function to check if anime is from AllAnime source
-func isAllAnimeSource(anime *models.Anime) bool {
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	// Check if URL is a short ID (AllAnime typically uses short IDs)
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to extract AllAnime ID from URL
-func extractAllAnimeID(url string) string {
-	// For AllAnime, the URL is often just the anime ID
-	if !strings.Contains(url, "http") && len(url) < 30 {
-		return url
-	}
-
-	// Extract ID from full AllAnime URLs if needed
-	if strings.Contains(url, "allanime") {
-		parts := strings.SplitSeq(url, "/")
-		for part := range parts {
-			if len(part) > 5 && len(part) < 30 &&
-				strings.ContainsAny(part, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") {
-				return part
-			}
-		}
-	}
-
-	return url // Return as-is if can't extract
-}
-
 // HandleAllAnimeEpisodeNavigation handles episode navigation for AllAnime
-func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber string, direction string) (*models.Episode, error) {
+func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber, direction string) (*models.Episode, error) {
 	// Use cached navigator to avoid re-fetching the entire episode list
-	animeID := extractAllAnimeID(anime.URL)
+	animeID := api.ExtractAllAnimeID(anime.URL)
 	navigatorCacheMu.Lock()
 	navigator, ok := navigatorCache[animeID]
 	navigatorCacheMu.Unlock()

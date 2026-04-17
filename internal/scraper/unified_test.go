@@ -684,6 +684,43 @@ func TestSearchAnime_AllSourcesUnavailable_SentinelChainPreserved(t *testing.T) 
 		"errors.Is should find ErrSourceUnavailable in the chain, got: %v", err)
 }
 
+func TestDrainPendingSearchResults_LateSourceUnavailablePreservesSentinel(t *testing.T) {
+	t.Parallel()
+
+	manager := createTestManager(nil, nil)
+	searchErrors := []string{}
+	searchSourceErrors := []error{}
+	allResults := []*models.Anime{}
+	sourcesWithResults := make(map[ScraperType]bool)
+	resultChan := make(chan searchResult, 1)
+	lateErr := fmt.Errorf("cloudflare challenge: %w", ErrSourceUnavailable)
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		resultChan <- searchResult{
+			scraperType: AnimefireType,
+			err:         lateErr,
+		}
+		close(resultChan)
+	}()
+
+	manager.drainPendingSearchResults(
+		resultChan,
+		&allResults,
+		sourcesWithResults,
+		&searchErrors,
+		&searchSourceErrors,
+		100*time.Millisecond,
+	)
+
+	require.Empty(t, allResults)
+	require.Len(t, searchErrors, 1)
+	require.Len(t, searchSourceErrors, 1)
+	assert.Contains(t, searchErrors[0], "Animefire.io")
+	assert.True(t, errors.Is(errors.Join(searchSourceErrors...), ErrSourceUnavailable),
+		"late drain should preserve ErrSourceUnavailable in the joined chain")
+}
+
 // =============================================================================
 // Helper functions
 // =============================================================================

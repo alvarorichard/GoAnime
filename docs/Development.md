@@ -289,6 +289,56 @@ go test ./internal/player/
 go test -v ./...
 ```
 
+### Feature Smoke Suite
+
+For small PRs, prefer a focused smoke suite that covers the main feature flow
+without depending on the full interactive stack:
+
+```bash
+# Core feature flow: search -> source resolution -> episodes -> stream URL
+go test -count=1 ./internal/scraper ./internal/api ./pkg/goanime
+
+# Player-specific helpers and playback handoff
+go test -count=1 ./internal/player
+```
+
+Recommended use:
+
+- **Scraper/source changes**: run `./internal/scraper ./internal/api ./pkg/goanime`
+- **Playback/player changes**: run `./internal/player` in addition to the core
+  feature flow packages
+- **Small bugfixes**: run at least the package you touched plus the core feature
+  flow packages if the change affects search, episodes, or streams
+
+### Current Automated Test Map
+
+The test suite is currently strongest in the packages below. These are the best
+starting points for feature-level regression coverage:
+
+- **`internal/scraper/`**: source-specific tests, HTML/challenge-page guards,
+  stream extraction, concurrent search behavior
+- **`internal/api/`**: source resolution, provider orchestration, episode flow,
+  movie/TV API integrations
+- **`internal/player/`**: blogger extraction, download helpers, race checks,
+  playback-related helpers
+- **`pkg/goanime/`**: public client/API smoke coverage
+- **`test/util/`**: parser and selection helper regressions
+
+Areas with lighter coverage today:
+
+- **`internal/appflow/`**: some focused tests exist, but full workflow coverage
+  is still limited
+- **`internal/playback/`**: targeted tests exist, but interactive paths are not
+  covered deeply
+- **`internal/tui/`** and **`cmd/goanime/`**: no meaningful automated coverage
+  yet
+
+### Windows / TUI Caveat
+
+Some full-suite tests on Windows still touch TUI/input behavior and may be
+flaky or environment-dependent. For day-to-day PR validation, the focused smoke
+suite above is the recommended baseline until those paths are isolated further.
+
 ### Test File Organization
 
 - Test files should be named `*_test.go`
