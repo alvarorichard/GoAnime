@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -26,16 +27,18 @@ type DownloadConfig struct {
 	AnimeURL   string
 	OutputDir  string
 	NumThreads int
-	Concurrent int    // Number of concurrent episode downloads
-	AnimeName  string // Anime name for Plex-compatible file naming
-	Season     int    // Season number (default: 1)
+	Concurrent int             // Number of concurrent episode downloads
+	AnimeName  string          // Anime name for Plex-compatible file naming
+	Season     int             // Season number (default: 1)
+	Meta       *util.MediaMeta // External IDs and year for Plex/Jellyfin folder naming
 }
 
 // EpisodeDownloader handles episode download operations
 type EpisodeDownloader struct {
-	config   DownloadConfig
-	episodes []models.Episode
-	anime    *models.Anime // Store anime data for enhanced API calls
+	config    DownloadConfig
+	episodes  []models.Episode
+	anime     *models.Anime            // Store anime data for enhanced API calls
+	seasonMap []metadata.SeasonMapping // AniList-based absolute→season map
 }
 
 // NewEpisodeDownloader creates a new episode downloader
@@ -62,6 +65,23 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 		}
 	}
 
+	// Build MediaMeta from anime data for Plex/Jellyfin-compatible folder naming
+	var meta *util.MediaMeta
+	if anime != nil {
+		meta = &util.MediaMeta{
+			OfficialTitle: anime.OfficialTitle(),
+			Year:          anime.Year,
+			TMDBID:        anime.TMDBID,
+			IMDBID:        anime.IMDBID,
+			AnilistID:     anime.AnilistID,
+			MalID:         anime.MalID,
+		}
+	}
+	// Also check global player state for metadata set during enrichment
+	if meta == nil {
+		meta = player.GetMediaMeta()
+	}
+
 	// Compute output directory using Plex-compatible structure
 	// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
 	var baseDir string
@@ -74,11 +94,11 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 	if animeName != "" {
 		// Intelligently organize: movies get flat paths, TV/anime get season paths
 		if anime != nil && anime.IsMovie() {
-			// Standalone movies: <baseDir>/<MovieName>/ (no season hierarchy)
-			outputDir = util.FormatPlexMovieDir(baseDir, animeName)
+			// Standalone movies: <baseDir>/<MovieName (Year) {ids}>/ (no season hierarchy)
+			outputDir = util.FormatPlexMovieDir(baseDir, animeName, meta)
 		} else {
-			// TV shows and anime: <baseDir>/<Name>/Season XX/
-			outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season)
+			// TV shows and anime: <baseDir>/<Name (Year) {ids}>/Season XX/
+			outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season, meta)
 		}
 	} else {
 		// Fallback to URL-based directory for backward compatibility
@@ -87,7 +107,7 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 		outputDir = filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
 	}
 
-	return &EpisodeDownloader{
+	d := &EpisodeDownloader{
 		config: DownloadConfig{
 			AnimeURL:   animeURL,
 			OutputDir:  outputDir,
@@ -95,10 +115,20 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 			Concurrent: 3,
 			AnimeName:  util.SanitizeForFilename(animeName),
 			Season:     season,
+			Meta:       meta,
 		},
 		episodes: episodes,
 		anime:    anime,
 	}
+
+	// Enrich with AniList metadata for per-episode season resolution
+	if anime != nil && !anime.IsMovie() {
+		enricher := metadata.NewEnricher()
+		sm, _ := enricher.EnrichAnime(context.Background(), anime)
+		d.seasonMap = sm
+	}
+
+	return d
 }
 
 // DownloadSingleEpisode downloads a specific episode by number
@@ -109,11 +139,12 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
+	outDir := d.episodeDir(episodeNum)
+	if err := os.MkdirAll(outDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(episodeNum))
+	episodePath := filepath.Join(d.episodeDir(episodeNum), d.episodeFilename(episodeNum))
 
 	// Check if episode already exists
 	if d.fileExists(episodePath) {
@@ -137,11 +168,6 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 		return fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
 	}
 
-	// Create output directory
-	if err := os.MkdirAll(d.config.OutputDir, 0700); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
 	// Collect episodes to download
 	var episodesToDownload []int
 	var existingEpisodes []int
@@ -151,7 +177,7 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 			util.Warnf("Episode %d not found, skipping", epNum)
 			continue
 		}
-		episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
+		episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
 		if d.fileExists(episodePath) {
 			existingEpisodes = append(existingEpisodes, epNum)
 		} else {
@@ -204,7 +230,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 			continue
 		}
 
-		episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
+		episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
 
 		// Get content length
 		size, err := d.getContentLength(videoURL)
@@ -262,7 +288,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 
 	fmt.Printf("\nAll %d episodes downloaded successfully!\n", len(episodeNums))
 	if len(episodeNums) > 0 {
-		epPath := filepath.Join(d.config.OutputDir, d.episodeFilename(episodeNums[0]))
+		epPath := filepath.Join(d.episodeDir(episodeNums[0]), d.episodeFilename(episodeNums[0]))
 		printDownloadLocation(filepath.Dir(epPath))
 	}
 	return d.promptPlayDownloadedRangeHuh(episodeNums)
@@ -474,22 +500,47 @@ func (d *EpisodeDownloader) episodeFilename(epNum int) string {
 	if d.config.AnimeName != "" {
 		// Check if this is a standalone movie — use flat naming
 		if d.anime != nil && d.anime.IsMovie() {
-			safeName := util.SanitizeForFilename(d.anime.Name)
-			if safeName == "" {
-				safeName = d.config.AnimeName
-			}
-			year := ""
-			if d.anime.Year != "" {
-				year = d.anime.Year
-			}
-			if year != "" {
-				return fmt.Sprintf("%s (%s).mp4", safeName, year)
-			}
-			return fmt.Sprintf("%s.mp4", safeName)
+			fileName := util.BuildMediaFileName(d.anime.Name, d.config.Meta)
+			return fileName + ".mp4"
 		}
-		return util.PlexEpisodeFilename(d.config.AnimeName, d.config.Season, epNum)
+		season, relEp := d.resolveEpisodeSeason(epNum)
+		return util.PlexEpisodeFilename(d.config.AnimeName, season, relEp, d.config.Meta)
 	}
 	return fmt.Sprintf("%d.mp4", epNum)
+}
+
+// resolveEpisodeSeason returns the correct (season, relativeEp) for an absolute
+// episode number using the AniList season map.
+func (d *EpisodeDownloader) resolveEpisodeSeason(absEp int) (season, ep int) {
+	if len(d.seasonMap) > 0 {
+		for _, sm := range d.seasonMap {
+			if absEp >= sm.StartEp && absEp <= sm.EndEp {
+				return sm.Season, absEp - sm.StartEp + 1
+			}
+		}
+		last := d.seasonMap[len(d.seasonMap)-1]
+		return last.Season, absEp - last.StartEp + 1
+	}
+	return max(d.config.Season, 1), absEp
+}
+
+// episodeDir returns the output directory for an episode, using per-episode
+// season resolution when a season map is available.
+func (d *EpisodeDownloader) episodeDir(epNum int) string {
+	if d.config.AnimeName == "" || (d.anime != nil && d.anime.IsMovie()) {
+		return d.config.OutputDir
+	}
+	if len(d.seasonMap) > 0 {
+		var baseDir string
+		if d.anime != nil && d.anime.IsMovieOrTV() {
+			baseDir = util.DefaultMovieDownloadDir()
+		} else {
+			baseDir = util.DefaultDownloadDir()
+		}
+		season, _ := d.resolveEpisodeSeason(epNum)
+		return util.FormatPlexEpisodeDir(baseDir, d.config.AnimeName, season, d.config.Meta)
+	}
+	return d.config.OutputDir
 }
 
 func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
@@ -612,6 +663,10 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 
 // downloadWithProgress downloads a single episode with progress bar
 func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, episodeNum int) error {
+	// Ensure output directory exists (may vary per episode with season maps)
+	if err := os.MkdirAll(filepath.Dir(episodePath), 0700); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
 	// Create progress model
 	m := &progressModel{
 		progress: progress.New(progress.WithDefaultBlend()),
@@ -1028,7 +1083,7 @@ func (d *EpisodeDownloader) promptPlayDownloadedRangeHuh(episodeNums []int) erro
 	// Check if choice is in the downloaded episodes
 	for _, epNum := range episodeNums {
 		if epNum == choice {
-			episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
+			episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
 			return d.playEpisode(episodePath, epNum)
 		}
 	}
@@ -1059,7 +1114,7 @@ func (d *EpisodeDownloader) promptPlayExistingRangeHuh(episodeNums []int) error 
 	// Check if choice is in the existing episodes
 	for _, epNum := range episodeNums {
 		if epNum == choice {
-			episodePath := filepath.Join(d.config.OutputDir, d.episodeFilename(epNum))
+			episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
 			return d.playEpisode(episodePath, epNum)
 		}
 	}

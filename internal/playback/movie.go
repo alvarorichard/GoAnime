@@ -60,6 +60,16 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		// Route downloads to the correct directory (anime/ vs movies/) using exact media type
 		player.SetExactMediaType(string(anime.MediaType))
 
+		// Store external IDs for Plex/Jellyfin-compatible folder naming
+		player.SetMediaMeta(&util.MediaMeta{
+			OfficialTitle: anime.OfficialTitle(),
+			Year:          anime.Year,
+			TMDBID:        anime.TMDBID,
+			IMDBID:        anime.IMDBID,
+			AnilistID:     anime.AnilistID,
+			MalID:         anime.MalID,
+		})
+
 		playErr := player.HandleDownloadAndPlay(
 			videoURL,
 			episodes,

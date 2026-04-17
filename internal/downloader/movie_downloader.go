@@ -88,12 +88,18 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 	util.Infof("Starting download for: %s", media.Name)
 	util.Debugf("Source: %s, URL: %s", media.Source, media.URL)
 
-	// Use Plex-compatible movie path: <OutputDir>/<MovieName>/<MovieName> (Year).mp4
-	safeFileName := util.SanitizeForFilename(media.Name)
-	if safeFileName == "" {
-		safeFileName = sanitizeFileName(media.Name)
+	// Build metadata for Plex/Jellyfin-compatible folder naming
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
 	}
-	movieDir := filepath.Join(md.config.OutputDir, safeFileName)
+
+	// Use Plex-compatible movie path: <OutputDir>/<MovieName (Year) {ids}>/<MovieName (Year)>.mp4
+	movieDir := util.FormatPlexMovieDir(md.config.OutputDir, media.Name, meta)
 	if err := os.MkdirAll(movieDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -104,13 +110,8 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	// Build movie filename with year if available
-	var moviePath string
-	if media.Year != "" {
-		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s (%s).mp4", safeFileName, media.Year))
-	} else {
-		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s.mp4", safeFileName))
-	}
+	// Build movie file path with Plex-compatible naming
+	moviePath := util.FormatPlexMoviePath(md.config.OutputDir, media.Name, media.Year, meta)
 
 	// Check if movie already exists
 	if md.fileExists(moviePath) {
@@ -153,12 +154,18 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 
 	util.Infof("Starting download for: %s S%02dE%02d", media.Name, seasonNum, episodeNum)
 
-	// Create Plex-compatible output directory: <OutputDir>/<ShowName>/Season XX/
-	safeShowName := util.SanitizeForFilename(media.Name)
-	if safeShowName == "" {
-		safeShowName = sanitizeFileName(media.Name)
+	// Build metadata for Plex/Jellyfin-compatible folder naming
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
 	}
-	showDir := filepath.Join(md.config.OutputDir, safeShowName, fmt.Sprintf("Season %02d", seasonNum))
+
+	// Create Plex-compatible output directory: <OutputDir>/<ShowName (Year) {ids}>/Season XX/
+	showDir := util.FormatPlexEpisodeDir(md.config.OutputDir, media.Name, seasonNum, meta)
 	if err := os.MkdirAll(showDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -169,8 +176,8 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	// Plex-compatible episode filename: <ShowName> - sXXeXX.mp4
-	episodePath := filepath.Join(showDir, fmt.Sprintf("%s - s%02de%02d.mp4", safeShowName, seasonNum, episodeNum))
+	// Plex-compatible episode path: <ShowDir>/<ShowName (Year)> - SXXeXX.mp4
+	episodePath := util.FormatPlexEpisodePath(md.config.OutputDir, media.Name, seasonNum, episodeNum, meta)
 
 	// Check if episode already exists
 	if md.fileExists(episodePath) {
@@ -891,26 +898,6 @@ func extractMediaIDFromURL(urlStr string) string {
 		return parts[len(parts)-1]
 	}
 	return ""
-}
-
-func sanitizeFileName(name string) string {
-	// Remove language tags
-	result := name
-	for _, tag := range []string{"[PT-BR]", "[Portuguese]", "[Português]", "[English]", "[Multilanguage]", "[Movie]", "[TV]", "[Movies/TV]"} {
-		result = strings.ReplaceAll(result, tag, "")
-	}
-	result = strings.TrimSpace(result)
-
-	// Replace invalid characters with underscore
-	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
-	for _, char := range invalid {
-		result = strings.ReplaceAll(result, char, "_")
-	}
-	// Also clean up multiple underscores
-	for strings.Contains(result, "__") {
-		result = strings.ReplaceAll(result, "__", "_")
-	}
-	return strings.TrimSpace(result)
 }
 
 func convertSFlixToFlixHQStreamInfo(sflix *scraper.SFlixStreamInfo) *scraper.FlixHQStreamInfo {

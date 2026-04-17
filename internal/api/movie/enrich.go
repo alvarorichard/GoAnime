@@ -144,36 +144,55 @@ func EnrichWithOMDb(media *models.Media) error {
 		return nil
 	}
 
-	// Clean the name for search
-	cleanName := CleanMediaName(media.Name)
-	util.Debug("Searching OMDb for", "name", cleanName)
+	var omdbMedia *OMDbMedia
 
-	// Determine media type for search
-	var searchType string
-	switch media.MediaType {
-	case models.MediaTypeMovie:
-		searchType = "movie"
-	case models.MediaTypeTV:
-		searchType = "series"
+	// Fast path: if we already have an IMDB ID (e.g. from SuperFlix), look up
+	// directly by ID. This avoids the problem where OMDb title search fails
+	// for localized names (e.g. "Dois Homens e Meio" → not found).
+	if media.IMDBID != "" {
+		util.Debug("OMDb direct lookup by IMDB ID", "imdbID", media.IMDBID)
+		m, err := client.GetByIMDBID(media.IMDBID)
+		if err == nil {
+			omdbMedia = m
+		} else {
+			util.Debug("OMDb IMDB ID lookup failed, falling back to title search", "error", err)
+		}
 	}
 
-	// Try exact title match first
-	omdbMedia, err := client.GetByTitle(cleanName, media.Year)
-	if err != nil {
-		// Fall back to search
-		util.Debug("Exact title match failed, trying search", "error", err)
-		searchResult, searchErr := client.SearchByTitle(cleanName, searchType)
-		if searchErr != nil || len(searchResult.Search) == 0 {
-			// Not finding metadata is not critical - just log and continue
-			util.Debug("OMDb search failed or no results, continuing without enrichment", "error", searchErr)
-			return nil // Return nil instead of error - metadata is optional
+	// If direct ID lookup didn't work, try title-based search
+	if omdbMedia == nil {
+		// Clean the name for search
+		cleanName := CleanMediaName(media.Name)
+		util.Debug("Searching OMDb for", "name", cleanName)
+
+		// Determine media type for search
+		var searchType string
+		switch media.MediaType {
+		case models.MediaTypeMovie:
+			searchType = "movie"
+		case models.MediaTypeTV:
+			searchType = "series"
 		}
-		// Get details for the first result
-		omdbMedia, err = client.GetByIMDBID(searchResult.Search[0].IMDBID)
+
+		// Try exact title match first
+		m, err := client.GetByTitle(cleanName, media.Year)
 		if err != nil {
-			util.Debug("Failed to get OMDb details, continuing without enrichment", "error", err)
-			return nil // Return nil instead of error - metadata is optional
+			// Fall back to search
+			util.Debug("Exact title match failed, trying search", "error", err)
+			searchResult, searchErr := client.SearchByTitle(cleanName, searchType)
+			if searchErr != nil || len(searchResult.Search) == 0 {
+				// Not finding metadata is not critical - just log and continue
+				util.Debug("OMDb search failed or no results, continuing without enrichment", "error", searchErr)
+				return nil // Return nil instead of error - metadata is optional
+			}
+			// Get details for the first result
+			m, err = client.GetByIMDBID(searchResult.Search[0].IMDBID)
+			if err != nil {
+				util.Debug("Failed to get OMDb details, continuing without enrichment", "error", err)
+				return nil // Return nil instead of error - metadata is optional
+			}
 		}
+		omdbMedia = m
 	}
 
 	// Enrich the media object
@@ -205,8 +224,31 @@ func EnrichWithOMDb(media *models.Media) error {
 		media.ImageURL = omdbMedia.Poster
 	}
 
+	// Populate TMDBDetails with the official (English) title from OMDb.
+	// This is essential for OfficialTitle() to return the English name
+	// instead of the scraped/localized name, especially when the TMDB API
+	// key is not configured and OMDb is the only metadata source.
+	if omdbMedia.Title != "" && omdbMedia.Title != "N/A" {
+		if media.TMDBDetails == nil {
+			media.TMDBDetails = &models.TMDBDetails{}
+		}
+		// OMDb always returns the English title.
+		// Movies use TMDBDetails.Title, TV shows use TMDBDetails.Name.
+		if media.MediaType == models.MediaTypeMovie {
+			if media.TMDBDetails.Title == "" {
+				media.TMDBDetails.Title = omdbMedia.Title
+			}
+		} else {
+			if media.TMDBDetails.Name == "" {
+				media.TMDBDetails.Name = omdbMedia.Title
+			}
+		}
+		util.Debug("OMDb official title set for OfficialTitle()", "title", omdbMedia.Title)
+	}
+
 	util.Debug("OMDb enrichment successful",
 		"imdb", media.IMDBID,
+		"title", omdbMedia.Title,
 		"rating", media.Rating,
 		"year", media.Year)
 

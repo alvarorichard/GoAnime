@@ -26,7 +26,7 @@ func TestSeasonDefaultedToOne_Bug(t *testing.T) {
 
 		path := util.FormatPlexEpisodePath("/media/tv", "Dexter", snap.AnimeSeason, 5)
 		assert.Contains(t, path, "Season 01", "bug scenario: download path shows Season 01")
-		assert.Contains(t, path, "s01e05", "bug scenario: filename shows s01e05")
+		assert.Contains(t, path, "S01E05", "bug scenario: filename shows S01E05")
 	})
 }
 
@@ -47,7 +47,7 @@ func TestSeasonPropagation_Fix(t *testing.T) {
 			season:         2,
 			episode:        5,
 			wantSeasonDir:  "Season 02",
-			wantFilePrefix: "s02e05",
+			wantFilePrefix: "S02E05",
 		},
 		{
 			name:           "Breaking Bad Season 4 Episode 11",
@@ -55,7 +55,7 @@ func TestSeasonPropagation_Fix(t *testing.T) {
 			season:         4,
 			episode:        11,
 			wantSeasonDir:  "Season 04",
-			wantFilePrefix: "s04e11",
+			wantFilePrefix: "S04E11",
 		},
 		{
 			name:           "Season 1 still works",
@@ -63,7 +63,7 @@ func TestSeasonPropagation_Fix(t *testing.T) {
 			season:         1,
 			episode:        1,
 			wantSeasonDir:  "Season 01",
-			wantFilePrefix: "s01e01",
+			wantFilePrefix: "S01E01",
 		},
 		{
 			name:           "high season number",
@@ -71,7 +71,7 @@ func TestSeasonPropagation_Fix(t *testing.T) {
 			season:         35,
 			episode:        10,
 			wantSeasonDir:  "Season 35",
-			wantFilePrefix: "s35e10",
+			wantFilePrefix: "S35E10",
 		},
 	}
 
@@ -178,9 +178,9 @@ func TestHandleDownloadAndPlay_SeasonFromAnime(t *testing.T) {
 		// Verify the download path uses the correct season
 		path := util.FormatPlexEpisodePath("/media/tv", snap.AnimeName, snap.AnimeSeason, 5)
 		assert.Contains(t, path, "Season 02")
-		assert.Contains(t, path, "s02e05")
+		assert.Contains(t, path, "S02E05")
 		assert.NotContains(t, path, "Season 01")
-		assert.NotContains(t, path, "s01e05")
+		assert.NotContains(t, path, "S01E05")
 	})
 
 	t.Run("GlobalDownloadRequest overrides anime season", func(t *testing.T) {
@@ -373,7 +373,7 @@ func TestEndToEndSeasonPipeline(t *testing.T) {
 
 	// Step 6: Download path uses Season 02
 	path := util.FormatPlexEpisodePath("/media/tv", snap.AnimeName, snap.AnimeSeason, 5)
-	assert.Contains(t, path, "Dexter/Season 02/Dexter - s02e05.mp4")
+	assert.Contains(t, path, "Dexter/Season 02/Dexter - S02E05.mp4")
 
 	// Step 7: MPV title shows S02E05
 	title := fmt.Sprintf("%s S%02dE%02d", snap.AnimeName, snap.AnimeSeason, 5)
