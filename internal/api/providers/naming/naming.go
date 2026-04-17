@@ -141,13 +141,13 @@ func FullPath(info *MediaInfo) string {
 	if info.IsMovie {
 		dir := SeriesDir(info)
 		filename := MovieFilename(info)
-		return filepath.Join("Movies", dir, filename)
+		return filepath.ToSlash(filepath.Join("Movies", dir, filename))
 	}
 
 	dir := SeriesDir(info)
 	seasonDir := SeasonDir(info.Season)
 	filename := EpisodeFilename(info)
-	return filepath.Join("Shows", dir, seasonDir, filename)
+	return filepath.ToSlash(filepath.Join("Shows", dir, seasonDir, filename))
 }
 
 // FromAnimeEpisode creates a MediaInfo from an Anime and Episode model.
