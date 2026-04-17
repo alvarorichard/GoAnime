@@ -1464,12 +1464,12 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 		var fullPath string
 		// Check if this is a standalone movie (no season/episode hierarchy)
 		if snap.MediaType == "movie" {
-			// Movies: flat structure  <baseDir>/<MovieName>/<MovieName>.mp4
-			fullPath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
+			// Movies: flat structure  <baseDir>/<MovieName (Year) {ids}>/<MovieName (Year)>.mp4
+			fullPath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := max(snap.AnimeSeason, 1)
-			fullPath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
+			season, relEp := resolveSeasonForEpisode(snap, epNum)
+			fullPath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
 		}
 		dir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(dir, 0700); err != nil {

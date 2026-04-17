@@ -2,12 +2,15 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/movie"
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
 	"github.com/alvarorichard/Goanime/internal/player"
@@ -45,6 +48,31 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	player.SetAnimeName(anime.Name, season)
 	// Route downloads to the correct directory (anime/ vs movies/) using exact media type
 	player.SetExactMediaType(string(anime.MediaType))
+
+	// Build and store external IDs for Plex/Jellyfin-compatible folder naming
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
+
+	// Enrich with AniList metadata for per-episode season resolution
+	enricher := metadata.NewEnricher()
+	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
+	player.SetSeasonMap(seasonMap)
+
+	// Update metadata after enrichment (AniList may have populated IDs)
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
 
 	// If this is a movie from FlixHQ/SFlix, redirect to the movie download workflow
 	// Movies should not go through the episode-based download path
@@ -221,6 +249,13 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	anime := selectedMedia.ToAnimeModel()
 	anime.Source = selectedMedia.Source
 
+	// Enrich with TMDB/OMDb metadata to get official title, year, and external IDs.
+	// This is essential for Plex/Jellyfin-compatible folder naming — without it,
+	// folders use the scraped (often localized) name instead of the official title.
+	if err := movie.EnrichMedia(anime); err != nil {
+		util.Debugf("TMDB/OMDb enrichment failed (non-critical): %v", err)
+	}
+
 	// Set exact media type for intelligent path organization
 	if selectedMedia.Type == scraper.MediaTypeMovie {
 		player.SetExactMediaType("movie")
@@ -228,6 +263,16 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 		player.SetExactMediaType("tv")
 	}
 	player.SetAnimeName(anime.Name, request.SeasonNum)
+
+	// Build and store external IDs for Plex/Jellyfin-compatible folder naming
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
 
 	// Create movie downloader
 	md := downloader.NewMovieDownloaderWithConfig(downloader.MovieDownloadConfig{

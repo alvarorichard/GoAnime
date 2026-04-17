@@ -23,6 +23,7 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -60,7 +61,9 @@ type mediaState struct {
 	animeName   string
 	animeSeason int
 	isMovieOrTV bool
-	mediaType   string // "movie", "tv", or "anime"
+	mediaType   string                   // "movie", "tv", or "anime"
+	seasonMap   []metadata.SeasonMapping // AniList-based absolute→season map
+	meta        *util.MediaMeta          // External IDs and year for folder naming
 }
 
 var gMedia mediaState
@@ -129,6 +132,8 @@ type mediaSnapshot struct {
 	IsMovieOrTV bool
 	MediaType   string
 	AnimeURL    string
+	SeasonMap   []metadata.SeasonMapping
+	Meta        *util.MediaMeta // External IDs and year for folder naming
 }
 
 // snapshotMedia returns a consistent point-in-time copy of the global media state.
@@ -141,7 +146,52 @@ func snapshotMedia() mediaSnapshot {
 		IsMovieOrTV: gMedia.isMovieOrTV,
 		MediaType:   gMedia.mediaType,
 		AnimeURL:    gMedia.animeURL,
+		SeasonMap:   gMedia.seasonMap,
+		Meta:        gMedia.meta,
 	}
+}
+
+// SetSeasonMap stores the AniList-derived season mapping for per-episode
+// season resolution. Call after metadata enrichment.
+func SetSeasonMap(sm []metadata.SeasonMapping) {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.seasonMap = sm
+}
+
+// SetMediaMeta stores external IDs (TMDB, IMDB, AniList, MAL) and year for
+// Plex/Jellyfin-compatible folder naming. Call after metadata enrichment.
+func SetMediaMeta(meta *util.MediaMeta) {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.meta = meta
+}
+
+// GetMediaMeta returns the current media metadata (external IDs and year).
+func GetMediaMeta() *util.MediaMeta {
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return gMedia.meta
+}
+
+// resolveSeasonForEpisode returns the correct (season, episode) pair for an
+// absolute episode number using the AniList season map. Falls back to
+// (snap.AnimeSeason, absEp) when no map is available.
+func resolveSeasonForEpisode(snap mediaSnapshot, absEp int) (season, ep int) {
+	if len(snap.SeasonMap) == 0 {
+		util.Debugf("resolveSeasonForEpisode: no season map, using default season=%d, ep=%d", max(snap.AnimeSeason, 1), absEp)
+		return max(snap.AnimeSeason, 1), absEp
+	}
+	util.Debugf("resolveSeasonForEpisode: seasonMap has %d entries, absEp=%d", len(snap.SeasonMap), absEp)
+	for _, sm := range snap.SeasonMap {
+		if absEp >= sm.StartEp && absEp <= sm.EndEp {
+			util.Debugf("resolveSeasonForEpisode: matched S%02d range [%d-%d] → s%02de%02d", sm.Season, sm.StartEp, sm.EndEp, sm.Season, absEp-sm.StartEp+1)
+			return sm.Season, absEp - sm.StartEp + 1
+		}
+	}
+	// Beyond known range: use last season
+	last := snap.SeasonMap[len(snap.SeasonMap)-1]
+	return last.Season, absEp - last.StartEp + 1
 }
 
 const (
@@ -669,12 +719,11 @@ func downloadAndPlayEpisode(
 
 		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
 		if snap.MediaType == "movie" {
-			// Movies: flat structure <baseDir>/<MovieName>/
-			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName)
-			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
+			// Movies: flat structure <baseDir>/<MovieName (Year) {ids}>/
+			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta)
+			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := max(snap.AnimeSeason, 1)
 			// Use the int episode number directly; fall back to parsing the string only if needed
 			epNum := selectedEpisodeNum
 			if epNum < 1 {
@@ -685,8 +734,9 @@ func downloadAndPlayEpisode(
 					epNum = 1
 				}
 			}
-			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season)
-			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
+			season, relEp := resolveSeasonForEpisode(snap, epNum)
+			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta)
+			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
 		}
 		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
 	} else {

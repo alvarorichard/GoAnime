@@ -122,6 +122,32 @@ func (m *Media) GetDisplayName() string {
 	return name
 }
 
+// OfficialTitle returns the official title from metadata databases.
+// Priority: TMDB Title/Name > AniList English > AniList Romaji > scraped Name.
+// This is used for Plex/Jellyfin-compatible folder naming so that media
+// servers can properly match content (e.g. "Two and a Half Men" instead
+// of the localized "Dois Homens e Meio").
+func (m *Media) OfficialTitle() string {
+	// TMDB: movies use Title, TV shows use Name
+	if m.TMDBDetails != nil {
+		if m.TMDBDetails.Title != "" {
+			return m.TMDBDetails.Title
+		}
+		if m.TMDBDetails.Name != "" {
+			return m.TMDBDetails.Name
+		}
+	}
+	// AniList: prefer English, fall back to Romaji
+	if m.Details.Title.English != "" {
+		return m.Details.Title.English
+	}
+	if m.Details.Title.Romaji != "" {
+		return m.Details.Title.Romaji
+	}
+	// Fall back to scraped name
+	return m.Name
+}
+
 // GetRatingDisplay returns a formatted rating string
 func (m *Media) GetRatingDisplay() string {
 	if m.Rating > 0 {

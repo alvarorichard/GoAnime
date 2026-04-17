@@ -902,6 +902,77 @@ func stripTrailingAnimeMetadata(name string) string {
 	return name
 }
 
+// MediaMeta carries external IDs, year, and official title for
+// Plex/Jellyfin-compatible folder naming. Pass nil when metadata is
+// unavailable — all helpers treat a nil *MediaMeta the same as an empty one.
+type MediaMeta struct {
+	OfficialTitle string // Official title from TMDB/AniList (English or Romaji)
+	Year          string // Release year, e.g. "2003"
+	TMDBID        int    // TheMovieDB ID
+	IMDBID        string // IMDB ID, e.g. "tt0369179"
+	AnilistID     int    // AniList ID
+	MalID         int    // MyAnimeList ID
+}
+
+// resolveTitle returns the best available title: OfficialTitle from metadata
+// databases (TMDB, AniList), falling back to the sanitized scraper name.
+func resolveTitle(scraperName string, meta *MediaMeta) string {
+	if meta != nil && meta.OfficialTitle != "" {
+		safe := SanitizeForFilename(meta.OfficialTitle)
+		if safe != "" {
+			return safe
+		}
+	}
+	safe := SanitizeForFilename(scraperName)
+	if safe != "" {
+		return safe
+	}
+	return "Unknown"
+}
+
+// BuildMediaFolderName returns a Plex/Jellyfin-compatible folder name.
+// Format: "<OfficialTitle> (<Year>) {tmdb-123} {imdb-tt456}"
+// Prefers the official title from TMDB/AniList over the scraped name.
+// External IDs use the {source-id} syntax recognised by both Plex and Jellyfin.
+func BuildMediaFolderName(name string, meta *MediaMeta) string {
+	result := resolveTitle(name, meta)
+	if meta == nil {
+		return result
+	}
+
+	// Append year
+	if meta.Year != "" {
+		result += " (" + meta.Year + ")"
+	}
+
+	// Append external IDs in priority order (Plex/Jellyfin {source-id} syntax)
+	if meta.TMDBID > 0 {
+		result += fmt.Sprintf(" {tmdb-%d}", meta.TMDBID)
+	}
+	if meta.IMDBID != "" {
+		result += fmt.Sprintf(" {imdb-%s}", meta.IMDBID)
+	}
+	if meta.AnilistID > 0 {
+		result += fmt.Sprintf(" {anilist-%d}", meta.AnilistID)
+	}
+	if meta.MalID > 0 {
+		result += fmt.Sprintf(" {mal-%d}", meta.MalID)
+	}
+
+	return result
+}
+
+// BuildMediaFileName returns a Plex/Jellyfin-compatible base name for files.
+// Format: "<OfficialTitle> (<Year>)" — external IDs are only on the folder, not the file.
+// Prefers the official title from TMDB/AniList over the scraped name.
+func BuildMediaFileName(name string, meta *MediaMeta) string {
+	title := resolveTitle(name, meta)
+	if meta != nil && meta.Year != "" {
+		return title + " (" + meta.Year + ")"
+	}
+	return title
+}
+
 // DefaultDownloadDir returns the base download directory for anime content.
 // If the user specified a custom directory via -o flag, that is returned.
 // Otherwise returns the default ~/.local/goanime/downloads/anime/ path.
@@ -925,71 +996,85 @@ func DefaultMovieDownloadDir() string {
 }
 
 // FormatPlexMoviePath builds a Plex/Jellyfin-compatible file path for a movie.
-// Format: <baseDir>/<MovieName>/<MovieName> (Year).mp4
-// Movies are stored flat without season/episode hierarchy.
-func FormatPlexMoviePath(baseDir, movieName string, year string) string {
-	safeName := SanitizeForFilename(movieName)
-	if safeName == "" {
-		safeName = "Unknown Movie"
+// Format: <baseDir>/<MovieName (Year) {ids}>/<MovieName (Year)>.mp4
+// The folder includes external IDs; the filename includes only name and year.
+func FormatPlexMoviePath(baseDir, movieName string, year string, meta ...*MediaMeta) string {
+	var m *MediaMeta
+	if len(meta) > 0 {
+		m = meta[0]
 	}
-	var filename string
+	// Ensure year is populated from meta if not passed directly
+	if year == "" && m != nil {
+		year = m.Year
+	}
+	// Build a consistent meta for helpers (merge year param)
+	effectiveMeta := &MediaMeta{}
+	if m != nil {
+		*effectiveMeta = *m
+	}
 	if year != "" {
-		filename = fmt.Sprintf("%s (%s).mp4", safeName, year)
-	} else {
-		filename = fmt.Sprintf("%s.mp4", safeName)
+		effectiveMeta.Year = year
 	}
-	return filepath.Join(baseDir, safeName, filename)
+
+	folderName := BuildMediaFolderName(movieName, effectiveMeta)
+	fileName := BuildMediaFileName(movieName, effectiveMeta)
+	return filepath.Join(baseDir, folderName, fileName+".mp4")
 }
 
 // FormatPlexMovieDir returns the directory path for a Plex-compatible movie.
-// Format: <baseDir>/<MovieName>/
-func FormatPlexMovieDir(baseDir, movieName string) string {
-	safeName := SanitizeForFilename(movieName)
-	if safeName == "" {
-		safeName = "Unknown Movie"
+// Format: <baseDir>/<MovieName (Year) {ids}>/
+func FormatPlexMovieDir(baseDir, movieName string, meta ...*MediaMeta) string {
+	var m *MediaMeta
+	if len(meta) > 0 {
+		m = meta[0]
 	}
-	return filepath.Join(baseDir, safeName)
+	folderName := BuildMediaFolderName(movieName, m)
+	return filepath.Join(baseDir, folderName)
 }
 
 // FormatPlexEpisodePath builds a Plex/Jellyfin-compatible file path for an episode.
-// Format: <baseDir>/<AnimeName>/Season XX/<AnimeName> - sXXeXX.mp4
-// Uses lowercase s/e per Plex naming guidelines.
-func FormatPlexEpisodePath(baseDir, animeName string, season, episodeNum int) string {
-	safeName := SanitizeForFilename(animeName)
-	if safeName == "" {
-		safeName = "Unknown Anime"
+// Format: <baseDir>/<Name (Year) {ids}>/Season XX/<Name (Year)> - SXXeXX.mp4
+// The folder includes external IDs; the filename includes name, year, and episode info.
+func FormatPlexEpisodePath(baseDir, animeName string, season, episodeNum int, meta ...*MediaMeta) string {
+	var m *MediaMeta
+	if len(meta) > 0 {
+		m = meta[0]
 	}
+	folderName := BuildMediaFolderName(animeName, m)
+	fileName := BuildMediaFileName(animeName, m)
 	if season < 1 {
 		season = 1
 	}
 	seasonDir := fmt.Sprintf("Season %02d", season)
-	filename := fmt.Sprintf("%s - s%02de%02d.mp4", safeName, season, episodeNum)
-	return filepath.ToSlash(filepath.Join(baseDir, safeName, seasonDir, filename))
+	filename := fmt.Sprintf("%s - S%02dE%02d.mp4", fileName, season, episodeNum)
+	return filepath.ToSlash(filepath.Join(baseDir, folderName, seasonDir, filename))
 }
 
 // FormatPlexEpisodeDir returns the directory path for a Plex-compatible anime season.
-// Format: <baseDir>/<AnimeName>/Season XX/
-func FormatPlexEpisodeDir(baseDir, animeName string, season int) string {
-	safeName := SanitizeForFilename(animeName)
-	if safeName == "" {
-		safeName = "Unknown Anime"
+// Format: <baseDir>/<Name (Year) {ids}>/Season XX/
+func FormatPlexEpisodeDir(baseDir, animeName string, season int, meta ...*MediaMeta) string {
+	var m *MediaMeta
+	if len(meta) > 0 {
+		m = meta[0]
 	}
+	folderName := BuildMediaFolderName(animeName, m)
 	if season < 1 {
 		season = 1
 	}
 	seasonDir := fmt.Sprintf("Season %02d", season)
-	return filepath.ToSlash(filepath.Join(baseDir, safeName, seasonDir))
+	return filepath.ToSlash(filepath.Join(baseDir, folderName, seasonDir))
 }
 
 // PlexEpisodeFilename returns just the filename part in Plex format.
-// Format: <AnimeName> - sXXeXX.mp4
-func PlexEpisodeFilename(animeName string, season, episodeNum int) string {
-	safeName := SanitizeForFilename(animeName)
-	if safeName == "" {
-		safeName = "Unknown Anime"
+// Format: <Name (Year)> - SXXeXX.mp4
+func PlexEpisodeFilename(animeName string, season, episodeNum int, meta ...*MediaMeta) string {
+	var m *MediaMeta
+	if len(meta) > 0 {
+		m = meta[0]
 	}
+	fileName := BuildMediaFileName(animeName, m)
 	if season < 1 {
 		season = 1
 	}
-	return fmt.Sprintf("%s - s%02de%02d.mp4", safeName, season, episodeNum)
+	return fmt.Sprintf("%s - S%02dE%02d.mp4", fileName, season, episodeNum)
 }

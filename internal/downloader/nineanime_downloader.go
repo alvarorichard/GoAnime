@@ -36,8 +36,9 @@ type NineAnimeDownloadConfig struct {
 	Quality      string // "best", "1080p", "720p", etc.
 	AnimeName    string
 	Season       int
-	Concurrent   int    // max concurrent episode downloads (default 1 for 9anime rate limits)
-	SubsLanguage string // subtitle language chosen by user; empty = prompt interactively
+	Concurrent   int             // max concurrent episode downloads (default 1 for 9anime rate limits)
+	SubsLanguage string          // subtitle language chosen by user; empty = prompt interactively
+	Meta         *util.MediaMeta // External IDs and year for Plex/Jellyfin folder naming
 }
 
 // NineAnimeDownloader handles downloading anime episodes from 9animetv.to
@@ -179,13 +180,20 @@ func (d *NineAnimeDownloader) buildOutputDir(anime *models.Anime) string {
 	if animeName == "" {
 		animeName = anime.Name
 	}
-	// SanitizeForFilename now handles all bracket tags, parenthesized 9anime
-	// metadata (HD, SUB, DUB, Multilanguage, Ep N/N), and trailing ratings.
-	safeName := util.SanitizeForFilename(animeName)
-	if safeName == "" {
-		safeName = fmt.Sprintf("9Anime_%s", anime.URL)
+	// Build meta from anime if not provided in config
+	meta := d.config.Meta
+	if meta == nil && anime != nil {
+		meta = &util.MediaMeta{
+			OfficialTitle: anime.OfficialTitle(),
+			Year:          anime.Year,
+			TMDBID:        anime.TMDBID,
+			IMDBID:        anime.IMDBID,
+			AnilistID:     anime.AnilistID,
+			MalID:         anime.MalID,
+		}
 	}
-	return filepath.Join(d.config.OutputDir, safeName, fmt.Sprintf("Season %02d", d.config.Season))
+	folderName := util.BuildMediaFolderName(animeName, meta)
+	return filepath.Join(d.config.OutputDir, folderName, fmt.Sprintf("Season %02d", d.config.Season))
 }
 
 // episodeFilename returns a Plex-compatible filename for an episode
@@ -199,7 +207,7 @@ func (d *NineAnimeDownloader) episodeFilename(anime *models.Anime, epNum int) st
 	if safeName == "" {
 		safeName = fmt.Sprintf("9Anime_%s", anime.URL)
 	}
-	return util.PlexEpisodeFilename(safeName, d.config.Season, epNum)
+	return util.PlexEpisodeFilename(safeName, d.config.Season, epNum, d.config.Meta)
 }
 
 // resolveStream resolves the m3u8 stream URL and metadata for a 9anime episode
