@@ -247,17 +247,35 @@ func (c *SuperFlixClient) parseCards(doc *goquery.Document) []*SuperFlixMedia {
 			}
 		})
 
-		// Extract type and year from metadata
-		meta := card.Find("div.mt-3")
-		metaText := strings.TrimSpace(meta.Text())
-		metaParts := splitAndTrim(metaText, "|")
-
+		// Extract type and year from metadata.
+		// The div.mt-3 contains child spans: one for the year (e.g. "2017")
+		// and one for the type (e.g. "Anime", "Filme", "Série").
+		// Older HTML used "|" separators; current HTML uses separate <span>s.
 		var tipo, year string
-		if len(metaParts) > 0 {
-			tipo = metaParts[len(metaParts)-1]
-		}
-		if len(metaParts) > 1 {
-			year = metaParts[1]
+		card.Find("div.mt-3 span").Each(func(_ int, span *goquery.Selection) {
+			text := strings.TrimSpace(span.Text())
+			if text == "" {
+				return
+			}
+			// A 4-digit number starting with 1 or 2 is a year.
+			if len(text) == 4 && (text[0] == '1' || text[0] == '2') {
+				if _, err := strconv.Atoi(text); err == nil {
+					year = text
+					return
+				}
+			}
+			tipo = text
+		})
+		// Fallback: try legacy "|"-separated format inside div.mt-3.
+		if tipo == "" && year == "" {
+			metaText := strings.TrimSpace(card.Find("div.mt-3").Text())
+			metaParts := splitAndTrim(metaText, "|")
+			if len(metaParts) > 0 {
+				tipo = metaParts[len(metaParts)-1]
+			}
+			if len(metaParts) > 1 {
+				year = metaParts[1]
+			}
 		}
 
 		sfType := "serie"

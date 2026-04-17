@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -19,21 +18,13 @@ import (
 // ScraperType represents different scraper types
 type ScraperType int
 
-// Timeout configurations - optimized to include results from ALL available sources
+// Timeout configurations – we wait for ALL sources to finish (or the hard
+// timeout) so that slower scrapers like SuperFlix are never silently dropped.
 const (
-	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 12 * time.Second
-	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 10 * time.Second
-	// earlyReturnDelay is the time to wait after first results before returning.
-	// Must be long enough for slower sources (SuperFlix, SFlix, etc.) to respond.
-	earlyReturnDelay = 3500 * time.Millisecond
-	// minSourcesForEarlyReturn is the minimum number of distinct sources that
-	// must have returned results before early return is allowed.
-	minSourcesForEarlyReturn = 3
-	// postDrainGrace is how long to wait after early return to capture straggler results
-	// that are in-flight or just about to arrive.
-	postDrainGrace = 600 * time.Millisecond
+	// searchTimeout is the maximum time to wait for all scrapers.
+	searchTimeout = 15 * time.Second
+	// perScraperTimeout is the timeout for individual scrapers.
+	perScraperTimeout = 12 * time.Second
 )
 
 const (
@@ -98,8 +89,9 @@ func NewScraperManager() *ScraperManager {
 	return globalScraperManager
 }
 
-// SearchAnime searches across all available scrapers with enhanced Portuguese messaging
-// Uses optimized goroutines with early return for better performance
+// SearchAnime searches across all available scrapers with enhanced Portuguese messaging.
+// All sources are queried concurrently and results are collected until every
+// scraper finishes or the hard timeout expires.
 func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([]*models.Anime, error) {
 	timer := util.StartTimer("SearchAnime:Total")
 	defer timer.Stop()
@@ -144,7 +136,9 @@ type searchResult struct {
 	err         error
 }
 
-// searchAllScrapersConcurrent searches all scrapers in parallel with early return optimization
+// searchAllScrapersConcurrent searches all scrapers in parallel and waits for
+// every scraper to finish (or the hard searchTimeout to expire).  This ensures
+// slower sources like SuperFlix are never silently dropped.
 func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.Anime, error) {
 	util.Debug("Starting concurrent search across all sources", "query", query)
 
@@ -158,16 +152,6 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		searchErrors       []string
 		searchSourceErrors []error
 		errorsMutex        sync.Mutex
-		sourcesWithResults map[ScraperType]bool
-	)
-	sourcesWithResults = make(map[ScraperType]bool)
-
-	// Track completion for early return
-	var (
-		completedCount  int32
-		totalScrapers   = int32(len(sm.scrapers)) // #nosec G115 - scrapers count is always small (<10)
-		firstResultTime time.Time
-		firstResultOnce sync.Once
 	)
 
 	resultChan := make(chan searchResult, len(sm.scrapers))
@@ -178,8 +162,6 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		wg.Add(1)
 		go func(st ScraperType, s UnifiedScraper) {
 			defer wg.Done()
-			defer atomic.AddInt32(&completedCount, 1)
-
 			result := sm.searchWithTimeout(ctx, st, s, query)
 			resultChan <- result
 		}(sType, scraper)
@@ -191,15 +173,12 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		close(resultChan)
 	}()
 
-	// Early return timer - starts when we get first good results
-	var earlyReturnTimer <-chan time.Time
-
-	// Collect results with early return logic
+	// Collect results – wait for ALL scrapers to finish or the context to expire.
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				// Channel closed, all scrapers done
+				// Channel closed – all scrapers finished.
 				goto done
 			}
 
@@ -214,106 +193,23 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 			}
 
 			if len(res.results) > 0 {
-				// Tag and add results thread-safely
 				sm.tagResults(res.results, res.scraperType)
-
 				resultsMutex.Lock()
 				allResults = append(allResults, res.results...)
-				sourcesWithResults[res.scraperType] = true
-				currentCount := len(allResults)
-				sourceCount := len(sourcesWithResults)
 				resultsMutex.Unlock()
 
-				util.Debug("Search results received", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results), "total", currentCount, "sources", sourceCount)
-
-				// Start early return timer on first results
-				firstResultOnce.Do(func() {
-					firstResultTime = time.Now()
-					earlyReturnTimer = time.After(earlyReturnDelay)
-				})
-			}
-
-			// If all scrapers have completed and no more results pending, drain channel
-			if atomic.LoadInt32(&completedCount) >= totalScrapers {
-				// Drain any remaining results from the channel before returning
-				for {
-					select {
-					case remaining, ok := <-resultChan:
-						if !ok {
-							goto done
-						}
-						if remaining.err == nil && len(remaining.results) > 0 {
-							sm.tagResults(remaining.results, remaining.scraperType)
-							resultsMutex.Lock()
-							allResults = append(allResults, remaining.results...)
-							sourcesWithResults[remaining.scraperType] = true
-							resultsMutex.Unlock()
-						}
-					default:
-						goto done
-					}
-				}
-			}
-
-		case <-earlyReturnTimer:
-			// Early return: only if enough distinct sources have responded
-			resultsMutex.Lock()
-			currentCount := len(allResults)
-			sourceCount := len(sourcesWithResults)
-			resultsMutex.Unlock()
-
-			completed := atomic.LoadInt32(&completedCount)
-			if sourceCount >= minSourcesForEarlyReturn && completed < totalScrapers {
-				util.Debug("Early return triggered",
-					"results", currentCount,
-					"sources", sourceCount,
-					"completed", completed,
-					"total", totalScrapers,
-					"waitTime", time.Since(firstResultTime))
-				goto done
+				util.Debug("Search results received",
+					"source", sm.getScraperDisplayName(res.scraperType),
+					"count", len(res.results))
 			}
 
 		case <-ctx.Done():
-			util.Debug("Search timeout reached")
+			util.Debug("Search timeout reached, returning collected results")
 			goto done
 		}
 	}
 
 done:
-	// Grace period: drain any results that arrived during or just after early return.
-	// The channel is buffered (size = number of scrapers), so results from in-flight
-	// goroutines may already be waiting. We also wait a short grace period for
-	// goroutines that are just about to finish.
-	graceTimer := time.After(postDrainGrace)
-drainLoop:
-	for {
-		select {
-		case res, ok := <-resultChan:
-			if !ok {
-				break drainLoop
-			}
-			if res.err != nil {
-				errorsMutex.Lock()
-				sourceName := sm.getScraperDisplayName(res.scraperType)
-				util.Debug("Late search error", "source", sourceName, "error", res.err)
-				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
-				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
-				errorsMutex.Unlock()
-				continue
-			}
-			if len(res.results) > 0 {
-				sm.tagResults(res.results, res.scraperType)
-				resultsMutex.Lock()
-				allResults = append(allResults, res.results...)
-				sourcesWithResults[res.scraperType] = true
-				resultsMutex.Unlock()
-				util.Debug("Late result captured", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results))
-			}
-		case <-graceTimer:
-			break drainLoop
-		}
-	}
-
 	// Log warnings for failed sources
 	errorsMutex.Lock()
 	if len(searchErrors) > 0 {
