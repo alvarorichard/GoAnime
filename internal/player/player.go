@@ -535,6 +535,7 @@ func HandleDownloadAndPlay(
 	updater *discord.RichPresenceUpdater,
 	animeName string,
 	animeSeason int,
+	anime *models.Anime,
 ) error {
 	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
 
@@ -584,7 +585,7 @@ func HandleDownloadAndPlay(
 			return nil
 		case 2:
 			// Download episodes in a range
-			if err := HandleBatchDownload(episodes, animeURL); err != nil {
+			if err := HandleBatchDownload(episodes, anime); err != nil {
 				return err
 			}
 			return nil
@@ -594,6 +595,19 @@ func HandleDownloadAndPlay(
 				util.Errorf("Upscale error: %v", err)
 			}
 			continue // Return to menu after upscaling
+		case 5:
+			// Download ALL episodes
+			if len(episodes) == 0 {
+				util.Errorf("No episodes available to download")
+				continue
+			}
+			if err := HandleBatchDownloadRange(episodes, anime, 1, len(episodes)); err != nil {
+				if errors.Is(err, ErrUserQuit) {
+					return nil
+				}
+				return err
+			}
+			return nil
 		default:
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
@@ -833,7 +847,9 @@ func downloadAndPlayEpisode(
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 
 		} else if strings.Contains(videoURL, "blogger.com") ||
 			LooksLikeHLS(videoURL) ||
@@ -948,7 +964,9 @@ func downloadAndPlayEpisode(
 			printDownloadLocation(episodePath)
 
 			// Download selected subtitles alongside the video file
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 
 		} else {
 			// Initialize progress model
@@ -1006,7 +1024,9 @@ func downloadAndPlayEpisode(
 
 			// Download selected subtitles alongside the video file
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 		}
 	} else {
 		fmt.Println("Video already downloaded.")
@@ -1044,6 +1064,7 @@ func askForDownload() int {
 	}
 	items := []menuOption{
 		{"← Back", "back"},
+		{"Download ALL episodes", "download_all"},
 		{"Download this episode", "download_single"},
 		{"Download episodes in a range", "download_range"},
 		{upscaleLabel, "upscale"},
@@ -1068,6 +1089,8 @@ func askForDownload() int {
 		return 2
 	case "upscale":
 		return 3
+	case "download_all":
+		return 5
 	default:
 		return 4
 	}
@@ -1371,7 +1394,13 @@ func printDownloadLocation(filePath string) {
 // downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
 // the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
 // (already filtered by util.SelectSubtitles).
-func downloadSubtitleFiles(videoPath string) {
+func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...any)) {
+	if printFn == nil {
+		printFn = func(format string, a ...any) {
+			fmt.Printf(format, a...)
+		}
+	}
+
 	subs := util.GlobalSubtitles
 	if len(subs) == 0 {
 		return
@@ -1380,21 +1409,23 @@ func downloadSubtitleFiles(videoPath string) {
 	// Check ffmpeg availability — required for muxing subtitles into the video
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		util.Warnf("ffmpeg not found — cannot embed subtitles into the video file")
+		util.Debugf("ffmpeg not found — cannot embed subtitles into the video file")
+		printFn("Warning: ffmpeg not found — cannot embed subtitles\n")
 		return
 	}
 	// Resolve symlinks and validate the binary path to prevent PATH-based injection.
 	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
 	if err != nil {
-		util.Warnf("failed to resolve ffmpeg path: %v", err)
+		util.Debugf("failed to resolve ffmpeg path: %v", err)
+		printFn("Warning: failed to resolve ffmpeg path\n")
 		return
 	}
 	if !filepath.IsAbs(ffmpegPath) {
-		util.Warnf("ffmpeg resolved to a non-absolute path — refusing to execute")
+		util.Debugf("ffmpeg resolved to a non-absolute path — refusing to execute")
 		return
 	}
 	if fi, statErr := os.Stat(ffmpegPath); statErr != nil || fi.IsDir() {
-		util.Warnf("ffmpeg path is not a valid file: %s", ffmpegPath)
+		util.Debugf("ffmpeg path is not a valid file: %s", ffmpegPath)
 		return
 	}
 
@@ -1478,7 +1509,7 @@ func downloadSubtitleFiles(videoPath string) {
 	}
 
 	// --- Mux subtitles into the video container ---
-	fmt.Printf("Embedding %d subtitle(s) into video...\n", len(entries))
+	printFn("Embedding %d subtitle(s) into video...\n", len(entries))
 
 	// buildMuxArgs builds the ffmpeg arguments for a given subtitle codec and output path.
 	buildMuxArgs := func(subCodec, outPath string) []string {
@@ -1542,15 +1573,16 @@ func downloadSubtitleFiles(videoPath string) {
 				_ = os.Remove(tmpMKV)
 			} else {
 				embedded = true
-				fmt.Printf("Note: saved as .mkv for better subtitle compatibility\n")
+				printFn("Note: saved as .mkv for better subtitle compatibility\n")
 			}
 		}
 	}
 
 	if embedded {
-		fmt.Printf("Subtitles embedded successfully!\n")
+		printFn("Subtitles embedded successfully!\n")
 	} else {
-		util.Warnf("Could not embed subtitles — both MP4 and MKV muxing failed")
+		util.Debugf("Could not embed subtitles — both MP4 and MKV muxing failed")
+		printFn("Warning: Could not embed subtitles — both MP4 and MKV muxing failed\n")
 	}
 
 	// Clean up temp subtitle files

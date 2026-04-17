@@ -80,6 +80,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			updater,
 			anime.Name,
 			anime.CurrentSeason,
+			anime,
 		)
 
 		if updater != nil {

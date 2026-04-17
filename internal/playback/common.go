@@ -152,6 +152,7 @@ func PlayEpisode(
 		updater,
 		anime.Name,
 		anime.CurrentSeason,
+		anime,
 	)
 
 	if updater != nil {

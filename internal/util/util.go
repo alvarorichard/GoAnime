@@ -359,6 +359,8 @@ type DownloadRequest struct {
 	SeasonNum    int    // Season number for TV shows
 	SubsLanguage string // Subtitle language preference
 	OutputDir    string // Custom output directory for downloads
+	// Download-all mode
+	IsAll bool // True to download ALL episodes (anime) or ALL seasons+episodes (TV/series/dorama)
 }
 
 // UpscaleRequest holds upscale command parameters
@@ -402,6 +404,7 @@ func FlagParser() (string, error) {
 	updateFlag := fs.Bool("update", false, "check for updates and update if available")
 	downloadFlag := fs.Bool("d", false, "download mode")
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
+	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
 	sourceFlag := fs.String("source", "", "specify anime source (allanime, animefire, ptbr, flixhq)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
@@ -477,12 +480,12 @@ func FlagParser() (string, error) {
 
 	// Handle download mode
 	if *downloadFlag {
-		return handleDownloadModeWithSmart(fs.Args(), *rangeFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
+		return handleDownloadModeWithSmart(fs.Args(), *rangeFlag, *allFlag, *sourceFlag, *qualityFlag, *allanimeSmartFlag)
 	}
 
 	// Handle movie/TV download mode (FlixHQ/SFlix)
 	if *movieDownloadFlag {
-		return handleMovieDownloadMode(fs.Args(), *rangeFlag, *qualityFlag, *subsLanguageFlag, *mediaTypeFlag)
+		return handleMovieDownloadMode(fs.Args(), *rangeFlag, *allFlag, *qualityFlag, *subsLanguageFlag, *mediaTypeFlag)
 	}
 
 	// Handle upscale mode
@@ -554,10 +557,24 @@ func TreatingAnimeName(animeName string) string {
 }
 
 // handleDownloadModeWithSmart processes download args with AllAnime Smart option
-func handleDownloadModeWithSmart(args []string, isRange bool, source, quality string, allanimeSmart bool) (string, error) {
+func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source, quality string, allanimeSmart bool) (string, error) {
 
 	if len(args) == 0 {
 		return "", fmt.Errorf("download mode requires anime name and episode number/range")
+	}
+
+	// Download-all mode: goanime -d -a "anime name"
+	if isAll {
+		animeName := strings.Join(args, " ")
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:     animeName,
+			IsAll:         true,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
+		}
+		return TreatingAnimeName(animeName), ErrDownloadRequested
 	}
 
 	if isRange {
@@ -608,35 +625,140 @@ func handleDownloadModeWithSmart(args []string, isRange bool, source, quality st
 		return TreatingAnimeName(animeName), ErrDownloadRequested
 
 	} else {
-		// Single episode download: goanime -d "anime name" episode_number
-		if len(args) < 2 {
-			return "", fmt.Errorf("single episode download requires anime name and episode number")
+		// No episode number provided — show interactive download mode menu
+		// This covers: goanime -d "anime name"
+		animeName := strings.Join(args, " ")
+
+		// Try parsing last arg as episode number first
+		if len(args) >= 2 {
+			episodeStr := args[len(args)-1]
+			if episodeNum, err := strconv.Atoi(episodeStr); err == nil && episodeNum >= 1 {
+				// Last arg is a valid episode number
+				animeName = strings.Join(args[:len(args)-1], " ")
+				GlobalDownloadRequest = &DownloadRequest{
+					AnimeName:     animeName,
+					EpisodeNum:    episodeNum,
+					IsRange:       false,
+					Source:        source,
+					Quality:       quality,
+					AllAnimeSmart: allanimeSmart,
+					OutputDir:     GlobalOutputDir,
+				}
+				return TreatingAnimeName(animeName), ErrDownloadRequested
+			}
 		}
 
-		animeName := strings.Join(args[:len(args)-1], " ")
-		episodeStr := args[len(args)-1]
+		// No episode number — show interactive menu
+		var downloadMode string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Download mode for: "+animeName).
+					Options(
+						huh.NewOption("Download ALL episodes", "all"),
+						huh.NewOption("Download a single episode", "single"),
+						huh.NewOption("Download a range of episodes", "range"),
+					).
+					Value(&downloadMode),
+			),
+		)
 
-		episodeNum, err := strconv.Atoi(episodeStr)
-		if err != nil {
-			return "", fmt.Errorf("invalid episode number: %s", episodeStr)
+		if err := form.Run(); err != nil {
+			return "", fmt.Errorf("download mode selection cancelled: %w", err)
 		}
 
-		if episodeNum < 1 {
-			return "", fmt.Errorf("episode number must be positive")
-		}
+		switch downloadMode {
+		case "all":
+			GlobalDownloadRequest = &DownloadRequest{
+				AnimeName:     animeName,
+				IsAll:         true,
+				Source:        source,
+				Quality:       quality,
+				AllAnimeSmart: allanimeSmart,
+				OutputDir:     GlobalOutputDir,
+			}
+			return TreatingAnimeName(animeName), ErrDownloadRequested
 
-		// Store download request
-		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:     animeName,
-			EpisodeNum:    episodeNum,
-			IsRange:       false,
-			Source:        source,
-			Quality:       quality,
-			AllAnimeSmart: allanimeSmart,
-			OutputDir:     GlobalOutputDir,
-		}
+		case "single":
+			var episodeStr string
+			inputForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Episode number").
+						Description("Enter the episode number to download").
+						Value(&episodeStr).
+						Validate(func(v string) error {
+							if n, err := strconv.Atoi(v); err != nil || n < 1 {
+								return fmt.Errorf("enter a valid positive number")
+							}
+							return nil
+						}),
+				),
+			)
+			if err := inputForm.Run(); err != nil {
+				return "", fmt.Errorf("episode input cancelled: %w", err)
+			}
+			episodeNum, _ := strconv.Atoi(episodeStr)
+			GlobalDownloadRequest = &DownloadRequest{
+				AnimeName:     animeName,
+				EpisodeNum:    episodeNum,
+				IsRange:       false,
+				Source:        source,
+				Quality:       quality,
+				AllAnimeSmart: allanimeSmart,
+				OutputDir:     GlobalOutputDir,
+			}
+			return TreatingAnimeName(animeName), ErrDownloadRequested
 
-		return TreatingAnimeName(animeName), ErrDownloadRequested
+		case "range":
+			var startStr, endStr string
+			rangeForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Start episode").
+						Description("First episode number").
+						Value(&startStr).
+						Validate(func(v string) error {
+							if n, err := strconv.Atoi(v); err != nil || n < 1 {
+								return fmt.Errorf("enter a valid positive number")
+							}
+							return nil
+						}),
+					huh.NewInput().
+						Title("End episode").
+						Description("Last episode number").
+						Value(&endStr).
+						Validate(func(v string) error {
+							if n, err := strconv.Atoi(v); err != nil || n < 1 {
+								return fmt.Errorf("enter a valid positive number")
+							}
+							return nil
+						}),
+				),
+			)
+			if err := rangeForm.Run(); err != nil {
+				return "", fmt.Errorf("range input cancelled: %w", err)
+			}
+			startEp, _ := strconv.Atoi(startStr)
+			endEp, _ := strconv.Atoi(endStr)
+			if startEp > endEp {
+				return "", fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
+			}
+			GlobalDownloadRequest = &DownloadRequest{
+				AnimeName:     animeName,
+				IsRange:       true,
+				StartEpisode:  startEp,
+				EndEpisode:    endEp,
+				Source:        source,
+				Quality:       quality,
+				AllAnimeSmart: allanimeSmart,
+				OutputDir:     GlobalOutputDir,
+			}
+			return TreatingAnimeName(animeName), ErrDownloadRequested
+
+		default:
+			return "", fmt.Errorf("unknown download mode selected")
+		}
 	}
 }
 
@@ -692,13 +814,27 @@ func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes 
 }
 
 // handleMovieDownloadMode processes movie/TV download arguments for FlixHQ/SFlix
-func handleMovieDownloadMode(args []string, isRange bool, quality, subsLanguage, mediaType string) (string, error) {
+func handleMovieDownloadMode(args []string, isRange bool, isAll bool, quality, subsLanguage, mediaType string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)")
+		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)\n       goanime -dm -a \"TV Show\" (download all seasons and episodes)")
 	}
 
 	// Determine if it's a movie or TV download
-	isTV := mediaType == "tv" || isRange
+	isTV := mediaType == "tv" || isRange || isAll
+
+	// Download-all mode for TV/series/dorama: goanime -dm -a "Show Name"
+	if isAll {
+		showName := strings.Join(args, " ")
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:    showName,
+			IsAll:        true,
+			IsTV:         true,
+			Quality:      quality,
+			SubsLanguage: subsLanguage,
+			OutputDir:    GlobalOutputDir,
+		}
+		return TreatingAnimeName(showName), ErrMovieDownloadRequested
+	}
 
 	if isTV && isRange {
 		// TV episode range download: goanime -dm -r "TV Show" season start-end

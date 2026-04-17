@@ -236,6 +236,125 @@ func (md *MovieDownloader) DownloadTVEpisodeRange(media *models.Anime, seasonNum
 	return nil
 }
 
+// DownloadAllSeasons downloads every season and episode of a TV show/series/dorama.
+// It enumerates all seasons via the FlixHQ or SFlix API, then downloads each episode
+// sequentially (season by season, episode by episode), skipping episodes that already
+// exist on disk.
+func (md *MovieDownloader) DownloadAllSeasons(media *models.Anime) error {
+	if media == nil {
+		return fmt.Errorf("media is nil")
+	}
+
+	mediaID := extractMediaIDFromURL(media.URL)
+	if mediaID == "" {
+		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
+	}
+
+	source := strings.ToLower(media.Source)
+	isSFlix := strings.Contains(source, "sflix")
+
+	// Build metadata once for path operations
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
+	}
+
+	// Collect season IDs upfront to avoid re-fetching on each iteration
+	type seasonInfo struct {
+		id     string
+		number int
+	}
+	var seasons []seasonInfo
+
+	if isSFlix {
+		sflixSeasons, err := md.mediaManager.GetSFlixTVSeasons(mediaID)
+		if err != nil {
+			return fmt.Errorf("failed to get seasons: %w", err)
+		}
+		for i, s := range sflixSeasons {
+			seasons = append(seasons, seasonInfo{id: s.ID, number: i + 1})
+		}
+	} else {
+		flixSeasons, err := md.mediaManager.GetTVSeasons(mediaID)
+		if err != nil {
+			return fmt.Errorf("failed to get seasons: %w", err)
+		}
+		for i, s := range flixSeasons {
+			seasons = append(seasons, seasonInfo{id: s.ID, number: i + 1})
+		}
+	}
+
+	if len(seasons) == 0 {
+		return fmt.Errorf("no seasons found for %s", media.Name)
+	}
+
+	fmt.Printf("Found %d season(s) for %s — downloading all episodes\n", len(seasons), media.Name)
+
+	var totalDownloaded int
+	var totalSkipped int
+	var downloadErrors []error
+
+	for _, s := range seasons {
+		// Get episode count for this season
+		var episodeCount int
+		if isSFlix {
+			episodes, err := md.mediaManager.GetSFlixTVEpisodes(s.id)
+			if err != nil {
+				util.Warnf("Failed to get episodes for season %d: %v", s.number, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("season %d episodes: %w", s.number, err))
+				continue
+			}
+			episodeCount = len(episodes)
+		} else {
+			episodes, err := md.mediaManager.GetTVEpisodes(s.id)
+			if err != nil {
+				util.Warnf("Failed to get episodes for season %d: %v", s.number, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("season %d episodes: %w", s.number, err))
+				continue
+			}
+			episodeCount = len(episodes)
+		}
+
+		if episodeCount == 0 {
+			util.Warnf("Season %d has no episodes, skipping", s.number)
+			continue
+		}
+
+		fmt.Printf("\n=== Season %d — %d episode(s) ===\n", s.number, episodeCount)
+
+		for epNum := 1; epNum <= episodeCount; epNum++ {
+			// Check if already downloaded
+			episodePath := util.FormatPlexEpisodePath(md.config.OutputDir, media.Name, s.number, epNum, meta)
+			if md.fileExists(episodePath) {
+				totalSkipped++
+				continue
+			}
+
+			fmt.Printf("  Downloading S%02dE%02d...\n", s.number, epNum)
+			if err := md.DownloadTVEpisode(media, s.number, epNum); err != nil {
+				util.Warnf("Failed to download S%02dE%02d: %v", s.number, epNum, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("S%02dE%02d: %w", s.number, epNum, err))
+			} else {
+				totalDownloaded++
+			}
+		}
+	}
+
+	// Summary
+	fmt.Printf("\n=== Download Complete ===\n")
+	fmt.Printf("Downloaded: %d  |  Skipped (existing): %d  |  Failed: %d\n",
+		totalDownloaded, totalSkipped, len(downloadErrors))
+
+	if len(downloadErrors) > 0 {
+		return fmt.Errorf("%d episode(s) failed to download", len(downloadErrors))
+	}
+	return nil
+}
+
 // getFlixHQMovieStream gets stream info for a FlixHQ movie
 func (md *MovieDownloader) getFlixHQMovieStream(mediaID string) (*scraper.FlixHQStreamInfo, error) {
 	return md.mediaManager.GetMovieStreamWithQuality(mediaID, md.config.Quality, md.config.SubsLanguage)

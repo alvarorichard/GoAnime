@@ -195,6 +195,50 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 	return d.downloadConcurrentWithProgress(episodesToDownload)
 }
 
+// DownloadAllEpisodes downloads every available episode from the episode list.
+// Episodes that already exist on disk are skipped automatically.
+func (d *EpisodeDownloader) DownloadAllEpisodes() error {
+	if len(d.episodes) == 0 {
+		return fmt.Errorf("no episodes available for download")
+	}
+
+	fmt.Printf("Found %d episode(s) total for download-all\n", len(d.episodes))
+
+	// Collect all episode numbers and check which already exist
+	var episodesToDownload []int
+	var existingCount int
+	for _, ep := range d.episodes {
+		epNum := ep.Num
+		if epNum <= 0 {
+			// Try parsing from the Number string field
+			if n, err := strconv.Atoi(ep.Number); err == nil && n > 0 {
+				epNum = n
+			} else {
+				continue // skip episodes with no valid number
+			}
+		}
+		episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
+		if d.fileExists(episodePath) {
+			existingCount++
+		} else {
+			episodesToDownload = append(episodesToDownload, epNum)
+		}
+	}
+
+	if existingCount > 0 {
+		fmt.Printf("Skipping %d already-downloaded episode(s)\n", existingCount)
+	}
+
+	if len(episodesToDownload) == 0 {
+		fmt.Println("All episodes already downloaded!")
+		return nil
+	}
+
+	fmt.Printf("Downloading %d episode(s)...\n", len(episodesToDownload))
+
+	return d.downloadConcurrentWithProgress(episodesToDownload)
+}
+
 // downloadConcurrentWithProgress downloads multiple episodes with proper Bubble Tea progress UI
 func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) error {
 	if len(episodeNums) == 0 {
