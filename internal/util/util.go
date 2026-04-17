@@ -1018,7 +1018,7 @@ func FormatPlexMoviePath(baseDir, movieName string, year string, meta ...*MediaM
 
 	folderName := BuildMediaFolderName(movieName, effectiveMeta)
 	fileName := BuildMediaFileName(movieName, effectiveMeta)
-	return filepath.Join(baseDir, folderName, fileName+".mp4")
+	return filepath.ToSlash(filepath.Join(baseDir, folderName, fileName+".mp4"))
 }
 
 // FormatPlexMovieDir returns the directory path for a Plex-compatible movie.
@@ -1029,7 +1029,7 @@ func FormatPlexMovieDir(baseDir, movieName string, meta ...*MediaMeta) string {
 		m = meta[0]
 	}
 	folderName := BuildMediaFolderName(movieName, m)
-	return filepath.Join(baseDir, folderName)
+	return filepath.ToSlash(filepath.Join(baseDir, folderName))
 }
 
 // FormatPlexEpisodePath builds a Plex/Jellyfin-compatible file path for an episode.
