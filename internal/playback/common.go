@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 
 	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -113,6 +115,33 @@ func PlayEpisode(
 	// Route downloads to the correct directory (anime/ vs movies/) using exact media type
 	player.SetExactMediaType(string(anime.MediaType))
 
+	// Store external IDs for Plex/Jellyfin-compatible folder naming
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
+
+	// Enrich anime with AniList metadata for per-episode season resolution.
+	// This populates the season map so episodes like Black Clover ep 52 go to
+	// Season 02 instead of Season 01.
+	enricher := metadata.NewEnricher()
+	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
+	player.SetSeasonMap(seasonMap)
+
+	// Update metadata after enrichment (AniList may have populated IDs)
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
+
 	playErr := player.HandleDownloadAndPlay(
 		videoURL,
 		episodes,
@@ -123,6 +152,7 @@ func PlayEpisode(
 		updater,
 		anime.Name,
 		anime.CurrentSeason,
+		anime,
 	)
 
 	if updater != nil {

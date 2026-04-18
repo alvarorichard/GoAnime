@@ -4,6 +4,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -87,12 +88,18 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 	util.Infof("Starting download for: %s", media.Name)
 	util.Debugf("Source: %s, URL: %s", media.Source, media.URL)
 
-	// Use Plex-compatible movie path: <OutputDir>/<MovieName>/<MovieName> (Year).mp4
-	safeFileName := util.SanitizeForFilename(media.Name)
-	if safeFileName == "" {
-		safeFileName = sanitizeFileName(media.Name)
+	// Build metadata for Plex/Jellyfin-compatible folder naming
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
 	}
-	movieDir := filepath.Join(md.config.OutputDir, safeFileName)
+
+	// Use Plex-compatible movie path: <OutputDir>/<MovieName (Year) {ids}>/<MovieName (Year)>.mp4
+	movieDir := util.FormatPlexMovieDir(md.config.OutputDir, media.Name, meta)
 	if err := os.MkdirAll(movieDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -103,13 +110,8 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	// Build movie filename with year if available
-	var moviePath string
-	if media.Year != "" {
-		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s (%s).mp4", safeFileName, media.Year))
-	} else {
-		moviePath = filepath.Join(movieDir, fmt.Sprintf("%s.mp4", safeFileName))
-	}
+	// Build movie file path with Plex-compatible naming
+	moviePath := util.FormatPlexMoviePath(md.config.OutputDir, media.Name, media.Year, meta)
 
 	// Check if movie already exists
 	if md.fileExists(moviePath) {
@@ -152,12 +154,18 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 
 	util.Infof("Starting download for: %s S%02dE%02d", media.Name, seasonNum, episodeNum)
 
-	// Create Plex-compatible output directory: <OutputDir>/<ShowName>/Season XX/
-	safeShowName := util.SanitizeForFilename(media.Name)
-	if safeShowName == "" {
-		safeShowName = sanitizeFileName(media.Name)
+	// Build metadata for Plex/Jellyfin-compatible folder naming
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
 	}
-	showDir := filepath.Join(md.config.OutputDir, safeShowName, fmt.Sprintf("Season %02d", seasonNum))
+
+	// Create Plex-compatible output directory: <OutputDir>/<ShowName (Year) {ids}>/Season XX/
+	showDir := util.FormatPlexEpisodeDir(md.config.OutputDir, media.Name, seasonNum, meta)
 	if err := os.MkdirAll(showDir, 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -168,8 +176,8 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
 
-	// Plex-compatible episode filename: <ShowName> - sXXeXX.mp4
-	episodePath := filepath.Join(showDir, fmt.Sprintf("%s - s%02de%02d.mp4", safeShowName, seasonNum, episodeNum))
+	// Plex-compatible episode path: <ShowDir>/<ShowName (Year)> - SXXeXX.mp4
+	episodePath := util.FormatPlexEpisodePath(md.config.OutputDir, media.Name, seasonNum, episodeNum, meta)
 
 	// Check if episode already exists
 	if md.fileExists(episodePath) {
@@ -225,6 +233,125 @@ func (md *MovieDownloader) DownloadTVEpisodeRange(media *models.Anime, seasonNum
 	}
 
 	fmt.Printf("\nAll episodes downloaded successfully!\n")
+	return nil
+}
+
+// DownloadAllSeasons downloads every season and episode of a TV show/series/dorama.
+// It enumerates all seasons via the FlixHQ or SFlix API, then downloads each episode
+// sequentially (season by season, episode by episode), skipping episodes that already
+// exist on disk.
+func (md *MovieDownloader) DownloadAllSeasons(media *models.Anime) error {
+	if media == nil {
+		return fmt.Errorf("media is nil")
+	}
+
+	mediaID := extractMediaIDFromURL(media.URL)
+	if mediaID == "" {
+		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
+	}
+
+	source := strings.ToLower(media.Source)
+	isSFlix := strings.Contains(source, "sflix")
+
+	// Build metadata once for path operations
+	meta := &util.MediaMeta{
+		OfficialTitle: media.OfficialTitle(),
+		Year:          media.Year,
+		TMDBID:        media.TMDBID,
+		IMDBID:        media.IMDBID,
+		AnilistID:     media.AnilistID,
+		MalID:         media.MalID,
+	}
+
+	// Collect season IDs upfront to avoid re-fetching on each iteration
+	type seasonInfo struct {
+		id     string
+		number int
+	}
+	var seasons []seasonInfo
+
+	if isSFlix {
+		sflixSeasons, err := md.mediaManager.GetSFlixTVSeasons(mediaID)
+		if err != nil {
+			return fmt.Errorf("failed to get seasons: %w", err)
+		}
+		for i, s := range sflixSeasons {
+			seasons = append(seasons, seasonInfo{id: s.ID, number: i + 1})
+		}
+	} else {
+		flixSeasons, err := md.mediaManager.GetTVSeasons(mediaID)
+		if err != nil {
+			return fmt.Errorf("failed to get seasons: %w", err)
+		}
+		for i, s := range flixSeasons {
+			seasons = append(seasons, seasonInfo{id: s.ID, number: i + 1})
+		}
+	}
+
+	if len(seasons) == 0 {
+		return fmt.Errorf("no seasons found for %s", media.Name)
+	}
+
+	fmt.Printf("Found %d season(s) for %s — downloading all episodes\n", len(seasons), media.Name)
+
+	var totalDownloaded int
+	var totalSkipped int
+	var downloadErrors []error
+
+	for _, s := range seasons {
+		// Get episode count for this season
+		var episodeCount int
+		if isSFlix {
+			episodes, err := md.mediaManager.GetSFlixTVEpisodes(s.id)
+			if err != nil {
+				util.Warnf("Failed to get episodes for season %d: %v", s.number, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("season %d episodes: %w", s.number, err))
+				continue
+			}
+			episodeCount = len(episodes)
+		} else {
+			episodes, err := md.mediaManager.GetTVEpisodes(s.id)
+			if err != nil {
+				util.Warnf("Failed to get episodes for season %d: %v", s.number, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("season %d episodes: %w", s.number, err))
+				continue
+			}
+			episodeCount = len(episodes)
+		}
+
+		if episodeCount == 0 {
+			util.Warnf("Season %d has no episodes, skipping", s.number)
+			continue
+		}
+
+		fmt.Printf("\n=== Season %d — %d episode(s) ===\n", s.number, episodeCount)
+
+		for epNum := 1; epNum <= episodeCount; epNum++ {
+			// Check if already downloaded
+			episodePath := util.FormatPlexEpisodePath(md.config.OutputDir, media.Name, s.number, epNum, meta)
+			if md.fileExists(episodePath) {
+				totalSkipped++
+				continue
+			}
+
+			fmt.Printf("  Downloading S%02dE%02d...\n", s.number, epNum)
+			if err := md.DownloadTVEpisode(media, s.number, epNum); err != nil {
+				util.Warnf("Failed to download S%02dE%02d: %v", s.number, epNum, err)
+				downloadErrors = append(downloadErrors, fmt.Errorf("S%02dE%02d: %w", s.number, epNum, err))
+			} else {
+				totalDownloaded++
+			}
+		}
+	}
+
+	// Summary
+	fmt.Printf("\n=== Download Complete ===\n")
+	fmt.Printf("Downloaded: %d  |  Skipped (existing): %d  |  Failed: %d\n",
+		totalDownloaded, totalSkipped, len(downloadErrors))
+
+	if len(downloadErrors) > 0 {
+		return fmt.Errorf("%d episode(s) failed to download", len(downloadErrors))
+	}
 	return nil
 }
 
@@ -322,15 +449,22 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 		title:    title,
 	}
 
-	// Get content length for progress tracking
-	contentLength, err := md.getContentLength(videoURL)
-	if err != nil {
-		util.Warnf("Failed to get content length: %v, using fallback", err)
-		contentLength = 500 * 1024 * 1024 // 500MB fallback for movies
+	// Get content length for progress tracking.
+	// For HLS streams, don't pre-seed a fixed estimate — the download
+	// callbacks will dynamically compute the real total from segment data
+	// or yt-dlp's reported TotalBytes.
+	if isM3U8 || player.LooksLikeHLS(videoURL) {
+		m.totalBytes = 0 // let download callbacks set the real value
+		fmt.Println("Download setup - HLS stream (size determined during download)")
+	} else {
+		contentLength, err := md.getContentLength(videoURL)
+		if err != nil {
+			util.Warnf("Failed to get content length: %v, using fallback", err)
+			contentLength = 500 * 1024 * 1024 // 500MB fallback for direct downloads
+		}
+		m.totalBytes = contentLength
+		fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 	}
-	m.totalBytes = contentLength
-
-	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
 	p := tea.NewProgram(m)
 
@@ -338,7 +472,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 	downloadComplete := make(chan error, 1)
 	go func() {
 		var err error
-		if isM3U8 || strings.Contains(videoURL, ".m3u8") {
+		if isM3U8 || player.LooksLikeHLS(videoURL) {
 			err = md.downloadM3U8WithYtDlp(videoURL, destPath, referer, m, p)
 		} else {
 			err = md.downloadHTTPWithProgress(videoURL, destPath, referer, headers, m, p)
@@ -453,7 +587,7 @@ func (md *MovieDownloader) downloadHTTPWithProgress(videoURL, destPath, referer 
 	}
 
 	// Copy with progress tracking
-	buffer := make([]byte, 32*1024)
+	buffer := make([]byte, 256*1024)
 	var totalReceived int64
 
 	for {
@@ -513,11 +647,24 @@ func (md *MovieDownloader) downloadM3U8WithYtDlp(videoURL, destPath, referer str
 
 	// Native HLS first — handles obfuscated segment extensions (.jpg, .png) and
 	// "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp's ffmpeg downloader.
+	// However, if the master playlist has separate audio tracks, skip native HLS
+	// and go straight to yt-dlp which properly merges video+audio.
 	nativeErr := md.downloadM3U8WithNativeHLS(videoURL, destPath, referer, progressModel, program)
 	if nativeErr == nil {
 		return nil
 	}
-	util.Logger.Warn("Native HLS failed for movie, falling back to yt-dlp", "error", nativeErr)
+	if errors.Is(nativeErr, hls.ErrSeparateAudioTracks) {
+		util.Logger.Info("HLS has separate audio tracks, using yt-dlp for proper audio/video merging")
+	} else {
+		util.Logger.Warn("Native HLS failed for movie, falling back to yt-dlp", "error", nativeErr)
+	}
+
+	// Reset progress — native HLS didn't produce output, let yt-dlp set real values
+	progressModel.mu.Lock()
+	progressModel.received = 0
+	progressModel.totalBytes = 0
+	progressModel.mu.Unlock()
+	program.Send(movieProgressMsg{received: 0, totalBytes: 0})
 
 	// Fallback to yt-dlp
 	return md.downloadM3U8WithYtDlpDirect(videoURL, destPath, referer, progressModel, program)
@@ -536,14 +683,13 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
 	}
 
-	// Use typed API for ALL flags so they are placed before the URL
-	// (critical for --downloader-args to be processed correctly by yt-dlp).
+	// Use yt-dlp's native HLS downloader (not ffmpeg) so that obfuscated
+	// segment extensions (.js, .html, .jpg) from CDNs are accepted.
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		Downloader("ffmpeg").
-		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
-		ConcurrentFragments(4).
+		ConcurrentFragments(24).
+		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)
@@ -561,9 +707,12 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 		}
 	}
 
-	// Real-time progress via yt-dlp's native callback
+	// Real-time progress via yt-dlp's native callback.
+	// Track per-file totals so video+audio sizes are summed correctly
+	// (yt-dlp downloads them as separate files then merges).
 	var lastReportedBytes int64
 	var lastProgressFile string
+	fileTotals := make(map[string]int64)
 	dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 		if update.Status == ytdlp.ProgressStatusPostProcessing ||
 			update.Status == ytdlp.ProgressStatusFinished {
@@ -584,13 +733,32 @@ func (md *MovieDownloader) downloadM3U8WithYtDlpDirect(videoURL, destPath, refer
 			lastReportedBytes = downloaded
 		}
 
-		if update.TotalBytes > 0 && progressModel.totalBytes < int64(update.TotalBytes) {
-			progressModel.totalBytes = int64(update.TotalBytes)
+		// Sum totals across all files (video + audio) for accurate progress.
+		if update.TotalBytes > 0 {
+			fname := update.Filename
+			if fname == "" {
+				fname = "_default"
+			}
+			fileTotals[fname] = int64(update.TotalBytes)
+			var sum int64
+			for _, v := range fileTotals {
+				sum += v
+			}
+			progressModel.totalBytes = sum
+		} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
+			pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			if pct > progressModel.peakPct {
+				progressModel.peakPct = pct
+			}
 		}
 
 		program.Send(movieProgressMsg{
 			received:   progressModel.received,
 			totalBytes: progressModel.totalBytes,
+			peakPct:    progressModel.peakPct,
 		})
 	})
 
@@ -643,8 +811,12 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 	// Create context for the download
 	ctx := context.Background()
 
+	// Use a surf-backed HTTP client with Chrome TLS fingerprinting so the CDN
+	// does not reject requests from a plain Go client.
+	surfClient := util.GetDownloadClient()
+
 	// Use the native HLS downloader with byte-based progress callback
-	err := hls.DownloadToFile(ctx, videoURL, destPath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
+	err := hls.DownloadToFileWithClient(ctx, surfClient, videoURL, destPath, headers, func(bytesWritten int64, segmentsWritten, totalSegments int) {
 		if totalSegments <= 0 {
 			return
 		}
@@ -653,11 +825,15 @@ func (md *MovieDownloader) downloadM3U8WithNativeHLS(videoURL, destPath, referer
 		// Update received with real bytes on disk
 		progressModel.received = bytesWritten
 
-		// Dynamically estimate total from average bytes per written segment
+		// Dynamically estimate total from average bytes per written segment.
+		// After 10+ segments the average is reliable — allow shrinking so the
+		// bar tracks reality instead of sitting at a low percentage.
 		if segmentsWritten >= 3 {
 			avgBytesPerSeg := bytesWritten / int64(segmentsWritten)
 			estimatedTotal := avgBytesPerSeg * int64(totalSegments)
-			if estimatedTotal > progressModel.totalBytes {
+			if segmentsWritten >= 10 {
+				progressModel.totalBytes = estimatedTotal
+			} else if estimatedTotal > progressModel.totalBytes {
 				progressModel.totalBytes = estimatedTotal
 			}
 		}
@@ -733,7 +909,7 @@ func extractRefererFromStreamURL(streamURL string) string {
 
 // getContentLength gets the content length of a URL
 func (md *MovieDownloader) getContentLength(url string) (int64, error) {
-	if strings.Contains(url, ".m3u8") {
+	if player.LooksLikeHLS(url) {
 		return 500 * 1024 * 1024, nil // 500MB estimate for HLS
 	}
 
@@ -843,26 +1019,6 @@ func extractMediaIDFromURL(urlStr string) string {
 	return ""
 }
 
-func sanitizeFileName(name string) string {
-	// Remove language tags
-	result := name
-	for _, tag := range []string{"[PT-BR]", "[Portuguese]", "[Português]", "[English]", "[Multilanguage]", "[Movie]", "[TV]", "[Movies/TV]"} {
-		result = strings.ReplaceAll(result, tag, "")
-	}
-	result = strings.TrimSpace(result)
-
-	// Replace invalid characters with underscore
-	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
-	for _, char := range invalid {
-		result = strings.ReplaceAll(result, char, "_")
-	}
-	// Also clean up multiple underscores
-	for strings.Contains(result, "__") {
-		result = strings.ReplaceAll(result, "__", "_")
-	}
-	return strings.TrimSpace(result)
-}
-
 func convertSFlixToFlixHQStreamInfo(sflix *scraper.SFlixStreamInfo) *scraper.FlixHQStreamInfo {
 	if sflix == nil {
 		return nil
@@ -898,12 +1054,14 @@ type movieStatusMsg string
 type movieProgressMsg struct {
 	received   int64
 	totalBytes int64
+	peakPct    float64
 }
 
 type movieProgressModel struct {
 	progress   progress.Model
 	totalBytes int64
 	received   int64
+	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	status     string
 	title      string
 	done       bool
@@ -932,8 +1090,21 @@ func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.mu.Lock()
+		pct := 0.0
 		if m.totalBytes > 0 && m.received > 0 {
-			cmd := m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		// Monotonic: never go backward
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		if pct > 0 {
+			cmd := m.progress.SetPercent(pct)
 			m.mu.Unlock()
 			return m, tea.Batch(cmd, movieTickCmd())
 		}
@@ -946,9 +1117,25 @@ func (m *movieProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
-		var cmd tea.Cmd
+		if msg.peakPct > m.peakPct {
+			m.peakPct = msg.peakPct
+		}
+		// Compute pct with monotonic guarantee
+		pct := 0.0
 		if m.totalBytes > 0 {
-			cmd = m.progress.SetPercent(float64(m.received) / float64(m.totalBytes))
+			pct = float64(m.received) / float64(m.totalBytes)
+		}
+		if pct < m.peakPct {
+			pct = m.peakPct
+		} else if pct > 0 {
+			if pct > 0.99 {
+				pct = 0.99
+			}
+			m.peakPct = pct
+		}
+		var cmd tea.Cmd
+		if pct > 0 {
+			cmd = m.progress.SetPercent(pct)
 		}
 		m.mu.Unlock()
 		return m, cmd

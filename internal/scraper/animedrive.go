@@ -234,7 +234,7 @@ type AnimeDriveClient struct {
 // NewAnimeDriveClient creates a new AnimeDrive client
 func NewAnimeDriveClient() *AnimeDriveClient {
 	return &AnimeDriveClient{
-		client:     util.GetFastClient(),
+		client:     util.NewFastClient(),
 		baseURL:    AnimeDriveBase,
 		userAgent:  UserAgent,
 		maxRetries: 2,

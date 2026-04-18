@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -88,7 +89,7 @@ func TestAnimefireSearchDetectsChallengePage(t *testing.T) {
 
 	_, err := client.SearchAnime("naruto")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "challenge")
+	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
 }
 
 func TestAnimefireExtractsVideoFromIframe(t *testing.T) {

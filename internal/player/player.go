@@ -3,6 +3,7 @@ package player
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,7 +23,9 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/discord"
+	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -58,7 +61,9 @@ type mediaState struct {
 	animeName   string
 	animeSeason int
 	isMovieOrTV bool
-	mediaType   string // "movie", "tv", or "anime"
+	mediaType   string                   // "movie", "tv", or "anime"
+	seasonMap   []metadata.SeasonMapping // AniList-based absolute→season map
+	meta        *util.MediaMeta          // External IDs and year for folder naming
 }
 
 var gMedia mediaState
@@ -69,10 +74,7 @@ func SetAnimeName(name string, season int) {
 	gMedia.mu.Lock()
 	defer gMedia.mu.Unlock()
 	gMedia.animeName = name
-	gMedia.animeSeason = season
-	if season < 1 {
-		gMedia.animeSeason = 1
-	}
+	gMedia.animeSeason = max(season, 1)
 }
 
 // SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
@@ -130,6 +132,8 @@ type mediaSnapshot struct {
 	IsMovieOrTV bool
 	MediaType   string
 	AnimeURL    string
+	SeasonMap   []metadata.SeasonMapping
+	Meta        *util.MediaMeta // External IDs and year for folder naming
 }
 
 // snapshotMedia returns a consistent point-in-time copy of the global media state.
@@ -142,7 +146,52 @@ func snapshotMedia() mediaSnapshot {
 		IsMovieOrTV: gMedia.isMovieOrTV,
 		MediaType:   gMedia.mediaType,
 		AnimeURL:    gMedia.animeURL,
+		SeasonMap:   gMedia.seasonMap,
+		Meta:        gMedia.meta,
 	}
+}
+
+// SetSeasonMap stores the AniList-derived season mapping for per-episode
+// season resolution. Call after metadata enrichment.
+func SetSeasonMap(sm []metadata.SeasonMapping) {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.seasonMap = sm
+}
+
+// SetMediaMeta stores external IDs (TMDB, IMDB, AniList, MAL) and year for
+// Plex/Jellyfin-compatible folder naming. Call after metadata enrichment.
+func SetMediaMeta(meta *util.MediaMeta) {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	gMedia.meta = meta
+}
+
+// GetMediaMeta returns the current media metadata (external IDs and year).
+func GetMediaMeta() *util.MediaMeta {
+	gMedia.mu.RLock()
+	defer gMedia.mu.RUnlock()
+	return gMedia.meta
+}
+
+// resolveSeasonForEpisode returns the correct (season, episode) pair for an
+// absolute episode number using the AniList season map. Falls back to
+// (snap.AnimeSeason, absEp) when no map is available.
+func resolveSeasonForEpisode(snap mediaSnapshot, absEp int) (season, ep int) {
+	if len(snap.SeasonMap) == 0 {
+		util.Debugf("resolveSeasonForEpisode: no season map, using default season=%d, ep=%d", max(snap.AnimeSeason, 1), absEp)
+		return max(snap.AnimeSeason, 1), absEp
+	}
+	util.Debugf("resolveSeasonForEpisode: seasonMap has %d entries, absEp=%d", len(snap.SeasonMap), absEp)
+	for _, sm := range snap.SeasonMap {
+		if absEp >= sm.StartEp && absEp <= sm.EndEp {
+			util.Debugf("resolveSeasonForEpisode: matched S%02d range [%d-%d] → s%02de%02d", sm.Season, sm.StartEp, sm.EndEp, sm.Season, absEp-sm.StartEp+1)
+			return sm.Season, absEp - sm.StartEp + 1
+		}
+	}
+	// Beyond known range: use last season
+	last := snap.SeasonMap[len(snap.SeasonMap)-1]
+	return last.Season, absEp - last.StartEp + 1
 }
 
 const (
@@ -160,6 +209,7 @@ type model struct {
 	progress   progress.Model
 	totalBytes int64
 	received   int64
+	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	done       bool
 	doneFrames int // frames elapsed since done; allows 100% to render before quit
 	status     string
@@ -485,6 +535,7 @@ func HandleDownloadAndPlay(
 	updater *discord.RichPresenceUpdater,
 	animeName string,
 	animeSeason int,
+	anime *models.Anime,
 ) error {
 	util.Debug("HandleDownloadAndPlay called", "videoURL", videoURL, "episodeNum", selectedEpisodeNum)
 
@@ -493,10 +544,7 @@ func HandleDownloadAndPlay(
 
 	// Store anime name for Plex-compatible download file naming
 	if animeName != "" {
-		season := animeSeason
-		if season < 1 {
-			season = 1
-		}
+		season := max(animeSeason, 1)
 		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
 			season = util.GlobalDownloadRequest.SeasonNum
 		}
@@ -504,7 +552,7 @@ func HandleDownloadAndPlay(
 	}
 
 	// Check if this is an HLS stream (for proper handling later)
-	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	isHLSStream := LooksLikeHLS(videoURL)
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
@@ -537,7 +585,7 @@ func HandleDownloadAndPlay(
 			return nil
 		case 2:
 			// Download episodes in a range
-			if err := HandleBatchDownload(episodes, animeURL); err != nil {
+			if err := HandleBatchDownload(episodes, anime); err != nil {
 				return err
 			}
 			return nil
@@ -547,6 +595,19 @@ func HandleDownloadAndPlay(
 				util.Errorf("Upscale error: %v", err)
 			}
 			continue // Return to menu after upscaling
+		case 5:
+			// Download ALL episodes
+			if len(episodes) == 0 {
+				util.Errorf("No episodes available to download")
+				continue
+			}
+			if err := HandleBatchDownloadRange(episodes, anime, 1, len(episodes)); err != nil {
+				if errors.Is(err, ErrUserQuit) {
+					return nil
+				}
+				return err
+			}
+			return nil
 		default:
 			// Play online - determine the best approach based on URL type
 			videoURLToPlay := ""
@@ -672,15 +733,11 @@ func downloadAndPlayEpisode(
 
 		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
 		if snap.MediaType == "movie" {
-			// Movies: flat structure <baseDir>/<MovieName>/
-			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName)
-			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "")
+			// Movies: flat structure <baseDir>/<MovieName (Year) {ids}>/
+			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta)
+			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
 		} else {
 			// TV Shows and Anime: season/episode structure
-			season := snap.AnimeSeason
-			if season < 1 {
-				season = 1
-			}
 			// Use the int episode number directly; fall back to parsing the string only if needed
 			epNum := selectedEpisodeNum
 			if epNum < 1 {
@@ -691,8 +748,9 @@ func downloadAndPlayEpisode(
 					epNum = 1
 				}
 			}
-			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season)
-			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, epNum)
+			season, relEp := resolveSeasonForEpisode(snap, epNum)
+			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta)
+			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
 		}
 		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
 	} else {
@@ -789,10 +847,12 @@ func downloadAndPlayEpisode(
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 
 		} else if strings.Contains(videoURL, "blogger.com") ||
-			strings.Contains(videoURL, ".m3u8") ||
+			LooksLikeHLS(videoURL) ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com") {
 			// Use yt-dlp with progress bar
@@ -807,30 +867,53 @@ func downloadAndPlayEpisode(
 			}
 			p := tea.NewProgram(m)
 
-			// Estimate/obtain total size for progress percentage
-			httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
-			if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
-				m.totalBytes = sz
+			// Estimate/obtain total size for progress percentage.
+			// For HLS streams, do NOT pre-seed a large estimate (like 500 MB)
+			// because the native HLS or yt-dlp callbacks will set the real
+			// total dynamically. A wrong initial value makes the bar stuck.
+			if LooksLikeHLS(videoURL) {
+				m.totalBytes = 0 // let download callbacks set the real value
 			} else {
-				// Fallback for HLS
-				m.totalBytes = 150 * 1024 * 1024
+				httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+				if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
+					m.totalBytes = sz
+				} else {
+					m.totalBytes = 150 * 1024 * 1024
+				}
 			}
 
 			go func() {
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
-				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
+				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL) {
+				if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
-					if dlErr != nil {
-						util.Debugf("Native HLS failed, trying direct HTTP: %v", dlErr)
-						dlErr = downloadDirectHTTP(videoURL, episodePath, m)
-					}
-					if dlErr != nil {
-						util.Debugf("Direct HTTP failed, falling back to yt-dlp: %v", dlErr)
+					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
+						// Separate audio tracks need yt-dlp for proper audio/video merging
+						util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", dlErr)
+						// Reset progress — native HLS didn't produce output
+						m.mu.Lock()
+						m.received = 0
+						m.totalBytes = 0
+						m.peakPct = 0
+						m.mu.Unlock()
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+					} else if dlErr != nil {
+						// Native HLS failed for another reason — try yt-dlp, then direct HTTP
+						util.Debugf("Native HLS failed, trying yt-dlp: %v", dlErr)
+						// Reset progress for yt-dlp fallback
+						m.mu.Lock()
+						m.received = 0
+						m.totalBytes = 0
+						m.peakPct = 0
+						m.mu.Unlock()
+						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+						if dlErr != nil {
+							util.Debugf("yt-dlp failed, trying direct HTTP: %v", dlErr)
+							dlErr = downloadDirectHTTP(videoURL, episodePath, m)
+						}
 					}
 				} else {
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
@@ -881,7 +964,9 @@ func downloadAndPlayEpisode(
 			printDownloadLocation(episodePath)
 
 			// Download selected subtitles alongside the video file
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 
 		} else {
 			// Initialize progress model
@@ -939,7 +1024,9 @@ func downloadAndPlayEpisode(
 
 			// Download selected subtitles alongside the video file
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath)
+			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			})
 		}
 	} else {
 		fmt.Println("Video already downloaded.")
@@ -977,6 +1064,7 @@ func askForDownload() int {
 	}
 	items := []menuOption{
 		{"← Back", "back"},
+		{"Download ALL episodes", "download_all"},
 		{"Download this episode", "download_single"},
 		{"Download episodes in a range", "download_range"},
 		{upscaleLabel, "upscale"},
@@ -1001,6 +1089,8 @@ func askForDownload() int {
 		return 2
 	case "upscale":
 		return 3
+	case "download_all":
+		return 5
 	default:
 		return 4
 	}
@@ -1304,7 +1394,13 @@ func printDownloadLocation(filePath string) {
 // downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
 // the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
 // (already filtered by util.SelectSubtitles).
-func downloadSubtitleFiles(videoPath string) {
+func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...any)) {
+	if printFn == nil {
+		printFn = func(format string, a ...any) {
+			fmt.Printf(format, a...)
+		}
+	}
+
 	subs := util.GlobalSubtitles
 	if len(subs) == 0 {
 		return
@@ -1313,21 +1409,23 @@ func downloadSubtitleFiles(videoPath string) {
 	// Check ffmpeg availability — required for muxing subtitles into the video
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		util.Warnf("ffmpeg not found — cannot embed subtitles into the video file")
+		util.Debugf("ffmpeg not found — cannot embed subtitles into the video file")
+		printFn("Warning: ffmpeg not found — cannot embed subtitles\n")
 		return
 	}
 	// Resolve symlinks and validate the binary path to prevent PATH-based injection.
 	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
 	if err != nil {
-		util.Warnf("failed to resolve ffmpeg path: %v", err)
+		util.Debugf("failed to resolve ffmpeg path: %v", err)
+		printFn("Warning: failed to resolve ffmpeg path\n")
 		return
 	}
 	if !filepath.IsAbs(ffmpegPath) {
-		util.Warnf("ffmpeg resolved to a non-absolute path — refusing to execute")
+		util.Debugf("ffmpeg resolved to a non-absolute path — refusing to execute")
 		return
 	}
 	if fi, statErr := os.Stat(ffmpegPath); statErr != nil || fi.IsDir() {
-		util.Warnf("ffmpeg path is not a valid file: %s", ffmpegPath)
+		util.Debugf("ffmpeg path is not a valid file: %s", ffmpegPath)
 		return
 	}
 
@@ -1411,7 +1509,7 @@ func downloadSubtitleFiles(videoPath string) {
 	}
 
 	// --- Mux subtitles into the video container ---
-	fmt.Printf("Embedding %d subtitle(s) into video...\n", len(entries))
+	printFn("Embedding %d subtitle(s) into video...\n", len(entries))
 
 	// buildMuxArgs builds the ffmpeg arguments for a given subtitle codec and output path.
 	buildMuxArgs := func(subCodec, outPath string) []string {
@@ -1475,15 +1573,16 @@ func downloadSubtitleFiles(videoPath string) {
 				_ = os.Remove(tmpMKV)
 			} else {
 				embedded = true
-				fmt.Printf("Note: saved as .mkv for better subtitle compatibility\n")
+				printFn("Note: saved as .mkv for better subtitle compatibility\n")
 			}
 		}
 	}
 
 	if embedded {
-		fmt.Printf("Subtitles embedded successfully!\n")
+		printFn("Subtitles embedded successfully!\n")
 	} else {
-		util.Warnf("Could not embed subtitles — both MP4 and MKV muxing failed")
+		util.Debugf("Could not embed subtitles — both MP4 and MKV muxing failed")
+		printFn("Warning: Could not embed subtitles — both MP4 and MKV muxing failed\n")
 	}
 
 	// Clean up temp subtitle files

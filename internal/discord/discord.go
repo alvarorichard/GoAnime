@@ -268,10 +268,11 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 		return
 	}
 
-	// Get image URL
+	// Get image URL — normalize CloudFront proxy URLs to direct TMDB URLs
+	// since Discord can proxy TMDB images but not CloudFront double-URLs
 	imageURL := rpu.anime.ImageURL
-	if imageURL == "" {
-		imageURL = "https://raw.githubusercontent.com/alvarorichard/Goanime/main/docs/assets/goanime-logo.png"
+	if idx := strings.Index(imageURL, "https://image.tmdb.org/t/p/"); idx > 0 {
+		imageURL = imageURL[idx:]
 	}
 
 	// Build precise timestamps based on actual playback position

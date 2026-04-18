@@ -3,11 +3,12 @@ package scraper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -17,19 +18,13 @@ import (
 // ScraperType represents different scraper types
 type ScraperType int
 
-// Timeout configurations - optimized to include results from ALL available sources
+// Timeout configurations – we wait for ALL sources to finish (or the hard
+// timeout) so that slower scrapers like SuperFlix are never silently dropped.
 const (
-	// searchTimeout is the maximum time to wait for all scrapers
-	searchTimeout = 10 * time.Second
-	// perScraperTimeout is the timeout for individual scrapers
-	perScraperTimeout = 8 * time.Second
-	// earlyReturnDelay is the time to wait after first results before returning.
-	// Kept short so the user sees the fuzzy finder quickly; slower sources
-	// that miss this window simply won't appear in this search.
-	earlyReturnDelay = 1500 * time.Millisecond
-	// minSourcesForEarlyReturn is the minimum number of distinct sources that
-	// must have returned results before early return is allowed.
-	minSourcesForEarlyReturn = 2
+	// searchTimeout is the maximum time to wait for all scrapers.
+	searchTimeout = 15 * time.Second
+	// perScraperTimeout is the timeout for individual scrapers.
+	perScraperTimeout = 12 * time.Second
 )
 
 const (
@@ -40,6 +35,7 @@ const (
 	SFlixType     // Alternative Movies and TV Shows source
 	NineAnimeType // 9animetv.to anime source
 	GoyabuType    // PT-BR anime source
+	SuperFlixType // SuperFlix PT-BR movies/series/animes/doramas
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -82,6 +78,7 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
 		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
 		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
+		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: NewSuperFlixClient()}
 
 		// AnimeDrive disabled — Cloudflare protection blocks all requests.
 		// Kept on standby until a bypass/solution is found.
@@ -92,8 +89,9 @@ func NewScraperManager() *ScraperManager {
 	return globalScraperManager
 }
 
-// SearchAnime searches across all available scrapers with enhanced Portuguese messaging
-// Uses optimized goroutines with early return for better performance
+// SearchAnime searches across all available scrapers with enhanced Portuguese messaging.
+// All sources are queried concurrently and results are collected until every
+// scraper finishes or the hard timeout expires.
 func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([]*models.Anime, error) {
 	timer := util.StartTimer("SearchAnime:Total")
 	defer timer.Stop()
@@ -138,7 +136,9 @@ type searchResult struct {
 	err         error
 }
 
-// searchAllScrapersConcurrent searches all scrapers in parallel with early return optimization
+// searchAllScrapersConcurrent searches all scrapers in parallel and waits for
+// every scraper to finish (or the hard searchTimeout to expire).  This ensures
+// slower sources like SuperFlix are never silently dropped.
 func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.Anime, error) {
 	util.Debug("Starting concurrent search across all sources", "query", query)
 
@@ -150,17 +150,8 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		allResults         []*models.Anime
 		resultsMutex       sync.Mutex
 		searchErrors       []string
+		searchSourceErrors []error
 		errorsMutex        sync.Mutex
-		sourcesWithResults map[ScraperType]bool
-	)
-	sourcesWithResults = make(map[ScraperType]bool)
-
-	// Track completion for early return
-	var (
-		completedCount  int32
-		totalScrapers   = int32(len(sm.scrapers)) // #nosec G115 - scrapers count is always small (<10)
-		firstResultTime time.Time
-		firstResultOnce sync.Once
 	)
 
 	resultChan := make(chan searchResult, len(sm.scrapers))
@@ -171,8 +162,6 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		wg.Add(1)
 		go func(st ScraperType, s UnifiedScraper) {
 			defer wg.Done()
-			defer atomic.AddInt32(&completedCount, 1)
-
 			result := sm.searchWithTimeout(ctx, st, s, query)
 			resultChan <- result
 		}(sType, scraper)
@@ -184,15 +173,12 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		close(resultChan)
 	}()
 
-	// Early return timer - starts when we get first good results
-	var earlyReturnTimer <-chan time.Time
-
-	// Collect results with early return logic
+	// Collect results – wait for ALL scrapers to finish or the context to expire.
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				// Channel closed, all scrapers done
+				// Channel closed – all scrapers finished.
 				goto done
 			}
 
@@ -201,72 +187,24 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				sourceName := sm.getScraperDisplayName(res.scraperType)
 				util.Debug("Search error", "source", sourceName, "error", res.err)
 				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
+				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
 				errorsMutex.Unlock()
 				continue
 			}
 
 			if len(res.results) > 0 {
-				// Tag and add results thread-safely
 				sm.tagResults(res.results, res.scraperType)
-
 				resultsMutex.Lock()
 				allResults = append(allResults, res.results...)
-				sourcesWithResults[res.scraperType] = true
-				currentCount := len(allResults)
-				sourceCount := len(sourcesWithResults)
 				resultsMutex.Unlock()
 
-				util.Debug("Search results received", "source", sm.getScraperDisplayName(res.scraperType), "count", len(res.results), "total", currentCount, "sources", sourceCount)
-
-				// Start early return timer on first results
-				firstResultOnce.Do(func() {
-					firstResultTime = time.Now()
-					earlyReturnTimer = time.After(earlyReturnDelay)
-				})
-			}
-
-			// If all scrapers have completed and no more results pending, drain channel
-			if atomic.LoadInt32(&completedCount) >= totalScrapers {
-				// Drain any remaining results from the channel before returning
-				for {
-					select {
-					case remaining, ok := <-resultChan:
-						if !ok {
-							goto done
-						}
-						if remaining.err == nil && len(remaining.results) > 0 {
-							sm.tagResults(remaining.results, remaining.scraperType)
-							resultsMutex.Lock()
-							allResults = append(allResults, remaining.results...)
-							sourcesWithResults[remaining.scraperType] = true
-							resultsMutex.Unlock()
-						}
-					default:
-						goto done
-					}
-				}
-			}
-
-		case <-earlyReturnTimer:
-			// Early return: only if enough distinct sources have responded
-			resultsMutex.Lock()
-			currentCount := len(allResults)
-			sourceCount := len(sourcesWithResults)
-			resultsMutex.Unlock()
-
-			completed := atomic.LoadInt32(&completedCount)
-			if sourceCount >= minSourcesForEarlyReturn && completed < totalScrapers {
-				util.Debug("Early return triggered",
-					"results", currentCount,
-					"sources", sourceCount,
-					"completed", completed,
-					"total", totalScrapers,
-					"waitTime", time.Since(firstResultTime))
-				goto done
+				util.Debug("Search results received",
+					"source", sm.getScraperDisplayName(res.scraperType),
+					"count", len(res.results))
 			}
 
 		case <-ctx.Done():
-			util.Debug("Search timeout reached")
+			util.Debug("Search timeout reached, returning collected results")
 			goto done
 		}
 	}
@@ -290,10 +228,13 @@ done:
 		errorsMutex.Lock()
 		defer errorsMutex.Unlock()
 		if len(searchErrors) > 0 {
-			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s)", query, strings.Join(searchErrors, "; "))
+			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s): %w", query, strings.Join(searchErrors, "; "), errors.Join(searchSourceErrors...))
 		}
 		return nil, fmt.Errorf("no anime found with name: %s", query)
 	}
+
+	// Sort results: PT-BR first, then everything else
+	sortPTBRFirst(finalResults)
 
 	sm.logSearchSummary(finalResults)
 	return finalResults, nil
@@ -343,6 +284,17 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 	}
 }
 
+// sortPTBRFirst reorders results so that PT-BR entries appear before all others,
+// preserving the relative order within each group.
+func sortPTBRFirst(results []*models.Anime) {
+	sort.SliceStable(results, func(i, j int) bool {
+		iPTBR := strings.Contains(results[i].Name, "[PT-BR]")
+		jPTBR := strings.Contains(results[j].Name, "[PT-BR]")
+		// PT-BR entries come first; within the same group, keep original order.
+		return iPTBR && !jPTBR
+	})
+}
+
 // ptbrTitleCleanRe are compiled regexes for cleaning PT-BR anime titles
 var (
 	ptbrSpaceRe      = regexp.MustCompile(`\s+`)
@@ -376,10 +328,37 @@ func cleanPTBRTitle(title string) string {
 	return title
 }
 
+// needsMediaTypeDisambig pre-scans results and returns a set of lowercased
+// titles that appear with more than one MediaType in the batch.  Only those
+// entries need an explicit [Movie]/[TV] disambiguation tag.
+func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
+	titleTypes := make(map[string]models.MediaType, len(results))
+	ambiguous := make(map[string]bool)
+	for _, a := range results {
+		key := strings.ToLower(strings.TrimSpace(a.Name))
+		if prev, exists := titleTypes[key]; exists {
+			if prev != a.MediaType {
+				ambiguous[key] = true
+			}
+		} else {
+			titleTypes[key] = a.MediaType
+		}
+	}
+	return ambiguous
+}
+
 // tagResults adds language tags and source metadata to results
 func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
 	sourceName := sm.getScraperDisplayName(scraperType)
 	isPTBR := scraperType == AnimefireType || scraperType == AnimeDriveType || scraperType == GoyabuType
+
+	// For FlixHQ/SFlix, pre-scan to find titles that need a [Movie]/[TV]
+	// disambiguation tag (same title appears as both movie and TV show).
+	// SuperFlix always shows media type since it mixes movies/series/animes/doramas.
+	var disambig map[string]bool
+	if scraperType == FlixHQType || scraperType == SFlixType {
+		disambig = needsMediaTypeDisambig(results)
+	}
 
 	for _, anime := range results {
 		// Clean PT-BR titles before tagging
@@ -397,17 +376,34 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			// For FlixHQ/SFlix, use specific [Movie] or [TV] tag based on media type
-			if scraperType == FlixHQType || scraperType == SFlixType {
+			switch scraperType {
+			case SuperFlixType:
+				// SuperFlix is PT-BR. Movies get [Movie], TV series get [TV],
+				// but anime/dorama only need [PT-BR].
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
-					anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
 				case models.MediaTypeTV:
-					anime.Name = fmt.Sprintf("[TV] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
 				default:
-					anime.Name = fmt.Sprintf("[Movies/TV] %s", anime.Name)
+					anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
 				}
-			} else {
+			case FlixHQType, SFlixType:
+				// FlixHQ/SFlix: add [Movie]/[TV] only when disambiguation is needed.
+				key := strings.ToLower(strings.TrimSpace(anime.Name))
+				if disambig[key] {
+					switch anime.MediaType {
+					case models.MediaTypeMovie:
+						anime.Name = fmt.Sprintf("[Movie] %s", anime.Name)
+					case models.MediaTypeTV:
+						anime.Name = fmt.Sprintf("[TV] %s", anime.Name)
+					default:
+						anime.Name = fmt.Sprintf("[English] %s", anime.Name)
+					}
+				} else {
+					anime.Name = fmt.Sprintf("[English] %s", anime.Name)
+				}
+			default:
 				languageTag := sm.getLanguageTag(scraperType)
 				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 			}
@@ -450,12 +446,13 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"flixHQ", counts["FlixHQ"],
 		"9anime", counts["9Anime"],
 		"goyabu", counts["Goyabu"],
+		"superflix", counts["SuperFlix"],
 		"total", len(results))
 }
 
 // SearchAnimePTBR searches PT-BR sources (AnimeFire and Goyabu) concurrently
 func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
-	ptbrTypes := []ScraperType{AnimefireType, GoyabuType}
+	ptbrTypes := []ScraperType{AnimefireType, GoyabuType, SuperFlixType}
 
 	var (
 		allResults []*models.Anime
@@ -511,6 +508,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "9Anime"
 	case GoyabuType:
 		return "Goyabu"
+	case SuperFlixType:
+		return "SuperFlix"
 	default:
 		return "Desconhecido"
 	}
@@ -526,12 +525,14 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AnimeDriveType:
 		return "[PT-BR]"
 	case FlixHQType:
-		return "[Movies/TV]"
+		return "[English]"
 	case SFlixType:
-		return "[Movies/TV]"
+		return "[English]"
 	case NineAnimeType:
 		return "[Multilanguage]"
 	case GoyabuType:
+		return "[PT-BR]"
+	case SuperFlixType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -900,4 +901,97 @@ func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (string,
 
 func (a *GoyabuAdapter) GetType() ScraperType {
 	return GoyabuType
+}
+
+// SuperFlixAdapter adapts SuperFlixClient to UnifiedScraper interface
+type SuperFlixAdapter struct {
+	client *SuperFlixClient
+}
+
+func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	media, err := a.client.SearchMedia(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var animes []*models.Anime
+	for _, m := range media {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+func (a *SuperFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	// For SuperFlix, animeURL contains the TMDB ID
+	return nil, fmt.Errorf("for SuperFlix, use GetSuperFlixEpisodes in enhanced.go")
+}
+
+func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+	// episodeURL = TMDB ID
+	// options[0] = media type ("filme" or "serie")
+	// options[1] = season (optional)
+	// options[2] = episode number (optional)
+	mediaType := "filme"
+	season := ""
+	episode := ""
+
+	if len(options) > 0 {
+		if s, ok := options[0].(string); ok {
+			mediaType = s
+		}
+	}
+	if len(options) > 1 {
+		if s, ok := options[1].(string); ok {
+			season = s
+		}
+	}
+	if len(options) > 2 {
+		if s, ok := options[2].(string); ok {
+			episode = s
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := a.client.GetStreamURL(ctx, mediaType, episodeURL, season, episode)
+	if err != nil {
+		return "", nil, err
+	}
+
+	metadata := make(map[string]string)
+	metadata["source"] = "superflix"
+	metadata["referer"] = result.Referer
+	metadata["title"] = result.Title
+
+	if len(result.Subtitles) > 0 {
+		var subURLs, subLabels []string
+		for _, sub := range result.Subtitles {
+			subURLs = append(subURLs, sub.URL)
+			subLabels = append(subLabels, sub.Lang)
+		}
+		metadata["subtitles"] = strings.Join(subURLs, ",")
+		metadata["subtitle_labels"] = strings.Join(subLabels, ",")
+	}
+
+	if len(result.DefaultAudio) > 0 {
+		metadata["audio_lang"] = result.DefaultAudio[0]
+	}
+
+	return result.StreamURL, metadata, nil
+}
+
+func (a *SuperFlixAdapter) GetType() ScraperType {
+	return SuperFlixType
+}
+
+// GetClient returns the underlying SuperFlix client for direct access
+func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
+	return a.client
+}
+
+// NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
+// Useful for testing with mock servers.
+func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
+	return &SuperFlixAdapter{client: client}
 }

@@ -43,10 +43,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		if m.done {
-			// View() already renders 100% via ViewAs(1.0) when done.
 			// Wait a few frames so the terminal redraws before we quit.
+			// On error, wait longer so the user can read the status message.
 			m.doneFrames++
-			if m.doneFrames >= 3 {
+			maxFrames := 3
+			if m.err != nil {
+				maxFrames = 80 // ~2 seconds at 25ms/tick
+			}
+			if m.doneFrames >= maxFrames {
 				return m, tea.Quit
 			}
 			return m, tickCmd()
@@ -56,24 +60,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			currentProgress := float64(m.received) / float64(m.totalBytes)
 
 			// Ensure progress is within valid bounds
-			if currentProgress > 1.0 {
-				currentProgress = 1.0
-			}
-			if currentProgress < 0.0 {
-				currentProgress = 0.0
+			if currentProgress > 0.99 {
+				currentProgress = 0.99 // reserve 100% for actual completion
 			}
 
-			// Update the progress bar with the new percentage
+			// Monotonic: never go backward (e.g. when audio file total is added)
+			if currentProgress < m.peakPct {
+				currentProgress = m.peakPct
+			} else {
+				m.peakPct = currentProgress
+			}
+
 			cmd := m.progress.SetPercent(currentProgress)
+			return m, tea.Batch(cmd, tickCmd())
+		}
+		if m.peakPct > 0 {
+			// HLS: use monotonic fragment-based progress when byte totals
+			// are unavailable (totalBytes == 0).
+			cmd := m.progress.SetPercent(m.peakPct)
 			return m, tea.Batch(cmd, tickCmd())
 		}
 		return m, tickCmd()
 
 	case statusMsg:
 		m.status = string(msg)
-		// Force a small progress refresh when status changes
-		cmd := m.progress.SetPercent(float64(m.received) / max(1, float64(m.totalBytes)))
-		return m, tea.Batch(cmd)
+		return m, nil
 
 	case progress.FrameMsg:
 		var cmd tea.Cmd
@@ -114,9 +125,10 @@ func (m *model) View() tea.View {
 	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
 
 	// Returns the UI layout: status message, progress bar, and quit instruction
-	// When done, render exactly 100% using ViewAs to bypass spring animation.
+	// When done successfully, render exactly 100% using ViewAs to bypass spring animation.
+	// On error, show the bar at whatever position it was at.
 	var bar string
-	if m.done {
+	if m.done && m.err == nil {
 		bar = m.progress.ViewAs(1.0)
 	} else {
 		bar = m.progress.View()
@@ -140,12 +152,4 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(time.Millisecond*25, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
-}
-
-// Provide a small helper for avoiding div by zero
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

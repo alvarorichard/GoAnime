@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -84,10 +86,14 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.GoyabuType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "Goyabu")
+	} else if strings.ToLower(source) == "superflix" {
+		t := scraper.SuperFlixType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "SuperFlix")
 	} else if strings.ToLower(source) == "ptbr" || strings.ToLower(source) == "pt-br" {
-		// Search only PT-BR sources (AnimeFire + Goyabu) via dedicated method
+		// Search only PT-BR sources (AnimeFire + Goyabu + SuperFlix) via dedicated method
 		isPTBR = true
-		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu)")
+		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu + SuperFlix)")
 	} else {
 		// Default behavior: search all sources simultaneously (including FlixHQ)
 		scraperType = nil
@@ -144,6 +150,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	animedriveCount := 0
 	flixhqCount := 0
 	nineAnimeCount := 0
+	superflixCount := 0
 	for _, anime := range animes {
 		if strings.Contains(anime.Source, "AnimeFire") {
 			animefireCount++
@@ -155,10 +162,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			flixhqCount++
 		} else if anime.Source == "9Anime" {
 			nineAnimeCount++
+		} else if anime.Source == "SuperFlix" {
+			superflixCount++
 		}
 	}
 
-	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount)
+	util.Debug("Source breakdown", "AnimeFire", animefireCount, "AllAnime", allanimeCount, "AnimeDrive", animedriveCount, "FlixHQ", flixhqCount, "9Anime", nineAnimeCount, "SuperFlix", superflixCount)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
 	sort.SliceStable(animes, func(i, j int) bool {
@@ -250,6 +259,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 // Enhanced episode fetching that works with different sources
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
+	// Check if this is a SuperFlix source
+	if anime.Source == "SuperFlix" {
+		return GetSuperFlixEpisodes(anime)
+	}
+
 	// Check if this is a FlixHQ movie/TV show
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		return GetFlixHQEpisodes(anime)
@@ -384,6 +398,11 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	// Track anime source globally for subtitle selection and other source-specific behavior
 	if anime != nil && anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)
+	}
+
+	// Check if this is SuperFlix content
+	if anime.Source == "SuperFlix" {
+		return GetSuperFlixStreamURL(anime, episode, quality)
 	}
 
 	// Check if this is FlixHQ content
@@ -961,13 +980,183 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return GetAnimeEpisodesEnhanced(anime)
 }
 
+// GetSuperFlixEpisodes handles episodes/content for SuperFlix movies and TV shows
+func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
+	sfClient := scraper.NewSuperFlixClient()
+
+	// media.URL contains the TMDB ID for SuperFlix
+	tmdbID := media.URL
+	if tmdbID == "" {
+		return nil, fmt.Errorf("no TMDB ID found for SuperFlix content")
+	}
+
+	util.Debug("Getting SuperFlix content", "mediaType", media.MediaType, "tmdbID", tmdbID)
+
+	// For movies, return a single "episode" representing the movie
+	if media.MediaType == models.MediaTypeMovie {
+		util.Debug("SuperFlix: Processing movie")
+		return []models.Episode{
+			{
+				Number: "1",
+				Num:    1,
+				URL:    tmdbID,
+				Title: models.TitleDetails{
+					English: media.Name,
+					Romaji:  media.Name,
+				},
+			},
+		}, nil
+	}
+
+	// For TV shows / series, get seasons and episodes
+	util.Debug("SuperFlix: Processing TV show/series, getting episodes")
+
+	var allEpisodes map[string][]scraper.SuperFlixEpisode
+	var episodesErr error
+	runWithSpinner("Loading seasons...", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		allEpisodes, episodesErr = sfClient.GetEpisodes(ctx, tmdbID)
+	})
+	if episodesErr != nil {
+		return nil, fmt.Errorf("failed to get episodes: %w", episodesErr)
+	}
+
+	if len(allEpisodes) == 0 {
+		return nil, fmt.Errorf("no seasons found")
+	}
+
+	// Sort season numbers
+	var seasonNums []string
+	for k := range allEpisodes {
+		seasonNums = append(seasonNums, k)
+	}
+	sort.Strings(seasonNums)
+
+	// Build season labels for selection
+	var seasonLabels []string
+	for _, sn := range seasonNums {
+		epCount := len(allEpisodes[sn])
+		seasonLabels = append(seasonLabels, fmt.Sprintf("Season %s (%d episodes)", sn, epCount))
+	}
+
+	// Let user select a season
+	seasonIdx, err := tui.Find(seasonLabels, func(i int) string {
+		return seasonLabels[i]
+	}, fuzzyfinder.WithPromptString("Select season: "))
+	if err != nil {
+		return nil, fmt.Errorf("season selection cancelled: %w", err)
+	}
+
+	selectedSeason := seasonNums[seasonIdx]
+	epList := allEpisodes[selectedSeason]
+	util.Debug("Selected season", "season", selectedSeason, "episodes", len(epList))
+
+	// Convert to models.Episode
+	var episodes []models.Episode
+	for _, ep := range epList {
+		epNum := ep.EpiNum.String()
+		num := 0
+		if n, err := ep.EpiNum.Int64(); err == nil {
+			num = int(n)
+		}
+
+		episodes = append(episodes, models.Episode{
+			Number:   epNum,
+			Num:      num,
+			URL:      tmdbID, // Store TMDB ID for stream retrieval
+			SeasonID: selectedSeason,
+			Title: models.TitleDetails{
+				English: ep.Title,
+				Romaji:  ep.Title,
+			},
+			Aired: ep.AirDate,
+		})
+	}
+
+	// Store current season on the media object
+	var seasonNum int
+	if _, err := fmt.Sscanf(selectedSeason, "%d", &seasonNum); err == nil {
+		media.CurrentSeason = seasonNum
+	}
+
+	util.Debug("SuperFlix episodes loaded", "count", len(episodes))
+	return episodes, nil
+}
+
+// GetSuperFlixStreamURL gets the stream URL for SuperFlix content
+func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
+	util.ClearGlobalSubtitles()
+	util.SetGlobalAnimeSource("SuperFlix")
+
+	sfClient := scraper.NewSuperFlixClient()
+
+	tmdbID := episode.URL
+	if tmdbID == "" {
+		tmdbID = media.URL
+	}
+
+	var sfType, season, epNum string
+	if media.MediaType == models.MediaTypeMovie {
+		sfType = "filme"
+	} else {
+		sfType = "serie"
+		season = episode.SeasonID
+		epNum = episode.Number
+	}
+
+	util.Debug("Getting SuperFlix stream", "tmdbID", tmdbID, "type", sfType, "season", season, "episode", epNum)
+
+	var result *scraper.SuperFlixStreamResult
+	var streamErr error
+	runWithSpinner("Loading stream...", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		result, streamErr = sfClient.GetStreamURL(ctx, sfType, tmdbID, season, epNum)
+	})
+	if streamErr != nil {
+		return "", fmt.Errorf("failed to get SuperFlix stream: %w", streamErr)
+	}
+
+	// Store referer globally for mpv playback
+	if result.Referer != "" {
+		util.SetGlobalReferer(result.Referer)
+	}
+
+	// Update cover image from stream thumbnail if not already set
+	if media.ImageURL == "" && result.Thumb != "" {
+		media.ImageURL = result.Thumb
+		util.Debug("SuperFlix cover set from stream thumbnail", "url", result.Thumb)
+	}
+
+	// Store subtitles globally for playback
+	if len(result.Subtitles) > 0 && !util.GlobalNoSubs {
+		var subInfos []util.SubtitleInfo
+		for _, sub := range result.Subtitles {
+			lang := strings.ToLower(sub.Lang)
+			subInfos = append(subInfos, util.SubtitleInfo{
+				URL:      sub.URL,
+				Language: lang,
+				Label:    sub.Lang,
+			})
+		}
+		util.SetGlobalSubtitles(subInfos)
+		util.Debug("SuperFlix subtitles loaded", "count", len(subInfos))
+	}
+
+	util.Debug("SuperFlix stream URL obtained", "url", result.StreamURL[:min(len(result.StreamURL), 80)])
+	return result.StreamURL, nil
+}
+
 // languagePriority returns a sort key for language-based ordering.
 // Lower values sort first: Portuguese → Multilanguage → English → Movies/TV → Unknown.
 func languagePriority(name string) int {
 	lower := strings.ToLower(name)
-	switch {
-	case strings.HasPrefix(lower, "[pt-br]") || strings.HasPrefix(lower, "[portuguese]") || strings.HasPrefix(lower, "[português]"):
+	// Check for [PT-BR] anywhere (covers "[Movie] [PT-BR] ...", "[TV] [PT-BR] ...", etc.)
+	if strings.Contains(lower, "[pt-br]") || strings.Contains(lower, "[portuguese]") || strings.Contains(lower, "[português]") {
 		return 0
+	}
+	switch {
 	case strings.HasPrefix(lower, "[multilanguage]"):
 		return 1
 	case strings.HasPrefix(lower, "[english]"):

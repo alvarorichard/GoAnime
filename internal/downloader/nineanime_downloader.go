@@ -36,8 +36,9 @@ type NineAnimeDownloadConfig struct {
 	Quality      string // "best", "1080p", "720p", etc.
 	AnimeName    string
 	Season       int
-	Concurrent   int    // max concurrent episode downloads (default 1 for 9anime rate limits)
-	SubsLanguage string // subtitle language chosen by user; empty = prompt interactively
+	Concurrent   int             // max concurrent episode downloads (default 1 for 9anime rate limits)
+	SubsLanguage string          // subtitle language chosen by user; empty = prompt interactively
+	Meta         *util.MediaMeta // External IDs and year for Plex/Jellyfin folder naming
 }
 
 // NineAnimeDownloader handles downloading anime episodes from 9animetv.to
@@ -179,13 +180,20 @@ func (d *NineAnimeDownloader) buildOutputDir(anime *models.Anime) string {
 	if animeName == "" {
 		animeName = anime.Name
 	}
-	// SanitizeForFilename now handles all bracket tags, parenthesized 9anime
-	// metadata (HD, SUB, DUB, Multilanguage, Ep N/N), and trailing ratings.
-	safeName := util.SanitizeForFilename(animeName)
-	if safeName == "" {
-		safeName = fmt.Sprintf("9Anime_%s", anime.URL)
+	// Build meta from anime if not provided in config
+	meta := d.config.Meta
+	if meta == nil && anime != nil {
+		meta = &util.MediaMeta{
+			OfficialTitle: anime.OfficialTitle(),
+			Year:          anime.Year,
+			TMDBID:        anime.TMDBID,
+			IMDBID:        anime.IMDBID,
+			AnilistID:     anime.AnilistID,
+			MalID:         anime.MalID,
+		}
 	}
-	return filepath.Join(d.config.OutputDir, safeName, fmt.Sprintf("Season %02d", d.config.Season))
+	folderName := util.BuildMediaFolderName(animeName, meta)
+	return filepath.Join(d.config.OutputDir, folderName, fmt.Sprintf("Season %02d", d.config.Season))
 }
 
 // episodeFilename returns a Plex-compatible filename for an episode
@@ -199,7 +207,7 @@ func (d *NineAnimeDownloader) episodeFilename(anime *models.Anime, epNum int) st
 	if safeName == "" {
 		safeName = fmt.Sprintf("9Anime_%s", anime.URL)
 	}
-	return util.PlexEpisodeFilename(safeName, d.config.Season, epNum)
+	return util.PlexEpisodeFilename(safeName, d.config.Season, epNum, d.config.Meta)
 }
 
 // resolveStream resolves the m3u8 stream URL and metadata for a 9anime episode
@@ -793,9 +801,8 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 	dl := ytdlp.New().
 		Output(destPath).
 		Format("bestvideo+bestaudio/best").
-		Downloader("ffmpeg").
-		DownloaderArgs("ffmpeg_i:-allowed_extensions ALL").
-		ConcurrentFragments(4).
+		ConcurrentFragments(24).
+		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)
@@ -812,9 +819,11 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 		}
 	}
 
-	// Real-time progress via yt-dlp callback
+	// Real-time progress via yt-dlp callback.
+	// Track per-file totals so video+audio sizes are summed correctly.
 	var lastReportedBytes int64
 	var lastProgressFile string
+	fileTotals := make(map[string]int64)
 	if m != nil {
 		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
 			if update.Status == ytdlp.ProgressStatusPostProcessing ||
@@ -836,8 +845,26 @@ func (d *NineAnimeDownloader) downloadWithYtDlp(streamURL, destPath, referer str
 				lastReportedBytes = downloaded
 			}
 
-			if update.TotalBytes > 0 && m.totalBytes < int64(update.TotalBytes) {
-				m.totalBytes = int64(update.TotalBytes)
+			// Sum totals across all files (video + audio) for accurate progress.
+			if update.TotalBytes > 0 {
+				fname := update.Filename
+				if fname == "" {
+					fname = "_default"
+				}
+				fileTotals[fname] = int64(update.TotalBytes)
+				var sum int64
+				for _, v := range fileTotals {
+					sum += v
+				}
+				m.totalBytes = sum
+			} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
+				pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+				if pct > 0.99 {
+					pct = 0.99
+				}
+				if pct > m.peakPct {
+					m.peakPct = pct
+				}
 			}
 		})
 	}

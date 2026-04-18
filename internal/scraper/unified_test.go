@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -358,6 +359,75 @@ func TestSearchAnime_SlowSourceDoesNotBlockFastSource(t *testing.T) {
 }
 
 // =============================================================================
+// Test: Slow scraper (SuperFlix-like) results are always included
+// =============================================================================
+
+func TestSearchAnime_SlowScraperAlwaysIncluded(t *testing.T) {
+	t.Parallel()
+
+	// Simulate 4 fast scrapers that respond in <50ms and 1 slow scraper that
+	// responds in ~500ms (like SuperFlix doing HTML scraping).  With the old
+	// early-return logic (3.5s + 0.6s grace), the slow scraper would be
+	// dropped.  Now we wait for ALL scrapers to finish.
+	manager := &ScraperManager{
+		scrapers: make(map[ScraperType]UnifiedScraper),
+	}
+
+	fast := func(name string) *MockScraper {
+		return &MockScraper{
+			searchFunc: func(query string) ([]*models.Anime, error) {
+				time.Sleep(20 * time.Millisecond)
+				return []*models.Anime{{Name: name, URL: "fast-" + name}}, nil
+			},
+		}
+	}
+
+	slowSuperFlix := &MockScraper{
+		searchFunc: func(query string) ([]*models.Anime, error) {
+			time.Sleep(500 * time.Millisecond) // Significantly slower
+			return []*models.Anime{
+				{Name: "Black Clover", URL: "superflix-bc", MediaType: models.MediaTypeTV},
+			}, nil
+		},
+	}
+
+	fast1 := fast("AllAnime Hit")
+	fast1.scraperType = AllAnimeType
+	manager.scrapers[AllAnimeType] = fast1
+
+	fast2 := fast("AnimeFire Hit")
+	fast2.scraperType = AnimefireType
+	manager.scrapers[AnimefireType] = fast2
+
+	fast3 := fast("Goyabu Hit")
+	fast3.scraperType = GoyabuType
+	manager.scrapers[GoyabuType] = fast3
+
+	fast4 := fast("FlixHQ Hit")
+	fast4.scraperType = FlixHQType
+	manager.scrapers[FlixHQType] = fast4
+
+	slowSuperFlix.scraperType = SuperFlixType
+	manager.scrapers[SuperFlixType] = slowSuperFlix
+
+	results, err := manager.SearchAnime("black clover", nil)
+	require.NoError(t, err)
+
+	// ALL 5 sources must be present — the slow scraper must NOT be dropped.
+	assert.Len(t, results, 5, "All 5 scraper results must be included")
+
+	// Verify SuperFlix result is present
+	hasSuperFlix := false
+	for _, r := range results {
+		if r.Source == "SuperFlix" {
+			hasSuperFlix = true
+			break
+		}
+	}
+	assert.True(t, hasSuperFlix, "SuperFlix results must be included even though it was slower")
+}
+
+// =============================================================================
 // Test: Specific scraper selection - AnimeFire only
 // =============================================================================
 
@@ -653,6 +723,34 @@ func TestSearchAnime_QueryPassedCorrectly(t *testing.T) {
 	assert.Len(t, capturedQueries, 2)
 	assert.Contains(t, capturedQueries, "allanime:Shingeki no Kyojin")
 	assert.Contains(t, capturedQueries, "animefire:Shingeki no Kyojin")
+}
+
+// =============================================================================
+// Test: ErrSourceUnavailable sentinel is preserved through errors.Join
+// =============================================================================
+
+func TestSearchAnime_AllSourcesUnavailable_SentinelChainPreserved(t *testing.T) {
+	t.Parallel()
+
+	unavailableErr := fmt.Errorf("blocked by Cloudflare: %w", ErrSourceUnavailable)
+
+	allAnimeMock := &MockScraper{
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, unavailableErr
+		},
+	}
+	animefireMock := &MockScraper{
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, unavailableErr
+		},
+	}
+
+	manager := createTestManager(allAnimeMock, animefireMock)
+	_, err := manager.SearchAnime("one piece", nil)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSourceUnavailable),
+		"errors.Is should find ErrSourceUnavailable in the chain, got: %v", err)
 }
 
 // =============================================================================

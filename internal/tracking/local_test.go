@@ -246,3 +246,82 @@ func TestLocalTracker_DeleteAnime(t *testing.T) {
 		t.Error("Anime was not deleted")
 	}
 }
+
+func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test_episode_keys.db")
+	tracker := NewLocalTracker(dbPath)
+	if tracker == nil {
+		t.Fatal("NewLocalTracker returned nil")
+	}
+	defer func() {
+		if err := tracker.Close(); err != nil {
+			t.Logf("Error closing tracker: %v", err)
+		}
+	}()
+
+	// Simulate AllAnime where all episodes share the same base URL.
+	// The tracking key should be "animeID:ep<N>" so each episode
+	// gets its own row and does not overwrite other episodes.
+	baseURL := "shared-anime-id-123"
+
+	ep3 := Anime{
+		AnilistID:     100,
+		AllanimeID:    baseURL + ":ep3",
+		EpisodeNumber: 3,
+		PlaybackTime:  900,
+		Duration:      1440,
+		Title:         "Breaking Bad S2E3",
+		LastUpdated:   time.Now(),
+	}
+	ep4 := Anime{
+		AnilistID:     100,
+		AllanimeID:    baseURL + ":ep4",
+		EpisodeNumber: 4,
+		PlaybackTime:  450,
+		Duration:      1440,
+		Title:         "Breaking Bad S2E4",
+		LastUpdated:   time.Now(),
+	}
+
+	if err := tracker.UpdateProgress(ep3); err != nil {
+		t.Fatalf("UpdateProgress ep3: %v", err)
+	}
+	if err := tracker.UpdateProgress(ep4); err != nil {
+		t.Fatalf("UpdateProgress ep4: %v", err)
+	}
+
+	// Each episode should have its own independent tracking entry
+	got3, err := tracker.GetAnime(100, baseURL+":ep3")
+	if err != nil {
+		t.Fatalf("GetAnime ep3: %v", err)
+	}
+	if got3 == nil {
+		t.Fatal("ep3 tracking not found")
+	}
+	if got3.EpisodeNumber != 3 || got3.PlaybackTime != 900 {
+		t.Errorf("ep3 mismatch: got episode=%d time=%d, want episode=3 time=900",
+			got3.EpisodeNumber, got3.PlaybackTime)
+	}
+
+	got4, err := tracker.GetAnime(100, baseURL+":ep4")
+	if err != nil {
+		t.Fatalf("GetAnime ep4: %v", err)
+	}
+	if got4 == nil {
+		t.Fatal("ep4 tracking not found")
+	}
+	if got4.EpisodeNumber != 4 || got4.PlaybackTime != 450 {
+		t.Errorf("ep4 mismatch: got episode=%d time=%d, want episode=4 time=450",
+			got4.EpisodeNumber, got4.PlaybackTime)
+	}
+
+	// Looking up with the bare base URL should NOT return either episode's data
+	gotBare, err := tracker.GetAnime(100, baseURL)
+	if err != nil {
+		t.Fatalf("GetAnime bare: %v", err)
+	}
+	if gotBare != nil {
+		t.Errorf("bare base URL should not match any episode-specific entry, got: %+v", gotBare)
+	}
+}
