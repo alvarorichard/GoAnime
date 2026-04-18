@@ -278,7 +278,7 @@ func TestEnrichAnime_TMDBFallbackForSingleSeason(t *testing.T) {
 	// Mock TMDB TV details (4 seasons)
 	tvBody, _ := json.Marshal(map[string]any{
 		"seasons": []map[string]any{
-			{"season_number": 0, "episode_count": 4},  // Specials — skipped
+			{"season_number": 0, "episode_count": 4}, // Specials — skipped
 			{"season_number": 1, "episode_count": 51},
 			{"season_number": 2, "episode_count": 51},
 			{"season_number": 3, "episode_count": 52},
