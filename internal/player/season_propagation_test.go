@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -378,4 +379,67 @@ func TestEndToEndSeasonPipeline(t *testing.T) {
 	// Step 7: MPV title shows S02E05
 	title := fmt.Sprintf("%s S%02dE%02d", snap.AnimeName, snap.AnimeSeason, 5)
 	assert.Equal(t, "Dexter S02E05", title)
+}
+
+func TestResolveSeasonForEpisode_UsesSelectedSeasonForLocalEpisodes(t *testing.T) {
+	snap := mediaSnapshot{
+		AnimeName:   "JUJUTSU KAISEN Season 2",
+		AnimeSeason: 2,
+		SeasonMap: []metadata.SeasonMapping{
+			{Season: 1, StartEp: 1, EndEp: 23, EpisodeCount: 23},
+			{Season: 2, StartEp: 24, EndEp: 46, EpisodeCount: 23},
+		},
+	}
+
+	season, episode := resolveSeasonForEpisode(snap, 1)
+	assert.Equal(t, 2, season)
+	assert.Equal(t, 1, episode)
+
+	season, episode = resolveSeasonForEpisode(snap, 23)
+	assert.Equal(t, 2, season)
+	assert.Equal(t, 23, episode)
+}
+
+func TestJujutsuKaisenSeason2LocalEpisodeBugAndFix(t *testing.T) {
+	mockSeasonMap := []metadata.SeasonMapping{
+		{Season: 1, StartEp: 1, EndEp: 23, EpisodeCount: 23},
+		{Season: 2, StartEp: 24, EndEp: 46, EpisodeCount: 23},
+	}
+	mockEpisodes := []models.Episode{
+		{Number: "Episódio 1", Num: 1, URL: "https://goyabu.io/?p=44626"},
+		{Number: "Episódio 23", Num: 23, URL: "https://goyabu.io/?p=45012"},
+	}
+
+	oldResolveSeasonForEpisode := func(seasonMap []metadata.SeasonMapping, absEp int) (season, ep int) {
+		for _, sm := range seasonMap {
+			if absEp >= sm.StartEp && absEp <= sm.EndEp {
+				return sm.Season, absEp - sm.StartEp + 1
+			}
+		}
+		return 1, absEp
+	}
+
+	oldSeason, oldEpisode := oldResolveSeasonForEpisode(mockSeasonMap, mockEpisodes[0].Num)
+	oldPath := util.FormatPlexEpisodePath("/media/anime", "JUJUTSU KAISEN Season 2", oldSeason, oldEpisode)
+	assert.Contains(t, oldPath, "Season 01")
+	assert.Contains(t, oldPath, "S01E01")
+
+	fixedSnap := mediaSnapshot{
+		AnimeName:   "JUJUTSU KAISEN Season 2",
+		AnimeSeason: 2,
+		MediaType:   string(models.MediaTypeAnime),
+		SeasonMap:   mockSeasonMap,
+	}
+	fixedSeason, fixedEpisode := resolveSeasonForEpisode(fixedSnap, mockEpisodes[0].Num)
+	fixedPath := util.FormatPlexEpisodePath("/media/anime", fixedSnap.AnimeName, fixedSeason, fixedEpisode)
+	assert.Contains(t, fixedPath, "Season 02")
+	assert.Contains(t, fixedPath, "S02E01")
+	assert.NotContains(t, fixedPath, "Season 01")
+	assert.NotContains(t, fixedPath, "S01E01")
+
+	fixedSeason, fixedEpisode = resolveSeasonForEpisode(fixedSnap, mockEpisodes[1].Num)
+	fixedPath = util.FormatPlexEpisodePath("/media/anime", fixedSnap.AnimeName, fixedSeason, fixedEpisode)
+	assert.Contains(t, fixedPath, "Season 02")
+	assert.Contains(t, fixedPath, "S02E23")
+	assert.NotContains(t, fixedPath, "S01E23")
 }

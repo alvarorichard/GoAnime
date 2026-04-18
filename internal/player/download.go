@@ -924,27 +924,10 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, error) {
 	animeURL := anime.URL
 
-	// Non-AllAnime HTTP page URL path
-	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
-		sources, err := ExtractVideoSources(episode.URL)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract video sources: %w", err)
-		}
-		if len(sources) == 0 {
-			return "", fmt.Errorf("no video sources available")
-		}
-		best := sources[0]
-		for _, s := range sources {
-			if s.Quality > best.Quality {
-				best = s
-			}
-		}
-		return best.URL, nil
-	}
-
 	// Source-aware routing: use anime.Source to determine the correct resolver.
 	// Sources like SuperFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
-	// non-HTTP identifiers (TMDB IDs, data-ids, etc.) that are NOT AllAnime IDs.
+	// source-specific identifiers or HTTP pages that need scraper-specific
+	// resolution instead of the legacy generic page extractor.
 	source := anime.Source
 	if source != "" && source != "AllAnime" {
 		// Use episode.Number; fall back to Num if Number is empty
@@ -969,6 +952,25 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 			return "", fmt.Errorf("empty stream URL from %s for episode %s", source, epNumber)
 		}
 		return url, nil
+	}
+
+	// Legacy HTTP page URL path. Keep this after source-aware routing so
+	// provider-backed episode pages are not parsed with the generic extractor.
+	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
+		sources, err := ExtractVideoSources(episode.URL)
+		if err != nil {
+			return "", fmt.Errorf("failed to extract video sources: %w", err)
+		}
+		if len(sources) == 0 {
+			return "", fmt.Errorf("no video sources available")
+		}
+		best := sources[0]
+		for _, s := range sources {
+			if s.Quality > best.Quality {
+				best = s
+			}
+		}
+		return best.URL, nil
 	}
 
 	// AllAnime path: animeURL is AllAnime ID/URL, episode.Number is episode string

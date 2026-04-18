@@ -178,6 +178,14 @@ func GetMediaMeta() *util.MediaMeta {
 // absolute episode number using the AniList season map. Falls back to
 // (snap.AnimeSeason, absEp) when no map is available.
 func resolveSeasonForEpisode(snap mediaSnapshot, absEp int) (season, ep int) {
+	if snap.AnimeSeason > 1 {
+		for _, sm := range snap.SeasonMap {
+			if sm.Season == snap.AnimeSeason && absEp >= 1 && absEp <= sm.EpisodeCount {
+				util.Debugf("resolveSeasonForEpisode: using selected season S%02d local episode %02d", snap.AnimeSeason, absEp)
+				return snap.AnimeSeason, absEp
+			}
+		}
+	}
 	if len(snap.SeasonMap) == 0 {
 		util.Debugf("resolveSeasonForEpisode: no season map, using default season=%d, ep=%d", max(snap.AnimeSeason, 1), absEp)
 		return max(snap.AnimeSeason, 1), absEp
