@@ -344,7 +344,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 				),
 			)
 
-			if err := modeForm.Run(); err != nil {
+			if err := tui.RunClean(modeForm.Run); err != nil {
 				return fmt.Errorf("download mode selection cancelled: %w", err)
 			}
 
@@ -407,7 +407,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 							}),
 					),
 				)
-				if err := rangeForm.Run(); err != nil {
+				if err := tui.RunClean(rangeForm.Run); err != nil {
 					return fmt.Errorf("range input cancelled: %w", err)
 				}
 				startEp, _ := strconv.Atoi(startStr)

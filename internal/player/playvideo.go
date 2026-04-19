@@ -182,7 +182,7 @@ func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
 		Negative("No, start from beginning").
 		Value(&resume)
 
-	if err := confirm.Run(); err != nil {
+	if err := tui.RunClean(confirm.Run); err != nil {
 		return false, fmt.Errorf("error showing dialog: %w", err)
 	}
 

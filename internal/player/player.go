@@ -224,6 +224,11 @@ type model struct {
 	err        error // download error propagated from goroutine
 	mu         sync.Mutex
 	keys       keyMap
+
+	parent       *model
+	taskID       string
+	taskTotals   map[string]int64
+	taskReceived map[string]int64
 }
 
 type keyMap struct {
@@ -233,6 +238,173 @@ type keyMap struct {
 // Init initializes the Bubble Tea model
 func (m *model) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), m.progress.Init())
+}
+
+func (m *model) childProgress(taskID string, estimatedTotal int64) *model {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskTotals == nil {
+		m.taskTotals = make(map[string]int64)
+	}
+	if m.taskReceived == nil {
+		m.taskReceived = make(map[string]int64)
+	}
+	if estimatedTotal > 0 {
+		if old := m.taskTotals[taskID]; old != estimatedTotal {
+			m.totalBytes += estimatedTotal - old
+			m.taskTotals[taskID] = estimatedTotal
+		}
+	}
+	return &model{parent: m, taskID: taskID}
+}
+
+func (m *model) setProgressTotal(total int64) {
+	if m == nil || total <= 0 {
+		return
+	}
+	if m.parent != nil {
+		m.parent.setTaskTotal(m.taskID, total)
+		return
+	}
+	m.mu.Lock()
+	m.totalBytes = total
+	m.mu.Unlock()
+}
+
+func (m *model) progressTotal() int64 {
+	if m == nil {
+		return 0
+	}
+	if m.parent != nil {
+		return m.parent.taskTotal(m.taskID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.totalBytes
+}
+
+func (m *model) taskTotal(taskID string) int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.taskTotals[taskID]
+}
+
+func (m *model) shouldGrowProgressTotal(total int64) bool {
+	if total <= 0 {
+		return false
+	}
+	current := m.progressTotal()
+	return total > current
+}
+
+func (m *model) setTaskTotal(taskID string, total int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskTotals == nil {
+		m.taskTotals = make(map[string]int64)
+	}
+	old := m.taskTotals[taskID]
+	if old == total {
+		return
+	}
+	m.taskTotals[taskID] = total
+	m.totalBytes += total - old
+}
+
+func (m *model) addProgressReceived(delta int64) {
+	if m == nil || delta <= 0 {
+		return
+	}
+	if m.parent != nil {
+		m.parent.addTaskReceived(m.taskID, delta)
+		return
+	}
+	m.mu.Lock()
+	m.received += delta
+	m.mu.Unlock()
+}
+
+func (m *model) addTaskReceived(taskID string, delta int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskReceived == nil {
+		m.taskReceived = make(map[string]int64)
+	}
+	m.taskReceived[taskID] += delta
+	m.received += delta
+}
+
+func (m *model) setProgressReceived(received int64) {
+	if m == nil || received < 0 {
+		return
+	}
+	if m.parent != nil {
+		m.parent.setTaskReceived(m.taskID, received)
+		return
+	}
+	m.mu.Lock()
+	m.received = received
+	m.mu.Unlock()
+}
+
+func (m *model) setTaskReceived(taskID string, received int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskReceived == nil {
+		m.taskReceived = make(map[string]int64)
+	}
+	old := m.taskReceived[taskID]
+	if received < old {
+		received = old
+	}
+	m.taskReceived[taskID] = received
+	m.received += received - old
+}
+
+func (m *model) resetProgressReceived() {
+	if m == nil {
+		return
+	}
+	if m.parent != nil {
+		m.parent.resetTaskReceived(m.taskID)
+		return
+	}
+	m.mu.Lock()
+	m.received = 0
+	m.peakPct = 0
+	m.mu.Unlock()
+}
+
+func (m *model) resetTaskReceived(taskID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskReceived == nil {
+		return
+	}
+	old := m.taskReceived[taskID]
+	delete(m.taskReceived, taskID)
+	m.received -= old
+	if m.received < 0 {
+		m.received = 0
+	}
+}
+
+func (m *model) setProgressPeak(pct float64) {
+	if m == nil || pct <= 0 {
+		return
+	}
+	if m.parent != nil {
+		m.parent.setProgressPeak(pct)
+		return
+	}
+	m.mu.Lock()
+	if pct > m.peakPct {
+		m.peakPct = pct
+	}
+	m.mu.Unlock()
 }
 
 // StartVideo opens mpv with a socket for IPC
@@ -810,7 +982,7 @@ func downloadAndPlayEpisode(
 					),
 				},
 			}
-			p := tea.NewProgram(m)
+			p := tui.NewProgram(m)
 
 			go func() {
 				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
@@ -873,7 +1045,7 @@ func downloadAndPlayEpisode(
 					),
 				},
 			}
-			p := tea.NewProgram(m)
+			p := tui.NewProgram(m)
 
 			// Estimate/obtain total size for progress percentage.
 			// For HLS streams, do NOT pre-seed a large estimate (like 500 MB)
@@ -987,7 +1159,7 @@ func downloadAndPlayEpisode(
 					),
 				},
 			}
-			p := tea.NewProgram(m)
+			p := tui.NewProgram(m)
 
 			// Get content length
 			httpClient := &http.Client{

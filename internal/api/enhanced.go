@@ -41,11 +41,13 @@ func isStdoutTerminal() bool {
 // callback when no terminal is attached.
 func runWithSpinner(title string, action func()) {
 	if isStdoutTerminal() {
-		_ = spinner.New().
-			Title(title).
-			Type(spinner.Dots).
-			Action(action).
-			Run()
+		_ = tui.RunClean(func() error {
+			return spinner.New().
+				Title(title).
+				Type(spinner.Dots).
+				Action(action).
+				Run()
+		})
 	} else {
 		action()
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/lrstanley/go-ytdlp"
 )
@@ -466,7 +467,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 		fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 	}
 
-	p := tea.NewProgram(m)
+	p := tui.NewProgram(m)
 
 	// Start download in goroutine with progress tracking
 	downloadComplete := make(chan error, 1)

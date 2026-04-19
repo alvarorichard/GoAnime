@@ -618,3 +618,137 @@ func TestProgressNativeHLSDynamicEstimate(t *testing.T) {
 	assert.InDelta(t, 0.15, pct, 0.01,
 		"progress should be ~15%% (15/100 segments), got %.1f%%", pct*100)
 }
+
+func TestSelectAnimeFireDownloadSourceChoosesDirectMP4(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"data": [
+			{"src": "https://lightspeedst.net/s6/mp4/show/sd/1.mp4", "label": "360p"},
+			{"src": "https://lightspeedst.net/s6/mp4/show/hd/1.mp4", "label": "720p"}
+		]
+	}`)
+
+	got, err := selectAnimeFireDownloadSource(body, "720p")
+	require.NoError(t, err)
+	assert.Equal(t, "https://lightspeedst.net/s6/mp4/show/hd/1.mp4", got)
+}
+
+func TestSelectAnimeFireDownloadSourceBestUsesHighestResolution(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"data": [
+			{"src": "https://lightspeedst.net/s6/mp4/show/sd/1.mp4", "label": "360p"},
+			{"src": "https://lightspeedst.net/s6/mp4/show/hd/1.mp4", "label": "720p"}
+		]
+	}`)
+
+	got, err := selectAnimeFireDownloadSource(body, "best")
+	require.NoError(t, err)
+	assert.Equal(t, "https://lightspeedst.net/s6/mp4/show/hd/1.mp4", got)
+}
+
+func TestSelectAnimeFireDownloadSourceRejectsEmptyData(t *testing.T) {
+	t.Parallel()
+
+	_, err := selectAnimeFireDownloadSource([]byte(`{"data":[]}`), "best")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no sources")
+}
+
+func TestSelectAnimeFireDownloadCandidatesOrdersPreferredThenFallbacks(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"data": [
+			{"src": "https://lightspeedst.net/s6/mp4/show/sd/20.mp4", "label": "360p"},
+			{"src": "https://lightspeedst.net/s6/mp4/show/hd/20.mp4", "label": "720p"},
+			{"src": "https://lightspeedst.net/s6/mp4/show/fhd/20.mp4", "label": "1080p"}
+		]
+	}`)
+
+	got, err := selectAnimeFireDownloadCandidates(body, "720p")
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"https://lightspeedst.net/s6/mp4/show/hd/20.mp4",
+		"https://lightspeedst.net/s6/mp4/show/fhd/20.mp4",
+		"https://lightspeedst.net/s6/mp4/show/sd/20.mp4",
+	}, got)
+}
+
+func TestRunAnimeFireDirectDownloadWithFallbackRetriesAlternativeAfter404(t *testing.T) {
+	t.Parallel()
+
+	sourceURL := "https://animefire.io/video/show/20"
+	primaryURL := "https://lightspeedst.net/s6/mp4/show/hd/20.mp4"
+	fallbackURL := "https://lightspeedst.net/s6/mp4/show/sd/20.mp4"
+	var calls []string
+
+	err := runAnimeFireDirectDownloadWithFallback(
+		sourceURL,
+		primaryURL,
+		t.TempDir()+"/episode.mp4",
+		nil,
+		func(url, _ string, _ *model) error {
+			calls = append(calls, url)
+			if url == primaryURL {
+				return errors.New("HTTP 404: 404 Not Found")
+			}
+			return nil
+		},
+		func(apiURL, failedURL string) (string, error) {
+			assert.Equal(t, sourceURL, apiURL)
+			assert.Equal(t, primaryURL, failedURL)
+			return fallbackURL, nil
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{primaryURL, fallbackURL}, calls)
+}
+
+func TestRunAnimeFireDirectDownloadWithFallbackDoesNotRetryNon404(t *testing.T) {
+	t.Parallel()
+
+	primaryErr := errors.New("HTTP 403: 403 Forbidden")
+	resolveCalled := false
+
+	err := runAnimeFireDirectDownloadWithFallback(
+		"https://animefire.io/video/show/20",
+		"https://lightspeedst.net/s6/mp4/show/hd/20.mp4",
+		t.TempDir()+"/episode.mp4",
+		nil,
+		func(_, _ string, _ *model) error {
+			return primaryErr
+		},
+		func(_, _ string) (string, error) {
+			resolveCalled = true
+			return "", nil
+		},
+	)
+
+	require.ErrorIs(t, err, primaryErr)
+	assert.False(t, resolveCalled)
+}
+
+func TestBatchDownloadErrorSortsAndReportsFailures(t *testing.T) {
+	t.Parallel()
+
+	failures := []batchDownloadFailure{
+		{Episode: 20, Err: errors.New("HTTP 404: 404 Not Found")},
+		{Episode: 3, Err: errors.New("no stream")},
+	}
+
+	err := newBatchDownloadError(failures)
+	require.Error(t, err)
+
+	var batchErr batchDownloadError
+	require.ErrorAs(t, err, &batchErr)
+	require.Len(t, batchErr.Failures, 2)
+	assert.Equal(t, 3, batchErr.Failures[0].Episode)
+	assert.Equal(t, 20, batchErr.Failures[1].Episode)
+	assert.Contains(t, err.Error(), "2 episodes failed")
+	assert.Contains(t, err.Error(), "episode 3: no stream")
+	assert.Contains(t, err.Error(), "episode 20: HTTP 404")
+}

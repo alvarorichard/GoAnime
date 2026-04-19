@@ -15,6 +15,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -71,28 +72,30 @@ func PlayEpisode(
 	var videoErr error
 	currentEpisodeCopy := currentEpisode // capture for goroutine
 
-	_ = spinner.New().
-		Title("Loading episode...").
-		Type(spinner.Dots).
-		Action(func() {
-			var wg sync.WaitGroup
-			wg.Add(2)
+	_ = tui.RunClean(func() error {
+		return spinner.New().
+			Title("Loading episode...").
+			Type(spinner.Dots).
+			Action(func() {
+				var wg sync.WaitGroup
+				wg.Add(2)
 
-			go func() {
-				defer wg.Done()
-				if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-					util.Debugf("Error fetching episode data: %v", err)
-				}
-			}()
+				go func() {
+					defer wg.Done()
+					if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
+						util.Debugf("Error fetching episode data: %v", err)
+					}
+				}()
 
-			go func() {
-				defer wg.Done()
-				videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
-			}()
+				go func() {
+					defer wg.Done()
+					videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
+				}()
 
-			wg.Wait()
-		}).
-		Run()
+				wg.Wait()
+			}).
+			Run()
+	})
 
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
