@@ -42,22 +42,6 @@ type MovieDownloader struct {
 	mediaManager *scraper.MediaManager
 }
 
-// NewMovieDownloader creates a new movie downloader
-func NewMovieDownloader() *MovieDownloader {
-	userHome, _ := os.UserHomeDir()
-	outputDir := filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
-
-	return &MovieDownloader{
-		config: MovieDownloadConfig{
-			OutputDir:    outputDir,
-			Quality:      scraper.Quality1080,
-			SubsLanguage: "english",
-			Provider:     "Vidcloud",
-		},
-		mediaManager: scraper.NewMediaManager(),
-	}
-}
-
 // NewMovieDownloaderWithConfig creates a movie downloader with custom configuration
 func NewMovieDownloaderWithConfig(config MovieDownloadConfig) *MovieDownloader {
 	if config.OutputDir == "" {

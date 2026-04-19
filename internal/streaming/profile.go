@@ -77,15 +77,6 @@ func NeedsContentLengthEstimate(u string) bool {
 		strings.Contains(lower, "animesfire")
 }
 
-// ShouldUseYtDLP reports whether yt-dlp is usually the safest transport for the URL.
-func ShouldUseYtDLP(u string) bool {
-	lower := strings.ToLower(u)
-	return LooksLikeHLS(lower) ||
-		IsWixmpURL(lower) ||
-		IsMirrorStreamURL(lower) ||
-		IsBloggerStreamURL(lower)
-}
-
 // ShouldUseNativeHLSDownload reports whether native HLS is the safest first attempt.
 func ShouldUseNativeHLSDownload(u string) bool {
 	return LooksLikeHLS(u) || HasUnsafeExtension(u)

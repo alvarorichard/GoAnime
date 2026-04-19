@@ -276,35 +276,6 @@ func isAnimeFireVideoAPIURL(u string) bool {
 		strings.Contains(lower, "animefire.plus/video/")
 }
 
-func resolveDownloadURL(videoURL string) (string, error) {
-	if !isAnimeFireVideoAPIURL(videoURL) {
-		return videoURL, nil
-	}
-
-	util.Debug("Resolving AnimeFire video API URL for download", "url", videoURL)
-	resp, err := api.SafeGet(videoURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch AnimeFire video API: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			util.Warn("Error closing AnimeFire video API response", "error", err)
-		}
-	}()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-	if err != nil {
-		return "", fmt.Errorf("failed to read AnimeFire video API: %w", err)
-	}
-
-	selected, err := selectAnimeFireDownloadSource(body, util.GlobalQuality)
-	if err != nil {
-		return "", err
-	}
-	util.Debug("Resolved AnimeFire download URL", "quality", util.GlobalQuality, "url", selected)
-	return selected, nil
-}
-
 func selectAnimeFireDownloadSource(body []byte, quality string) (string, error) {
 	candidates, err := selectAnimeFireDownloadCandidates(body, quality)
 	if err != nil {
@@ -381,51 +352,8 @@ func orderAnimeFireSources(videoData []VideoData, quality string) []string {
 	return candidates
 }
 
-func resolveAnimeFireFallbackDownloadURL(videoAPIURL, failedURL string) (string, error) {
-	if !isAnimeFireVideoAPIURL(videoAPIURL) {
-		return "", errors.New("source URL is not an AnimeFire video API URL")
-	}
-
-	resp, err := api.SafeGet(videoAPIURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch AnimeFire fallback sources: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			util.Warn("Error closing AnimeFire fallback response", "error", err)
-		}
-	}()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-	if err != nil {
-		return "", fmt.Errorf("failed to read AnimeFire fallback sources: %w", err)
-	}
-
-	candidates, err := selectAnimeFireDownloadCandidates(body, util.GlobalQuality)
-	if err != nil {
-		return "", err
-	}
-	for _, candidate := range candidates {
-		if candidate != "" && candidate != failedURL {
-			return candidate, nil
-		}
-	}
-	return "", errors.New("AnimeFire video API returned no fallback source")
-}
-
 type directDownloadFunc func(string, string, *model) error
 type fallbackResolveFunc func(string, string) (string, error)
-
-func downloadAnimeFireDirectWithFallback(videoAPIURL, videoURL, path string, m *model) error {
-	return runAnimeFireDirectDownloadWithFallback(
-		videoAPIURL,
-		videoURL,
-		path,
-		m,
-		downloadDirectHTTP,
-		resolveAnimeFireFallbackDownloadURL,
-	)
-}
 
 func runAnimeFireDirectDownloadWithFallback(videoAPIURL, videoURL, path string, m *model, download directDownloadFunc, resolveFallback fallbackResolveFunc) error {
 	err := download(videoURL, path, m)

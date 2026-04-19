@@ -1,10 +1,6 @@
 package source
 
-import (
-	"strings"
-
-	"github.com/alvarorichard/Goanime/internal/models"
-)
+import "github.com/alvarorichard/Goanime/internal/models"
 
 // SourceDefinition is a declarative description of a media source.
 // Adding a new source to GoAnime costs one entry in the sourceDefs slice
@@ -86,55 +82,4 @@ var sourceDefs = []SourceDefinition{
 		URLMatchers:      []string{"allanime"},
 		ShortID:          true,
 	},
-}
-
-func (d SourceDefinition) matchesExplicit(value string) bool {
-	lowerValue := strings.ToLower(strings.TrimSpace(value))
-	for _, explicit := range d.Explicit {
-		if lowerValue == strings.ToLower(explicit) {
-			return true
-		}
-	}
-	for _, pattern := range d.ExplicitContains {
-		if strings.Contains(lowerValue, strings.ToLower(pattern)) {
-			return true
-		}
-	}
-	return false
-}
-
-func (d SourceDefinition) matchesMediaType(mediaType models.MediaType) bool {
-	for _, candidate := range d.MediaTypes {
-		if mediaType == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func (d SourceDefinition) matchesTag(name string) bool {
-	lowerName := strings.ToLower(name)
-	for _, tag := range d.Tags {
-		if strings.Contains(lowerName, tag) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchURL checks whether a raw URL matches this definition's URL patterns.
-func (d SourceDefinition) matchURL(url string) (string, bool) {
-	if url == "" {
-		return "", false
-	}
-	lower := strings.ToLower(url)
-	for _, pat := range d.URLMatchers {
-		if strings.Contains(lower, pat) {
-			return "URL contains " + pat, true
-		}
-	}
-	if d.ShortID && IsAllAnimeShortID(url) {
-		return "short ID", true
-	}
-	return "", false
 }

@@ -4,7 +4,6 @@ package hls
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -49,35 +47,6 @@ type M3U8Playlist struct {
 // Downloader handles HLS downloads
 type Downloader struct {
 	client *http.Client
-}
-
-// NewDownloader creates a new HLS downloader with a plain Go HTTP client.
-// Prefer NewDownloaderWithClient to supply a surf-backed client with Chrome
-// TLS fingerprinting, which is required by most CDNs.
-func NewDownloader() *Downloader {
-	// Force HTTP/1.1 by disabling HTTP/2.  CDN servers often reset
-	// multiplexed HTTP/2 streams with INTERNAL_ERROR when many segments
-	// are fetched concurrently over a single connection.  HTTP/1.1 opens
-	// a separate TCP connection per request, avoiding this issue.
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-		// Setting TLSNextProto to an empty map disables HTTP/2
-		TLSNextProto:        make(map[string]func(string, *tls.Conn) http.RoundTripper),
-		MaxIdleConns:        48,
-		MaxIdleConnsPerHost: 24,
-		IdleConnTimeout:     90 * time.Second,
-		// SSRF protection: validates resolved IPs before connecting
-		DialContext: api.SafeDialContext(30 * time.Second),
-	}
-
-	return &Downloader{
-		client: &http.Client{
-			Timeout:   5 * time.Minute,
-			Transport: transport,
-		},
-	}
 }
 
 // NewDownloaderWithClient creates an HLS downloader using the provided
@@ -584,12 +553,6 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	}
 
 	return nil
-}
-
-// DownloadToFile is a convenience function to download HLS to a file
-func DownloadToFile(ctx context.Context, streamURL, outputPath string, headers map[string]string, progressCallback ProgressCallback) error {
-	downloader := NewDownloader()
-	return downloader.DownloadWithProgress(ctx, streamURL, outputPath, headers, progressCallback)
 }
 
 // DownloadToFileWithClient is like DownloadToFile but uses the provided

@@ -293,14 +293,6 @@ func (m *model) taskTotal(taskID string) int64 {
 	return m.taskTotals[taskID]
 }
 
-func (m *model) shouldGrowProgressTotal(total int64) bool {
-	if total <= 0 {
-		return false
-	}
-	current := m.progressTotal()
-	return total > current
-}
-
 func (m *model) setTaskTotal(taskID string, total int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -391,21 +383,6 @@ func (m *model) resetTaskReceived(taskID string) {
 	if m.received < 0 {
 		m.received = 0
 	}
-}
-
-func (m *model) setProgressPeak(pct float64) {
-	if m == nil || pct <= 0 {
-		return
-	}
-	if m.parent != nil {
-		m.parent.setProgressPeak(pct)
-		return
-	}
-	m.mu.Lock()
-	if pct > m.peakPct {
-		m.peakPct = pct
-	}
-	m.mu.Unlock()
 }
 
 // StartVideo opens mpv with a socket for IPC
@@ -1284,68 +1261,6 @@ func askForPlayOffline() bool {
 }
 
 // playVideo has been moved to playvideo.go
-
-// ToggleSubtitle toggles subtitle visibility
-func ToggleSubtitle(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []any{
-		"cycle",
-		"sub-visibility",
-	})
-	return err
-}
-
-// GetPlaybackStats returns current playback statistics
-func GetPlaybackStats(socketPath string) (map[string]any, error) {
-	stats := make(map[string]any)
-
-	// Get various playback properties
-	properties := []string{
-		"time-pos",
-		"duration",
-		"speed",
-		"volume",
-		"pause",
-		"filename",
-	}
-
-	for _, prop := range properties {
-		value, err := mpvSendCommand(socketPath, []any{"get_property", prop})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get %s: %w", prop, err)
-		}
-		stats[prop] = value
-	}
-
-	return stats, nil
-}
-
-// SetPlaybackSpeed sets the video playback speed
-func SetPlaybackSpeed(socketPath string, speed float64) error {
-	_, err := mpvSendCommand(socketPath, []any{
-		"set_property",
-		"speed",
-		speed,
-	})
-	return err
-}
-
-// CycleAudioTrack cycles through available audio tracks
-func CycleAudioTrack(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []any{
-		"cycle",
-		"aid",
-	})
-	return err
-}
-
-// CycleSubtitleTrack cycles through available subtitle tracks
-func CycleSubtitleTrack(socketPath string) error {
-	_, err := mpvSendCommand(socketPath, []any{
-		"cycle",
-		"sid",
-	})
-	return err
-}
 
 // SetAudioTrack sets a specific audio track by ID
 func SetAudioTrack(socketPath string, trackID int) error {

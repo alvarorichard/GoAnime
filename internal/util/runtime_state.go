@@ -61,12 +61,6 @@ func SetGlobalMediaType(mediaType string) {
 	runtimeStateMu.Unlock()
 }
 
-func GetGlobalMediaType() string {
-	runtimeStateMu.RLock()
-	defer runtimeStateMu.RUnlock()
-	return GlobalMediaType
-}
-
 func SetPreferredSubtitleLanguage(language string) {
 	runtimeStateMu.Lock()
 	GlobalSubsLanguage = language

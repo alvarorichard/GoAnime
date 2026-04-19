@@ -85,21 +85,6 @@ func GetGlobalTracker() *LocalTracker {
 	return globalTracker
 }
 
-// CloseGlobalTracker closes the global tracker and clears the cache.
-// Should be called on application shutdown.
-func CloseGlobalTracker() error {
-	trackerMutex.Lock()
-	defer trackerMutex.Unlock()
-
-	if globalTracker != nil {
-		err := globalTracker.Close()
-		globalTracker = nil
-		globalTrackerPath = ""
-		return err
-	}
-	return nil
-}
-
 /*
 ────────────────────────────────────────────────────────────────────────────*
 │  Construtor e Inicialização                                                │

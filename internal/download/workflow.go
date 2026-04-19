@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -622,55 +621,4 @@ func extractIDFromURL(urlStr string) string {
 		return parts[len(parts)-1]
 	}
 	return ""
-}
-
-// ExampleMovieDownload demonstrates movie download
-func ExampleMovieDownload() {
-	// Command: goanime -dm "Inception"
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName: "Inception",
-		IsMovie:   true,
-		Quality:   "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("Movie download failed: %v", err)
-	}
-}
-
-// ExampleTVDownload demonstrates TV episode download
-func ExampleTVDownload() {
-	// Command: goanime -dm --type tv "Breaking Bad" 1 1
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:  "Breaking Bad",
-		IsTV:       true,
-		SeasonNum:  1,
-		EpisodeNum: 1,
-		Quality:    "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("TV download failed: %v", err)
-	}
-}
-
-// ExampleTVRangeDownload demonstrates TV episode range download
-func ExampleTVRangeDownload() {
-	// Command: goanime -dm -r "Game of Thrones" 1 1-5
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:    "Game of Thrones",
-		IsTV:         true,
-		IsRange:      true,
-		SeasonNum:    1,
-		StartEpisode: 1,
-		EndEpisode:   5,
-		Quality:      "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("TV range download failed: %v", err)
-	}
 }

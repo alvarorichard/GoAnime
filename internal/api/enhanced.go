@@ -42,12 +42,12 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 
 	normalizedSource := strings.ToLower(strings.TrimSpace(source))
 
-	switch {
-	case normalizedSource == "ptbr" || normalizedSource == "pt-br":
+	switch normalizedSource {
+	case "ptbr", "pt-br":
 		// Search only PT-BR sources (AnimeFire + Goyabu + SuperFlix) via dedicated method.
 		isPTBR = true
 		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu + SuperFlix)")
-	case normalizedSource == "":
+	case "":
 		// Default behavior: search all sources simultaneously (including FlixHQ).
 		scraperType = nil
 		util.Debug("Searching all sources", "query", name)

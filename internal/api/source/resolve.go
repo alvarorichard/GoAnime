@@ -191,14 +191,6 @@ func resolvePTBRSource(rawURL string) (ResolvedSource, bool) {
 	return ResolvedSource{}, false
 }
 
-func definitionForKind(kind SourceKind) (SourceDefinition, bool) {
-	if def, ok := resolverIndex.definitions[kind]; ok {
-		return def, true
-	}
-
-	return SourceDefinition{}, false
-}
-
 // IsAllAnimeShortID returns true if s looks like an AllAnime short ID.
 func IsAllAnimeShortID(value string) bool {
 	value = strings.TrimSpace(value)

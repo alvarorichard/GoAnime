@@ -159,22 +159,6 @@ func NewSFlixClient() *SFlixClient {
 	}
 }
 
-// NewSFlixClientWithContext creates a new SFlix client with custom settings
-func NewSFlixClientWithContext(timeout time.Duration, maxRetries int) *SFlixClient {
-	return &SFlixClient{
-		client: &http.Client{
-			Timeout:   timeout,
-			Transport: safeScraperTransport(timeout),
-		},
-		baseURL:        SFlixBase,
-		apiURL:         SFlixAPI,
-		fallbackAPIURL: SFlixFallbackAPI,
-		userAgent:      SFlixUserAgent,
-		maxRetries:     maxRetries,
-		retryDelay:     100 * time.Millisecond,
-	}
-}
-
 // SearchMedia searches for movies and TV shows on SFlix
 func (c *SFlixClient) SearchMedia(query string) ([]*SFlixMedia, error) {
 	return c.SearchMediaWithContext(context.Background(), query)

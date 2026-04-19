@@ -86,20 +86,6 @@ func (nav *AllAnimeNavigator) GetPreviousEpisode(currentEpisode string) (string,
 	return strconv.Itoa(prev), nil
 }
 
-// GetTotalEpisodes returns the total number of episodes
-func (nav *AllAnimeNavigator) GetTotalEpisodes() int {
-	return len(nav.episodes)
-}
-
-// ListAllEpisodes returns all available episode numbers
-func (nav *AllAnimeNavigator) ListAllEpisodes() []string {
-	result := make([]string, len(nav.episodes))
-	for i := range nav.episodes {
-		result[i] = strconv.Itoa(i + 1)
-	}
-	return result
-}
-
 // HandleAllAnimeEpisodeNavigation handles episode navigation for AllAnime
 func HandleAllAnimeEpisodeNavigation(anime *models.Anime, currentEpisodeNumber string, direction string) (*models.Episode, error) {
 	// Use cached navigator to avoid re-fetching the entire episode list

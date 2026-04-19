@@ -43,11 +43,6 @@ type EpisodeDownloader struct {
 	subtitlesPrepared bool
 }
 
-// NewEpisodeDownloader creates a new episode downloader
-func NewEpisodeDownloader(episodes []models.Episode, animeURL string) *EpisodeDownloader {
-	return NewEpisodeDownloaderWithAnime(episodes, animeURL, nil)
-}
-
 // NewEpisodeDownloaderWithAnime creates a new episode downloader with anime data for enhanced API support
 func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, anime *models.Anime) *EpisodeDownloader {
 	// Determine anime name and season

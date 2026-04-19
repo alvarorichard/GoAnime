@@ -297,16 +297,6 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 	}
 }
 
-// CheckIfSeriesEnhanced checks if anime is a series using enhanced API
-func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
-	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
-	if err != nil {
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
-		return false, 1
-	}
-	return series, totalEpisodes
-}
-
 // ChangeAnimeLocal allows the user to search for and select a new anime (local implementation to avoid circular imports)
 func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 	const maxRetries = 3

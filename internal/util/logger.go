@@ -258,15 +258,6 @@ func writeToFile(level log.Level, msg string, keyvals ...any) {
 	}
 }
 
-// GetLogFileWriter returns the log file as an io.Writer for external use (e.g., capturing subprocess output).
-// Returns nil if file logging is not active.
-func GetLogFileWriter() io.Writer {
-	if logFile == nil {
-		return nil
-	}
-	return logFile
-}
-
 // Debug logs a debug message (only when debug mode is enabled).
 // Debug messages are written exclusively to the log file to avoid
 // corrupting interactive TUI elements on the terminal.
@@ -297,25 +288,6 @@ func Warn(msg any, keyvals ...any) {
 		formatted := fmt.Sprintf("%v", msg)
 		Logger.Warn(formatted, keyvals...)
 		writeToFile(log.WarnLevel, formatted, keyvals...)
-	}
-}
-
-// Error logs an error message
-func Error(msg any, keyvals ...any) {
-	if Logger != nil {
-		formatted := fmt.Sprintf("%v", msg)
-		Logger.Error(formatted, keyvals...)
-		writeToFile(log.ErrorLevel, formatted, keyvals...)
-	}
-}
-
-// Fatal logs a fatal message and exits
-func Fatal(msg any, keyvals ...any) {
-	if Logger != nil {
-		formatted := fmt.Sprintf("%v", msg)
-		writeToFile(log.FatalLevel, formatted, keyvals...)
-		CloseLogFile() // ensure file is flushed before exit
-		Logger.Fatal(formatted, keyvals...)
 	}
 }
 
