@@ -25,16 +25,6 @@ func TestGetAnimeEpisodes_EmptyResult(t *testing.T) {
 	t.Logf("Got expected error: %v", err)
 }
 
-// TestGetAnimeEpisodesLegacy_EmptyResult verifies the legacy variant also
-// returns an error instead of fataling.
-func TestGetAnimeEpisodesLegacy_EmptyResult(t *testing.T) {
-	episodes, err := GetAnimeEpisodesLegacy("https://invalid.example.com/anime/does-not-exist")
-
-	assert.Error(t, err, "expected an error for invalid URL")
-	assert.Nil(t, episodes, "expected nil episodes on error")
-	t.Logf("Got expected error: %v", err)
-}
-
 // TestSearchAnime_InvalidName verifies that SearchAnime returns an error
 // instead of fataling when the search fails.
 func TestSearchAnime_InvalidName(t *testing.T) {

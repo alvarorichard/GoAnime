@@ -18,7 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/internal/streaming"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/lrstanley/go-ytdlp"
 )
@@ -36,10 +36,11 @@ type DownloadConfig struct {
 
 // EpisodeDownloader handles episode download operations
 type EpisodeDownloader struct {
-	config    DownloadConfig
-	episodes  []models.Episode
-	anime     *models.Anime            // Store anime data for enhanced API calls
-	seasonMap []metadata.SeasonMapping // AniList-based absolute→season map
+	config            DownloadConfig
+	episodes          []models.Episode
+	anime             *models.Anime            // Store anime data for enhanced API calls
+	seasonMap         []metadata.SeasonMapping // AniList-based absolute-to-season map
+	subtitlesPrepared bool
 }
 
 // NewEpisodeDownloader creates a new episode downloader
@@ -57,12 +58,12 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 	}
 
 	// Allow override from global download request
-	if util.GlobalDownloadRequest != nil {
-		if util.GlobalDownloadRequest.AnimeName != "" && animeName == "" {
-			animeName = util.GlobalDownloadRequest.AnimeName
+	if req := util.CurrentDownloadRequest(); req != nil {
+		if req.AnimeName != "" && animeName == "" {
+			animeName = req.AnimeName
 		}
-		if util.GlobalDownloadRequest.SeasonNum > 0 {
-			season = util.GlobalDownloadRequest.SeasonNum
+		if req.SeasonNum > 0 {
+			season = req.SeasonNum
 		}
 	}
 
@@ -102,7 +103,7 @@ func NewEpisodeDownloaderWithAnime(episodes []models.Episode, animeURL string, a
 			outputDir = util.FormatPlexEpisodeDir(baseDir, animeName, season, meta)
 		}
 	} else {
-		// Fallback to URL-based directory for backward compatibility
+		// Fallback to a URL-derived directory when no title metadata is available.
 		userHome, _ := os.UserHomeDir()
 		safeAnimeName := strings.ReplaceAll(player.DownloadFolderFormatter(animeURL), " ", "_")
 		outputDir = filepath.Join(userHome, ".local", "goanime", "downloads", "anime", safeAnimeName)
@@ -153,11 +154,13 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 		return d.promptPlayExisting(episodeNum, episodePath)
 	}
 
-	// Get video URL using enhanced method if possible, fallback to regular method
-	videoURL, err := d.getBestQualityURL(episode.URL)
+	// Get video URL using the canonical source-aware resolver.
+	videoURL, err := d.getBestQualityURL(episode)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
 	}
+
+	d.prepareDownloadSubtitles()
 
 	// Download with progress
 	return d.downloadWithProgress(videoURL, episodePath, episodeNum)
@@ -268,7 +271,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 			continue
 		}
 
-		videoURL, err := d.getBestQualityURL(episode.URL)
+		videoURL, err := d.getBestQualityURL(episode)
 		if err != nil {
 			util.Warnf("Failed to get video URL for episode %d: %v", epNum, err)
 			skippedEpisodes = append(skippedEpisodes, epNum)
@@ -301,8 +304,10 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 		return fmt.Errorf("no episodes could be resolved for download (failed: %v)", skippedEpisodes)
 	}
 
+	d.prepareDownloadSubtitles()
+
 	m.totalBytes = totalBytes
-	p := tui.NewProgram(m)
+	p := tea.NewProgram(m)
 
 	// Start downloads with progress tracking
 	downloadComplete := make(chan error, 1)
@@ -485,7 +490,16 @@ func (d *EpisodeDownloader) downloadEpisodeWithSharedProgress(videoURL, destPath
 		}
 	}
 
+	player.EmbedDownloadedSubtitles(destPath, nil)
 	return nil
+}
+
+func (d *EpisodeDownloader) prepareDownloadSubtitles() {
+	if d.subtitlesPrepared {
+		return
+	}
+	util.PreparePlaybackSubtitles()
+	d.subtitlesPrepared = true
 }
 
 // Helper methods
@@ -588,25 +602,17 @@ func (d *EpisodeDownloader) episodeDir(epNum int) string {
 	return d.config.OutputDir
 }
 
-func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
-	// Use existing player functionality to get video URL
-	videoURL, err := player.GetVideoURLForEpisode(episodeURL)
-	if err != nil {
-		return "", err
+func (d *EpisodeDownloader) getBestQualityURL(episode models.Episode) (string, error) {
+	if d.anime != nil {
+		return player.ResolveDownloadStreamURL(episode, d.anime)
 	}
-	return videoURL, nil
+
+	return player.GetVideoURLForEpisode(episode.URL)
 }
 
 func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
-	// Check if this is an AllAnime URL that might not have Content-Length header
-	// Based on ani-cli patterns
-	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
-		strings.Contains(url, "wixmp.com") ||
-		strings.Contains(url, "repackager.wixmp.com") ||
-		strings.Contains(url, "master.m3u8") ||
-		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "allanime.pro") ||
-		strings.Contains(url, "blogger.com")
+	// Some CDN and streaming endpoints do not expose Content-Length reliably.
+	needsStreamEstimate := requiresStreamEstimate(url)
 
 	// For streaming URLs that we know won't have Content-Length, return estimate immediately
 	if strings.Contains(url, ".m3u8") || strings.Contains(url, "master.m3u8") {
@@ -622,23 +628,26 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
-		if isAllAnimeURL {
-			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
-			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		if needsStreamEstimate {
+			fmt.Printf("HEAD request failed for stream URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil
 		}
 		return 0, err
 	}
 
-	// Add referer for AllAnime URLs (like ani-cli does)
-	if isAllAnimeURL {
-		req.Header.Set("Referer", "https://allmanga.to")
+	referer := defaultStreamReferer()
+	if referer == "" && needsStreamEstimate {
+		referer = streaming.DeriveReferer(url)
+	}
+	if referer != "" && needsStreamEstimate {
+		req.Header.Set("Referer", referer)
 	}
 
 	resp, err := httpClient.Do(req) // #nosec G704
 	if err != nil {
-		if isAllAnimeURL {
-			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
-			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		if needsStreamEstimate {
+			fmt.Printf("HEAD request failed for stream URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil
 		}
 		return 0, err
 	}
@@ -650,26 +659,25 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	contentLength := resp.Header.Get("Content-Length")
 	if contentLength == "" {
-		// For AllAnime URLs that might not have Content-Length, use fallback
-		if isAllAnimeURL {
-			fmt.Println("Content-Length header missing for AllAnime URL, using fallback estimate")
-			return d.estimateContentLengthForAllAnime(url, httpClient)
+		if needsStreamEstimate {
+			fmt.Println("Content-Length header missing for stream URL, using fallback estimate")
+			return d.estimateStreamContentLength(url, httpClient)
 		}
 		return 0, fmt.Errorf("content-length header missing")
 	}
 	return strconv.ParseInt(contentLength, 10, 64)
 }
 
-// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
-func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+// estimateStreamContentLength provides a fallback size estimate for streaming endpoints.
+func (d *EpisodeDownloader) estimateStreamContentLength(url string, client *http.Client) (int64, error) {
 	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
-	if strings.Contains(url, ".m3u8") {
+	if streaming.LooksLikeHLS(url) {
 		util.Debugf("HLS stream detected, using estimated size for download")
 		// Return an estimated size for a typical episode (500MB)
 		return 500 * 1024 * 1024, nil
 	}
 
-	// For other AllAnime URLs, try to get partial content to estimate size
+	// For other stream endpoints, try to get partial content to estimate size
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, err
@@ -706,6 +714,17 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 	return 300 * 1024 * 1024, nil // 300MB default
 }
 
+func defaultStreamReferer() string {
+	if referer := util.GetGlobalReferer(); referer != "" {
+		return referer
+	}
+	return ""
+}
+
+func requiresStreamEstimate(url string) bool {
+	return streaming.NeedsContentLengthEstimate(url)
+}
+
 // downloadWithProgress downloads a single episode with progress bar
 func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, episodeNum int) error {
 	// Ensure output directory exists (may vary per episode with season maps)
@@ -728,7 +747,7 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 
 	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
-	p := tui.NewProgram(m)
+	p := tea.NewProgram(m)
 
 	// Start download in goroutine with proper progress tracking
 	downloadComplete := make(chan error, 1)
@@ -781,6 +800,7 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 
 	fmt.Printf("\nEpisode %d downloaded successfully!\n", episodeNum)
 	printDownloadLocation(episodePath)
+	player.EmbedDownloadedSubtitles(episodePath, nil)
 	return d.promptPlayDownloaded(episodeNum, episodePath)
 }
 
@@ -794,26 +814,25 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 	// Inspired by ani-cli download logic
 	// Check URL type and use appropriate download method
 
-	// For m3u8 streams (HLS) - use yt-dlp like ani-cli
-	if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") {
+	// HLS-like streams are best handled by yt-dlp.
+	if streaming.LooksLikeHLS(videoURL) {
 		fmt.Println("Detected HLS stream, using yt-dlp download (ani-cli style)")
 		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
 	}
 
-	// For wixmp.com URLs (common in AllAnime) - use yt-dlp
-	if strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
+	// Some CDN mirrors are more reliable through yt-dlp.
+	if streaming.IsWixmpURL(videoURL) {
 		fmt.Println("Detected wixmp URL, using yt-dlp download")
 		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
 	}
 
-	// For blogger.com URLs - use yt-dlp
-	if strings.Contains(videoURL, "blogger.com") {
+	if streaming.IsBloggerStreamURL(videoURL) {
 		fmt.Println("Detected blogger URL, using yt-dlp download")
 		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
 	}
 
-	// For sharepoint URLs (AllAnime) - try HTTP first, fallback to yt-dlp
-	if strings.Contains(videoURL, "sharepoint.com") {
+	// SharePoint links often serve direct media but may still need yt-dlp fallback.
+	if streaming.IsSharePointURL(videoURL) {
 		fmt.Println("Detected SharePoint URL, trying HTTP download first")
 		err := d.downloadHTTPWithProgress(videoURL, destPath, progressModel, program)
 		if err != nil {
@@ -823,9 +842,8 @@ func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath strin
 		return nil
 	}
 
-	// For any AllAnime URL, try yt-dlp as default
-	if strings.Contains(videoURL, "allanime") || strings.Contains(videoURL, "allmanga") {
-		fmt.Println("Detected AllAnime URL, using yt-dlp download")
+	if streaming.IsMirrorStreamURL(videoURL) {
+		fmt.Println("Detected mirrored stream URL, using yt-dlp download")
 		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
 	}
 

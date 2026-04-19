@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"sort"
@@ -58,21 +59,41 @@ var (
 
 // GoyabuClient handles interactions with goyabu.io
 type GoyabuClient struct {
-	client     *http.Client
-	baseURL    string
-	userAgent  string
-	maxRetries int
-	retryDelay time.Duration
+	client         *http.Client
+	fallbackClient *http.Client
+	baseURL        string
+	userAgent      string
+	maxRetries     int
+	retryDelay     time.Duration
 }
 
 // NewGoyabuClient creates a new Goyabu client
 func NewGoyabuClient() *GoyabuClient {
 	return &GoyabuClient{
-		client:     util.NewFastClient(),
-		baseURL:    goyabuBase,
-		userAgent:  UserAgent,
-		maxRetries: 2,
-		retryDelay: 300 * time.Millisecond,
+		client:         util.NewFastClient(),
+		fallbackClient: newGoyabuFallbackClient(15 * time.Second),
+		baseURL:        goyabuBase,
+		userAgent:      UserAgent,
+		maxRetries:     2,
+		retryDelay:     300 * time.Millisecond,
+	}
+}
+
+func newGoyabuFallbackClient(timeout time.Duration) *http.Client {
+	jar, _ := cookiejar.New(nil)
+
+	return &http.Client{
+		Timeout: timeout,
+		Jar:     jar,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          32,
+			MaxIdleConnsPerHost:   8,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
 	}
 }
 
@@ -500,29 +521,10 @@ func (c *GoyabuClient) parseEpisodesFromJS(html string) []models.Episode {
 func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	util.Debug("Goyabu stream URL", "url", episodeURL)
 
-	// Step 1: Fetch the episode page to get the blogger token
-	req, err := http.NewRequest("GET", episodeURL, nil)
+	pageHTML, err := c.fetchEpisodePageHTML(episodeURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	c.decorateRequest(req)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch episode page: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if err := checkHTTPStatus(resp, "Goyabu episode page"); err != nil {
 		return "", err
 	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	pageHTML := string(body)
 
 	// Strategy 1: Look for direct video URL in the page
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(pageHTML))
@@ -570,6 +572,72 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find stream URL in episode page")
+}
+
+func (c *GoyabuClient) fetchEpisodePageHTML(episodeURL string) (string, error) {
+	pageHTML, err := c.fetchEpisodePageHTMLWithClient(c.client, episodeURL)
+	if err == nil {
+		return pageHTML, nil
+	}
+
+	if c.fallbackClient == nil || !shouldFallbackGoyabuClient(err) {
+		return "", err
+	}
+
+	util.Debug("Goyabu episode page retrying with fallback client", "url", episodeURL, "error", err)
+	fallbackHTML, fallbackErr := c.fetchEpisodePageHTMLWithClient(c.fallbackClient, episodeURL)
+	if fallbackErr == nil {
+		return fallbackHTML, nil
+	}
+
+	return "", err
+}
+
+func (c *GoyabuClient) fetchEpisodePageHTMLWithClient(client *http.Client, episodeURL string) (string, error) {
+	req, err := http.NewRequest("GET", episodeURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	c.decorateRequest(req)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch episode page: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := checkHTTPStatus(resp, "Goyabu episode page"); err != nil {
+		return "", err
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err == nil {
+		if err := checkChallengeDocument(doc, "Goyabu episode page"); err != nil {
+			return "", err
+		}
+	}
+
+	return string(body), nil
+}
+
+func shouldFallbackGoyabuClient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrSourceUnavailable) {
+		return true
+	}
+
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "request canceled") ||
+		strings.Contains(lower, "forçado o cancelamento") ||
+		strings.Contains(lower, "wsarecv")
 }
 
 // extractPlayerData extracts the blogger_token and Blogger embed URL from the page.

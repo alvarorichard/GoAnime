@@ -1,8 +1,8 @@
 // Package models contains anime-specific data structures
 package models
 
-// Anime represents an anime series with its metadata
-// For backwards compatibility, this is an alias to Media
+// Anime is the shared media model used by the anime-oriented flows.
+// It aliases Media so anime and movie/TV paths operate on the same payload.
 type Anime = Media
 
 // AniListResponse represents the response from AniList GraphQL API

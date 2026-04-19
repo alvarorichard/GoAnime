@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -47,6 +49,25 @@ func (m *mockHTTPClient) addAniListResponse(media aniListMedia) {
 		Body:       io.NopCloser(bytes.NewReader(body)),
 	}
 }
+
+func (m *mockHTTPClient) addAniListStatusError(status int) {
+	m.responses["POST:graphql.anilist.co"] = &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(`{"errors":[{"message":"rate limit exceeded"}]}`)),
+	}
+}
+
+func (m *mockHTTPClient) addAniListMalformedJSON() {
+	m.responses["POST:graphql.anilist.co"] = &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{not valid json`)),
+	}
+}
+
+// errHTTPClient simulates a transport-level failure (DNS failure, connection refused).
+type errHTTPClient struct{ err error }
+
+func (e *errHTTPClient) Do(_ *http.Request) (*http.Response, error) { return nil, e.err }
 
 func makeMedia(id, malID int, english, romaji string, year, episodes int) aniListMedia {
 	m := aniListMedia{
@@ -483,5 +504,195 @@ func TestEnrichAnime_JujutsuKaisenSeason2InfersCurrentSeasonFromMockedAniList(t 
 	}
 	if seasonMap[1].Season != 2 || seasonMap[1].StartEp != 24 || seasonMap[1].EndEp != 46 {
 		t.Fatalf("seasonMap[1] = %+v, want season 2 range 24-46", seasonMap[1])
+	}
+}
+
+// --- Error / edge-case scenarios ---
+
+// Bug scenario: AniList returns HTTP 429 (rate-limit). EnrichFromAniList used to
+// silently return empty metadata. Fix: non-200 must return a descriptive error.
+func TestEnrichFromAniList_HTTP429ReturnsError(t *testing.T) {
+	mock := newMockClient()
+	mock.addAniListStatusError(http.StatusTooManyRequests)
+
+	enricher := NewEnricherWithClient(mock)
+	_, err := enricher.EnrichFromAniList(context.Background(), "Naruto")
+	if err == nil {
+		t.Fatal("expected error for HTTP 429, got nil")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Fatalf("error should mention status 429, got: %v", err)
+	}
+}
+
+// Bug scenario: AniList returns HTTP 500 (server error). Must propagate as error,
+// not silently return empty metadata that triggers wrong downstream behavior.
+func TestEnrichFromAniList_HTTP500ReturnsError(t *testing.T) {
+	mock := newMockClient()
+	mock.addAniListStatusError(http.StatusInternalServerError)
+
+	enricher := NewEnricherWithClient(mock)
+	_, err := enricher.EnrichFromAniList(context.Background(), "Naruto")
+	if err == nil {
+		t.Fatal("expected error for HTTP 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("error should mention status 500, got: %v", err)
+	}
+}
+
+// Bug scenario: AniList returns HTTP 200 with a malformed JSON body.
+// The JSON decoder must surface this as an error, not return zero-value metadata
+// that silently causes wrong file naming downstream.
+func TestEnrichFromAniList_MalformedJSONReturnsError(t *testing.T) {
+	mock := newMockClient()
+	mock.addAniListMalformedJSON()
+
+	enricher := NewEnricherWithClient(mock)
+	_, err := enricher.EnrichFromAniList(context.Background(), "Naruto")
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+}
+
+// Bug scenario: transport-level network error (DNS failure, connection refused).
+// Must be wrapped and propagated so callers can distinguish transient failures.
+func TestEnrichFromAniList_NetworkErrorPropagates(t *testing.T) {
+	netErr := errors.New("dial tcp: connection refused")
+	enricher := NewEnricherWithClient(&errHTTPClient{err: netErr})
+
+	_, err := enricher.EnrichFromAniList(context.Background(), "Naruto")
+	if err == nil {
+		t.Fatal("expected network error to propagate, got nil")
+	}
+	if !errors.Is(err, netErr) {
+		t.Fatalf("expected original netErr in chain, got: %v", err)
+	}
+}
+
+// Bug scenario: anime name collapses to empty string after cleaning tags.
+// Example: an entry named "[PT-BR]" with no actual title.
+// EnrichFromAniList must reject this upfront rather than send a blank query to AniList
+// (which would return random results and corrupt the metadata).
+func TestEnrichFromAniList_EmptyNameAfterCleaningReturnsError(t *testing.T) {
+	enricher := NewEnricherWithClient(newMockClient())
+
+	for _, name := range []string{"[PT-BR]", "(Dublado)", "[AnimeFire] (Legendado)", ""} {
+		t.Run(fmt.Sprintf("name=%q", name), func(t *testing.T) {
+			_, err := enricher.EnrichFromAniList(context.Background(), name)
+			if err == nil {
+				t.Fatalf("expected error for empty name %q, got nil", name)
+			}
+		})
+	}
+}
+
+// Bug scenario: AniList returns a valid response but with ID=0 (no search result).
+// Must return an error, not empty metadata, so callers know the lookup failed.
+func TestEnrichFromAniList_NoResultReturnsError(t *testing.T) {
+	mock := newMockClient()
+	// Response with ID=0 → no match found
+	mock.responses["POST:graphql.anilist.co"] = &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"data":{"Media":{"id":0}}}`)),
+	}
+
+	enricher := NewEnricherWithClient(mock)
+	_, err := enricher.EnrichFromAniList(context.Background(), "NonExistentAnime12345")
+	if err == nil {
+		t.Fatal("expected error when AniList returns no result, got nil")
+	}
+}
+
+// EnrichAnime treats AniList failures as non-fatal: it should return (nil, nil)
+// so the caller can still continue with scraped data.
+func TestEnrichAnime_AniListFailureIsNonFatal(t *testing.T) {
+	mock := newMockClient()
+	mock.addAniListStatusError(http.StatusServiceUnavailable)
+
+	enricher := NewEnricherWithClient(mock)
+	anime := &models.Anime{Name: "Naruto"}
+	seasonMap, err := enricher.EnrichAnime(context.Background(), anime)
+	if err != nil {
+		t.Fatalf("EnrichAnime must treat AniList failures as non-fatal, got: %v", err)
+	}
+	if seasonMap != nil {
+		t.Fatalf("expected nil seasonMap on AniList failure, got: %v", seasonMap)
+	}
+}
+
+// EnrichAnime with nil anime must not panic — callers sometimes pass nil as a
+// defensive measure and expect a graceful no-op.
+func TestEnrichAnime_NilAnimeIsNoop(t *testing.T) {
+	enricher := NewEnricherWithClient(newMockClient())
+	seasonMap, err := enricher.EnrichAnime(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error for nil anime: %v", err)
+	}
+	if seasonMap != nil {
+		t.Fatalf("expected nil seasonMap for nil anime, got: %v", seasonMap)
+	}
+}
+
+// AbsoluteToSeason with an empty SeasonMap must fall back to season 1
+// (single-season anime) rather than returning 0 or panicking.
+func TestAbsoluteToSeason_EmptyMapFallsBackToSeason1(t *testing.T) {
+	t.Parallel()
+
+	meta := &AnimeMetadata{SeasonMap: nil}
+	for _, ep := range []int{1, 13, 100} {
+		s, e := meta.AbsoluteToSeason(ep)
+		if s != 1 {
+			t.Errorf("ep %d: season = %d, want 1", ep, s)
+		}
+		if e != ep {
+			t.Errorf("ep %d: episode = %d, want %d", ep, e, ep)
+		}
+	}
+}
+
+// AbsoluteToSeason for an episode beyond the last season's EndEp must put it
+// in the last season rather than returning season 0.
+func TestAbsoluteToSeason_EpisodeBeyondLastSeason(t *testing.T) {
+	t.Parallel()
+
+	meta := &AnimeMetadata{SeasonMap: []SeasonMapping{
+		{Season: 1, StartEp: 1, EndEp: 13, EpisodeCount: 13},
+		{Season: 2, StartEp: 14, EndEp: 26, EpisodeCount: 13},
+	}}
+
+	// Episode 99 is beyond season 2's EndEp=26.
+	s, e := meta.AbsoluteToSeason(99)
+	if s != 2 {
+		t.Fatalf("ep 99: season = %d, want 2 (last season)", s)
+	}
+	// Local episode within last season: 99 - 14 + 1 = 86
+	if e != 86 {
+		t.Fatalf("ep 99: local episode = %d, want 86", e)
+	}
+}
+
+// cleanSearchName edge cases: tags-only names collapse to empty;
+// mixed-case parenthetical tags are stripped; surrounding whitespace trimmed.
+func TestCleanSearchName_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct{ input, want string }{
+		{"[PT-BR] Naruto (Dublado)", "Naruto"},
+		{"[English] One Piece (Dub)", "One Piece"},
+		{"Black Clover (Completo)", "Black Clover"},
+		{"  Attack on Titan  ", "Attack on Titan"},
+		{"[AnimeFire]", ""},
+		{"(Dublado)", ""},
+		{"Dragon Ball Z (Dual Audio)", "Dragon Ball Z"},
+		{"Fullmetal Alchemist: Brotherhood", "Fullmetal Alchemist: Brotherhood"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			if got := cleanSearchName(tc.input); got != tc.want {
+				t.Fatalf("cleanSearchName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
 	}
 }

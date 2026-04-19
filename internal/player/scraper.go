@@ -18,6 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/streaming"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	g "github.com/enetx/g"
@@ -28,8 +29,6 @@ import (
 // Pre-compiled regexes for player scraper (avoid per-call compilation)
 var (
 	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-	isNumericRe         = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-	hasLetterRe         = regexp.MustCompile(`[A-Za-z]`)
 	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
 	bloggerPatternRe    = regexp.MustCompile(`https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)`)
 	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
@@ -79,16 +78,8 @@ func DownloadFolderFormatter(str string) string {
 
 // getContentLength retrieves the content length of the given URL.
 func getContentLength(url string, client *http.Client) (int64, error) {
-	// Check if this is a URL that might not have Content-Length header
-	isKnownStreamURL := strings.Contains(url, "sharepoint.com") ||
-		strings.Contains(url, "wixmp.com") ||
-		strings.Contains(url, "master.m3u8") ||
-		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "allanime.pro") ||
-		strings.Contains(url, "animefire") ||
-		strings.Contains(url, "blogger.com") ||
-		strings.Contains(url, "animesfire") ||
-		strings.Contains(url, "repackager.wixmp.com")
+	// Check if this is a stream URL that might not have Content-Length header
+	isKnownStreamURL := isKnownStreamingContentURL(url)
 
 	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
 	req, err := http.NewRequest("HEAD", url, nil)
@@ -131,7 +122,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		// For known streaming URLs that might not have Content-Length, return a default size
 		if isKnownStreamURL {
 			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
-			return estimateContentLengthForAllAnime(url, client)
+			return estimateContentLengthForStreamURL(url, client)
 		}
 		// For any other URL without Content-Length, use a reasonable default instead of failing
 		util.Debugf("Content-Length header missing, using default estimate")
@@ -149,16 +140,21 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	return contentLength, nil
 }
 
-// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
-func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+func isKnownStreamingContentURL(url string) bool {
+	return streaming.NeedsContentLengthEstimate(url)
+}
+
+// estimateContentLengthForStreamURL provides a fallback method to estimate
+// content length for CDN and streaming URLs that omit Content-Length.
+func estimateContentLengthForStreamURL(url string, client *http.Client) (int64, error) {
 	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
-	if strings.Contains(url, ".m3u8") {
+	if streaming.LooksLikeHLS(url) {
 		util.Debugf("HLS stream detected, using estimated size for download")
 		// Return an estimated size for a typical episode (500MB)
 		return 500 * 1024 * 1024, nil
 	}
 
-	// For other AllAnime URLs, try to get partial content to estimate size
+	// For other stream URLs, try to get partial content to estimate size
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, err
@@ -226,7 +222,6 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		}
 	}
 
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: calling fuzzyfinder.Find with %d items", len(displayList))
 	idx, err := tui.Find(
 		displayList,
 		func(i int) string {
@@ -234,7 +229,6 @@ func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, er
 		},
 		fuzzyfinder.WithPromptString("Select the episode: "),
 	)
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: fuzzyfinder returned idx=%d, err=%v", idx, err)
 	if err != nil {
 		// Treat abort (no selection / Escape / no match) as back request
 		if errors.Is(err, fuzzyfinder.ErrAbort) {
@@ -332,7 +326,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		}
 
 		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
-		if isLikelyAllAnimeID(episode.URL) {
+		if api.IsAllAnimeShortID(episode.URL) {
 			if util.IsDebug {
 				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
 			}
@@ -348,69 +342,49 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 			if episode.Number == "" {
 				episode.Number = "1"
 			}
-			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
+			return api.GetEpisodeStreamURL(episode, tmpAnime, util.GetGlobalQuality())
 		}
 
 		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
-	// Try AnimeDrive enhanced navigation if applicable
-	if isAnimeDriveSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			// Validate the URL is a playable video, not an iframe/embed page
-			if isPlayableVideoURL(streamURL) {
-				return streamURL, nil
-			}
-			// Try to extract actual video from intermediate URL
-			if needsVideoExtraction(streamURL) {
-				resolved, resolveErr := extractActualVideoURL(streamURL)
-				if resolveErr == nil && resolved != "" {
-					return resolved, nil
-				}
-			}
-			util.Debug("AnimeDrive returned non-playable URL", "url", streamURL)
-			return "", fmt.Errorf("AnimeDrive returned non-playable URL: %s", streamURL)
-		}
-		// Check if user requested to go back from server selection
+	resolved, err := api.ResolveSource(anime)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve anime source: %w", err)
+	}
+
+	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GetGlobalQuality())
+
+	if err != nil {
 		if errors.Is(err, scraper.ErrBackRequested) {
 			return "", ErrBackToEpisodeSelection
 		}
-		// For AnimeDrive, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AnimeDrive stream URL: %w", err)
-	}
 
-	// Try FlixHQ for movies/TV shows
-	if isFlixHQSourcePlayer(anime) {
-		util.Debug("FlixHQ source detected", "source", anime.Source, "mediaType", anime.MediaType, "episodeURL", episode.URL)
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			util.Debug("FlixHQ stream URL obtained", "url", streamURL)
-			return streamURL, nil
-		}
-		util.Debug("FlixHQ stream URL failed", "error", err)
-		// For FlixHQ, return the error - legacy method won't work with DataIDs
-		return "", fmt.Errorf("failed to get FlixHQ stream URL: %w", err)
-	}
-
-	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
-		if err == nil {
-			return streamURL, nil
-		}
-	}
-
-	// Use the regular enhanced API to get stream URL
-	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-	if err != nil {
-		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
+		if strings.Contains(episode.URL, "http") &&
+			resolved.Kind != api.SourceAllAnime &&
+			resolved.Kind != api.SourceAnimeDrive &&
+			resolved.Kind != api.SourceGoyabu {
 			return GetVideoURLForEpisode(episode.URL)
 		}
-		// For AllAnime, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+
+		return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
+	}
+
+	if resolved.Kind == api.SourceAnimeDrive {
+		// AnimeDrive sometimes returns an intermediate page instead of the final
+		// media URL, so validate it before continuing with the generic extraction path.
+		if isPlayableVideoURL(streamURL) {
+			return streamURL, nil
+		}
+		if needsVideoExtraction(streamURL) {
+			resolvedURL, resolveErr := extractActualVideoURL(streamURL)
+			if resolveErr == nil && resolvedURL != "" {
+				return resolvedURL, nil
+			}
+		}
+		util.Debug("AnimeDrive returned non-playable URL", "url", streamURL)
+		return "", fmt.Errorf("AnimeDrive returned non-playable URL: %s", streamURL)
 	}
 
 	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire
@@ -426,87 +400,6 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	}
 
 	return streamURL, nil
-}
-
-// Helper function to check if anime is from AllAnime source (player module)
-func isAllAnimeSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") &&
-		!strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if anime is from AnimeDrive source (player module)
-func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AnimeDrive" {
-		return true
-	}
-	if strings.Contains(anime.Name, "[AnimeDrive]") {
-		return true
-	}
-	if strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-	return false
-}
-
-// Helper function to check if anime is from FlixHQ source (player module)
-func isFlixHQSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "FlixHQ" {
-		return true
-	}
-	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		return true
-	}
-	if strings.Contains(anime.URL, "flixhq") {
-		return true
-	}
-	return false
-}
-
-// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
-func isNumericString(s string) bool {
-	if s == "" {
-		return false
-	}
-	return isNumericRe.MatchString(s)
-}
-
-// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
-func isLikelyAllAnimeID(s string) bool {
-	if strings.Contains(s, "http") {
-		return false
-	}
-	if isNumericString(s) {
-		return false
-	}
-	// Typical AllAnime IDs are short-ish alphanumeric strings
-	if len(s) >= 6 && len(s) < 30 {
-		// Must contain at least one letter
-		return hasLetterRe.MatchString(s)
-	}
-	return false
 }
 
 func extractVideoURL(url string) (string, error) {
@@ -891,7 +784,6 @@ func StopBloggerProxy() {
 	bloggerProxy.mu.Lock()
 	defer bloggerProxy.mu.Unlock()
 	if bloggerProxy.server != nil {
-		util.Debugf("Stopping Blogger proxy on port %s", bloggerProxy.port)
 		_ = bloggerProxy.server.Close()
 		bloggerProxy.server = nil
 		bloggerProxy.port = ""
@@ -924,14 +816,15 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 
 	// Create a shared surf client for the proxy (reused across requests).
-	// surf defaults to a 30s timeout which maps to http.Client.Timeout —
-	// a full-request deadline that kills streaming for large files.
-	// Zero it out after converting to *http.Client so the Chrome TLS
-	// transport is preserved but there's no request-level deadline.
+	// The Google video CDN commonly issues redirects before the actual media
+	// response, so the proxy must follow redirects while preserving Chrome TLS
+	// impersonation. surf defaults to a 30s timeout which maps to
+	// http.Client.Timeout — a full-request deadline that kills streaming for
+	// large files. Zero it out after converting to *http.Client so the Chrome
+	// TLS transport is preserved but there's no request-level deadline.
 	proxyClient := surf.NewClient().
 		Builder().
 		Impersonate().Chrome().
-		NotFollowRedirects().
 		Build().
 		Unwrap().
 		Std()
@@ -948,7 +841,6 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 			}
 			upResp, err := proxyClient.Do(upReq)
 			if err != nil {
-				util.Debugf("BloggerProxy HEAD err: %v", err)
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
@@ -959,7 +851,6 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 				}
 			}
 			w.WriteHeader(upResp.StatusCode)
-			util.Debugf("BloggerProxy HEAD -> %d", upResp.StatusCode)
 
 		case http.MethodGet:
 			upReq, err := http.NewRequest(http.MethodGet, videoURL, nil)
@@ -983,9 +874,7 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 				}
 			}
 			w.WriteHeader(upResp.StatusCode)
-			util.Debugf("BloggerProxy GET Range=%s -> %d", r.Header.Get("Range"), upResp.StatusCode)
-			written, _ := io.Copy(w, upResp.Body)
-			util.Debugf("BloggerProxy GET done: %db", written)
+			_, _ = io.Copy(w, upResp.Body)
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1006,7 +895,6 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	}()
 
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%s/blogger_proxy", port)
-	util.Debugf("Blogger proxy started on port %s", port)
 
 	// Readiness check with fast polling — exit as soon as proxy responds
 	httpClient := &http.Client{Timeout: 2 * time.Second}
@@ -1015,13 +903,10 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	for {
 		select {
 		case <-deadline:
-			util.Debugf("Proxy readiness check timed out")
 			return proxyURL, nil // proceed anyway — mpv will retry
 		default:
 			headResp, headErr := httpClient.Head(proxyURL)
 			if headErr == nil {
-				util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s",
-					headResp.StatusCode, headResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Length"))
 				_ = headResp.Body.Close()
 				return proxyURL, nil
 			}
@@ -1111,11 +996,12 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			// specific quality during this session (e.g. "720p").
 			// When GlobalQuality is "best" (the default) we still show the
 			// interactive prompt so the user can choose manually.
-			if util.GlobalQuality != "" && util.GlobalQuality != "best" {
-				selectedSrc := selectQualityFromOptions(videoResponse.Data, util.GlobalQuality)
+			sessionQuality := util.GetGlobalQuality()
+			if sessionQuality != "" && sessionQuality != "best" {
+				selectedSrc := selectQualityFromOptions(videoResponse.Data, sessionQuality)
 				if selectedSrc != "" {
 					if util.IsDebug {
-						util.Debugf("Auto-selected quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
+						util.Debugf("Auto-selected quality preference: %s -> %s", sessionQuality, selectedSrc)
 					}
 					return selectedSrc, nil
 				}
@@ -1153,13 +1039,13 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			}
 
 			// Store the selected quality for future use in this session
-			if util.GlobalQuality == "" || util.GlobalQuality == "best" {
+			if sessionQuality == "" || sessionQuality == "best" {
 				// Extract quality label from selected option
 				for _, v := range videoResponse.Data {
 					if v.Src == selectedSrc {
-						util.GlobalQuality = strings.ToLower(v.Label)
+						util.SetGlobalQuality(strings.ToLower(v.Label))
 						if util.IsDebug {
-							util.Debugf("Storing selected quality for session: %s", util.GlobalQuality)
+							util.Debugf("Storing selected quality for session: %s", util.GetGlobalQuality())
 						}
 						break
 					}

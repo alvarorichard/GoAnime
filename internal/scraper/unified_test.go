@@ -68,6 +68,59 @@ func createTestManager(allAnimeMock, animefireMock *MockScraper) *ScraperManager
 	return manager
 }
 
+func TestGetScraper_LazyFactoryCachesInstance(t *testing.T) {
+	t.Parallel()
+
+	var created atomic.Int32
+	manager := &ScraperManager{
+		scrapers: make(map[ScraperType]UnifiedScraper),
+		factories: map[ScraperType]scraperFactory{
+			GoyabuType: func() UnifiedScraper {
+				created.Add(1)
+				return &MockScraper{scraperType: GoyabuType}
+			},
+		},
+	}
+
+	first, err := manager.GetScraper(GoyabuType)
+	require.NoError(t, err)
+
+	second, err := manager.GetScraper(GoyabuType)
+	require.NoError(t, err)
+
+	assert.Same(t, first, second)
+	assert.Equal(t, int32(1), created.Load())
+}
+
+func TestGetScraper_LazyFactoryConcurrentSingleInit(t *testing.T) {
+	t.Parallel()
+
+	var created atomic.Int32
+	manager := &ScraperManager{
+		scrapers: make(map[ScraperType]UnifiedScraper),
+		factories: map[ScraperType]scraperFactory{
+			AllAnimeType: func() UnifiedScraper {
+				created.Add(1)
+				time.Sleep(10 * time.Millisecond)
+				return &MockScraper{scraperType: AllAnimeType}
+			},
+		},
+	}
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := manager.GetScraper(AllAnimeType)
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(1), created.Load())
+}
+
 // =============================================================================
 // Test: Both sources return results successfully
 // =============================================================================

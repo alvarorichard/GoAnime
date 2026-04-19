@@ -248,7 +248,7 @@ func sanitizeSmartDest(p string) (string, error) {
 
 // validateSmartRangeInputs ensures correct source and quality defaulting
 func validateSmartRangeInputs(anime *models.Anime, startEp, endEp int, quality *string) error {
-	if !isAllAnimeSourceAPI(anime) {
+	if !IsAllAnimeSource(anime) {
 		return fmt.Errorf("AllAnime Smart Range is only available for AllAnime sources")
 	}
 	if quality != nil && *quality == "" {
@@ -328,15 +328,10 @@ func resolveStreamURLForEpisode(ep *models.Episode, anime *models.Anime, quality
 	if ep == nil || anime == nil {
 		return "", fmt.Errorf("nil episode or anime")
 	}
-	url, err := GetEpisodeStreamURLEnhanced(ep, anime, quality)
-	if err == nil && url != "" {
-		util.Debug("Stream URL resolved (enhanced)", "len", len(url))
-		return url, nil
-	}
-	url, err = GetEpisodeStreamURL(ep, anime, quality)
+	url, err := GetEpisodeStreamURL(ep, anime, quality)
 	if err != nil || url == "" {
-		return "", fmt.Errorf("fallback stream URL resolution failed: %w", err)
+		return "", fmt.Errorf("stream URL resolution failed: %w", err)
 	}
-	util.Debug("Stream URL resolved (fallback)", "len", len(url))
+	util.Debug("Stream URL resolved", "len", len(url))
 	return url, nil
 }

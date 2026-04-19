@@ -43,10 +43,13 @@ var (
 
 // SetGlobalSubtitles stores subtitles for the current playback session
 func SetGlobalSubtitles(subs []SubtitleInfo) {
-	GlobalSubtitles = subs
-	if len(subs) > 0 {
-		Debugf("Stored %d subtitle track(s) for playback", len(subs))
-		for i, sub := range subs {
+	playbackStateMu.Lock()
+	GlobalSubtitles = cloneSubtitleInfos(subs)
+	stored := cloneSubtitleInfos(GlobalSubtitles)
+	playbackStateMu.Unlock()
+	if len(stored) > 0 {
+		Debugf("Stored %d subtitle track(s) for playback", len(stored))
+		for i, sub := range stored {
 			Debugf("  Subtitle %d: %s (%s)", i+1, sub.Label, sub.Language)
 		}
 	}
@@ -54,12 +57,16 @@ func SetGlobalSubtitles(subs []SubtitleInfo) {
 
 // ClearGlobalSubtitles clears stored subtitles
 func ClearGlobalSubtitles() {
+	playbackStateMu.Lock()
 	GlobalSubtitles = nil
+	playbackStateMu.Unlock()
 }
 
 // SetGlobalReferer stores the referer for stream requests
 func SetGlobalReferer(referer string) {
+	playbackStateMu.Lock()
 	GlobalReferer = referer
+	playbackStateMu.Unlock()
 	if referer != "" {
 		Debugf("Stored referer for stream requests: %s", referer)
 	}
@@ -67,17 +74,23 @@ func SetGlobalReferer(referer string) {
 
 // GetGlobalReferer returns the stored referer
 func GetGlobalReferer() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalReferer
 }
 
 // ClearGlobalReferer clears the stored referer
 func ClearGlobalReferer() {
+	playbackStateMu.Lock()
 	GlobalReferer = ""
+	playbackStateMu.Unlock()
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "9Anime", "AllAnime")
 func SetGlobalAnimeSource(source string) {
+	playbackStateMu.Lock()
 	GlobalAnimeSource = source
+	playbackStateMu.Unlock()
 	if source != "" {
 		Debugf("Stored anime source: %s", source)
 	}
@@ -85,12 +98,14 @@ func SetGlobalAnimeSource(source string) {
 
 // GetGlobalAnimeSource returns the stored anime source
 func GetGlobalAnimeSource() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalAnimeSource
 }
 
 // Is9AnimeSource returns true if the current stream is from 9Anime
 func Is9AnimeSource() bool {
-	return GlobalAnimeSource == "9Anime"
+	return GetGlobalAnimeSource() == "9Anime"
 }
 
 // subtitleOption maps a display label to a sentinel value for subtitle selection.
@@ -104,14 +119,15 @@ type subtitleOption struct {
 // subsequent call to GetSubtitleArgs only includes the selected tracks.
 // If there are 0 or 1 subtitles available, no menu is shown.
 func SelectSubtitles() {
-	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
+	tracks := GetGlobalSubtitles()
+	if SubtitlesDisabled() || len(tracks) <= 1 {
 		return
 	}
 
 	// Build options: "All", each individual track, "None"
 	var items []subtitleOption
 	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range GlobalSubtitles {
+	for i, sub := range tracks {
 		label := sub.Label
 		if label == "" {
 			label = sub.Language
@@ -135,15 +151,15 @@ func SelectSubtitles() {
 	switch selected {
 	case -1:
 		// Keep all — no change needed
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+		Debugf("User selected all %d subtitle track(s)", len(tracks))
 	case -2:
 		// Disable subtitles
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		Debugf("User disabled subtitles")
 	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
+		if selected >= 0 && selected < len(tracks) {
+			kept := tracks[selected]
+			SetGlobalSubtitles([]SubtitleInfo{kept})
 			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
 		}
 	}
@@ -156,13 +172,13 @@ func SelectSubtitles() {
 // It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
 // the correct arguments for mpv.
 func PromptSubtitleLanguage() {
-	if GlobalNoSubs {
+	if SubtitlesDisabled() {
 		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		return
 	}
 
-	tracks := GlobalSubtitles
+	tracks := GetGlobalSubtitles()
 
 	// No tracks available — inform the user and continue without subtitles
 	if len(tracks) == 0 {
@@ -197,7 +213,7 @@ func PromptSubtitleLanguage() {
 		}
 
 		if items[idx].Value == -2 {
-			GlobalSubtitles = nil
+			ClearGlobalSubtitles()
 			fmt.Println("Subtitles: disabled")
 			Debugf("User disabled subtitles")
 		} else {
@@ -237,17 +253,17 @@ func PromptSubtitleLanguage() {
 	switch selected {
 	case -1:
 		// Keep all — no change needed
-		fmt.Printf("Subtitles: all (%d tracks)\n", len(GlobalSubtitles))
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+		fmt.Printf("Subtitles: all (%d tracks)\n", len(tracks))
+		Debugf("User selected all %d subtitle track(s)", len(tracks))
 	case -2:
 		// Disable subtitles
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		fmt.Println("Subtitles: disabled")
 		Debugf("User disabled subtitles")
 	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
+		if selected >= 0 && selected < len(tracks) {
+			kept := tracks[selected]
+			SetGlobalSubtitles([]SubtitleInfo{kept})
 			fmt.Printf("Subtitles: %s\n", kept.Label)
 			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
 		}
@@ -259,13 +275,14 @@ func PromptSubtitleLanguage() {
 // - Single subtitle: --sub-file='URL'
 // - Multiple subtitles: --sub-files='URL1:URL2:...'
 func GetSubtitleArgs() []string {
-	if GlobalNoSubs || len(GlobalSubtitles) == 0 {
+	tracks := GetGlobalSubtitles()
+	if SubtitlesDisabled() || len(tracks) == 0 {
 		return nil
 	}
 
 	// Collect all subtitle URLs
 	var urls []string
-	for _, sub := range GlobalSubtitles {
+	for _, sub := range tracks {
 		if sub.URL != "" {
 			urls = append(urls, sub.URL)
 		}
@@ -452,13 +469,13 @@ func FlagParser() (string, error) {
 	}
 
 	// Store global configurations
-	GlobalSource = *sourceFlag
-	GlobalQuality = *qualityFlag
-	GlobalMediaType = *mediaTypeFlag
-	GlobalSubsLanguage = *subsLanguageFlag
-	GlobalAudioLanguage = *audioLanguageFlag
-	GlobalNoSubs = *noSubsFlag
-	GlobalOutputDir = *outputDirFlag
+	SetGlobalSource(*sourceFlag)
+	SetGlobalQuality(*qualityFlag)
+	SetGlobalMediaType(*mediaTypeFlag)
+	SetPreferredSubtitleLanguage(*subsLanguageFlag)
+	SetPreferredAudioLanguage(*audioLanguageFlag)
+	SetSubtitlesDisabled(*noSubsFlag)
+	SetGlobalOutputDir(*outputDirFlag)
 
 	if *noSubsFlag {
 		Debug("Subtitles disabled by user")
@@ -1113,8 +1130,8 @@ func BuildMediaFileName(name string, meta *MediaMeta) string {
 // If the user specified a custom directory via -o flag, that is returned.
 // Otherwise returns the default ~/.local/goanime/downloads/anime/ path.
 func DefaultDownloadDir() string {
-	if GlobalOutputDir != "" {
-		return GlobalOutputDir
+	if outputDir := GetGlobalOutputDir(); outputDir != "" {
+		return outputDir
 	}
 	userHome, _ := os.UserHomeDir()
 	return filepath.Join(userHome, ".local", "goanime", "downloads", "anime")
@@ -1124,8 +1141,8 @@ func DefaultDownloadDir() string {
 // If the user specified a custom directory via -o flag, that is returned.
 // Otherwise returns the default ~/.local/goanime/downloads/movies/ path.
 func DefaultMovieDownloadDir() string {
-	if GlobalOutputDir != "" {
-		return GlobalOutputDir
+	if outputDir := GetGlobalOutputDir(); outputDir != "" {
+		return outputDir
 	}
 	userHome, _ := os.UserHomeDir()
 	return filepath.Join(userHome, ".local", "goanime", "downloads", "movies")

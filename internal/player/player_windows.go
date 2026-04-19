@@ -12,11 +12,7 @@ import (
 )
 
 func setProcessGroup(cmd *exec.Cmd) {
-	// mensage debug
-	if util.IsDebug {
-		fmt.Println("Setting process group for command:", cmd.String())
-	}
-
+	_ = cmd
 }
 
 // findMPVPath searches for mpv executable in PATH and common installation directories on Windows.

@@ -9,10 +9,8 @@ import (
 
 // resetSubtitleState resets all subtitle-related global state between tests.
 func resetSubtitleState() {
-	GlobalSubtitles = nil
+	ResetPlaybackState()
 	GlobalNoSubs = false
-	GlobalAnimeSource = ""
-	GlobalReferer = ""
 	GlobalSubsLanguage = ""
 	GlobalAudioLanguage = ""
 }

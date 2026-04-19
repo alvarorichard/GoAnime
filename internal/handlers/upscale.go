@@ -16,11 +16,10 @@ func HandleUpscaleRequest() error {
 	// Initialize logger for upscale process
 	util.InitLogger()
 
-	if util.GlobalUpscaleRequest == nil {
+	req := util.CurrentUpscaleRequest()
+	if req == nil {
 		return fmt.Errorf("upscale request is nil")
 	}
-
-	req := util.GlobalUpscaleRequest
 
 	// Validate FFmpeg is available
 	ffmpegVersion, err := upscaler.ValidateFFmpeg()

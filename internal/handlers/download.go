@@ -12,11 +12,12 @@ func HandleDownloadRequest() error {
 	// Initialize logger for download process
 	util.InitLogger()
 
-	if util.GlobalDownloadRequest == nil {
+	req := util.CurrentDownloadRequest()
+	if req == nil {
 		return fmt.Errorf("download request is nil")
 	}
 
-	if err := download.HandleDownloadRequest(util.GlobalDownloadRequest); err != nil {
+	if err := download.HandleDownloadRequest(req); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 	return nil
@@ -27,11 +28,12 @@ func HandleMovieDownloadRequest() error {
 	// Initialize logger for download process
 	util.InitLogger()
 
-	if util.GlobalDownloadRequest == nil {
+	req := util.CurrentDownloadRequest()
+	if req == nil {
 		return fmt.Errorf("movie download request is nil")
 	}
 
-	if err := download.HandleMovieDownloadRequest(util.GlobalDownloadRequest); err != nil {
+	if err := download.HandleMovieDownloadRequest(req); err != nil {
 		return fmt.Errorf("movie download failed: %w", err)
 	}
 	return nil

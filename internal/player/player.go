@@ -27,6 +27,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/streaming"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -725,8 +726,8 @@ func HandleDownloadAndPlay(
 	// Store anime name for Plex-compatible download file naming
 	if animeName != "" {
 		season := max(animeSeason, 1)
-		if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.SeasonNum > 0 {
-			season = util.GlobalDownloadRequest.SeasonNum
+		if req := util.CurrentDownloadRequest(); req != nil && req.SeasonNum > 0 {
+			season = req.SeasonNum
 		}
 		SetAnimeName(animeName, season)
 	}
@@ -954,11 +955,7 @@ func downloadAndPlayEpisode(
 	// Prompt user to select subtitle language BEFORE download starts
 	// (stdin is free here — no Bubble Tea running yet)
 	// For 9Anime, ALWAYS use the mandatory language prompt regardless of track count.
-	if util.Is9AnimeSource() {
-		util.PromptSubtitleLanguage()
-	} else if len(util.GlobalSubtitles) > 0 {
-		util.SelectSubtitles()
-	}
+	util.PreparePlaybackSubtitles()
 
 	if _, err := os.Stat(episodePath); os.IsNotExist(err) {
 		numThreads := 4 // Define the number of threads for downloading
@@ -1031,10 +1028,7 @@ func downloadAndPlayEpisode(
 				fmt.Printf(format, a...)
 			})
 
-		} else if strings.Contains(videoURL, "blogger.com") ||
-			LooksLikeHLS(videoURL) ||
-			strings.Contains(videoURL, "wixmp.com") ||
-			strings.Contains(videoURL, "sharepoint.com") {
+		} else if streaming.ShouldUseYtDLPDownload(videoURL) {
 			// Use yt-dlp with progress bar
 			m := &model{
 				progress: progress.New(progress.WithDefaultBlend()),
@@ -1051,7 +1045,7 @@ func downloadAndPlayEpisode(
 			// For HLS streams, do NOT pre-seed a large estimate (like 500 MB)
 			// because the native HLS or yt-dlp callbacks will set the real
 			// total dynamically. A wrong initial value makes the bar stuck.
-			if LooksLikeHLS(videoURL) {
+			if streaming.LooksLikeHLS(videoURL) {
 				m.totalBytes = 0 // let download callbacks set the real value
 			} else {
 				httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
@@ -1068,7 +1062,7 @@ func downloadAndPlayEpisode(
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
+				if streaming.ShouldUseNativeHLSDownload(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
 						// Separate audio tracks need yt-dlp for proper audio/video merging
@@ -1572,8 +1566,7 @@ func printDownloadLocation(filePath string) {
 }
 
 // downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
-// the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
-// (already filtered by util.SelectSubtitles).
+// the downloaded video file using the current playback-state snapshot.
 func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...any)) {
 	if printFn == nil {
 		printFn = func(format string, a ...any) {
@@ -1581,7 +1574,7 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 		}
 	}
 
-	subs := util.GlobalSubtitles
+	subs := util.GetGlobalSubtitles()
 	if len(subs) == 0 {
 		return
 	}
@@ -1769,4 +1762,15 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 	for _, e := range entries {
 		_ = os.Remove(e.tmpPath)
 	}
+}
+
+// EmbedDownloadedSubtitles applies the currently selected subtitle tracks to a
+// downloaded media file using the same logic as the interactive player flow.
+func EmbedDownloadedSubtitles(videoPath string, printFn func(format string, a ...any)) {
+	if printFn == nil {
+		printFn = func(format string, a ...any) {
+			_, _ = fmt.Printf(format, a...)
+		}
+	}
+	downloadSubtitleFiles(videoPath, printFn)
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 
 	"charm.land/huh/v2"
-	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -21,7 +20,7 @@ func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Use enhanced API with source selection (spinner is inside api.SearchAnimeEnhanced)
-	anime, err := api.SearchAnimeEnhanced(name, util.GlobalSource)
+	anime, err := api.SearchAnimeEnhanced(name, util.GetGlobalSource())
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -53,7 +52,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
 		// Respect user's --source flag (e.g. --source allanime) via GlobalSource
-		source := util.GlobalSource
+		source := util.GetGlobalSource()
 		if source != "" {
 			util.Debugf("Searching for: %s (source: %s)", currentName, source)
 		} else {
@@ -89,7 +88,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 				return nil
 			})
 
-		if promptErr := tui.RunClean(prompt.Run); promptErr != nil {
+		if promptErr := prompt.Run(); promptErr != nil {
 			return nil, fmt.Errorf("search cancelled by user")
 		}
 
@@ -103,81 +102,74 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 func FetchAnimeDetails(anime *models.Anime) {
 	detailsStart := time.Now()
 
-	// Use spinner while fetching details
-	_ = tui.RunClean(func() error {
-		return spinner.New().
-			Title("Fetching anime details...").
-			Type(spinner.Dots).
-			Action(func() {
-				// For FlixHQ/SuperFlix movies/TV shows, use TMDB enrichment instead of AniList
-				if anime.Source == "FlixHQ" || anime.Source == "SuperFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-					util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
-					// SuperFlix stores TMDB ID in URL, not a web page URL, so skip the old page scraping
-					if anime.Source != "SuperFlix" {
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to enrich content with TMDB: %v", err)
-						}
-					}
-					util.Debugf("[PERF] FetchAnimeDetails (movie/TV) completed in %v", time.Since(detailsStart))
+	tui.RunWithSpinner("Fetching anime details...", func() {
+		// For FlixHQ/SuperFlix movies/TV shows, use TMDB enrichment instead of AniList
+		if anime.Source == "FlixHQ" || anime.Source == "SuperFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+			util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
+			// SuperFlix stores TMDB ID in URL, not a web page URL, so skip the old page scraping
+			if anime.Source != "SuperFlix" {
+				if err := api.FetchAnimeDetails(anime); err != nil {
+					util.Debugf("Failed to enrich content with TMDB: %v", err)
+				}
+			}
+			util.Debugf("[PERF] FetchAnimeDetails (movie/TV) completed in %v", time.Since(detailsStart))
+			return
+		}
+
+		// Skip AniList enrichment if already done during search (enrichAnimeData)
+		needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
+		needsSourceDetails := api.IsAllAnimeSource(anime) && len(anime.URL) > 20 && strings.Contains(strings.ToLower(anime.URL), "allanime.to")
+
+		if needsAniList && needsSourceDetails {
+			// Both needed — run in parallel
+			var wg sync.WaitGroup
+			wg.Add(2)
+
+			go func() {
+				defer wg.Done()
+				aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
+				if err != nil {
+					util.Debugf("Failed to fetch from AniList: %v", err)
 					return
 				}
-
-				// Skip AniList enrichment if already done during search (enrichAnimeData)
-				needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
-				needsSourceDetails := anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to")
-
-				if needsAniList && needsSourceDetails {
-					// Both needed — run in parallel
-					var wg sync.WaitGroup
-					wg.Add(2)
-
-					go func() {
-						defer wg.Done()
-						aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
-						if err != nil {
-							util.Debugf("Failed to fetch from AniList: %v", err)
-							return
-						}
-						anime.AnilistID = aniListInfo.Data.Media.ID
-						anime.MalID = aniListInfo.Data.Media.IDMal
-						anime.Details = aniListInfo.Data.Media
-						if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
-							anime.ImageURL = cover
-						}
-						util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
-					}()
-
-					go func() {
-						defer wg.Done()
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to fetch anime details from source: %v", err)
-						}
-					}()
-
-					wg.Wait()
-				} else if needsAniList {
-					aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
-					if err != nil {
-						util.Debugf("Failed to fetch from AniList: %v", err)
-					} else {
-						anime.AnilistID = aniListInfo.Data.Media.ID
-						anime.MalID = aniListInfo.Data.Media.IDMal
-						anime.Details = aniListInfo.Data.Media
-						if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
-							anime.ImageURL = cover
-						}
-						util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
-					}
-				} else {
-					util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
-					if needsSourceDetails {
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to fetch anime details from source: %v", err)
-						}
-					}
+				anime.AnilistID = aniListInfo.Data.Media.ID
+				anime.MalID = aniListInfo.Data.Media.IDMal
+				anime.Details = aniListInfo.Data.Media
+				if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+					anime.ImageURL = cover
 				}
-			}).
-			Run()
+				util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
+			}()
+
+			go func() {
+				defer wg.Done()
+				if err := api.FetchAnimeDetails(anime); err != nil {
+					util.Debugf("Failed to fetch anime details from source: %v", err)
+				}
+			}()
+
+			wg.Wait()
+		} else if needsAniList {
+			aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
+			if err != nil {
+				util.Debugf("Failed to fetch from AniList: %v", err)
+			} else {
+				anime.AnilistID = aniListInfo.Data.Media.ID
+				anime.MalID = aniListInfo.Data.Media.IDMal
+				anime.Details = aniListInfo.Data.Media
+				if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+					anime.ImageURL = cover
+				}
+				util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
+			}
+		} else {
+			util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
+			if needsSourceDetails {
+				if err := api.FetchAnimeDetails(anime); err != nil {
+					util.Debugf("Failed to fetch anime details from source: %v", err)
+				}
+			}
+		}
 	})
 
 	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
@@ -195,16 +187,8 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	if anime.Source == "FlixHQ" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		episodes, fetchErr = api.GetAnimeEpisodesEnhanced(anime)
 	} else {
-		// Use spinner while fetching episodes for non-FlixHQ content
-		_ = tui.RunClean(func() error {
-			return spinner.New().
-				Title("Loading episodes...").
-				Type(spinner.Dots).
-				Action(func() {
-					// Use enhanced API for episode fetching
-					episodes, fetchErr = api.GetAnimeEpisodesEnhanced(anime)
-				}).
-				Run()
+		tui.RunWithSpinner("Loading episodes...", func() {
+			episodes, fetchErr = api.GetAnimeEpisodesEnhanced(anime)
 		})
 	}
 
@@ -216,34 +200,5 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	}
 
 	util.Debugf("[PERF] GetAnimeEpisodes completed in %v", time.Since(episodesStart))
-	return episodes, nil
-}
-
-// GetAnimeEpisodesLegacy - compatibility function for old URL-based calls
-func GetAnimeEpisodesLegacy(url string) ([]models.Episode, error) {
-	episodesStart := time.Now()
-
-	var episodes []models.Episode
-	var fetchErr error
-
-	// Use spinner while fetching episodes
-	_ = tui.RunClean(func() error {
-		return spinner.New().
-			Title("Loading episodes...").
-			Type(spinner.Dots).
-			Action(func() {
-				episodes, fetchErr = api.GetAnimeEpisodes(url)
-			}).
-			Run()
-	})
-
-	if fetchErr != nil {
-		return nil, fmt.Errorf("failed to fetch episodes: %w", fetchErr)
-	}
-	if len(episodes) == 0 {
-		return nil, fmt.Errorf("the selected anime does not have episodes on the server")
-	}
-
-	util.Debugf("[PERF] GetAnimeEpisodesLegacy completed in %v", time.Since(episodesStart))
 	return episodes, nil
 }

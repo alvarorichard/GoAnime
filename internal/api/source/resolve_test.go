@@ -1,198 +1,167 @@
 package source
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 )
 
-func TestResolve_ExplicitSource(t *testing.T) {
-	tests := []struct {
-		name     string
-		source   string
-		wantKind SourceKind
+func TestResolve(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name           string
+		anime          models.Anime
+		wantKind       SourceKind
+		wantName       string
+		wantReasonLike string
+		wantErrLike    string
 	}{
-		{"AllAnime", "AllAnime", AllAnime},
-		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
-		{"AnimeFire direct", "AnimeFire", AnimeFire},
-		{"FlixHQ", "FlixHQ", FlixHQ},
-		{"SFlix", "SFlix", SFlix},
-		{"9Anime", "9Anime", NineAnime},
-		{"AnimeDrive", "AnimeDrive", AnimeDrive},
-		{"Goyabu", "Goyabu", Goyabu},
-		{"SuperFlix", "SuperFlix", SuperFlix},
+		{
+			name: "AllAnime by short ID",
+			anime: models.Anime{
+				Name: "Naruto",
+				URL:  "naruto123abc",
+			},
+			wantKind:       AllAnime,
+			wantName:       "AllAnime",
+			wantReasonLike: "short ID",
+		},
+		{
+			name: "explicit source wins over URL",
+			anime: models.Anime{
+				Name:   "Naruto",
+				URL:    "https://animefire.plus/naruto",
+				Source: "Goyabu",
+			},
+			wantKind:       Goyabu,
+			wantName:       "Goyabu",
+			wantReasonLike: "explicit",
+		},
+		{
+			name: "AnimeFire by URL without PT-BR tag",
+			anime: models.Anime{
+				Name: "Naruto",
+				URL:  "https://animefire.plus/animes/naruto",
+			},
+			wantKind:       AnimeFire,
+			wantName:       "Animefire.io",
+			wantReasonLike: "URL",
+		},
+		{
+			name: "PT-BR tag plus URL resolves Goyabu",
+			anime: models.Anime{
+				Name: "[PT-BR] Naruto",
+				URL:  "https://goyabu.to/anime/naruto",
+			},
+			wantKind:       Goyabu,
+			wantName:       "Goyabu",
+			wantReasonLike: "PT-BR",
+		},
+		{
+			name: "AnimeDrive remains distinct from AnimeFire",
+			anime: models.Anime{
+				Name: "[PT-BR] Naruto",
+				URL:  "https://animesdrive.blog/anime/naruto",
+			},
+			wantKind:       AnimeDrive,
+			wantName:       "AnimeDrive",
+			wantReasonLike: "PT-BR",
+		},
+		{
+			name: "FlixHQ by media type",
+			anime: models.Anime{
+				Name:      "Inception",
+				MediaType: models.MediaTypeMovie,
+			},
+			wantKind:       FlixHQ,
+			wantName:       "FlixHQ",
+			wantReasonLike: "media type",
+		},
+		{
+			name: "9Anime explicit source",
+			anime: models.Anime{
+				Name:   "[Multilanguage] Naruto",
+				URL:    "8143",
+				Source: "9Anime",
+			},
+			wantKind:       NineAnime,
+			wantName:       "9Anime",
+			wantReasonLike: "explicit",
+		},
+		{
+			name: "explicit source fuzzy match remains declarative",
+			anime: models.Anime{
+				Name:   "Naruto",
+				URL:    "https://animefire.plus/animes/naruto",
+				Source: "AnimeFire Legacy",
+			},
+			wantKind:       AnimeFire,
+			wantName:       "Animefire.io",
+			wantReasonLike: "explicit",
+		},
+		{
+			name: "PT-BR tag plus AnimeFire URL resolves AnimeFire",
+			anime: models.Anime{
+				Name: "[PT-BR] Naruto",
+				URL:  "https://animefire.plus/animes/naruto",
+			},
+			wantKind:       AnimeFire,
+			wantName:       "Animefire.io",
+			wantReasonLike: "PT-BR",
+		},
+		{
+			name: "ambiguous PT-BR without URL fails",
+			anime: models.Anime{
+				Name: "[PT-BR] Naruto",
+				URL:  "naruto",
+			},
+			wantErrLike: "could not resolve PT-BR source",
+		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{Source: tt.source}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(Source=%q) = %s (%s), want %s", tt.source, got.Kind, got.Reason, tt.wantKind)
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resolved, err := Resolve(&tc.anime)
+			if tc.wantErrLike != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.wantErrLike)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrLike) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrLike)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Resolve returned unexpected error: %v", err)
+			}
+
+			if resolved.Kind != tc.wantKind {
+				t.Fatalf("Resolve kind = %s, want %s", resolved.Kind, tc.wantKind)
+			}
+			if resolved.Name != tc.wantName {
+				t.Fatalf("Resolve name = %s, want %s", resolved.Name, tc.wantName)
+			}
+			if !strings.Contains(strings.ToLower(resolved.Reason), strings.ToLower(tc.wantReasonLike)) {
+				t.Fatalf("Resolve reason = %q, want substring %q", resolved.Reason, tc.wantReasonLike)
+			}
+
+			resolved.Apply(&tc.anime)
+			if tc.anime.Source != tc.wantName {
+				t.Fatalf("Apply set Source = %q, want %q", tc.anime.Source, tc.wantName)
 			}
 		})
-	}
-}
-
-func TestResolve_ExplicitSourceTrumpsURL(t *testing.T) {
-	anime := &models.Anime{
-		Source: "9Anime",
-		URL:    "https://animefire.plus/something",
-	}
-	got := Resolve(anime)
-	if got.Kind != NineAnime {
-		t.Errorf("explicit Source should win over URL, got %s (%s)", got.Kind, got.Reason)
-	}
-}
-
-func TestResolve_MediaType(t *testing.T) {
-	tests := []struct {
-		name      string
-		mediaType models.MediaType
-		wantKind  SourceKind
-	}{
-		{"movie", models.MediaTypeMovie, FlixHQ},
-		{"tv", models.MediaTypeTV, FlixHQ},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{MediaType: tt.mediaType}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(MediaType=%s) = %s, want %s", tt.mediaType, got.Kind, tt.wantKind)
-			}
-		})
-	}
-}
-
-func TestResolve_NameTags(t *testing.T) {
-	tests := []struct {
-		name     string
-		animName string
-		wantKind SourceKind
-	}{
-		{"english tag", "Naruto [English]", AllAnime},
-		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
-		{"animedrive tag", "Naruto [AnimeDrive]", AnimeDrive},
-		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
-		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
-		{"9anime tag", "Naruto [9Anime]", NineAnime},
-		{"multilanguage tag", "Naruto [Multilanguage]", NineAnime},
-		{"movie tag", "Inception [Movie]", FlixHQ},
-		{"tv tag", "Breaking Bad [TV]", FlixHQ},
-		{"flixhq tag", "Movie [FlixHQ]", FlixHQ},
-		{"sflix tag", "Movie [SFlix]", SFlix},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{Name: tt.animName}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(Name=%q) = %s (%s), want %s", tt.animName, got.Kind, got.Reason, tt.wantKind)
-			}
-		})
-	}
-}
-
-func TestResolve_URLPatterns(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		wantKind SourceKind
-	}{
-		{"animesdrive URL", "https://animesdrive.blog/naruto", AnimeDrive},
-		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
-		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
-		{"allanime URL", "https://allanime.to/anime/abc", AllAnime},
-		{"flixhq URL", "https://flixhq.to/movie/inception", FlixHQ},
-		{"sflix URL", "https://sflix.to/movie/inception", SFlix},
-		{"9anime URL", "https://9anime.to/watch/naruto", NineAnime},
-		{"superflix URL", "https://superflix.to/naruto", SuperFlix},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{URL: tt.url}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(URL=%q) = %s (%s), want %s", tt.url, got.Kind, got.Reason, tt.wantKind)
-			}
-		})
-	}
-}
-
-func TestResolve_AnimeDriveNotConfusedWithAllAnime(t *testing.T) {
-	// This is the latent bug in the current codebase:
-	// animesdrive URL must resolve to AnimeDrive, not AllAnime.
-	anime := &models.Anime{URL: "https://animesdrive.blog/ep/naruto-1"}
-	got := Resolve(anime)
-	if got.Kind != AnimeDrive {
-		t.Errorf("animesdrive should resolve to AnimeDrive, got %s (%s)", got.Kind, got.Reason)
-	}
-}
-
-func TestResolve_ShortID(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		wantKind SourceKind
-	}{
-		{"alphanumeric short ID", "hHjXnUTda", AllAnime},
-		{"mixed short ID", "abc123XYZ", AllAnime},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{URL: tt.url}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(URL=%q) = %s, want %s", tt.url, got.Kind, tt.wantKind)
-			}
-		})
-	}
-}
-
-func TestResolve_NumericOnlyIsNotShortID(t *testing.T) {
-	// Purely numeric strings are NOT AllAnime short IDs.
-	anime := &models.Anime{URL: "8143"}
-	got := Resolve(anime)
-	if got.Kind == AllAnime && got.Reason == "short ID" {
-		t.Error("purely numeric '8143' should not match as AllAnime short ID")
-	}
-}
-
-func TestResolve_PTBRFallback(t *testing.T) {
-	anime := &models.Anime{Name: "Naruto [PT-BR]"}
-	got := Resolve(anime)
-	if got.Kind != AnimeFire {
-		t.Errorf("[PT-BR] tag without source should default to AnimeFire, got %s", got.Kind)
-	}
-}
-
-func TestResolve_NilAnime(t *testing.T) {
-	got := Resolve(nil)
-	if got.Kind != Unknown {
-		t.Errorf("nil anime should return Unknown, got %s", got.Kind)
-	}
-}
-
-func TestResolve_EmptyAnime(t *testing.T) {
-	got := Resolve(&models.Anime{})
-	if got.Kind != Unknown {
-		t.Errorf("empty anime should return Unknown, got %s", got.Kind)
-	}
-}
-
-func TestResolve_BestEffortKind(t *testing.T) {
-	r := ResolvedSource{Kind: Unknown, Reason: "test"}
-	if r.BestEffortKind() != AllAnime {
-		t.Errorf("BestEffortKind for Unknown should be AllAnime, got %s", r.BestEffortKind())
-	}
-
-	r2 := ResolvedSource{Kind: FlixHQ, Reason: "test"}
-	if r2.BestEffortKind() != FlixHQ {
-		t.Errorf("BestEffortKind for FlixHQ should be FlixHQ, got %s", r2.BestEffortKind())
 	}
 }
 
 func TestResolveURL(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		url      string
@@ -202,21 +171,28 @@ func TestResolveURL(t *testing.T) {
 		{"animesdrive", "https://animesdrive.blog/ep/naruto", AnimeDrive},
 		{"goyabu", "https://goyabu.to/ep/naruto-1", Goyabu},
 		{"allanime", "https://allanime.to/anime/hHjXnUTda", AllAnime},
+		{"superflix", "https://superflixapi.rest/serie/123", SuperFlix},
 		{"short ID", "hHjXnUTda", AllAnime},
 		{"empty", "", Unknown},
 		{"unknown domain", "https://example.com/video", Unknown},
 	}
+
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := ResolveURL(tt.url)
 			if got.Kind != tt.wantKind {
-				t.Errorf("ResolveURL(%q) = %s (%s), want %s", tt.url, got.Kind, got.Reason, tt.wantKind)
+				t.Fatalf("ResolveURL(%q) = %s, want %s", tt.url, got.Kind, tt.wantKind)
 			}
 		})
 	}
 }
 
 func TestIsAllAnimeShortID(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input string
 		want  bool
@@ -228,47 +204,58 @@ func TestIsAllAnimeShortID(t *testing.T) {
 		{"", false},
 		{"https://example.com", false},
 		{"a/b", false},
-		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false}, // 31 chars
-		{"abc def", false},                         // space
+		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false},
+		{"abc def", false},
 	}
+
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+
 			if got := IsAllAnimeShortID(tt.input); got != tt.want {
-				t.Errorf("IsAllAnimeShortID(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Fatalf("IsAllAnimeShortID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestExtractAllAnimeID(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		input string
 		want  string
 	}{
 		{"hHjXnUTda", "hHjXnUTda"},
 		{"https://allanime.to/anime/hHjXnUTda", "hHjXnUTda"},
-		{"https://example.com/8143", "https://example.com/8143"}, // numeric-only not extracted
+		{"https://example.com/8143", "https://example.com/8143"},
 	}
+
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+
 			if got := ExtractAllAnimeID(tt.input); got != tt.want {
-				t.Errorf("ExtractAllAnimeID(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Fatalf("ExtractAllAnimeID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestScraperTypeFor(t *testing.T) {
+	t.Parallel()
+
 	st, ok := ScraperTypeFor(AllAnime)
 	if !ok {
 		t.Fatal("ScraperTypeFor(AllAnime) should return true")
 	}
-	if st != 0 { // AllAnimeType = iota = 0
-		t.Errorf("ScraperTypeFor(AllAnime) = %d, want 0", st)
+	if st != 0 {
+		t.Fatalf("ScraperTypeFor(AllAnime) = %d, want 0", st)
 	}
 
-	_, ok = ScraperTypeFor(Unknown)
-	if ok {
-		t.Error("ScraperTypeFor(Unknown) should return false")
+	if _, ok := ScraperTypeFor(Unknown); ok {
+		t.Fatal("ScraperTypeFor(Unknown) should return false")
 	}
 }

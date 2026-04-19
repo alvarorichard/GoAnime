@@ -10,8 +10,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,6 +119,23 @@ func TestLooksLikeHLS(t *testing.T) {
 			assert.Equal(t, tc.want, got, "LooksLikeHLS(%q)", tc.url)
 		})
 	}
+}
+
+func TestResolveBatchDownloadPolicyGoyabu(t *testing.T) {
+	t.Parallel()
+
+	policy := resolveBatchDownloadPolicy(&models.Anime{
+		Name:   "[PT-BR] Naruto Shippuden",
+		URL:    "https://goyabu.io/anime/naruto-shippuden-online-hd-3",
+		Source: string(api.SourceGoyabu),
+	})
+
+	assert.False(t, policy.preflightResolve)
+	assert.Equal(t, 1, policy.downloadConcurrency)
+	assert.Equal(t, 150*1024*1024, int(policy.progressEstimate))
+	assert.Equal(t, 5*time.Second, policy.resolveDelay)
+	assert.Equal(t, 20*time.Second, policy.postEpisodeCooldown)
+	assert.Equal(t, 30*time.Second, policy.failureCooldown)
 }
 
 // =====================================================================

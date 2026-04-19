@@ -25,3 +25,7 @@ build/goanime-local
 
 #Ignore MacOS system files junk
 .DS_Store
+
+# Local Go cache and generated benchmark reports
+.gocache/
+benchmarks/*.txt
