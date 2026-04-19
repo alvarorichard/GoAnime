@@ -34,6 +34,7 @@ func TestDownloadDirectHTTPWithClientDownloadsMockVideoAndTracksProgress(t *test
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	outPath := filepath.Join(home, "downloads", "episode.mp4")
 	m := &model{}
 
@@ -59,6 +60,7 @@ func TestDownloadDirectHTTPWithClientReturnsHTTPStatusErrorFromMockCDN(t *testin
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	outPath := filepath.Join(home, "downloads", "episode.mp4")
 
 	err := downloadDirectHTTPWithClient(server.URL+"/missing.mp4", outPath, &model{}, server.Client())
@@ -96,6 +98,7 @@ func TestAnimeFireFallbackUsesRealHTTPDownloaderAfter404(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	outPath := filepath.Join(home, "downloads", "episode-20.mp4")
 	progressModel := &model{}
 
