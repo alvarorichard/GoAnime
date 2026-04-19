@@ -442,16 +442,17 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	var sourceName string
 
 	// Priority 1: Check the Source field (most reliable)
-	if anime.Source == "AllAnime" {
+	sourceLower := strings.ToLower(anime.Source)
+	if sourceLower == "allanime" {
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
-	} else if strings.Contains(anime.Source, "AnimeFire") {
+	} else if strings.Contains(sourceLower, "animefire") {
 		scraperType = scraper.AnimefireType
 		sourceName = "Animefire.io"
-	} else if anime.Source == "AnimeDrive" {
+	} else if sourceLower == "animedrive" {
 		scraperType = scraper.AnimeDriveType
 		sourceName = "AnimeDrive"
-	} else if anime.Source == "Goyabu" {
+	} else if sourceLower == "goyabu" {
 		scraperType = scraper.GoyabuType
 		sourceName = "Goyabu"
 	} else if strings.Contains(anime.Name, "[English]") {

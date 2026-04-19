@@ -1,8 +1,10 @@
 package player
 
 import (
+	"errors"
 	"testing"
 
+	"charm.land/bubbles/v2/progress"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,4 +80,19 @@ func TestBatchProgressFallbackCanResetOnlyCurrentEpisode(t *testing.T) {
 
 	assert.Equal(t, int64(95), received)
 	assert.Equal(t, int64(200), total)
+}
+
+func TestBatchProgressFailureStatusDoesNotRenderSuccessMessage(t *testing.T) {
+	m := &model{
+		progress:   progress.New(progress.WithDefaultBlend()),
+		status:     "Downloads completed with 1 failure(s)",
+		done:       true,
+		err:        errors.New("episode 20: HTTP 404"),
+		totalBytes: 100,
+		received:   98,
+	}
+
+	view := m.View()
+	assert.Contains(t, view.Content, "Downloads completed with 1 failure(s)")
+	assert.NotContains(t, view.Content, "All downloads completed!")
 }

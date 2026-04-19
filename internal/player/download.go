@@ -963,6 +963,13 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 // Used as a last-resort fallback when both native HLS and yt-dlp fail
 // (e.g. SharePoint .aspx URLs that serve direct video content).
 func downloadDirectHTTP(videoURL, path string, m *model) error {
+	client := &http.Client{
+		Transport: api.SafeTransport(10 * time.Minute),
+	}
+	return downloadDirectHTTPWithClient(videoURL, path, m, client)
+}
+
+func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.Client) error {
 	safeURL, err := sanitizeMediaTarget(videoURL)
 	if err != nil {
 		return fmt.Errorf("invalid download URL: %w", err)
@@ -977,8 +984,10 @@ func downloadDirectHTTP(videoURL, path string, m *model) error {
 
 	util.Debug("Starting direct HTTP download", "url", safeURL)
 
-	client := &http.Client{
-		Transport: api.SafeTransport(10 * time.Minute),
+	if client == nil {
+		client = &http.Client{
+			Transport: api.SafeTransport(10 * time.Minute),
+		}
 	}
 	req, err := http.NewRequest("GET", safeURL, nil)
 	if err != nil {
@@ -1003,7 +1012,9 @@ func downloadDirectHTTP(videoURL, path string, m *model) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	m.setProgressTotal(resp.ContentLength)
+	if m != nil {
+		m.setProgressTotal(resp.ContentLength)
+	}
 
 	// #nosec G304: path validated by sanitizeOutputPath
 	out, err := os.Create(safePath)
@@ -1019,7 +1030,9 @@ func downloadDirectHTTP(videoURL, path string, m *model) error {
 			if _, wErr := out.Write(buf[:n]); wErr != nil {
 				return wErr
 			}
-			m.addProgressReceived(int64(n))
+			if m != nil {
+				m.addProgressReceived(int64(n))
+			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
