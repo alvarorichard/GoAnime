@@ -201,8 +201,3 @@ func ValidateExternalURL(rawURL string) error {
 // against the SSRF allow-list. Inject this into custom http.Transport structs
 // that need their own TLS settings (e.g. HTTP/1.1-only HLS downloads) but
 // still require SSRF protection.
-func SafeDialContext(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialFunc(network, addr, timeout, nil)
-	}
-}

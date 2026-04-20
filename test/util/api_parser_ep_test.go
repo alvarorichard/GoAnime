@@ -1,16 +1,10 @@
 package test_util
 
 import (
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/pkg/errors"
-
 	"github.com/PuerkitoBio/goquery"
-
-	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 func TestParseEpisodes(t *testing.T) {
@@ -51,33 +45,3 @@ func TestParseEpisodes(t *testing.T) {
 }
 
 // Helper functions for parseEpisodes test
-
-func ParseEpisodes(doc *goquery.Document) []Episode {
-	var episodes []Episode
-	doc.Find("a.lEp.epT.divNumEp.smallbox.px-2.mx-1.text-left.d-flex").Each(func(i int, s *goquery.Selection) {
-		episodeNum := s.Text()
-		episodeURL, _ := s.Attr("href")
-
-		num, err := parseEpisodeNumber(episodeNum)
-		if err != nil {
-			util.Debugf("Error parsing episode number '%s': %v", episodeNum, err)
-			return
-		}
-
-		episodes = append(episodes, Episode{
-			Number: episodeNum,
-			Num:    num,
-			URL:    episodeURL,
-		})
-	})
-	return episodes
-}
-
-func ParseEpisodeNumber(episodeNum string) (int, error) {
-	numRe := regexp.MustCompile(`\d+`)
-	numStr := numRe.FindString(episodeNum)
-	if numStr == "" {
-		return 0, errors.New("no episode number found")
-	}
-	return strconv.Atoi(numStr)
-}

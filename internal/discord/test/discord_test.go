@@ -18,11 +18,6 @@ type MockMPVClient struct {
 }
 
 // MockMPVSendCommand é uma implementação mock de mpvSendCommand
-func (m *MockMPVClient) MockMPVSendCommand(socketPath string, args []any) (any, error) {
-	callArgs := m.Called(socketPath, args)
-	return callArgs.Get(0), callArgs.Error(1)
-}
-
 // mockMPVSendCommand é uma função mock simples
 func mockMPVSendCommand(socketPath string, args []any) (any, error) {
 	// Simula a resposta do MPV para time-pos
