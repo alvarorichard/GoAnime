@@ -3,6 +3,11 @@ package scraper
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +28,9 @@ const (
 	AllAnimeBase    = "allanime.day"
 	AllAnimeAPI     = "https://api.allanime.day/api"
 	UserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+	// allAnimeKeyPhrase is the passphrase used to derive the AES-256 key via SHA-256.
+	// Matches: printf '%s' 'SimtVuagFbGR2K7P' | openssl dgst -sha256 -binary
+	allAnimeKeyPhrase = "SimtVuagFbGR2K7P"
 )
 
 // Pre-compiled regexes for AllAnime scraper (avoid per-call compilation)
@@ -45,6 +53,116 @@ var (
 	allAnimeClientInstance *AllAnimeClient
 	allAnimeClientOnce     sync.Once
 )
+
+// allAnimeKey returns the AES-256 key derived from SHA-256(allAnimeKeyPhrase).
+// Computed once and cached.
+var allAnimeKey = func() []byte {
+	h := sha256.Sum256([]byte(allAnimeKeyPhrase))
+	return h[:]
+}()
+
+// sourceInfo holds a decoded source URL and its provider name.
+type sourceInfo struct {
+	sourceName string
+	sourceURL  string
+}
+
+// decodeToBeParsed decrypts the "tobeparsed" blob from the AllAnime API.
+//
+// The blob is base64-encoded. The first 12 bytes are the AES-CTR nonce/IV.
+// The remaining bytes are the ciphertext encrypted with AES-256-CTR.
+// The counter starts at nonce || 0x00000002 (matching OpenSSL conventions).
+//
+// After decryption, the plaintext is JSON containing sourceUrl/sourceName pairs.
+func decodeToBeParsed(blob string) ([]sourceInfo, error) {
+	data, err := base64.StdEncoding.DecodeString(blob)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode failed: %w", err)
+	}
+
+	if len(data) < 13 { // 12-byte nonce + at least 1 byte of ciphertext
+		return nil, fmt.Errorf("tobeparsed blob too short (%d bytes)", len(data))
+	}
+
+	nonce := data[:12]
+	ciphertext := data[12:]
+
+	block, err := aes.NewCipher(allAnimeKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	// Build the 16-byte IV for AES-256-CTR: nonce (12 bytes) + counter starting at 2.
+	// This matches the bash script: ctr="${iv}00000002"
+	iv := make([]byte, aes.BlockSize)
+	copy(iv[:12], nonce)
+	binary.BigEndian.PutUint32(iv[12:], 2)
+
+	stream := cipher.NewCTR(block, iv) // #nosec G407 -- IV is derived from the nonce in the encrypted blob, not hardcoded
+
+	plaintext := make([]byte, len(ciphertext))
+	stream.XORKeyStream(plaintext, ciphertext)
+
+	// Parse the decrypted JSON to extract sourceUrl/sourceName pairs.
+	// The bash script does:
+	//   sed -nE 's|.*"sourceUrl":"--([^"]*)".*"sourceName":"([^"]*)".*|\2 :\1|p'
+	// We parse each sourceUrls entry from the JSON structure.
+	var result struct {
+		Data struct {
+			Episode struct {
+				SourceUrls []struct {
+					SourceURL  string `json:"sourceUrl"`
+					SourceName string `json:"sourceName"`
+				} `json:"sourceUrls"`
+			} `json:"episode"`
+		} `json:"data"`
+	}
+
+	// The plaintext may contain the full GraphQL response or just the sourceUrls array.
+	// Try parsing as the full response first.
+	if err := json.Unmarshal(plaintext, &result); err == nil && len(result.Data.Episode.SourceUrls) > 0 {
+		var sources []sourceInfo
+		for _, su := range result.Data.Episode.SourceUrls {
+			url := su.SourceURL
+			url = strings.TrimPrefix(url, "--")
+			sources = append(sources, sourceInfo{
+				sourceName: su.SourceName,
+				sourceURL:  url,
+			})
+		}
+		return sources, nil
+	}
+
+	// Fallback: try to extract using regex (like the bash sed pattern).
+	// The plaintext might not be perfectly structured JSON.
+	re := regexp.MustCompile(`"sourceUrl"\s*:\s*"--([^"]*)"[^}]*"sourceName"\s*:\s*"([^"]*)"`)
+	matches := re.FindAllSubmatch(plaintext, -1)
+	if len(matches) == 0 {
+		// Also try reverse order (sourceName before sourceUrl)
+		re2 := regexp.MustCompile(`"sourceName"\s*:\s*"([^"]*)"[^}]*"sourceUrl"\s*:\s*"--([^"]*)"`)
+		matches = re2.FindAllSubmatch(plaintext, -1)
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no source URLs found in decrypted tobeparsed data")
+		}
+		var sources []sourceInfo
+		for _, m := range matches {
+			sources = append(sources, sourceInfo{
+				sourceName: string(m[1]),
+				sourceURL:  string(m[2]),
+			})
+		}
+		return sources, nil
+	}
+
+	var sources []sourceInfo
+	for _, m := range matches {
+		sources = append(sources, sourceInfo{
+			sourceName: string(m[2]),
+			sourceURL:  string(m[1]),
+		})
+	}
+	return sources, nil
+}
 
 // NewAllAnimeClient creates a new AllAnime client (returns cached instance for connection reuse)
 func NewAllAnimeClient() *AllAnimeClient {
@@ -636,22 +754,46 @@ func (c *AllAnimeClient) getPriorityScore(url string) int {
 
 // extractSourceURLs extracts source URLs from the API response
 func (c *AllAnimeClient) extractSourceURLs(response string) []string {
-	// Parse the response as JSON to extract sourceUrls properly
+	// Check if the response contains a "tobeparsed" blob (AES-encrypted source URLs).
+	// This matches the bash script: if printf "%s" "$api_resp" | grep -q '"tobeparsed"'; then ...
+	var rawResp map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(response), &rawResp); err == nil {
+		// Look for "tobeparsed" at any level of the response
+		if strings.Contains(response, `"tobeparsed"`) {
+			blob := extractToBeParsedBlob(response)
+			if blob != "" {
+				sources, err := decodeToBeParsed(blob)
+				if err == nil && len(sources) > 0 {
+					util.Debugf("Decoded %d sources from tobeparsed blob", len(sources))
+					var urls []string
+					for _, src := range sources {
+						decoded := c.decodeSourceURL(src.sourceURL)
+						urls = append(urls, decoded)
+					}
+					return urls
+				}
+				util.Debugf("Failed to decode tobeparsed blob: %v", err)
+			}
+		}
+	}
+
+	// Standard path: parse the JSON response to extract sourceUrls
 	var episodeResp EpisodeResponse
 	if err := json.Unmarshal([]byte(response), &episodeResp); err == nil {
 		var urls []string
 		for _, sourceUrl := range episodeResp.Data.Episode.SourceUrls {
 			if after, ok := strings.CutPrefix(sourceUrl.SourceUrl, "--"); ok {
 				// This is an encoded URL that needs decoding
-				encoded := after
-				decoded := c.decodeSourceURL(encoded)
+				decoded := c.decodeSourceURL(after)
 				urls = append(urls, decoded)
 			} else {
 				// Direct URL
 				urls = append(urls, sourceUrl.SourceUrl)
 			}
 		}
-		return urls
+		if len(urls) > 0 {
+			return urls
+		}
 	}
 
 	// Fallback to regex-based extraction if JSON parsing fails
@@ -660,7 +802,6 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 	var urls []string
 	for _, match := range matches {
 		if len(match) >= 2 {
-			// Decode the URL using the complex decoding logic from ani-cli
 			decodedURL := c.decodeSourceURL(match[1])
 			urls = append(urls, decodedURL)
 		}
@@ -669,50 +810,66 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 	return urls
 }
 
-// decodeSourceURL decodes the encoded source URL using the exact logic from Curd
+// extractToBeParsedBlob extracts the base64 "tobeparsed" value from the API response JSON.
+func extractToBeParsedBlob(response string) string {
+	re := regexp.MustCompile(`"tobeparsed"\s*:\s*"([^"]*)"`)
+	match := re.FindStringSubmatch(response)
+	if len(match) >= 2 {
+		return match[1]
+	}
+	return ""
+}
+
+// hexSubstitutionTable is the complete hex-pair substitution cipher from ani-cli's provider_init.
+// Each 2-char hex pair maps to its decoded ASCII character.
+var hexSubstitutionTable = map[string]string{
+	// Uppercase letters
+	"79": "A", "7a": "B", "7b": "C", "7c": "D", "7d": "E", "7e": "F", "7f": "G",
+	"70": "H", "71": "I", "72": "J", "73": "K", "74": "L", "75": "M", "76": "N", "77": "O",
+	"68": "P", "69": "Q", "6a": "R", "6b": "S", "6c": "T", "6d": "U", "6e": "V", "6f": "W",
+	"60": "X", "61": "Y", "62": "Z",
+	// Lowercase letters
+	"59": "a", "5a": "b", "5b": "c", "5c": "d", "5d": "e", "5e": "f", "5f": "g",
+	"50": "h", "51": "i", "52": "j", "53": "k", "54": "l", "55": "m", "56": "n", "57": "o",
+	"48": "p", "49": "q", "4a": "r", "4b": "s", "4c": "t", "4d": "u", "4e": "v", "4f": "w",
+	"40": "x", "41": "y", "42": "z",
+	// Digits
+	"08": "0", "09": "1", "0a": "2", "0b": "3", "0c": "4", "0d": "5", "0e": "6", "0f": "7",
+	"00": "8", "01": "9",
+	// Special characters
+	"15": "-", "16": ".", "67": "_", "46": "~",
+	"02": ":", "17": "/", "07": "?", "1b": "#",
+	"63": "[", "65": "]", "78": "@",
+	"19": "!", "1c": "$", "1e": "&",
+	"10": "(", "11": ")", "12": "*", "13": "+", "14": ",",
+	"03": ";", "05": "=", "1d": "%",
+}
+
+// decodeSourceURL decodes the encoded source URL using the hex substitution cipher from ani-cli
 func (c *AllAnimeClient) decodeSourceURL(encoded string) string {
-	// Handle the case where the encoded string might contain a colon and port
-	parts := strings.Split(encoded, ":")
-	mainPart := parts[0]
-	port := ""
-	if len(parts) > 1 {
-		port = ":" + parts[1]
-	}
-
-	// Create mapping exactly like Curd's decodeProviderID function
-	replacements := map[string]string{
-		"01": "9", "08": "0", "05": "=", "0a": "2", "0b": "3", "0c": "4", "07": "?",
-		"00": "8", "5c": "d", "0f": "7", "5e": "f", "17": "/", "54": "l", "09": "1",
-		"48": "p", "4f": "w", "0e": "6", "5b": "c", "5d": "e", "0d": "5", "53": "k",
-		"1e": "&", "5a": "b", "59": "a", "4a": "r", "4c": "t", "4e": "v", "57": "o",
-		"51": "i",
-	}
-
-	// Split the string into pairs of characters (no regex needed)
-	var pairs []string
-	for i := 0; i+1 < len(mainPart); i += 2 {
-		pairs = append(pairs, mainPart[i:i+2])
-	}
-
-	// Perform the replacement
-	for i, pair := range pairs {
-		if val, exists := replacements[pair]; exists {
-			pairs[i] = val
+	// Split into 2-char hex pairs and substitute
+	var result strings.Builder
+	result.Grow(len(encoded))
+	for i := 0; i+1 < len(encoded); i += 2 {
+		pair := encoded[i : i+2]
+		if val, exists := hexSubstitutionTable[pair]; exists {
+			result.WriteString(val)
+		} else {
+			result.WriteString(pair)
 		}
 	}
 
-	// Join the modified pairs back into a single string
-	result := strings.Join(pairs, "") + port
+	decoded := result.String()
 
-	// Replace "/clock" with "/clock.json" like in Curd
-	result = strings.ReplaceAll(result, "/clock", "/clock.json")
+	// Replace "/clock" with "/clock.json" like in ani-cli
+	decoded = strings.ReplaceAll(decoded, "/clock", "/clock.json")
 
 	// If it starts with /, it's a path that needs the AllAnime base
-	if strings.HasPrefix(result, "/") {
-		result = fmt.Sprintf("https://%s%s", AllAnimeBase, result)
+	if strings.HasPrefix(decoded, "/") {
+		decoded = fmt.Sprintf("https://%s%s", AllAnimeBase, decoded)
 	}
 
-	return result
+	return decoded
 }
 
 // getLinks extracts video links from the source URL with proper headers
