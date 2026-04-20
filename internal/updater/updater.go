@@ -193,21 +193,6 @@ func CheckAndPromptUpdate() error {
 	return nil
 }
 
-// CheckForUpdatesQuietly checks for updates without user interaction
-func CheckForUpdatesQuietly() {
-	release, hasUpdate, err := CheckForUpdates()
-	if err != nil {
-		util.Debug("Failed to check for updates:", err)
-		return
-	}
-
-	if hasUpdate {
-		util.Info(fmt.Sprintf("🚀 New version available: %s (current: %s)",
-			release.TagName, version.Version))
-		util.Info("Run with --update flag to update")
-	}
-}
-
 // Helper functions
 
 func isVersionNewer(latest, current string) (bool, error) {

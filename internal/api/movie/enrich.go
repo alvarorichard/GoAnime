@@ -2,7 +2,6 @@
 package movie
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -285,35 +284,4 @@ func CleanMediaName(name string) string {
 	}
 
 	return strings.TrimSpace(name)
-}
-
-// FormatMediaInfo formats media info for display
-func FormatMediaInfo(media *models.Media) string {
-	var parts []string
-
-	if media.Year != "" {
-		parts = append(parts, media.Year)
-	}
-
-	if media.Rating > 0 {
-		parts = append(parts, fmt.Sprintf("★ %.1f", media.Rating))
-	}
-
-	if media.Runtime > 0 {
-		hours := media.Runtime / 60
-		mins := media.Runtime % 60
-		if hours > 0 {
-			parts = append(parts, fmt.Sprintf("%dh %dm", hours, mins))
-		} else {
-			parts = append(parts, fmt.Sprintf("%dm", mins))
-		}
-	}
-
-	if len(media.Genres) > 0 {
-		// Show first 3 genres
-		maxGenres := min(len(media.Genres), 3)
-		parts = append(parts, strings.Join(media.Genres[:maxGenres], ", "))
-	}
-
-	return strings.Join(parts, " | ")
 }

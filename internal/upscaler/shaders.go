@@ -474,7 +474,6 @@ func GetShaderModeName(mode ShaderMode) string {
 	}
 }
 
-
 // SetShaderMode sets the shader mode
 func SetShaderMode(mode ShaderMode) {
 	CurrentShaderMode = mode
