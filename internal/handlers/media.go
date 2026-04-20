@@ -244,7 +244,7 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 		prompt := huh.NewInput().
 			Title("Search").
 			Value(&searchQuery)
-		if err := prompt.Run(); err != nil {
+		if err := tui.RunClean(prompt.Run); err != nil {
 			return nil, err
 		}
 		query = searchQuery
@@ -382,7 +382,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 			return nil
 		})
 
-	if err := prompt.Run(); err != nil {
+	if err := tui.RunClean(prompt.Run); err != nil {
 		return nil, err
 	}
 	if episodeNum == "" {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/version"
 )
@@ -158,7 +159,7 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 		),
 	)
 
-	if err := form.Run(); err != nil {
+	if err := tui.RunClean(form.Run); err != nil {
 		return false, fmt.Errorf("failed to show update prompt: %w", err)
 	}
 

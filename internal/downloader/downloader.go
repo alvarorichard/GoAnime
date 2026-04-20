@@ -18,6 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/lrstanley/go-ytdlp"
 )
@@ -301,7 +302,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	}
 
 	m.totalBytes = totalBytes
-	p := tea.NewProgram(m)
+	p := tui.NewProgram(m)
 
 	// Start downloads with progress tracking
 	downloadComplete := make(chan error, 1)
@@ -727,7 +728,7 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 
 	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
-	p := tea.NewProgram(m)
+	p := tui.NewProgram(m)
 
 	// Start download in goroutine with proper progress tracking
 	downloadComplete := make(chan error, 1)

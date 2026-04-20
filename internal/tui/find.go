@@ -17,13 +17,14 @@ package tui
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
-// resetTerminal sends ANSI sequences to reset terminal state after tcell
+// ResetTerminal sends ANSI sequences to reset terminal state after tcell
 // and drains any stale bytes from stdin that tcell may have left behind.
-func resetTerminal() {
+func ResetTerminal() {
 	// Reset DECCKM (normal cursor keys) + reset keypad numeric mode + show cursor
 	// These match the exact sequences tcell's ExitKeypad should send but
 	// sometimes fails to:
@@ -32,14 +33,16 @@ func resetTerminal() {
 	//   \033[?25h — show cursor
 	fmt.Fprint(os.Stdout, "\033[?1l\033>\033[?25h")
 
-	// Drain any stale bytes from stdin (platform-specific implementation).
-	drainStdin()
+	// Drain any stale bytes from stdin (platform-specific implementation). A
+	// short raw/no-echo window also catches late terminal capability responses
+	// such as OSC 11 and DECRQM ?2026/?2027 before they can be echoed.
+	DrainTerminalResponses(50 * time.Millisecond)
 }
 
 // Find is a drop-in replacement for fuzzyfinder.Find that resets the
 // terminal's cursor key mode after the finder exits.
 func Find[T any](slice []T, itemFunc func(i int) string, opts ...fuzzyfinder.Option) (int, error) {
 	idx, err := fuzzyfinder.Find(slice, itemFunc, opts...)
-	resetTerminal()
+	ResetTerminal()
 	return idx, err
 }

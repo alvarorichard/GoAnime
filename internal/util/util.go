@@ -544,7 +544,7 @@ func getUserInput(label string) (string, error) {
 		),
 	)
 
-	if err := form.Run(); err != nil {
+	if err := tui.RunClean(form.Run); err != nil {
 		return "", err
 	}
 	return animeName, nil
@@ -663,7 +663,7 @@ func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source
 			),
 		)
 
-		if err := form.Run(); err != nil {
+		if err := tui.RunClean(form.Run); err != nil {
 			return "", fmt.Errorf("download mode selection cancelled: %w", err)
 		}
 
@@ -695,7 +695,7 @@ func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source
 						}),
 				),
 			)
-			if err := inputForm.Run(); err != nil {
+			if err := tui.RunClean(inputForm.Run); err != nil {
 				return "", fmt.Errorf("episode input cancelled: %w", err)
 			}
 			episodeNum, _ := strconv.Atoi(episodeStr)
@@ -736,7 +736,7 @@ func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source
 						}),
 				),
 			)
-			if err := rangeForm.Run(); err != nil {
+			if err := tui.RunClean(rangeForm.Run); err != nil {
 				return "", fmt.Errorf("range input cancelled: %w", err)
 			}
 			startEp, _ := strconv.Atoi(startStr)

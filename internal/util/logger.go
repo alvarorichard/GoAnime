@@ -6,14 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/charmbracelet/colorprofile"
 )
 
 var Logger *log.Logger
+
+var consoleLogMu sync.Mutex
+var consoleLogSuppressions int
 
 // fileLogger is a separate logger that writes plain text to the log file (no ANSI codes)
 var fileLogger *log.Logger
@@ -149,12 +154,42 @@ func InitLogger() {
 		if logFile != nil {
 			RegisterCleanup(CloseLogFile)
 			showDebugBanner()
+			tui.ResetTerminal()
 		} else {
 			Logger.Info("Debug mode enabled (file logging unavailable — logs will appear in console)")
 			// Fallback: if we can't write to a file, allow debug on console
 			Logger.SetLevel(log.DebugLevel)
 			Logger.SetReportCaller(true)
 		}
+	}
+}
+
+// SuppressConsoleLogging temporarily silences the console logger while keeping
+// file logging available through the util logging helpers. This prevents async
+// logs from corrupting interactive progress bars.
+func SuppressConsoleLogging() func() {
+	consoleLogMu.Lock()
+	if Logger != nil {
+		if consoleLogSuppressions == 0 {
+			Logger.SetOutput(io.Discard)
+		}
+		consoleLogSuppressions++
+	}
+	consoleLogMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			consoleLogMu.Lock()
+			defer consoleLogMu.Unlock()
+			if Logger == nil || consoleLogSuppressions == 0 {
+				return
+			}
+			consoleLogSuppressions--
+			if consoleLogSuppressions == 0 {
+				Logger.SetOutput(os.Stderr)
+			}
+		})
 	}
 }
 

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/progress"
-	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -592,7 +591,7 @@ func (d *NineAnimeDownloader) downloadEpisodeWithProgress(anime *models.Anime, e
 		totalBytes: estimatedSize,
 	}
 
-	p := tea.NewProgram(m)
+	p := tui.NewProgram(m)
 
 	downloadComplete := make(chan error, 1)
 	go func() {

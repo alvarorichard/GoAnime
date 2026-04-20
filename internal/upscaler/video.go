@@ -18,6 +18,7 @@ import (
 
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -321,7 +322,7 @@ func (v *VideoUpscaler) upscaleFrames(ctx context.Context, inputDir, outputDir s
 		totalFrames: totalFrames,
 	}
 
-	program := tea.NewProgram(model)
+	program := tui.NewProgram(model)
 
 	// Channel for frame jobs
 	jobs := make(chan string, totalFrames)

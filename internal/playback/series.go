@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -21,6 +22,7 @@ func printEpisodeNotFoundMsg() {
 }
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+	tui.ResetTerminal()
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
 	} else {
@@ -335,7 +337,7 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 				return nil
 			})
 
-		if err := prompt.Run(); err != nil {
+		if err := tui.RunClean(prompt.Run); err != nil {
 			return nil, nil, err
 		}
 

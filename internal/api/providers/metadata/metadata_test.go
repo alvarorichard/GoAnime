@@ -413,3 +413,75 @@ func TestEnrichAnime_SuperFlixFallback(t *testing.T) {
 		t.Errorf("ep 55: got S%02dE%02d, want S02E04", s, e)
 	}
 }
+
+func TestInferSeasonNumberFromTitle(t *testing.T) {
+	tests := []struct {
+		title string
+		want  int
+	}{
+		{title: "JUJUTSU KAISEN Season 2", want: 2},
+		{title: "Jujutsu Kaisen 2 Season", want: 2},
+		{title: "Jujutsu Kaisen 2nd Season", want: 2},
+		{title: "Black Clover", want: 0},
+		{title: "Season 1", want: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.title, func(t *testing.T) {
+			if got := inferSeasonNumberFromTitle(tc.title); got != tc.want {
+				t.Fatalf("inferSeasonNumberFromTitle(%q) = %d, want %d", tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnrichAnime_JujutsuKaisenSeason2InfersCurrentSeasonFromMockedAniList(t *testing.T) {
+	media := makeMedia(145064, 51009, "JUJUTSU KAISEN Season 2", "Jujutsu Kaisen 2nd Season", 2023, 23)
+	relJSON := `{
+		"edges": [{
+			"relationType": "SEQUEL",
+			"node": {
+				"id": 999999,
+				"title": {"romaji": "Jujutsu Kaisen Culling Game", "english": "JUJUTSU KAISEN Season 3"},
+				"episodes": 23,
+				"format": "TV",
+				"startDate": {"year": 2026, "month": 1}
+			}
+		}]
+	}`
+	if err := json.Unmarshal([]byte(relJSON), &media.Relations); err != nil {
+		t.Fatalf("failed to build mock relations: %v", err)
+	}
+
+	mock := newMockClient()
+	mock.addAniListResponse(media)
+	enricher := NewEnricherWithClient(mock)
+	anime := &models.Anime{
+		Name:      "[PT-BR] Jujutsu Kaisen 2 Season (Dublado)",
+		URL:       "https://goyabu.io/anime/jujutsu-kaisen-2-season-dublado",
+		Source:    "Goyabu",
+		AnilistID: 145064,
+		MalID:     51009,
+	}
+
+	seasonMap, err := enricher.EnrichAnime(context.Background(), anime)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if anime.CurrentSeason != 2 {
+		t.Fatalf("CurrentSeason = %d, want 2", anime.CurrentSeason)
+	}
+	if anime.OfficialTitle() != "JUJUTSU KAISEN Season 2" {
+		t.Fatalf("OfficialTitle = %q, want JUJUTSU KAISEN Season 2", anime.OfficialTitle())
+	}
+	if len(seasonMap) != 2 {
+		t.Fatalf("seasonMap len = %d, want 2: %+v", len(seasonMap), seasonMap)
+	}
+	if seasonMap[0].Season != 1 || seasonMap[0].StartEp != 1 || seasonMap[0].EndEp != 23 {
+		t.Fatalf("seasonMap[0] = %+v, want season 1 range 1-23", seasonMap[0])
+	}
+	if seasonMap[1].Season != 2 || seasonMap[1].StartEp != 24 || seasonMap[1].EndEp != 46 {
+		t.Fatalf("seasonMap[1] = %+v, want season 2 range 24-46", seasonMap[1])
+	}
+}

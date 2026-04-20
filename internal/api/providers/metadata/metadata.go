@@ -400,6 +400,12 @@ func (e *Enricher) EnrichAnime(ctx context.Context, anime *models.Anime) ([]Seas
 	if meta.TotalEpisodes > 0 && anime.Details.Episodes == 0 {
 		anime.Details.Episodes = meta.TotalEpisodes
 	}
+	if anime.CurrentSeason <= 0 {
+		if season := inferSeasonNumber(anime.Name, meta.TitleEnglish, meta.TitleRomaji); season > 1 {
+			anime.CurrentSeason = season
+			util.Debug("inferred anime season from title", "season", season, "anime", anime.Name)
+		}
+	}
 
 	seasonMap := meta.SeasonMap
 
@@ -429,6 +435,38 @@ func (e *Enricher) EnrichAnime(ctx context.Context, anime *models.Anime) ([]Seas
 
 	util.Debug("EnrichAnime final result", "seasonMapLen", len(seasonMap), "anime", anime.Name)
 	return seasonMap, nil
+}
+
+func inferSeasonNumber(titles ...string) int {
+	for _, title := range titles {
+		if season := inferSeasonNumberFromTitle(title); season > 1 {
+			return season
+		}
+	}
+	return 0
+}
+
+func inferSeasonNumberFromTitle(title string) int {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return 0
+	}
+
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bseason\s+(\d+)\b`),
+		regexp.MustCompile(`(?i)\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b`),
+	}
+	for _, pattern := range patterns {
+		matches := pattern.FindStringSubmatch(title)
+		if len(matches) < 2 {
+			continue
+		}
+		season, err := strconv.Atoi(matches[1])
+		if err == nil && season > 1 {
+			return season
+		}
+	}
+	return 0
 }
 
 // --- Internal types ---

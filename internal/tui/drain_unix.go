@@ -5,20 +5,33 @@ package tui
 import (
 	"math"
 	"os"
+	"time"
 
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
-// drainStdin reads and discards any pending bytes on stdin using
-// non-blocking I/O so it never blocks if there is nothing to read.
-// This clears stale escape sequences left by tcell's application cursor
-// key mode before the next interactive prompt runs.
-func drainStdin() {
+// DrainTerminalResponses reads and discards pending bytes on stdin using
+// non-blocking I/O. While waiting, stdin is temporarily put in raw/no-echo mode
+// so delayed terminal responses do not get printed as literal escape text.
+func DrainTerminalResponses(wait time.Duration) {
 	rawFd := os.Stdin.Fd()
 	if rawFd > math.MaxInt {
 		return
 	}
 	fd := int(rawFd) //nolint:gosec // overflow guarded above
+
+	if !term.IsTerminal(fd) {
+		return
+	}
+
+	state, rawErr := term.MakeRaw(fd)
+	if rawErr == nil {
+		defer func() { _ = term.Restore(fd, state) }()
+	}
+	if wait > 0 {
+		time.Sleep(wait)
+	}
 
 	// Set non-blocking mode on stdin
 	if err := unix.SetNonblock(fd, true); err != nil {
