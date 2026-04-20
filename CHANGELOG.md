@@ -8,6 +8,7 @@ Release date: 2026-04-20
 - **Jellyfin & Plex Compatibility**: Reorganized the media storage structure for movies, series, anime, and doramas, making them out-of-the-box compatible with Jellyfin and Plex.
 - **Automatic Season Inference**: GoAnime now automatically detects the season number from the anime title (e.g., "Mushoku Tensei Season 2"), eliminating manual configuration and ensuring episodes are organized under the correct season.
 - **More Robust Downloads with Smart Fallback**: The download system has been completely revamped with intelligent source selection, automatic fallback to alternative URLs (especially for AnimeFire), and improved progress tracking for batch downloads.
+- **AllAnime Encrypted API Support**: Implemented AES-256-CTR decryption for AllAnime's new encrypted "tobeparsed" API responses, ensuring continued access to the AllAnime source after their API migration.
 - **More Stable Terminal Interface**: Critical fixes to terminal interaction prevent display issues during asynchronous operations such as downloads and updates.
 
 ## Features
@@ -21,6 +22,7 @@ Release date: 2026-04-20
 - Add hierarchical progress model (`childProgress`) for batch downloads, enabling accurate tracking of total and received bytes across multiple simultaneous episodes.
 - Introduce console output suppression mechanism (`SuppressConsole`) during asynchronous operations to prevent interference with progress bars.
 - Implement episode-specific tracking keys to prevent data overlap in the database.
+- Implement AES-256-CTR decryption for AllAnime's new encrypted "tobeparsed" source URL blobs, with JSON parsing and regex fallback extraction.
 - Integrate images and Discord RPC for the SuperFlix source.
 
 ## Bug Fixes
@@ -31,6 +33,8 @@ Release date: 2026-04-20
 - Fix `USERPROFILE` environment variable in download tests for Windows compatibility.
 - Ensure all sources appear in scraper search results.
 - Fix Windows path compatibility using `filepath.ToSlash` in media naming functions.
+- Fix AllAnime source URL decoding by replacing the incomplete hex substitution table with the full cipher from ani-cli's `provider_init`, covering all uppercase/lowercase letters, digits, and special characters.
+- Fix AllAnime `extractSourceURLs` to fall through to regex extraction when JSON parsing returns zero URLs, preventing silent failures.
 - Fix HTTP2 transport race conditions by replacing the shared fast client with dedicated instances.
 
 ## Improvements
