@@ -1,3 +1,4 @@
+// Package appflow coordinates top-level anime data retrieval and enrichment flows.
 package appflow
 
 import (

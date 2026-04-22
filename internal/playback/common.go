@@ -17,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// PlayEpisode loads and starts playback for a single episode.
 func PlayEpisode(
 	anime *models.Anime,
 	episodes []models.Episode,
@@ -154,6 +155,7 @@ func PlayEpisode(
 	return playErr
 }
 
+// SelectEpisodeWithFuzzy presents a fuzzy-finder UI and returns the chosen episode URL, number string, and number.
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, error) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
@@ -170,6 +172,7 @@ func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, err
 	return url, numStr, epNum, nil
 }
 
+// FindEpisodeByNumber returns the URL, number string, and number for the episode matching num.
 func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, int, error) {
 	for _, ep := range episodes {
 		if epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(ep.Number)); err == nil && epNum == num {

@@ -6,8 +6,11 @@ import "github.com/alvarorichard/Goanime/internal/scraper"
 
 // SourceKind is the canonical type-safe identifier for a media source.
 // Unlike scraper.ScraperType (iota int), SourceKind is human-readable and safe for logging.
+//
+//revive:disable-next-line:exported
 type SourceKind string
 
+// Media source kind constants used throughout the application for source identification.
 const (
 	AllAnime   SourceKind = "AllAnime"
 	AnimeFire  SourceKind = "Animefire.io"

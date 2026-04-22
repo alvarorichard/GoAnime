@@ -140,7 +140,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				return displayName
 			},
 			fuzzyfinder.WithPromptString("Select the anime you want: "),
-			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
+			fuzzyfinder.WithPreviewWindow(func(i, _, _ int) string {
 				if i < 0 || i >= len(animesWithBack) {
 					return ""
 				}

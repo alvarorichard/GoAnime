@@ -1,3 +1,4 @@
+// Package handlers provides HTTP-level request handlers for download and media operations.
 package handlers
 
 import (

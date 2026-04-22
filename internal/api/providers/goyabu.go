@@ -35,7 +35,7 @@ func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) (
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *goyabuProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *goyabuProvider) FetchStreamURL(_ context.Context, episode *models.Episode, _ *models.Anime, _ string) (string, error) {
 	adapter, err := p.sm.GetScraper(scraper.GoyabuType)
 	if err != nil {
 		return "", err

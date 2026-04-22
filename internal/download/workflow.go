@@ -121,11 +121,10 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			return nil
 		}
 		return downloadEpisodeRangeWithFallback(anime, request.StartEpisode, request.EndEpisode)
-	} else {
-		util.Infof("Downloading episode %d of %s",
-			request.EpisodeNum, anime.Name)
-		return downloadSingleEpisodeWithFallback(anime, request.EpisodeNum)
 	}
+	util.Infof("Downloading episode %d of %s",
+		request.EpisodeNum, anime.Name)
+	return downloadSingleEpisodeWithFallback(anime, request.EpisodeNum)
 }
 
 func downloadAllEpisodesWithFallback(anime *models.Anime) error {
@@ -418,18 +417,17 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 		if request.IsRange {
 			util.Infof("Downloading %s S%02d E%02d-%02d", anime.Name, seasonNum, request.StartEpisode, request.EndEpisode)
 			return md.DownloadTVEpisodeRange(anime, seasonNum, request.StartEpisode, request.EndEpisode)
-		} else {
-			episodeNum := request.EpisodeNum
-			if episodeNum == 0 {
-				// Let user select episode
-				episodeNum, err = selectEpisode(mediaManager, mediaID, seasonNum)
-				if err != nil {
-					return fmt.Errorf("failed to select episode: %w", err)
-				}
-			}
-			util.Infof("Downloading %s S%02dE%02d", anime.Name, seasonNum, episodeNum)
-			return md.DownloadTVEpisode(anime, seasonNum, episodeNum)
 		}
+		episodeNum := request.EpisodeNum
+		if episodeNum == 0 {
+			// Let user select episode
+			episodeNum, err = selectEpisode(mediaManager, mediaID, seasonNum)
+			if err != nil {
+				return fmt.Errorf("failed to select episode: %w", err)
+			}
+		}
+		util.Infof("Downloading %s S%02dE%02d", anime.Name, seasonNum, episodeNum)
+		return md.DownloadTVEpisode(anime, seasonNum, episodeNum)
 	}
 
 	return fmt.Errorf("could not determine media type for download")

@@ -97,7 +97,7 @@ func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *animeFireProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *animeFireProvider) FetchStreamURL(_ context.Context, episode *models.Episode, _ *models.Anime, _ string) (string, error) {
 	adapter, err := p.sm.GetScraper(scraper.AnimefireType)
 	if err != nil {
 		return "", err
@@ -488,7 +488,7 @@ func (p *nineAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *nineAnimeProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *nineAnimeProvider) FetchStreamURL(_ context.Context, episode *models.Episode, _ *models.Anime, _ string) (string, error) {
 	adapter, err := p.sm.GetScraper(scraper.NineAnimeType)
 	if err != nil {
 		return "", err
@@ -604,7 +604,7 @@ func (p *superFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Ani
 	return episodes, nil
 }
 
-func (p *superFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *superFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
 	client, err := p.client()
 	if err != nil {
 		return "", err
@@ -688,7 +688,7 @@ func (p *animeDriveProvider) FetchEpisodes(_ context.Context, anime *models.Anim
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *animeDriveProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *animeDriveProvider) FetchStreamURL(_ context.Context, episode *models.Episode, _ *models.Anime, _ string) (string, error) {
 	adapter, err := p.sm.GetScraper(scraper.AnimeDriveType)
 	if err != nil {
 		return "", err

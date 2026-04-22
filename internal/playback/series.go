@@ -21,6 +21,7 @@ func printEpisodeNotFoundMsg() {
 	util.Warnf("This episode does not exist in this source. Try another episode.")
 }
 
+// HandleSeries drives the interactive episode selection and playback loop for anime series.
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	tui.ResetTerminal()
 	if anime.IsTV() {
@@ -203,6 +204,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	return nil
 }
 
+// SelectInitialEpisode presents a fuzzy-finder UI to pick the starting episode.
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
 	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {

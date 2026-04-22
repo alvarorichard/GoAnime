@@ -884,9 +884,8 @@ func downloadWithYtDlp(url, path string, m *model) error {
 
 		if attempt < maxRetries && isRetryableError(runErr) {
 			continue
-		} else {
-			break
 		}
+		break
 	}
 
 	if runErr != nil {

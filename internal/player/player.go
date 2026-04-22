@@ -1,3 +1,4 @@
+// Package player manages media playback, download orchestration, and scraper integration.
 package player
 
 import (

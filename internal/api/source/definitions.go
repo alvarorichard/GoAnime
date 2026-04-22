@@ -5,6 +5,8 @@ import "github.com/alvarorichard/Goanime/internal/models"
 // SourceDefinition is a declarative description of a media source.
 // Adding a new source to GoAnime costs one entry in the sourceDefs slice
 // and one Provider implementation — no Resolve() changes needed.
+//
+//revive:disable-next-line:exported
 type SourceDefinition struct {
 	Kind             SourceKind
 	Explicit         []string           // Exact values that may appear in anime.Source

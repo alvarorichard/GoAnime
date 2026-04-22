@@ -530,9 +530,8 @@ func findBloggerLink(content string) (string, error) {
 
 	if len(matches) > 0 {
 		return matches[0], nil
-	} else {
-		return "", errors.New("no blogger video link found in the content")
 	}
+	return "", errors.New("no blogger video link found in the content")
 }
 
 // newSurfClient creates a surf HTTP client with Chrome browser impersonation.
