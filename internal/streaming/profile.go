@@ -1,3 +1,4 @@
+// Package streaming classifies stream URLs and selects the appropriate download strategy.
 package streaming
 
 import (

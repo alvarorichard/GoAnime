@@ -1,3 +1,4 @@
+// Package providers registers and dispatches to anime source providers.
 package providers
 
 import (

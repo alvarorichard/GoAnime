@@ -31,4 +31,4 @@ foreach ($pkg in $packages) {
     "" | Tee-Object -FilePath $reportPath -Append
 }
 
-Write-Host "Benchmark report -> $reportPath"
+Write-Output "Benchmark report -> $reportPath"

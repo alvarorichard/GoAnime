@@ -1,3 +1,4 @@
+// Package util manages global playback state shared between playback and discord layers.
 package util
 
 import "sync"

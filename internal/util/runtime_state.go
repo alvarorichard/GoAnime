@@ -1,4 +1,5 @@
-package util
+// Package util provides shared runtime state, configuration, and helper functions for GoAnime.
+package util // nosemgrep
 
 import "sync"
 

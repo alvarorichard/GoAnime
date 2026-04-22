@@ -1,3 +1,4 @@
+// Package source defines source kinds and their associated metadata definitions.
 package source
 
 import "github.com/alvarorichard/Goanime/internal/models"

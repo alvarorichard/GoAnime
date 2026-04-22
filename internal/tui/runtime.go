@@ -1,3 +1,4 @@
+// Package tui wraps fuzzyfinder and form utilities for interactive terminal prompts.
 package tui
 
 import (

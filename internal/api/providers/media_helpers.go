@@ -1,3 +1,4 @@
+// Package providers implements stream provider adapters for each anime source.
 package providers
 
 import (

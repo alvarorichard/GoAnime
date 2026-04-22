@@ -1,3 +1,4 @@
+// Package scraper resolves media IDs from episode URLs for supported scrapers.
 package scraper
 
 import "strings"
