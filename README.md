@@ -87,9 +87,10 @@ sudo xattr -d com.apple.quarantine /usr/local/bin/goanime
 sudo apt update
 sudo apt install mpv -y
 
-curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-linux
-chmod +x goanime
-sudo mv goanime /usr/local/bin/
+curl -LO https://github.com/alvarorichard/Goanime/releases/latest/download/goanime-linux-amd64.tar.gz
+tar -xzf goanime-linux-amd64.tar.gz
+chmod +x goanime-linux-amd64
+sudo mv goanime-linux-amd64 /usr/local/bin/goanime
 ```
 </details>
 
@@ -108,9 +109,10 @@ yay -S goanime
 sudo dnf update
 sudo dnf install mpv
 
-curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-linux
-chmod +x goanime
-sudo mv goanime /usr/local/bin/
+curl -LO https://github.com/alvarorichard/Goanime/releases/latest/download/goanime-linux-amd64.tar.gz
+tar -xzf goanime-linux-amd64.tar.gz
+chmod +x goanime-linux-amd64
+sudo mv goanime-linux-amd64 /usr/local/bin/goanime
 ```
 </details>
 
