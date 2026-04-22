@@ -1525,7 +1525,8 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
-				if streaming.ShouldUseNativeHLSDownload(videoURL) {
+				switch {
+				case streaming.ShouldUseNativeHLSDownload(videoURL):
 					err = downloadWithNativeHLS(videoURL, episodePath, m)
 					if err != nil && errors.Is(err, hls.ErrSeparateAudioTracks) {
 						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, err)
@@ -1538,7 +1539,7 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, err)
 						err = downloadWithYtDlp(videoURL, episodePath, m)
 					}
-				} else if streaming.IsBloggerStreamURL(videoURL) {
+				case streaming.IsBloggerStreamURL(videoURL):
 					// Blogger URLs: extract googlevideo CDN URL and download directly
 					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
 					if extractErr != nil {
@@ -1552,9 +1553,9 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 							err = downloadWithYtDlp(videoURL, episodePath, m)
 						}
 					}
-				} else if streaming.ShouldUseYtDLPDownload(videoURL) {
+				case streaming.ShouldUseYtDLPDownload(videoURL):
 					err = downloadWithYtDlp(videoURL, episodePath, m)
-				} else {
+				default:
 					// Plain MP4 (including blogger proxy) — multi-threaded Range download
 					err = DownloadVideo(videoURL, episodePath, 4, m)
 				}
@@ -1772,7 +1773,8 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
-				if streaming.ShouldUseNativeHLSDownload(videoURL) {
+				switch {
+				case streaming.ShouldUseNativeHLSDownload(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && errors.Is(dlErr, hls.ErrSeparateAudioTracks) {
 						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, dlErr)
@@ -1785,7 +1787,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, dlErr)
 						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 					}
-				} else if streaming.IsBloggerStreamURL(videoURL) {
+				case streaming.IsBloggerStreamURL(videoURL):
 					// Blogger URLs: extract googlevideo CDN URL and download directly
 					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
 					if extractErr != nil {
@@ -1799,9 +1801,9 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 							dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 						}
 					}
-				} else if streaming.ShouldUseYtDLPDownload(videoURL) {
+				case streaming.ShouldUseYtDLPDownload(videoURL):
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-				} else {
+				default:
 					// Plain MP4 (including blogger proxy) — multi-threaded Range download
 					dlErr = DownloadVideo(videoURL, episodePath, 4, m)
 				}

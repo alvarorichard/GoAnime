@@ -318,7 +318,7 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 						if idx := strings.LastIndex(baseURL, "/"); idx != -1 {
 							baseURL = baseURL[:idx+1]
 						} else {
-							baseURL = baseURL + "/"
+							baseURL += "/"
 						}
 						segmentURL = baseURL + segmentURL
 					}

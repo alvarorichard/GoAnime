@@ -431,11 +431,11 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			lowerName := strings.ToLower(anime.Name)
 			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
 				if !strings.Contains(anime.Name, "(Dublado)") {
-					anime.Name = anime.Name + " (Dublado)"
+					anime.Name += " (Dublado)"
 				}
 			} else if strings.Contains(lowerName, "legendado") || strings.Contains(lowerURL, "legendado") {
 				if !strings.Contains(anime.Name, "(Legendado)") {
-					anime.Name = anime.Name + " (Legendado)"
+					anime.Name += " (Legendado)"
 				}
 			}
 		}

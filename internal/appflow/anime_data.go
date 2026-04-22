@@ -99,6 +99,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 	}
 }
 
+// FetchAnimeDetails enriches the anime with AniList and source-specific metadata.
 func FetchAnimeDetails(anime *models.Anime) {
 	detailsStart := time.Now()
 

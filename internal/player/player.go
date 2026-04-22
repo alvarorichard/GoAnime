@@ -666,21 +666,6 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 	return nil, errors.New("no data field in mpv response")
 }
 
-// windows
-// dialMPVSocket creates a connection to mpv's socket.
-//func dialMPVSocket(socketPath string) (net.Conn, error) {
-//	if runtime.GOOS == "windows" {
-// Attempt named pipe on Windows
-//		return net.Dial("unix", socketPath)
-//	} else {
-// Unix-like system uses Unix sockets
-//		return net.Dial("unix", socketPath)
-//	}
-//}
-
-// Funções de download extraídas de player.go
-// downloadPart, combineParts, DownloadVideo, downloadWithYtDlp, ExtractVideoSources, getBestQualityURL, ExtractVideoSourcesWithPrompt, HandleBatchDownload, getEpisodeRange, findEpisode, createEpisodePath, fileExists
-// As implementações completas estão agora em download.go
 
 // HandleDownloadAndPlay handles the download and playback of the video
 func HandleDownloadAndPlay(
