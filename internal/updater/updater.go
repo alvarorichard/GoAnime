@@ -1,3 +1,4 @@
+// Package updater checks for new GoAnime releases and applies self-updates.
 package updater
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/version"
 )
 
+// GitHub repository constants for release checks and self-update downloads.
 const (
 	GitHubOwner = "alvarorichard"
 	GitHubRepo  = "GoAnime"

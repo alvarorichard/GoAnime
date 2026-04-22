@@ -20,7 +20,7 @@ type nineAnimeMockScraper struct {
 	streamArg   string
 }
 
-func (m *nineAnimeMockScraper) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+func (m *nineAnimeMockScraper) SearchAnime(_ string, _ ...any) ([]*models.Anime, error) {
 	return nil, nil
 }
 
@@ -29,7 +29,7 @@ func (m *nineAnimeMockScraper) GetAnimeEpisodes(animeURL string) ([]models.Episo
 	return m.episodes, nil
 }
 
-func (m *nineAnimeMockScraper) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (m *nineAnimeMockScraper) GetStreamURL(episodeURL string, _ ...any) (string, map[string]string, error) {
 	m.streamArg = episodeURL
 	if m.streamErr != nil {
 		return "", nil, m.streamErr

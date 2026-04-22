@@ -1,3 +1,4 @@
+// Package streaming provides URL classification and download strategy helpers.
 package streaming
 
 import "testing"

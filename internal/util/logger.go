@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
+// Logger is the global structured logger used for debug output.
 var Logger *log.Logger
 
 var consoleLogMu sync.Mutex

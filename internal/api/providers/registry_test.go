@@ -23,7 +23,7 @@ func (p *testProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]
 	return anime.Episodes, nil
 }
 
-func (p *testProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+func (p *testProvider) FetchStreamURL(_ context.Context, _ *models.Episode, _ *models.Anime, quality string) (string, error) {
 	return quality, nil
 }
 
@@ -32,7 +32,7 @@ func TestForKindCachesProviderInstances(t *testing.T) {
 
 	kind := source.SourceKind("TestCacheProvider")
 	var calls atomic.Int32
-	RegisterProvider(kind, func(sm *scraper.ScraperManager) Provider {
+	RegisterProvider(kind, func(_ *scraper.ScraperManager) Provider {
 		calls.Add(1)
 		return &testProvider{kind: kind}
 	})
@@ -60,7 +60,7 @@ func TestForKindConcurrentFactoryCall(t *testing.T) {
 
 	kind := source.SourceKind("TestConcurrentProvider")
 	var calls atomic.Int32
-	RegisterProvider(kind, func(sm *scraper.ScraperManager) Provider {
+	RegisterProvider(kind, func(_ *scraper.ScraperManager) Provider {
 		calls.Add(1)
 		return &testProvider{kind: kind}
 	})
@@ -196,7 +196,7 @@ func TestForKindAndRegisterProviderConcurrentSafe(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		RegisterProvider(kind, func(sm *scraper.ScraperManager) Provider {
+		RegisterProvider(kind, func(_ *scraper.ScraperManager) Provider {
 			calls.Add(1)
 			return &testProvider{kind: kind}
 		})

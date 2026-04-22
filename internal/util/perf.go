@@ -106,7 +106,7 @@ func (pt *PerfTracker) IncrementCounter(name string) {
 	pt.mu.Lock()
 	counter, exists := pt.counters[name]
 	if !exists {
-		var c int64 = 0
+		var c int64
 		counter = &c
 		pt.counters[name] = counter
 	}

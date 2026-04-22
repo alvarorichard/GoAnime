@@ -57,7 +57,7 @@ type mockUnifiedScraper struct {
 	streamArg   string
 }
 
-func (m *mockUnifiedScraper) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+func (m *mockUnifiedScraper) SearchAnime(_ string, _ ...any) ([]*models.Anime, error) {
 	return nil, nil
 }
 
@@ -66,7 +66,7 @@ func (m *mockUnifiedScraper) GetAnimeEpisodes(animeURL string) ([]models.Episode
 	return m.episodes, nil
 }
 
-func (m *mockUnifiedScraper) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (m *mockUnifiedScraper) GetStreamURL(episodeURL string, _ ...any) (string, map[string]string, error) {
 	m.streamArg = episodeURL
 	if m.streamCalls < len(m.streamErrs) {
 		err := m.streamErrs[m.streamCalls]

@@ -19,7 +19,7 @@ import (
 
 // mockMPVFullState provides a complete mock MPV that returns all properties
 // needed by getPrecisePlaybackState and updateDiscordPresence
-func mockMPVFullState(socketPath string, args []any) (any, error) {
+func mockMPVFullState(_ string, args []any) (any, error) {
 	if len(args) >= 2 && args[0] == "get_property" {
 		switch args[1] {
 		case "time-pos":

@@ -164,6 +164,7 @@ func enrichAnimeData(anime *models.Anime) error {
 	return nil
 }
 
+// ParseAnimes extracts a list of anime entries from a GoAnime search results page.
 func ParseAnimes(doc *goquery.Document) []models.Anime {
 	var animes []models.Anime
 
@@ -180,6 +181,7 @@ func ParseAnimes(doc *goquery.Document) []models.Anime {
 	return animes
 }
 
+// FetchAnimeFromAniList queries the AniList GraphQL API by anime name.
 func FetchAnimeFromAniList(animeName string) (*models.AniListResponse, error) {
 	return FetchAnimeFromAniListWithURL(animeName, "")
 }
@@ -345,6 +347,7 @@ func generateSearchVariations(cleanedName string) []string {
 	return variations
 }
 
+// CleanTitle removes common suffixes, tags, and source annotations from an anime title.
 func CleanTitle(title string) string {
 	cleaned := title
 

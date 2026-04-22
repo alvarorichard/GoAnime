@@ -1,3 +1,4 @@
+// Package discord manages Discord Rich Presence integration for GoAnime playback sessions.
 package discord
 
 import (

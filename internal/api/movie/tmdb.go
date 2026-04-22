@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	// TMDB API base URL
+	// TMDBBaseURL is the TMDB REST API base URL.
 	TMDBBaseURL = "https://api.themoviedb.org/3"
-	// TMDB image base URL
+	// TMDBImageBaseURL is the TMDB image CDN base URL.
 	TMDBImageBaseURL = "https://image.tmdb.org/t/p"
 )
 
