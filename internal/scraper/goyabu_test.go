@@ -478,7 +478,7 @@ func TestGoyabuGetEpisodeStreamURL_AJAXPlayVazio_FallbackBloggerURL(t *testing.T
 	mux := http.NewServeMux()
 
 	// Página do episódio com playersData em linha única (regex do Goyabu usa .*? sem DOTALL).
-	mux.HandleFunc("/episodio/1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/episodio/1", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprintf(w, `<html><head><script>var playersData = [{"name":"Blog","select":"blogger","url":"https://www.blogger.com/video.g?token=%s","blogger_token":"dGVzdA=="}];</script></head><body></body></html>`, bloggerToken)
 	})
 

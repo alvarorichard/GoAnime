@@ -25,7 +25,7 @@
 //
 // Funções testadas:
 //   - parseBatchexecuteResponse (real — player/scraper.go, fix 2026-04-23)
-//   - parseBatchexecuteResponse_legacy (lógica anterior ao fix, inlinada aqui)
+//   - parseBatchexecuteResponseLegacy (lógica anterior ao fix, inlinada aqui)
 // ===========================================================================
 
 package player
@@ -52,12 +52,12 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// parseBatchexecuteResponse_legacy — lógica ANTERIOR ao fix de 2026-04-23
+// parseBatchexecuteResponseLegacy — lógica ANTERIOR ao fix de 2026-04-23
 //
 // Mantida aqui para demonstrar o bug: só verifica data[2] e não tem fallback
 // regex. Qualquer resposta com streams fora do índice 2 retorna erro.
 // ---------------------------------------------------------------------------
-func parseBatchexecuteResponse_legacy(body []byte) (string, error) {
+func parseBatchexecuteResponseLegacy(body []byte) (string, error) {
 	var videoURL string
 	for _, line := range strings.Split(string(body), "\n") {
 		if !strings.Contains(line, "wrb.fr") {
@@ -152,7 +152,7 @@ func TestParseBatchexecuteResponse_StreamsAtIndex2_FormatoClassico(t *testing.T)
 	body := buildBatchexecuteBody(2, []string{googleVideoURL720p, googleVideoURL360p})
 
 	// Parser antigo (pré-fix) funciona porque streams estão em data[2].
-	legacyURL, err := parseBatchexecuteResponse_legacy(body)
+	legacyURL, err := parseBatchexecuteResponseLegacy(body)
 	require.NoError(t, err, "lógica antiga deve funcionar com streams em data[2]")
 	assert.Equal(t, googleVideoURL720p, legacyURL)
 
@@ -175,7 +175,7 @@ func TestParseBatchexecuteResponse_Bug_StreamsEmIndex0(t *testing.T) {
 	body := buildBatchexecuteBody(0, []string{googleVideoURL720p})
 
 	// BUG simulado: parser antigo (pré 2026-04-23) falha com streams em data[0].
-	_, err := parseBatchexecuteResponse_legacy(body)
+	_, err := parseBatchexecuteResponseLegacy(body)
 	assert.Error(t, err, "BUG 2026-04-23: parser antigo NÃO encontra streams em data[0]")
 
 	// SOLUÇÃO: parser corrigido encontra streams em qualquer índice.
@@ -192,7 +192,7 @@ func TestParseBatchexecuteResponse_Bug_StreamsEmIndex1(t *testing.T) {
 	body := buildBatchexecuteBody(1, []string{googleVideoURL360p})
 
 	// BUG simulado: parser antigo falha (data tem 2 elementos, len(data) < 3).
-	_, err := parseBatchexecuteResponse_legacy(body)
+	_, err := parseBatchexecuteResponseLegacy(body)
 	assert.Error(t, err, "BUG 2026-04-23: parser antigo falha quando len(data) < 3")
 
 	// SOLUÇÃO: parser corrigido encontra streams em data[1].
@@ -208,7 +208,7 @@ func TestParseBatchexecuteResponse_Bug_DataComUmElemento(t *testing.T) {
 
 	body := buildBatchexecuteBody(0, []string{googleVideoURL360p})
 
-	_, err := parseBatchexecuteResponse_legacy(body)
+	_, err := parseBatchexecuteResponseLegacy(body)
 	assert.Error(t, err, "BUG 2026-04-23: len(data)==1 < 3, parser antigo descarta")
 
 	url, err := parseBatchexecuteResponse(body)
@@ -257,7 +257,7 @@ func TestParseBatchexecuteResponse_FallbackRegex(t *testing.T) {
 		`debug: ` + googleVideoURL720p + ` extra`)
 
 	// Parser antigo (sem fallback regex) falha.
-	_, err := parseBatchexecuteResponse_legacy(body)
+	_, err := parseBatchexecuteResponseLegacy(body)
 	assert.Error(t, err, "parser antigo não tem fallback regex")
 
 	// Parser corrigido encontra via regex.
