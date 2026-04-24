@@ -768,8 +768,30 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 	}
 
 	// Step 3: Parse the batchexecute response to find the googlevideo URL
+	videoURL, err := parseBatchexecuteResponse(batchBody)
+	if err != nil {
+		return "", err
+	}
+
+	util.Debugf("Blogger extract: video URL obtained (%d chars)", len(videoURL))
+	return videoURL, nil
+}
+
+// parseBatchexecuteResponse extracts the best MP4 video URL from a Google
+// batchexecute API response body (WcwnYd RPC).
+//
+// Fix 2026-04-23: the previous implementation assumed streams were always at
+// data[2] inside the inner JSON payload. When Google changed the response
+// structure (or returned fewer top-level elements), the hardcoded index caused
+// a silent `continue`, and all three retry attempts produced
+// "no video URL found in batchexecute response".
+//
+// The fix iterates every index of data[] looking for the first element that is
+// itself an array of arrays (the streams list). A regex fallback is also
+// applied over the raw body in case structured parsing fails entirely.
+func parseBatchexecuteResponse(body []byte) (string, error) {
 	var videoURL string
-	for line := range strings.SplitSeq(string(batchBody), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		if !strings.Contains(line, "wrb.fr") {
 			continue
 		}
@@ -789,14 +811,22 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 			if err := json.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
 				continue
 			}
-			if len(data) < 3 {
+			// Search all indices for a streams array (resilient to Google index changes).
+			var streams []any
+			for i, elem := range data {
+				if s, ok := elem.([]any); ok && len(s) > 0 {
+					if _, isSlice := s[0].([]any); isSlice {
+						streams = s
+						util.Debugf("Blogger batchexecute: found streams at data[%d]", i)
+						break
+					}
+				}
+			}
+			if streams == nil {
+				util.Debugf("Blogger batchexecute: no streams array found in data (len=%d)", len(data))
 				continue
 			}
-			streams, ok := data[2].([]any)
-			if !ok {
-				continue
-			}
-			// Collect all MP4 stream URLs and prefer higher quality (itag=22 is 720p, itag=18 is 360p)
+			// Collect MP4 URLs; prefer 720p (itag=22) over 360p (itag=18).
 			var mp4URLs []string
 			for _, s := range streams {
 				stream, ok := s.([]any)
@@ -811,7 +841,6 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 					mp4URLs = append(mp4URLs, u)
 				}
 			}
-			// Prefer 720p (itag=22) over 360p (itag=18)
 			for _, u := range mp4URLs {
 				if strings.Contains(u, "itag=22") {
 					videoURL = u
@@ -835,11 +864,19 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 		}
 	}
 
+	// Regex fallback: scan the raw body for any *.googlevideo.com URL.
 	if videoURL == "" {
-		return "", errors.New("no video URL found in batchexecute response")
+		googleVideoRe := regexp.MustCompile(`https://[^"\\]+\.googlevideo\.com/[^"\\]+`)
+		if match := googleVideoRe.FindString(string(body)); match != "" {
+			util.Debugf("Blogger batchexecute: found googlevideo URL via regex fallback")
+			videoURL = match
+		}
 	}
 
-	util.Debugf("Blogger extract: video URL obtained (%d chars)", len(videoURL))
+	if videoURL == "" {
+		util.Debugf("Blogger batchexecute response body (first 500 bytes): %s", string(body[:min(500, len(body))]))
+		return "", errors.New("no video URL found in batchexecute response")
+	}
 	return videoURL, nil
 }
 

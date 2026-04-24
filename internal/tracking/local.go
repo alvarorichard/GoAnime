@@ -486,6 +486,9 @@ func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
 *────────────────────────────────────────────────────────────────────────────
 */
 func (t *LocalTracker) Close() error {
+	if t == nil {
+		return nil
+	}
 	var finalErr error
 
 	closeStmt := func(stmt *sql.Stmt, name string) {

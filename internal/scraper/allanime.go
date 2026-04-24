@@ -7,7 +7,6 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,8 +28,9 @@ const (
 	AllAnimeAPI     = "https://api.allanime.day/api"
 	UserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 	// allAnimeKeyPhrase is the passphrase used to derive the AES-256 key via SHA-256.
-	// Matches: printf '%s' 'SimtVuagFbGR2K7P' | openssl dgst -sha256 -binary
-	allAnimeKeyPhrase = "SimtVuagFbGR2K7P"
+	// Updated 2026-04-24: AllAnime rotated the key to "Xot36i3lK3:v1".
+	// Matches: printf '%s' 'Xot36i3lK3:v1' | openssl dgst -sha256 -binary
+	allAnimeKeyPhrase = "Xot36i3lK3:v1"
 )
 
 // Pre-compiled regexes for AllAnime scraper (avoid per-call compilation)
@@ -69,39 +69,52 @@ type sourceInfo struct {
 
 // decodeToBeParsed decrypts the "tobeparsed" blob from the AllAnime API.
 //
-// The blob is base64-encoded. The first 12 bytes are the AES-CTR nonce/IV.
-// The remaining bytes are the ciphertext encrypted with AES-256-CTR.
-// The counter starts at nonce || 0x00000002 (matching OpenSSL conventions).
+// Blob format (updated 2026-04-24): [1-byte version 0x01][12-byte nonce][ciphertext][16-byte GCM tag]
+// The cipher is AES-256-GCM; the key is SHA-256("Xot36i3lK3:v1").
+// Minimum valid size: 1 + 12 + 0 + 16 = 29 bytes (empty plaintext), so we require ≥ 30.
 //
-// After decryption, the plaintext is JSON containing sourceUrl/sourceName pairs.
+// ani-cli reference: https://github.com/pystardust/ani-cli/commit/e5523a9b480f67ee878a0cc075043313cc58e07d
 func decodeToBeParsed(blob string) ([]sourceInfo, error) {
+	util.Debugf("AllAnime tobeparsed raw blob (first 60 chars): %q", blob[:min(60, len(blob))])
+
+	// Try standard base64 first, then URL-safe (AllAnime may use either)
 	data, err := base64.StdEncoding.DecodeString(blob)
 	if err != nil {
-		return nil, fmt.Errorf("base64 decode failed: %w", err)
+		data, err = base64.URLEncoding.DecodeString(blob)
+		if err != nil {
+			data, err = base64.RawURLEncoding.DecodeString(blob)
+			if err != nil {
+				return nil, fmt.Errorf("base64 decode failed: %w", err)
+			}
+		}
 	}
 
-	if len(data) < 13 { // 12-byte nonce + at least 1 byte of ciphertext
+	util.Debugf("AllAnime tobeparsed decoded length: %d bytes, first 16 bytes: %x", len(data), data[:min(16, len(data))])
+
+	// 1 (version) + 12 (nonce) + 16 (GCM tag) + at least 1 byte plaintext = 30
+	if len(data) < 30 {
 		return nil, fmt.Errorf("tobeparsed blob too short (%d bytes)", len(data))
 	}
 
-	nonce := data[:12]
-	ciphertext := data[12:]
+	// Blob format: [0x01 version byte][12-byte nonce][ciphertext + 16-byte GCM tag]
+	nonce := data[1:13]
+	ciphertextWithTag := data[13:]
+	util.Debugf("AllAnime tobeparsed nonce: %x", nonce)
 
 	block, err := aes.NewCipher(allAnimeKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	// Build the 16-byte IV for AES-256-CTR: nonce (12 bytes) + counter starting at 2.
-	// This matches the bash script: ctr="${iv}00000002"
-	iv := make([]byte, aes.BlockSize)
-	copy(iv[:12], nonce)
-	binary.BigEndian.PutUint32(iv[12:], 2)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
 
-	stream := cipher.NewCTR(block, iv) // #nosec G407 -- IV is derived from the nonce in the encrypted blob, not hardcoded
-
-	plaintext := make([]byte, len(ciphertext))
-	stream.XORKeyStream(plaintext, ciphertext)
+	plaintext, err := gcm.Open(nil, nonce, ciphertextWithTag, nil)
+	if err != nil {
+		return nil, fmt.Errorf("AES-GCM decryption failed: %w", err)
+	}
 
 	// Parse the decrypted JSON to extract sourceUrl/sourceName pairs.
 	// The bash script does:
@@ -117,6 +130,8 @@ func decodeToBeParsed(blob string) ([]sourceInfo, error) {
 			} `json:"episode"`
 		} `json:"data"`
 	}
+
+	util.Debugf("AllAnime tobeparsed decrypted (first 200 bytes): %q", string(plaintext[:min(200, len(plaintext))]))
 
 	// The plaintext may contain the full GraphQL response or just the sourceUrls array.
 	// Try parsing as the full response first.
