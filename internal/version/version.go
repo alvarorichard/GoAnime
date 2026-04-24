@@ -7,8 +7,14 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tracking"
 )
 
-const (
-	Version = "1.8"
+// Version is set via -ldflags at build time by the CI workflow.
+// Fallback value is used for local development builds.
+var Version = "1.8.2"
+
+// BuildTime and Commit are injected by the CI workflow via -ldflags.
+var (
+	BuildTime = "unknown"
+	Commit    = "unknown"
 )
 
 func HasVersionArg() bool {

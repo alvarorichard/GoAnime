@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,8 +39,9 @@ func newTestClient(serverURL string) *AllAnimeClient {
 	}
 }
 
-// encryptToBeParsed encrypts plaintext JSON the same way the AllAnime API would:
-// base64( nonce(12) || AES-256-CTR(plaintext) ) with counter starting at 2.
+// encryptToBeParsed encrypts plaintext JSON the same way the AllAnime API does:
+// base64( 0x01 || nonce(12) || AES-256-GCM(plaintext) )
+// Updated 2026-04-24: cipher changed from CTR to GCM; key rotated to "Xot36i3lK3:v1".
 func encryptToBeParsed(t *testing.T, plaintext string) string {
 	t.Helper()
 	nonce := make([]byte, 12)
@@ -56,14 +56,13 @@ func encryptToBeParsedWithNonce(t *testing.T, plaintext string, nonce []byte) st
 	key := sha256.Sum256([]byte(allAnimeKeyPhrase))
 	block, err := aes.NewCipher(key[:])
 	require.NoError(t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(t, err)
 
-	iv := make([]byte, aes.BlockSize)
-	copy(iv[:12], nonce)
-	binary.BigEndian.PutUint32(iv[12:], 2)
-
-	ct := make([]byte, len(plaintext))
-	cipher.NewCTR(block, iv).XORKeyStream(ct, []byte(plaintext))
-	return base64.StdEncoding.EncodeToString(append(nonce, ct...))
+	sealed := gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	payload := append([]byte{0x01}, nonce...)
+	payload = append(payload, sealed...)
+	return base64.StdEncoding.EncodeToString(payload)
 }
 
 // buildSourceURLsJSON builds a valid AllAnime sourceUrls JSON response.
@@ -264,7 +263,9 @@ func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
 
 func TestAllAnimeKeyMatchesOpenSSL(t *testing.T) {
 	t.Parallel()
-	expected := "cb156d973b237c31a2aa2dbac52dc963da6a2e571968bb69df00242f80c46348"
+	// sha256("Xot36i3lK3:v1") — updated 2026-04-24 when AllAnime rotated the key.
+	// Verify: printf '%s' 'Xot36i3lK3:v1' | openssl dgst -sha256
+	expected := "a254aa27c410f297bd04ba33a0c0df7ff4e706bf3ae27271c6703f84e750f552"
 	assert.Equal(t, expected, hex.EncodeToString(allAnimeKey))
 }
 
@@ -386,7 +387,7 @@ func TestDecodeSourceURLTableCoversAllExpectedChars(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. AES-256-CTR — decodeToBeParsed
+// 4. AES-256-GCM — decodeToBeParsed (updated 2026-04-24: CTR → GCM, new key)
 // ---------------------------------------------------------------------------
 
 func TestDecodeToBeParsedRoundTrip(t *testing.T) {
@@ -436,7 +437,7 @@ func TestDecodeToBeParsedBadBase64(t *testing.T) {
 
 func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 	t.Parallel()
-	// 12 bytes of nonce, 0 bytes of ciphertext -> too short (need >= 13)
+	// 12 bytes < 30 (minimum for GCM: 1+12+16+1) → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 12))
 	_, err := decodeToBeParsed(blob)
 	require.Error(t, err)
@@ -445,12 +446,21 @@ func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 
 func TestDecodeToBeParsedExactly13BytesMinimal(t *testing.T) {
 	t.Parallel()
-	// 13 bytes = 12 nonce + 1 ciphertext — should not panic
+	// 13 bytes < 30 → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 13))
 	_, err := decodeToBeParsed(blob)
-	// Decryption succeeds but parsing the garbled byte as JSON fails
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no source URLs found")
+	assert.Contains(t, err.Error(), "too short")
+}
+
+func TestDecodeToBeParsedExactly29BytesStillTooShort(t *testing.T) {
+	t.Parallel()
+	// Updated 2026-04-24: GCM requires ≥ 30 bytes (1 version + 12 nonce + 16 tag + 1 plaintext).
+	// 29 bytes is still too short.
+	blob := base64.StdEncoding.EncodeToString(make([]byte, 29))
+	_, err := decodeToBeParsed(blob)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too short")
 }
 
 func TestDecodeToBeParsedCorruptedCiphertext(t *testing.T) {
@@ -458,16 +468,18 @@ func TestDecodeToBeParsedCorruptedCiphertext(t *testing.T) {
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--0809","sourceName":"P1"}]}}}`
 	blob := encryptToBeParsed(t, plaintext)
 
-	// Decode, flip bits in ciphertext, re-encode
+	// Decode, flip bits in the ciphertext+tag region (bytes 13+), re-encode.
+	// AES-GCM authentication will reject the tampered payload.
 	raw, err := base64.StdEncoding.DecodeString(blob)
 	require.NoError(t, err)
-	for i := 12; i < len(raw); i++ {
-		raw[i] ^= 0xFF // flip every bit
+	for i := 13; i < len(raw); i++ {
+		raw[i] ^= 0xFF
 	}
 	corruptBlob := base64.StdEncoding.EncodeToString(raw)
 
 	_, err = decodeToBeParsed(corruptBlob)
-	assert.Error(t, err, "corrupted ciphertext should fail to parse")
+	assert.Error(t, err, "GCM authentication must reject tampered ciphertext")
+	assert.Contains(t, err.Error(), "AES-GCM decryption failed")
 }
 
 func TestDecodeToBeParsedTruncatedCiphertext(t *testing.T) {
@@ -477,11 +489,11 @@ func TestDecodeToBeParsedTruncatedCiphertext(t *testing.T) {
 
 	raw, err := base64.StdEncoding.DecodeString(blob)
 	require.NoError(t, err)
-	// Keep nonce + first few bytes of ciphertext (truncate the rest)
+	// 16 bytes < 30 minimum → "too short" before GCM is even attempted
 	truncated := base64.StdEncoding.EncodeToString(raw[:16])
 
 	_, err = decodeToBeParsed(truncated)
-	assert.Error(t, err, "truncated ciphertext should fail to parse")
+	assert.Error(t, err, "truncated blob should fail")
 }
 
 func TestDecodeToBeParsedRegexFallbackSourceUrlBeforeSourceName(t *testing.T) {
@@ -1804,33 +1816,29 @@ func TestGetEpisodeURLConcurrentCalls(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDecodeToBeParsedCrossValidateWithOpenSSL(t *testing.T) {
-	// Deterministic test: verify our Go encryption matches what OpenSSL would produce,
-	// and that decryption correctly reverses it.
+	// Deterministic test: verify our Go GCM encryption/decryption round-trips correctly.
+	// Updated 2026-04-24: CTR → GCM, key rotated to "Xot36i3lK3:v1".
+	// ani-cli reference: https://github.com/pystardust/ani-cli/commit/e5523a9b480f67ee878a0cc075043313cc58e07d
 	t.Parallel()
 
 	nonce, _ := hex.DecodeString("aabbccddeeff00112233aabb")
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--504c4c484b021717","sourceName":"TestProvider"}]}}}`
 
-	// Encrypt manually matching the exact bash script algorithm
-	key := sha256.Sum256([]byte("SimtVuagFbGR2K7P"))
+	// Encrypt using new key + GCM
+	key := sha256.Sum256([]byte("Xot36i3lK3:v1"))
 	assert.Equal(t, allAnimeKey, key[:], "key derivation must be consistent")
 
 	block, err := aes.NewCipher(key[:])
 	require.NoError(t, err)
+	gcm, err := cipher.NewGCM(block)
+	require.NoError(t, err)
 
-	iv := make([]byte, 16)
-	copy(iv[:12], nonce)
-	iv[12] = 0x00
-	iv[13] = 0x00
-	iv[14] = 0x00
-	iv[15] = 0x02
+	sealed := gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	payload := append([]byte{0x01}, nonce...)
+	payload = append(payload, sealed...)
+	blob := base64.StdEncoding.EncodeToString(payload)
 
-	ct := make([]byte, len(plaintext))
-	cipher.NewCTR(block, iv).XORKeyStream(ct, []byte(plaintext))
-
-	blob := base64.StdEncoding.EncodeToString(append(nonce, ct...))
-
-	// Now decrypt using our production code
+	// Decrypt using production code
 	sources, err := decodeToBeParsed(blob)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)

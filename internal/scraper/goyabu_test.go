@@ -408,3 +408,155 @@ func TestGoyabuDecodeBloggerTokenClassifiesHTMLAsSourceUnavailable(t *testing.T)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
 }
+
+// ===========================================================================
+// Testes de regressão — bug 2026-04-23 (Goyabu/Blogger AJAX)
+//
+// Problema detectado: 2026-04-23
+//   O endpoint AJAX do Goyabu (/wp-admin/admin-ajax.php?action=decode_blogger_video)
+//   retornou JSON sem URLs de vídeo utilizáveis, gerando o erro
+//   "no video URL found in AJAX response" antes do fallback para batchexecute.
+//
+// Esses testes cobrem os formatos de resposta que causam esse erro,
+// garantindo que o código trate cada caso corretamente e que o fallback
+// para a URL embed do Blogger seja acionado quando necessário.
+// ===========================================================================
+
+// TestGoyabuDecodeBloggerToken_PlayArrayVazio simula a resposta AJAX que
+// causou o bug de 2026-04-23: o servidor retorna JSON válido com "play":[]
+// (array vazio), produzindo "no video URL found in AJAX response".
+func TestGoyabuDecodeBloggerToken_PlayArrayVazio(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Formato real do Goyabu com play array vazio — causa exata do bug de 2026-04-23.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"play":[]}}`)
+	}))
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	_, err := client.decodeBloggerToken("testtoken123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no video URL found in AJAX response",
+		"play array vazio deve produzir 'no video URL found in AJAX response'")
+}
+
+// TestGoyabuDecodeBloggerToken_DataNulo verifica que data=null na resposta
+// AJAX também produz "no video URL found in AJAX response".
+func TestGoyabuDecodeBloggerToken_DataNulo(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":false,"data":null}`)
+	}))
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	_, err := client.decodeBloggerToken("testtoken123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no video URL found in AJAX response")
+}
+
+// TestGoyabuGetEpisodeStreamURL_AJAXPlayVazio_FallbackBloggerURL verifica que,
+// quando o endpoint AJAX retorna play array vazio (bug 2026-04-23), o sistema
+// faz fallback corretamente para a URL embed do Blogger presente na página.
+func TestGoyabuGetEpisodeStreamURL_AJAXPlayVazio_FallbackBloggerURL(t *testing.T) {
+	t.Parallel()
+
+	const bloggerToken = "AD6v5dwTestTokenParaBug20260423"
+
+	mux := http.NewServeMux()
+
+	// Página do episódio com playersData em linha única (regex do Goyabu usa .*? sem DOTALL).
+	mux.HandleFunc("/episodio/1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `<html><head><script>var playersData = [{"name":"Blog","select":"blogger","url":"https://www.blogger.com/video.g?token=%s","blogger_token":"dGVzdA=="}];</script></head><body></body></html>`, bloggerToken)
+	})
+
+	// AJAX retorna play array vazio — condição do bug de 2026-04-23.
+	mux.HandleFunc("/wp-admin/admin-ajax.php", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"play":[]}}`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	streamURL, err := client.GetEpisodeStreamURL(server.URL + "/episodio/1")
+	require.NoError(t, err)
+	// Fallback deve retornar a URL embed do Blogger da página, não o erro do AJAX.
+	assert.Contains(t, streamURL, "blogger.com/video.g?token="+bloggerToken,
+		"quando AJAX falha com play vazio, deve fazer fallback para URL embed do Blogger")
+}
+
+// TestGoyabuDecodeBloggerToken_VerificaParametrosAJAX garante que o cliente
+// envia os parâmetros corretos (action e token) para o endpoint AJAX.
+func TestGoyabuDecodeBloggerToken_VerificaParametrosAJAX(t *testing.T) {
+	t.Parallel()
+
+	var receivedAction, receivedToken string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		receivedAction = r.FormValue("action")
+		receivedToken = r.FormValue("token")
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"play":[
+			{"src":"https://cdn.example.com/video.mp4","size":720,"type":"video/mp4"}
+		]}}`)
+	}))
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	url, err := client.decodeBloggerToken("meutoken123")
+	require.NoError(t, err)
+	assert.Equal(t, "decode_blogger_video", receivedAction)
+	assert.Equal(t, "meutoken123", receivedToken)
+	assert.Equal(t, "https://cdn.example.com/video.mp4", url)
+}
+
+// TestGoyabuDecodeBloggerToken_RespostaURLDireta verifica que uma resposta
+// AJAX que retorna URL direta (sem wrapper play[]) também é tratada.
+func TestGoyabuDecodeBloggerToken_RespostaURLDireta(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Formato alternativo: URL no campo "url" do data.
+		resp := map[string]any{
+			"success": true,
+			"data":    map[string]any{"url": "https://cdn.example.com/direto.mp4"},
+		}
+		body, _ := json.Marshal(resp)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	client := NewGoyabuClient()
+	client.baseURL = server.URL
+	client.maxRetries = 0
+	client.retryDelay = 0
+
+	url, err := client.decodeBloggerToken("token456")
+	require.NoError(t, err)
+	assert.Equal(t, "https://cdn.example.com/direto.mp4", url)
+}
