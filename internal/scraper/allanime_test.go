@@ -445,10 +445,22 @@ func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 
 func TestDecodeToBeParsedExactly13BytesMinimal(t *testing.T) {
 	t.Parallel()
-	// 13 bytes = 12 nonce + 1 ciphertext — should not panic
+	// Fix 2026-04-23: o formato do blob agora inclui 1 byte de versão (0x01) antes do
+	// nonce, exigindo mínimo de 14 bytes. Um blob de 13 bytes retorna "too short".
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 13))
 	_, err := decodeToBeParsed(blob)
-	// Decryption succeeds but parsing the garbled byte as JSON fails
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "too short")
+}
+
+func TestDecodeToBeParsedExactly14BytesMinimal(t *testing.T) {
+	t.Parallel()
+	// 14 bytes = 1 byte versão (0x01) + 12 nonce + 1 ciphertext — mínimo válido.
+	data := make([]byte, 14)
+	data[0] = 0x01
+	blob := base64.StdEncoding.EncodeToString(data)
+	_, err := decodeToBeParsed(blob)
+	// Descriptografia ocorre mas o plaintext de 1 byte não é JSON com sourceUrls.
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no source URLs found")
 }

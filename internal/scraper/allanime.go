@@ -75,17 +75,35 @@ type sourceInfo struct {
 //
 // After decryption, the plaintext is JSON containing sourceUrl/sourceName pairs.
 func decodeToBeParsed(blob string) ([]sourceInfo, error) {
+	util.Debugf("AllAnime tobeparsed raw blob (first 60 chars): %q", blob[:min(60, len(blob))])
+
+	// Try standard base64 first, then URL-safe (AllAnime may use either)
 	data, err := base64.StdEncoding.DecodeString(blob)
 	if err != nil {
-		return nil, fmt.Errorf("base64 decode failed: %w", err)
+		data, err = base64.URLEncoding.DecodeString(blob)
+		if err != nil {
+			data, err = base64.RawURLEncoding.DecodeString(blob)
+			if err != nil {
+				return nil, fmt.Errorf("base64 decode failed: %w", err)
+			}
+		}
 	}
 
-	if len(data) < 13 { // 12-byte nonce + at least 1 byte of ciphertext
+	util.Debugf("AllAnime tobeparsed decoded length: %d bytes, first 16 bytes: %x", len(data), data[:min(16, len(data))])
+
+	if len(data) < 14 { // version byte + 12-byte nonce + at least 1 byte of ciphertext
 		return nil, fmt.Errorf("tobeparsed blob too short (%d bytes)", len(data))
 	}
 
-	nonce := data[:12]
-	ciphertext := data[12:]
+	// Blob format: [1-byte version][12-byte nonce][ciphertext]
+	// The first byte (0x01) is a version indicator added by AllAnime.
+	nonceOffset := 0
+	if data[0] == 0x01 {
+		nonceOffset = 1
+	}
+	nonce := data[nonceOffset : nonceOffset+12]
+	ciphertext := data[nonceOffset+12:]
+	util.Debugf("AllAnime tobeparsed nonce (offset=%d): %x", nonceOffset, nonce)
 
 	block, err := aes.NewCipher(allAnimeKey)
 	if err != nil {
@@ -117,6 +135,8 @@ func decodeToBeParsed(blob string) ([]sourceInfo, error) {
 			} `json:"episode"`
 		} `json:"data"`
 	}
+
+	util.Debugf("AllAnime tobeparsed decrypted (first 200 bytes): %q", string(plaintext[:min(200, len(plaintext))]))
 
 	// The plaintext may contain the full GraphQL response or just the sourceUrls array.
 	// Try parsing as the full response first.
