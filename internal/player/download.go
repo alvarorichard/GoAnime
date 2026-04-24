@@ -74,6 +74,9 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 			return err
 		}
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
+		if strings.Contains(url, "allanime.day") || strings.Contains(url, "allanime.pro") {
+			req.Header.Set("Referer", "https://allanime.to")
+		}
 
 		resp, err := client.Do(req) // #nosec G704
 		if err != nil {

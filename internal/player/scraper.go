@@ -85,6 +85,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "master.m3u8") ||
 		strings.Contains(url, ".m3u8") ||
 		strings.Contains(url, "allanime.pro") ||
+		strings.Contains(url, "allanime.day") ||
 		strings.Contains(url, "animefire") ||
 		strings.Contains(url, "blogger.com") ||
 		strings.Contains(url, "animesfire") ||
@@ -95,6 +96,9 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	if err != nil {
 		// Returns 0 and the error if the request creation fails.
 		return 0, err
+	}
+	if strings.Contains(url, "allanime.day") || strings.Contains(url, "allanime.pro") {
+		req.Header.Set("Referer", "https://allanime.to")
 	}
 
 	// Sends the HEAD request to the server.
