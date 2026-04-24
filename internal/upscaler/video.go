@@ -549,21 +549,6 @@ func (m *upscaleProgressModel) View() tea.View {
 		completed, m.totalFrames, percent*100))
 }
 
-// UpscaleVideoFile is a convenience function to upscale a video file
-func UpscaleVideoFile(inputPath, outputPath string, opts Anime4KOptions) error {
-	config := DefaultVideoConfig()
-	config.InputPath = inputPath
-	config.OutputPath = outputPath
-	config.Anime4KOptions = opts
-
-	upscaler, err := NewVideoUpscaler(config)
-	if err != nil {
-		return err
-	}
-
-	return upscaler.UpscaleVideo(context.Background())
-}
-
 // GetVideoInfo returns information about a video file
 func GetVideoInfo(videoPath string) (*VideoFrameInfo, error) {
 	config := DefaultVideoConfig()

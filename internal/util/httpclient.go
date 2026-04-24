@@ -179,10 +179,6 @@ var (
 	// AniListCache caches AniList API responses (5 minute TTL)
 	AniListCache     *ResponseCache
 	aniListCacheOnce sync.Once
-
-	// SearchCache caches search results (2 minute TTL)
-	SearchCache     *ResponseCache
-	searchCacheOnce sync.Once
 )
 
 // GetAniListCache returns the global AniList cache
@@ -191,104 +187,6 @@ func GetAniListCache() *ResponseCache {
 		AniListCache = NewResponseCache(10*time.Minute, 500)
 	})
 	return AniListCache
-}
-
-// GetSearchCache returns the global search cache
-func GetSearchCache() *ResponseCache {
-	searchCacheOnce.Do(func() {
-		SearchCache = NewResponseCache(3*time.Minute, 300)
-	})
-	return SearchCache
-}
-
-// WorkerPool provides a safe way to run multiple goroutines with a limit
-type WorkerPool struct {
-	maxWorkers int
-	semaphore  chan struct{}
-}
-
-// NewWorkerPool creates a new worker pool with the specified max concurrent workers
-func NewWorkerPool(maxWorkers int) *WorkerPool {
-	return &WorkerPool{
-		maxWorkers: maxWorkers,
-		semaphore:  make(chan struct{}, maxWorkers),
-	}
-}
-
-// Submit submits a task to the worker pool
-// It will block if all workers are busy until one becomes available
-func (wp *WorkerPool) Submit(task func()) {
-	wp.semaphore <- struct{}{} // Acquire
-	go func() {
-		defer func() { <-wp.semaphore }() // Release
-		task()
-	}()
-}
-
-// Wait waits for all submitted tasks to complete
-func (wp *WorkerPool) Wait() {
-	// Fill the semaphore to ensure all workers are done
-	for i := 0; i < wp.maxWorkers; i++ {
-		wp.semaphore <- struct{}{}
-	}
-	// Release them
-	for i := 0; i < wp.maxWorkers; i++ {
-		<-wp.semaphore
-	}
-}
-
-// Global worker pools for different use cases
-var (
-	// ScraperPool is used for concurrent scraper operations
-	ScraperPool     *WorkerPool
-	scraperPoolOnce sync.Once
-
-	// APIPool is used for concurrent API requests
-	APIPool     *WorkerPool
-	apiPoolOnce sync.Once
-)
-
-// GetScraperPool returns the global scraper worker pool (10 workers)
-func GetScraperPool() *WorkerPool {
-	scraperPoolOnce.Do(func() {
-		ScraperPool = NewWorkerPool(10)
-	})
-	return ScraperPool
-}
-
-// GetAPIPool returns the global API worker pool (15 workers)
-func GetAPIPool() *WorkerPool {
-	apiPoolOnce.Do(func() {
-		APIPool = NewWorkerPool(15)
-	})
-	return APIPool
-}
-
-// ParallelExecute executes multiple functions in parallel with a worker limit
-// Returns when all functions complete. Safe for concurrent use.
-func ParallelExecute(maxWorkers int, tasks ...func()) {
-	if len(tasks) == 0 {
-		return
-	}
-
-	// Use min of maxWorkers and task count
-	workers := min(len(tasks), maxWorkers)
-
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, workers)
-
-	for _, task := range tasks {
-		wg.Add(1)
-		task := task // Capture for goroutine
-		go func() {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-			task()
-		}()
-	}
-
-	wg.Wait()
 }
 
 // knownHosts are API hosts that we know will be contacted, used for connection pre-warming.

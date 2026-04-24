@@ -21,6 +21,7 @@ func printEpisodeNotFoundMsg() {
 	util.Warnf("This episode does not exist in this source. Try another episode.")
 }
 
+// HandleSeries drives the interactive episode selection and playback loop for anime series.
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	tui.ResetTerminal()
 	if anime.IsTV() {
@@ -203,10 +204,9 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	return nil
 }
 
+// SelectInitialEpisode presents a fuzzy-finder UI to pick the starting episode.
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
-	util.Debugf("[TRACE] SelectInitialEpisode: calling SelectEpisodeWithFuzzyFinder with %d episodes", len(episodes))
 	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
-	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", selectedEpisodeURL, episodeNumberStr, err)
 	if err != nil {
 		// Propagate back request error
 		if errors.Is(err, player.ErrBackRequested) {
@@ -246,7 +246,7 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 // Enhanced navigation handler that supports AllAnime-specific navigation
 func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
 	// Check if this is an AllAnime source and use enhanced navigation
-	if isAllAnimeSource(anime) {
+	if api.IsAllAnimeSource(anime) {
 		return handleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
 	}
 
@@ -297,26 +297,6 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 	default:
 		return handleUserNavigation(input, episodes, currentNum, totalEpisodes)
 	}
-}
-
-func CheckIfSeries(url string) (bool, int) {
-	series, totalEpisodes, err := api.IsSeries(url)
-	if err != nil {
-		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
-		return false, 1
-	}
-	return series, totalEpisodes
-}
-
-// CheckIfSeriesEnhanced checks if anime is a series using enhanced API
-func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
-	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
-	if err != nil {
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
-		return false, 1
-	}
-	return series, totalEpisodes
 }
 
 // ChangeAnimeLocal allows the user to search for and select a new anime (local implementation to avoid circular imports)

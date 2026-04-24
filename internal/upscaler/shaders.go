@@ -474,66 +474,6 @@ func GetShaderModeName(mode ShaderMode) string {
 	}
 }
 
-// GetShaderModeDescription returns a detailed description for the shader mode
-func GetShaderModeDescription(mode ShaderMode) string {
-	switch mode {
-	case ShaderModeOff:
-		return "Real-time upscaling disabled"
-	case ShaderModeFast:
-		return "Mode A: Optimized for text-heavy anime with subtitles"
-	case ShaderModeBalanced:
-		return "Mode B: General purpose anime upscaling, good balance"
-	case ShaderModeQuality:
-		return "Mode C: High quality for anime films, requires good GPU"
-	case ShaderModePerformance:
-		return "Minimal shaders for weaker GPUs"
-	case ShaderModeUltra:
-		return "Maximum enhancement with denoise + deblur + upscale"
-	case ShaderModeGAN_UUL:
-		return "Experimental SRGAN for 360p→4K, VERY heavy, requires powerful GPU"
-	case ShaderModeAdvancedAA:
-		return "Double restore pass, highest perceptual quality, may cause ringing"
-	case ShaderModeAdvancedBB:
-		return "Double soft restore, good for 720p with aliasing artifacts"
-	case ShaderModeAdvancedCA:
-		return "Quality + restore, good for downscaled 480p anime"
-	default:
-		return "Unknown mode"
-	}
-}
-
-// GetAllShaderModes returns all available shader modes
-func GetAllShaderModes() []ShaderMode {
-	return []ShaderMode{
-		ShaderModeOff,
-		ShaderModeFast,
-		ShaderModeBalanced,
-		ShaderModeQuality,
-		ShaderModePerformance,
-		ShaderModeUltra,
-		ShaderModeGAN_UUL,
-		ShaderModeAdvancedAA,
-		ShaderModeAdvancedBB,
-		ShaderModeAdvancedCA,
-	}
-}
-
-// GetAdvancedShaderModes returns only the advanced shader modes (for menu)
-func GetAdvancedShaderModes() []ShaderMode {
-	return []ShaderMode{
-		ShaderModeGAN_UUL,
-		ShaderModeAdvancedAA,
-		ShaderModeAdvancedBB,
-		ShaderModeAdvancedCA,
-	}
-}
-
-// CycleShaderMode cycles through shader modes
-func CycleShaderMode() ShaderMode {
-	CurrentShaderMode = (CurrentShaderMode + 1) % 10
-	return CurrentShaderMode
-}
-
 // SetShaderMode sets the shader mode
 func SetShaderMode(mode ShaderMode) {
 	CurrentShaderMode = mode

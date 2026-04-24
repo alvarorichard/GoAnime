@@ -243,23 +243,6 @@ func NewAnimeDriveClient() *AnimeDriveClient {
 	}
 }
 
-// NewAnimeDriveClientWithContext creates a new AnimeDrive client with custom
-// settings and SSRF-safe transport for use when the base URL may not be the
-// hardcoded default.
-func NewAnimeDriveClientWithContext(timeout time.Duration, maxRetries int) *AnimeDriveClient {
-	return &AnimeDriveClient{
-		client: &http.Client{
-			Timeout:   timeout,
-			Transport: safeScraperTransport(timeout),
-		},
-		baseURL:    AnimeDriveBase,
-		userAgent:  UserAgent,
-		maxRetries: maxRetries,
-		retryDelay: 100 * time.Millisecond,
-		totalPages: 371,
-	}
-}
-
 // AlphabetLetters returns the list of letters for A-Z navigation
 func (c *AnimeDriveClient) AlphabetLetters() []string {
 	return []string{

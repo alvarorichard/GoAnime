@@ -26,27 +26,216 @@ type SubtitleInfo struct {
 }
 
 var (
-	IsDebug             bool
-	minNameLength       = 4
-	ErrHelpRequested    = errors.New("help requested") // Custom error for help
-	GlobalSource        string                         // Global variable to store selected source
-	GlobalQuality       string                         // Global variable to store selected quality
-	GlobalMediaType     string                         // Global variable to store media type (anime, movie, tv)
-	GlobalSubsLanguage  string                         // Global variable to store subtitle language
-	GlobalAudioLanguage string                         // Global variable to store preferred audio language
-	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
-	GlobalNoSubs        bool                           // Global flag to disable subtitles
-	GlobalReferer       string                         // Global variable to store referer for stream requests
-	GlobalOutputDir     string                         // Global variable to store custom download output directory
-	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
+	// IsDebug enables verbose debug logging when set to true.
+	IsDebug       bool
+	minNameLength = 4
+	// ErrHelpRequested is returned when the user requests help or version info instead of running the program.
+	ErrHelpRequested = errors.New("help requested")
+	// GlobalSource is the selected anime source, set via --source flag (e.g. "allanime", "animefire").
+	GlobalSource string
+	// GlobalQuality is the selected video quality, set via --quality flag.
+	GlobalQuality string
+	// GlobalMediaType is the media type filter, set via --type flag (anime, movie, tv).
+	GlobalMediaType string
+	// GlobalSubsLanguage is the preferred subtitle language, set via --subs flag.
+	GlobalSubsLanguage string
+	// GlobalAudioLanguage is the preferred audio language, set via --audio flag.
+	GlobalAudioLanguage string
+	// GlobalSubtitles holds the subtitle tracks for the current playback session.
+	GlobalSubtitles []SubtitleInfo
+	// GlobalNoSubs disables subtitles when set to true via --no-subs flag.
+	GlobalNoSubs bool
+	// GlobalReferer is the HTTP Referer header sent with stream requests.
+	GlobalReferer string
+	// GlobalOutputDir is the custom download output directory, set via -o flag.
+	GlobalOutputDir string
+	// GlobalAnimeSource is the current anime scraper name (e.g. "9Anime", "AllAnime").
+	GlobalAnimeSource string
 )
+
+// SessionConfig captures the user-facing runtime preferences parsed from flags.
+type SessionConfig struct {
+	Source        string
+	Quality       string
+	MediaType     string
+	SubsLanguage  string
+	AudioLanguage string
+	NoSubs        bool
+	OutputDir     string
+}
+
+var runtimeStateMu sync.RWMutex
+
+// CurrentSessionConfig returns a snapshot of the current session preferences.
+func CurrentSessionConfig() SessionConfig {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+
+	return SessionConfig{
+		Source:        GlobalSource,
+		Quality:       GlobalQuality,
+		MediaType:     GlobalMediaType,
+		SubsLanguage:  GlobalSubsLanguage,
+		AudioLanguage: GlobalAudioLanguage,
+		NoSubs:        GlobalNoSubs,
+		OutputDir:     GlobalOutputDir,
+	}
+}
+
+// SetGlobalSource sets the preferred media source (e.g. "allanime", "animefire").
+func SetGlobalSource(source string) {
+	runtimeStateMu.Lock()
+	GlobalSource = source
+	runtimeStateMu.Unlock()
+}
+
+// GetGlobalSource returns the currently configured media source preference.
+func GetGlobalSource() string {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalSource
+}
+
+// SetGlobalQuality sets the preferred stream quality (e.g. "1080", "720", "best").
+func SetGlobalQuality(quality string) {
+	runtimeStateMu.Lock()
+	GlobalQuality = quality
+	runtimeStateMu.Unlock()
+}
+
+// GetGlobalQuality returns the currently configured stream quality preference.
+func GetGlobalQuality() string {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalQuality
+}
+
+// SetGlobalMediaType sets the media type filter (e.g. "movie", "tv").
+func SetGlobalMediaType(mediaType string) {
+	runtimeStateMu.Lock()
+	GlobalMediaType = mediaType
+	runtimeStateMu.Unlock()
+}
+
+// SetPreferredSubtitleLanguage sets the preferred subtitle language (e.g. "english", "portuguese").
+func SetPreferredSubtitleLanguage(language string) {
+	runtimeStateMu.Lock()
+	GlobalSubsLanguage = language
+	runtimeStateMu.Unlock()
+}
+
+// GetPreferredSubtitleLanguage returns the currently configured subtitle language.
+func GetPreferredSubtitleLanguage() string {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalSubsLanguage
+}
+
+// SetPreferredAudioLanguage sets the preferred audio track language.
+func SetPreferredAudioLanguage(language string) {
+	runtimeStateMu.Lock()
+	GlobalAudioLanguage = language
+	runtimeStateMu.Unlock()
+}
+
+// GetPreferredAudioLanguage returns the currently configured audio language.
+func GetPreferredAudioLanguage() string {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalAudioLanguage
+}
+
+// SetSubtitlesDisabled enables or disables subtitle loading globally.
+func SetSubtitlesDisabled(disabled bool) {
+	runtimeStateMu.Lock()
+	GlobalNoSubs = disabled
+	runtimeStateMu.Unlock()
+}
+
+// SubtitlesDisabled reports whether subtitle loading has been disabled by the user.
+func SubtitlesDisabled() bool {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalNoSubs
+}
+
+// SetGlobalOutputDir sets the directory where downloaded files will be saved.
+func SetGlobalOutputDir(outputDir string) {
+	runtimeStateMu.Lock()
+	GlobalOutputDir = outputDir
+	runtimeStateMu.Unlock()
+}
+
+// GetGlobalOutputDir returns the configured output directory for downloads.
+func GetGlobalOutputDir() string {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return GlobalOutputDir
+}
+
+func cloneDownloadRequest(req *DownloadRequest) *DownloadRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	return &cloned
+}
+
+// SetGlobalDownloadRequest stores the current download request snapshot.
+func SetGlobalDownloadRequest(req *DownloadRequest) {
+	runtimeStateMu.Lock()
+	GlobalDownloadRequest = cloneDownloadRequest(req)
+	runtimeStateMu.Unlock()
+}
+
+// CurrentDownloadRequest returns a copy of the current download request.
+func CurrentDownloadRequest() *DownloadRequest {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return cloneDownloadRequest(GlobalDownloadRequest)
+}
+
+// ClearGlobalDownloadRequest resets the stored download request to nil.
+func ClearGlobalDownloadRequest() {
+	SetGlobalDownloadRequest(nil)
+}
+
+func cloneUpscaleRequest(req *UpscaleRequest) *UpscaleRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	return &cloned
+}
+
+// SetGlobalUpscaleRequest stores the current upscale request snapshot.
+func SetGlobalUpscaleRequest(req *UpscaleRequest) {
+	runtimeStateMu.Lock()
+	GlobalUpscaleRequest = cloneUpscaleRequest(req)
+	runtimeStateMu.Unlock()
+}
+
+// CurrentUpscaleRequest returns a copy of the current upscale request.
+func CurrentUpscaleRequest() *UpscaleRequest {
+	runtimeStateMu.RLock()
+	defer runtimeStateMu.RUnlock()
+	return cloneUpscaleRequest(GlobalUpscaleRequest)
+}
+
+// ClearGlobalUpscaleRequest resets the stored upscale request to nil.
+func ClearGlobalUpscaleRequest() {
+	SetGlobalUpscaleRequest(nil)
+}
 
 // SetGlobalSubtitles stores subtitles for the current playback session
 func SetGlobalSubtitles(subs []SubtitleInfo) {
-	GlobalSubtitles = subs
-	if len(subs) > 0 {
-		Debugf("Stored %d subtitle track(s) for playback", len(subs))
-		for i, sub := range subs {
+	playbackStateMu.Lock()
+	GlobalSubtitles = cloneSubtitleInfos(subs)
+	stored := cloneSubtitleInfos(GlobalSubtitles)
+	playbackStateMu.Unlock()
+	if len(stored) > 0 {
+		Debugf("Stored %d subtitle track(s) for playback", len(stored))
+		for i, sub := range stored {
 			Debugf("  Subtitle %d: %s (%s)", i+1, sub.Label, sub.Language)
 		}
 	}
@@ -54,12 +243,16 @@ func SetGlobalSubtitles(subs []SubtitleInfo) {
 
 // ClearGlobalSubtitles clears stored subtitles
 func ClearGlobalSubtitles() {
+	playbackStateMu.Lock()
 	GlobalSubtitles = nil
+	playbackStateMu.Unlock()
 }
 
 // SetGlobalReferer stores the referer for stream requests
 func SetGlobalReferer(referer string) {
+	playbackStateMu.Lock()
 	GlobalReferer = referer
+	playbackStateMu.Unlock()
 	if referer != "" {
 		Debugf("Stored referer for stream requests: %s", referer)
 	}
@@ -67,17 +260,23 @@ func SetGlobalReferer(referer string) {
 
 // GetGlobalReferer returns the stored referer
 func GetGlobalReferer() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalReferer
 }
 
 // ClearGlobalReferer clears the stored referer
 func ClearGlobalReferer() {
+	playbackStateMu.Lock()
 	GlobalReferer = ""
+	playbackStateMu.Unlock()
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "9Anime", "AllAnime")
 func SetGlobalAnimeSource(source string) {
+	playbackStateMu.Lock()
 	GlobalAnimeSource = source
+	playbackStateMu.Unlock()
 	if source != "" {
 		Debugf("Stored anime source: %s", source)
 	}
@@ -85,12 +284,14 @@ func SetGlobalAnimeSource(source string) {
 
 // GetGlobalAnimeSource returns the stored anime source
 func GetGlobalAnimeSource() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalAnimeSource
 }
 
 // Is9AnimeSource returns true if the current stream is from 9Anime
 func Is9AnimeSource() bool {
-	return GlobalAnimeSource == "9Anime"
+	return GetGlobalAnimeSource() == "9Anime"
 }
 
 // subtitleOption maps a display label to a sentinel value for subtitle selection.
@@ -104,14 +305,15 @@ type subtitleOption struct {
 // subsequent call to GetSubtitleArgs only includes the selected tracks.
 // If there are 0 or 1 subtitles available, no menu is shown.
 func SelectSubtitles() {
-	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
+	tracks := GetGlobalSubtitles()
+	if SubtitlesDisabled() || len(tracks) <= 1 {
 		return
 	}
 
 	// Build options: "All", each individual track, "None"
 	var items []subtitleOption
 	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range GlobalSubtitles {
+	for i, sub := range tracks {
 		label := sub.Label
 		if label == "" {
 			label = sub.Language
@@ -135,15 +337,15 @@ func SelectSubtitles() {
 	switch selected {
 	case -1:
 		// Keep all — no change needed
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+		Debugf("User selected all %d subtitle track(s)", len(tracks))
 	case -2:
 		// Disable subtitles
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		Debugf("User disabled subtitles")
 	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
+		if selected >= 0 && selected < len(tracks) {
+			kept := tracks[selected]
+			SetGlobalSubtitles([]SubtitleInfo{kept})
 			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
 		}
 	}
@@ -156,13 +358,13 @@ func SelectSubtitles() {
 // It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
 // the correct arguments for mpv.
 func PromptSubtitleLanguage() {
-	if GlobalNoSubs {
+	if SubtitlesDisabled() {
 		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		return
 	}
 
-	tracks := GlobalSubtitles
+	tracks := GetGlobalSubtitles()
 
 	// No tracks available — inform the user and continue without subtitles
 	if len(tracks) == 0 {
@@ -197,7 +399,7 @@ func PromptSubtitleLanguage() {
 		}
 
 		if items[idx].Value == -2 {
-			GlobalSubtitles = nil
+			ClearGlobalSubtitles()
 			fmt.Println("Subtitles: disabled")
 			Debugf("User disabled subtitles")
 		} else {
@@ -237,17 +439,17 @@ func PromptSubtitleLanguage() {
 	switch selected {
 	case -1:
 		// Keep all — no change needed
-		fmt.Printf("Subtitles: all (%d tracks)\n", len(GlobalSubtitles))
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
+		fmt.Printf("Subtitles: all (%d tracks)\n", len(tracks))
+		Debugf("User selected all %d subtitle track(s)", len(tracks))
 	case -2:
 		// Disable subtitles
-		GlobalSubtitles = nil
+		ClearGlobalSubtitles()
 		fmt.Println("Subtitles: disabled")
 		Debugf("User disabled subtitles")
 	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
+		if selected >= 0 && selected < len(tracks) {
+			kept := tracks[selected]
+			SetGlobalSubtitles([]SubtitleInfo{kept})
 			fmt.Printf("Subtitles: %s\n", kept.Label)
 			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
 		}
@@ -259,13 +461,14 @@ func PromptSubtitleLanguage() {
 // - Single subtitle: --sub-file='URL'
 // - Multiple subtitles: --sub-files='URL1:URL2:...'
 func GetSubtitleArgs() []string {
-	if GlobalNoSubs || len(GlobalSubtitles) == 0 {
+	tracks := GetGlobalSubtitles()
+	if SubtitlesDisabled() || len(tracks) == 0 {
 		return nil
 	}
 
 	// Collect all subtitle URLs
 	var urls []string
-	for _, sub := range GlobalSubtitles {
+	for _, sub := range tracks {
 		if sub.URL != "" {
 			urls = append(urls, sub.URL)
 		}
@@ -325,9 +528,8 @@ func ErrorHandler(err error) string {
 			return fmt.Sprintf("%+v\n\nDebug log saved to: %s", err, LogFilePath)
 		}
 		return fmt.Sprintf("%+v", err)
-	} else {
-		return fmt.Sprintf("%v -- run the program with --debug to see details and save a log file", err)
 	}
+	return fmt.Sprintf("%v -- run the program with --debug to see details and save a log file", err)
 }
 
 // Helper prints the beautiful help message
@@ -379,10 +581,10 @@ type UpscaleRequest struct {
 	Workers          int     // Number of parallel workers
 }
 
-// Global variable to store download request
+// GlobalDownloadRequest holds the pending download request parsed from CLI flags.
 var GlobalDownloadRequest *DownloadRequest
 
-// Global variable to store upscale request
+// GlobalUpscaleRequest holds the pending upscale request parsed from CLI flags.
 var GlobalUpscaleRequest *UpscaleRequest
 
 // FlagParser parses the -flags and returns the anime name
@@ -452,13 +654,13 @@ func FlagParser() (string, error) {
 	}
 
 	// Store global configurations
-	GlobalSource = *sourceFlag
-	GlobalQuality = *qualityFlag
-	GlobalMediaType = *mediaTypeFlag
-	GlobalSubsLanguage = *subsLanguageFlag
-	GlobalAudioLanguage = *audioLanguageFlag
-	GlobalNoSubs = *noSubsFlag
-	GlobalOutputDir = *outputDirFlag
+	SetGlobalSource(*sourceFlag)
+	SetGlobalQuality(*qualityFlag)
+	SetGlobalMediaType(*mediaTypeFlag)
+	SetPreferredSubtitleLanguage(*subsLanguageFlag)
+	SetPreferredAudioLanguage(*audioLanguageFlag)
+	SetSubtitlesDisabled(*noSubsFlag)
+	SetGlobalOutputDir(*outputDirFlag)
 
 	if *noSubsFlag {
 		Debug("Subtitles disabled by user")
@@ -623,82 +825,18 @@ func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source
 		}
 
 		return TreatingAnimeName(animeName), ErrDownloadRequested
+	}
 
-	} else {
-		// No episode number provided — show interactive download mode menu
-		// This covers: goanime -d "anime name"
-		animeName := strings.Join(args, " ")
+	// No episode number provided — show interactive download mode menu
+	// This covers: goanime -d "anime name"
+	animeName := strings.Join(args, " ")
 
-		// Try parsing last arg as episode number first
-		if len(args) >= 2 {
-			episodeStr := args[len(args)-1]
-			if episodeNum, err := strconv.Atoi(episodeStr); err == nil && episodeNum >= 1 {
-				// Last arg is a valid episode number
-				animeName = strings.Join(args[:len(args)-1], " ")
-				GlobalDownloadRequest = &DownloadRequest{
-					AnimeName:     animeName,
-					EpisodeNum:    episodeNum,
-					IsRange:       false,
-					Source:        source,
-					Quality:       quality,
-					AllAnimeSmart: allanimeSmart,
-					OutputDir:     GlobalOutputDir,
-				}
-				return TreatingAnimeName(animeName), ErrDownloadRequested
-			}
-		}
-
-		// No episode number — show interactive menu
-		var downloadMode string
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Download mode for: "+animeName).
-					Options(
-						huh.NewOption("Download ALL episodes", "all"),
-						huh.NewOption("Download a single episode", "single"),
-						huh.NewOption("Download a range of episodes", "range"),
-					).
-					Value(&downloadMode),
-			),
-		)
-
-		if err := tui.RunClean(form.Run); err != nil {
-			return "", fmt.Errorf("download mode selection cancelled: %w", err)
-		}
-
-		switch downloadMode {
-		case "all":
-			GlobalDownloadRequest = &DownloadRequest{
-				AnimeName:     animeName,
-				IsAll:         true,
-				Source:        source,
-				Quality:       quality,
-				AllAnimeSmart: allanimeSmart,
-				OutputDir:     GlobalOutputDir,
-			}
-			return TreatingAnimeName(animeName), ErrDownloadRequested
-
-		case "single":
-			var episodeStr string
-			inputForm := huh.NewForm(
-				huh.NewGroup(
-					huh.NewInput().
-						Title("Episode number").
-						Description("Enter the episode number to download").
-						Value(&episodeStr).
-						Validate(func(v string) error {
-							if n, err := strconv.Atoi(v); err != nil || n < 1 {
-								return fmt.Errorf("enter a valid positive number")
-							}
-							return nil
-						}),
-				),
-			)
-			if err := tui.RunClean(inputForm.Run); err != nil {
-				return "", fmt.Errorf("episode input cancelled: %w", err)
-			}
-			episodeNum, _ := strconv.Atoi(episodeStr)
+	// Try parsing last arg as episode number first
+	if len(args) >= 2 {
+		episodeStr := args[len(args)-1]
+		if episodeNum, err := strconv.Atoi(episodeStr); err == nil && episodeNum >= 1 {
+			// Last arg is a valid episode number
+			animeName = strings.Join(args[:len(args)-1], " ")
 			GlobalDownloadRequest = &DownloadRequest{
 				AnimeName:     animeName,
 				EpisodeNum:    episodeNum,
@@ -709,56 +847,119 @@ func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source
 				OutputDir:     GlobalOutputDir,
 			}
 			return TreatingAnimeName(animeName), ErrDownloadRequested
-
-		case "range":
-			var startStr, endStr string
-			rangeForm := huh.NewForm(
-				huh.NewGroup(
-					huh.NewInput().
-						Title("Start episode").
-						Description("First episode number").
-						Value(&startStr).
-						Validate(func(v string) error {
-							if n, err := strconv.Atoi(v); err != nil || n < 1 {
-								return fmt.Errorf("enter a valid positive number")
-							}
-							return nil
-						}),
-					huh.NewInput().
-						Title("End episode").
-						Description("Last episode number").
-						Value(&endStr).
-						Validate(func(v string) error {
-							if n, err := strconv.Atoi(v); err != nil || n < 1 {
-								return fmt.Errorf("enter a valid positive number")
-							}
-							return nil
-						}),
-				),
-			)
-			if err := tui.RunClean(rangeForm.Run); err != nil {
-				return "", fmt.Errorf("range input cancelled: %w", err)
-			}
-			startEp, _ := strconv.Atoi(startStr)
-			endEp, _ := strconv.Atoi(endStr)
-			if startEp > endEp {
-				return "", fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
-			}
-			GlobalDownloadRequest = &DownloadRequest{
-				AnimeName:     animeName,
-				IsRange:       true,
-				StartEpisode:  startEp,
-				EndEpisode:    endEp,
-				Source:        source,
-				Quality:       quality,
-				AllAnimeSmart: allanimeSmart,
-				OutputDir:     GlobalOutputDir,
-			}
-			return TreatingAnimeName(animeName), ErrDownloadRequested
-
-		default:
-			return "", fmt.Errorf("unknown download mode selected")
 		}
+	}
+
+	// No episode number — show interactive menu
+	var downloadMode string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Download mode for: "+animeName).
+				Options(
+					huh.NewOption("Download ALL episodes", "all"),
+					huh.NewOption("Download a single episode", "single"),
+					huh.NewOption("Download a range of episodes", "range"),
+				).
+				Value(&downloadMode),
+		),
+	)
+
+	if err := tui.RunClean(form.Run); err != nil {
+		return "", fmt.Errorf("download mode selection cancelled: %w", err)
+	}
+
+	switch downloadMode {
+	case "all":
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:     animeName,
+			IsAll:         true,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
+		}
+		return TreatingAnimeName(animeName), ErrDownloadRequested
+
+	case "single":
+		var episodeStr string
+		inputForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Episode number").
+					Description("Enter the episode number to download").
+					Value(&episodeStr).
+					Validate(func(v string) error {
+						if n, err := strconv.Atoi(v); err != nil || n < 1 {
+							return fmt.Errorf("enter a valid positive number")
+						}
+						return nil
+					}),
+			),
+		)
+		if err := tui.RunClean(inputForm.Run); err != nil {
+			return "", fmt.Errorf("episode input cancelled: %w", err)
+		}
+		episodeNum, _ := strconv.Atoi(episodeStr)
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:     animeName,
+			EpisodeNum:    episodeNum,
+			IsRange:       false,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
+		}
+		return TreatingAnimeName(animeName), ErrDownloadRequested
+
+	case "range":
+		var startStr, endStr string
+		rangeForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Start episode").
+					Description("First episode number").
+					Value(&startStr).
+					Validate(func(v string) error {
+						if n, err := strconv.Atoi(v); err != nil || n < 1 {
+							return fmt.Errorf("enter a valid positive number")
+						}
+						return nil
+					}),
+				huh.NewInput().
+					Title("End episode").
+					Description("Last episode number").
+					Value(&endStr).
+					Validate(func(v string) error {
+						if n, err := strconv.Atoi(v); err != nil || n < 1 {
+							return fmt.Errorf("enter a valid positive number")
+						}
+						return nil
+					}),
+			),
+		)
+		if err := tui.RunClean(rangeForm.Run); err != nil {
+			return "", fmt.Errorf("range input cancelled: %w", err)
+		}
+		startEp, _ := strconv.Atoi(startStr)
+		endEp, _ := strconv.Atoi(endStr)
+		if startEp > endEp {
+			return "", fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
+		}
+		GlobalDownloadRequest = &DownloadRequest{
+			AnimeName:     animeName,
+			IsRange:       true,
+			StartEpisode:  startEp,
+			EndEpisode:    endEp,
+			Source:        source,
+			Quality:       quality,
+			AllAnimeSmart: allanimeSmart,
+			OutputDir:     GlobalOutputDir,
+		}
+		return TreatingAnimeName(animeName), ErrDownloadRequested
+
+	default:
+		return "", fmt.Errorf("unknown download mode selected")
 	}
 }
 
@@ -889,8 +1090,9 @@ func handleMovieDownloadMode(args []string, isRange bool, isAll bool, quality, s
 		}
 
 		return TreatingAnimeName(showName), ErrMovieDownloadRequested
+	}
 
-	} else if isTV {
+	if isTV {
 		// Single TV episode download: goanime -dm --type tv "TV Show" season episode
 		if len(args) < 3 {
 			return "", fmt.Errorf("TV episode download requires show name, season number, and episode number\nUsage: goanime -dm --type tv \"TV Show\" 1 5")
@@ -926,22 +1128,21 @@ func handleMovieDownloadMode(args []string, isRange bool, isAll bool, quality, s
 		}
 
 		return TreatingAnimeName(showName), ErrMovieDownloadRequested
-
-	} else {
-		// Movie download: goanime -dm "Movie Name"
-		movieName := strings.Join(args, " ")
-
-		GlobalDownloadRequest = &DownloadRequest{
-			AnimeName:    movieName,
-			IsMovie:      true,
-			IsRange:      false,
-			Quality:      quality,
-			SubsLanguage: subsLanguage,
-			OutputDir:    GlobalOutputDir,
-		}
-
-		return TreatingAnimeName(movieName), ErrMovieDownloadRequested
 	}
+
+	// Movie download: goanime -dm "Movie Name"
+	movieName := strings.Join(args, " ")
+
+	GlobalDownloadRequest = &DownloadRequest{
+		AnimeName:    movieName,
+		IsMovie:      true,
+		IsRange:      false,
+		Quality:      quality,
+		SubsLanguage: subsLanguage,
+		OutputDir:    GlobalOutputDir,
+	}
+
+	return TreatingAnimeName(movieName), ErrMovieDownloadRequested
 }
 
 // Pre-compiled regexes for SanitizeForFilename and related functions (hot path)
@@ -1113,8 +1314,8 @@ func BuildMediaFileName(name string, meta *MediaMeta) string {
 // If the user specified a custom directory via -o flag, that is returned.
 // Otherwise returns the default ~/.local/goanime/downloads/anime/ path.
 func DefaultDownloadDir() string {
-	if GlobalOutputDir != "" {
-		return GlobalOutputDir
+	if outputDir := GetGlobalOutputDir(); outputDir != "" {
+		return outputDir
 	}
 	userHome, _ := os.UserHomeDir()
 	return filepath.Join(userHome, ".local", "goanime", "downloads", "anime")
@@ -1124,8 +1325,8 @@ func DefaultDownloadDir() string {
 // If the user specified a custom directory via -o flag, that is returned.
 // Otherwise returns the default ~/.local/goanime/downloads/movies/ path.
 func DefaultMovieDownloadDir() string {
-	if GlobalOutputDir != "" {
-		return GlobalOutputDir
+	if outputDir := GetGlobalOutputDir(); outputDir != "" {
+		return outputDir
 	}
 	userHome, _ := os.UserHomeDir()
 	return filepath.Join(userHome, ".local", "goanime", "downloads", "movies")

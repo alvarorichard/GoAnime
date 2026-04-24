@@ -17,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/streaming"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -339,13 +340,14 @@ func playVideo(
 
 	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
 	// Many streaming servers require specific User-Agent and Referer headers
-	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	isHLSStream := streaming.LooksLikeHLS(videoURL)
+	playbackState := util.CurrentPlaybackState()
 
 	// Determine the anime source for source-specific playback configuration.
 	// Use the globally-stored anime source (set during stream resolution) so
 	// that 9Anime is detected reliably even when Discord (and hence the
 	// updater) is disabled.
-	is9Anime := util.Is9AnimeSource()
+	is9Anime := playbackState.AnimeSource == "9Anime"
 	if !is9Anime && updater != nil && updater.GetAnime() != nil {
 		is9Anime = updater.GetAnime().Source == "9Anime"
 	}
@@ -353,14 +355,16 @@ func playVideo(
 	if isHLSStream {
 		// Use the stored global referer if available (set by source-specific stream resolvers),
 		// otherwise fall back to the default referer for legacy sources
-		referer := util.GetGlobalReferer()
+		referer := playbackState.Referer
 		if referer == "" {
-			referer = "https://streameeeeee.site/"
+			referer = streaming.DeriveReferer(videoURL)
 		}
-		mpvArgs = append(mpvArgs,
-			fmt.Sprintf("--http-header-fields=Referer: %s", referer),
-		)
-		util.Debugf("HLS stream detected - Referer: %s", referer)
+		if referer != "" {
+			mpvArgs = append(mpvArgs,
+				fmt.Sprintf("--http-header-fields=Referer: %s", referer),
+			)
+			util.Debugf("HLS stream detected - Referer: %s", referer)
+		}
 
 		// For 9Anime (and other Cloudflare-protected CDNs), route playback through
 		// yt-dlp with Chrome TLS impersonation to bypass Cloudflare fingerprint checks.
@@ -379,7 +383,7 @@ func playVideo(
 
 	// For googlevideo.com URLs served through our local Blogger proxy,
 	// disable yt-dlp so mpv fetches from 127.0.0.1 directly.
-	if strings.Contains(videoURL, "127.0.0.1") && strings.Contains(videoURL, "blogger_proxy") {
+	if streaming.IsBloggerProxyURL(videoURL) {
 		mpvArgs = append(mpvArgs, "--ytdl=no")
 		util.Debugf("Blogger proxy URL detected - disabling yt-dlp")
 	}
@@ -416,12 +420,12 @@ func playVideo(
 
 	if isMovieOrTV {
 		// Audio and subtitle language preferences only for movies/TV
-		audioLang := util.GlobalAudioLanguage
+		audioLang := util.GetPreferredAudioLanguage()
 		if audioLang == "" {
 			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English
 			audioLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
 		}
-		subsLang := util.GlobalSubsLanguage
+		subsLang := util.GetPreferredSubtitleLanguage()
 		if subsLang == "" {
 			subsLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
 		}
@@ -433,15 +437,7 @@ func playVideo(
 	// Add external subtitle files if available (FlixHQ / 9Anime subtitles)
 	// This follows the lobster.sh implementation for external subtitles
 	if isMovieOrTV || is9Anime {
-		// For 9Anime (multi-language platform), ALWAYS prompt the user to select
-		// their preferred subtitle language after every episode selection, without
-		// exception. This ensures the user explicitly chooses subtitles each time.
-		if is9Anime {
-			util.PromptSubtitleLanguage()
-		} else if len(util.GlobalSubtitles) > 1 {
-			// For other sources (FlixHQ), use the standard selection
-			util.SelectSubtitles()
-		}
+		util.PreparePlaybackSubtitles()
 		subArgs := util.GetSubtitleArgs()
 		if len(subArgs) > 0 {
 			mpvArgs = append(mpvArgs, subArgs...)
@@ -1201,15 +1197,14 @@ func switchEpisode(newIndex int, episodes []models.Episode, anilistID int, updat
 	// If no updater/anime context, try to synthesize from lastAnimeURL
 	storedURL := getLastAnimeURL()
 	if anime == nil && storedURL != "" {
-		guessedSource := ""
-		// Check global anime source first (most reliable, set during stream resolution)
-		if src := util.GetGlobalAnimeSource(); src != "" {
-			guessedSource = src
-		} else if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
-			// Check global referer to detect 9Anime (uses rapid-cloud referer)
-			guessedSource = "9Anime"
-		} else if (len(storedURL) < 30 && !strings.Contains(storedURL, "http")) || strings.Contains(storedURL, "allanime") {
-			guessedSource = "AllAnime"
+		guessedSource := util.CurrentPlaybackState().AnimeSource
+		if guessedSource == "" {
+			if resolved := api.ResolveURL(storedURL); resolved.Kind != api.SourceUnknown {
+				guessedSource = resolved.Name
+			}
+		}
+		if guessedSource == "" && updater != nil && updater.GetAnime() != nil {
+			guessedSource = updater.GetAnime().Source
 		}
 		anime = &models.Anime{URL: storedURL, Source: guessedSource}
 	}

@@ -129,11 +129,11 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 
 	return &http.Transport{
 		// Custom dial function for regular (non-TLS) connections.
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
 			return dialFunc(network, addr, timeout, nil)
 		},
 		// Custom dial function for TLS connections, using the specified TLS configuration.
-		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		DialTLSContext: func(_ context.Context, network, addr string) (net.Conn, error) {
 			return dialFunc(network, addr, timeout, tlsConfig)
 		},
 		// Set the timeout for the TLS handshake process.
@@ -201,8 +201,3 @@ func ValidateExternalURL(rawURL string) error {
 // against the SSRF allow-list. Inject this into custom http.Transport structs
 // that need their own TLS settings (e.g. HTTP/1.1-only HLS downloads) but
 // still require SSRF protection.
-func SafeDialContext(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialFunc(network, addr, timeout, nil)
-	}
-}

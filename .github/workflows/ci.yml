@@ -14,10 +14,10 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.2'
 
@@ -63,9 +63,12 @@ jobs:
         run: go mod download
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.11.4
+          # Avoid failing the entire CI on transient network timeouts while fetching
+          # the remote JSON schema used only for config validation.
+          verify: false
           args: --timeout=15m
 
       - name: Install Gosec
@@ -112,10 +115,10 @@ jobs:
             asset_name: goanime-darwin-arm64
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.2'
 
@@ -178,12 +181,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.2'
 
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get dependencies
         run: go mod download

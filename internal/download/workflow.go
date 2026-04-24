@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -22,7 +22,7 @@ import (
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
-// HandleDownloadRequest processes a download request from command line
+// HandleDownloadRequest processes a download request from command line.
 func HandleDownloadRequest(request *util.DownloadRequest) error {
 	util.Info("Starting enhanced download mode...")
 
@@ -90,53 +90,9 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		return HandleMovieDownloadRequest(movieRequest)
 	}
 
-	// If this is 9Anime content, use the dedicated 9anime downloader
-	// 9Anime episodes use data-id based resolution that is incompatible with legacy downloaders
-	if anime.Source == "9Anime" {
-		util.Infof("Detected 9Anime content: %s — using 9Anime downloader", anime.Name)
-		nad := downloader.NewNineAnimeDownloader(downloader.NineAnimeDownloadConfig{
-			AnimeName:    anime.Name,
-			Quality:      quality,
-			OutputDir:    request.OutputDir,
-			Season:       season,
-			SubsLanguage: request.SubsLanguage,
-		})
-		if request.IsAll {
-			return nad.DownloadAllEpisodes(anime)
-		}
-		if request.IsRange {
-			return nad.DownloadEpisodeRange(anime, request.StartEpisode, request.EndEpisode)
-		}
-		if request.EpisodeNum <= 0 {
-			// No specific episode requested — download all episodes
-			return nad.DownloadAllEpisodes(anime)
-		}
-		return nad.DownloadSingleEpisode(anime, request.EpisodeNum)
-	}
-
-	// Download-all mode: fetch all episodes and download them
 	if request.IsAll {
 		util.Infof("Downloading ALL episodes of %s", anime.Name)
-
-		// Try enhanced episode fetch first, fallback to legacy
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
-		if err == nil && len(eps) > 0 {
-			dlErr := player.HandleBatchDownload(eps, anime)
-			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
-				return nil
-			}
-			util.Infof("Batch download path failed, falling back to legacy: %v", dlErr)
-		} else if err != nil {
-			util.Infof("Enhanced episodes fetch failed: %v", err)
-		}
-
-		// Fallback to legacy downloader
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
-		if legacyErr != nil {
-			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
-		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-		return dl.DownloadAllEpisodes()
+		return downloadAllEpisodesWithFallback(anime)
 	}
 
 	if request.IsRange {
@@ -144,7 +100,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			request.StartEpisode, request.EndEpisode, anime.Name)
 
 		// Exclusive AllAnime Smart Range
-		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
+		if request.AllAnimeSmart && api.IsAllAnimeSource(anime) {
 			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
 			// Use player batch downloader with provided range to get consistent progress UI
 			eps, err := api.GetAnimeEpisodesEnhanced(anime)
@@ -160,89 +116,115 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			}
 			if err := api.DownloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 				util.Errorf("AllAnime Smart Range failed: %v", err)
-				// Fallback to normal enhanced
-				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
-					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
-					// Fallback to legacy downloader
-					episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
-					if legacyErr != nil {
-						return fmt.Errorf("legacy episode fetch also failed: %w", legacyErr)
-					}
-					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
-				}
-				return nil
+				return downloadEpisodeRangeWithFallback(anime, request.StartEpisode, request.EndEpisode)
 			}
 			return nil
 		}
-
-		// Try batch downloader with progress UI first (works for AllAnime and other sources)
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
-		if err == nil && len(eps) > 0 {
-			dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
-			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
-				return nil
-			}
-			util.Infof("Batch download path failed, falling back to legacy: %v", dlErr)
-		} else if err != nil {
-			util.Infof("Enhanced episodes fetch failed: %v", err)
-		}
-		// Fallback to legacy downloader
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
-		if legacyErr != nil {
-			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
-		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-		return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
-	} else {
-		util.Infof("Downloading episode %d of %s",
-			request.EpisodeNum, anime.Name)
-
-		// Enhanced download is a placeholder - use legacy downloader
-		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
-		if legacyErr != nil {
-			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
-		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-		return dl.DownloadSingleEpisode(request.EpisodeNum)
+		return downloadEpisodeRangeWithFallback(anime, request.StartEpisode, request.EndEpisode)
 	}
+	util.Infof("Downloading episode %d of %s",
+		request.EpisodeNum, anime.Name)
+	return downloadSingleEpisodeWithFallback(anime, request.EpisodeNum)
 }
 
-// Example usage functions for documentation
+func downloadAllEpisodesWithFallback(anime *models.Anime) error {
+	return withEnhancedEpisodeDownloader(anime, func(episodes []models.Episode, dl *downloader.EpisodeDownloader) error {
+		dlErr := player.HandleBatchDownload(episodes, anime)
+		if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
+			return nil
+		}
 
-// ExampleSingleDownload demonstrates single episode download
-//func ExampleSingleDownload() {
-//	// Command: goanime -d "My Hero Academia" 15
-//	// This would create a DownloadRequest like:
-//	request := &util.DownloadRequest{
-//		AnimeName:  "My Hero Academia",
-//		EpisodeNum: 15,
-//		IsRange:    false,
-//	}
-//
-//	if err := HandleDownloadRequest(request); err != nil {
-//		log.Printf("Download failed: %v", err)
-//	}
-//}
+		util.Infof("Batch download path failed, falling back to downloader-backed flow: %v", dlErr)
+		if isNineAnimeSource(anime) {
+			return downloadEpisodesSequentially(dl, episodeNumbersFromSlice(episodes))
+		}
+		return dl.DownloadAllEpisodes()
+	})
+}
 
-//// ExampleRangeDownload demonstrates episode range download
-//func ExampleRangeDownload() {
-//	// Command: goanime -d -r "Attack on Titan" 1-5
-//	// This would create a DownloadRequest like:
-//	request := &util.DownloadRequest{
-//		AnimeName:    "Attack on Titan",
-//		IsRange:      true,
-//		StartEpisode: 1,
-//		EndEpisode:   5,
-//	}
-//
-//	if err := HandleDownloadRequest(request); err != nil {
-//		log.Printf("Range download failed: %v", err)
-//	}
-//}
+func downloadEpisodeRangeWithFallback(anime *models.Anime, startEp, endEp int) error {
+	return withEnhancedEpisodeDownloader(anime, func(episodes []models.Episode, dl *downloader.EpisodeDownloader) error {
+		dlErr := player.HandleBatchDownloadRange(episodes, anime, startEp, endEp)
+		if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
+			return nil
+		}
 
-// HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ and SFlix
+		util.Infof("Batch download path failed, falling back to downloader-backed flow: %v", dlErr)
+		if isNineAnimeSource(anime) {
+			return downloadEpisodesSequentially(dl, episodeNumbersInRange(episodes, startEp, endEp))
+		}
+		return dl.DownloadEpisodeRange(startEp, endEp)
+	})
+}
+
+func downloadSingleEpisodeWithFallback(anime *models.Anime, episodeNum int) error {
+	return withEnhancedEpisodeDownloader(anime, func(episodes []models.Episode, dl *downloader.EpisodeDownloader) error {
+		dlErr := player.HandleBatchDownloadRange(episodes, anime, episodeNum, episodeNum)
+		if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
+			return nil
+		}
+
+		util.Infof("Single-episode batch path failed, falling back to downloader-backed flow: %v", dlErr)
+		return dl.DownloadSingleEpisode(episodeNum)
+	})
+}
+
+func withEnhancedEpisodeDownloader(anime *models.Anime, action func([]models.Episode, *downloader.EpisodeDownloader) error) error {
+	episodes, err := api.GetAnimeEpisodesEnhanced(anime)
+	if err != nil {
+		return fmt.Errorf("failed to fetch enhanced episodes: %w", err)
+	}
+	if len(episodes) == 0 {
+		return fmt.Errorf("the selected anime does not have episodes on the server")
+	}
+
+	dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+	return action(episodes, dl)
+}
+
+func isNineAnimeSource(anime *models.Anime) bool {
+	resolved, err := api.ResolveSource(anime)
+	return err == nil && resolved.Kind == api.SourceNineAnime
+}
+
+func episodeNumbersFromSlice(episodes []models.Episode) []int {
+	var episodeNums []int
+	for _, episode := range episodes {
+		if episode.Num > 0 {
+			episodeNums = append(episodeNums, episode.Num)
+			continue
+		}
+		if num, err := strconv.Atoi(strings.TrimSpace(episode.Number)); err == nil && num > 0 {
+			episodeNums = append(episodeNums, num)
+		}
+	}
+	return episodeNums
+}
+
+func episodeNumbersInRange(episodes []models.Episode, startEp, endEp int) []int {
+	var episodeNums []int
+	for _, episodeNum := range episodeNumbersFromSlice(episodes) {
+		if episodeNum >= startEp && episodeNum <= endEp {
+			episodeNums = append(episodeNums, episodeNum)
+		}
+	}
+	return episodeNums
+}
+
+func downloadEpisodesSequentially(dl *downloader.EpisodeDownloader, episodeNums []int) error {
+	if len(episodeNums) == 0 {
+		return fmt.Errorf("no episodes resolved for sequential download")
+	}
+
+	for _, episodeNum := range episodeNums {
+		if err := dl.DownloadSingleEpisode(episodeNum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ and SFlix.
 func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	util.Info("Starting movie/TV download mode...")
 
@@ -275,7 +257,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 		return fmt.Errorf("failed to select media: %w", err)
 	}
 
-	// Convert to models.Anime for compatibility with downloader
+	// Convert to models.Anime so the shared download flow can reuse the media result.
 	anime := selectedMedia.ToAnimeModel()
 	anime.Source = selectedMedia.Source
 
@@ -435,18 +417,17 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 		if request.IsRange {
 			util.Infof("Downloading %s S%02d E%02d-%02d", anime.Name, seasonNum, request.StartEpisode, request.EndEpisode)
 			return md.DownloadTVEpisodeRange(anime, seasonNum, request.StartEpisode, request.EndEpisode)
-		} else {
-			episodeNum := request.EpisodeNum
-			if episodeNum == 0 {
-				// Let user select episode
-				episodeNum, err = selectEpisode(mediaManager, mediaID, seasonNum)
-				if err != nil {
-					return fmt.Errorf("failed to select episode: %w", err)
-				}
-			}
-			util.Infof("Downloading %s S%02dE%02d", anime.Name, seasonNum, episodeNum)
-			return md.DownloadTVEpisode(anime, seasonNum, episodeNum)
 		}
+		episodeNum := request.EpisodeNum
+		if episodeNum == 0 {
+			// Let user select episode
+			episodeNum, err = selectEpisode(mediaManager, mediaID, seasonNum)
+			if err != nil {
+				return fmt.Errorf("failed to select episode: %w", err)
+			}
+		}
+		util.Infof("Downloading %s S%02dE%02d", anime.Name, seasonNum, episodeNum)
+		return md.DownloadTVEpisode(anime, seasonNum, episodeNum)
 	}
 
 	return fmt.Errorf("could not determine media type for download")
@@ -605,55 +586,4 @@ func extractIDFromURL(urlStr string) string {
 		return parts[len(parts)-1]
 	}
 	return ""
-}
-
-// ExampleMovieDownload demonstrates movie download
-func ExampleMovieDownload() {
-	// Command: goanime -dm "Inception"
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName: "Inception",
-		IsMovie:   true,
-		Quality:   "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("Movie download failed: %v", err)
-	}
-}
-
-// ExampleTVDownload demonstrates TV episode download
-func ExampleTVDownload() {
-	// Command: goanime -dm --type tv "Breaking Bad" 1 1
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:  "Breaking Bad",
-		IsTV:       true,
-		SeasonNum:  1,
-		EpisodeNum: 1,
-		Quality:    "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("TV download failed: %v", err)
-	}
-}
-
-// ExampleTVRangeDownload demonstrates TV episode range download
-func ExampleTVRangeDownload() {
-	// Command: goanime -dm -r "Game of Thrones" 1 1-5
-	// This would create a DownloadRequest like:
-	request := &util.DownloadRequest{
-		AnimeName:    "Game of Thrones",
-		IsTV:         true,
-		IsRange:      true,
-		SeasonNum:    1,
-		StartEpisode: 1,
-		EndEpisode:   5,
-		Quality:      "1080",
-	}
-
-	if err := HandleMovieDownloadRequest(request); err != nil {
-		log.Printf("TV range download failed: %v", err)
-	}
 }

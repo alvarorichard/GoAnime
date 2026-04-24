@@ -80,16 +80,6 @@ func (t *Timer) Stop() time.Duration {
 	return duration
 }
 
-// StopAndLog stops the timer and logs the duration
-func (t *Timer) StopAndLog() time.Duration {
-	if t == nil || !PerfEnabled {
-		return 0
-	}
-	duration := t.Stop()
-	Debugf("[PERF] %s took %v", t.name, duration)
-	return duration
-}
-
 // Record records a metric with the given name and duration
 func (pt *PerfTracker) Record(name string, duration time.Duration) {
 	pt.mu.Lock()
@@ -116,7 +106,7 @@ func (pt *PerfTracker) IncrementCounter(name string) {
 	pt.mu.Lock()
 	counter, exists := pt.counters[name]
 	if !exists {
-		var c int64 = 0
+		var c int64
 		counter = &c
 		pt.counters[name] = counter
 	}
@@ -125,45 +115,9 @@ func (pt *PerfTracker) IncrementCounter(name string) {
 	atomic.AddInt64(counter, 1)
 }
 
-// GetCounter returns the current value of a counter
-func (pt *PerfTracker) GetCounter(name string) int64 {
-	pt.mu.RLock()
-	defer pt.mu.RUnlock()
-
-	counter, exists := pt.counters[name]
-	if !exists {
-		return 0
-	}
-	return atomic.LoadInt64(counter)
-}
-
-// GetMetrics returns a copy of all metrics
-func (pt *PerfTracker) GetMetrics() map[string]*PerfMetric {
-	pt.mu.RLock()
-	defer pt.mu.RUnlock()
-
-	result := make(map[string]*PerfMetric, len(pt.metrics))
-	for k, v := range pt.metrics {
-		// Create a copy
-		metricCopy := *v
-		result[k] = &metricCopy
-	}
-	return result
-}
-
 // GetUptime returns the time since tracking started
 func (pt *PerfTracker) GetUptime() time.Duration {
 	return time.Since(pt.started)
-}
-
-// Reset resets all metrics
-func (pt *PerfTracker) Reset() {
-	pt.mu.Lock()
-	defer pt.mu.Unlock()
-
-	pt.metrics = make(map[string]*PerfMetric)
-	pt.counters = make(map[string]*int64)
-	pt.started = time.Now()
 }
 
 // Performance styles using lipgloss
@@ -324,50 +278,6 @@ func (pt *PerfTracker) PrintReport() {
 	report.WriteString("\n")
 
 	fmt.Print(report.String())
-}
-
-// TimeFunc is a helper that times a function execution
-func TimeFunc(name string, fn func()) {
-	if !PerfEnabled {
-		fn()
-		return
-	}
-
-	timer := StartTimer(name)
-	fn()
-	timer.Stop()
-}
-
-// TimeFuncWithResult times a function that returns a value
-func TimeFuncWithResult[T any](name string, fn func() T) T {
-	if !PerfEnabled {
-		return fn()
-	}
-
-	timer := StartTimer(name)
-	result := fn()
-	timer.Stop()
-	return result
-}
-
-// TimeFuncWithError times a function that returns a value and error
-func TimeFuncWithError[T any](name string, fn func() (T, error)) (T, error) {
-	if !PerfEnabled {
-		return fn()
-	}
-
-	timer := StartTimer(name)
-	result, err := fn()
-	timer.Stop()
-	return result, err
-}
-
-// Perf is a shorthand for recording a performance metric
-func Perf(name string, start time.Time) {
-	if !PerfEnabled {
-		return
-	}
-	GetPerfTracker().Record(name, time.Since(start))
 }
 
 // PerfCount increments a performance counter

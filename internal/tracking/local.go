@@ -1,4 +1,4 @@
-// tracking/sqlite_tracker.go
+// Package tracking provides local SQLite-backed progress tracking for anime and movies.
 package tracking
 
 import (
@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // CGO SQLite driver
 )
 
 // IsCgoEnabled indicates whether CGO is enabled for SQLite support
@@ -58,6 +58,7 @@ type Anime struct {
 	LastUpdated   time.Time `json:"last_updated"`
 }
 
+// LocalTracker is a SQLite-backed tracker for local anime and movie progress.
 type LocalTracker struct {
 	db       *sql.DB
 	upsertPS *sql.Stmt
@@ -85,26 +86,13 @@ func GetGlobalTracker() *LocalTracker {
 	return globalTracker
 }
 
-// CloseGlobalTracker closes the global tracker and clears the cache.
-// Should be called on application shutdown.
-func CloseGlobalTracker() error {
-	trackerMutex.Lock()
-	defer trackerMutex.Unlock()
-
-	if globalTracker != nil {
-		err := globalTracker.Close()
-		globalTracker = nil
-		globalTrackerPath = ""
-		return err
-	}
-	return nil
-}
-
 /*
 ────────────────────────────────────────────────────────────────────────────*
 │  Construtor e Inicialização                                                │
 *────────────────────────────────────────────────────────────────────────────
 */
+
+// NewLocalTracker constructs a LocalTracker; assigned at init time to allow test injection.
 var NewLocalTracker func(dbPath string) *LocalTracker
 
 func newLocalTrackerImpl(dbPath string) *LocalTracker {
@@ -184,7 +172,7 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		upsertPS: statements.upsert,
 		getPS:    statements.get,
 		allPS:    statements.all,
-		deletePS: statements.delete,
+		deletePS: statements.deleteStmt,
 	}
 
 	// Cache the tracker globally for reuse
@@ -280,10 +268,10 @@ func migrateOldData(db *sql.DB) {
 *────────────────────────────────────────────────────────────────────────────
 */
 type preparedStatements struct {
-	upsert *sql.Stmt
-	get    *sql.Stmt
-	all    *sql.Stmt
-	delete *sql.Stmt
+	upsert     *sql.Stmt
+	get        *sql.Stmt
+	all        *sql.Stmt
+	deleteStmt *sql.Stmt
 }
 
 func prepareStatements(db *sql.DB) (*preparedStatements, error) {
@@ -339,7 +327,7 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		return nil, fmt.Errorf("all preparation failed: %w", err)
 	}
 
-	delete, err := db.Prepare(`DELETE FROM media_progress 
+	deleteStmt, err := db.Prepare(`DELETE FROM media_progress
 		WHERE allanime_id = ?`)
 
 	if err != nil {
@@ -347,10 +335,10 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 	}
 
 	return &preparedStatements{
-		upsert: upsert,
-		get:    get,
-		all:    all,
-		delete: delete,
+		upsert:     upsert,
+		get:        get,
+		all:        all,
+		deleteStmt: deleteStmt,
 	}, nil
 }
 
@@ -359,6 +347,8 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 │  Operações Principais                                                      │
 *────────────────────────────────────────────────────────────────────────────
 */
+
+// UpdateProgress persists current playback state for a given anime or movie.
 func (t *LocalTracker) UpdateProgress(a Anime) error {
 	// Safety check for when tracker is not initialized
 	if t == nil || t.db == nil || t.upsertPS == nil {
@@ -431,6 +421,7 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 	return &a, nil
 }
 
+// GetAllAnime returns all tracked anime and movie entries from the local database.
 func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 	// Safety check for when tracker is not initialized
 	if t == nil || t.db == nil || t.allPS == nil {
@@ -475,7 +466,7 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 
 // DeleteAnime removes tracking data by allanime_id
 // The anilistID parameter is kept for backwards compatibility but is ignored
-func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
+func (t *LocalTracker) DeleteAnime(_ int, allanimeID string) error {
 	_, err := t.deletePS.Exec(allanimeID)
 	return err
 }
@@ -485,6 +476,8 @@ func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
 │  Finalização                                                               │
 *────────────────────────────────────────────────────────────────────────────
 */
+
+// Close releases all prepared statements and the underlying database connection.
 func (t *LocalTracker) Close() error {
 	var finalErr error
 

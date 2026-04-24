@@ -1,3 +1,4 @@
+// Package updater checks for new GoAnime releases and applies self-updates.
 package updater
 
 import (
@@ -21,6 +22,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/version"
 )
 
+// GitHub repository constants for release checks and self-update downloads.
 const (
 	GitHubOwner = "alvarorichard"
 	GitHubRepo  = "GoAnime"
@@ -191,21 +193,6 @@ func CheckAndPromptUpdate() error {
 
 	util.Info("Update cancelled by user")
 	return nil
-}
-
-// CheckForUpdatesQuietly checks for updates without user interaction
-func CheckForUpdatesQuietly() {
-	release, hasUpdate, err := CheckForUpdates()
-	if err != nil {
-		util.Debug("Failed to check for updates:", err)
-		return
-	}
-
-	if hasUpdate {
-		util.Info(fmt.Sprintf("🚀 New version available: %s (current: %s)",
-			release.TagName, version.Version))
-		util.Info("Run with --update flag to update")
-	}
 }
 
 // Helper functions

@@ -23,7 +23,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/internal/streaming"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/lrstanley/go-ytdlp"
 )
@@ -40,22 +40,6 @@ type MovieDownloadConfig struct {
 type MovieDownloader struct {
 	config       MovieDownloadConfig
 	mediaManager *scraper.MediaManager
-}
-
-// NewMovieDownloader creates a new movie downloader
-func NewMovieDownloader() *MovieDownloader {
-	userHome, _ := os.UserHomeDir()
-	outputDir := filepath.Join(userHome, ".local", "goanime", "downloads", "movies")
-
-	return &MovieDownloader{
-		config: MovieDownloadConfig{
-			OutputDir:    outputDir,
-			Quality:      scraper.Quality1080,
-			SubsLanguage: "english",
-			Provider:     "Vidcloud",
-		},
-		mediaManager: scraper.NewMediaManager(),
-	}
 }
 
 // NewMovieDownloaderWithConfig creates a movie downloader with custom configuration
@@ -106,7 +90,7 @@ func (md *MovieDownloader) DownloadMovie(media *models.Anime) error {
 	}
 
 	// Extract media ID from URL
-	mediaID := extractMediaIDFromURL(media.URL)
+	mediaID := scraper.ExtractMediaID(media.URL)
 	if mediaID == "" {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
@@ -172,7 +156,7 @@ func (md *MovieDownloader) DownloadTVEpisode(media *models.Anime, seasonNum, epi
 	}
 
 	// Extract media ID from URL
-	mediaID := extractMediaIDFromURL(media.URL)
+	mediaID := scraper.ExtractMediaID(media.URL)
 	if mediaID == "" {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
@@ -246,7 +230,7 @@ func (md *MovieDownloader) DownloadAllSeasons(media *models.Anime) error {
 		return fmt.Errorf("media is nil")
 	}
 
-	mediaID := extractMediaIDFromURL(media.URL)
+	mediaID := scraper.ExtractMediaID(media.URL)
 	if mediaID == "" {
 		return fmt.Errorf("could not extract media ID from URL: %s", media.URL)
 	}
@@ -454,7 +438,7 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 	// For HLS streams, don't pre-seed a fixed estimate — the download
 	// callbacks will dynamically compute the real total from segment data
 	// or yt-dlp's reported TotalBytes.
-	if isM3U8 || player.LooksLikeHLS(videoURL) {
+	if isM3U8 || streaming.LooksLikeHLS(videoURL) {
 		m.totalBytes = 0 // let download callbacks set the real value
 		fmt.Println("Download setup - HLS stream (size determined during download)")
 	} else {
@@ -467,13 +451,13 @@ func (md *MovieDownloader) downloadMovieWithProgress(videoURL, destPath, title s
 		fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 	}
 
-	p := tui.NewProgram(m)
+	p := tea.NewProgram(m)
 
 	// Start download in goroutine with progress tracking
 	downloadComplete := make(chan error, 1)
 	go func() {
 		var err error
-		if isM3U8 || player.LooksLikeHLS(videoURL) {
+		if isM3U8 || streaming.LooksLikeHLS(videoURL) {
 			err = md.downloadM3U8WithYtDlp(videoURL, destPath, referer, m, p)
 		} else {
 			err = md.downloadHTTPWithProgress(videoURL, destPath, referer, headers, m, p)
@@ -910,7 +894,7 @@ func extractRefererFromStreamURL(streamURL string) string {
 
 // getContentLength gets the content length of a URL
 func (md *MovieDownloader) getContentLength(url string) (int64, error) {
-	if player.LooksLikeHLS(url) {
+	if streaming.LooksLikeHLS(url) {
 		return 500 * 1024 * 1024, nil // 500MB estimate for HLS
 	}
 
@@ -1011,14 +995,6 @@ func (md *MovieDownloader) playMovie(path, title string) error {
 }
 
 // Helper functions
-
-func extractMediaIDFromURL(urlStr string) string {
-	parts := strings.Split(urlStr, "-")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-	return ""
-}
 
 func convertSFlixToFlixHQStreamInfo(sflix *scraper.SFlixStreamInfo) *scraper.FlixHQStreamInfo {
 	if sflix == nil {

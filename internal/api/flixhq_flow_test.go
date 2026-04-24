@@ -76,7 +76,7 @@ func TestFlixHQFullFlow(t *testing.T) {
 	flixhqClient := scraper.NewFlixHQClient()
 
 	// Extract media ID from URL (get last number from URL like "watch-dexter-39448")
-	mediaID := extractMediaIDFromURL(anime.URL)
+	mediaID := scraper.ExtractMediaID(anime.URL)
 	t.Logf("Extracted mediaID: %s from URL: %s", mediaID, anime.URL)
 
 	seasons, err := flixhqClient.GetSeasons(mediaID)

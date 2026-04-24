@@ -227,22 +227,6 @@ func NewFlixHQClient() *FlixHQClient {
 	}
 }
 
-// NewFlixHQClientWithContext creates a new FlixHQ client with custom settings
-func NewFlixHQClientWithContext(timeout time.Duration, maxRetries int) *FlixHQClient {
-	return &FlixHQClient{
-		client: &http.Client{
-			Timeout:   timeout,
-			Transport: safeScraperTransport(timeout),
-		},
-		baseURL:        FlixHQBase,
-		apiURL:         FlixHQAPI,
-		fallbackAPIURL: FlixHQFallbackAPI,
-		userAgent:      FlixHQUserAgent,
-		maxRetries:     maxRetries,
-		retryDelay:     100 * time.Millisecond,
-	}
-}
-
 // SearchMedia searches for movies and TV shows on FlixHQ
 func (c *FlixHQClient) SearchMedia(query string) ([]*FlixHQMedia, error) {
 	return c.SearchMediaWithContext(context.Background(), query)

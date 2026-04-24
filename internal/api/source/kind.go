@@ -6,31 +6,25 @@ import "github.com/alvarorichard/Goanime/internal/scraper"
 
 // SourceKind is the canonical type-safe identifier for a media source.
 // Unlike scraper.ScraperType (iota int), SourceKind is human-readable and safe for logging.
+//
+//revive:disable-next-line:exported
 type SourceKind string
 
+// Media source kind constants used throughout the application for source identification.
 const (
 	AllAnime   SourceKind = "AllAnime"
-	AnimeFire  SourceKind = "AnimeFire"
+	AnimeFire  SourceKind = "Animefire.io"
 	AnimeDrive SourceKind = "AnimeDrive"
 	FlixHQ     SourceKind = "FlixHQ"
 	SFlix      SourceKind = "SFlix"
 	NineAnime  SourceKind = "9Anime"
 	Goyabu     SourceKind = "Goyabu"
 	SuperFlix  SourceKind = "SuperFlix"
-
-	// Unknown is returned when no definition matches. Downstream treats it as
-	// best-effort AllAnime, but logs a warning for investigation.
-	Unknown SourceKind = "Unknown"
+	Unknown    SourceKind = "Unknown"
 )
 
-// ScraperTypeFor maps a SourceKind to the corresponding scraper.ScraperType.
-// Returns the ScraperType and true if found, or (0, false) for Unknown/unregistered kinds.
-func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
-	st, ok := scraperTypeMap[kind]
-	return st, ok
-}
-
-var scraperTypeMap = map[SourceKind]scraper.ScraperType{
+// ScraperTypeMap maps a SourceKind to the corresponding scraper.ScraperType.
+var ScraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AllAnime:   scraper.AllAnimeType,
 	AnimeFire:  scraper.AnimefireType,
 	AnimeDrive: scraper.AnimeDriveType,
@@ -39,4 +33,15 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	NineAnime:  scraper.NineAnimeType,
 	Goyabu:     scraper.GoyabuType,
 	SuperFlix:  scraper.SuperFlixType,
+}
+
+// ScraperType returns the matching scraper type when one exists.
+func (k SourceKind) ScraperType() (scraper.ScraperType, bool) {
+	st, ok := ScraperTypeMap[k]
+	return st, ok
+}
+
+// ScraperTypeFor maps a SourceKind to the corresponding scraper.ScraperType.
+func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
+	return kind.ScraperType()
 }

@@ -46,9 +46,13 @@ type UnifiedScraper interface {
 	GetType() ScraperType
 }
 
+type scraperFactory func() UnifiedScraper
+
 // ScraperManager manages multiple scrapers
 type ScraperManager struct {
-	scrapers map[ScraperType]UnifiedScraper
+	mu        sync.RWMutex
+	scrapers  map[ScraperType]UnifiedScraper
+	factories map[ScraperType]scraperFactory
 }
 
 // Singleton ScraperManager — scrapers are stateless HTTP clients, no need to recreate
@@ -57,28 +61,35 @@ var (
 	globalScraperManagerOnce sync.Once
 )
 
-// PreWarmScraperManager triggers background initialization of the scraper
-// manager singleton so it's ready when the first search happens.
+// PreWarmScraperManager primes the singleton manager in the background.
+// Individual scrapers are still created lazily on first use.
 func PreWarmScraperManager() {
 	go func() { NewScraperManager() }()
 }
 
+func defaultScraperFactories() map[ScraperType]scraperFactory {
+	return map[ScraperType]scraperFactory{
+		AllAnimeType:  func() UnifiedScraper { return &AllAnimeAdapter{client: NewAllAnimeClient()} },
+		AnimefireType: func() UnifiedScraper { return &AnimefireAdapter{client: NewAnimefireClient()} },
+		AnimeDriveType: func() UnifiedScraper {
+			return &AnimeDriveAdapter{client: NewAnimeDriveClient()}
+		},
+		FlixHQType:    func() UnifiedScraper { return &FlixHQAdapter{client: NewFlixHQClient()} },
+		SFlixType:     func() UnifiedScraper { return &SFlixAdapter{client: NewSFlixClient()} },
+		NineAnimeType: func() UnifiedScraper { return &NineAnimeAdapter{client: NewNineAnimeClient()} },
+		GoyabuType:    func() UnifiedScraper { return &GoyabuAdapter{client: NewGoyabuClient()} },
+		SuperFlixType: func() UnifiedScraper { return &SuperFlixAdapter{client: NewSuperFlixClient()} },
+	}
+}
+
 // NewScraperManager returns a cached scraper manager singleton.
-// Scrapers are stateless HTTP clients so a single instance is reused.
+// Scrapers are instantiated lazily and reused after the first lookup.
 func NewScraperManager() *ScraperManager {
 	globalScraperManagerOnce.Do(func() {
 		manager := &ScraperManager{
-			scrapers: make(map[ScraperType]UnifiedScraper),
+			scrapers:  make(map[ScraperType]UnifiedScraper),
+			factories: defaultScraperFactories(),
 		}
-
-		// Initialize scrapers
-		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
-		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
-		manager.scrapers[FlixHQType] = &FlixHQAdapter{client: NewFlixHQClient()}
-		manager.scrapers[SFlixType] = &SFlixAdapter{client: NewSFlixClient()}
-		manager.scrapers[NineAnimeType] = &NineAnimeAdapter{client: NewNineAnimeClient()}
-		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
-		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: NewSuperFlixClient()}
 
 		// AnimeDrive disabled — Cloudflare protection blocks all requests.
 		// Kept on standby until a bypass/solution is found.
@@ -107,9 +118,9 @@ func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([
 
 // searchSpecificScraper searches using a single specific scraper
 func (sm *ScraperManager) searchSpecificScraper(query string, scraperType ScraperType) ([]*models.Anime, error) {
-	scraper, exists := sm.scrapers[scraperType]
-	if !exists {
-		return nil, fmt.Errorf("scraper type %v not found", scraperType)
+	scraper, err := sm.GetScraper(scraperType)
+	if err != nil {
+		return nil, err
 	}
 
 	util.Debug("Searching specific scraper", "scraper", sm.getScraperDisplayName(scraperType))
@@ -144,6 +155,7 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 
 	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
 	defer cancel()
+	scraperTypes := sm.availableScraperTypes()
 
 	// Thread-safe result collection
 	var (
@@ -154,17 +166,21 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		errorsMutex        sync.Mutex
 	)
 
-	resultChan := make(chan searchResult, len(sm.scrapers))
+	resultChan := make(chan searchResult, len(scraperTypes))
 	var wg sync.WaitGroup
 
 	// Launch all scrapers concurrently
-	for sType, scraper := range sm.scrapers {
+	for _, sType := range scraperTypes {
 		wg.Add(1)
-		go func(st ScraperType, s UnifiedScraper) {
+		go func(st ScraperType) {
 			defer wg.Done()
-			result := sm.searchWithTimeout(ctx, st, s, query)
-			resultChan <- result
-		}(sType, scraper)
+			s, err := sm.GetScraper(st)
+			if err != nil {
+				resultChan <- searchResult{scraperType: st, err: err}
+				return
+			}
+			resultChan <- sm.searchWithTimeout(ctx, st, s, query)
+		}(sType)
 	}
 
 	// Close channel when all goroutines complete
@@ -415,11 +431,11 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			lowerName := strings.ToLower(anime.Name)
 			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
 				if !strings.Contains(anime.Name, "(Dublado)") {
-					anime.Name = anime.Name + " (Dublado)"
+					anime.Name += " (Dublado)"
 				}
 			} else if strings.Contains(lowerName, "legendado") || strings.Contains(lowerURL, "legendado") {
 				if !strings.Contains(anime.Name, "(Legendado)") {
-					anime.Name = anime.Name + " (Legendado)"
+					anime.Name += " (Legendado)"
 				}
 			}
 		}
@@ -485,10 +501,50 @@ func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error)
 
 // GetScraper returns a specific scraper by type
 func (sm *ScraperManager) GetScraper(scraperType ScraperType) (UnifiedScraper, error) {
+	sm.mu.RLock()
+	if scraper, exists := sm.scrapers[scraperType]; exists {
+		sm.mu.RUnlock()
+		return scraper, nil
+	}
+	sm.mu.RUnlock()
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	if scraper, exists := sm.scrapers[scraperType]; exists {
 		return scraper, nil
 	}
-	return nil, fmt.Errorf("scraper type %v not found", scraperType)
+
+	factory, exists := sm.factories[scraperType]
+	if !exists || factory == nil {
+		return nil, fmt.Errorf("scraper type %v not found", scraperType)
+	}
+
+	scraper := factory()
+	sm.scrapers[scraperType] = scraper
+	return scraper, nil
+}
+
+func (sm *ScraperManager) availableScraperTypes() []ScraperType {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	seen := make(map[ScraperType]struct{}, len(sm.scrapers)+len(sm.factories))
+	for scraperType := range sm.scrapers {
+		seen[scraperType] = struct{}{}
+	}
+	for scraperType := range sm.factories {
+		seen[scraperType] = struct{}{}
+	}
+
+	types := make([]ScraperType, 0, len(seen))
+	for scraperType := range seen {
+		types = append(types, scraperType)
+	}
+	sort.Slice(types, func(i, j int) bool {
+		return types[i] < types[j]
+	})
+	return types
 }
 
 // getScraperDisplayName returns a Portuguese display name for the scraper type

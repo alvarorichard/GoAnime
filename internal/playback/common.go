@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -19,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// PlayEpisode loads and starts playback for a single episode.
 func PlayEpisode(
 	anime *models.Anime,
 	episodes []models.Episode,
@@ -51,11 +50,9 @@ func PlayEpisode(
 
 	if currentEpisode == nil {
 		// Create episode if not found
-		// For AllAnime, use the anime ID as URL instead of episode-specific URL
-		// For AnimeDrive, use the episode URL directly
 		episodeURLForCreation := episodeURL
-		if anime.Source == "AllAnime" || (len(anime.URL) < 30 && !strings.Contains(anime.URL, "http") && !strings.Contains(anime.URL, "animesdrive")) {
-			episodeURLForCreation = anime.URL // Use anime ID for AllAnime
+		if api.IsAllAnimeSource(anime) {
+			episodeURLForCreation = anime.URL
 		}
 
 		currentEpisode = &models.Episode{
@@ -72,29 +69,23 @@ func PlayEpisode(
 	var videoErr error
 	currentEpisodeCopy := currentEpisode // capture for goroutine
 
-	_ = tui.RunClean(func() error {
-		return spinner.New().
-			Title("Loading episode...").
-			Type(spinner.Dots).
-			Action(func() {
-				var wg sync.WaitGroup
-				wg.Add(2)
+	tui.RunWithSpinner("Loading episode...", func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-				go func() {
-					defer wg.Done()
-					if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-						util.Debugf("Error fetching episode data: %v", err)
-					}
-				}()
+		go func() {
+			defer wg.Done()
+			if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
+				util.Debugf("Error fetching episode data: %v", err)
+			}
+		}()
 
-				go func() {
-					defer wg.Done()
-					videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
-				}()
+		go func() {
+			defer wg.Done()
+			videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
+		}()
 
-				wg.Wait()
-			}).
-			Run()
+		wg.Wait()
 	})
 
 	if videoErr != nil {
@@ -164,6 +155,7 @@ func PlayEpisode(
 	return playErr
 }
 
+// SelectEpisodeWithFuzzy presents a fuzzy-finder UI and returns the chosen episode URL, number string, and number.
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, error) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
@@ -180,6 +172,7 @@ func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, err
 	return url, numStr, epNum, nil
 }
 
+// FindEpisodeByNumber returns the URL, number string, and number for the episode matching num.
 func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, int, error) {
 	for _, ep := range episodes {
 		if epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(ep.Number)); err == nil && epNum == num {

@@ -15,12 +15,12 @@ type Provider interface {
 	// Kind returns the SourceKind for this provider.
 	Kind() source.SourceKind
 
+	// HasSeasons reports whether this provider requires season-aware flows.
+	HasSeasons() bool
+
 	// FetchEpisodes retrieves episodes for an anime from this source.
 	FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error)
 
 	// FetchStreamURL resolves the streaming URL for a specific episode.
 	FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error)
-
-	// HasSeasons returns true if this source organizes content into seasons (e.g. FlixHQ, SFlix).
-	HasSeasons() bool
 }

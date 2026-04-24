@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -40,15 +39,8 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		var videoURL string
 		var videoErr error
 
-		// Use spinner while fetching video URL
-		_ = tui.RunClean(func() error {
-			return spinner.New().
-				Title("Loading video stream...").
-				Type(spinner.Dots).
-				Action(func() {
-					videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
-				}).
-				Run()
+		tui.RunWithSpinner("Loading video stream...", func() {
+			videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
 		})
 
 		if videoErr != nil {

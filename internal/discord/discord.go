@@ -1,3 +1,4 @@
+// Package discord manages Discord Rich Presence integration for GoAnime playback sessions.
 package discord
 
 import (
@@ -101,13 +102,6 @@ func LogoutClient() error {
 		util.Debug("Discord RPC logged out")
 	}
 	return nil
-}
-
-// IsClientLoggedIn returns whether the Discord client is logged in
-func IsClientLoggedIn() bool {
-	clientMutex.Lock()
-	defer clientMutex.Unlock()
-	return isLoggedIn
 }
 
 // GetCurrentPlaybackPosition gets the current playback position from MPV
@@ -532,16 +526,4 @@ func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec i
 	if durSec > 0 {
 		f(durSec)
 	}
-}
-
-// FormatTime formats seconds into human-readable time
-func FormatTime(seconds int) string {
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	remainingSeconds := seconds % 60
-
-	if hours > 0 {
-		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, remainingSeconds)
-	}
-	return fmt.Sprintf("%d:%02d", minutes, remainingSeconds)
 }
