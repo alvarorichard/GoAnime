@@ -1,7 +1,9 @@
 package updater
 
 import (
+	"archive/zip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func createTestZip(t *testing.T, zipPath string, entries map[string]string) {
+	t.Helper()
+
+	zipFile, err := os.Create(zipPath)
+	require.NoError(t, err)
+
+	zw := zip.NewWriter(zipFile)
+	for name, content := range entries {
+		entry, createErr := zw.Create(name)
+		require.NoError(t, createErr)
+
+		_, writeErr := io.WriteString(entry, content)
+		require.NoError(t, writeErr)
+	}
+
+	require.NoError(t, zw.Close())
+	require.NoError(t, zipFile.Close())
+}
 
 // Mock release data for testing
 var mockRelease = GitHubRelease{
@@ -96,6 +117,34 @@ func TestIsVersionNewer(t *testing.T) {
 			current:  "1.0.invalid",
 			expected: false,
 			hasError: true,
+		},
+		{
+			name:     "v prefix on latest only",
+			latest:   "v1.8.1",
+			current:  "1.8.0",
+			expected: true,
+			hasError: false,
+		},
+		{
+			name:     "v prefix on current only",
+			latest:   "1.8.1",
+			current:  "v1.8.0",
+			expected: true,
+			hasError: false,
+		},
+		{
+			name:     "v prefix on both",
+			latest:   "v1.8.1",
+			current:  "v1.8.1",
+			expected: false,
+			hasError: false,
+		},
+		{
+			name:     "v prefix newer patch",
+			latest:   "v1.8.1",
+			current:  "v1.8",
+			expected: true,
+			hasError: false,
 		},
 	}
 
@@ -287,24 +336,332 @@ func TestCopyFile_InvalidDestination(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestCheckForUpdates_MockServer(t *testing.T) {
-	// Create mock server
+// TestCheckForUpdates_BugReproduction simulates the exact bug where
+// version "1.8" (two-part) failed to detect "v1.8.1" (three-part) as newer.
+// This was the root cause of the update mechanism not detecting v1.8.1.
+func TestCheckForUpdates_BugReproduction(t *testing.T) {
+	// Simulate the GitHub API response for v1.8.1 release
+	releaseV181 := GitHubRelease{
+		TagName: "v1.8.1",
+		Name:    "GoAnime v1.8.1",
+		Body:    "Bug fix release",
+		Assets: []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			{Name: "goanime-linux-amd64", BrowserDownloadURL: "http://example.com/goanime-linux-amd64"},
+			{Name: "goanime-darwin-arm64", BrowserDownloadURL: "http://example.com/goanime-darwin-arm64"},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(mockRelease); err != nil {
-				http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			http.NotFound(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(releaseV181); err != nil {
+			http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+			return
 		}
 	}))
 	defer server.Close()
 
-	// Since we can't modify the const, we'll test the function directly
-	// but note that in practice you'd want to make the API URL configurable for testing
-	t.Skip("Skipping integration test - would need configurable API URL")
+	t.Run("bug_version_1.8_must_detect_v1.8.1_as_newer", func(t *testing.T) {
+		// This was the exact scenario that failed before the fix:
+		// The application had version "1.8" (two parts) and the GitHub
+		// release was "v1.8.1" (three parts with v prefix). The old code
+		// did not handle different-length version strings and failed to
+		// detect the update.
+		release, hasUpdate, err := checkForUpdatesFromURL(server.URL, "1.8")
+
+		require.NoError(t, err)
+		assert.True(t, hasUpdate,
+			"BUG REPRODUCED: version 1.8 must detect v1.8.1 as a newer version")
+		assert.Equal(t, "v1.8.1", release.TagName)
+	})
+
+	t.Run("bug_version_v1.8_must_detect_v1.8.1_as_newer", func(t *testing.T) {
+		// Same bug but with v prefix on the current version
+		release, hasUpdate, err := checkForUpdatesFromURL(server.URL, "v1.8")
+
+		require.NoError(t, err)
+		assert.True(t, hasUpdate,
+			"BUG REPRODUCED: version v1.8 must detect v1.8.1 as a newer version")
+		assert.Equal(t, "v1.8.1", release.TagName)
+	})
+
+	t.Run("bug_version_1.8.0_must_detect_v1.8.1_as_newer", func(t *testing.T) {
+		// Three-part version with explicit .0 patch
+		release, hasUpdate, err := checkForUpdatesFromURL(server.URL, "1.8.0")
+
+		require.NoError(t, err)
+		assert.True(t, hasUpdate,
+			"version 1.8.0 must detect v1.8.1 as a newer version")
+		assert.Equal(t, "v1.8.1", release.TagName)
+	})
+}
+
+// TestCheckForUpdates_SameVersion verifies that same-version comparison
+// correctly returns no update, including cross-format comparisons.
+func TestCheckForUpdates_SameVersion(t *testing.T) {
+	releaseV181 := GitHubRelease{
+		TagName: "v1.8.1",
+		Name:    "GoAnime v1.8.1",
+		Body:    "Current release",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(releaseV181); err != nil {
+			http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+			return
+		}
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name       string
+		currentVer string
+	}{
+		{"exact_match_no_prefix", "1.8.1"},
+		{"exact_match_with_prefix", "v1.8.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, hasUpdate, err := checkForUpdatesFromURL(server.URL, tt.currentVer)
+
+			require.NoError(t, err)
+			assert.False(t, hasUpdate,
+				"same version %q must not report an update available", tt.currentVer)
+		})
+	}
+}
+
+// TestCheckForUpdates_NewerVersionAvailable tests that various older versions
+// correctly detect a newer release through the full HTTP flow.
+func TestCheckForUpdates_NewerVersionAvailable(t *testing.T) {
+	releaseV200 := GitHubRelease{
+		TagName: "v2.0.0",
+		Name:    "GoAnime v2.0.0",
+		Body:    "Major release",
+		Assets: []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			{Name: "goanime-linux-amd64", BrowserDownloadURL: "http://example.com/goanime-linux-amd64"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(releaseV200); err != nil {
+			http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+			return
+		}
+	}))
+	defer server.Close()
+
+	olderVersions := []string{"1.0.0", "1.8", "1.8.1", "v1.9.9", "1.99.99"}
+
+	for _, ver := range olderVersions {
+		t.Run("from_"+ver, func(t *testing.T) {
+			release, hasUpdate, err := checkForUpdatesFromURL(server.URL, ver)
+
+			require.NoError(t, err)
+			assert.True(t, hasUpdate,
+				"version %q must detect v2.0.0 as newer", ver)
+			assert.Equal(t, "v2.0.0", release.TagName)
+		})
+	}
+}
+
+// TestCheckForUpdates_CurrentIsNewer verifies that when the local version
+// is ahead of the release (e.g., dev builds), no update is reported.
+func TestCheckForUpdates_CurrentIsNewer(t *testing.T) {
+	releaseV180 := GitHubRelease{
+		TagName: "v1.8.0",
+		Name:    "GoAnime v1.8.0",
+		Body:    "Old release",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(releaseV180); err != nil {
+			http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+			return
+		}
+	}))
+	defer server.Close()
+
+	newerVersions := []string{"1.8.1", "v1.9.0", "2.0.0"}
+
+	for _, ver := range newerVersions {
+		t.Run("local_"+ver, func(t *testing.T) {
+			_, hasUpdate, err := checkForUpdatesFromURL(server.URL, ver)
+
+			require.NoError(t, err)
+			assert.False(t, hasUpdate,
+				"local version %q is newer than release v1.8.0, should not report update", ver)
+		})
+	}
+}
+
+// TestCheckForUpdates_APIErrors verifies graceful handling of GitHub API failures.
+func TestCheckForUpdates_APIErrors(t *testing.T) {
+	t.Run("api_returns_500", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		_, _, err := checkForUpdatesFromURL(server.URL, "1.8.1")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "status 500")
+	})
+
+	t.Run("api_returns_invalid_json", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if _, err := w.Write([]byte("not valid json")); err != nil {
+				http.Error(w, "write error", http.StatusInternalServerError)
+			}
+		}))
+		defer server.Close()
+
+		_, _, err := checkForUpdatesFromURL(server.URL, "1.8.1")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode")
+	})
+
+	t.Run("api_returns_rate_limit", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			if _, err := w.Write([]byte(`{"message":"API rate limit exceeded"}`)); err != nil {
+				return
+			}
+		}))
+		defer server.Close()
+
+		_, _, err := checkForUpdatesFromURL(server.URL, "1.8.1")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "status 403")
+	})
+
+	t.Run("server_unreachable", func(t *testing.T) {
+		_, _, err := checkForUpdatesFromURL("http://127.0.0.1:1", "1.8.1")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to fetch")
+	})
+}
+
+// TestCheckForUpdates_FullFlowEndToEnd simulates the complete update
+// lifecycle: check -> detect newer version -> verify release metadata.
+func TestCheckForUpdates_FullFlowEndToEnd(t *testing.T) {
+	// Simulate a realistic GitHub release response matching the actual v1.8.1 structure
+	realisticRelease := GitHubRelease{
+		TagName: "v1.8.1",
+		Name:    "GoAnime v1.8.1",
+		Body:    "# GoAnime Release Notes - Version 1.8.1\n\nNew PT-BR sources, Jellyfin compatibility, and more.",
+		Assets: []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		}{
+			{Name: "goanime-linux-amd64", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/goanime-linux-amd64"},
+			{Name: "goanime-linux-arm64", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/goanime-linux-arm64"},
+			{Name: "goanime-darwin-amd64", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/goanime-darwin-amd64"},
+			{Name: "goanime-darwin-arm64", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/goanime-darwin-arm64"},
+			{Name: "goanime-windows-amd64.zip", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/goanime-windows-amd64.zip"},
+			{Name: "GoAnime-Installer-1.8.1.exe", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/GoAnime-Installer-1.8.1.exe"},
+			{Name: "checksums-sha256.txt", BrowserDownloadURL: "https://github.com/alvarorichard/GoAnime/releases/download/v1.8.1/checksums-sha256.txt"},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(realisticRelease); err != nil {
+			http.Error(w, "Failed to encode JSON", http.StatusInternalServerError)
+			return
+		}
+	}))
+	defer server.Close()
+
+	// Step 1: Detect update from version "1.8" (the original bug scenario)
+	release, hasUpdate, err := checkForUpdatesFromURL(server.URL, "1.8")
+	require.NoError(t, err, "update check must not error")
+	require.True(t, hasUpdate, "must detect v1.8.1 as newer than 1.8")
+
+	// Step 2: Verify release metadata is correctly parsed
+	assert.Equal(t, "v1.8.1", release.TagName)
+	assert.Equal(t, "GoAnime v1.8.1", release.Name)
+	assert.Contains(t, release.Body, "Release Notes")
+
+	// Step 3: Verify all platform assets are available
+	assert.Len(t, release.Assets, 7, "should have all release assets")
+
+	// Step 4: Verify asset lookup works for every platform
+	platforms := []struct {
+		platform     PlatformInfo
+		expectedName string
+	}{
+		{PlatformInfo{OS: "linux", Arch: "amd64"}, "goanime-linux-amd64"},
+		{PlatformInfo{OS: "linux", Arch: "arm64"}, "goanime-linux-arm64"},
+		{PlatformInfo{OS: "darwin", Arch: "amd64"}, "goanime-darwin-amd64"},
+		{PlatformInfo{OS: "darwin", Arch: "arm64"}, "goanime-darwin-arm64"},
+		{PlatformInfo{OS: "windows", Arch: "amd64"}, "goanime-windows-amd64.zip"},
+	}
+
+	for _, p := range platforms {
+		_, name, err := findAssetForPlatformWithInfo(release, p.platform)
+		assert.NoError(t, err, "should find asset for %s/%s", p.platform.OS, p.platform.Arch)
+		assert.Equal(t, p.expectedName, name)
+	}
+}
+
+func TestExtractExecutableFromZipAsset_PrefersPortableBinary(t *testing.T) {
+	tempDir := t.TempDir()
+	zipPath := filepath.Join(tempDir, "goanime-windows-amd64.zip")
+
+	createTestZip(t, zipPath, map[string]string{
+		"GoAnime-Installer-1.8.1.exe": "installer",
+		"goanime-windows-amd64.exe":   "portable",
+	})
+
+	exePath, cleanup, err := extractExecutableFromZipAsset(zipPath)
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	assert.Equal(t, "goanime-windows-amd64.exe", filepath.Base(exePath))
+
+	content, readErr := os.ReadFile(exePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "portable", string(content))
+}
+
+func TestExtractExecutableFromZipAsset_FallbackWhenNameNotGoanime(t *testing.T) {
+	tempDir := t.TempDir()
+	zipPath := filepath.Join(tempDir, "tool.zip")
+
+	createTestZip(t, zipPath, map[string]string{
+		"setup-installer.exe": "installer",
+		"app-portable.exe":    "portable",
+	})
+
+	exePath, cleanup, err := extractExecutableFromZipAsset(zipPath)
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	assert.Equal(t, "app-portable.exe", filepath.Base(exePath))
+}
+
+func TestExtractExecutableFromZipAsset_NoPortableExe(t *testing.T) {
+	tempDir := t.TempDir()
+	zipPath := filepath.Join(tempDir, "broken.zip")
+
+	createTestZip(t, zipPath, map[string]string{
+		"README.txt": "no binaries here",
+	})
+
+	_, _, err := extractExecutableFromZipAsset(zipPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no portable executable")
 }
 
 func TestDownloadAsset_MockServer(t *testing.T) {
@@ -609,18 +966,89 @@ func BenchmarkFindAssetForPlatform(b *testing.B) {
 
 // Integration-style tests that test multiple components together
 func TestUpdateWorkflow_MockScenario(t *testing.T) {
-	t.Skip("Integration test - requires full mock setup")
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows due to file locking complexities")
+	}
 
-	// This would test the complete update workflow:
-	// 1. Check for updates
-	// 2. Download new version
-	// 3. Replace executable
-	// 4. Verify update success
-	//
-	// Implementation would require:
-	// - Mock HTTP server for GitHub API
-	// - Temporary executables
-	// - Mock user interaction for prompts
+	// Step 1: Set up mock GitHub API server
+	binaryContent := "#!/bin/sh\necho 'GoAnime v1.8.1'"
+	releaseV181 := GitHubRelease{
+		TagName: "v1.8.1",
+		Name:    "GoAnime v1.8.1",
+		Body:    "Update with bug fixes",
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			// Serve release metadata - set the download URL to point to this test server
+			releaseWithURL := releaseV181
+			releaseWithURL.Assets = []struct {
+				Name               string `json:"name"`
+				BrowserDownloadURL string `json:"browser_download_url"`
+			}{
+				{Name: "goanime-" + runtime.GOOS + "-" + runtime.GOARCH,
+					BrowserDownloadURL: "http://" + r.Host + "/download/goanime"},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(releaseWithURL); err != nil {
+				http.Error(w, "encode error", http.StatusInternalServerError)
+			}
+		case strings.HasPrefix(r.URL.Path, "/download/"):
+			// Serve the fake binary
+			w.Header().Set("Content-Type", "application/octet-stream")
+			if _, err := w.Write([]byte(binaryContent)); err != nil {
+				http.Error(w, "write error", http.StatusInternalServerError)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Step 2: Check for updates (simulating version 1.8)
+	release, hasUpdate, err := checkForUpdatesFromURL(server.URL+"/releases/latest", "1.8")
+	require.NoError(t, err)
+	require.True(t, hasUpdate, "must detect v1.8.1 as newer than 1.8")
+
+	// Step 3: Find the correct asset for this platform
+	_, assetName, err := findAssetForPlatformWithInfo(release, GetCurrentPlatform())
+	require.NoError(t, err)
+	assert.Contains(t, assetName, "goanime-")
+
+	// Step 4: Download the asset
+	tempFile, err := downloadAssetWithTestFlag(
+		release.Assets[0].BrowserDownloadURL, assetName, true)
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Remove(tempFile); err != nil {
+			t.Logf("Failed to remove temp file: %v", err)
+		}
+	}()
+
+	// Verify downloaded content
+	downloadedContent, err := os.ReadFile(tempFile)
+	require.NoError(t, err)
+	assert.Equal(t, binaryContent, string(downloadedContent))
+
+	// Step 5: Simulate executable replacement
+	tempDir := t.TempDir()
+	currentExe := filepath.Join(tempDir, "goanime-current")
+	err = os.WriteFile(currentExe, []byte("old version"), 0755)
+	require.NoError(t, err)
+
+	err = replaceExecutable(currentExe, tempFile)
+	require.NoError(t, err)
+
+	// Verify the executable was replaced
+	updatedContent, err := os.ReadFile(currentExe)
+	require.NoError(t, err)
+	assert.Equal(t, binaryContent, string(updatedContent))
+
+	// Verify permissions
+	info, err := os.Stat(currentExe)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0755), info.Mode())
 }
 
 // Test for edge cases in version comparison
