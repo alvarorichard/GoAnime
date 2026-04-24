@@ -377,6 +377,11 @@ type directDownloadFunc func(string, string, *model) error
 type fallbackResolveFunc func(string, string) (string, error)
 
 func downloadAnimeFireDirectWithFallback(videoAPIURL, videoURL, path string, m *model) error {
+	// lightspeedst.net (AnimeFire CDN) requires Referer: https://animefire.io to authorise
+	// token-signed requests. Ensure it is set before the download client sends any request.
+	if util.GetGlobalReferer() == "" {
+		util.SetGlobalReferer("https://animefire.io")
+	}
 	return runAnimeFireDirectDownloadWithFallback(
 		videoAPIURL,
 		videoURL,
