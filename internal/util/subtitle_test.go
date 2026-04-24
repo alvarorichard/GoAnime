@@ -612,3 +612,131 @@ func TestSubtitleArgs_AllSubtitlesPassedToMpv(t *testing.T) {
 		t.Errorf("Expected suffix %q, got %q", expectedSuffix, subArgs[0])
 	}
 }
+
+func TestCurrentPlaybackStateReturnsCopy(t *testing.T) {
+	t.Cleanup(resetSubtitleState)
+
+	SetGlobalAnimeSource("9Anime")
+	SetGlobalReferer("https://rapid-cloud.co/")
+	SetGlobalSubtitles([]SubtitleInfo{
+		{URL: "https://cdn.example.com/en.vtt", Language: "eng", Label: "English"},
+	})
+
+	state := CurrentPlaybackState()
+	if state.AnimeSource != "9Anime" {
+		t.Fatalf("AnimeSource = %q, want %q", state.AnimeSource, "9Anime")
+	}
+	if state.Referer != "https://rapid-cloud.co/" {
+		t.Fatalf("Referer = %q, want %q", state.Referer, "https://rapid-cloud.co/")
+	}
+	if len(state.Subtitles) != 1 {
+		t.Fatalf("len(Subtitles) = %d, want 1", len(state.Subtitles))
+	}
+
+	state.Subtitles[0].Label = "Mutated"
+	current := GetGlobalSubtitles()
+	if current[0].Label != "English" {
+		t.Fatalf("stored subtitles were mutated through snapshot: %q", current[0].Label)
+	}
+}
+
+func TestResetPlaybackStateClearsSessionFields(t *testing.T) {
+	t.Cleanup(resetSubtitleState)
+
+	SetGlobalAnimeSource("9Anime")
+	SetGlobalReferer("https://rapid-cloud.co/")
+	SetGlobalSubtitles([]SubtitleInfo{
+		{URL: "https://cdn.example.com/en.vtt", Language: "eng", Label: "English"},
+	})
+
+	ResetPlaybackState()
+
+	state := CurrentPlaybackState()
+	if state.AnimeSource != "" {
+		t.Fatalf("AnimeSource = %q, want empty", state.AnimeSource)
+	}
+	if state.Referer != "" {
+		t.Fatalf("Referer = %q, want empty", state.Referer)
+	}
+	if len(state.Subtitles) != 0 {
+		t.Fatalf("len(Subtitles) = %d, want 0", len(state.Subtitles))
+	}
+}
+
+func resetRuntimeState() {
+	SetGlobalSource("")
+	SetGlobalQuality("")
+	SetGlobalMediaType("")
+	SetPreferredSubtitleLanguage("")
+	SetPreferredAudioLanguage("")
+	SetSubtitlesDisabled(false)
+	SetGlobalOutputDir("")
+	ClearGlobalDownloadRequest()
+	ClearGlobalUpscaleRequest()
+}
+
+func TestCurrentSessionConfig(t *testing.T) {
+	t.Cleanup(resetRuntimeState)
+
+	SetGlobalSource("goyabu")
+	SetGlobalQuality("720p")
+	SetGlobalMediaType("anime")
+	SetPreferredSubtitleLanguage("por")
+	SetPreferredAudioLanguage("jpn")
+	SetSubtitlesDisabled(true)
+	SetGlobalOutputDir("C:\\downloads")
+
+	cfg := CurrentSessionConfig()
+	if cfg.Source != "goyabu" || cfg.Quality != "720p" || cfg.MediaType != "anime" {
+		t.Fatalf("unexpected config snapshot: %+v", cfg)
+	}
+	if cfg.SubsLanguage != "por" || cfg.AudioLanguage != "jpn" {
+		t.Fatalf("unexpected language snapshot: %+v", cfg)
+	}
+	if !cfg.NoSubs || cfg.OutputDir != "C:\\downloads" {
+		t.Fatalf("unexpected output/no-subs snapshot: %+v", cfg)
+	}
+}
+
+func TestCurrentDownloadRequestReturnsCopy(t *testing.T) {
+	t.Cleanup(resetRuntimeState)
+
+	SetGlobalDownloadRequest(&DownloadRequest{
+		AnimeName:     "Naruto",
+		SeasonNum:     2,
+		EpisodeNum:    7,
+		AllAnimeSmart: true,
+	})
+
+	req := CurrentDownloadRequest()
+	if req == nil {
+		t.Fatal("CurrentDownloadRequest() returned nil")
+	}
+	req.AnimeName = "Mutated"
+
+	current := CurrentDownloadRequest()
+	if current.AnimeName != "Naruto" {
+		t.Fatalf("stored request was mutated through snapshot: %+v", current)
+	}
+}
+
+func TestCurrentUpscaleRequestReturnsCopy(t *testing.T) {
+	t.Cleanup(resetRuntimeState)
+
+	SetGlobalUpscaleRequest(&UpscaleRequest{
+		InputPath:   "input.mp4",
+		OutputPath:  "output.mp4",
+		ScaleFactor: 2,
+	})
+
+	req := CurrentUpscaleRequest()
+	if req == nil {
+		t.Fatal("CurrentUpscaleRequest() returned nil")
+	}
+	req.OutputPath = "mutated.mp4"
+
+	current := CurrentUpscaleRequest()
+	if current.OutputPath != "output.mp4" {
+		t.Fatalf("stored upscale request was mutated through snapshot: %+v", current)
+	}
+}
