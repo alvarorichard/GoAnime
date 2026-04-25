@@ -1,33 +1,31 @@
 // ===========================================================================
-// blogger_test.go — Testes para o bug do Blogger/AnimeFire (TLS fingerprint)
+// blogger_test.go — Tests for the Blogger/AnimeFire bug (TLS fingerprint)
 //
-// Bug descoberto:  2026-02-28 (sábado)
-//   Sintoma: "Bleach dublado episódio 1" não reproduzia pelo GoAnime, mas
-//   funcionava diretamente no site animefire.io. O mpv abria uma janela
-//   preta sem vídeo.
+// Bug discovered:  2026-02-28 (Saturday)
+//   Symptom: "Bleach dubbed episode 1" was not playing via GoAnime, but
+//   it worked directly on animefire.io. mpv opened a black window with no video.
 //
-// Bug corrigido:   2026-03-6 (sexta-feira)
+// Bug fixed:       2026-03-06 (Friday)
 //
-// Causa raiz: a CDN do Google (googlevideo.com) rejeita requests cujo TLS
-//   Causa raiz (3 problemas encadeados):
+// Root cause (3 chained issues):
 //
-//   1. TLS Fingerprint — A CDN do Google (googlevideo.com) rejeita com 403
-//      requests cujo fingerprint TLS não seja de um navegador real. O Go
-//      net/http usa um fingerprint Go-padrão que é bloqueado. A solução foi
-//      usar bogdanfinn/tls-client (que impersona o Chrome) para toda a
-//      cadeia: extração do vídeo via batchexecute E streaming.
+//   1. TLS Fingerprint — Google's CDN (googlevideo.com) rejects with 403
+//      requests whose TLS fingerprint is not from a real browser. Go
+//      net/http uses a Go-standard fingerprint that gets blocked. The fix was
+//      to use bogdanfinn/tls-client (which impersonates Chrome) for the entire
+//      chain: video extraction via batchexecute AND streaming.
 //
-//   2. Batchexecute no lado errado — Originalmente o Go fazia o batchexecute
-//      (com TLS Go) e passava a URL para o proxy (com TLS Chrome).
-//      Mas a CDN amarra a URL ao fingerprint que a extraiu → 403 no proxy.
-//      Fix: usar tls-client para toda a cadeia (extração + streaming).
+//   2. Batchexecute on the wrong side — Originally Go performed the batchexecute
+//      (with Go TLS) and passed the URL to the proxy (with Chrome TLS).
+//      But the CDN ties the URL to the fingerprint that extracted it → 403 at proxy.
+//      Fix: use tls-client for the entire chain (extraction + streaming).
 //
-//   3. --ytdl=no removido — filterMPVArgs() usava um whitelist rígida que
-//      não tinha o prefixo "--ytdl=". O argumento "--ytdl=no" era descartado,
-//      fazendo o mpv chamar yt-dlp no URL do proxy local → janela preta.
-//      Fix: adicionar "--ytdl=" ao whitelist de prefixos permitidos.
+//   3. --ytdl=no stripped — filterMPVArgs() used a strict allowlist that
+//      did not include the "--ytdl=" prefix. The "--ytdl=no" argument was silently
+//      dropped, causing mpv to invoke yt-dlp on the local proxy URL → black window.
+//      Fix: add "--ytdl=" to the allowed-prefix list.
 //
-// Funções testadas:
+// Functions tested:
 //   - needsVideoExtraction() (scraper.go)
 //   - findBloggerLink()      (scraper.go)
 //   - filterMPVArgs()        (player.go)
@@ -50,15 +48,15 @@ import (
 )
 
 // ===========================================================================
-// needsVideoExtraction — função real (scraper.go)
+// needsVideoExtraction — real function (scraper.go)
 //
-// Detecta URLs intermediárias (AnimeFire, Blogger) que precisam de extração
-// antes de serem jogadas no mpv. URLs diretas (CDN, HLS, proxy local) devem
-// retornar false.
+// Detects intermediate URLs (AnimeFire, Blogger) that require extraction
+// before being passed to mpv. Direct URLs (CDN, HLS, local proxy) should
+// return false.
 // ===========================================================================
 
 func TestNeedsVideoExtraction(t *testing.T) {
-	// Função real: needsVideoExtraction() — scraper.go
+	// Real function: needsVideoExtraction() — scraper.go
 	tests := []struct {
 		name string
 		url  string
@@ -76,22 +74,22 @@ func TestNeedsVideoExtraction(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Função real: needsVideoExtraction()
+			// Real function: needsVideoExtraction()
 			assert.Equal(t, tc.want, needsVideoExtraction(tc.url))
 		})
 	}
 }
 
 // ===========================================================================
-// findBloggerLink — função real (scraper.go)
+// findBloggerLink — real function (scraper.go)
 //
-// Extrai a URL do iframe do Blogger dentro do HTML do AnimeFire.
-// Bug: sem essa extração correta, o fluxo nunca chegava ao batchexecute.
+// Extracts the Blogger iframe URL from AnimeFire HTML.
+// Bug: without this correct extraction, the flow never reached batchexecute.
 // ===========================================================================
 
 func TestFindBloggerLink(t *testing.T) {
-	// Função real: findBloggerLink() — scraper.go
-	t.Run("extrai link do blogger do HTML", func(t *testing.T) {
+	// Real function: findBloggerLink() — scraper.go
+	t.Run("extracts blogger link from HTML", func(t *testing.T) {
 		html := `<div class="video-player">
 			<iframe src="https://www.blogger.com/video.g?token=AD6v5dykZRdbBj2paRaH29" allowfullscreen></iframe>
 		</div>`
@@ -101,19 +99,19 @@ func TestFindBloggerLink(t *testing.T) {
 		assert.Contains(t, link, "AD6v5dykZRdb")
 	})
 
-	t.Run("sem link do blogger no conteudo", func(t *testing.T) {
+	t.Run("no blogger link in content", func(t *testing.T) {
 		html := `<div><video src="https://cdn.example.com/video.mp4"></video></div>`
 		_, err := findBloggerLink(html)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no blogger video link found")
 	})
 
-	t.Run("conteudo vazio", func(t *testing.T) {
+	t.Run("empty content", func(t *testing.T) {
 		_, err := findBloggerLink("")
 		assert.Error(t, err)
 	})
 
-	t.Run("multiplos links pega o primeiro", func(t *testing.T) {
+	t.Run("multiple links picks the first one", func(t *testing.T) {
 		html := `<iframe src="https://www.blogger.com/video.g?token=FIRST_TOKEN"></iframe>
 		         <iframe src="https://www.blogger.com/video.g?token=SECOND_TOKEN"></iframe>`
 		link, err := findBloggerLink(html)
@@ -123,20 +121,20 @@ func TestFindBloggerLink(t *testing.T) {
 }
 
 // ===========================================================================
-// filterMPVArgs — função real (player.go)
+// filterMPVArgs — real function (player.go)
 //
-// Bug #3 (descoberto 2026-02-28, corrigido 2026-03-01):
-// O whitelist de filterMPVArgs não tinha o prefixo "--ytdl=", então o
-// argumento "--ytdl=no" era silenciosamente descartado.
-// Sem "--ytdl=no", o mpv ativava o hook do yt-dlp que tentava resolver o
-// URL do proxy local (http://127.0.0.1:PORT/blogger_proxy) como se fosse
-// uma URL remota, resultando em janela preta sem vídeo.
-// Correção: adicionar "--ytdl=" à lista allowedWithValuePrefixes.
+// Bug #3 (discovered 2026-02-28, fixed 2026-03-01):
+// filterMPVArgs allowlist did not include the "--ytdl=" prefix, so the
+// "--ytdl=no" argument was silently dropped.
+// Without "--ytdl=no", mpv activated the yt-dlp hook which tried to resolve
+// the local proxy URL (http://127.0.0.1:PORT/blogger_proxy) as a remote URL,
+// resulting in a black window with no video.
+// Fix: add "--ytdl=" to the allowedWithValuePrefixes list.
 // ===========================================================================
 
 func TestFilterMPVArgs_YtdlNoAllowed(t *testing.T) {
-	t.Run("BUG #3: --ytdl=no passa pelo filtro", func(t *testing.T) {
-		// Chama a função real filterMPVArgs()
+	t.Run("BUG #3: --ytdl=no passes through the filter", func(t *testing.T) {
+		// Calls the real filterMPVArgs()
 		args := []string{
 			"--cache=yes",
 			"--ytdl=no",
@@ -144,12 +142,12 @@ func TestFilterMPVArgs_YtdlNoAllowed(t *testing.T) {
 		}
 		filtered := filterMPVArgs(args)
 		assert.Contains(t, filtered, "--ytdl=no",
-			"BUG #3 fix: --ytdl=no DEVE passar pelo filterMPVArgs; sem ele, "+
-				"o mpv chama yt-dlp no URL do proxy, resultando em janela preta")
+			"BUG #3 fix: --ytdl=no MUST pass through filterMPVArgs; without it, "+
+				"mpv invokes yt-dlp on the proxy URL, resulting in a black window")
 	})
 
-	t.Run("--ytdl=yes tambem passa", func(t *testing.T) {
-		// Função real: filterMPVArgs()
+	t.Run("--ytdl=yes also passes", func(t *testing.T) {
+		// Real function: filterMPVArgs()
 		filtered := filterMPVArgs([]string{"--ytdl=yes"})
 		assert.Contains(t, filtered, "--ytdl=yes")
 	})
@@ -182,7 +180,7 @@ func TestFilterMPVArgs_Whitelist(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Função real: filterMPVArgs()
+			// Real function: filterMPVArgs()
 			filtered := filterMPVArgs([]string{tc.arg})
 			if tc.allowed {
 				assert.Contains(t, filtered, tc.arg)
@@ -194,23 +192,23 @@ func TestFilterMPVArgs_Whitelist(t *testing.T) {
 }
 
 // ===========================================================================
-// Simulação do Bug #1 — TLS Fingerprint 403 (googlevideo.com)
+// Bug #1 Simulation — TLS Fingerprint 403 (googlevideo.com)
 //
-// Descoberto: 2026-02-28 | Corrigido: 2026-03-01
+// Discovered: 2026-02-28 | Fixed: 2026-03-01
 //
-// Problema: a CDN do Google (rr*.googlevideo.com) verifica o fingerprint TLS
-// da conexão. Se o fingerprint não corresponde a um navegador conhecido
-// (Chrome, Firefox, etc.), a CDN responde 403 Forbidden.
+// Problem: Google's CDN (rr*.googlevideo.com) verifies the TLS fingerprint
+// of the connection. If the fingerprint does not match a known browser
+// (Chrome, Firefox, etc.), the CDN responds with 403 Forbidden.
 //
-// O Go net/http usa o TLS stack nativo do Go cujo fingerprint é facilmente
-// identificável como "não-navegador". O curl_cffi do Python impersona o
-// Chrome (JA3 + extensões TLS idênticas), então passa pelo filtro.
+// Go net/http uses Go's native TLS stack whose fingerprint is easily
+// identifiable as "non-browser". Python's curl_cffi impersonates
+// Chrome (JA3 + identical TLS extensions) and passes the filter.
 //
-// Simulação: httptest server que retorna 403 quando o header X-Chrome-TLS
-// está ausente (simula fingerprint Go) e 200 quando presente (simula Chrome).
+// Simulation: httptest server that returns 403 when the X-Chrome-TLS header
+// is absent (simulates Go fingerprint) and 200 when present (simulates Chrome).
 // ===========================================================================
 
-// fakeMP4Header retorna um box ftyp mínimo válido para simular dados MP4.
+// fakeMP4Header returns a minimal valid ftyp box to simulate MP4 data.
 func fakeMP4Header() []byte {
 	return []byte{
 		0x00, 0x00, 0x00, 0x18,
@@ -222,9 +220,9 @@ func fakeMP4Header() []byte {
 	}
 }
 
-// newFakeCDN cria um servidor de teste que simula o gating de fingerprint TLS
-// da CDN do Google. Sem o header de impersonation → 403 (como Go net/http).
-// Com o header → 200 + vídeo (como curl_cffi Chrome TLS).
+// newFakeCDN creates a test server that simulates Google CDN's TLS fingerprint
+// gating. Without the impersonation header → 403 (like Go net/http).
+// With the header → 200 + video (like curl_cffi Chrome TLS).
 func newFakeCDN(t *testing.T) *httptest.Server {
 	t.Helper()
 	body := fakeMP4Header()
@@ -248,9 +246,9 @@ func newFakeCDN(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestBloggerTLSIssue_GoHTTP_Gets403 — Simulação do BUG:
-// Go net/http envia request com TLS fingerprint Go → CDN rejeita com 403.
-// Este era o comportamento broken que impedia a reprodução.
+// TestBloggerTLSIssue_GoHTTP_Gets403 — Bug simulation:
+// Go net/http sends a request with Go TLS fingerprint → CDN rejects with 403.
+// This was the broken behavior that prevented playback.
 func TestBloggerTLSIssue_GoHTTP_Gets403(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
@@ -260,12 +258,12 @@ func TestBloggerTLSIssue_GoHTTP_Gets403(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode,
-		"BUG: Go net/http recebe 403 da CDN que verifica TLS fingerprint")
+		"BUG: Go net/http gets 403 from CDN that checks TLS fingerprint")
 }
 
-// TestBloggerTLSIssue_WithImpersonation_Gets200 — Simulação da CORREÇÃO:
-// Com Chrome TLS impersonation (curl_cffi), a CDN aceita → 200 + vídeo.
-// Este é o comportamento correto após o fix.
+// TestBloggerTLSIssue_WithImpersonation_Gets200 — Fix simulation:
+// With Chrome TLS impersonation (curl_cffi), the CDN accepts → 200 + video.
+// This is the correct behavior after the fix.
 func TestBloggerTLSIssue_WithImpersonation_Gets200(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
@@ -279,15 +277,15 @@ func TestBloggerTLSIssue_WithImpersonation_Gets200(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
-		"FIX: Com Chrome TLS impersonation a CDN retorna 200")
+		"FIX: With Chrome TLS impersonation the CDN returns 200")
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, fakeMP4Header(), body)
 }
 
-// TestBloggerTLSIssue_RangeRequest — Verifica que Range requests (necessários
-// para streaming no mpv) funcionam pela via de impersonation (206 Partial Content).
+// TestBloggerTLSIssue_RangeRequest — Verifies that Range requests (required
+// for mpv streaming) work via impersonation (206 Partial Content).
 func TestBloggerTLSIssue_RangeRequest(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
@@ -302,7 +300,7 @@ func TestBloggerTLSIssue_RangeRequest(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusPartialContent, resp.StatusCode,
-		"FIX: Range requests via impersonation retorna 206 (necessário para mpv streaming)")
+		"FIX: Range requests via impersonation return 206 (required for mpv streaming)")
 }
 
 // ===========================================================================
@@ -319,9 +317,9 @@ func TestNewSurfClient_CreatesSuccessfully(t *testing.T) {
 }
 
 // ===========================================================================
-// StopBloggerProxy — função real (scraper.go)
+// StopBloggerProxy — real function (scraper.go)
 //
-// Deve ser seguro chamar mesmo sem proxy ativo (idempotente).
+// Must be safe to call even without an active proxy (idempotent).
 // ===========================================================================
 
 func TestStopBloggerProxy_NoOp(t *testing.T) {
@@ -334,10 +332,10 @@ func TestStopBloggerProxy_NoOp(t *testing.T) {
 }
 
 // ===========================================================================
-// startBloggerProxy — teste de integração com Go HTTP proxy
+// startBloggerProxy — integration test with Go HTTP proxy
 //
-// Testa a orquestração do proxy Go: cria servidor, verifica porta, faz
-// HEAD readiness check e GET para obter o vídeo.
+// Tests Go proxy orchestration: creates server, verifies port, performs
+// HEAD readiness check and GET to obtain the video.
 // ===========================================================================
 
 func TestStartBloggerProxy_GoProxy(t *testing.T) {
@@ -364,14 +362,14 @@ func TestStartBloggerProxy_GoProxy(t *testing.T) {
 }
 
 // ===========================================================================
-// Pipeline completo: detecção de proxy → injeção de --ytdl=no → filterMPVArgs
+// Pipeline: proxy detection → --ytdl=no injection → filterMPVArgs
 //
-// Testa a integração entre a detecção do URL do proxy local e o filtro de
-// argumentos do mpv. O bug #3 fazia o --ytdl=no ser removido aqui.
+// Tests the integration between local proxy URL detection and the mpv
+// argument filter. Bug #3 caused --ytdl=no to be dropped here.
 // ===========================================================================
 
 func TestBloggerProxyURL_MpvArgsPipeline(t *testing.T) {
-	t.Run("blog proxy URL injeta --ytdl=no", func(t *testing.T) {
+	t.Run("blogger proxy URL injects --ytdl=no", func(t *testing.T) {
 		videoURL := "http://127.0.0.1:58551/blogger_proxy"
 		var mpvArgs []string
 
@@ -379,13 +377,13 @@ func TestBloggerProxyURL_MpvArgsPipeline(t *testing.T) {
 			mpvArgs = append(mpvArgs, "--ytdl=no")
 		}
 
-		// Função real: filterMPVArgs()
+		// Real function: filterMPVArgs()
 		filtered := filterMPVArgs(mpvArgs)
 		assert.Contains(t, filtered, "--ytdl=no",
-			"FIX bug #3: --ytdl=no deve sobreviver ao filterMPVArgs para URLs do proxy blogger")
+			"FIX bug #3: --ytdl=no must survive filterMPVArgs for blogger proxy URLs")
 	})
 
-	t.Run("URL nao-proxy nao recebe --ytdl=no", func(t *testing.T) {
+	t.Run("non-proxy URL does not receive --ytdl=no", func(t *testing.T) {
 		videoURL := "https://cdn.example.com/video.mp4"
 		var mpvArgs []string
 
@@ -396,8 +394,8 @@ func TestBloggerProxyURL_MpvArgsPipeline(t *testing.T) {
 		assert.NotContains(t, mpvArgs, "--ytdl=no")
 	})
 
-	t.Run("args padroes de playback passam pelo filtro", func(t *testing.T) {
-		// Função real: filterMPVArgs()
+	t.Run("default playback args pass through the filter", func(t *testing.T) {
+		// Real function: filterMPVArgs()
 		args := []string{
 			"--cache=yes",
 			"--demuxer-max-bytes=300M",
@@ -418,15 +416,16 @@ func TestBloggerProxyURL_MpvArgsPipeline(t *testing.T) {
 }
 
 // ===========================================================================
-// End-to-end: fake CDN → proxy → HTTP client (simula mpv)
+// End-to-end: fake CDN → proxy → HTTP client (simulates mpv)
 //
-// Teste que reproduz o fluxo completo:
-//   1. CDN falsa que rejeita fingerprint não-Chrome (403)
-//   2. Proxy que adiciona impersonation (simula curl_cffi)
-//   3. Cliente HTTP (simula mpv) acessa pelo proxy → 200 + vídeo
+// Test that reproduces the full flow:
 //
-// Sem o proxy (bug): acesso direto → 403
-// Com o proxy (fix): acesso via proxy → 200 + MP4 válido
+//	1. Fake CDN that rejects non-Chrome fingerprints (403)
+//	2. Proxy that adds impersonation (simulates curl_cffi)
+//	3. HTTP client (simulates mpv) accesses via proxy → 200 + video
+//
+// Without proxy (bug): direct access → 403
+// With proxy (fix): access via proxy → 200 + valid MP4
 // ===========================================================================
 
 func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
@@ -462,14 +461,14 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 	}))
 	defer proxy.Close()
 
-	t.Run("BUG: acesso direto recebe 403", func(t *testing.T) {
+	t.Run("BUG: direct access gets 403", func(t *testing.T) {
 		resp, err := http.Get(cdn.URL) //nolint:gosec // test URL
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	})
 
-	t.Run("FIX: acesso via proxy recebe 200 com video", func(t *testing.T) {
+	t.Run("FIX: access via proxy gets 200 with video", func(t *testing.T) {
 		resp, err := http.Get(proxy.URL) //nolint:gosec // test URL
 		require.NoError(t, err)
 		body, _ := io.ReadAll(resp.Body)
@@ -478,10 +477,10 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "video/mp4", resp.Header.Get("Content-Type"))
 		assert.Equal(t, fakeMP4Header(), body,
-			"FIX: dados de vídeo devem ser um ftyp box MP4 válido")
+			"FIX: video data should be a valid MP4 ftyp box")
 	})
 
-	t.Run("FIX: range request via proxy recebe 206", func(t *testing.T) {
+	t.Run("FIX: range request via proxy gets 206", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", proxy.URL, nil)
 		req.Header.Set("Range", "bytes=0-7")
 		resp, err := http.DefaultClient.Do(req)
@@ -490,7 +489,7 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 		assert.Equal(t, http.StatusPartialContent, resp.StatusCode)
 	})
 
-	t.Run("FIX: HEAD via proxy recebe 200", func(t *testing.T) {
+	t.Run("FIX: HEAD via proxy gets 200", func(t *testing.T) {
 		resp, err := http.Head(proxy.URL) //nolint:gosec // test URL
 		require.NoError(t, err)
 		_ = resp.Body.Close()

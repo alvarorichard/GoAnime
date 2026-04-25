@@ -1,7 +1,7 @@
 //go:build !windows
 
-// Arquivo específico para sistemas Unix (Linux, macOS) que implementa
-// a conexão com o socket do MPV utilizando sockets Unix padrão.
+// Unix-specific file (Linux, macOS) that implements the MPV socket
+// connection using standard Unix domain sockets.
 
 package player
 
@@ -9,9 +9,9 @@ import (
 	"net"
 )
 
-// dialMPVSocket cria uma conexão com o socket do MPV em sistemas Unix.
-// Em sistemas Unix (Linux, macOS), utilizamos sockets Unix padrão
-// através da função net.Dial com o tipo "unix".
+// dialMPVSocket opens a connection to the MPV socket on Unix systems.
+// On Unix-like systems (Linux, macOS), standard Unix domain sockets are
+// used via net.Dial with the "unix" network type.
 func dialMPVSocket(socketPath string) (net.Conn, error) {
 	// Unix-like system uses Unix sockets
 	return net.Dial("unix", socketPath)

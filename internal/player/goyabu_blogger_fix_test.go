@@ -1,31 +1,31 @@
 // ===========================================================================
-// goyabu_blogger_fix_test.go — Regressão para o bug Goyabu/Blogger batchexecute
+// goyabu_blogger_fix_test.go — Regression tests for the Goyabu/Blogger batchexecute bug
 //
-// Problema detectado: 2026-04-23
-//   Diiver reportou via Discord que episódios do Goyabu (fonte PT-BR) não
-//   reproduziam. O log de debug mostrava o erro
-//   "no video URL found in batchexecute response" em todas as 3 tentativas
-//   do extrator de URL do Blogger.
+// Issue detected: 2026-04-23
+//   Diiver reported via Discord that Goyabu (PT-BR source) episodes were not
+//   playing. The debug log showed the error
+//   "no video URL found in batchexecute response" on all 3 attempts
+//   of the Blogger URL extractor.
 //
-// Causa raiz (player/scraper.go — antes do fix de 2026-04-23):
-//   O parser do batchexecute assumia que o array de streams estava fixo no
-//   índice data[2] do payload inner JSON. Quando o Google alterou o índice
-//   (ou retornou data com menos de 3 elementos), o código executava `continue`
-//   silenciosamente sem extrair nenhuma URL. Não havia fallback de regex.
+// Root cause (player/scraper.go — before the 2026-04-23 fix):
+//   The batchexecute parser assumed the streams array was always at index
+//   data[2] of the inner JSON payload. When Google changed the index
+//   (or returned data with fewer than 3 elements), the code silently executed
+//   `continue` without extracting any URL. There was no regex fallback.
 //
-//   Trecho bugado (removido em 2026-04-23):
-//     if len(data) < 3 { continue }        // falha se data tiver 0–2 elementos
-//     streams, ok := data[2].([]any)       // índice hardcoded — quebra com mudança do Google
+//   Buggy code (removed on 2026-04-23):
+//     if len(data) < 3 { continue }        // fails when data has 0-2 elements
+//     streams, ok := data[2].([]any)       // hardcoded index — breaks when Google changes it
 //
-// Correção aplicada: 2026-04-23
-//   1. O parser itera todos os índices de data[], identificando streams como
-//      o primeiro elemento que seja um array de arrays.
-//   2. Fallback regex extrai URLs *.googlevideo.com diretamente do corpo bruto
-//      caso o parsing estruturado não produza resultado.
+// Fix applied: 2026-04-23
+//   1. The parser iterates all indices of data[], identifying streams as
+//      the first element that is an array of arrays.
+//   2. Regex fallback extracts *.googlevideo.com URLs directly from the raw body
+//      if the structured parsing produces no result.
 //
-// Funções testadas:
+// Functions tested:
 //   - parseBatchexecuteResponse (real — player/scraper.go, fix 2026-04-23)
-//   - parseBatchexecuteResponseLegacy (lógica anterior ao fix, inlinada aqui)
+//   - parseBatchexecuteResponseLegacy (pre-fix logic, inlined here)
 // ===========================================================================
 
 package player
@@ -42,7 +42,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Constantes de URL usadas nos fixtures de teste
+// URL constants used in test fixtures
 // ---------------------------------------------------------------------------
 
 const (
@@ -52,10 +52,10 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// parseBatchexecuteResponseLegacy — lógica ANTERIOR ao fix de 2026-04-23
+// parseBatchexecuteResponseLegacy — logic BEFORE the 2026-04-23 fix
 //
-// Mantida aqui para demonstrar o bug: só verifica data[2] e não tem fallback
-// regex. Qualquer resposta com streams fora do índice 2 retorna erro.
+// Kept here to demonstrate the bug: only checks data[2] and has no regex
+// fallback. Any response with streams outside index 2 returns an error.
 // ---------------------------------------------------------------------------
 func parseBatchexecuteResponseLegacy(body []byte) (string, error) {
 	var videoURL string
@@ -79,8 +79,8 @@ func parseBatchexecuteResponseLegacy(body []byte) (string, error) {
 			if err := json.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
 				continue
 			}
-			// BUG (antes de 2026-04-23): índice hardcoded; falha se data tiver
-			// menos de 3 elementos ou se o Google mover streams para outro índice.
+			// BUG (before 2026-04-23): hardcoded index; fails when data has
+			// fewer than 3 elements or if Google moves streams to a different index.
 			if len(data) < 3 {
 				continue
 			}
@@ -115,14 +115,15 @@ func parseBatchexecuteResponseLegacy(body []byte) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// buildBatchexecuteBody constrói um corpo de resposta batchexecute realista.
+// buildBatchexecuteBody builds a realistic batchexecute response body.
 //
-// O formato real do Google é:
-//   )]}'\n
-//   [["wrb.fr","WcwnYd","<inner_json_string>",null,...,"generic"]]\n
+// The actual Google format is:
 //
-// onde <inner_json_string> é o payload inner JSON serializado como string.
-// streams é posicionado em data[dataIdx] do inner payload.
+//	)]}'\n
+//	[["wrb.fr","WcwnYd","<inner_json_string>",null,...,"generic"]]\n
+//
+// where <inner_json_string> is the inner JSON payload serialized as a string.
+// streams is placed at data[dataIdx] in the inner payload.
 // ---------------------------------------------------------------------------
 func buildBatchexecuteBody(dataIdx int, streamURLs []string) []byte {
 	streams := make([]any, len(streamURLs))
@@ -143,7 +144,7 @@ func buildBatchexecuteBody(dataIdx int, streamURLs []string) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// Testes: formato clássico (streams em data[2]) — ambos os parsers funcionam
+// Tests: classic format (streams at data[2]) — both parsers work
 // ---------------------------------------------------------------------------
 
 func TestParseBatchexecuteResponse_StreamsAtIndex2_FormatoClassico(t *testing.T) {
@@ -151,65 +152,65 @@ func TestParseBatchexecuteResponse_StreamsAtIndex2_FormatoClassico(t *testing.T)
 
 	body := buildBatchexecuteBody(2, []string{googleVideoURL720p, googleVideoURL360p})
 
-	// Parser antigo (pré-fix) funciona porque streams estão em data[2].
+	// Legacy parser (pre-fix) works because streams are at data[2].
 	legacyURL, err := parseBatchexecuteResponseLegacy(body)
-	require.NoError(t, err, "lógica antiga deve funcionar com streams em data[2]")
+	require.NoError(t, err, "legacy logic should work with streams at data[2]")
 	assert.Equal(t, googleVideoURL720p, legacyURL)
 
-	// Parser corrigido também funciona.
+	// Fixed parser also works.
 	fixedURL, err := parseBatchexecuteResponse(body)
 	require.NoError(t, err)
 	assert.Equal(t, googleVideoURL720p, fixedURL)
 }
 
 // ---------------------------------------------------------------------------
-// Testes: simulação do bug 2026-04-23 — streams em índice != 2
+// Tests: simulation of bug 2026-04-23 — streams at index != 2
 // ---------------------------------------------------------------------------
 
-// TestParseBatchexecuteResponse_Bug_StreamsEmIndex0 demonstra o bug:
-// quando o Google retorna streams em data[0], o parser antigo falha enquanto
-// o parser corrigido (fix 2026-04-23) encontra a URL.
+// TestParseBatchexecuteResponse_Bug_StreamsEmIndex0 demonstrates the bug:
+// when Google returns streams at data[0], the legacy parser fails while
+// the fixed parser (fix 2026-04-23) finds the URL.
 func TestParseBatchexecuteResponse_Bug_StreamsEmIndex0(t *testing.T) {
 	t.Parallel()
 
 	body := buildBatchexecuteBody(0, []string{googleVideoURL720p})
 
-	// BUG simulado: parser antigo (pré 2026-04-23) falha com streams em data[0].
+	// Simulated BUG: legacy parser (pre 2026-04-23) fails with streams at data[0].
 	_, err := parseBatchexecuteResponseLegacy(body)
-	assert.Error(t, err, "BUG 2026-04-23: parser antigo NÃO encontra streams em data[0]")
+	assert.Error(t, err, "BUG 2026-04-23: legacy parser does NOT find streams at data[0]")
 
-	// SOLUÇÃO: parser corrigido encontra streams em qualquer índice.
+	// FIX: updated parser finds streams at any index.
 	url, err := parseBatchexecuteResponse(body)
-	require.NoError(t, err, "fix 2026-04-23: parser deve encontrar streams em data[0]")
+	require.NoError(t, err, "fix 2026-04-23: parser should find streams at data[0]")
 	assert.Equal(t, googleVideoURL720p, url)
 }
 
-// TestParseBatchexecuteResponse_Bug_StreamsEmIndex1 cobre o caso em que o
-// Google retorna apenas dois elementos em data (índice 0 e 1).
+// TestParseBatchexecuteResponse_Bug_StreamsEmIndex1 covers the case where
+// Google returns only two elements in data (indices 0 and 1).
 func TestParseBatchexecuteResponse_Bug_StreamsEmIndex1(t *testing.T) {
 	t.Parallel()
 
 	body := buildBatchexecuteBody(1, []string{googleVideoURL360p})
 
-	// BUG simulado: parser antigo falha (data tem 2 elementos, len(data) < 3).
+	// Simulated BUG: legacy parser fails (data has 2 elements, len(data) < 3).
 	_, err := parseBatchexecuteResponseLegacy(body)
-	assert.Error(t, err, "BUG 2026-04-23: parser antigo falha quando len(data) < 3")
+	assert.Error(t, err, "BUG 2026-04-23: legacy parser fails when len(data) < 3")
 
-	// SOLUÇÃO: parser corrigido encontra streams em data[1].
+	// FIX: updated parser finds streams at data[1].
 	url, err := parseBatchexecuteResponse(body)
-	require.NoError(t, err, "fix 2026-04-23: deve encontrar streams em data[1]")
+	require.NoError(t, err, "fix 2026-04-23: should find streams at data[1]")
 	assert.Equal(t, googleVideoURL360p, url)
 }
 
-// TestParseBatchexecuteResponse_Bug_DataComUmElemento cobre o caso extremo
-// onde data possui apenas um elemento (data[0] = streams).
+// TestParseBatchexecuteResponse_Bug_DataComUmElemento covers the edge case
+// where data has only one element (data[0] = streams).
 func TestParseBatchexecuteResponse_Bug_DataComUmElemento(t *testing.T) {
 	t.Parallel()
 
 	body := buildBatchexecuteBody(0, []string{googleVideoURL360p})
 
 	_, err := parseBatchexecuteResponseLegacy(body)
-	assert.Error(t, err, "BUG 2026-04-23: len(data)==1 < 3, parser antigo descarta")
+	assert.Error(t, err, "BUG 2026-04-23: len(data)==1 < 3, legacy parser discards it")
 
 	url, err := parseBatchexecuteResponse(body)
 	require.NoError(t, err)
@@ -217,7 +218,7 @@ func TestParseBatchexecuteResponse_Bug_DataComUmElemento(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Testes: seleção de qualidade
+// Tests: quality selection
 // ---------------------------------------------------------------------------
 
 func TestParseBatchexecuteResponse_Prefere720p(t *testing.T) {
@@ -228,10 +229,10 @@ func TestParseBatchexecuteResponse_Prefere720p(t *testing.T) {
 
 	url, err := parseBatchexecuteResponse(body)
 	require.NoError(t, err)
-	assert.Equal(t, googleVideoURL720p, url, "deve preferir 720p (itag=22) sobre 360p (itag=18)")
+	assert.Equal(t, googleVideoURL720p, url, "should prefer 720p (itag=22) over 360p (itag=18)")
 }
 
-func TestParseBatchexecuteResponse_Apenas360p(t *testing.T) {
+func TestParseBatchexecuteResponse_Only360p(t *testing.T) {
 	t.Parallel()
 
 	body := buildBatchexecuteBody(2, []string{googleVideoURL360p})
@@ -242,38 +243,38 @@ func TestParseBatchexecuteResponse_Apenas360p(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Testes: fallback regex (fix 2026-04-23)
+// Tests: regex fallback (fix 2026-04-23)
 // ---------------------------------------------------------------------------
 
-// TestParseBatchexecuteResponse_FallbackRegex verifica que, quando o parsing
-// estruturado não encontra streams, o regex ainda captura URLs googlevideo.com
-// presentes no corpo bruto da resposta.
+// TestParseBatchexecuteResponse_FallbackRegex verifies that when structured
+// parsing finds no streams, the regex still captures googlevideo.com URLs
+// present in the raw response body.
 func TestParseBatchexecuteResponse_FallbackRegex(t *testing.T) {
 	t.Parallel()
 
-	// Corpo com URL googlevideo.com mas sem estrutura wrb.fr/WcwnYd válida.
+	// Raw body with a googlevideo.com URL but no valid wrb.fr/WcwnYd structure.
 	body := []byte(`)]}'\n` +
 		`[["wrb.fr","WcwnYd","{}",null,null,null,"generic"]]` + "\n" +
 		`debug: ` + googleVideoURL720p + ` extra`)
 
-	// Parser antigo (sem fallback regex) falha.
+	// Legacy parser (no regex fallback) fails.
 	_, err := parseBatchexecuteResponseLegacy(body)
-	assert.Error(t, err, "parser antigo não tem fallback regex")
+	assert.Error(t, err, "legacy parser has no regex fallback")
 
-	// Parser corrigido encontra via regex.
+	// Fixed parser finds URL via regex.
 	url, err := parseBatchexecuteResponse(body)
-	require.NoError(t, err, "fix 2026-04-23: fallback regex deve encontrar URL googlevideo.com")
+	require.NoError(t, err, "fix 2026-04-23: regex fallback should find googlevideo.com URL")
 	assert.Contains(t, url, ".googlevideo.com")
 }
 
-// TestParseBatchexecuteResponse_FallbackRegex_StreamsSemMIME cobre streams
-// que existem na estrutura mas não têm mime=video%2Fmp4, enquanto o corpo
-// bruto contém uma URL googlevideo.com válida.
+// TestParseBatchexecuteResponse_FallbackRegex_StreamsSemMIME covers streams
+// that exist in the structure but lack mime=video%2Fmp4, while the raw body
+// contains a valid googlevideo.com URL.
 func TestParseBatchexecuteResponse_FallbackRegex_StreamsSemMIME(t *testing.T) {
 	t.Parallel()
 
 	body := buildBatchexecuteBody(2, []string{googleVideoNoMIME})
-	// Adiciona URL válida em texto livre no final do corpo.
+	// Appends a valid URL as free text at the end of the body.
 	body = append(body, []byte("\ninfo: "+googleVideoURL360p)...)
 
 	url, err := parseBatchexecuteResponse(body)
@@ -282,7 +283,7 @@ func TestParseBatchexecuteResponse_FallbackRegex_StreamsSemMIME(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Testes: casos de erro / resposta inválida
+// Tests: error cases / invalid response
 // ---------------------------------------------------------------------------
 
 func TestParseBatchexecuteResponse_CorpoVazio(t *testing.T) {
@@ -314,7 +315,7 @@ func TestParseBatchexecuteResponse_SemLinhaWrbFr(t *testing.T) {
 func TestParseBatchexecuteResponse_DataSemArrayDeArrays(t *testing.T) {
 	t.Parallel()
 
-	// data contém apenas strings e números, nenhum array de arrays.
+	// data contains only strings and numbers, no array of arrays.
 	innerJSON := `["string_value", 42, null]`
 	outerLine, _ := json.Marshal([][]any{
 		{"wrb.fr", "WcwnYd", innerJSON, nil, nil, nil, "generic"},
@@ -328,7 +329,7 @@ func TestParseBatchexecuteResponse_DataSemArrayDeArrays(t *testing.T) {
 func TestParseBatchexecuteResponse_StreamsVazios(t *testing.T) {
 	t.Parallel()
 
-	// data[2] é um array vazio — não atende à condição len(s) > 0.
+	// data[2] is an empty array — does not satisfy len(s) > 0.
 	innerJSON := `[null, null, []]`
 	outerLine, _ := json.Marshal([][]any{
 		{"wrb.fr", "WcwnYd", innerJSON, nil, nil, nil, "generic"},
@@ -340,14 +341,14 @@ func TestParseBatchexecuteResponse_StreamsVazios(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Testes: múltiplos índices — parser deve usar o primeiro válido encontrado
+// Tests: multiple indices — parser should use the first valid one found
 // ---------------------------------------------------------------------------
 
 func TestParseBatchexecuteResponse_UsaPrimeiroIndiceValido(t *testing.T) {
 	t.Parallel()
 
-	// data[1] = streams com 360p; data[3] = streams com 720p.
-	// Parser deve retornar o primeiro válido encontrado (data[1], 360p).
+	// data[1] = streams with 360p; data[3] = streams with 720p.
+	// Parser should return the first valid one found (data[1], 360p).
 	streams360 := []any{[]any{googleVideoURL360p, float64(360)}}
 	streams720 := []any{[]any{googleVideoURL720p, float64(720)}}
 
@@ -360,6 +361,6 @@ func TestParseBatchexecuteResponse_UsaPrimeiroIndiceValido(t *testing.T) {
 
 	url, err := parseBatchexecuteResponse(body)
 	require.NoError(t, err)
-	// Streams em data[1] (360p) devem ser encontrados primeiro.
+	// Streams at data[1] (360p) should be found first.
 	assert.Equal(t, googleVideoURL360p, url)
 }

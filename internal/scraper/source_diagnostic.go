@@ -97,30 +97,30 @@ func (d *SourceDiagnostic) UserMessage() string {
 	switch d.Kind {
 	case DiagnosticSourceUnavailable:
 		if isCloudflareOriginStatus(d.StatusCode) {
-			return fmt.Sprintf("%s temporariamente indisponivel: Cloudflare %d/origem fora", source, d.StatusCode)
+			return fmt.Sprintf("%s temporarily unavailable: Cloudflare %d/origin down", source, d.StatusCode)
 		}
 		if d.StatusCode > 0 {
-			return fmt.Sprintf("%s temporariamente indisponivel: HTTP %d", source, d.StatusCode)
+			return fmt.Sprintf("%s temporarily unavailable: HTTP %d", source, d.StatusCode)
 		}
-		return fmt.Sprintf("%s temporariamente indisponivel: %s", source, d.reason())
+		return fmt.Sprintf("%s temporarily unavailable: %s", source, d.reason())
 	case DiagnosticBlockedChallenge:
 		if d.StatusCode > 0 {
-			return fmt.Sprintf("%s bloqueou a requisicao: HTTP %d/challenge", source, d.StatusCode)
+			return fmt.Sprintf("%s blocked the request: HTTP %d/challenge", source, d.StatusCode)
 		}
-		return fmt.Sprintf("%s bloqueou a requisicao: captcha/challenge", source)
+		return fmt.Sprintf("%s blocked the request: captcha/challenge", source)
 	case DiagnosticParserBroken:
-		return fmt.Sprintf("%s respondeu, mas o parser nao encontrou os dados esperados: %s", source, d.reason())
+		return fmt.Sprintf("%s responded but the parser could not find the expected data: %s", source, d.reason())
 	case DiagnosticDecryptBroken:
-		return fmt.Sprintf("%s decrypt falhou: formato ou chave pode ter mudado", source)
+		return fmt.Sprintf("%s decrypt failed: format or key may have changed", source)
 	case DiagnosticDownloadExpired:
 		if d.StatusCode > 0 {
-			return fmt.Sprintf("%s link de download expirou ou foi negado: HTTP %d", source, d.StatusCode)
+			return fmt.Sprintf("%s download link expired or was rejected: HTTP %d", source, d.StatusCode)
 		}
-		return fmt.Sprintf("%s link de download expirou ou foi negado", source)
+		return fmt.Sprintf("%s download link expired or was rejected", source)
 	case DiagnosticInternalBug:
-		return fmt.Sprintf("%s erro interno no app: %s", source, d.reason())
+		return fmt.Sprintf("%s internal app error: %s", source, d.reason())
 	default:
-		return fmt.Sprintf("%s falhou: %s", source, d.reason())
+		return fmt.Sprintf("%s failed: %s", source, d.reason())
 	}
 }
 
@@ -281,7 +281,7 @@ func DiagnoseError(source, layer string, err error) *SourceDiagnostic {
 		return &SourceDiagnostic{Source: source, Layer: layer, Kind: DiagnosticDecryptBroken, Message: err.Error(), Err: err}
 	case containsAny(lower, "no source url", "no source urls", "no suitable quality", "no server found", "no embed", "no video url", "no video sources", "failed to parse", "selector", "expected payload"):
 		return &SourceDiagnostic{Source: source, Layer: layer, Kind: DiagnosticParserBroken, Message: err.Error(), Err: err}
-	case containsAny(lower, "panic", "nil pointer", "deadlock", "loop infinito", "infinite loop"):
+	case containsAny(lower, "panic", "nil pointer", "deadlock", "infinite loop"):
 		return &SourceDiagnostic{Source: source, Layer: layer, Kind: DiagnosticInternalBug, Message: err.Error(), Err: err}
 	default:
 		return &SourceDiagnostic{Source: source, Layer: layer, Kind: DiagnosticInternalBug, Message: err.Error(), Err: err}

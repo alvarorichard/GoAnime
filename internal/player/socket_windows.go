@@ -1,7 +1,7 @@
 //go:build windows
 
-// Arquivo específico para Windows que implementa a conexão com o socket do MPV
-// utilizando named pipes ao invés de sockets Unix.
+// Windows-specific file that implements the MPV socket connection
+// using named pipes instead of Unix domain sockets.
 
 package player
 
@@ -14,9 +14,9 @@ import (
 	"github.com/Microsoft/go-winio"
 )
 
-// dialMPVSocket cria uma conexão com o socket do MPV no Windows.
-// No Windows, utilizamos named pipes no formato \\.\pipe\NOME_DO_PIPE
-// O pacote go-winio é usado apenas em Windows para suporte a named pipes.
+// dialMPVSocket opens a connection to the MPV socket on Windows.
+// On Windows, named pipes are used in the format \\\\.\\pipe\\PIPENAME.
+// The go-winio package is used only on Windows for named pipe support.
 func dialMPVSocket(socketPath string) (net.Conn, error) {
 	// Windows uses named pipes format
 	// Named pipes in Windows need to be in the format \\.\pipe\PIPENAME
