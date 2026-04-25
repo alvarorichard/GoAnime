@@ -25,6 +25,7 @@ func TestNewHTTPStatusErrorClassifiesCloudflareOriginDown(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrSourceUnavailable))
 	assert.True(t, diagnostic.ShouldSkipHealthCheck())
 	assert.Contains(t, diagnostic.UserMessage(), "Cloudflare 521")
+	assert.Contains(t, diagnostic.UserMessage(), "temporarily unavailable")
 }
 
 func TestNewHTTPStatusErrorClassifiesBlockedChallenge(t *testing.T) {
@@ -62,6 +63,17 @@ func TestDiagnoseErrorClassifiesTimeoutAsSourceUnavailable(t *testing.T) {
 	assert.Equal(t, DiagnosticSourceUnavailable, diagnostic.Kind)
 	assert.True(t, errors.Is(diagnostic, ErrSourceUnavailable))
 	assert.True(t, diagnostic.ShouldSkipHealthCheck())
+}
+
+func TestDownloadExpiredUserMessageUsesEnglish(t *testing.T) {
+	t.Parallel()
+
+	err := NewDownloadExpiredError("Download", "http", http.StatusNotFound, errors.New("404 Not Found"))
+	diagnostic := DiagnoseError("Download", "http", err)
+
+	require.NotNil(t, diagnostic)
+	assert.Equal(t, DiagnosticDownloadExpired, diagnostic.Kind)
+	assert.Equal(t, "Download link expired or was denied: HTTP 404", diagnostic.UserMessage())
 }
 
 func TestSourceCircuitBreakerSkipsAfterRepeatedOriginFailures(t *testing.T) {

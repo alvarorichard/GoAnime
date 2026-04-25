@@ -514,7 +514,7 @@ func TestSearchAnime_SpecificScraper_Fails(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, results)
-	assert.Contains(t, err.Error(), "busca falhou")
+	assert.Contains(t, err.Error(), "search failed")
 	assert.Contains(t, err.Error(), "Cloudflare challenge")
 }
 
