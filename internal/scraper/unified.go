@@ -48,7 +48,9 @@ type UnifiedScraper interface {
 
 // ScraperManager manages multiple scrapers
 type ScraperManager struct {
-	scrapers map[ScraperType]UnifiedScraper
+	scrapers  map[ScraperType]UnifiedScraper
+	breaker   *sourceCircuitBreaker
+	breakerMu sync.Mutex
 }
 
 // Singleton ScraperManager — scrapers are stateless HTTP clients, no need to recreate
@@ -69,6 +71,7 @@ func NewScraperManager() *ScraperManager {
 	globalScraperManagerOnce.Do(func() {
 		manager := &ScraperManager{
 			scrapers: make(map[ScraperType]UnifiedScraper),
+			breaker:  newSourceCircuitBreaker(),
 		}
 
 		// Initialize scrapers
@@ -112,18 +115,29 @@ func (sm *ScraperManager) searchSpecificScraper(query string, scraperType Scrape
 		return nil, fmt.Errorf("scraper type %v not found", scraperType)
 	}
 
-	util.Debug("Searching specific scraper", "scraper", sm.getScraperDisplayName(scraperType))
+	sourceName := sm.getScraperDisplayName(scraperType)
+	if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(scraperType); open {
+		util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
+		return nil, fmt.Errorf("busca pulada em %s: %w", sourceName, diagnostic)
+	}
+
+	util.Debug("Searching specific scraper", "scraper", sourceName)
 
 	results, err := scraper.SearchAnime(query)
 	if err != nil {
-		return nil, fmt.Errorf("busca falhou em %s: %w", sm.getScraperDisplayName(scraperType), err)
+		diagnostic := DiagnoseError(sourceName, "search", err)
+		if sm.recordSourceFailure(scraperType, diagnostic) {
+			util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
+		}
+		return nil, fmt.Errorf("busca falhou em %s: %w", sourceName, diagnostic)
 	}
+	sm.recordSourceSuccess(scraperType)
 
 	// Add language tags
 	sm.tagResults(results, scraperType)
 
 	if len(results) > 0 {
-		util.Debug("Search completed", "scraper", sm.getScraperDisplayName(scraperType), "results", len(results))
+		util.Debug("Search completed", "scraper", sourceName, "results", len(results))
 	}
 
 	return results, nil
@@ -159,6 +173,14 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 
 	// Launch all scrapers concurrently
 	for sType, scraper := range sm.scrapers {
+		sourceName := sm.getScraperDisplayName(sType)
+		if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(sType); open {
+			util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
+			searchErrors = append(searchErrors, diagnostic.UserMessage())
+			searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, diagnostic))
+			continue
+		}
+
 		wg.Add(1)
 		go func(st ScraperType, s UnifiedScraper) {
 			defer wg.Done()
@@ -185,13 +207,18 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 			if res.err != nil {
 				errorsMutex.Lock()
 				sourceName := sm.getScraperDisplayName(res.scraperType)
-				util.Debug("Search error", "source", sourceName, "error", res.err)
-				searchErrors = append(searchErrors, fmt.Sprintf("%s: %v", sourceName, res.err))
-				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, res.err))
+				diagnostic := DiagnoseError(sourceName, "search", res.err)
+				util.Debug("Search error", "source", sourceName, "kind", diagnostic.Kind, "error", diagnostic)
+				if sm.recordSourceFailure(res.scraperType, diagnostic) {
+					util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
+				}
+				searchErrors = append(searchErrors, diagnostic.UserMessage())
+				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, diagnostic))
 				errorsMutex.Unlock()
 				continue
 			}
 
+			sm.recordSourceSuccess(res.scraperType)
 			if len(res.results) > 0 {
 				sm.tagResults(res.results, res.scraperType)
 				resultsMutex.Lock()
@@ -214,7 +241,7 @@ done:
 	errorsMutex.Lock()
 	if len(searchErrors) > 0 {
 		for _, errMsg := range searchErrors {
-			util.Warn("Search source unavailable", "details", errMsg)
+			util.Warn("Search source diagnostic", "details", errMsg)
 		}
 	}
 	errorsMutex.Unlock()

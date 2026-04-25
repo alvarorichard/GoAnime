@@ -3,7 +3,6 @@
 package api
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -17,26 +16,7 @@ func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	transient := []string{
-		"context deadline exceeded",
-		"connection refused",
-		"no such host",
-		"timeout",
-		"500", "502", "503", "530", "405",
-		"Bad Gateway",
-		"Method Not Allowed",
-		"both APIs failed",
-		"i/o timeout",
-		"TLS handshake timeout",
-		"no server found",
-	}
-	for _, s := range transient {
-		if strings.Contains(msg, s) {
-			return true
-		}
-	}
-	return false
+	return scraper.DiagnoseError("FlixHQ", "integration", err).ShouldSkipHealthCheck()
 }
 
 func TestFlixHQFullFlow(t *testing.T) {

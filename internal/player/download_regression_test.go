@@ -16,6 +16,7 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -296,6 +297,9 @@ func TestDownloadDirectHTTPWithClientReturnsHTTPStatusErrorFromMockCDN(t *testin
 	err := downloadDirectHTTPWithClient(server.URL+"/missing.mp4", outPath, &model{}, server.Client())
 	require.Error(t, err)
 	assert.True(t, isHTTPStatusError(err, http.StatusNotFound), "error should be recognized as HTTP 404: %v", err)
+	diagnostic := scraper.DiagnoseError("Download", "http", err)
+	require.NotNil(t, diagnostic)
+	assert.Equal(t, scraper.DiagnosticDownloadExpired, diagnostic.Kind)
 
 	_, statErr := os.Stat(outPath)
 	assert.True(t, os.IsNotExist(statErr), "404 response must not create a completed file")

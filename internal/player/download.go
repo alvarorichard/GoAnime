@@ -24,6 +24,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -87,10 +88,15 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 		}
 
 		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+			statusCode := resp.StatusCode
+			status := resp.Status
 			if cErr := resp.Body.Close(); cErr != nil {
 				util.Logger.Warn("Error closing response body", "error", cErr)
 			}
-			util.Debugf("Download part %d: unexpected status %d", part, resp.StatusCode)
+			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
+				return scraper.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
+			}
+			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
 			staleRetries++
 			continue
 		}
@@ -1018,6 +1024,9 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 	}()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+			return scraper.NewDownloadExpiredError("Download", "http", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 

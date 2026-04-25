@@ -84,6 +84,11 @@ jobs:
         shell: bash
         run: go test -race -v -coverprofile=coverage.out ./...
 
+      - name: Run source health diagnostics
+        if: runner.os == 'Linux'
+        shell: bash
+        run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
+
   build-binaries:
     needs: test
     runs-on: ${{ matrix.os }}

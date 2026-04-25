@@ -56,6 +56,7 @@ func (m *MockScraper) GetType() ScraperType {
 func createTestManager(allAnimeMock, animefireMock *MockScraper) *ScraperManager {
 	manager := &ScraperManager{
 		scrapers: make(map[ScraperType]UnifiedScraper),
+		breaker:  newSourceCircuitBreaker(),
 	}
 	if allAnimeMock != nil {
 		allAnimeMock.scraperType = AllAnimeType
