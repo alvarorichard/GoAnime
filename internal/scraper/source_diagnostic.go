@@ -113,10 +113,14 @@ func (d *SourceDiagnostic) UserMessage() string {
 	case DiagnosticDecryptBroken:
 		return fmt.Sprintf("%s decrypt failed: format or key may have changed", source)
 	case DiagnosticDownloadExpired:
-		if d.StatusCode > 0 {
-			return fmt.Sprintf("%s download link expired or was rejected: HTTP %d", source, d.StatusCode)
+		downloadSubject := source + " download link"
+		if strings.EqualFold(source, "download") {
+			downloadSubject = "Download link"
 		}
-		return fmt.Sprintf("%s download link expired or was rejected", source)
+		if d.StatusCode > 0 {
+			return fmt.Sprintf("%s expired or was rejected: HTTP %d", downloadSubject, d.StatusCode)
+		}
+		return fmt.Sprintf("%s expired or was rejected", downloadSubject)
 	case DiagnosticInternalBug:
 		return fmt.Sprintf("%s internal app error: %s", source, d.reason())
 	default:
