@@ -711,14 +711,19 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	// Collect results with timeout
 	timeout := time.After(6 * time.Second)
-	successCount := 0
+	processedCount := 0
 	var bestURL string
 	var bestMetadata map[string]string
+	var firstErr error
 
-	for successCount < len(sourceURLs) {
+	for processedCount < len(sourceURLs) {
 		select {
 		case res := <-results:
+			processedCount++
 			if res.err != nil {
+				if firstErr == nil {
+					firstErr = res.err
+				}
 				continue
 			}
 
@@ -740,11 +745,13 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 					}
 				}
 			}
-			successCount++
 
 		case <-timeout:
 			if bestURL != "" {
 				return bestURL, bestMetadata, nil
+			}
+			if firstErr != nil {
+				return "", nil, fmt.Errorf("timeout waiting for results after %d/%d sources: %w", processedCount, len(sourceURLs), firstErr)
 			}
 			return "", nil, fmt.Errorf("timeout waiting for results")
 		}
@@ -752,6 +759,10 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	if bestURL != "" {
 		return bestURL, bestMetadata, nil
+	}
+
+	if firstErr != nil {
+		return "", nil, fmt.Errorf("no suitable quality found from any source: %w", firstErr)
 	}
 
 	return "", nil, fmt.Errorf("no suitable quality found from any source")

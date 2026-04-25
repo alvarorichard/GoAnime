@@ -1478,11 +1478,14 @@ func TestProcessSourceURLsConcurrentAllFail(t *testing.T) {
 	defer failServer.Close()
 
 	client := newTestClient(failServer.URL)
+	startedAt := time.Now()
 	_, _, err := client.processSourceURLsConcurrent(
 		[]string{failServer.URL + "/1", failServer.URL + "/2"},
 		"best", "anime-id", "1",
 	)
-	assert.Error(t, err)
+	require.Error(t, err)
+	assert.Less(t, time.Since(startedAt), 2*time.Second, "failed sources should not wait for the global timeout")
+	assert.NotContains(t, err.Error(), "timeout waiting for results")
 }
 
 func TestProcessSourceURLsConcurrentPartialFailure(t *testing.T) {
@@ -1505,12 +1508,14 @@ func TestProcessSourceURLsConcurrentPartialFailure(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
+	startedAt := time.Now()
 	url, _, err := client.processSourceURLsConcurrent(
 		[]string{server.URL + "/fail", server.URL + "/ok"},
 		"best", "anime-id", "1",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "https://cdn.example.com/720.mp4", url)
+	assert.Less(t, time.Since(startedAt), 2*time.Second, "successful fallback should not wait for the global timeout")
 }
 
 func TestProcessSourceURLsConcurrentHighPriorityWins(t *testing.T) {
@@ -1622,16 +1627,16 @@ func TestHTTPStatusCodes(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		code         int
+		code                int
 		shouldBeUnavailable bool
 	}{
 		{200, false},
-		{301, true},  // redirect is non-2xx
-		{400, true},  // bad request
-		{403, true},  // forbidden -> ErrSourceUnavailable
-		{429, true},  // rate limited -> ErrSourceUnavailable
-		{500, true},  // internal server error
-		{503, true},  // service unavailable -> ErrSourceUnavailable
+		{301, true}, // redirect is non-2xx
+		{400, true}, // bad request
+		{403, true}, // forbidden -> ErrSourceUnavailable
+		{429, true}, // rate limited -> ErrSourceUnavailable
+		{500, true}, // internal server error
+		{503, true}, // service unavailable -> ErrSourceUnavailable
 	}
 
 	for _, tt := range tests {
@@ -1929,12 +1934,12 @@ func TestDecodeToBeParsedNoPanicOnMalformed(t *testing.T) {
 	t.Parallel()
 
 	inputs := []string{
-		"",                          // empty
-		"AA==",                      // 1 byte
-		"AAAAAAAAAAAAAAAA",          // 12 bytes exactly (nonce only, too short)
-		"AAAAAAAAAAAAAAAAAAAA",      // 15 bytes
+		"",                     // empty
+		"AA==",                 // 1 byte
+		"AAAAAAAAAAAAAAAA",     // 12 bytes exactly (nonce only, too short)
+		"AAAAAAAAAAAAAAAAAAAA", // 15 bytes
 		base64.StdEncoding.EncodeToString(make([]byte, 100)), // 100 zero bytes
-		"YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",             // "abcdefghijklmnopqrstuvwxyz"
+		"YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",               // "abcdefghijklmnopqrstuvwxyz"
 	}
 
 	for i, input := range inputs {
