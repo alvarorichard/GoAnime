@@ -32,8 +32,9 @@ import (
 
 // Pre-compiled regexes for download quality parsing
 var (
-	digitsRe        = regexp.MustCompile(`\d+`)
-	resolutionMp4Re = regexp.MustCompile(`(\d{3,4})p?\.mp4`)
+	digitsRe               = regexp.MustCompile(`\d+`)
+	resolutionMp4Re        = regexp.MustCompile(`(\d{3,4})p?\.mp4`)
+	downloadPartRetryDelay = 500 * time.Millisecond
 )
 
 // downloadPart downloads a part of the video file using HTTP Range Requests.
@@ -64,7 +65,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 		}
 		if attempt > 0 {
 			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(downloadPartRetryDelay)
 		}
 
 		beforeRead := current

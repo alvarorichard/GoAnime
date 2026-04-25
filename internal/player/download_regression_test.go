@@ -2,6 +2,7 @@ package player
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -95,6 +97,74 @@ func TestDownloadPartAddsAllAnimeReferer(t *testing.T) {
 	got, err := os.ReadFile(outPath + ".part0")
 	require.NoError(t, err)
 	assert.Equal(t, payload, got)
+}
+
+func TestDownloadPartStopsAfterRepeatedRequestErrors(t *testing.T) {
+	restore := setDownloadPartRetryDelayForTest(0)
+	defer restore()
+
+	var attempts int
+	client := &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			attempts++
+			return nil, errors.New("temporary network failure")
+		}),
+	}
+
+	err := downloadPart(
+		"https://allanime.day/video/episode.mp4",
+		0,
+		6,
+		0,
+		client,
+		filepath.Join(t.TempDir(), "episode.mp4"),
+		&model{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max retries (20) exceeded")
+	assert.Equal(t, 20, attempts)
+}
+
+func TestDownloadPartStopsAfterRepeatedHTTPStatusWithoutProgress(t *testing.T) {
+	restore := setDownloadPartRetryDelayForTest(0)
+	defer restore()
+
+	var attempts int
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Status:     "503 Service Unavailable",
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("source unavailable")),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	err := downloadPart(
+		"https://allanime.day/video/episode.mp4",
+		0,
+		6,
+		0,
+		client,
+		filepath.Join(t.TempDir(), "episode.mp4"),
+		&model{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max retries (20) exceeded")
+	assert.Equal(t, 20, attempts)
+}
+
+func setDownloadPartRetryDelayForTest(delay time.Duration) func() {
+	original := downloadPartRetryDelay
+	downloadPartRetryDelay = delay
+	return func() {
+		downloadPartRetryDelay = original
+	}
 }
 
 func TestGetContentLengthAddsAllAnimeReferer(t *testing.T) {
