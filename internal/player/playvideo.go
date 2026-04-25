@@ -36,6 +36,25 @@ var ErrBackToDownloadOptions = errors.New("back to download options")
 // dubSubTagRe strips parenthesized dub/sub tags from anime names for display
 var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|Dubbed)\)\s*`)
 
+const defaultHLSReferer = "https://streameeeeee.site/"
+
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) ([]string, string) {
+	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
+	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
+		return mpvArgs, ""
+	}
+
+	referer := util.GetGlobalReferer()
+	if referer == "" && isHLSStream {
+		referer = defaultHLSReferer
+	}
+	if referer == "" {
+		return mpvArgs, ""
+	}
+
+	return append(mpvArgs, fmt.Sprintf("--http-header-fields=Referer: %s", referer)), referer
+}
+
 // waitForVideoReady waits for the HLS video to be ready for playback
 // Returns true if video is ready, false if timeout
 func waitForVideoReady(socketPath string) bool {
@@ -350,17 +369,20 @@ func playVideo(
 		is9Anime = updater.GetAnime().Source == "9Anime"
 	}
 
-	if isHLSStream {
-		// Use the stored global referer if available (set by source-specific stream resolvers),
-		// otherwise fall back to the default referer for legacy sources
-		referer := util.GetGlobalReferer()
-		if referer == "" {
-			referer = "https://streameeeeee.site/"
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, videoURL, isHLSStream)
+	if playbackReferer != "" {
+		if isHLSStream {
+			util.Debugf("HLS stream detected - Referer: %s", playbackReferer)
+		} else {
+			util.Debugf("HTTP stream detected - Referer: %s", playbackReferer)
 		}
-		mpvArgs = append(mpvArgs,
-			fmt.Sprintf("--http-header-fields=Referer: %s", referer),
-		)
-		util.Debugf("HLS stream detected - Referer: %s", referer)
+	}
+
+	if isHLSStream {
+		referer := playbackReferer
+		if referer == "" {
+			referer = defaultHLSReferer
+		}
 
 		// For 9Anime (and other Cloudflare-protected CDNs), route playback through
 		// yt-dlp with Chrome TLS impersonation to bypass Cloudflare fingerprint checks.

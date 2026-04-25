@@ -106,6 +106,9 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber string, qual
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get episode URL: %w", err)
 	}
+	if referer, ok := metadata["referer"]; ok && referer != "" {
+		util.SetGlobalReferer(referer)
+	}
 
 	// Add additional metadata
 	metadata["navigator"] = "allanime"
