@@ -118,7 +118,7 @@ func (sm *ScraperManager) searchSpecificScraper(query string, scraperType Scrape
 	sourceName := sm.getScraperDisplayName(scraperType)
 	if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(scraperType); open {
 		util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
-		return nil, fmt.Errorf("busca pulada em %s: %w", sourceName, diagnostic)
+		return nil, fmt.Errorf("search skipped in %s: %w", sourceName, diagnostic)
 	}
 
 	util.Debug("Searching specific scraper", "scraper", sourceName)
@@ -129,7 +129,7 @@ func (sm *ScraperManager) searchSpecificScraper(query string, scraperType Scrape
 		if sm.recordSourceFailure(scraperType, diagnostic) {
 			util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
 		}
-		return nil, fmt.Errorf("busca falhou em %s: %w", sourceName, diagnostic)
+		return nil, fmt.Errorf("search failed in %s: %w", sourceName, diagnostic)
 	}
 	sm.recordSourceSuccess(scraperType)
 
