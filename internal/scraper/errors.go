@@ -23,12 +23,8 @@ var ErrInvalidStreamURL = errors.New("invalid stream url")
 // checkHTTPStatus wraps blocking upstream statuses with ErrSourceUnavailable so
 // callers can differentiate provider-side issues from local parsing failures.
 func checkHTTPStatus(resp *http.Response, source string) error {
-	switch resp.StatusCode {
-	case http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable:
-		return fmt.Errorf("%s returned status %d (source blocked?): %w", source, resp.StatusCode, ErrSourceUnavailable)
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned status %d", source, resp.StatusCode)
+		return NewHTTPStatusError(source, "http", resp.StatusCode)
 	}
 	return nil
 }
@@ -37,12 +33,12 @@ func checkHTTPStatus(resp *http.Response, source string) error {
 // are expected.
 func checkHTMLResponse(resp *http.Response, body []byte, source string) error {
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
-		return fmt.Errorf("%s returned HTML instead of JSON (source blocked?): %w", source, ErrSourceUnavailable)
+		return NewBlockedChallengeError(source, "http", "returned HTML instead of JSON", nil)
 	}
 
 	trimmed := bytes.TrimLeft(body, " \t\r\n")
 	if len(trimmed) > 0 && trimmed[0] == '<' {
-		return fmt.Errorf("%s returned HTML instead of JSON (source blocked?): %w", source, ErrSourceUnavailable)
+		return NewBlockedChallengeError(source, "http", "returned HTML instead of JSON", nil)
 	}
 
 	return nil
@@ -53,16 +49,16 @@ func checkHTMLResponse(resp *http.Response, body []byte, source string) error {
 func checkChallengeDocument(doc *goquery.Document, source string) error {
 	title := strings.ToLower(strings.TrimSpace(doc.Find("title").First().Text()))
 	if strings.Contains(title, "just a moment") {
-		return fmt.Errorf("%s returned a challenge page: %w", source, ErrSourceUnavailable)
+		return NewBlockedChallengeError(source, "http", "returned a challenge page", nil)
 	}
 
 	if doc.Find("#cf-wrapper").Length() > 0 || doc.Find("#challenge-form").Length() > 0 {
-		return fmt.Errorf("%s returned a challenge page: %w", source, ErrSourceUnavailable)
+		return NewBlockedChallengeError(source, "http", "returned a challenge page", nil)
 	}
 
 	body := strings.ToLower(doc.Text())
 	if strings.Contains(body, "cf-error") || strings.Contains(body, "cloudflare") {
-		return fmt.Errorf("%s returned a challenge page: %w", source, ErrSourceUnavailable)
+		return NewBlockedChallengeError(source, "http", "returned a challenge page", nil)
 	}
 
 	return nil

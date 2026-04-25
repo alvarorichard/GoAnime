@@ -125,6 +125,9 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 
 	// Checks if the server responded with a 200 OK or 206 Partial Content status.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+			return 0, scraper.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+		}
 		// Returns an error if the server does not support partial content (required for ranged requests).
 		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
 	}
