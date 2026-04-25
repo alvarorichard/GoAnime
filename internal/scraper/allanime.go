@@ -676,6 +676,16 @@ func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, qualit
 
 	for i, sourceURL := range sourceURLs {
 		go func(idx int, url string) {
+			if c.isDirectProviderURL(url) {
+				results <- result{
+					index:     idx,
+					sourceURL: url,
+					links: map[string]string{
+						"direct": url,
+					},
+				}
+				return
+			}
 
 			links, err := c.getLinks(url)
 			if err != nil {
@@ -776,6 +786,10 @@ func (c *AllAnimeClient) getPriorityScore(url string) int {
 		}
 	}
 	return 0
+}
+
+func (c *AllAnimeClient) isDirectProviderURL(sourceURL string) bool {
+	return strings.Contains(sourceURL, "tools.fast4speed.rsvp")
 }
 
 // extractSourceURLs extracts source URLs from the API response
@@ -905,8 +919,8 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Use the same headers as Curd for better compatibility
-	req.Header.Set("Referer", "https://allanime.to")
+	// Match ani-cli: AllAnime's current providers expect the allmanga referer.
+	req.Header.Set("Referer", c.referer)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0")
 
 	resp, err := c.client.Do(req) // #nosec G704
@@ -1076,6 +1090,13 @@ func (c *AllAnimeClient) selectQuality(links map[string]string, requestedQuality
 	if url, exists := links["hls"]; exists {
 		metadata["quality"] = "hls"
 		metadata["type"] = "m3u8"
+		return url, metadata
+	}
+
+	if url, exists := links["direct"]; exists {
+		metadata["quality"] = "direct"
+		metadata["type"] = "direct"
+		metadata["referer"] = c.referer
 		return url, metadata
 	}
 

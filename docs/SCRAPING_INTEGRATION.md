@@ -84,6 +84,26 @@ type UnifiedScraper interface {
 5. **Error Handling with Fallbacks**
 6. **Metadata Extraction**
 
+### AllAnime Provider Notes
+
+The AllAnime implementation follows the current `ani-cli` provider behavior for
+source resolution:
+
+- GraphQL requests use `https://api.allanime.day/api`.
+- Provider and playback requests use `https://allmanga.to` as the referer.
+- Encoded `/clock` source URLs are decoded with the ani-cli hex substitution
+  table and normalized to `/clock.json`.
+- `tools.fast4speed.rsvp` entries are treated as direct playable URLs. Some
+  shows expose this provider while the `/apivtwo/clock.json` providers return
+  server errors, so the resolver keeps the direct URL as a fallback instead of
+  requiring it to return a secondary JSON link list.
+
+Regression coverage:
+
+```bash
+go test ./internal/scraper -run TestProcessSourceURLsConcurrentFallsBackToFast4SpeedDirectSource -count=1
+```
+
 
 
 ### Command Equivalents

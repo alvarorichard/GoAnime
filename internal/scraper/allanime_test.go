@@ -1369,7 +1369,7 @@ func TestGetLinksVerifiesRefererHeader(t *testing.T) {
 	defer server.Close()
 
 	_, _ = newTestClient(server.URL).getLinks(server.URL)
-	assert.Equal(t, "https://allanime.to", capturedReferer)
+	assert.Equal(t, AllAnimeReferer, capturedReferer)
 }
 
 // ---------------------------------------------------------------------------
@@ -1516,6 +1516,31 @@ func TestProcessSourceURLsConcurrentPartialFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://cdn.example.com/720.mp4", url)
 	assert.Less(t, time.Since(startedAt), 2*time.Second, "successful fallback should not wait for the global timeout")
+}
+
+func TestProcessSourceURLsConcurrentFallsBackToFast4SpeedDirectSource(t *testing.T) {
+	t.Parallel()
+
+	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failServer.Close()
+
+	client := newTestClient(failServer.URL)
+	directURL := "https://tools.fast4speed.rsvp//media9/videos/gHQe2eBBh57QdC9hZ/sub/1"
+
+	url, meta, err := client.processSourceURLsConcurrent(
+		[]string{failServer.URL + "/clock.json", directURL},
+		"worst", "gHQe2eBBh57QdC9hZ", "1",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, directURL, url)
+	assert.Equal(t, "direct", meta["quality"])
+	assert.Equal(t, "direct", meta["type"])
+	assert.Equal(t, AllAnimeReferer, meta["referer"])
+	assert.Equal(t, "gHQe2eBBh57QdC9hZ", meta["anime_id"])
+	assert.Equal(t, "1", meta["episode"])
 }
 
 func TestProcessSourceURLsConcurrentHighPriorityWins(t *testing.T) {
