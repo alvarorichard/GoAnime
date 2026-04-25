@@ -1,3 +1,4 @@
+// Package scraper implements provider search, stream extraction, and source diagnostics.
 package scraper
 
 import (

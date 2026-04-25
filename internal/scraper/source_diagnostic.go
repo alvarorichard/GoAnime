@@ -1,3 +1,4 @@
+// Package scraper implements provider search, stream extraction, and source diagnostics.
 package scraper
 
 import (
@@ -71,6 +72,7 @@ func (d *SourceDiagnostic) Unwrap() error {
 	return d.Err
 }
 
+// Is lets errors.Is match ErrSourceUnavailable for source-side diagnostics.
 func (d *SourceDiagnostic) Is(target error) bool {
 	if d == nil {
 		return false
