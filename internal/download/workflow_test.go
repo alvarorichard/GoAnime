@@ -122,7 +122,7 @@ func TestHandleDownloadRequestRangeFallsBackToLegacyDownloader(t *testing.T) {
 	searchAnimeWithRetry = func(_ string) (*models.Anime, error) {
 		return anime, nil
 	}
-	getAnimeEpisodesEnhanced = func(gotAnime *models.Anime) ([]models.Episode, error) {
+	getAnimeEpisodesEnhanced = func(_ *models.Anime) ([]models.Episode, error) {
 		return nil, enhancedErr
 	}
 	getAnimeEpisodesLegacy = func(url string) ([]models.Episode, error) {
