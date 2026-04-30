@@ -15,11 +15,64 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
+)
+
+type episodeDownloader interface {
+	DownloadAllEpisodes() error
+	DownloadEpisodeRange(startEp, endEp int) error
+	DownloadSingleEpisode(episodeNum int) error
+}
+
+type nineAnimeDownloader interface {
+	DownloadAllEpisodes(anime *models.Anime) error
+	DownloadEpisodeRange(anime *models.Anime, startEp, endEp int) error
+	DownloadSingleEpisode(anime *models.Anime, episodeNum int) error
+}
+
+type movieDownloader interface {
+	DownloadMovie(media *models.Anime) error
+	DownloadTVEpisode(media *models.Anime, seasonNum, episodeNum int) error
+	DownloadTVEpisodeRange(media *models.Anime, seasonNum, startEp, endEp int) error
+	DownloadAllSeasons(media *models.Anime) error
+}
+
+type mediaCatalog interface {
+	SearchMoviesAndTV(query string) ([]*scraper.FlixHQMedia, error)
+	GetTVSeasons(mediaID string) ([]scraper.FlixHQSeason, error)
+	GetTVEpisodes(seasonID string) ([]scraper.FlixHQEpisode, error)
+}
+
+var (
+	searchAnimeWithRetry         = appflow.SearchAnimeWithRetry
+	getAnimeEpisodesEnhanced     = api.GetAnimeEpisodesEnhanced
+	getAnimeEpisodesLegacy       = appflow.GetAnimeEpisodesLegacy
+	downloadAllAnimeSmartRange   = api.DownloadAllAnimeSmartRange
+	downloadEpisodeRangeEnhanced = api.DownloadEpisodeRangeEnhanced
+	handleBatchDownload          = player.HandleBatchDownload
+	handleBatchDownloadRange     = player.HandleBatchDownloadRange
+	handleMovieDownloadWorkflow  = HandleMovieDownloadRequest
+	enrichAnimeMetadata          = func(ctx context.Context, anime *models.Anime) ([]metadata.SeasonMapping, error) {
+		return metadata.NewEnricher().EnrichAnime(ctx, anime)
+	}
+	enrichMovieMedia              = movie.EnrichMedia
+	newEpisodeDownloaderWithAnime = func(episodes []models.Episode, animeURL string, anime *models.Anime) episodeDownloader {
+		return downloader.NewEpisodeDownloaderWithAnime(episodes, animeURL, anime)
+	}
+	newNineAnimeDownloader = func(config downloader.NineAnimeDownloadConfig) nineAnimeDownloader {
+		return downloader.NewNineAnimeDownloader(config)
+	}
+	newMediaManager = func() mediaCatalog {
+		return scraper.NewMediaManager()
+	}
+	newMovieDownloaderWithConfig = func(config downloader.MovieDownloadConfig) movieDownloader {
+		return downloader.NewMovieDownloaderWithConfig(config)
+	}
 )
 
 // HandleDownloadRequest processes a download request from command line
@@ -36,7 +89,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	util.Infof("Using source: %s, quality: %s", source, quality)
 
 	// Try enhanced search with retry logic
-	anime, err := appflow.SearchAnimeWithRetry(request.AnimeName)
+	anime, err := searchAnimeWithRetry(request.AnimeName)
 	if err != nil {
 		util.Errorf("Failed to search for anime: %v", err)
 		return err
@@ -62,8 +115,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	})
 
 	// Enrich with AniList metadata for per-episode season resolution
-	enricher := metadata.NewEnricher()
-	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
+	seasonMap, _ := enrichAnimeMetadata(context.Background(), anime)
 	player.SetSeasonMap(seasonMap)
 
 	// Update metadata after enrichment (AniList may have populated IDs)
@@ -87,14 +139,14 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			SubsLanguage: request.SubsLanguage,
 			OutputDir:    request.OutputDir,
 		}
-		return HandleMovieDownloadRequest(movieRequest)
+		return handleMovieDownloadWorkflow(movieRequest)
 	}
 
 	// If this is 9Anime content, use the dedicated 9anime downloader
 	// 9Anime episodes use data-id based resolution that is incompatible with legacy downloaders
 	if anime.Source == "9Anime" {
 		util.Infof("Detected 9Anime content: %s — using 9Anime downloader", anime.Name)
-		nad := downloader.NewNineAnimeDownloader(downloader.NineAnimeDownloadConfig{
+		nad := newNineAnimeDownloader(downloader.NineAnimeDownloadConfig{
 			AnimeName:    anime.Name,
 			Quality:      quality,
 			OutputDir:    request.OutputDir,
@@ -119,9 +171,9 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		util.Infof("Downloading ALL episodes of %s", anime.Name)
 
 		// Try enhanced episode fetch first, fallback to legacy
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := getAnimeEpisodesEnhanced(anime)
 		if err == nil && len(eps) > 0 {
-			dlErr := player.HandleBatchDownload(eps, anime)
+			dlErr := handleBatchDownload(eps, anime)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 				return nil
 			}
@@ -131,11 +183,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		}
 
 		// Fallback to legacy downloader
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := getAnimeEpisodesLegacy(anime.URL)
 		if legacyErr != nil {
 			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
 		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+		dl := newEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadAllEpisodes()
 	}
 
@@ -147,9 +199,9 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
 			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
 			// Use player batch downloader with provided range to get consistent progress UI
-			eps, err := api.GetAnimeEpisodesEnhanced(anime)
+			eps, err := getAnimeEpisodesEnhanced(anime)
 			if err == nil && len(eps) > 0 {
-				dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
+				dlErr := handleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 				if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 					return nil
 				}
@@ -158,17 +210,17 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			} else if err != nil {
 				util.Infof("Enhanced episodes fetch failed for progress path: %v", err)
 			}
-			if err := api.DownloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
+			if err := downloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 				util.Errorf("AllAnime Smart Range failed: %v", err)
 				// Fallback to normal enhanced
-				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
+				if err := downloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
 					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
 					// Fallback to legacy downloader
-					episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+					episodes, legacyErr := getAnimeEpisodesLegacy(anime.URL)
 					if legacyErr != nil {
 						return fmt.Errorf("legacy episode fetch also failed: %w", legacyErr)
 					}
-					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+					dl := newEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 				}
 				return nil
@@ -177,9 +229,9 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		}
 
 		// Try batch downloader with progress UI first (works for AllAnime and other sources)
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := getAnimeEpisodesEnhanced(anime)
 		if err == nil && len(eps) > 0 {
-			dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
+			dlErr := handleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 				return nil
 			}
@@ -188,11 +240,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			util.Infof("Enhanced episodes fetch failed: %v", err)
 		}
 		// Fallback to legacy downloader
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := getAnimeEpisodesLegacy(anime.URL)
 		if legacyErr != nil {
 			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
 		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+		dl := newEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
 	} else {
 		util.Infof("Downloading episode %d of %s",
@@ -200,11 +252,11 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		// Enhanced download is a placeholder - use legacy downloader
 		util.Infof("Using legacy downloader for episode %d", request.EpisodeNum)
-		episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
+		episodes, legacyErr := getAnimeEpisodesLegacy(anime.URL)
 		if legacyErr != nil {
 			return fmt.Errorf("failed to fetch episodes: %w", legacyErr)
 		}
-		dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
+		dl := newEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
 		return dl.DownloadSingleEpisode(request.EpisodeNum)
 	}
 }
@@ -259,7 +311,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	util.Infof("Searching for: %s (quality: %s)", request.AnimeName, quality)
 
 	// Create media manager and search
-	mediaManager := scraper.NewMediaManager()
+	mediaManager := newMediaManager()
 	results, err := mediaManager.SearchMoviesAndTV(request.AnimeName)
 	if err != nil {
 		return fmt.Errorf("failed to search for movie/TV: %w", err)
@@ -282,7 +334,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	// Enrich with TMDB/OMDb metadata to get official title, year, and external IDs.
 	// This is essential for Plex/Jellyfin-compatible folder naming — without it,
 	// folders use the scraped (often localized) name instead of the official title.
-	if err := movie.EnrichMedia(anime); err != nil {
+	if err := enrichMovieMedia(anime); err != nil {
 		util.Debugf("TMDB/OMDb enrichment failed (non-critical): %v", err)
 	}
 
@@ -305,7 +357,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	})
 
 	// Create movie downloader
-	md := downloader.NewMovieDownloaderWithConfig(downloader.MovieDownloadConfig{
+	md := newMovieDownloaderWithConfig(downloader.MovieDownloadConfig{
 		Quality:      scraper.Quality(quality),
 		SubsLanguage: subsLanguage,
 		Provider:     "Vidcloud",
@@ -513,7 +565,7 @@ func selectMovieFromResults(results []*scraper.FlixHQMedia, preferMovie, preferT
 }
 
 // selectSeason presents a selection UI for TV seasons
-func selectSeason(mm *scraper.MediaManager, mediaID string) (int, error) {
+func selectSeason(mm mediaCatalog, mediaID string) (int, error) {
 	seasons, err := mm.GetTVSeasons(mediaID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get seasons: %w", err)
@@ -543,7 +595,7 @@ func selectSeason(mm *scraper.MediaManager, mediaID string) (int, error) {
 }
 
 // selectEpisode presents a selection UI for TV episodes
-func selectEpisode(mm *scraper.MediaManager, mediaID string, seasonNum int) (int, error) {
+func selectEpisode(mm mediaCatalog, mediaID string, seasonNum int) (int, error) {
 	seasons, err := mm.GetTVSeasons(mediaID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get seasons: %w", err)
@@ -579,7 +631,7 @@ func selectEpisode(mm *scraper.MediaManager, mediaID string, seasonNum int) (int
 }
 
 // getSeasonEpisodeCount returns the number of episodes in a given season
-func getSeasonEpisodeCount(mm *scraper.MediaManager, mediaID string, seasonNum int) (int, error) {
+func getSeasonEpisodeCount(mm mediaCatalog, mediaID string, seasonNum int) (int, error) {
 	seasons, err := mm.GetTVSeasons(mediaID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get seasons: %w", err)

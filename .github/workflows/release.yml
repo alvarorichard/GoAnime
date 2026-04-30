@@ -46,7 +46,10 @@ jobs:
           args: --timeout=15m
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./... || true
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run deterministic E2E tests
+        run: go test -tags e2e -count=1 -v ./test/e2e
 
       - name: Check test coverage
         run: |

@@ -84,6 +84,10 @@ jobs:
         shell: bash
         run: go test -race -v -coverprofile=coverage.out ./...
 
+      - name: Run deterministic E2E tests
+        shell: bash
+        run: go test -tags e2e -count=1 -v ./test/e2e
+
       - name: Run source health diagnostics
         if: runner.os == 'Linux'
         shell: bash

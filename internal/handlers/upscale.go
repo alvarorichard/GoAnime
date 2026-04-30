@@ -11,6 +11,11 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+var (
+	validateFFmpeg   = upscaler.ValidateFFmpeg
+	upscaleImageFile = upscaler.UpscaleImageFile
+)
+
 // HandleUpscaleRequest processes upscale requests
 func HandleUpscaleRequest() error {
 	// Initialize logger for upscale process
@@ -23,7 +28,7 @@ func HandleUpscaleRequest() error {
 	req := util.GlobalUpscaleRequest
 
 	// Validate FFmpeg is available
-	ffmpegVersion, err := upscaler.ValidateFFmpeg()
+	ffmpegVersion, err := validateFFmpeg()
 	if err != nil {
 		return fmt.Errorf("FFmpeg validation failed: %w", err)
 	}
@@ -73,7 +78,7 @@ func handleImageUpscale(inputPath, outputPath string, opts upscaler.Anime4KOptio
 
 	startTime := time.Now()
 
-	if err := upscaler.UpscaleImageFile(inputPath, outputPath, opts); err != nil {
+	if err := upscaleImageFile(inputPath, outputPath, opts); err != nil {
 		return fmt.Errorf("image upscale failed: %w", err)
 	}
 

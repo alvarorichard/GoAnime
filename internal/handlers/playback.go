@@ -15,23 +15,43 @@ import (
 	"github.com/alvarorichard/Goanime/internal/version"
 )
 
+type playbackModeDiscordManager interface {
+	Initialize() error
+	Shutdown()
+	IsEnabled() bool
+}
+
+var (
+	playbackModeInitLogger           = util.InitLogger
+	playbackModePreWarmConnections   = util.PreWarmConnections
+	playbackModeHandleTrackingNotice = tracking.HandleTrackingNotice
+	playbackModeNewDiscordManager    = func() playbackModeDiscordManager {
+		return discord.NewManager()
+	}
+	playbackModeSearchAnimeWithRetry = appflow.SearchAnimeWithRetry
+	playbackModeFetchAnimeDetails    = appflow.FetchAnimeDetails
+	playbackModeGetAnimeEpisodes     = appflow.GetAnimeEpisodes
+	playbackModeHandleSeries         = playback.HandleSeries
+	playbackModeHandleMovie          = playback.HandleMovie
+)
+
 // HandlePlaybackMode processes normal anime playback
 func HandlePlaybackMode(animeName string) {
 	timer := util.StartTimer("PlaybackMode:Total")
 	defer timer.Stop()
 
 	// Initialize the beautiful logger
-	util.InitLogger()
+	playbackModeInitLogger()
 
 	// Pre-warm connections are now started in main() so they run while the
 	// user is still typing the anime name. This call is a noop (sync.Once).
-	util.PreWarmConnections()
+	playbackModePreWarmConnections()
 
-	tracking.HandleTrackingNotice()
+	playbackModeHandleTrackingNotice()
 	util.Debugf("[PERF] starting Goanime v%s", version.Version)
 
 	// Discord init runs in background - doesn't block startup
-	discordManager := discord.NewManager()
+	discordManager := playbackModeNewDiscordManager()
 	_ = discordManager.Initialize() // Non-blocking, runs async
 	defer discordManager.Shutdown()
 
@@ -40,7 +60,7 @@ func HandlePlaybackMode(animeName string) {
 	for {
 		// Use enhanced search with retry logic
 		searchTimer := util.StartTimer("SearchAnime:WithRetry")
-		anime, err := appflow.SearchAnimeWithRetry(currentAnimeName)
+		anime, err := playbackModeSearchAnimeWithRetry(currentAnimeName)
 		searchTimer.Stop()
 
 		if err != nil {
@@ -68,11 +88,11 @@ func HandlePlaybackMode(animeName string) {
 			parallelTimer := util.StartTimer("FetchDetails+Episodes:Sequential")
 
 			detailsTimer := util.StartTimer("FetchAnimeDetails")
-			appflow.FetchAnimeDetails(anime)
+			playbackModeFetchAnimeDetails(anime)
 			detailsTimer.Stop()
 
 			episodesTimer := util.StartTimer("GetAnimeEpisodes")
-			episodes, epErr = appflow.GetAnimeEpisodes(anime)
+			episodes, epErr = playbackModeGetAnimeEpisodes(anime)
 			if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
 				util.Errorf("Failed to get episodes: %v", epErr)
 			}
@@ -88,13 +108,13 @@ func HandlePlaybackMode(animeName string) {
 			go func() {
 				defer wg.Done()
 				detailsTimer := util.StartTimer("FetchAnimeDetails")
-				appflow.FetchAnimeDetails(anime)
+				playbackModeFetchAnimeDetails(anime)
 				detailsTimer.Stop()
 			}()
 			go func() {
 				defer wg.Done()
 				episodesTimer := util.StartTimer("GetAnimeEpisodes")
-				episodes, epErr = appflow.GetAnimeEpisodes(anime)
+				episodes, epErr = playbackModeGetAnimeEpisodes(anime)
 				if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
 					util.Errorf("Failed to get episodes: %v", epErr)
 				}
@@ -132,9 +152,9 @@ func HandlePlaybackMode(animeName string) {
 
 		playbackTimer := util.StartTimer("Playback:Handle")
 		if series {
-			playbackErr = playback.HandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
+			playbackErr = playbackModeHandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
 		} else {
-			playbackErr = playback.HandleMovie(anime, episodes, discordManager.IsEnabled())
+			playbackErr = playbackModeHandleMovie(anime, episodes, discordManager.IsEnabled())
 		}
 		playbackTimer.Stop()
 
