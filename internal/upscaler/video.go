@@ -22,6 +22,13 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+var (
+	lookPath = exec.LookPath
+	statPath = os.Stat
+	getEnv   = os.Getenv
+	goos     = runtime.GOOS
+)
+
 // VideoUpscaleConfig holds configuration for video upscaling
 type VideoUpscaleConfig struct {
 	InputPath      string
@@ -41,20 +48,7 @@ type VideoUpscaleConfig struct {
 
 // DefaultVideoConfig returns default video upscaling configuration
 func DefaultVideoConfig() VideoUpscaleConfig {
-	ffmpegPath := "ffmpeg"
-	ffprobePath := "ffprobe"
-
-	// Try to find FFmpeg in common locations
-	if runtime.GOOS == "darwin" {
-		// Check Homebrew locations
-		if _, err := os.Stat("/opt/homebrew/bin/ffmpeg"); err == nil {
-			ffmpegPath = "/opt/homebrew/bin/ffmpeg"
-			ffprobePath = "/opt/homebrew/bin/ffprobe"
-		} else if _, err := os.Stat("/usr/local/bin/ffmpeg"); err == nil {
-			ffmpegPath = "/usr/local/bin/ffmpeg"
-			ffprobePath = "/usr/local/bin/ffprobe"
-		}
-	}
+	ffmpegPath, ffprobePath := resolveFFmpegTools()
 
 	return VideoUpscaleConfig{
 		Anime4KOptions: DefaultOptions(),
@@ -69,6 +63,49 @@ func DefaultVideoConfig() VideoUpscaleConfig {
 		AudioBitrate:   "192k",
 		FrameRate:      0,
 	}
+}
+
+func resolveFFmpegTools() (string, string) {
+	ffmpegPath := "ffmpeg"
+	ffprobePath := "ffprobe"
+
+	// Prefer PATH first so local shims and user-selected toolchains win.
+	if path, err := lookPath("ffmpeg"); err == nil {
+		ffmpegPath = path
+	}
+	if path, err := lookPath("ffprobe"); err == nil {
+		ffprobePath = path
+	}
+
+	// Deterministic E2E runs must not silently pick host-level Homebrew tools
+	// outside the test PATH.
+	if getEnv("GOANIME_E2E") != "" {
+		return ffmpegPath, ffprobePath
+	}
+
+	if goos != "darwin" {
+		return ffmpegPath, ffprobePath
+	}
+
+	// Fallback for macOS users whose FFmpeg is installed in common Homebrew
+	// paths but not exported in PATH.
+	for _, base := range []string{"/opt/homebrew/bin", "/usr/local/bin"} {
+		ffmpegCandidate := filepath.Join(base, "ffmpeg")
+		ffprobeCandidate := filepath.Join(base, "ffprobe")
+
+		if ffmpegPath == "ffmpeg" {
+			if _, err := statPath(ffmpegCandidate); err == nil {
+				ffmpegPath = ffmpegCandidate
+			}
+		}
+		if ffprobePath == "ffprobe" {
+			if _, err := statPath(ffprobeCandidate); err == nil {
+				ffprobePath = ffprobeCandidate
+			}
+		}
+	}
+
+	return ffmpegPath, ffprobePath
 }
 
 // VideoUpscaler handles video upscaling operations
