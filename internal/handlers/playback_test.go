@@ -54,16 +54,16 @@ func installPlaybackModeTestHooks(t *testing.T) *stubPlaybackModeDiscordManager 
 		t.Errorf("unexpected search for %q", name)
 		return nil, unexpectedCall
 	}
-	playbackModeFetchAnimeDetails = func(anime *models.Anime) {}
+	playbackModeFetchAnimeDetails = func(_ *models.Anime) {}
 	playbackModeGetAnimeEpisodes = func(anime *models.Anime) ([]models.Episode, error) {
 		t.Errorf("unexpected episode fetch for %#v", anime)
 		return nil, unexpectedCall
 	}
-	playbackModeHandleSeries = func(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+	playbackModeHandleSeries = func(anime *models.Anime, _ []models.Episode, _ int, _ bool) error {
 		t.Errorf("unexpected series playback for %#v", anime)
 		return nil
 	}
-	playbackModeHandleMovie = func(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	playbackModeHandleMovie = func(anime *models.Anime, _ []models.Episode, _ bool) error {
 		t.Errorf("unexpected movie playback for %#v", anime)
 		return nil
 	}
@@ -121,7 +121,7 @@ func TestHandlePlaybackModeSeriesAnimeUsesSeriesHandler(t *testing.T) {
 		gotDiscordEnabled = discordEnabled
 		return nil
 	}
-	playbackModeHandleMovie = func(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	playbackModeHandleMovie = func(_ *models.Anime, _ []models.Episode, _ bool) error {
 		t.Errorf("movie playback called for series anime")
 		return nil
 	}
@@ -190,7 +190,7 @@ func TestHandlePlaybackModeMovieOrSingleEpisodeUsesMovieHandler(t *testing.T) {
 
 			movieCalls := 0
 			var gotEpisodes []models.Episode
-			playbackModeHandleMovie = func(got *models.Anime, eps []models.Episode, discordEnabled bool) error {
+			playbackModeHandleMovie = func(got *models.Anime, eps []models.Episode, _ bool) error {
 				movieCalls++
 				if got != tt.anime {
 					t.Errorf("movie anime = %#v, want %#v", got, tt.anime)
@@ -198,7 +198,7 @@ func TestHandlePlaybackModeMovieOrSingleEpisodeUsesMovieHandler(t *testing.T) {
 				gotEpisodes = append([]models.Episode(nil), eps...)
 				return nil
 			}
-			playbackModeHandleSeries = func(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+			playbackModeHandleSeries = func(_ *models.Anime, _ []models.Episode, _ int, _ bool) error {
 				t.Errorf("series playback called for %s", tt.name)
 				return nil
 			}
@@ -260,7 +260,7 @@ func TestHandlePlaybackModeBackToSearchContinuesWithFreshSearch(t *testing.T) {
 	}
 
 	seriesCalls := 0
-	playbackModeHandleSeries = func(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+	playbackModeHandleSeries = func(anime *models.Anime, _ []models.Episode, totalEpisodes int, _ bool) error {
 		seriesCalls++
 		if anime != secondAnime {
 			t.Errorf("series anime = %#v, want %#v", anime, secondAnime)
@@ -270,7 +270,7 @@ func TestHandlePlaybackModeBackToSearchContinuesWithFreshSearch(t *testing.T) {
 		}
 		return nil
 	}
-	playbackModeHandleMovie = func(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	playbackModeHandleMovie = func(_ *models.Anime, _ []models.Episode, _ bool) error {
 		t.Errorf("movie playback called after back-to-search")
 		return nil
 	}

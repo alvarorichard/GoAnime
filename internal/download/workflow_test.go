@@ -81,7 +81,7 @@ func TestHandleDownloadRequestAllTreatsUserQuitAsSuccess(t *testing.T) {
 	anime := &models.Anime{Name: "Bocchi", URL: "anime-id", Source: "AllAnime", MediaType: models.MediaTypeAnime}
 	episodes := []models.Episode{{Number: "1", Num: 1, URL: "episode-1"}}
 
-	searchAnimeWithRetry = func(name string) (*models.Anime, error) {
+	searchAnimeWithRetry = func(_ string) (*models.Anime, error) {
 		return anime, nil
 	}
 	getAnimeEpisodesEnhanced = func(gotAnime *models.Anime) ([]models.Episode, error) {
@@ -119,7 +119,7 @@ func TestHandleDownloadRequestRangeFallsBackToLegacyDownloader(t *testing.T) {
 	anime := &models.Anime{Name: "Dungeon Meshi", URL: "anime-url", Source: "AllAnime", MediaType: models.MediaTypeAnime}
 	enhancedErr := errors.New("enhanced unavailable")
 
-	searchAnimeWithRetry = func(name string) (*models.Anime, error) {
+	searchAnimeWithRetry = func(_ string) (*models.Anime, error) {
 		return anime, nil
 	}
 	getAnimeEpisodesEnhanced = func(gotAnime *models.Anime) ([]models.Episode, error) {
@@ -165,7 +165,7 @@ func TestHandleDownloadRequestRoutesNineAnimeRange(t *testing.T) {
 
 	anime := &models.Anime{Name: "Solo Leveling", URL: "solo-leveling-id", Source: "9Anime", MediaType: models.MediaTypeAnime}
 
-	searchAnimeWithRetry = func(name string) (*models.Anime, error) {
+	searchAnimeWithRetry = func(_ string) (*models.Anime, error) {
 		return anime, nil
 	}
 
@@ -209,7 +209,7 @@ func TestHandleDownloadRequestRedirectsMovieContent(t *testing.T) {
 	restoreWorkflowState(t)
 	installNoopMetadata(t)
 
-	searchAnimeWithRetry = func(name string) (*models.Anime, error) {
+	searchAnimeWithRetry = func(_ string) (*models.Anime, error) {
 		return &models.Anime{
 			Name:      "Inception",
 			URL:       "https://flixhq.to/movie/watch-inception-123",
@@ -305,7 +305,7 @@ func TestHandleMovieDownloadRequestDownloadsTVEpisodeWithoutSelectionUI(t *testi
 
 	var gotMedia *models.Anime
 	var gotSeason, gotEpisode int
-	newMovieDownloaderWithConfig = func(config downloader.MovieDownloadConfig) movieDownloader {
+	newMovieDownloaderWithConfig = func(_ downloader.MovieDownloadConfig) movieDownloader {
 		return stubMovieDownloader{
 			downloadTVEpisode: func(media *models.Anime, seasonNum, episodeNum int) error {
 				gotMedia, gotSeason, gotEpisode = media, seasonNum, episodeNum
@@ -427,15 +427,15 @@ type stubMediaCatalog struct {
 	err      error
 }
 
-func (s stubMediaCatalog) SearchMoviesAndTV(query string) ([]*scraper.FlixHQMedia, error) {
+func (s stubMediaCatalog) SearchMoviesAndTV(_ string) ([]*scraper.FlixHQMedia, error) {
 	return s.results, s.err
 }
 
-func (s stubMediaCatalog) GetTVSeasons(mediaID string) ([]scraper.FlixHQSeason, error) {
+func (s stubMediaCatalog) GetTVSeasons(_ string) ([]scraper.FlixHQSeason, error) {
 	return s.seasons, s.err
 }
 
-func (s stubMediaCatalog) GetTVEpisodes(seasonID string) ([]scraper.FlixHQEpisode, error) {
+func (s stubMediaCatalog) GetTVEpisodes(_ string) ([]scraper.FlixHQEpisode, error) {
 	return s.episodes, s.err
 }
 

@@ -35,7 +35,7 @@ func TestHandleDownloadRequestRejectsNilRequest(t *testing.T) {
 
 	var called bool
 	util.GlobalDownloadRequest = nil
-	runAnimeDownload = func(req *util.DownloadRequest) error {
+	runAnimeDownload = func(_ *util.DownloadRequest) error {
 		called = true
 		return nil
 	}
@@ -54,7 +54,7 @@ func TestHandleDownloadRequestWrapsRunnerError(t *testing.T) {
 
 	sentinel := errors.New("network blocked")
 	util.GlobalDownloadRequest = &util.DownloadRequest{AnimeName: "frieren", EpisodeNum: 1}
-	runAnimeDownload = func(req *util.DownloadRequest) error {
+	runAnimeDownload = func(_ *util.DownloadRequest) error {
 		return sentinel
 	}
 
@@ -151,7 +151,7 @@ func TestHandleUpscaleRequestStopsWhenFFmpegValidationFails(t *testing.T) {
 	validateFFmpeg = func() (string, error) {
 		return "", sentinel
 	}
-	upscaleImageFile = func(inputPath, outputPath string, opts upscaler.Anime4KOptions) error {
+	upscaleImageFile = func(_, _ string, _ upscaler.Anime4KOptions) error {
 		t.Fatal("upscaleImageFile must not run when FFmpeg validation fails")
 		return nil
 	}

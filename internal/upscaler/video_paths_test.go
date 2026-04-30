@@ -61,7 +61,7 @@ func TestResolveFFmpegToolsSkipsMacFallbackInE2E(t *testing.T) {
 		}
 		return ""
 	}
-	lookPath = func(file string) (string, error) {
+	lookPath = func(_ string) (string, error) {
 		return "", errors.New("missing from PATH")
 	}
 	statPath = func(path string) (fs.FileInfo, error) {
