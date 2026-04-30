@@ -1,5 +1,8 @@
 package handlers
 
+// Tests in this file mutate package-level vars used as DI seams.
+// Do not add t.Parallel(); these tests must run sequentially.
+
 import (
 	"errors"
 	"path/filepath"

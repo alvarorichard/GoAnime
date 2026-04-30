@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,8 @@ var (
 	binaryError error
 	buildDir    string
 )
+
+const e2eCommandTimeout = 30 * time.Second
 
 func TestMain(m *testing.M) {
 	code := m.Run()
@@ -77,15 +80,27 @@ func repoRoot(t *testing.T) string {
 func runGoAnime(t *testing.T, args ...string) (int, string) {
 	t.Helper()
 
-	cmd := exec.Command(goanimeBinary(t), args...)
+	return runGoAnimeWithEnv(t, isolatedEnv(t), args...)
+}
+
+func runGoAnimeWithEnv(t *testing.T, env []string, args ...string) (int, string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), e2eCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, goanimeBinary(t), args...)
 	cmd.Dir = repoRoot(t)
-	cmd.Env = isolatedEnv(t)
+	cmd.Env = env
 
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 
 	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("goanime %q timed out; likely a regression in early validation\noutput:\n%s", strings.Join(args, " "), output.String())
+	}
 	if err == nil {
 		return 0, output.String()
 	}
@@ -202,6 +217,8 @@ func TestCLIRejectsInvalidDownloadArguments(t *testing.T) {
 }
 
 func TestCLIRejectsInvalidUpscaleArguments(t *testing.T) {
+	missingInput := filepath.Join(t.TempDir(), "definitely-missing.png")
+
 	tests := []struct {
 		name string
 		args []string
@@ -214,7 +231,7 @@ func TestCLIRejectsInvalidUpscaleArguments(t *testing.T) {
 		},
 		{
 			name: "upscale input must exist",
-			args: []string{"--upscale", filepath.Join("testdata", "missing.png")},
+			args: []string{"--upscale", missingInput},
 			want: "input file not found",
 		},
 	}

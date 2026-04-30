@@ -47,7 +47,7 @@ The QA agent is responsible for each version:
 
 Minimum commands before creating a tag:
 
-```powershell
+```bash
 go mod verify
 go fmt ./...
 go vet ./...
@@ -67,7 +67,7 @@ publishing. A deterministic failure blocks release.
 
 Command:
 
-```powershell
+```bash
 go test -tags e2e -count=1 -v ./test/e2e
 ```
 
@@ -84,6 +84,11 @@ Current coverage:
 
 The suite avoids real scraping, real downloads, opening `mpv`, and video
 processing. This keeps the gate reliable for CI and release.
+
+The E2E binary is built with `CGO_ENABLED=0`. Real SQLite tracking coverage
+stays in the unit suite at `internal/tracking/local_test.go`; the deterministic
+E2E gate only validates the no-CGO contract covered by
+`internal/tracking/local_nocgo_test.go`.
 
 ## Complementary offline tests
 
@@ -103,7 +108,7 @@ for skips accepted during live QA.
 
 Use this when preparing a version or investigating provider failures:
 
-```powershell
+```bash
 go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
 go test -tags integration -run TestFlixHQFullFlow -count=1 -v ./internal/api
 go test ./pkg/goanime -run Integration -count=1 -v

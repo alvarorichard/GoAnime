@@ -3,12 +3,10 @@
 package e2e_test
 
 import (
-	"bytes"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -61,28 +59,6 @@ func TestCLIUpscaleUsesFFmpegShimFromIsolatedPath(t *testing.T) {
 	}
 }
 
-func runGoAnimeWithEnv(t *testing.T, env []string, args ...string) (int, string) {
-	t.Helper()
-
-	cmd := exec.Command(goanimeBinary(t), args...)
-	cmd.Dir = repoRoot(t)
-	cmd.Env = env
-
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-
-	err := cmd.Run()
-	if err == nil {
-		return 0, output.String()
-	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		return exitErr.ExitCode(), output.String()
-	}
-	t.Fatalf("failed to run goanime %q: %v\n%s", strings.Join(args, " "), err, output.String())
-	return -1, ""
-}
-
 func isolatedEnvWithPath(t *testing.T, path string) []string {
 	t.Helper()
 
@@ -99,6 +75,7 @@ func replaceEnv(env []string, key, value string) []string {
 		if strings.HasPrefix(entry, prefix) {
 			env[i] = prefix + value
 			replaced = true
+			break
 		}
 	}
 	if !replaced {
