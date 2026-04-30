@@ -86,10 +86,12 @@ func runGoAnime(t *testing.T, args ...string) (int, string) {
 func runGoAnimeWithEnv(t *testing.T, env []string, args ...string) (int, string) {
 	t.Helper()
 
+	binary := goanimeBinary(t)
+
 	ctx, cancel := context.WithTimeout(context.Background(), e2eCommandTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, goanimeBinary(t), args...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = repoRoot(t)
 	cmd.Env = env
 
