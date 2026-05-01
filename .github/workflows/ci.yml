@@ -9,6 +9,10 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      GOTOOLCHAIN: go1.26.2
+      GOANIME_INTERACTIVE_TESTS: "0"
+      GOANIME_LIVE_TESTS: "0"
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
@@ -84,14 +88,11 @@ jobs:
         shell: bash
         run: go test -race -v -coverprofile=coverage.out ./...
 
-      - name: Run source health diagnostics
-        if: runner.os == 'Linux'
-        shell: bash
-        run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
-
   build-binaries:
     needs: test
     runs-on: ${{ matrix.os }}
+    env:
+      GOTOOLCHAIN: go1.26.2
     strategy:
       matrix:
         include:
@@ -181,6 +182,8 @@ jobs:
   build-windows-installer:
     needs: test
     runs-on: windows-latest
+    env:
+      GOTOOLCHAIN: go1.26.2
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5

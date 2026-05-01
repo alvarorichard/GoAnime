@@ -5,9 +5,13 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/testutil/testenv"
 )
 
 func TestNineAnimeClient_Search(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewNineAnimeClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -33,6 +37,8 @@ func TestNineAnimeClient_Search(t *testing.T) {
 }
 
 func TestNineAnimeClient_GetEpisodes(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewNineAnimeClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -64,6 +70,8 @@ func TestNineAnimeClient_GetEpisodes(t *testing.T) {
 }
 
 func TestNineAnimeClient_GetServers(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewNineAnimeClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -96,6 +104,8 @@ func TestNineAnimeClient_GetServers(t *testing.T) {
 }
 
 func TestNineAnimeClient_GetAnimeEpisodes(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewNineAnimeClient()
 
 	// Test the models.Episode conversion

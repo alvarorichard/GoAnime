@@ -13,7 +13,10 @@ permissions:
 
 env:
   GO_VERSION: '1.26.2'
+  GOTOOLCHAIN: 'go1.26.2'
   BINARY_NAME: goanime
+  GOANIME_INTERACTIVE_TESTS: '0'
+  GOANIME_LIVE_TESTS: '0'
 
 jobs:
   # =============================================================================
@@ -46,7 +49,7 @@ jobs:
           args: --timeout=15m
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./... || true
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Check test coverage
         run: |

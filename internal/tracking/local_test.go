@@ -1,10 +1,16 @@
+//go:build cgo
+
 package tracking
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestNewLocalTracker(t *testing.T) {
@@ -13,7 +19,7 @@ func TestNewLocalTracker(t *testing.T) {
 
 	tracker := NewLocalTracker(dbPath)
 	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
+		t.Fatal("NewLocalTracker returned nil")
 	}
 
 	// Check if DB file was created
@@ -32,9 +38,6 @@ func TestLocalTracker_UpdateProgress(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	tracker := NewLocalTracker(dbPath)
-	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
-	}
 	defer func() {
 		if err := tracker.Close(); err != nil {
 			t.Logf("Error closing tracker: %v", err)
@@ -93,7 +96,7 @@ func TestLocalTracker_GetAnime(t *testing.T) {
 	dbPath := filepath.Join(dir, "test_get_anime.db")
 	tracker := NewLocalTracker(dbPath)
 	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
+		t.Fatal("NewLocalTracker returned nil")
 	}
 	defer func(tracker *LocalTracker) {
 		err := tracker.Close()
@@ -141,7 +144,7 @@ func TestLocalTracker_GetAllAnime(t *testing.T) {
 	dbPath := filepath.Join(dir, "test_get_all_anime.db")
 	tracker := NewLocalTracker(dbPath)
 	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
+		t.Fatal("NewLocalTracker returned nil")
 	}
 	defer func(tracker *LocalTracker) {
 		err := tracker.Close()
@@ -205,7 +208,7 @@ func TestLocalTracker_DeleteAnime(t *testing.T) {
 	dbPath := filepath.Join(dir, "test_delete_anime.db")
 	tracker := NewLocalTracker(dbPath)
 	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
+		t.Fatal("NewLocalTracker returned nil")
 	}
 	defer func(tracker *LocalTracker) {
 		err := tracker.Close()
@@ -255,7 +258,7 @@ func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
 	dbPath := filepath.Join(dir, "test_episode_keys.db")
 	tracker := NewLocalTracker(dbPath)
 	if tracker == nil {
-		t.Skip("tracking unavailable (CGO/SQLite not enabled in this build)")
+		t.Fatal("NewLocalTracker returned nil")
 	}
 	defer func() {
 		if err := tracker.Close(); err != nil {
@@ -301,7 +304,8 @@ func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
 	}
 	if got3 == nil {
 		t.Fatal("ep3 tracking not found")
-	} else if got3.EpisodeNumber != 3 || got3.PlaybackTime != 900 {
+	}
+	if got3.EpisodeNumber != 3 || got3.PlaybackTime != 900 {
 		t.Errorf("ep3 mismatch: got episode=%d time=%d, want episode=3 time=900",
 			got3.EpisodeNumber, got3.PlaybackTime)
 	}
@@ -312,7 +316,8 @@ func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
 	}
 	if got4 == nil {
 		t.Fatal("ep4 tracking not found")
-	} else if got4.EpisodeNumber != 4 || got4.PlaybackTime != 450 {
+	}
+	if got4.EpisodeNumber != 4 || got4.PlaybackTime != 450 {
 		t.Errorf("ep4 mismatch: got episode=%d time=%d, want episode=4 time=450",
 			got4.EpisodeNumber, got4.PlaybackTime)
 	}
@@ -324,5 +329,186 @@ func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
 	}
 	if gotBare != nil {
 		t.Errorf("bare base URL should not match any episode-specific entry, got: %+v", gotBare)
+	}
+}
+
+func TestGlobalTrackerSingletonLifecycle(t *testing.T) {
+	t.Cleanup(func() {
+		if err := CloseGlobalTracker(); err != nil {
+			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
+		}
+	})
+	if err := CloseGlobalTracker(); err != nil {
+		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "global_tracker.db")
+
+	first := NewLocalTracker(dbPath)
+	if first == nil {
+		t.Fatal("NewLocalTracker returned nil")
+	}
+
+	second := NewLocalTracker(dbPath)
+	if second == nil {
+		t.Fatal("second NewLocalTracker returned nil")
+	}
+
+	if first != second {
+		t.Fatalf("expected singleton tracker reuse, got %p and %p", first, second)
+	}
+
+	got := GetGlobalTracker()
+	if got != first {
+		t.Fatalf("GetGlobalTracker() = %p, want %p", got, first)
+	}
+
+	if err := CloseGlobalTracker(); err != nil {
+		t.Fatalf("CloseGlobalTracker() error: %v", err)
+	}
+
+	if GetGlobalTracker() != nil {
+		t.Fatal("expected global tracker to be cleared after CloseGlobalTracker")
+	}
+
+	third := NewLocalTracker(dbPath)
+	if third == nil {
+		t.Fatal("third NewLocalTracker returned nil")
+	}
+	if third == first {
+		t.Fatal("expected new tracker instance after closing global tracker")
+	}
+}
+
+func TestGlobalTrackerConcurrentSingleton(t *testing.T) {
+	t.Cleanup(func() {
+		if err := CloseGlobalTracker(); err != nil {
+			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
+		}
+	})
+	if err := CloseGlobalTracker(); err != nil {
+		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "concurrent_tracker.db")
+
+	const workers = 8
+	results := make(chan *LocalTracker, workers)
+	var wg sync.WaitGroup
+
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- NewLocalTracker(dbPath)
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	var first *LocalTracker
+	for tracker := range results {
+		if tracker == nil {
+			t.Fatal("NewLocalTracker returned nil in concurrent init")
+		}
+		if first == nil {
+			first = tracker
+			continue
+		}
+		if tracker != first {
+			t.Fatalf("expected singleton tracker reuse, got %p and %p", first, tracker)
+		}
+	}
+
+	if got := GetGlobalTracker(); got != first {
+		t.Fatalf("GetGlobalTracker() = %p, want %p", got, first)
+	}
+}
+
+func TestMigrateOldDataToMediaProgress(t *testing.T) {
+	t.Cleanup(func() {
+		if err := CloseGlobalTracker(); err != nil {
+			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
+		}
+	})
+	if err := CloseGlobalTracker(); err != nil {
+		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "migrate.db")
+	legacyDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error: %v", err)
+	}
+
+	_, err = legacyDB.Exec(`CREATE TABLE anime_progress (
+		anilist_id INTEGER,
+		allanime_id TEXT,
+		episode_number INTEGER,
+		playback_time INTEGER,
+		duration INTEGER,
+		title TEXT,
+		last_updated INTEGER
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy table error: %v", err)
+	}
+
+	_, err = legacyDB.Exec(`
+		INSERT INTO anime_progress (anilist_id, allanime_id, episode_number, playback_time, duration, title, last_updated)
+		VALUES
+			(11, 'shared-id', 3, 120, 1500, '[Movies/TV] Example Movie', 1700000000),
+			(11, 'shared-id', 3, 240, 1800, '[Movies/TV] Example Movie', 1700001000),
+			(22, 'anime-id', 7, 90, 1400, 'Example Anime', 1700002000)
+	`)
+	if err != nil {
+		t.Fatalf("insert legacy rows error: %v", err)
+	}
+
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("legacyDB.Close() error: %v", err)
+	}
+
+	tracker := NewLocalTracker(dbPath)
+	if tracker == nil {
+		t.Fatal("NewLocalTracker returned nil after legacy migration setup")
+	}
+
+	shared, err := tracker.GetAnime(11, "shared-id")
+	if err != nil {
+		t.Fatalf("GetAnime(shared-id) error: %v", err)
+	}
+	if shared == nil {
+		t.Fatal("expected migrated shared-id row")
+	}
+	if shared.PlaybackTime != 240 {
+		t.Fatalf("shared.PlaybackTime = %d, want 240", shared.PlaybackTime)
+	}
+	if shared.Duration != 1800 {
+		t.Fatalf("shared.Duration = %d, want 1800", shared.Duration)
+	}
+
+	var mediaType string
+	err = tracker.db.QueryRow(`SELECT media_type FROM media_progress WHERE allanime_id = ?`, "shared-id").Scan(&mediaType)
+	if err != nil {
+		t.Fatalf("query migrated media_type error: %v", err)
+	}
+	if mediaType != "movie" {
+		t.Fatalf("media_type = %q, want %q", mediaType, "movie")
+	}
+
+	animeRow, err := tracker.GetAnime(22, "anime-id")
+	if err != nil {
+		t.Fatalf("GetAnime(anime-id) error: %v", err)
+	}
+	if animeRow == nil || animeRow.PlaybackTime != 90 {
+		t.Fatalf("unexpected anime migration row: %+v", animeRow)
+	}
+
+	var count int
+	err = tracker.db.QueryRow(`SELECT COUNT(*) FROM anime_progress`).Scan(&count)
+	if err == nil {
+		t.Fatalf("expected legacy table anime_progress to be dropped, count query succeeded with %d", count)
 	}
 }

@@ -476,6 +476,10 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 // DeleteAnime removes tracking data by allanime_id
 // The anilistID parameter is kept for backwards compatibility but is ignored
 func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
+	if t == nil || t.db == nil || t.deletePS == nil {
+		return ErrTrackerNotInited
+	}
+
 	_, err := t.deletePS.Exec(allanimeID)
 	return err
 }
@@ -487,8 +491,9 @@ func (t *LocalTracker) DeleteAnime(anilistID int, allanimeID string) error {
 */
 func (t *LocalTracker) Close() error {
 	if t == nil {
-		return nil
+		return ErrTrackerNotInited
 	}
+
 	var finalErr error
 
 	closeStmt := func(stmt *sql.Stmt, name string) {

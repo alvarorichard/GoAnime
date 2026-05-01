@@ -2,90 +2,16 @@ package scraper
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/testutil/testenv"
 )
 
-func isFlixHQUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrSourceUnavailable) {
-		return true
-	}
-
-	msg := strings.ToLower(err.Error())
-	transient := []string{
-		"source unavailable",
-		"server returned: 521",
-		"status code 521",
-		"unexpected status code: 521",
-		"context deadline exceeded",
-		"context canceled",
-		"request canceled",
-		"client.timeout",
-		"timeout",
-		"connection refused",
-		"no such host",
-		"i/o timeout",
-		"tls handshake timeout",
-		"500", "502", "503", "521", "530", "405",
-		"bad gateway",
-		"method not allowed",
-		"both apis failed",
-		"no server found",
-	}
-	for _, s := range transient {
-		if strings.Contains(msg, s) {
-			return true
-		}
-	}
-	return false
-}
-
-// TestIsFlixHQUnavailable_SurfTimeoutFromCI is a regression test for a CI
-// flake observed on 2026-04-28: the surf-wrapped HTTP client returned
-// `request canceled while waiting for connection (Client.Timeout exceeded
-// while awaiting headers)` after both HTTP/2 and HTTP/1.1 attempts failed.
-// The original substring list missed it because matching was case-sensitive
-// ("Timeout" vs "timeout") and "request canceled" wasn't listed, so
-// TestFlixHQClient_SearchMedia/Search_for_TV_show failed instead of skipping
-// when flixhq.to was unreachable.
-func TestIsFlixHQUnavailable_SurfTimeoutFromCI(t *testing.T) {
-	cases := []struct {
-		name string
-		err  error
-	}{
-		{
-			name: "surf HTTP/2 then HTTP/1.1 timeout (run 25031539884)",
-			err: errors.New(
-				`failed to make request: Get "https://flixhq.to/search/breaking-bad": ` +
-					`surf: HTTP/2 request failed: net/http: request canceled; ` +
-					`HTTP/1.1 fallback failed: net/http: request canceled while waiting for connection ` +
-					`(Client.Timeout exceeded while awaiting headers)`,
-			),
-		},
-		{
-			name: "Client.Timeout alone (capital T)",
-			err:  errors.New(`Get "https://flixhq.to": Client.Timeout exceeded while awaiting headers`),
-		},
-		{
-			name: "request canceled alone",
-			err:  errors.New(`Get "https://flixhq.to": net/http: request canceled`),
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if !isFlixHQUnavailable(tc.err) {
-				t.Fatalf("expected isFlixHQUnavailable(%q) = true, got false", tc.err)
-			}
-		})
-	}
-}
-
 func TestFlixHQClient_GetInfo(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -123,6 +49,8 @@ func TestFlixHQClient_GetInfo(t *testing.T) {
 }
 
 func TestFlixHQClient_GetServers(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -130,9 +58,6 @@ func TestFlixHQClient_GetServers(t *testing.T) {
 	// First, search for a movie to get a valid ID
 	results, err := client.SearchMediaWithContext(ctx, "inception")
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("Search failed: %v", err)
 	}
 
@@ -152,9 +77,6 @@ func TestFlixHQClient_GetServers(t *testing.T) {
 
 	servers, err := client.GetServersWithContext(ctx, movie.ID, true)
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("GetServers failed: %v", err)
 	}
 
@@ -169,6 +91,8 @@ func TestFlixHQClient_GetServers(t *testing.T) {
 }
 
 func TestFlixHQClient_GetSources(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -176,9 +100,6 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 	// Search for a movie
 	results, err := client.SearchMediaWithContext(ctx, "inception")
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("Search failed: %v", err)
 	}
 
@@ -203,12 +124,11 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 	sources, err := client.GetSourcesWithContext(ctx, movie.ID, true)
 	if err != nil {
 		errMsg := err.Error()
-		if isFlixHQUnavailable(err) || strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") ||
-			strings.Contains(errMsg, "530") || strings.Contains(errMsg, "405") ||
-			strings.Contains(errMsg, "Bad Gateway") || strings.Contains(errMsg, "Method Not Allowed") ||
-			strings.Contains(errMsg, "both APIs failed") || strings.Contains(errMsg, "context deadline exceeded") ||
-			strings.Contains(errMsg, "context canceled") || strings.Contains(errMsg, "timeout") ||
-			strings.Contains(errMsg, "connection refused") {
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "530") ||
+			strings.Contains(errMsg, "405") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "Method Not Allowed") || strings.Contains(errMsg, "both APIs failed") ||
+			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
+			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
 		}
 		t.Fatalf("GetSources failed: %v", err)
@@ -224,6 +144,8 @@ func TestFlixHQClient_GetSources(t *testing.T) {
 }
 
 func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -231,9 +153,6 @@ func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
 	// Search for a movie
 	results, err := client.SearchMediaWithContext(ctx, "inception")
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("Search failed: %v", err)
 	}
 
@@ -256,12 +175,11 @@ func TestFlixHQClient_GetAvailableQualities(t *testing.T) {
 	qualities, err := client.GetAvailableQualitiesWithContext(ctx, movie.ID, true)
 	if err != nil {
 		errMsg := err.Error()
-		if isFlixHQUnavailable(err) || strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") ||
-			strings.Contains(errMsg, "530") || strings.Contains(errMsg, "405") ||
-			strings.Contains(errMsg, "Bad Gateway") || strings.Contains(errMsg, "Method Not Allowed") ||
-			strings.Contains(errMsg, "both APIs failed") || strings.Contains(errMsg, "context deadline exceeded") ||
-			strings.Contains(errMsg, "context canceled") || strings.Contains(errMsg, "timeout") ||
-			strings.Contains(errMsg, "connection refused") {
+		if strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "530") ||
+			strings.Contains(errMsg, "405") || strings.Contains(errMsg, "Bad Gateway") ||
+			strings.Contains(errMsg, "Method Not Allowed") || strings.Contains(errMsg, "both APIs failed") ||
+			strings.Contains(errMsg, "context deadline exceeded") || strings.Contains(errMsg, "context canceled") ||
+			strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "connection refused") {
 			t.Skipf("Skipping - external streaming service unavailable: %v", err)
 		}
 		t.Fatalf("GetAvailableQualities failed: %v", err)
@@ -309,6 +227,8 @@ func TestFlixHQClient_SelectBestQuality(t *testing.T) {
 }
 
 func TestFlixHQClient_HealthCheck(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -320,6 +240,8 @@ func TestFlixHQClient_HealthCheck(t *testing.T) {
 }
 
 func TestFlixHQClient_Caching(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 	ctx := context.Background()
 
@@ -327,9 +249,6 @@ func TestFlixHQClient_Caching(t *testing.T) {
 	start := time.Now()
 	results1, err := client.SearchMediaWithContext(ctx, "dexter")
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("First search failed: %v", err)
 	}
 	firstDuration := time.Since(start)
@@ -339,9 +258,6 @@ func TestFlixHQClient_Caching(t *testing.T) {
 	start = time.Now()
 	results2, err := client.SearchMediaWithContext(ctx, "dexter")
 	if err != nil {
-		if isFlixHQUnavailable(err) {
-			t.Skipf("Skipping - external service unavailable: %v", err)
-		}
 		t.Fatalf("Second search failed: %v", err)
 	}
 	secondDuration := time.Since(start)

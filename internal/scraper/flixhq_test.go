@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/testutil/testenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,6 +25,8 @@ func newFlixHQClientForTest(baseURL string) *FlixHQClient {
 }
 
 func TestFlixHQClient_SearchMedia(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 
 	tests := []struct {
@@ -51,8 +54,8 @@ func TestFlixHQClient_SearchMedia(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			results, err := client.SearchMedia(tt.query)
-			if err != nil && isFlixHQUnavailable(err) {
-				t.Skipf("Skipping - external service unavailable: %v", err)
+			if err != nil && !tt.wantErr {
+				t.Skipf("Skipping FlixHQ upstream search test due to source/network instability: %v", err)
 			}
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SearchMedia() error = %v, wantErr %v", err, tt.wantErr)
@@ -79,6 +82,8 @@ func TestFlixHQClient_SearchMedia(t *testing.T) {
 }
 
 func TestFlixHQClient_MediaTypeDetection(t *testing.T) {
+	testenv.RequireLiveNetwork(t)
+
 	client := NewFlixHQClient()
 
 	// Search for something that should return both movies and TV shows

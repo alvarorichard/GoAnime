@@ -1,10 +1,10 @@
 package appflow
 
 import (
-	"os"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/testutil/testenv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -38,12 +38,8 @@ func TestGetAnimeEpisodesLegacy_EmptyResult(t *testing.T) {
 // TestSearchAnime_InvalidName verifies that SearchAnime returns an error
 // instead of fataling when the search fails.
 func TestSearchAnime_InvalidName(t *testing.T) {
-	// SearchAnime may open an interactive fuzzy finder (tcell-based TUI) if
-	// results are returned. On CI there is no TTY, so tcell panics (Windows)
-	// or hangs waiting for terminal input.
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping interactive fuzzy-finder test in CI (no TTY available)")
-	}
+	testenv.RequireLiveNetwork(t)
+	testenv.RequireInteractiveTerminal(t)
 
 	anime, err := SearchAnime("zzzzz_nonexistent_anime_99999")
 
@@ -58,12 +54,8 @@ func TestSearchAnime_InvalidName(t *testing.T) {
 
 // TestSearchAnimeEnhanced_InvalidName verifies the enhanced search variant.
 func TestSearchAnimeEnhanced_InvalidName(t *testing.T) {
-	// SearchAnimeEnhanced may open an interactive fuzzy finder (tcell-based TUI)
-	// if results are returned. On CI there is no TTY, so tcell panics (Windows)
-	// or hangs waiting for terminal input.
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping interactive fuzzy-finder test in CI (no TTY available)")
-	}
+	testenv.RequireLiveNetwork(t)
+	testenv.RequireInteractiveTerminal(t)
 
 	anime, err := SearchAnimeEnhanced("zzzzz_nonexistent_anime_99999")
 
