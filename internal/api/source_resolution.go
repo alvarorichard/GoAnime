@@ -14,6 +14,7 @@ import (
 type SourceKind string
 
 const (
+	// SourceKind values identify the canonical media/source backends recognized by the API layer.
 	// SourceUnknown marks entries whose source could not be resolved safely.
 	SourceUnknown    SourceKind = "Unknown"
 	SourceAllAnime   SourceKind = "AllAnime"
