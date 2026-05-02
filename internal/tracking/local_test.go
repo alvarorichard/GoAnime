@@ -333,6 +333,8 @@ func TestLocalTracker_EpisodeSpecificKeys(t *testing.T) {
 }
 
 func TestGlobalTrackerSingletonLifecycle(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "global_tracker.db")
+
 	t.Cleanup(func() {
 		if err := CloseGlobalTracker(); err != nil {
 			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
@@ -341,8 +343,6 @@ func TestGlobalTrackerSingletonLifecycle(t *testing.T) {
 	if err := CloseGlobalTracker(); err != nil {
 		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
 	}
-
-	dbPath := filepath.Join(t.TempDir(), "global_tracker.db")
 
 	first := NewLocalTracker(dbPath)
 	if first == nil {
@@ -381,6 +381,8 @@ func TestGlobalTrackerSingletonLifecycle(t *testing.T) {
 }
 
 func TestGlobalTrackerConcurrentSingleton(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "concurrent_tracker.db")
+
 	t.Cleanup(func() {
 		if err := CloseGlobalTracker(); err != nil {
 			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
@@ -389,8 +391,6 @@ func TestGlobalTrackerConcurrentSingleton(t *testing.T) {
 	if err := CloseGlobalTracker(); err != nil {
 		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
 	}
-
-	dbPath := filepath.Join(t.TempDir(), "concurrent_tracker.db")
 
 	const workers = 8
 	results := make(chan *LocalTracker, workers)
@@ -427,6 +427,8 @@ func TestGlobalTrackerConcurrentSingleton(t *testing.T) {
 }
 
 func TestMigrateOldDataToMediaProgress(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migrate.db")
+
 	t.Cleanup(func() {
 		if err := CloseGlobalTracker(); err != nil {
 			t.Fatalf("CloseGlobalTracker() cleanup error: %v", err)
@@ -436,7 +438,6 @@ func TestMigrateOldDataToMediaProgress(t *testing.T) {
 		t.Fatalf("CloseGlobalTracker() setup error: %v", err)
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "migrate.db")
 	legacyDB, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("sql.Open() error: %v", err)
