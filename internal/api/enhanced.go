@@ -94,7 +94,7 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 	return breakdown
 }
 
-// Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
+// SearchAnimeEnhanced searches across the enhanced source set and returns the selected anime.
 func SearchAnimeEnhanced(name, source string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
 
@@ -267,7 +267,7 @@ func SearchAnimeEnhanced(name, source string) (*models.Anime, error) {
 	return selectedAnime, nil
 }
 
-// Enhanced episode fetching that works with different sources
+// GetAnimeEpisodesEnhanced fetches episodes using source-aware enhanced routing.
 func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	resolved, resolveErr := ResolveSource(anime)
 	if resolveErr != nil {
@@ -276,12 +276,12 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 	return getEpisodesByResolvedSource(anime, resolved)
 }
 
-// Enhanced episode URL fetching with improved source detection
+// GetEpisodeStreamURL resolves the episode stream URL with source-aware routing.
 func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	return getStreamURLByResolvedSource(anime, episode, quality)
 }
 
-// Enhanced download support
+// DownloadEpisodeEnhanced downloads a single episode through the enhanced API flow.
 func DownloadEpisodeEnhanced(anime *models.Anime, episodeNum int, quality string) error {
 	util.Debugf("Fetching episodes for %s...", anime.Name)
 
@@ -309,7 +309,7 @@ func DownloadEpisodeEnhanced(anime *models.Anime, episodeNum int, quality string
 		sanitizeFilename(anime.Name), episodeNum))
 }
 
-// Enhanced range download support
+// DownloadEpisodeRangeEnhanced downloads an episode range through the enhanced API flow.
 func DownloadEpisodeRangeEnhanced(anime *models.Anime, startEp, endEp int, quality string) error {
 	util.Debugf("Fetching episodes for %s...", anime.Name)
 
@@ -368,7 +368,7 @@ func downloadFromURL(_, _ string) error {
 	return fmt.Errorf("enhanced download not implemented - use legacy downloader")
 }
 
-// Legacy wrapper functions to maintain compatibility
+// SearchAnimeWithSource preserves the legacy wrapper entrypoint over SearchAnimeEnhanced.
 func SearchAnimeWithSource(name, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
 }
@@ -706,6 +706,7 @@ func extractMediaIDFromURL(urlStr string) string {
 	return ""
 }
 
+// GetAnimeEpisodesWithSource preserves the legacy wrapper entrypoint over GetAnimeEpisodesEnhanced.
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return GetAnimeEpisodesEnhanced(anime)
 }
