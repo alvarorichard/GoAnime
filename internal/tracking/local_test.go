@@ -4,6 +4,7 @@ package tracking
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -511,5 +512,24 @@ func TestMigrateOldDataToMediaProgress(t *testing.T) {
 	err = tracker.db.QueryRow(`SELECT COUNT(*) FROM anime_progress`).Scan(&count)
 	if err == nil {
 		t.Fatalf("expected legacy table anime_progress to be dropped, count query succeeded with %d", count)
+	}
+}
+
+func TestLocalTracker_DeleteAnime_Uninitialized(t *testing.T) {
+	var nilTracker *LocalTracker
+	if err := nilTracker.DeleteAnime(1, "missing"); !errors.Is(err, ErrTrackerNotInited) {
+		t.Fatalf("DeleteAnime(nil) error = %v, want %v", err, ErrTrackerNotInited)
+	}
+
+	emptyTracker := &LocalTracker{}
+	if err := emptyTracker.DeleteAnime(1, "missing"); !errors.Is(err, ErrTrackerNotInited) {
+		t.Fatalf("DeleteAnime(empty) error = %v, want %v", err, ErrTrackerNotInited)
+	}
+}
+
+func TestLocalTracker_Close_Uninitialized(t *testing.T) {
+	var nilTracker *LocalTracker
+	if err := nilTracker.Close(); !errors.Is(err, ErrTrackerNotInited) {
+		t.Fatalf("Close(nil) error = %v, want %v", err, ErrTrackerNotInited)
 	}
 }

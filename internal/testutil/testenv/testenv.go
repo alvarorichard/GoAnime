@@ -1,3 +1,5 @@
+// Package testenv provides helpers for opt-in tests that depend on
+// live network access or an interactive terminal.
 package testenv
 
 import (
