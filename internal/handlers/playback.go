@@ -4,7 +4,6 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -73,7 +72,7 @@ func HandlePlaybackMode(animeName string) {
 
 			episodesTimer := util.StartTimer("GetAnimeEpisodes")
 			episodes, epErr = appflow.GetAnimeEpisodes(anime)
-			if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
+			if epErr != nil {
 				util.Errorf("Failed to get episodes: %v", epErr)
 			}
 			episodesTimer.Stop()
@@ -95,7 +94,7 @@ func HandlePlaybackMode(animeName string) {
 				defer wg.Done()
 				episodesTimer := util.StartTimer("GetAnimeEpisodes")
 				episodes, epErr = appflow.GetAnimeEpisodes(anime)
-				if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
+				if epErr != nil {
 					util.Errorf("Failed to get episodes: %v", epErr)
 				}
 				episodesTimer.Stop()
@@ -103,14 +102,6 @@ func HandlePlaybackMode(animeName string) {
 
 			wg.Wait()
 			parallelTimer.Stop()
-		}
-
-		// User aborted season selection (FlixHQ/SuperFlix ESC) — go back to a
-		// fresh search prompt instead of killing the session.
-		if errors.Is(epErr, api.ErrBackToSearch) {
-			util.Infof("Going back to new search...")
-			currentAnimeName = ""
-			continue
 		}
 
 		if epErr != nil {

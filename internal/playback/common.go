@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -10,11 +9,50 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+var (
+	playbackGetEpisodeData                = api.GetEpisodeData
+	playbackGetVideoURLForEpisodeEnhanced = player.GetVideoURLForEpisodeEnhanced
+	playbackHandleDownloadAndPlay         = func(
+		videoURL string,
+		episodes []models.Episode,
+		selectedEpisodeNum int,
+		animeURL string,
+		episodeNumberStr string,
+		animeMalID int,
+		updater *discord.RichPresenceUpdater,
+		animeName string,
+		animeSeason int,
+	) error {
+		return player.HandleDownloadAndPlay(
+			videoURL,
+			episodes,
+			selectedEpisodeNum,
+			animeURL,
+			episodeNumberStr,
+			animeMalID,
+			0,
+			updater,
+			animeName,
+			animeSeason,
+			nil,
+		)
+	}
+	playbackSetExactMediaType = player.SetExactMediaType
+	playbackRunLoadingAction  = func(action func()) {
+		_ = spinner.New().
+			Title("Loading episode...").
+			Type(spinner.Dots).
+			Action(action).
+			Run()
+	}
 )
 
 func PlayEpisode(
@@ -63,39 +101,31 @@ func PlayEpisode(
 		}
 	}
 
-	// Fetch episode metadata and stream URL in parallel.
-	//
-	// 2026-04-28: removed the huh/v2 Bubble Tea spinner that previously
-	// wrapped this block. GetVideoURLForEpisodeEnhanced may invoke a
-	// tcell-based fuzzyfinder quality picker (AnimeFire's multi-quality
-	// response). The Bubble Tea spinner and tcell racing for stdin/stdout
-	// caused two user-visible bugs: arrow keys needed multiple presses to
-	// register (input contention) and the spinner's redraw clipped the
-	// first character of the picker's prompt ("S" of "Select"). A static
-	// log line is the smaller evil — animation is a nice-to-have, the
-	// picker working is not.
-	util.Infof("Loading episode...")
-
+	// Fetch episode metadata and stream URL in parallel under a single spinner
+	// GetEpisodeData (Jikan/AniList metadata) and GetVideoURLForEpisodeEnhanced (scraper)
+	// are independent operations — running them concurrently saves a full round-trip
 	var videoURL string
 	var videoErr error
-	currentEpisodeCopy := currentEpisode
+	currentEpisodeCopy := currentEpisode // capture for goroutine
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	playbackRunLoadingAction(func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
 
-	go func() {
-		defer wg.Done()
-		if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-			util.Debugf("Error fetching episode data: %v", err)
-		}
-	}()
+		go func() {
+			defer wg.Done()
+			if err := playbackGetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
+				util.Debugf("Error fetching episode data: %v", err)
+			}
+		}()
 
-	go func() {
-		defer wg.Done()
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
-	}()
+		go func() {
+			defer wg.Done()
+			videoURL, videoErr = playbackGetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
+		}()
 
-	wg.Wait()
+		wg.Wait()
+	})
 
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
@@ -116,47 +146,18 @@ func PlayEpisode(
 	updater := createUpdater(anime, isPaused, animeMutex, episodeDuration, discordEnabled)
 
 	// Route downloads to the correct directory (anime/ vs movies/) using exact media type
-	player.SetExactMediaType(string(anime.MediaType))
+	playbackSetExactMediaType(string(anime.MediaType))
 
-	// Store external IDs for Plex/Jellyfin-compatible folder naming
-	player.SetMediaMeta(&util.MediaMeta{
-		OfficialTitle: anime.OfficialTitle(),
-		Year:          anime.Year,
-		TMDBID:        anime.TMDBID,
-		IMDBID:        anime.IMDBID,
-		AnilistID:     anime.AnilistID,
-		MalID:         anime.MalID,
-	})
-
-	// Enrich anime with AniList metadata for per-episode season resolution.
-	// This populates the season map so episodes like Black Clover ep 52 go to
-	// Season 02 instead of Season 01.
-	enricher := metadata.NewEnricher()
-	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
-	player.SetSeasonMap(seasonMap)
-
-	// Update metadata after enrichment (AniList may have populated IDs)
-	player.SetMediaMeta(&util.MediaMeta{
-		OfficialTitle: anime.OfficialTitle(),
-		Year:          anime.Year,
-		TMDBID:        anime.TMDBID,
-		IMDBID:        anime.IMDBID,
-		AnilistID:     anime.AnilistID,
-		MalID:         anime.MalID,
-	})
-
-	playErr := player.HandleDownloadAndPlay(
+	playErr := playbackHandleDownloadAndPlay(
 		videoURL,
 		episodes,
 		episodeNum,
 		anime.URL,
 		episodeNumberStr,
 		anime.MalID,
-		anime.AnilistID,
 		updater,
 		anime.Name,
 		anime.CurrentSeason,
-		anime,
 	)
 
 	if updater != nil {

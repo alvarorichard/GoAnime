@@ -6,6 +6,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/term"
 )
 
 // TestSelectEpisodeWithFuzzy_EmptyList verifies that passing an empty episode
@@ -21,10 +22,9 @@ func TestSelectEpisodeWithFuzzy_EmptyList(t *testing.T) {
 // episode number returns an error instead of fataling.
 func TestFindEpisodeByNumber_NotFound(t *testing.T) {
 	// This test falls back to SelectEpisodeWithFuzzy which opens an interactive
-	// fuzzy finder (tcell-based TUI). On CI there is no TTY, so the fuzzy finder
-	// either panics (Windows) or hangs indefinitely waiting for terminal input.
-	if os.Getenv("CI") != "" {
-		t.Skip("Skipping interactive fuzzy-finder test in CI (no TTY available)")
+	// fuzzy finder. Keep it opt-in so local and CI runs stay hermetic by default.
+	if os.Getenv("GOANIME_INTERACTIVE_TESTS") != "1" || !term.IsTerminal(int(os.Stdout.Fd())) {
+		t.Skip("Skipping interactive fuzzy-finder test without GOANIME_INTERACTIVE_TESTS=1 and a real TTY")
 	}
 
 	episodes := []models.Episode{

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -38,10 +39,14 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		var videoURL string
 		var videoErr error
 
-		// Use static log instead of spinner while fetching video URL
-		// to avoid terminal UI contention if a quality picker opens.
-		util.Infof("Loading video stream...")
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
+		// Use spinner while fetching video URL
+		_ = spinner.New().
+			Title("Loading video stream...").
+			Type(spinner.Dots).
+			Action(func() {
+				videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
+			}).
+			Run()
 
 		if videoErr != nil {
 			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(videoErr))
@@ -55,28 +60,16 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		// Route downloads to the correct directory (anime/ vs movies/) using exact media type
 		player.SetExactMediaType(string(anime.MediaType))
 
-		// Store external IDs for Plex/Jellyfin-compatible folder naming
-		player.SetMediaMeta(&util.MediaMeta{
-			OfficialTitle: anime.OfficialTitle(),
-			Year:          anime.Year,
-			TMDBID:        anime.TMDBID,
-			IMDBID:        anime.IMDBID,
-			AnilistID:     anime.AnilistID,
-			MalID:         anime.MalID,
-		})
-
-		playErr := player.HandleDownloadAndPlay(
+		playErr := playbackHandleDownloadAndPlay(
 			videoURL,
 			episodes,
 			1,
 			anime.URL,
 			episodes[0].Number,
 			anime.MalID,
-			anime.AnilistID,
 			updater,
 			anime.Name,
 			anime.CurrentSeason,
-			anime,
 		)
 
 		if updater != nil {

@@ -14,9 +14,30 @@ import (
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
+type mediaCatalog interface {
+	SearchAnimeOnly(query string) ([]*models.Anime, error)
+	SearchMoviesAndTV(query string) ([]*scraper.FlixHQMedia, error)
+	SearchAll(query string) ([]*models.Anime, error)
+	GetTVSeasons(mediaID string) ([]scraper.FlixHQSeason, error)
+	GetTVEpisodes(seasonID string) ([]scraper.FlixHQEpisode, error)
+	GetMovieStreamInfo(mediaID, provider, quality, subsLanguage string) (*scraper.FlixHQStreamInfo, error)
+	GetTVEpisodeStreamInfo(dataID, provider, quality, subsLanguage string) (*scraper.FlixHQStreamInfo, error)
+	GetStreamWithQuality(episodeID string, isMovie bool, quality scraper.Quality, subsLanguage string) (*scraper.FlixHQStreamInfo, error)
+	GetStreamWithQualityWithContext(ctx context.Context, episodeID string, isMovie bool, quality scraper.Quality, subsLanguage string) (*scraper.FlixHQStreamInfo, error)
+	GetAvailableQualities(episodeID string, isMovie bool) ([]scraper.Quality, error)
+	GetAnimeStreamURL(anime *models.Anime, episodeNum string, quality, mode string) (string, map[string]string, error)
+	GetMovieQualities(mediaID string) ([]scraper.QualityOption, error)
+	GetMovieStreamWithQuality(mediaID string, quality scraper.Quality, subsLanguage string) (*scraper.FlixHQStreamInfo, error)
+	GetEpisodeQualities(dataID string) ([]scraper.QualityOption, error)
+}
+
+var newMediaCatalog = func() mediaCatalog {
+	return scraper.NewMediaManager()
+}
+
 // MediaHandler handles media selection and playback operations
 type MediaHandler struct {
-	mediaManager *scraper.MediaManager
+	mediaManager mediaCatalog
 	provider     string
 	quality      scraper.Quality
 	subsLanguage string
@@ -25,7 +46,7 @@ type MediaHandler struct {
 // NewMediaHandler creates a new MediaHandler
 func NewMediaHandler() *MediaHandler {
 	return &MediaHandler{
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: newMediaCatalog(),
 		provider:     "Vidcloud",
 		quality:      scraper.Quality1080,
 		subsLanguage: "english",
@@ -244,7 +265,7 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 		prompt := huh.NewInput().
 			Title("Search").
 			Value(&searchQuery)
-		if err := tui.RunClean(prompt.Run); err != nil {
+		if err := prompt.Run(); err != nil {
 			return nil, err
 		}
 		query = searchQuery
@@ -382,7 +403,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 			return nil
 		})
 
-	if err := tui.RunClean(prompt.Run); err != nil {
+	if err := prompt.Run(); err != nil {
 		return nil, err
 	}
 	if episodeNum == "" {

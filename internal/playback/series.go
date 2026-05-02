@@ -11,8 +11,18 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+var (
+	seriesSelectEpisodeWithFuzzyFinder = player.SelectEpisodeWithFuzzyFinder
+	seriesExtractEpisodeNumber         = player.ExtractEpisodeNumber
+	seriesSelectEpisodeWithFuzzy       = SelectEpisodeWithFuzzy
+	seriesFindEpisodeByNumber          = FindEpisodeByNumber
+	seriesIsAllAnimeSource             = isAllAnimeSource
+	seriesHandleAllAnimeNavigation     = handleAllAnimeNavigation
+	seriesCheckIsSeries                = api.IsSeries
+	seriesCheckIsSeriesEnhanced        = api.IsSeriesEnhanced
 )
 
 // printEpisodeNotFoundMsg prints a user-friendly warning when the selected
@@ -22,7 +32,6 @@ func printEpisodeNotFoundMsg() {
 }
 
 func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
-	tui.ResetTerminal()
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
 	} else {
@@ -205,7 +214,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
 	util.Debugf("[TRACE] SelectInitialEpisode: calling SelectEpisodeWithFuzzyFinder with %d episodes", len(episodes))
-	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+	selectedEpisodeURL, episodeNumberStr, err := seriesSelectEpisodeWithFuzzyFinder(episodes)
 	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", selectedEpisodeURL, episodeNumberStr, err)
 	if err != nil {
 		// Propagate back request error
@@ -214,7 +223,7 @@ func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error
 		}
 		return "", "", 0, err
 	}
-	selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+	selectedEpisodeNum, err := strconv.Atoi(seriesExtractEpisodeNumber(episodeNumberStr))
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -228,13 +237,13 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 
 	switch input {
 	case "e":
-		url, numStr, epNum, err = SelectEpisodeWithFuzzy(episodes)
+		url, numStr, epNum, err = seriesSelectEpisodeWithFuzzy(episodes)
 	case "p":
 		newNum := max(currentNum-1, 1)
-		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
+		url, numStr, epNum, err = seriesFindEpisodeByNumber(episodes, newNum)
 	default: // 'n' or default
 		newNum := min(currentNum+1, totalEpisodes)
-		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
+		url, numStr, epNum, err = seriesFindEpisodeByNumber(episodes, newNum)
 	}
 	if err != nil {
 		log.Printf("Navigation error: %v", err)
@@ -246,8 +255,8 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 // Enhanced navigation handler that supports AllAnime-specific navigation
 func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
 	// Check if this is an AllAnime source and use enhanced navigation
-	if isAllAnimeSource(anime) {
-		return handleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
+	if seriesIsAllAnimeSource(anime) {
+		return seriesHandleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
 	}
 
 	// Fallback to regular navigation for other sources
@@ -272,7 +281,7 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 
 	switch input {
 	case "e":
-		url, numStr, epNum, err := SelectEpisodeWithFuzzy(episodes)
+		url, numStr, epNum, err := seriesSelectEpisodeWithFuzzy(episodes)
 		if err != nil {
 			log.Printf("Episode selection error: %v", err)
 			return "", "", currentNum
@@ -300,7 +309,7 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 }
 
 func CheckIfSeries(url string) (bool, int) {
-	series, totalEpisodes, err := api.IsSeries(url)
+	series, totalEpisodes, err := seriesCheckIsSeries(url)
 	if err != nil {
 		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
 		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
@@ -311,7 +320,7 @@ func CheckIfSeries(url string) (bool, int) {
 
 // CheckIfSeriesEnhanced checks if anime is a series using enhanced API
 func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
-	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
+	series, totalEpisodes, err := seriesCheckIsSeriesEnhanced(anime)
 	if err != nil {
 		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
 		return false, 1
@@ -337,7 +346,7 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 				return nil
 			})
 
-		if err := tui.RunClean(prompt.Run); err != nil {
+		if err := prompt.Run(); err != nil {
 			return nil, nil, err
 		}
 

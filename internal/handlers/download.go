@@ -7,16 +7,22 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+var (
+	handleDownloadInitLogger     = util.InitLogger
+	handleDownloadRequestFn      = download.HandleDownloadRequest
+	handleMovieDownloadRequestFn = download.HandleMovieDownloadRequest
+)
+
 // HandleDownloadRequest processes download requests
 func HandleDownloadRequest() error {
 	// Initialize logger for download process
-	util.InitLogger()
+	handleDownloadInitLogger()
 
 	if util.GlobalDownloadRequest == nil {
 		return fmt.Errorf("download request is nil")
 	}
 
-	if err := download.HandleDownloadRequest(util.GlobalDownloadRequest); err != nil {
+	if err := handleDownloadRequestFn(util.GlobalDownloadRequest); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 	return nil
@@ -25,13 +31,13 @@ func HandleDownloadRequest() error {
 // HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ/SFlix
 func HandleMovieDownloadRequest() error {
 	// Initialize logger for download process
-	util.InitLogger()
+	handleDownloadInitLogger()
 
 	if util.GlobalDownloadRequest == nil {
 		return fmt.Errorf("movie download request is nil")
 	}
 
-	if err := download.HandleMovieDownloadRequest(util.GlobalDownloadRequest); err != nil {
+	if err := handleMovieDownloadRequestFn(util.GlobalDownloadRequest); err != nil {
 		return fmt.Errorf("movie download failed: %w", err)
 	}
 	return nil
