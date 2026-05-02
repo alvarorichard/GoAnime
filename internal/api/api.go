@@ -138,6 +138,7 @@ func SafeTransport(timeout time.Duration) *http.Transport {
 		},
 		// Set the timeout for the TLS handshake process.
 		TLSHandshakeTimeout: timeout,
+		TLSClientConfig:     tlsConfig,
 		// Connection pooling for better performance on repeated requests
 		MaxIdleConns:        200,
 		MaxIdleConnsPerHost: 25,
