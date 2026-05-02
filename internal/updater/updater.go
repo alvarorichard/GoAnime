@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/version"
 )
@@ -26,6 +25,13 @@ const (
 	GitHubOwner = "alvarorichard"
 	GitHubRepo  = "GoAnime"
 	GitHubAPI   = "https://api.github.com/repos/" + GitHubOwner + "/" + GitHubRepo
+)
+
+var (
+	updaterLatestReleaseURL = GitHubAPI + "/releases/latest"
+	updaterHTTPClient       = func(timeout time.Duration) *http.Client {
+		return &http.Client{Timeout: timeout}
+	}
 )
 
 // GitHubRelease represents a GitHub release
@@ -41,16 +47,9 @@ type GitHubRelease struct {
 
 // CheckForUpdates checks if a new version is available on GitHub
 func CheckForUpdates() (*GitHubRelease, bool, error) {
-	return checkForUpdatesFromURL(GitHubAPI+"/releases/latest", version.Version)
-}
-
-// checkForUpdatesFromURL is the internal implementation that accepts a custom
-// API URL and current version string. This enables testing the full update
-// check flow with a mock HTTP server.
-func checkForUpdatesFromURL(apiURL, currentVer string) (*GitHubRelease, bool, error) {
 	// Get latest release from GitHub API
-	httpClient := &http.Client{Timeout: 60 * time.Second}
-	resp, err := httpClient.Get(apiURL) // #nosec G107 -- URL is validated by caller or is a constant trusted GitHub API endpoint
+	httpClient := updaterHTTPClient(60 * time.Second)
+	resp, err := httpClient.Get(updaterLatestReleaseURL) // #nosec G107 -- URL is a constant trusted GitHub API endpoint
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to fetch latest release: %w", err)
 	}
@@ -70,9 +69,9 @@ func checkForUpdatesFromURL(apiURL, currentVer string) (*GitHubRelease, bool, er
 		return nil, false, fmt.Errorf("failed to decode release data: %w", err)
 	}
 
-	// Compare versions - strip "v" prefix from both to normalize
-	currentVersion := strings.TrimPrefix(currentVer, "v")
-	latestVersion := strings.TrimPrefix(release.TagName, "v")
+	// Compare versions
+	currentVersion := normalizeVersion(version.Version)
+	latestVersion := normalizeVersion(release.TagName)
 
 	isNewer, err := isVersionNewer(latestVersion, currentVersion)
 	if err != nil {
@@ -90,7 +89,7 @@ func PerformUpdate(release *GitHubRelease) error {
 		return err
 	}
 
-	util.Infof("Downloading update: %s", assetName)
+	util.Info("Downloading update:", assetName)
 
 	// Download the asset
 	tempFile, err := downloadAsset(assetURL, assetName)
@@ -103,21 +102,11 @@ func PerformUpdate(release *GitHubRelease) error {
 		}
 	}()
 
-	updateFile := tempFile
-	cleanupUpdateFile := func() {}
-
-	if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(assetName), ".zip") {
-		util.Info("Extracting executable from Windows zip package...")
-
-		extractedExe, cleanup, extractErr := extractExecutableFromZipAsset(tempFile)
-		if extractErr != nil {
-			return fmt.Errorf("failed to extract executable from update package: %w", extractErr)
-		}
-
-		updateFile = extractedExe
-		cleanupUpdateFile = cleanup
+	installFile, cleanupInstallFile, err := prepareDownloadedAsset(tempFile, assetName)
+	if err != nil {
+		return fmt.Errorf("failed to prepare downloaded asset: %w", err)
 	}
-	defer cleanupUpdateFile()
+	defer cleanupInstallFile()
 
 	// Get current executable path
 	currentExe, err := os.Executable()
@@ -137,7 +126,7 @@ func PerformUpdate(release *GitHubRelease) error {
 	}()
 
 	// Replace current executable
-	if err := replaceExecutable(currentExe, updateFile); err != nil {
+	if err := replaceExecutable(currentExe, installFile); err != nil {
 		// Try to restore backup if replacement fails
 		if _, backupErr := os.Stat(backupFile); backupErr == nil {
 			if restoreErr := copyFile(backupFile, currentExe); restoreErr != nil {
@@ -159,130 +148,6 @@ func PerformUpdate(release *GitHubRelease) error {
 
 	util.Info("Update completed successfully! Please restart the application.")
 	return nil
-}
-
-func extractExecutableFromZipAsset(zipPath string) (string, func(), error) {
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to open zip file: %w", err)
-	}
-	defer func() {
-		if closeErr := reader.Close(); closeErr != nil {
-			util.Debug("Failed to close zip reader:", closeErr)
-		}
-	}()
-
-	isPortableExe := func(name string) bool {
-		lower := strings.ToLower(name)
-		if !strings.HasSuffix(lower, ".exe") {
-			return false
-		}
-		if strings.Contains(lower, "installer") {
-			return false
-		}
-		return strings.HasPrefix(lower, "goanime")
-	}
-
-	isFallbackExe := func(name string) bool {
-		lower := strings.ToLower(name)
-		return strings.HasSuffix(lower, ".exe") && !strings.Contains(lower, "installer")
-	}
-
-	var selected *zip.File
-	for _, f := range reader.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-
-		entryName := filepath.Base(f.Name)
-		if isPortableExe(entryName) {
-			selected = f
-			break
-		}
-	}
-
-	if selected == nil {
-		for _, f := range reader.File {
-			if f.FileInfo().IsDir() {
-				continue
-			}
-
-			entryName := filepath.Base(f.Name)
-			if isFallbackExe(entryName) {
-				selected = f
-				break
-			}
-		}
-	}
-
-	if selected == nil {
-		return "", nil, fmt.Errorf("no portable executable found in zip asset")
-	}
-
-	tempDir, err := os.MkdirTemp("", "goanime-update-extract-")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create extraction directory: %w", err)
-	}
-
-	cleanup := func() {
-		if removeErr := os.RemoveAll(tempDir); removeErr != nil {
-			util.Debug("Failed to remove extraction directory:", removeErr)
-		}
-	}
-
-	entryReader, err := selected.Open()
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to open executable entry: %w", err)
-	}
-	defer func() {
-		if closeErr := entryReader.Close(); closeErr != nil {
-			util.Debug("Failed to close zip entry reader:", closeErr)
-		}
-	}()
-
-	exeName := filepath.Base(selected.Name)
-	if exeName == "" || exeName == "." || exeName == ".." || strings.ContainsAny(exeName, `/\`) {
-		cleanup()
-		return "", nil, fmt.Errorf("invalid executable name in zip: %q", exeName)
-	}
-
-	// Use os.Root to scope file creation under tempDir, preventing any path traversal.
-	root, err := os.OpenRoot(tempDir)
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to open extraction root: %w", err)
-	}
-	defer func() {
-		if closeErr := root.Close(); closeErr != nil {
-			util.Debug("Failed to close extraction root:", closeErr)
-		}
-	}()
-
-	outFile, err := root.Create(exeName)
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to create extracted executable: %w", err)
-	}
-
-	// Limit copy to 512 MiB to prevent zip-bomb DoS.
-	const maxUpdateSize = 512 << 20
-	if _, err := io.Copy(outFile, io.LimitReader(entryReader, maxUpdateSize)); err != nil {
-		if closeErr := outFile.Close(); closeErr != nil {
-			util.Debug("Failed to close extracted executable after copy error:", closeErr)
-		}
-		cleanup()
-		return "", nil, fmt.Errorf("failed to extract executable: %w", err)
-	}
-
-	extractedPath := filepath.Join(tempDir, exeName)
-
-	if closeErr := outFile.Close(); closeErr != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to close extracted executable: %w", closeErr)
-	}
-
-	return extractedPath, cleanup, nil
 }
 
 // PromptForUpdate shows an interactive prompt asking user if they want to update
@@ -307,7 +172,7 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 		),
 	)
 
-	if err := tui.RunClean(form.Run); err != nil {
+	if err := form.Run(); err != nil {
 		return false, fmt.Errorf("failed to show update prompt: %w", err)
 	}
 
@@ -316,6 +181,8 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 
 // CheckAndPromptUpdate is a convenience function that checks for updates and prompts user
 func CheckAndPromptUpdate() error {
+	util.Info("Checking for updates...")
+
 	release, hasUpdate, err := CheckForUpdates()
 	if err != nil {
 		return fmt.Errorf("failed to check for updates: %w", err)
@@ -357,10 +224,6 @@ func CheckForUpdatesQuietly() {
 // Helper functions
 
 func isVersionNewer(latest, current string) (bool, error) {
-	// Normalize: strip any "v" prefix that might have been left
-	latest = strings.TrimPrefix(latest, "v")
-	current = strings.TrimPrefix(current, "v")
-
 	latestParts := strings.Split(latest, ".")
 	currentParts := strings.Split(current, ".")
 
@@ -553,7 +416,7 @@ func downloadAssetWithTestFlag(url, filename string, allowTestMode bool) (string
 	}
 
 	// #nosec G107 - URL is validated above to ensure it's from trusted GitHub domains
-	resp, err := http.Get(url)
+	resp, err := updaterHTTPClient(60 * time.Second).Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -717,6 +580,136 @@ func truncateText(text string, maxLen int) string {
 		return text
 	}
 	return text[:maxLen] + "..."
+}
+
+func normalizeVersion(raw string) string {
+	normalized := strings.TrimSpace(raw)
+	normalized = strings.TrimPrefix(normalized, "v")
+	normalized = strings.TrimPrefix(normalized, "V")
+
+	if idx := strings.IndexAny(normalized, "+-"); idx >= 0 {
+		normalized = normalized[:idx]
+	}
+
+	return normalized
+}
+
+func prepareDownloadedAsset(assetPath, assetName string) (string, func(), error) {
+	cleanup := func() {}
+
+	if !strings.EqualFold(filepath.Ext(assetName), ".zip") &&
+		!strings.EqualFold(filepath.Ext(assetPath), ".zip") {
+		return assetPath, cleanup, nil
+	}
+
+	extractedPath, extractCleanup, err := extractExecutableFromZip(assetPath)
+	if err != nil {
+		return "", cleanup, err
+	}
+
+	return extractedPath, extractCleanup, nil
+}
+
+func extractExecutableFromZip(zipPath string) (string, func(), error) {
+	cleanup := func() {}
+
+	if err := validateFilePath(zipPath); err != nil {
+		return "", cleanup, fmt.Errorf("zip path validation failed: %w", err)
+	}
+
+	archiveReader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", cleanup, fmt.Errorf("failed to open zip archive: %w", err)
+	}
+	defer func() {
+		if closeErr := archiveReader.Close(); closeErr != nil {
+			util.Debug("Failed to close zip archive:", closeErr)
+		}
+	}()
+
+	exeFile, err := findExecutableInZip(archiveReader.File)
+	if err != nil {
+		return "", cleanup, err
+	}
+
+	tempDir, err := os.MkdirTemp("", "goanime-update-extract-")
+	if err != nil {
+		return "", cleanup, fmt.Errorf("failed to create extraction directory: %w", err)
+	}
+
+	cleanup = func() {
+		if removeErr := os.RemoveAll(tempDir); removeErr != nil {
+			util.Debug("Failed to remove extracted asset directory:", removeErr)
+		}
+	}
+
+	extractedPath := filepath.Join(tempDir, filepath.Base(exeFile.Name))
+	if err := validateFilePath(extractedPath); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("extracted file path validation failed: %w", err)
+	}
+
+	reader, err := exeFile.Open()
+	if err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to open executable from archive: %w", err)
+	}
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			util.Debug("Failed to close extracted executable reader:", closeErr)
+		}
+	}()
+
+	outFile, err := os.OpenFile(extractedPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+	if err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to create extracted executable: %w", err)
+	}
+	defer func() {
+		if closeErr := outFile.Close(); closeErr != nil {
+			util.Debug("Failed to close extracted executable:", closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(outFile, reader); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to extract executable from archive: %w", err)
+	}
+
+	util.Info("Extracted executable from update archive:", filepath.Base(extractedPath))
+	return extractedPath, cleanup, nil
+}
+
+func findExecutableInZip(files []*zip.File) (*zip.File, error) {
+	preferredNames := []string{
+		"goanime.exe",
+		"goanime-windows-amd64.exe",
+		"goanime-windows-386.exe",
+	}
+
+	for _, preferredName := range preferredNames {
+		for _, file := range files {
+			if file.FileInfo().IsDir() {
+				continue
+			}
+
+			if strings.EqualFold(filepath.Base(file.Name), preferredName) {
+				return file, nil
+			}
+		}
+	}
+
+	for _, file := range files {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+
+		if strings.EqualFold(filepath.Ext(file.Name), ".exe") {
+			return file, nil
+		}
+	}
+
+	return nil, fmt.Errorf("zip archive does not contain a GoAnime executable")
 }
 
 // createWindowsUpdateScript creates a batch script to replace the executable

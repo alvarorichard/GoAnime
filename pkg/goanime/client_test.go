@@ -2,6 +2,7 @@ package goanime_test
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/pkg/goanime"
@@ -94,8 +95,8 @@ func TestParseSource(t *testing.T) {
 
 // Integration test - requires network access
 func TestSearchAnime_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
+	if testing.Short() || os.Getenv("GOANIME_LIVE_TESTS") != "1" {
+		t.Skip("Skipping live integration test; run without -short and set GOANIME_LIVE_TESTS=1 to enable it")
 	}
 
 	client := goanime.NewClient()
@@ -128,8 +129,8 @@ func TestSearchAnime_Integration(t *testing.T) {
 
 // Integration test for specific source
 func TestSearchAnimeSpecificSource_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
+	if testing.Short() || os.Getenv("GOANIME_LIVE_TESTS") != "1" {
+		t.Skip("Skipping live integration test; run without -short and set GOANIME_LIVE_TESTS=1 to enable it")
 	}
 
 	client := goanime.NewClient()

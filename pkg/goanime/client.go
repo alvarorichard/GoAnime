@@ -3,13 +3,19 @@
 package goanime
 
 import (
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/pkg/goanime/types"
 )
 
+type scraperManager interface {
+	SearchAnime(query string, scraperType *scraper.ScraperType) ([]*models.Anime, error)
+	GetScraper(scraperType scraper.ScraperType) (scraper.UnifiedScraper, error)
+}
+
 // Client is the main client for interacting with anime sources
 type Client struct {
-	manager *scraper.ScraperManager
+	manager scraperManager
 }
 
 // NewClient creates a new GoAnime client with all available scrapers

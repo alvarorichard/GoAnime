@@ -16,6 +16,20 @@ import (
 	"golang.org/x/term"
 )
 
+var (
+	mainInitTrackerAsync           = player.InitTrackerAsync
+	mainPreWarmMPVPath             = player.PreWarmMPVPath
+	mainPreWarmClients             = util.PreWarmClients
+	mainPreWarmConnections         = util.PreWarmConnections
+	mainPreWarmScraperManager      = scraper.PreWarmScraperManager
+	mainHandleUpdateRequest        = handlers.HandleUpdateRequest
+	mainHandleDownloadRequest      = handlers.HandleDownloadRequest
+	mainHandleMovieDownloadRequest = handlers.HandleMovieDownloadRequest
+	mainHandleUpscaleRequest       = handlers.HandleUpscaleRequest
+	mainHandlePlaybackMode         = handlers.HandlePlaybackMode
+	mainRunCleanup                 = util.RunCleanup
+)
+
 func main() {
 	// Save terminal state so we can restore it on exit.
 	// Libraries like promptui (readline) and go-fuzzyfinder (tcell) put the
@@ -49,34 +63,34 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		util.RunCleanup()
+		mainRunCleanup()
 		os.Exit(0)
 	}()
 
 	// Ensure cleanup runs on normal exit
-	defer util.RunCleanup()
+	defer mainRunCleanup()
 
 	// Start total execution timer
 	timer := util.StartTimer("TotalExecution")
 	defer timer.Stop()
 
 	// Initialize tracker early in background to avoid delays when playing movies
-	player.InitTrackerAsync()
+	mainInitTrackerAsync()
 
 	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
-	player.PreWarmMPVPath()
+	mainPreWarmMPVPath()
 
 	// Pre-initialize HTTP clients and scraper manager in background so the
 	// first search doesn't pay the Chrome TLS + scraper setup cost
-	util.PreWarmClients()
-	util.PreWarmConnections()
-	scraper.PreWarmScraperManager()
+	mainPreWarmClients()
+	mainPreWarmConnections()
+	mainPreWarmScraperManager()
 
 	animeName, err := util.FlagParser()
 	if err != nil {
 		// Check if error is update request
 		if err == util.ErrUpdateRequested {
-			if updateErr := handlers.HandleUpdateRequest(); updateErr != nil {
+			if updateErr := mainHandleUpdateRequest(); updateErr != nil {
 				log.Fatalln(util.ErrorHandler(updateErr))
 			}
 			return
@@ -84,21 +98,21 @@ func main() {
 		}
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
-			if downloadErr := handlers.HandleDownloadRequest(); downloadErr != nil {
+			if downloadErr := mainHandleDownloadRequest(); downloadErr != nil {
 				log.Fatalln(util.ErrorHandler(downloadErr))
 			}
 			return
 		}
 		// Check if error is movie download request (FlixHQ/SFlix)
 		if err == util.ErrMovieDownloadRequested {
-			if movieDownloadErr := handlers.HandleMovieDownloadRequest(); movieDownloadErr != nil {
+			if movieDownloadErr := mainHandleMovieDownloadRequest(); movieDownloadErr != nil {
 				log.Fatalln(util.ErrorHandler(movieDownloadErr))
 			}
 			return
 		}
 		// Check if error is upscale request
 		if err == util.ErrUpscaleRequested {
-			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {
+			if upscaleErr := mainHandleUpscaleRequest(); upscaleErr != nil {
 				log.Fatalln(util.ErrorHandler(upscaleErr))
 			}
 			return
@@ -111,5 +125,5 @@ func main() {
 	}
 
 	// Handle normal playback mode
-	handlers.HandlePlaybackMode(animeName)
+	mainHandlePlaybackMode(animeName)
 }

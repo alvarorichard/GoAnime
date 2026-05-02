@@ -3,19 +3,28 @@ package version
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/tracking"
 )
 
-// Version is set via -ldflags at build time by the CI workflow.
-// Fallback value is used for local development builds.
-var Version = "1.8.3"
-
-// BuildTime and Commit are injected by the CI workflow via -ldflags.
 var (
-	BuildTime = "unknown"
-	Commit    = "unknown"
+	Version   = "1.7"
+	BuildTime = ""
+	Commit    = ""
 )
+
+func DisplayVersion() string {
+	displayVersion := strings.TrimSpace(Version)
+	displayVersion = strings.TrimPrefix(displayVersion, "v")
+	displayVersion = strings.TrimPrefix(displayVersion, "V")
+
+	if displayVersion == "" {
+		return "unknown"
+	}
+
+	return displayVersion
+}
 
 func HasVersionArg() bool {
 	if len(os.Args) > 1 {
@@ -26,7 +35,7 @@ func HasVersionArg() bool {
 }
 
 func ShowVersion() {
-	fmt.Printf("GoAnime v%s", Version)
+	fmt.Printf("GoAnime v%s", DisplayVersion())
 	if tracking.IsCgoEnabled {
 		fmt.Println(" (with SQLite tracking)")
 	} else {
