@@ -301,6 +301,7 @@ var knownHosts = []string{
 }
 
 var preWarmOnce = &sync.Once{}
+var preWarmWG sync.WaitGroup
 
 // PreWarmConnections initiates background DNS resolution and TLS handshakes
 // for known API hosts. Call this early (e.g., at startup) so that by the time
@@ -309,7 +310,9 @@ func PreWarmConnections() {
 	preWarmOnce.Do(func() {
 		client := GetFastClient()
 		for _, host := range knownHosts {
+			preWarmWG.Add(1)
 			go func() {
+				defer preWarmWG.Done()
 				// GET request with short timeout — triggers full TCP+TLS handshake
 				// to populate the connection pool. HEAD may not establish full TLS.
 				req, err := http.NewRequest("GET", "https://"+host, nil)

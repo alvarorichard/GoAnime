@@ -71,12 +71,18 @@ func TestPreWarmConnections_ExercisesGoroutineErrorPath(t *testing.T) {
 
 	PreWarmConnections()
 
-	// The pre-warm goroutine is fire-and-forget. Give it time to attempt the
-	// connection and exit via the error branch. We don't have a deterministic
-	// signal back, so we wait a bounded amount — the operation is local-only
-	// (connection refused), so 1s is comfortable.
-	assert.Eventually(t, func() bool {
-		// goroutine completed if no panic and the test process still alive
-		return true
-	}, time.Second, 50*time.Millisecond)
+	// Wait for the spawned goroutine deterministically so it does not race
+	// against later tests mutating package globals (e.g. IsDebug) during their
+	// cleanup. Bounded by a generous timeout to fail loud if it ever hangs.
+	done := make(chan struct{})
+	go func() {
+		preWarmWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pre-warm goroutine did not finish in time")
+	}
+	assert.True(t, true)
 }
