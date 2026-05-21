@@ -12,6 +12,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// kitsuBaseURL is the Kitsu API root. It is a var so tests can point it at a
+// local httptest server.
+var kitsuBaseURL = "https://kitsu.io"
+
 // EpisodeDataProvider defines an interface for fetching episode data from various sources
 type EpisodeDataProvider interface {
 	Name() string
@@ -184,8 +188,8 @@ func (p *KitsuProvider) fetchByAnimeName(anime *models.Anime, episodeNo int) err
 	// Clean the anime name for search (remove source tags and dub indicators)
 	searchName := CleanTitle(anime.Name)
 
-	searchURL := fmt.Sprintf("https://kitsu.io/api/edge/anime?filter[text]=%s&page[limit]=1",
-		strings.ReplaceAll(searchName, " ", "%20"))
+	searchURL := fmt.Sprintf("%s/api/edge/anime?filter[text]=%s&page[limit]=1",
+		kitsuBaseURL, strings.ReplaceAll(searchName, " ", "%20"))
 
 	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
@@ -255,7 +259,7 @@ func (p *KitsuProvider) fetchByAnimeName(anime *models.Anime, episodeNo int) err
 
 func (p *KitsuProvider) fetchEpisodeByKitsuID(kitsuAnimeID string, episodeNo int, anime *models.Anime) error {
 	// Fetch episodes for this anime
-	url := fmt.Sprintf("https://kitsu.io/api/edge/anime/%s/episodes?filter[number]=%d", kitsuAnimeID, episodeNo)
+	url := fmt.Sprintf("%s/api/edge/anime/%s/episodes?filter[number]=%d", kitsuBaseURL, kitsuAnimeID, episodeNo)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -365,7 +369,7 @@ func getAniListIDFromMAL(malID int) (int, error) {
 
 // getKitsuAnimeID finds the Kitsu anime ID using the MyAnimeList ID
 func getKitsuAnimeID(malID int) (string, error) {
-	url := fmt.Sprintf("https://kitsu.io/api/edge/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d", malID)
+	url := fmt.Sprintf("%s/api/edge/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d", kitsuBaseURL, malID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

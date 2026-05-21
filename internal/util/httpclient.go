@@ -300,7 +300,7 @@ var knownHosts = []string{
 	"kitsu.io:443",
 }
 
-var preWarmOnce sync.Once
+var preWarmOnce = &sync.Once{}
 
 // PreWarmConnections initiates background DNS resolution and TLS handshakes
 // for known API hosts. Call this early (e.g., at startup) so that by the time

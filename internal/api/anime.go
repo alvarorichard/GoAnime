@@ -22,6 +22,10 @@ import (
 // Common HTTP client instance - reuse the shared singleton for connection pooling
 var httpClient = util.GetSharedClient()
 
+// jikanBaseURL is the Jikan (MyAnimeList unofficial) API root. It is a var so
+// tests can point it at a local httptest server.
+var jikanBaseURL = "https://api.jikan.moe/v4"
+
 // GetEpisodeData fetches episode data using multiple providers with fallback support.
 // It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.
 // This provides robust episode data retrieval even when primary APIs are unavailable.
@@ -32,7 +36,7 @@ func GetEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
 // GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
 func GetMovieData(animeID int, anime *models.Anime) error {
 
-	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+	url := fmt.Sprintf("%s/anime/%d", jikanBaseURL, animeID)
 
 	response, err := makeGetRequest(url, nil)
 	if err != nil {
@@ -148,7 +152,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 
 // Unified function to fetch anime data from Jikan API
 func FetchAnimeData(animeID int, episodeNo int, anime *models.Anime) error {
-	endpoint := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+	endpoint := fmt.Sprintf("%s/anime/%d", jikanBaseURL, animeID)
 	if episodeNo > 0 {
 		endpoint = fmt.Sprintf("%s/episodes/%d", endpoint, episodeNo)
 	}
