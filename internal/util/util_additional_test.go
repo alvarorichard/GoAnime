@@ -3,6 +3,7 @@ package util
 import (
 	"errors"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -149,22 +150,32 @@ func TestErrorHandler_NonDebugIncludesDebugHint(t *testing.T) {
 	assert.Contains(t, out, "--debug")
 }
 
-// TestHelper_DoesNotPanic — Helper writes a styled help block to stdout.
-// We redirect stdout to a pipe and verify the helper executes without panic
-// and writes at least one byte.
+// TestHelper_WritesToStdout — Helper writes a styled help block to stdout.
+// The pipe is drained concurrently to prevent the pipe-buffer deadlock on
+// Windows: ShowBeautifulHelp emits ~12 KB in one shot, which exceeds the
+// default 4 KB kernel pipe buffer and causes WriteFile to block forever if
+// the read end is only opened after the write returns.
 func TestHelper_WritesToStdout(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
+
 	orig := os.Stdout
 	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = orig })
+
+	ch := make(chan int64, 1)
+	go func() {
+		n, _ := io.Copy(io.Discard, r)
+		ch <- n
+	}()
 
 	Helper()
+
+	os.Stdout = orig
 	require.NoError(t, w.Close())
 
-	buf := make([]byte, 16384)
-	n, _ := r.Read(buf)
-	assert.Greater(t, n, 0, "Helper must produce output")
+	n := <-ch
+	r.Close()
+	assert.Greater(t, n, int64(0), "Helper must produce output")
 }
 
 // snapshotOsArgs captures and restores os.Args around a test.
@@ -199,13 +210,17 @@ func TestFlagParser_HelpFlagReturnsHelpRequested(t *testing.T) {
 	snapshotGlobalRequest(t)
 	os.Args = []string{"goanime", "--help"}
 
-	// Helper() writes to stdout — redirect to avoid pollution.
+	// Helper() → ShowBeautifulHelp writes ~12 KB to stdout in one shot.
+	// Without a concurrent drainer the pipe buffer fills and WriteFile
+	// blocks forever on Windows (same deadlock as TestHelper_WritesToStdout).
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
 	orig := os.Stdout
-	r, w, _ := os.Pipe()
 	os.Stdout = w
+	go func() { _, _ = io.Copy(io.Discard, r) }()
 	t.Cleanup(func() { os.Stdout = orig; _ = r.Close() })
 
-	_, err := FlagParser()
+	_, err = FlagParser()
 	_ = w.Close()
 	require.ErrorIs(t, err, ErrHelpRequested)
 }
@@ -299,6 +314,13 @@ func TestFlagParser_PerfFlagEnablesPerfAndDebug(t *testing.T) {
 // function returns (empty name, non-nil error) instead of hanging.
 // This is the only practical way to exercise the function without a real TTY.
 func TestGetUserInput_NoTTYReturnsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// On Windows, bubbletea uses ReadConsole (the native Windows console
+		// API) rather than reading from os.Stdin. Redirecting os.Stdin to
+		// os.DevNull has no effect — the form still blocks on the real console
+		// handle indefinitely, making the test hang instead of error.
+		t.Skip("Windows console API bypasses os.Stdin redirection; no-TTY error path not testable without process-level console detachment")
+	}
 	if os.Getenv("CI") == "" && os.Getenv("GOANIME_RUN_TTY_TESTS") == "1" {
 		t.Skip("explicit TTY mode requested by env — skipping non-TTY assertion")
 	}
@@ -405,6 +427,12 @@ func TestHandleDownloadModeWithSmart_SingleNumericArg(t *testing.T) {
 // handleDownloadModeWithSmart with non-numeric trailing arg falls through to
 // the interactive menu, which needs a TTY. Without one it returns an error.
 func TestHandleDownloadModeWithSmart_NoEpisodeNumberFallsThroughToMenu(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows bubbletea uses ReadConsole (raw console handle) instead of
+		// os.Stdin, so redirecting stdin to os.DevNull has no effect and the
+		// form blocks on the real console indefinitely.
+		t.Skip("Windows console API bypasses os.Stdin redirection; no-TTY error path not testable without process-level console detachment")
+	}
 	snapshotGlobalRequest(t)
 	devnull, err := os.Open(os.DevNull)
 	require.NoError(t, err)
