@@ -309,7 +309,7 @@ go tool cover -func=p15.out | tail -1  # Esperado: ≥ 62%
 
 ---
 
-## FASE 16 ⬜ — Playback + Handlers + Discord + Upscaler + Updater: 55 funções (TUI/IPC com refactor)
+## FASE 16 ✅ — Playback + Handlers + Discord + Upscaler + Updater: 55 funções (TUI/IPC com refactor) (2026-05-22)
 
 **Pacotes:**
 - `internal/playback/` (14 funcs) — TUI navigation
@@ -351,6 +351,23 @@ Lista completa em `.test_manifests/p16_tui_ipc.txt` e `TEST_PLAN_FUNCTIONS.md` (
 go test ./internal/playback/ ./internal/handlers/ ./internal/discord/ ./internal/upscaler/ ./internal/updater/ -count=1 -race -coverprofile=p16.out
 go tool cover -func=p16.out | awk '$NF == "0.0%"' | wc -l  # Esperado: ≤ 15
 ```
+
+**Sessão completa (2026-05-22)** — 55/55 funções com teste dedicado (CLAUDE.md regra #1). Combined p16 coverage 33.5% → **64.5%**. Refatorações aplicadas (vars injetáveis, sem quebra de API pública):
+
+| Pacote | Refactor | Cov antes → depois | Pendentes a 0% |
+|---|---|---|---|
+| `discord/` | `rpcClient` interface + `var newRPCClient` factory | 29.5% → **94.0%** | 0 |
+| `updater/` | `var releaseAPIURL`, `findAssetFn`, `downloadFn`, `osExecutableFn`, `replaceExecutableFn`, `runForm` | 53.4% → **72.2%** | 0 |
+| `upscaler/` | `var anime4kShaderURL`, `anime4kGANShaderBaseURL`, `shaderDirOverride` | 49.2% → **73.0%** | `Close` (empty body → cover tool quirk) |
+| `handlers/` | `mediaSource` interface + `runFormFn`/`findFn`/`findResultFn` hooks | 5.7% → **55.9%** | `HandlePlaybackMode` (real-network TUI loop) |
+| `playback/` | sem refactor; testes exercitam paths internos + symbol-pin TUI | 13.3% → **33.4%** | `GetUserInput`, `HandleMovie`, `HandleSeries`, `SelectInitialEpisode`, `ChangeAnimeLocal` |
+
+**Notas:**
+- IPC do Discord: stub via `rpcClient` interface; cobre Login/Logout/Start/Stop/updateDiscordPresence/getPrecisePlaybackState/buildPreciseTimestamps/FetchDuration sem socket real.
+- Updater: `runForm = tui.RunClean` substituível permite testar `PromptForUpdate` e `CheckAndPromptUpdate` sem TTY. `replaceExecutableFn` permite testar `PerformUpdate` sem mexer no binário do teste.
+- Upscaler: `extractFrames`/`encodeVideo` testados com `/usr/bin/true` como FFmpeg stub. `extractZip` + `InstallShaders` exercitados via httptest serve zip in-memory. `upscaleSingleFrame` testado com PNG tiny real (sem FFmpeg).
+- Handlers: `mediaSource` interface elimina rede em `SearchMedia`/`InteractiveMediaFlow`/`handleAnimePlayback`. `findFn`/`runFormFn` hooks substituem TUI por stubs determinísticos.
+- Playback: funções TUI puras (`HandleSeries`/`HandleMovie`/`ChangeAnimeLocal`/`GetUserInput`) ficam como symbol-pin — driveriam huh forms + tcell fuzzyfinder que requerem TTY real. `PlayEpisode` parcialmente coberto via path de erro (videoErr early return).
 
 ---
 
@@ -420,7 +437,7 @@ go tool cover -func=p17.out | tail -1  # Esperado: ≥ 70%
 | 13 | API Movie + Enhanced + Providers | ~100 | ✅ (2026-05-18) |
 | 14 | Handlers + Playback + Discord + Upscaler + Resto | ~120 | ✅ (2026-05-18) |
 | 15 | API + Util (57 funcs 0%) | +57 funcs / +600 stmts | ✅ (2026-05-21 — api 42.3%→63.6%, util 44.7%→75.8%, total 52.8%→56.8%) |
-| 16 | Playback + Handlers + Discord + Upscaler + Updater (55 funcs) | +55 funcs / +900 stmts | ⬜ (push 70%) |
+| 16 | Playback + Handlers + Discord + Upscaler + Updater (55 funcs) | +55 funcs / +900 stmts | ✅ (2026-05-22 — discord 29.5%→94.0%, handlers 5.7%→55.9%, playback 13.3%→33.4%, updater 53.4%→72.2%, upscaler 49.2%→73.0%, total 56.8%→61.5%, 0% funcs 112→64) |
 | 17 | Scraper + Providers + Downloader + SDK + Misc (53 funcs) | +53 funcs / +600 stmts | ⬜ (push 70%) |
 | **TOTAL** | | **~1148 funcs / ~+2100 stmts** | |
 

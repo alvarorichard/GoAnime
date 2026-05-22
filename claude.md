@@ -193,15 +193,15 @@ Meta: **≥ 70.0%** · **≤ 50 funções a 0%** (apenas TUI/IPC/main não-test�
 
 ---
 
-## STATUS ATUAL (2026-05-21)
+## STATUS ATUAL (2026-05-22)
 
-- ✅ FASES 1–15: completadas → **56.8% cobertura total** · **112 funções ainda a 0%**
-- ⬜ FASES 16–17: planejadas (push 70% com regra estrita) → ver `TEST_STAGES.md` e `TEST_PLAN_FUNCTIONS.md`
+- ✅ FASES 1–16: completadas → **61.5% cobertura total** · **64 funções ainda a 0%**
+- ⬜ FASE 17: planejada (push 70% com regra estrita) → ver `TEST_STAGES.md` e `TEST_PLAN_FUNCTIONS.md`
 
 | Fase | Pacotes | Funcs 0% alvo | Stmts | Status |
 |---|---|---:|---:|:---:|
 | 15 | api + util | 57 | +600 | ✅ |
-| 16 | playback + handlers + discord + upscaler + updater | 55 | +900 | ⬜ |
+| 16 | playback + handlers + discord + upscaler + updater | 55 | +900 | ✅ |
 | 17 | scraper + providers + downloader + SDK + misc | 53 | +600 | ⬜ |
 | **TOTAL** | | **165** | **+2100** | |
 

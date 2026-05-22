@@ -15,12 +15,16 @@ import (
 )
 
 const (
-	// Anime4K shader release URL
-	anime4kShaderURL = "https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip"
-	// Anime4K GAN UUL shaders URL (experimental for 360p->4K)
-	anime4kGANShaderBaseURL = "https://raw.githubusercontent.com/bloc97/Anime4K/master/glsl/"
 	// Shader directory name
 	shaderDirName = "anime4k-shaders"
+)
+
+// URL hooks — vars so tests can swap to httptest endpoints.
+var (
+	anime4kShaderURL        = "https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip"
+	anime4kGANShaderBaseURL = "https://raw.githubusercontent.com/bloc97/Anime4K/master/glsl/"
+	// shaderDirOverride forces GetShaderDir to return a specific path in tests.
+	shaderDirOverride string
 )
 
 // ShaderMode represents the upscaling quality mode
@@ -55,6 +59,9 @@ var CurrentShaderMode = ShaderModeOff
 
 // GetShaderDir returns the path to the shader directory
 func GetShaderDir() string {
+	if shaderDirOverride != "" {
+		return shaderDirOverride
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		// Fallback to home directory
