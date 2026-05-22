@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -120,6 +121,11 @@ func TestHandleDownloadRequest_NilGlobal(t *testing.T) {
 }
 
 func TestHandleDownloadRequest_PropagatesDownloadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows console API bypasses os.Stdin redirection; the underlying
+		// fuzzy-finder hangs instead of erroring out, blocking CI for 10 minutes.
+		t.Skip("Windows fuzzy-finder cannot be driven from headless tests")
+	}
 	prev := util.GlobalDownloadRequest
 	util.GlobalDownloadRequest = &util.DownloadRequest{AnimeName: "", EpisodeNum: -1}
 	t.Cleanup(func() { util.GlobalDownloadRequest = prev })
@@ -141,6 +147,10 @@ func TestHandleMovieDownloadRequest_NilGlobal(t *testing.T) {
 }
 
 func TestHandleMovieDownloadRequest_PropagatesError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Same Windows fuzzy-finder hang as TestHandleDownloadRequest_PropagatesDownloadError.
+		t.Skip("Windows fuzzy-finder cannot be driven from headless tests")
+	}
 	prev := util.GlobalDownloadRequest
 	util.GlobalDownloadRequest = &util.DownloadRequest{}
 	t.Cleanup(func() { util.GlobalDownloadRequest = prev })
@@ -317,6 +327,12 @@ func TestHandlePlaybackMode_SymbolPin(t *testing.T) {
 // --- HandleUpdateRequest ---
 
 func TestHandleUpdateRequest_DoesNotPanic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// HandleUpdateRequest → updater.CheckAndPromptUpdate may open the huh
+		// confirm form when GitHub has a newer release. The form blocks on TTY
+		// on Windows CI. Skip there.
+		t.Skip("huh form blocks on Windows CI without TTY")
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(updater.GitHubRelease{TagName: "v0.0.0"})
 	}))
