@@ -719,7 +719,7 @@ func TestSSRFRegression_AllShaderFetchesGoThroughSafeShaderGet(t *testing.T) {
 	t.Parallel()
 	src, err := os.ReadFile("shaders.go")
 	require.NoError(t, err)
-	body := string(src)
+	body := strings.ReplaceAll(string(src), "\r\n", "\n")
 
 	// Extract InstallShaders body.
 	installStart := strings.Index(body, "func InstallShaders()")
