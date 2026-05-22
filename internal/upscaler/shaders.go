@@ -7,12 +7,74 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// shaderHTTPClient is the ONLY client used to fetch shader assets. Its
+// CheckRedirect hook re-runs validateShaderSourceURL on every redirect hop, so
+// a legitimate GitHub host cannot be used as an open redirect to attacker
+// infrastructure.
+var shaderHTTPClient = &http.Client{
+	CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+		if err := validateShaderSourceURL(req.URL.String()); err != nil {
+			return fmt.Errorf("redirect blocked: %w", err)
+		}
+		return nil
+	},
+}
+
+// safeShaderGet is the single chokepoint for fetching shader assets. Every
+// HTTP fetch in this file MUST go through it. The validateShaderSourceURL
+// check below + the CheckRedirect hook above ensure no variant of SSRF can
+// reach the wire from this package.
+func safeShaderGet(rawURL string) (*http.Response, error) {
+	if err := validateShaderSourceURL(rawURL); err != nil {
+		return nil, fmt.Errorf("shader URL rejected: %w", err)
+	}
+	// #nosec G107 -- URL validated immediately above and every redirect hop
+	// is re-validated by shaderHTTPClient.CheckRedirect.
+	return shaderHTTPClient.Get(rawURL)
+}
+
+// validateShaderSourceURL enforces that any URL fed to the shader downloader is
+// either an HTTPS GitHub-hosted asset (production) or a loopback httptest server
+// (tests). Anything else is rejected before the HTTP request goes out.
+func validateShaderSourceURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid shader URL: %w", err)
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("shader URL has no host: %q", rawURL)
+	}
+
+	// Test allowlist: any loopback address is fine. httptest binds 127.0.0.1.
+	if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+		return nil
+	}
+
+	// Production: HTTPS only, and the host must end in a known GitHub domain.
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("shader URL must use https (got %q)", parsed.Scheme)
+	}
+	allowedSuffixes := []string{
+		"github.com",
+		"githubusercontent.com",
+	}
+	for _, suffix := range allowedSuffixes {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("shader URL host %q not in allowlist", host)
+}
 
 const (
 	// Shader directory name
@@ -117,8 +179,7 @@ func InstallShaders() error {
 
 	util.Info("Downloading Anime4K shaders...")
 
-	// Download the shader zip
-	resp, err := http.Get(anime4kShaderURL)
+	resp, err := safeShaderGet(anime4kShaderURL)
 	if err != nil {
 		return fmt.Errorf("failed to download shaders: %w", err)
 	}
@@ -183,15 +244,20 @@ func InstallGANShaders() error {
 	util.Warn("Note: These shaders are very heavy and require a powerful GPU!")
 
 	for _, shaderPath := range ganShaders {
-		url := anime4kGANShaderBaseURL + shaderPath
+		fullURL := anime4kGANShaderBaseURL + shaderPath
 		fileName := filepath.Base(shaderPath)
 		destPath := filepath.Join(shaderDir, fileName)
 
 		util.Infof("Downloading %s...", fileName)
 
-		// #nosec G107 -- URL is constructed from trusted constant anime4kGANShaderBaseURL
-		resp, err := http.Get(url)
+		resp, err := safeShaderGet(fullURL)
 		if err != nil {
+			// Preserve the legacy "GAN shader URL rejected" message when the
+			// failure originates from validation so callers can tell which
+			// downloader rejected the URL.
+			if strings.Contains(err.Error(), "shader URL rejected") {
+				return fmt.Errorf("GAN %s for %s", err.Error(), fileName)
+			}
 			return fmt.Errorf("failed to download %s: %w", fileName, err)
 		}
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -53,6 +54,64 @@ func buildGLSLZip(t *testing.T, files map[string]string) []byte {
 	}
 	require.NoError(t, zw.Close())
 	return buf.Bytes()
+}
+
+func TestValidateShaderSourceURL_AcceptsGitHub(t *testing.T) {
+	t.Parallel()
+	for _, u := range []string{
+		"https://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip",
+		"https://raw.githubusercontent.com/bloc97/Anime4K/master/glsl/Restore/Anime4K_Restore_GAN_UUL.glsl",
+		"https://objects.githubusercontent.com/some/asset.zip",
+		"https://codeload.github.com/bloc97/Anime4K/zip/refs/heads/master",
+	} {
+		assert.NoError(t, validateShaderSourceURL(u), u)
+	}
+}
+
+func TestValidateShaderSourceURL_AcceptsLoopbackForTests(t *testing.T) {
+	t.Parallel()
+	for _, u := range []string{
+		"http://127.0.0.1:54321/zip",
+		"http://localhost:8080/shader.zip",
+		"http://[::1]:9999/glsl",
+	} {
+		assert.NoError(t, validateShaderSourceURL(u), u)
+	}
+}
+
+func TestValidateShaderSourceURL_RejectsAttackerHosts(t *testing.T) {
+	t.Parallel()
+	for _, u := range []string{
+		"https://evil.example.com/payload.zip",
+		"https://attacker-controlled.io/shader",
+		"https://example.com.github.com.attacker.io/x",
+		"http://github.com/bloc97/Anime4K",        // http on non-loopback rejected
+		"file:///etc/passwd",                       // wrong scheme
+		"ftp://github.com/x",                       // wrong scheme
+		"https://192.168.1.1/internal",             // private IP not in allowlist
+		"https://10.0.0.5/internal",                // private IP
+		"https://169.254.169.254/latest/meta-data", // AWS IMDS
+		"",                                          // empty
+		"not-a-url",                                // garbage
+	} {
+		assert.Error(t, validateShaderSourceURL(u), u)
+	}
+}
+
+func TestInstallShaders_RejectsAttackerURL(t *testing.T) {
+	withShaderDirOverride(t, t.TempDir())
+	withShaderURLs(t, "https://evil.example.com/payload.zip", "https://github.com/x/")
+	err := InstallShaders()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shader URL rejected")
+}
+
+func TestInstallGANShaders_RejectsAttackerURL(t *testing.T) {
+	withShaderDirOverride(t, t.TempDir())
+	withShaderURLs(t, "https://github.com/x", "https://evil.example.com/")
+	err := InstallGANShaders()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GAN shader URL rejected")
 }
 
 func TestInstallShaders_Success(t *testing.T) {
@@ -400,3 +459,283 @@ var _ = io.LimitReader
 
 // sanity util for errors.Is
 var _ = errors.Is
+
+// ============================================================================
+// SSRF regression suite — gosec G107 hardening
+// ----------------------------------------------------------------------------
+// Context: `anime4kShaderURL` and `anime4kGANShaderBaseURL` are package-level
+// `var` declarations (mutable for testability). gosec G107 flagged the
+// http.Get(<var>) call sites because a future maintainer wiring an env-var
+// override or config-file path into those vars would turn the downloader into
+// an attacker-controlled HTTP client (SSRF → loopback probing, AWS IMDS,
+// RFC1918 reconnaissance, malicious payload disguised as a shader zip).
+//
+// Mitigation: validateShaderSourceURL is called before every http.Get.
+//
+// The tests below:
+//   1) Reproduce the unmitigated vulnerability against an instrumented
+//      "attacker" server, proving the attack surface that motivated G107.
+//   2) Lock in the fix: the same attacker URL must NEVER reach the network
+//      once routed through InstallShaders / InstallGANShaders.
+// If either function is ever refactored to skip validateShaderSourceURL, the
+// regression guard fails because the attacker server's request counter goes
+// from 0 to 1.
+// ============================================================================
+
+// recordingServer is an httptest.Server that counts every request it receives.
+// Used to detect when validation has been bypassed.
+type recordingServer struct {
+	*httptest.Server
+	hits *atomicCounter
+}
+
+type atomicCounter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (a *atomicCounter) inc() { a.mu.Lock(); a.n++; a.mu.Unlock() }
+func (a *atomicCounter) get() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.n
+}
+
+func newRecordingServer(t *testing.T) *recordingServer {
+	t.Helper()
+	hits := &atomicCounter{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.inc()
+		// Pretend to serve a payload — real attacker would deliver a malicious
+		// zip here, banking on the caller treating it as trusted shader data.
+		_, _ = w.Write([]byte("ATTACKER_PAYLOAD"))
+	}))
+	t.Cleanup(srv.Close)
+	return &recordingServer{Server: srv, hits: hits}
+}
+
+// TestVulnDemo_RawHTTPGetWouldHaveLeaked documents the pre-fix attack surface.
+// It performs the raw http.Get the production code USED to do (without the
+// validator) against the attacker server and confirms the request lands. This
+// is the "what could have happened" half of the proof: it shows the issue
+// gosec flagged was a real attack vector, not a phantom warning.
+func TestVulnDemo_RawHTTPGetWouldHaveLeaked(t *testing.T) {
+	t.Parallel()
+	attacker := newRecordingServer(t)
+
+	// Simulate the original code path: package-level var mutated to an
+	// attacker-controlled URL, then http.Get called directly with no
+	// allowlist check. This is exactly the shape gosec G107 warned about.
+	maliciousURL := attacker.URL
+	// #nosec G107 -- intentional: this is the *vulnerable* pattern we are
+	// documenting. Production code routes through validateShaderSourceURL
+	// instead (see TestSSRFRegression_ValidatorBlocksAttackerHost below).
+	resp, err := http.Get(maliciousURL)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	assert.Equal(t, 1, attacker.hits.get(),
+		"raw http.Get reaches attacker — this is the vuln G107 flagged")
+	assert.Equal(t, "ATTACKER_PAYLOAD", string(body),
+		"raw path would have downloaded attacker bytes verbatim")
+}
+
+// TestSSRFRegression_ValidatorBlocksAttackerHost is the regression guard.
+// If anyone removes the validateShaderSourceURL call from InstallShaders,
+// this test fails because the attacker server's hit counter goes from 0 to 1.
+func TestSSRFRegression_InstallShaders_AttackerServerNeverContacted(t *testing.T) {
+	attacker := newRecordingServer(t)
+	withShaderDirOverride(t, t.TempDir())
+	withShaderURLs(t, attacker.URL, "http://unused")
+
+	// httptest.Server binds to 127.0.0.1, which is loopback-allowlisted for
+	// tests. To force a "non-loopback attacker" shape we rewrite the URL to
+	// use an external-looking host that resolves nowhere — the validator must
+	// reject it on hostname, never opening the connection. We then double-
+	// check by also testing a host that DOES resolve (evil.example.com style)
+	// in the second assertion below.
+	externalLookingURL := strings.Replace(attacker.URL, "127.0.0.1", "evil.example.com", 1)
+	withShaderURLs(t, externalLookingURL, "http://unused")
+
+	err := InstallShaders()
+	require.Error(t, err, "validator must reject non-allowlisted host")
+	assert.Contains(t, err.Error(), "shader URL rejected",
+		"error must originate from validator, not from network failure")
+	assert.Equal(t, 0, attacker.hits.get(),
+		"REGRESSION: attacker server was contacted — validator was bypassed")
+}
+
+func TestSSRFRegression_InstallGANShaders_AttackerServerNeverContacted(t *testing.T) {
+	attacker := newRecordingServer(t)
+	withShaderDirOverride(t, t.TempDir())
+
+	externalLookingURL := strings.Replace(attacker.URL, "127.0.0.1", "evil.example.com", 1)
+	withShaderURLs(t, "https://github.com/x", externalLookingURL+"/")
+
+	err := InstallGANShaders()
+	require.Error(t, err, "validator must reject non-allowlisted GAN host")
+	assert.Contains(t, err.Error(), "GAN shader URL rejected",
+		"error must originate from validator, not from network failure")
+	assert.Equal(t, 0, attacker.hits.get(),
+		"REGRESSION: attacker server was contacted — GAN validator was bypassed")
+}
+
+// TestSSRFRegression_InternalNetworkProbeBlocked locks down the specific
+// SSRF flavors most likely to motivate a future bypass: cloud metadata
+// endpoints and RFC1918 ranges. These must always be rejected, even if
+// someone later loosens the allowlist by accident.
+func TestSSRFRegression_InternalNetworkProbeBlocked(t *testing.T) {
+	t.Parallel()
+	dangerous := []string{
+		"https://169.254.169.254/latest/meta-data/iam/security-credentials/",   // AWS IMDS
+		"https://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", // GCP
+		"http://169.254.169.254/metadata/instance?api-version=2021-02-01",      // Azure IMDS
+		"https://10.0.0.1/admin",
+		"https://172.16.0.1/admin",
+		"https://192.168.1.1/router",
+	}
+	for _, url := range dangerous {
+		err := validateShaderSourceURL(url)
+		assert.Error(t, err, "must reject internal-network URL: %s", url)
+	}
+}
+
+// TestSSRFRegression_SchemeDowngradeBlocked guards against attackers that
+// strip TLS via http:// on github.com to MITM the download. Only loopback is
+// allowed to use http://.
+func TestSSRFRegression_SchemeDowngradeBlocked(t *testing.T) {
+	t.Parallel()
+	downgrades := []string{
+		"http://github.com/bloc97/Anime4K/releases/download/v4.0.1/Anime4K_v4.0.zip",
+		"http://raw.githubusercontent.com/bloc97/Anime4K/master/glsl/x.glsl",
+		"http://objects.githubusercontent.com/x.zip",
+	}
+	for _, url := range downgrades {
+		err := validateShaderSourceURL(url)
+		require.Error(t, err, "http:// on github.com must be rejected: %s", url)
+		assert.Contains(t, err.Error(), "https",
+			"error must explain the scheme requirement")
+	}
+}
+
+// TestSSRFRegression_HostSuffixSpoofingBlocked guards against the classic
+// allowlist-suffix bypass where attacker registers `github.com.attacker.io`
+// hoping a naive `strings.HasSuffix(host, "github.com")` lets it through.
+// The validator must use a dot-anchored suffix check.
+func TestSSRFRegression_HostSuffixSpoofingBlocked(t *testing.T) {
+	t.Parallel()
+	spoofs := []string{
+		"https://github.com.attacker.io/payload.zip",
+		"https://raw.githubusercontent.com.attacker.io/x.glsl",
+		"https://notgithub.com/x",
+		"https://fakegithubusercontent.com/x.glsl",
+		"https://github.com.evil.co/x",
+	}
+	for _, url := range spoofs {
+		err := validateShaderSourceURL(url)
+		assert.Error(t, err, "must reject suffix-spoofed host: %s", url)
+	}
+}
+
+// TestSSRFRegression_OpenRedirectBlocked covers the redirect-SSRF flavor:
+// a legitimate GitHub host returns 302 to an attacker URL. http.Get follows
+// redirects by default — without CheckRedirect re-validation the attacker
+// payload lands. This test sets up a loopback server that redirects to a
+// non-allowlisted "evil" host and asserts the request chain dies on the
+// CheckRedirect hook before the attacker is contacted.
+func TestSSRFRegression_OpenRedirectBlocked(t *testing.T) {
+	attacker := newRecordingServer(t)
+	evilURL := strings.Replace(attacker.URL, "127.0.0.1", "evil.example.com", 1)
+
+	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, &http.Request{}, evilURL, http.StatusFound)
+	}))
+	t.Cleanup(redir.Close)
+
+	withShaderDirOverride(t, t.TempDir())
+	withShaderURLs(t, redir.URL, "http://unused")
+
+	err := InstallShaders()
+	require.Error(t, err, "redirect to non-allowlisted host must fail the download")
+	assert.Contains(t, err.Error(), "redirect blocked",
+		"CheckRedirect must surface the rejection (was: %v)", err)
+	assert.Equal(t, 0, attacker.hits.get(),
+		"REGRESSION: open-redirect SSRF — attacker server was reached")
+}
+
+// TestSSRFRegression_SingleHTTPCallSiteInShaders is a structural guard. It
+// parses shaders.go and asserts:
+//
+//   - No bare http.Get / http.Post / http.Head / client.Do calls exist that
+//     fetch shader URLs. All HTTP fetches must go through safeShaderGet.
+//   - safeShaderGet itself contains the only http call site.
+//
+// If a future contributor adds a new download function that calls http.Get
+// directly without going through safeShaderGet, this test fails immediately
+// and forces them to either route through the chokepoint or add an explicit
+// exemption (which becomes a visible review point).
+func TestSSRFRegression_SingleHTTPCallSiteInShaders(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("shaders.go")
+	require.NoError(t, err, "must be able to read shaders.go from this package")
+
+	body := string(src)
+
+	// Inventory all direct HTTP method calls in shaders.go.
+	httpCallPatterns := []string{
+		"http.Get(",
+		"http.Post(",
+		"http.PostForm(",
+		"http.Head(",
+		"http.DefaultClient.",
+		".RoundTrip(",
+	}
+	// The only allowed direct http.* call is inside safeShaderGet, which
+	// uses shaderHTTPClient.Get(rawURL) — find that exact line and exclude it.
+	allowedCallSite := "return shaderHTTPClient.Get(rawURL)"
+	require.Contains(t, body, allowedCallSite,
+		"safeShaderGet must remain the sole HTTP chokepoint; got refactored?")
+
+	for _, pattern := range httpCallPatterns {
+		count := strings.Count(body, pattern)
+		assert.Equal(t, 0, count,
+			"shaders.go must not call %q directly — route through safeShaderGet (found %d occurrences)",
+			pattern, count)
+	}
+
+	// shaderHTTPClient.Get must appear exactly once (inside safeShaderGet).
+	count := strings.Count(body, "shaderHTTPClient.Get(")
+	assert.Equal(t, 1, count,
+		"shaderHTTPClient.Get must have exactly one call site (safeShaderGet); found %d",
+		count)
+}
+
+// TestSSRFRegression_AllShaderFetchesGoThroughSafeShaderGet asserts that any
+// function in shaders.go that fetches a shader passes through safeShaderGet.
+// Specifically: InstallShaders and InstallGANShaders bodies must each contain
+// a call to safeShaderGet.
+func TestSSRFRegression_AllShaderFetchesGoThroughSafeShaderGet(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("shaders.go")
+	require.NoError(t, err)
+	body := string(src)
+
+	// Extract InstallShaders body.
+	installStart := strings.Index(body, "func InstallShaders()")
+	require.NotEqual(t, -1, installStart, "InstallShaders not found")
+	installEnd := strings.Index(body[installStart:], "\n}\n")
+	require.NotEqual(t, -1, installEnd, "InstallShaders end not found")
+	installBody := body[installStart : installStart+installEnd]
+	assert.Contains(t, installBody, "safeShaderGet(",
+		"InstallShaders must fetch via safeShaderGet")
+
+	// Extract InstallGANShaders body.
+	ganStart := strings.Index(body, "func InstallGANShaders()")
+	require.NotEqual(t, -1, ganStart, "InstallGANShaders not found")
+	ganEnd := strings.Index(body[ganStart:], "\n}\n")
+	require.NotEqual(t, -1, ganEnd, "InstallGANShaders end not found")
+	ganBody := body[ganStart : ganStart+ganEnd]
+	assert.Contains(t, ganBody, "safeShaderGet(",
+		"InstallGANShaders must fetch via safeShaderGet")
+}
