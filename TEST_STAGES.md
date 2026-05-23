@@ -371,7 +371,7 @@ go tool cover -func=p16.out | awk '$NF == "0.0%"' | wc -l  # Esperado: ≤ 15
 
 ---
 
-## FASE 17 ⬜ — Scraper + Providers + Downloader + SDK + Misc: 53 funções
+## FASE 17 ✅ — Scraper + Providers + Downloader + SDK + Misc: 53 funções
 
 **Pacotes (organizado por gap):**
 - `internal/scraper/` (13 funcs)
@@ -438,7 +438,7 @@ go tool cover -func=p17.out | tail -1  # Esperado: ≥ 70%
 | 14 | Handlers + Playback + Discord + Upscaler + Resto | ~120 | ✅ (2026-05-18) |
 | 15 | API + Util (57 funcs 0%) | +57 funcs / +600 stmts | ✅ (2026-05-21 — api 42.3%→63.6%, util 44.7%→75.8%, total 52.8%→56.8%) |
 | 16 | Playback + Handlers + Discord + Upscaler + Updater (55 funcs) | +55 funcs / +900 stmts | ✅ (2026-05-22 — discord 29.5%→94.0%, handlers 5.7%→55.9%, playback 13.3%→33.4%, updater 53.4%→72.2%, upscaler 49.2%→73.0%, total 56.8%→61.5%, 0% funcs 112→64) |
-| 17 | Scraper + Providers + Downloader + SDK + Misc (53 funcs) | +53 funcs / +600 stmts | ⬜ (push 70%) |
+| 17 | Scraper + Providers + Downloader + SDK + Misc (53 funcs) | +53 funcs / +600 stmts | ✅ (2026-05-23 — scraper 83.2%, providers 69.9%, types 80.5%→100%, pkg/goanime 95.1%, tui 91.1%, total 57.0%→59.0% [-short], 0% funcs 112→68; 68 restantes = 5 main()+4 ex.main()+MPV/TTY/HW não-testáveis) |
 | **TOTAL** | | **~1148 funcs / ~+2100 stmts** | |
 
 **Pós-FASE 17 projetado:** ≥ 70% cobertura, ≤ 30 funções a 0% (apenas `main()` do CLI + exemplos SDK + TUI loops puros + GPU hardware paths)

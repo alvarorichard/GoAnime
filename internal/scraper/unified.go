@@ -81,6 +81,20 @@ func NewScraperManager() *ScraperManager {
 	return globalScraperManager
 }
 
+// NewScraperManagerForTest creates an empty ScraperManager with no scrapers.
+// Use RegisterScraperForTest to inject mocks. Only for tests.
+func NewScraperManagerForTest() *ScraperManager {
+	return &ScraperManager{
+		scrapers: make(map[ScraperType]UnifiedScraper),
+		breaker:  newSourceCircuitBreaker(),
+	}
+}
+
+// RegisterScraperForTest adds a scraper to a test manager. Only for tests.
+func (sm *ScraperManager) RegisterScraperForTest(t ScraperType, s UnifiedScraper) {
+	sm.scrapers[t] = s
+}
+
 // SearchAnime searches across all available scrapers with enhanced Portuguese messaging.
 // All sources are queried concurrently and results are collected until every
 // scraper finishes or the hard timeout expires.

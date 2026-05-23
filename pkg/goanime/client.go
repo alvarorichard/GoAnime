@@ -133,6 +133,11 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 	return scr.GetStreamURL(episode.URL)
 }
 
+// NewClientForTest creates a Client backed by a custom ScraperManager. Only for tests.
+func NewClientForTest(manager *scraper.ScraperManager) *Client {
+	return &Client{manager: manager}
+}
+
 // GetAvailableSources returns a list of all available scraper sources.
 func (c *Client) GetAvailableSources() []types.Source {
 	return []types.Source{

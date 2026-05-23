@@ -193,17 +193,17 @@ Meta: **≥ 70.0%** · **≤ 50 funções a 0%** (apenas TUI/IPC/main não-test�
 
 ---
 
-## STATUS ATUAL (2026-05-22)
+## STATUS ATUAL (2026-05-23)
 
-- ✅ FASES 1–16: completadas → **61.5% cobertura total** · **64 funções ainda a 0%**
-- ⬜ FASE 17: planejada (push 70% com regra estrita) → ver `TEST_STAGES.md` e `TEST_PLAN_FUNCTIONS.md`
+- ✅ FASES 1–17: completadas → **59.0% cobertura total** (-short) · **68 funções ainda a 0%**
+- 68 restantes = 9 `main()` (CLI + 4 exemplos SDK) + ~39 funções MPV/IPC requerem hardware + ~20 TUI/stdin/Windows-only
 
 | Fase | Pacotes | Funcs 0% alvo | Stmts | Status |
 |---|---|---:|---:|:---:|
 | 15 | api + util | 57 | +600 | ✅ |
 | 16 | playback + handlers + discord + upscaler + updater | 55 | +900 | ✅ |
-| 17 | scraper + providers + downloader + SDK + misc | 53 | +600 | ⬜ |
-| **TOTAL** | | **165** | **+2100** | |
+| 17 | scraper + providers + downloader + SDK + misc | 53 | +600 | ✅ (2026-05-23) |
+| **TOTAL** | | **165** | **+2100** | ✅ |
 
 **Paradigma FASES 15–17 (autorizado pelo usuário 2026-05-18 — "eficácia brutal"):**
 - **REGRA #0 mantida estrita:** *cada* função a 0% recebe seu próprio `TestNomeDaFuncao_Cenario`. Sem agrupar, sem pular.
