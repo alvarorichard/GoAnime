@@ -1,6 +1,7 @@
 package download
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -34,6 +35,9 @@ func TestHandleMovieDownloadRequest_NilRequest(t *testing.T) {
 func TestHandleDownloadRequest_EmptyName_ReturnsError(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: requires network search which may block")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("SearchAnimeWithRetry uses huh.NewInput which blocks on Windows without a TTY")
 	}
 	req := &util.DownloadRequest{AnimeName: ""}
 	err := HandleDownloadRequest(req)

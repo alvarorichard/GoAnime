@@ -1,6 +1,7 @@
 package appflow
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -39,6 +40,9 @@ func TestFetchAnimeDetails_Pin(t *testing.T) {
 func TestFetchAnimeDetails_MovieSource_NoPanic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: spinner may block without TTY")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("bubbletea spinner blocks on Windows without a TTY")
 	}
 	anime := &models.Anime{
 		Name:   "Spirited Away",
