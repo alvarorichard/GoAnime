@@ -932,7 +932,7 @@ func TestSendSkipTimesToMPVSuccess(t *testing.T) {
 		return nil, nil
 	}
 
-	err := client.SendSkipTimesToMPV(ep, "/tmp/mpv.sock", mockCmd)
+	err := client.SendSkipTimesToMPV(ep, "mpv_test.sock", mockCmd)
 	require.NoError(t, err)
 	require.Len(t, capturedArgs, 3)
 	assert.Equal(t, "set_property", capturedArgs[0])
@@ -956,7 +956,7 @@ func TestSendSkipTimesToMPVNoSkipTimes(t *testing.T) {
 	ep := &models.Episode{} // zero SkipTimes
 	mockCmd := func(_ string, _ []any) (any, error) { return nil, nil }
 
-	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "/tmp/mpv.sock", mockCmd)
+	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "mpv_test.sock", mockCmd)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no skip times")
 }
@@ -972,7 +972,7 @@ func TestSendSkipTimesToMPVCommandError(t *testing.T) {
 		return nil, fmt.Errorf("IPC connection refused")
 	}
 
-	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "/tmp/mpv.sock", mockCmd)
+	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "mpv_test.sock", mockCmd)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "IPC connection refused")
 }
@@ -991,7 +991,7 @@ func TestSendSkipTimesToMPVOnlyOpening(t *testing.T) {
 		return nil, nil
 	}
 
-	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "/tmp/mpv.sock", mockCmd)
+	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "mpv_test.sock", mockCmd)
 	require.NoError(t, err)
 
 	titles := make(map[string]bool)
@@ -1017,7 +1017,7 @@ func TestSendSkipTimesToMPVOnlyEnding(t *testing.T) {
 		return nil, nil
 	}
 
-	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "/tmp/mpv.sock", mockCmd)
+	err := NewAllAnimeClient().SendSkipTimesToMPV(ep, "mpv_test.sock", mockCmd)
 	require.NoError(t, err)
 
 	titles := make(map[string]bool)

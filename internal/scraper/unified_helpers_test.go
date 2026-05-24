@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSortPTBRFirst_StableOrder(t *testing.T) {
@@ -107,4 +109,50 @@ func TestNewScraperManager_Singleton(t *testing.T) {
 func TestPreWarmScraperManager_NoPanic(t *testing.T) {
 	t.Parallel()
 	assert.NotPanics(t, func() { PreWarmScraperManager() })
+}
+
+func TestLogSearchSummary_DebugEnabled(t *testing.T) {
+	// Exercise the full body (count map + util.Debug call) by enabling debug mode.
+	// Cannot be parallel — modifies a package-level var.
+	prev := util.IsDebug
+	util.IsDebug = true
+	t.Cleanup(func() { util.IsDebug = prev })
+
+	sm := &ScraperManager{}
+	results := []*models.Anime{
+		{Source: "AllAnime"},
+		{Source: "AllAnime"},
+		{Source: "Animefire.io"},
+		{Source: "Goyabu"},
+		{Source: "SuperFlix"},
+	}
+	assert.NotPanics(t, func() { sm.logSearchSummary(results) })
+}
+
+func TestLogSearchSummary_DebugDisabled(t *testing.T) {
+	// Confirm early return when IsDebug is false (the count map is never built).
+	prev := util.IsDebug
+	util.IsDebug = false
+	t.Cleanup(func() { util.IsDebug = prev })
+
+	sm := &ScraperManager{}
+	assert.NotPanics(t, func() { sm.logSearchSummary([]*models.Anime{{Source: "AllAnime"}}) })
+}
+
+func TestGetScraper_NotFound(t *testing.T) {
+	t.Parallel()
+	sm := NewScraperManagerForTest() // empty manager, no scrapers registered
+	_, err := sm.GetScraper(AllAnimeType)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestGetScraper_Found(t *testing.T) {
+	t.Parallel()
+	sm := NewScraperManagerForTest()
+	mock := &MockScraper{}
+	sm.RegisterScraperForTest(AllAnimeType, mock)
+	got, err := sm.GetScraper(AllAnimeType)
+	require.NoError(t, err)
+	assert.Equal(t, mock, got)
 }

@@ -1,6 +1,6 @@
-# GoAnime — Mapeamento das 165 Funções a 0% (Push 70%)
+# GoAnime — Mapeamento das Funções a 0% (Push 70%)
 
-> **Estado em 2026-05-18 (pós-FASE 14):** 165 funções a 0% (de 12065 statements totais, 52.8% cobertura).
+> **Estado em 2026-05-24 (pós-FASE 17):** 26 funções non-main a 0% (de 12102 statements totais, 62.9% cobertura).
 > **Gerado por:** `go tool cover -func=coverage.out | awk '$NF == "0.0%"'`
 > **Regra absoluta (CLAUDE.md):** *cada* função desta lista recebe seu próprio `TestNomeDaFuncao_*`.
 >
@@ -10,14 +10,16 @@
 
 ## Resumo por Fase
 
-| Fase | Funcs | Foco | Refactor? |
-|---|---:|---|:---:|
-| 15 | 57 | `internal/api/`, `internal/util/` — branches + error paths | sim — vars injetáveis |
-| 16 | 55 | `internal/playback/`, `internal/handlers/`, `internal/discord/`, `internal/upscaler/`, `internal/updater/` — TUI + IPC | sim — interface wrap + splits |
-| 17 | 53 | `internal/scraper/`, `internal/api/providers/`, `internal/downloader/`, `pkg/goanime/...`, misc | parcial |
-| **TOTAL** | **165** | | |
+| Fase | Funcs | Foco | Refactor? | Status |
+|---|---:|---|:---:|:---:|
+| 15 | 57 | `internal/api/`, `internal/util/` — branches + error paths | sim — vars injetáveis | ✅ |
+| 16 | 55 | `internal/playback/`, `internal/handlers/`, `internal/discord/`, `internal/upscaler/`, `internal/updater/` — TUI + IPC | sim — interface wrap + splits | ✅ |
+| 17 | 53 | `internal/scraper/`, `internal/api/providers/`, `internal/downloader/`, `pkg/goanime/...`, misc | parcial | ✅ |
+| 18 | 28 | `pkg/goanime/types/`, `pkg/goanime/`, `internal/api/` success paths, `internal/downloader/` exec mock, `internal/appflow/`, `internal/download/` | sim — execCommand var, ScraperManagerInterface, EpisodeDownloader interface | ⬜ |
+| **TOTAL** | **193** | | | |
 
-**Pós-FASE 17 projetado:** ≥ 70% cobertura, ≤ 50 funções a 0% (apenas TUI puro + `main()` + exemplos).
+**Pós-FASE 17 (real, 2026-05-24):** 62.9% cobertura, 26 funções non-main a 0%.
+**Pós-FASE 18 projetado:** ≥ 70% cobertura, ≤ 15 funções non-main a 0% (apenas TUI/TTY-bound + yt-dlp/hardware intratáveis).
 
 ---
 
@@ -312,6 +314,125 @@
 
 ---
 
+## FASE 18 — Push Final 70%: types + SDK + API success paths + exec mock + appflow + download (28 funções)
+
+**Meta:** 62.9% → ≥ 70.0% | Gap: 858 statements | Data: 2026-05-24
+
+### Ação 18A — `pkg/goanime/types/` (7 funções a 0%, ~41 stmts)
+
+**Tipo:** Unitário puro | **Arquivo:** `pkg/goanime/types/types_test.go` (novo) | **Refactor:** nenhum
+
+**types/anime.go**
+- L97: `FromInternalAnime`
+- L148: `FromInternalAnimeList`
+- L157: `FromInternalEpisode`
+- L199: `FromInternalEpisodeList`
+
+**types/source.go**
+- L20: `String`
+- L32: `ToScraperType`
+- L44: `ParseSource`
+
+### Ação 18B — `pkg/goanime/` (6 funções a 0%, ~39 stmts)
+
+**Tipo:** Unit + httptest | **Arquivo:** `pkg/goanime/client_test.go` (expandir) | **Refactor:** confirmar `NewClientForTest(client *http.Client, baseURL string)` injetável
+
+**client.go**
+- L25: `SearchAnime`
+- L43: `GetAnimeEpisodes`
+- L68: `GetStreamURL`
+- L86: `DefaultStreamOptions`
+- L105: `GetEpisodeStreamURL`
+- L137: `NewClientForTest`
+
+### Ação 18C — `internal/api/` success paths (7 funções parciais, ~280 stmts)
+
+**Tipo:** Unit + httptest — expandir testes existentes com respostas mock válidas
+**Arquivos:** expandir `internal/api/anime_test.go`, `enhanced_test.go`, `allanime_smart_test.go`, `allanime_enhanced_test.go`
+**Refactor:** adicionar `var allAnimeBaseURL`, `var aniListBaseURL` se não injetáveis; fixtures JSON em `internal/api/testdata/`
+
+**anime.go**
+- L28: `GetEpisodeData` — mock AllAnime GraphQL retornando episódio com `sourceUrls`
+- L33: `GetMovieData` — mock AllAnime retornando tipo movie
+
+**enhanced.go**
+- L481: `DownloadEpisodeEnhanced` (38.5% atual) — mock CDN + `t.TempDir()` como destino
+- L509: `DownloadEpisodeRangeEnhanced` (29.4% atual) — range [1-2], mock serve tiny file
+
+**allanime_smart.go**
+- L81: `smartDownload` — mock AllAnime + destino em `t.TempDir()`
+- L21: `DownloadAllAnimeSmartRange` — mock + range "1-2"
+
+**allanime_enhanced.go**
+- L14: `GetEpisodeStreamURLEnhanced` — mock retornando `{"links":[{"link":"https://cdn.test/ep.m3u8"}]}`
+
+Fixtures a criar:
+- `internal/api/testdata/allanime_episode_response.json`
+- `internal/api/testdata/allanime_stream_response.json`
+
+### Ação 18D — `internal/downloader/` exec mock (3 funções a 0%, ~150 stmts)
+
+**Tipo:** Refactor mínimo + Unit | **Arquivo:** `internal/downloader/downloader.go` + `downloader_test.go`
+
+**Refactor (1 var + substituições):**
+```go
+// downloader.go — adicionar junto às outras vars do pacote
+var execCommand = exec.Command
+// Substituir todas as chamadas `exec.Command(...)` → `execCommand(...)`
+```
+
+**downloader.go**
+- L710: `downloadWithProgress`
+- L941: `downloadM3U8WithYtDlp`
+- L1171: `playEpisode`
+
+Padrão de injeção nos testes:
+```go
+orig := execCommand; t.Cleanup(func() { execCommand = orig })
+execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("/usr/bin/true") }
+```
+
+### Ação 18E — `internal/appflow/` injection (4 funções a 0%, ~92 stmts)
+
+**Tipo:** Refactor + Unit com MockScraper | **Arquivo:** `internal/appflow/anime_data_test.go` (novo)
+**Reutilizar:** `MockScraper` / `createTestManager` de `internal/scraper/unified_test.go`
+
+**Refactor:**
+```go
+// appflow/anime_data.go
+var defaultScraperFactory = func() ScraperManagerInterface {
+    return scraper.GetScraperManager()
+}
+// Cada função pública aceita manager opcional via variadic ou factory override
+```
+
+**anime_data.go**
+- L20: `SearchAnime`
+- L34: `SearchAnimeEnhanced`
+- L48: `SearchAnimeWithRetry`
+- L103: `FetchAnimeDetails`
+
+### Ação 18F — `internal/download/workflow.go` injection (1 função a 0%, ~77 stmts)
+
+**Tipo:** Refactor + Unit | **Arquivo:** `internal/download/workflow_test.go` (novo)
+
+**Refactor:**
+```go
+// download/workflow.go
+type EpisodeDownloaderInterface interface {
+    DownloadSingleEpisode(ep scraper.Episode, opts ...DownloadOption) error
+    DownloadEpisodeRange(start, end int, eps []scraper.Episode, opts ...DownloadOption) error
+}
+
+var defaultDownloaderFactory = func(anime scraper.Anime) EpisodeDownloaderInterface {
+    return downloader.NewEpisodeDownloader(anime)
+}
+```
+
+**workflow.go**
+- L18: `HandleDownloadRequest`
+
+---
 
 ## Como Usar Este Arquivo
 
@@ -344,30 +465,30 @@ go tool cover -func=coverage.out | awk '$NF == "0.0%" {print $1, $2}' > /tmp/zer
 
 ---
 
-## Exceções Permanentes (NÃO testar)
+## Exceções Permanentes (NÃO testar — ficam a 0%)
 
 Per CLAUDE.md, NÃO precisam de teste:
 
-| Categoria | Localização | Funções |
+| Categoria | Funções | Razão |
 |---|---|---|
-| `main()` do CLI | `cmd/goanime/main.go:19` | 1 |
-| `main()` de exemplos SDK | `pkg/goanime/examples/*/main.go` | 4 |
-| Loops MPV/TUI interativos puros | `playback.HandleSeries`, `playback.HandleMovie`, `handlers.InteractiveMediaFlow`, `handlers.SelectMediaType` | ~10 |
-| Bubble Tea `View()`/`tickCmd()` integradas | `player/helper.go`, etc. | ~5 |
-| Funções com hardware (FFmpeg GPU/audio device) | `upscaler/anime4k.go:Close` | ~3 |
-| `pkg/goanime/types/*` (defs sem lógica) | tipos puros | 7 |
+| `main()` do CLI | `cmd/goanime/main.go:main` (1) | Entry point |
+| `main()` de exemplos SDK | `pkg/goanime/examples/*/main.go` (4) | Exemplos, não produção |
+| TUI/TTY-bound (Bubble Tea loops) | `HandleSeries`, `HandleMovie`, `GetUserInput`, `SelectInitialEpisode`, `ChangeAnimeLocal`, `HandlePlaybackMode`, `askForPlayOffline`, `handleUpscaleFromMenu` (8) | Requerem terminal real |
+| Binário externo não-mockável | `downloadWithProgress`, `downloadM3U8WithYtDlp`, `playEpisode` (3) → cobertos na FASE 18 via `execCommand` mock | Pós-18: cobertos |
+| Cover-tool quirk | `upscaler/anime4k.go:Close` (1) | Corpo vazio — 0 statements |
 
-**Total estimado de exceções:** ~30 funções → ficam a 0% mesmo após FASE 17.
-
-**Funções a cobrir efetivamente:** 165 − 30 = ~135 (≈ 81% das funções 0% restantes).
+**Exceções pós-FASE 18:** ~14 funções (5 main + 8 TUI + 1 quirk).
+**Funções cobertas nas FASES 15–18:** 193 funções com teste dedicado.
 
 ---
 
-## Métricas Esperadas
+## Métricas
 
-| Métrica | Pós-14 | Pós-15 | Pós-16 | Pós-17 |
-|---|---:|---:|---:|---:|
-| Funções 0% | 165 | ~108 | ~53 | **≤ 30** |
-| Cobertura % | 52.8 | ~58 | ~64 | **≥ 70** |
-| Testes novos | — | +57 | +55 | +53 |
+| Métrica | Pós-14 | Pós-15 | Pós-16 | Pós-17 (real) | Pós-18 (alvo) |
+|---|---:|---:|---:|---:|---:|
+| Funções 0% (total) | 165 | ~112 | ~64 | **36** | ≤ 31 |
+| Funções 0% (non-main) | — | — | — | **26** | **≤ 15** |
+| Cobertura % | 52.8 | 56.8 | 61.5 | **62.9** | **≥ 70.0** |
+| Stmts cobertos | 6373 | ~6843 | ~7430 | 7613 | ≥ 8471 |
+| Testes novos | — | +57 | +55 | +53 | **+28** |
 

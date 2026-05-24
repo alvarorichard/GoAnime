@@ -3,13 +3,21 @@
 package goanime
 
 import (
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/pkg/goanime/types"
 )
 
+// Manager abstracts the scraper backend used by Client. *scraper.ScraperManager
+// satisfies this interface.
+type Manager interface {
+	SearchAnime(query string, scraperType *scraper.ScraperType) ([]*models.Anime, error)
+	GetScraper(scraperType scraper.ScraperType) (scraper.UnifiedScraper, error)
+}
+
 // Client is the main client for interacting with anime sources
 type Client struct {
-	manager *scraper.ScraperManager
+	manager Manager
 }
 
 // NewClient creates a new GoAnime client with all available scrapers
@@ -133,8 +141,8 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 	return scr.GetStreamURL(episode.URL)
 }
 
-// NewClientForTest creates a Client backed by a custom ScraperManager. Only for tests.
-func NewClientForTest(manager *scraper.ScraperManager) *Client {
+// NewClientForTest creates a Client backed by a custom Manager. Only for tests.
+func NewClientForTest(manager Manager) *Client {
 	return &Client{manager: manager}
 }
 

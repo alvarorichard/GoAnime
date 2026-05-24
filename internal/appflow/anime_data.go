@@ -16,12 +16,19 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// searchEnhancedFn is the underlying search implementation; injectable for tests.
+var searchEnhancedFn = api.SearchAnimeEnhanced
+
+// searchWithRetryFn is the per-attempt search used inside SearchAnimeWithRetry.
+// Tests may override to avoid spawning real TUI components.
+var searchWithRetryFn = api.SearchAnimeEnhanced
+
 // SearchAnime searches for an anime by name using the globally configured source.
 func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Use enhanced API with source selection (spinner is inside api.SearchAnimeEnhanced)
-	anime, err := api.SearchAnimeEnhanced(name, util.GlobalSource)
+	anime, err := searchEnhancedFn(name, util.GlobalSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -35,7 +42,7 @@ func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Buscar em ambas as fontes (spinner is inside api.SearchAnimeEnhanced)
-	anime, err := api.SearchAnimeEnhanced(name, "")
+	anime, err := searchEnhancedFn(name, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -59,7 +66,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		} else {
 			util.Debugf("Searching for: %s (searching all sources)", currentName)
 		}
-		anime, searchErr := api.SearchAnimeEnhanced(currentName, source)
+		anime, searchErr := searchWithRetryFn(currentName, source)
 
 		if searchErr == nil && anime != nil {
 			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))

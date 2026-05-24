@@ -418,6 +418,192 @@ go tool cover -func=p17.out | tail -1  # Esperado: ≥ 70%
 
 ---
 
+## FASE 18 ✅ — Push Final 70%: types + SDK + API success paths + exec mock + appflow + download (28 funções)
+
+**Meta:** 62.9% → ≥ 70.0% | Gap: **858 statements** (12102 total, 7613 cobertos → precisam 8471)
+**Data planejada:** 2026-05-24
+
+**Medições base (2026-05-24, `go test ./... -race -coverprofile`):**
+| Pacote | Cobertura | Stmts perdidos |
+|---|---|---|
+| `pkg/goanime/types` | 0.0% | 41 |
+| `pkg/goanime` | 4.9% | 39 |
+| `internal/api` | 63.3% | 453 |
+| `internal/downloader` | 37.7% | 370 |
+| `internal/appflow` | 15.6% | 92 |
+| `internal/download` | 2.5% | 77 |
+
+---
+
+### Ação 18A — `pkg/goanime/types` (7 funções a 0%, ~41 stmts)
+
+**Tipo:** Unitário puro — sem I/O, sem dependências externas
+**Arquivo de teste:** `pkg/goanime/types/types_test.go` (novo)
+**Refactor:** nenhum
+
+| Arquivo | Linha | Função |
+|---|---|---|
+| `types/anime.go` | 97 | `FromInternalAnime` |
+| `types/anime.go` | 148 | `FromInternalAnimeList` |
+| `types/anime.go` | 157 | `FromInternalEpisode` |
+| `types/anime.go` | 199 | `FromInternalEpisodeList` |
+| `types/source.go` | 20 | `String` |
+| `types/source.go` | 32 | `ToScraperType` |
+| `types/source.go` | 44 | `ParseSource` |
+
+Padrão: table-driven com structs `internal.Anime` / `internal.Episode` construídas manualmente. Verificar que os campos mapeados são corretos (title, episodes, URL, source string).
+
+---
+
+### Ação 18B — `pkg/goanime/client` (6 funções a 0%, ~39 stmts)
+
+**Tipo:** Unit + httptest — `NewClientForTest` já aceita injeção de `*http.Client`
+**Arquivo de teste:** `pkg/goanime/client_test.go` (existente — expandir)
+**Refactor:** confirmar/ajustar `NewClientForTest` para aceitar `baseURL` ou `*http.Client` injetável
+
+| Arquivo | Linha | Função |
+|---|---|---|
+| `client.go` | 25 | `SearchAnime` |
+| `client.go` | 43 | `GetAnimeEpisodes` |
+| `client.go` | 68 | `GetStreamURL` |
+| `client.go` | 86 | `DefaultStreamOptions` |
+| `client.go` | 105 | `GetEpisodeStreamURL` |
+| `client.go` | 137 | `NewClientForTest` |
+
+Cada função recebe um `httptest.Server` que retorna JSON válido de AllAnime/AniList. Usar `NewClientForTest(srv.Client(), srv.URL)`.
+
+---
+
+### Ação 18C — `internal/api` success paths (7 funções parciais, ~280 stmts)
+
+**Tipo:** Unit + httptest — adicionar casos de **sucesso** aos testes existentes das fases 2 e 15
+**Arquivos de teste:** expandir `internal/api/*_test.go` existentes
+**Refactor:** verificar que `var allAnimeBaseURL`, `var aniListBaseURL`, `var jikanBaseURL` estão injetáveis (devem estar da Fase 15); adicionar se faltarem
+
+| Arquivo | Linha | Função | Cobertura atual | Problema |
+|---|---|---|---|---|
+| `anime.go` | 28 | `GetEpisodeData` | < 50% | Só caminhos de erro testados; falta mock de resposta GraphQL válida |
+| `anime.go` | 33 | `GetMovieData` | < 50% | Idem — falta mock AllAnime movie response |
+| `enhanced.go` | 481 | `DownloadEpisodeEnhanced` | 38.5% | Caminho de download nunca exercitado; usar `t.TempDir()` como destino |
+| `enhanced.go` | 509 | `DownloadEpisodeRangeEnhanced` | 29.4% | Range [1-2] com mock CDN serving tiny file |
+| `allanime_smart.go` | 81 | `smartDownload` | < 50% | mock AllAnime + destino em `t.TempDir()` |
+| `allanime_smart.go` | 21 | `DownloadAllAnimeSmartRange` | < 50% | mock + range "1-2" |
+| `allanime_enhanced.go` | 14 | `GetEpisodeStreamURLEnhanced` | < 50% | mock retornando URL de stream válido |
+
+Fixtures JSON necessárias (criar em `internal/api/testdata/`):
+- `allanime_episode_response.json` — resposta GraphQL `episode` com `sourceUrls`
+- `allanime_movie_response.json` — resposta GraphQL `show` com tipo movie
+- `allanime_stream_response.json` — resposta de URL de stream com `links`
+
+---
+
+### Ação 18D — `internal/downloader` exec mock (3 funções a 0%, ~150 stmts)
+
+**Tipo:** Refactor mínimo + Unit
+**Arquivo:** `internal/downloader/downloader.go` (1 var nova) + `downloader_test.go` (expandir)
+**Refactor:**
+```go
+// downloader.go — adicionar no topo do arquivo (junto às outras vars)
+var execCommand = exec.Command
+// Substituir todas as chamadas `exec.Command(...)` por `execCommand(...)`
+```
+
+| Arquivo | Linha | Função |
+|---|---|---|
+| `downloader.go` | 710 | `downloadWithProgress` |
+| `downloader.go` | 941 | `downloadM3U8WithYtDlp` |
+| `downloader.go` | 1171 | `playEpisode` |
+
+Padrão de teste:
+```go
+func TestDownloadWithProgress_ExecMock(t *testing.T) {
+    t.Parallel()
+    orig := execCommand
+    t.Cleanup(func() { execCommand = orig })
+    execCommand = func(name string, args ...string) *exec.Cmd {
+        return exec.Command("/usr/bin/true")  // noop stub
+    }
+    // exercitar downloadWithProgress com httptest server como CDN
+}
+```
+
+---
+
+### Ação 18E — `internal/appflow` injection (4 funções a 0%, ~92 stmts)
+
+**Tipo:** Refactor + Unit + MockScraper (reutilizar `createTestManager` de `internal/scraper/unified_test.go`)
+**Arquivo de teste:** `internal/appflow/anime_data_test.go` (novo)
+**Refactor:** cada função aceita um parâmetro opcional `manager ...ScraperManagerInterface` ou via `var defaultScraperFactory`
+
+```go
+// appflow/anime_data.go — refactor
+var defaultScraperFactory = func() ScraperManagerInterface {
+    return scraper.GetScraperManager()
+}
+
+func SearchAnime(name string, manager ...ScraperManagerInterface) ([]scraper.Anime, error) {
+    m := defaultScraperFactory()
+    if len(manager) > 0 { m = manager[0] }
+    // ...resto igual
+}
+```
+
+| Arquivo | Linha | Função |
+|---|---|---|
+| `anime_data.go` | 20 | `SearchAnime` |
+| `anime_data.go` | 34 | `SearchAnimeEnhanced` |
+| `anime_data.go` | 48 | `SearchAnimeWithRetry` |
+| `anime_data.go` | 103 | `FetchAnimeDetails` |
+
+---
+
+### Ação 18F — `internal/download/workflow.go` injection (1 função a 0%, ~77 stmts)
+
+**Tipo:** Refactor + Unit com mock downloader
+**Arquivo de teste:** `internal/download/workflow_test.go` (novo)
+**Refactor:** `HandleDownloadRequest` aceita interface injetável
+
+```go
+// download/workflow.go
+type EpisodeDownloader interface {
+    DownloadSingleEpisode(ep scraper.Episode, opts ...DownloadOption) error
+    DownloadEpisodeRange(start, end int, eps []scraper.Episode, opts ...DownloadOption) error
+}
+
+var defaultDownloaderFactory = func(anime scraper.Anime) EpisodeDownloader {
+    return downloader.NewEpisodeDownloader(anime)
+}
+```
+
+| Arquivo | Linha | Função |
+|---|---|---|
+| `workflow.go` | 18 | `HandleDownloadRequest` |
+
+---
+
+### Verificação FASE 18
+
+```bash
+# Por ação — rodar após cada ação concluída
+go test ./pkg/goanime/types/ -v -race -count=1                          # 18A
+go test ./pkg/goanime/ -v -race -count=1                                # 18B
+go test ./internal/api/ -v -race -count=1 -run "TestGetEpisode|TestDownload|TestSmart|TestGetEpisodeStreamURL"  # 18C
+go test ./internal/downloader/ -v -race -count=1 -run "TestDownloadWith|TestM3U8|TestPlayEpisode"  # 18D
+go test ./internal/appflow/ -v -race -count=1                           # 18E
+go test ./internal/download/ -v -race -count=1                          # 18F
+
+# Final — meta ≥ 70%
+go test ./... -coverprofile=coverage.out -covermode=atomic -race
+go tool cover -func=coverage.out | tail -1
+go tool cover -func=coverage.out | awk '$NF == "0.0%"' | grep -v "examples\|cmd/goanime" | wc -l
+```
+
+**Critérios de aceite:**
+- `total: ≥ 70.0%`
+- Funções não-main a 0%: ≤ 15
+
+---
+
 ## Checklist
 
 | Fase | Escopo | Funções | Status |
@@ -439,6 +625,8 @@ go tool cover -func=p17.out | tail -1  # Esperado: ≥ 70%
 | 15 | API + Util (57 funcs 0%) | +57 funcs / +600 stmts | ✅ (2026-05-21 — api 42.3%→63.6%, util 44.7%→75.8%, total 52.8%→56.8%) |
 | 16 | Playback + Handlers + Discord + Upscaler + Updater (55 funcs) | +55 funcs / +900 stmts | ✅ (2026-05-22 — discord 29.5%→94.0%, handlers 5.7%→55.9%, playback 13.3%→33.4%, updater 53.4%→72.2%, upscaler 49.2%→73.0%, total 56.8%→61.5%, 0% funcs 112→64) |
 | 17 | Scraper + Providers + Downloader + SDK + Misc (53 funcs) | +53 funcs / +600 stmts | ✅ (2026-05-23 — scraper 83.2%, providers 69.9%, types 80.5%→100%, pkg/goanime 95.1%, tui 91.1%, total 57.0%→59.0% [-short], 0% funcs 112→68; 68 restantes = 5 main()+4 ex.main()+MPV/TTY/HW não-testáveis) |
-| **TOTAL** | | **~1148 funcs / ~+2100 stmts** | |
+| 18 | types + SDK client + API success paths + exec mock + appflow + download (28 funcs) | +28 funcs / +858 stmts | ✅ (2026-05-24 — 62.9% → **75.7%**, non-main 0%: 26 → **2** [tui.Find + upscaler.Close]) |
+| **TOTAL** | | **~1176 funcs / ~+2958 stmts** | |
 
-**Pós-FASE 17 projetado:** ≥ 70% cobertura, ≤ 30 funções a 0% (apenas `main()` do CLI + exemplos SDK + TUI loops puros + GPU hardware paths)
+**Medições pós-FASE 17 (reais, 2026-05-24):** 62.9% cobertura (full suite sem -short) · 36 funções a 0% (26 non-main)
+**Medições pós-FASE 18 (reais, 2026-05-24):** **75.7%** cobertura (full suite com -race) · **2 funções non-main a 0%** (`tui.Find` + `upscaler.Close`) — ambas TUI/hardware não-testáveis. Meta ≥70% ATINGIDA.

@@ -27,6 +27,9 @@ var (
 	stdoutIsTerminalOnce sync.Once
 )
 
+// newScraperMgr is the ScraperManager constructor. Tests may override it.
+var newScraperMgr = scraper.NewScraperManager
+
 func isStdoutTerminal() bool {
 	stdoutIsTerminalOnce.Do(func() {
 		fd := os.Stdout.Fd()
@@ -307,7 +310,7 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 
 	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
 
-	scraperManager := scraper.NewScraperManager()
+	scraperManager := newScraperMgr()
 	var episodes []models.Episode
 	var err error
 
@@ -379,7 +382,7 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 		return GetSuperFlixStreamURL(anime, episode, quality)
 	}
 
-	scraperManager := scraper.NewScraperManager()
+	scraperManager := newScraperMgr()
 
 	// Determine source type with enhanced logic
 	var scraperType scraper.ScraperType

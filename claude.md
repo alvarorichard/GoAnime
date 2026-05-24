@@ -183,37 +183,31 @@ Criar em `internal/scraper/testdata/SCRAPER_NAME/`
 
 ---
 
-## VERIFICAÇÃO FINAL (após FASE 17)
+## VERIFICAÇÃO FINAL (após FASE 18)
 ```bash
-go test ./... -short -coverprofile=coverage.out -covermode=atomic -race
+go test ./... -coverprofile=coverage.out -covermode=atomic -race
 go tool cover -func=coverage.out | tail -1
-go tool cover -func=coverage.out | grep "0\.0%" | wc -l
+go tool cover -func=coverage.out | awk '$NF == "0.0%"' | grep -v "examples\|cmd/goanime" | wc -l
 ```
-Meta: **≥ 70.0%** · **≤ 50 funções a 0%** (apenas TUI/IPC/main não-testáveis)
+Meta: **≥ 70.0%** · **≤ 26 funções a 0%** (apenas TUI/IPC/main/hardware não-testáveis)
 
 ---
 
-## STATUS ATUAL (2026-05-23)
+## STATUS ATUAL (2026-05-24) — META ATINGIDA
 
-- ✅ FASES 1–17: completadas → **59.0% cobertura total** (-short) · **68 funções ainda a 0%**
-- 68 restantes = 9 `main()` (CLI + 4 exemplos SDK) + ~39 funções MPV/IPC requerem hardware + ~20 TUI/stdin/Windows-only
+- ✅ FASES 1–18: **TODAS COMPLETAS** → **75.7% cobertura total** (full suite com -race) · **2 funções non-main a 0%**
+- 2 restantes = `tui.Find` (TTY fuzzyfinder) + `upscaler.Close` (cover-tool quirk) — ambas intratáveis sem TTY/hardware
 
-| Fase | Pacotes | Funcs 0% alvo | Stmts | Status |
+| Fase | Pacotes | Funcs alvo | Stmts | Status |
 |---|---|---:|---:|:---:|
 | 15 | api + util | 57 | +600 | ✅ |
 | 16 | playback + handlers + discord + upscaler + updater | 55 | +900 | ✅ |
 | 17 | scraper + providers + downloader + SDK + misc | 53 | +600 | ✅ (2026-05-23) |
-| **TOTAL** | | **165** | **+2100** | ✅ |
+| 18 | types + SDK client + api success paths + exec mock + appflow + download | 28 | +858 | ✅ (2026-05-24) |
+| **TOTAL** | | **193** | **+2958** | ✅ |
 
-**Paradigma FASES 15–17 (autorizado pelo usuário 2026-05-18 — "eficácia brutal"):**
-- **REGRA #0 mantida estrita:** *cada* função a 0% recebe seu próprio `TestNomeDaFuncao_Cenario`. Sem agrupar, sem pular.
-- **Refactor amplamente permitido** para tornar testável (interface wrap, var injetável, split de função orquestrada, `*ForTesting`). Restrição única: **API pública não quebra (semver)**.
-- **Métricas duplas:**
-  1. Funções a 0%: 165 → ≤ 30 (apenas `main()` + exemplos + TUI loops puros)
-  2. Cobertura total: 52.8% → ≥ 70%
+**Resultado final FASE 18 (2026-05-24):** 62.9% → **75.7%** · non-main 0%: 26 → **2** · Meta ≥70% SUPERADA.
 
-**Pós-FASE 17 projetado:** ≥ 70% cobertura, ≤ 30 funções a 0%
-
-**Mapeamento funcional completo:** ver `TEST_PLAN_FUNCTIONS.md` (165 funções listadas por arquivo:linha:nome, agrupadas por fase).
+**Mapeamento funcional completo:** ver `TEST_PLAN_FUNCTIONS.md` (193 funções listadas por arquivo:linha:nome, agrupadas por fase).
 
 **Atenção ao bug do grep:** Para listar funções 0% use `awk '$NF == "0.0%"'`, NÃO `grep "0.0%"` (este último também matches `100.0%`, `80.0%`, `70.0%`, etc.).

@@ -55,7 +55,7 @@ func TestNewRichPresenceUpdater(t *testing.T) {
 	animeMutex := &sync.Mutex{}
 	updateFreq := 5 * time.Second
 	episodeDuration := 24 * time.Minute
-	socketPath := "/tmp/mpvsocket"
+	socketPath := "mpv_test.sock"
 
 	// Act
 	updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockMPVSendCommand)
@@ -79,7 +79,7 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockMPVSendCommand)
 
@@ -110,7 +110,7 @@ func TestGetCurrentPlaybackPosition(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, errorMockFunc)
 
@@ -151,7 +151,7 @@ func TestStartAndStop(t *testing.T) {
 	animeMutex := &sync.Mutex{}
 	updateFreq := 100 * time.Millisecond // Intervalo curto para teste
 	episodeDuration := 24 * time.Minute
-	socketPath := "/tmp/mpvsocket"
+	socketPath := "mpv_test.sock"
 
 	updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockMPVSendCommand)
 
@@ -267,7 +267,7 @@ func TestFetchDuration(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockFunc)
 
@@ -301,7 +301,7 @@ func TestFetchDuration(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, errorMockFunc)
 
@@ -335,7 +335,7 @@ func TestFetchDuration(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, nilMockFunc)
 
@@ -372,7 +372,7 @@ func TestFetchDuration(t *testing.T) {
 		animeMutex := &sync.Mutex{}
 		updateFreq := 5 * time.Second
 		episodeDuration := 24 * time.Minute
-		socketPath := "/tmp/mpvsocket"
+		socketPath := "mpv_test.sock"
 
 		updater := discord.NewRichPresenceUpdater(anime, &isPaused, animeMutex, updateFreq, episodeDuration, socketPath, mockFunc)
 

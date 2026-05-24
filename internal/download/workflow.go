@@ -14,6 +14,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// workflowSearchFn is the anime search function used by HandleDownloadRequest.
+// Tests may override it to avoid spawning a real TUI search.
+var workflowSearchFn = appflow.SearchAnimeWithRetry
+
 // HandleDownloadRequest processes a download request from command line
 func HandleDownloadRequest(request *util.DownloadRequest) error {
 	util.Info("Starting enhanced download mode...")
@@ -26,7 +30,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	util.Infof("Using source: %s, quality: %s", source, quality)
 
-	anime, err := appflow.SearchAnimeWithRetry(request.AnimeName)
+	anime, err := workflowSearchFn(request.AnimeName)
 	if err != nil {
 		util.Errorf("Failed to search for anime: %v", err)
 		return err

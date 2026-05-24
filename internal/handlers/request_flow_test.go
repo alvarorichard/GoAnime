@@ -457,3 +457,69 @@ func TestHandleVideoUpscale_FFmpegMissingOrInvalidInput(t *testing.T) {
 	err := handleVideoUpscale(req, "/tmp/out.mp4", testOpts())
 	require.Error(t, err)
 }
+
+// --- SelectMedia ---
+
+// stubFindResWithCallback returns a findResultFn that calls the formatter for every
+// item before returning (idx, err). This exercises the switch/branch logic inside
+// the formatter closure without launching a real TUI.
+func stubFindResWithCallback(idx int, err error) func([]*models.Anime, func(int) string, ...fuzzyfinder.Option) (int, error) {
+	return func(results []*models.Anime, formatter func(int) string, _ ...fuzzyfinder.Option) (int, error) {
+		for i := range results {
+			_ = formatter(i)
+		}
+		return idx, err
+	}
+}
+
+func TestSelectMedia_EmptyResults(t *testing.T) {
+	t.Parallel()
+	mh := newHandler(&fakeMediaSource{})
+	_, err := mh.SelectMedia(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no results")
+}
+
+func TestSelectMedia_AllTypeBranches(t *testing.T) {
+	// callback is invoked for every item — covers Movie/TV/Anime/unknown switch branches
+	// and both the year-present and year-absent branches.
+	setFindResultFn(t, stubFindResWithCallback(0, nil))
+
+	results := []*models.Anime{
+		{Name: "Movie Title", MediaType: models.MediaTypeMovie, Source: "AllAnime", Year: "2023"},
+		{Name: "TV Show", MediaType: models.MediaTypeTV, Source: "SuperFlix"},
+		{Name: "Anime Title", MediaType: models.MediaTypeAnime, Source: "AllAnime"},
+		{Name: "Unknown Type", Source: "AllAnime"}, // empty MediaType → empty typeTag
+	}
+	mh := newHandler(&fakeMediaSource{})
+	selected, err := mh.SelectMedia(results)
+	require.NoError(t, err)
+	assert.Equal(t, "Movie Title", selected.Name)
+}
+
+func TestSelectMedia_FindError(t *testing.T) {
+	setFindResultFn(t, func(_ []*models.Anime, _ func(int) string, _ ...fuzzyfinder.Option) (int, error) {
+		return -1, errors.New("aborted")
+	})
+	mh := newHandler(&fakeMediaSource{})
+	results := []*models.Anime{{Name: "Naruto"}}
+	_, err := mh.SelectMedia(results)
+	require.Error(t, err)
+}
+
+func TestSelectMedia_YearPresentInLabel(t *testing.T) {
+	// Verify the year-suffix branch: Year != "" → " (YEAR)" appended to label.
+	var capturedLabel string
+	setFindResultFn(t, func(results []*models.Anime, formatter func(int) string, _ ...fuzzyfinder.Option) (int, error) {
+		capturedLabel = formatter(0)
+		return 0, nil
+	})
+
+	results := []*models.Anime{
+		{Name: "Naruto", MediaType: models.MediaTypeAnime, Source: "AllAnime", Year: "2002"},
+	}
+	mh := newHandler(&fakeMediaSource{})
+	_, err := mh.SelectMedia(results)
+	require.NoError(t, err)
+	assert.Contains(t, capturedLabel, "(2002)")
+}
