@@ -2,6 +2,7 @@ package appflow
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -9,6 +10,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// skipIfWindowsNoTTY skips tests whose retry loop reaches tui.RunClean(huh.Input.Run),
+// which blocks indefinitely on Windows without a real console instead of returning an error.
+func skipIfWindowsNoTTY(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("huh.NewInput blocks on Windows without a TTY; cannot drive headlessly")
+	}
+}
 
 // withSearchFn swaps searchEnhancedFn for the duration of the test and restores it.
 // Do NOT use with t.Parallel() — shares a package-level var.
@@ -121,6 +131,7 @@ func TestSearchAnimeWithRetry_FirstAttemptSucceeds(t *testing.T) {
 }
 
 func TestSearchAnimeWithRetry_FirstAttemptReturnsNilAnime(t *testing.T) {
+	skipIfWindowsNoTTY(t)
 	// searchWithRetryFn returning nil anime (no error) should not be treated as
 	// success — the function continues the retry loop.  Without a TTY the prompt
 	// call via tui.RunClean returns an error, which triggers "search cancelled".
@@ -134,6 +145,7 @@ func TestSearchAnimeWithRetry_FirstAttemptReturnsNilAnime(t *testing.T) {
 }
 
 func TestSearchAnimeWithRetry_FirstAttemptBackToSearch(t *testing.T) {
+	skipIfWindowsNoTTY(t)
 	// api.ErrBackToSearch triggers the "Going back to new search..." branch,
 	// then falls through to the TUI prompt which fails without a terminal.
 	withSearchWithRetryFn(t, func(name, source string) (*models.Anime, error) {
@@ -147,6 +159,7 @@ func TestSearchAnimeWithRetry_FirstAttemptBackToSearch(t *testing.T) {
 }
 
 func TestSearchAnimeWithRetry_FirstAttemptOtherError(t *testing.T) {
+	skipIfWindowsNoTTY(t)
 	// A non-ErrBackToSearch error triggers the "No anime found" branch,
 	// then the TUI prompt which fails without a terminal.
 	withSearchWithRetryFn(t, func(name, source string) (*models.Anime, error) {
