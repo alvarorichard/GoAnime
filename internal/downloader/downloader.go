@@ -40,6 +40,57 @@ type EpisodeDownloader struct {
 	episodes  []models.Episode
 	anime     *models.Anime            // Store anime data for enhanced API calls
 	seasonMap []metadata.SeasonMapping // AniList-based absolute→season map
+	opts      downloaderOptions        // optional test injections (nil-safe via helpers)
+}
+
+// progressSender abstracts the subset of *tea.Program needed by the download
+// pipeline. tea.Program satisfies this interface implicitly. Tests inject a
+// mock sender so they can drive the pipeline without requiring a TTY.
+type progressSender interface {
+	Send(tea.Msg)
+	Quit()
+	Run() (tea.Model, error)
+}
+
+// downloaderOptions holds injectable dependencies. All fields are optional;
+// the corresponding helper method falls back to a production default when the
+// field is nil. Tests set these via SetTestHooks (test-only constructor).
+type downloaderOptions struct {
+	httpClient *http.Client                 // override SafeTransport client
+	sleep      func(time.Duration)          // override time.Sleep (skip waits)
+	newSender  func(tea.Model) progressSender // override tui.NewProgram
+}
+
+// httpClient returns the injected HTTP client when set, else builds the
+// production SafeTransport client. Centralises construction so tests can
+// substitute a loopback-friendly client.
+func (d *EpisodeDownloader) httpClient() *http.Client {
+	if d.opts.httpClient != nil {
+		return d.opts.httpClient
+	}
+	return &http.Client{
+		Transport: api.SafeTransport(10 * time.Minute),
+		Timeout:   0,
+	}
+}
+
+// sleepFn invokes the injected sleep function when set, else time.Sleep.
+// Tests inject a no-op to make pipeline tests deterministic.
+func (d *EpisodeDownloader) sleepFn(dur time.Duration) {
+	if d.opts.sleep != nil {
+		d.opts.sleep(dur)
+		return
+	}
+	time.Sleep(dur)
+}
+
+// newSender returns a progressSender for the given model. Production wraps
+// tui.NewProgram; tests inject a mock that does not require a TTY.
+func (d *EpisodeDownloader) newSender(m tea.Model) progressSender {
+	if d.opts.newSender != nil {
+		return d.opts.newSender(m)
+	}
+	return tui.NewProgram(m)
 }
 
 // NewEpisodeDownloader creates a new episode downloader
@@ -706,143 +757,133 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 	return 300 * 1024 * 1024, nil // 300MB default
 }
 
-// downloadWithProgress downloads a single episode with progress bar
+// downloadWithProgress downloads a single episode with progress bar.
+// Constructs the progress model + sender (TTY-bound by default), then
+// delegates the actual pipeline to runDownloadWithProgress which is fully
+// testable with an injected mock sender.
 func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, episodeNum int) error {
-	// Ensure output directory exists (may vary per episode with season maps)
 	if err := os.MkdirAll(filepath.Dir(episodePath), 0700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
-	// Create progress model
-	m := &progressModel{
-		progress: progress.New(progress.WithDefaultBlend()),
-	}
+	m := &progressModel{progress: progress.New(progress.WithDefaultBlend())}
 
-	// Get content length for progress tracking
 	contentLength, err := d.getContentLength(videoURL)
 	if err != nil {
 		fmt.Printf("Warning: Failed to get content length: %v, using fallback\n", err)
-		// Use a reasonable fallback size for progress tracking
 		contentLength = 200 * 1024 * 1024 // 200MB fallback
 	}
 	m.totalBytes = contentLength
 
 	fmt.Printf("Download setup - Content Length: %d MB\n", contentLength/(1024*1024))
 
-	p := tui.NewProgram(m)
+	return d.runDownloadWithProgress(videoURL, episodePath, episodeNum, m, d.newSender(m))
+}
 
-	// Start download in goroutine with proper progress tracking
+// runDownloadWithProgress executes the download pipeline against an arbitrary
+// progressSender. Extracted from downloadWithProgress so tests can drive the
+// full flow with a mock sender (no TTY) and verify the orchestration:
+// goroutine launch, completion verification, file size checks, prompt call.
+func (d *EpisodeDownloader) runDownloadWithProgress(videoURL, episodePath string, episodeNum int, m *progressModel, p progressSender) error {
 	downloadComplete := make(chan error, 1)
 	go func() {
-		// Use the existing player download functionality with progress tracking
 		err := d.downloadEpisodeWithProgress(videoURL, episodePath, m, p)
-
-		// Verify the file was actually downloaded before marking as complete
 		if err == nil && !d.fileExists(episodePath) {
 			err = fmt.Errorf("download failed: file was not created")
 		}
-
-		// Send completion status and wait before quitting
 		if err == nil {
 			p.Send(statusMsg("Download completed!"))
-			// Give time for final progress update to show 100%
-			time.Sleep(1 * time.Second)
+			d.sleepFn(1 * time.Second)
 		} else {
 			p.Send(statusMsg(fmt.Sprintf("Download failed: %v", err)))
-			time.Sleep(500 * time.Millisecond)
+			d.sleepFn(500 * time.Millisecond)
 		}
-
-		// Mark as done and quit
 		m.mu.Lock()
 		m.done = true
 		m.mu.Unlock()
 		p.Quit()
-
 		downloadComplete <- err
 	}()
 
-	// Run progress bar - this will block until download is complete
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("progress display error: %w", err)
 	}
-
-	// Wait for download completion
 	if err := <-downloadComplete; err != nil {
 		return err
 	}
-
-	// Double-check the file exists and has reasonable size
 	if !d.fileExists(episodePath) {
 		return fmt.Errorf("download verification failed: file does not exist")
 	}
-
 	if stat, err := os.Stat(episodePath); err == nil && stat.Size() < 1024 {
 		return fmt.Errorf("download verification failed: file is too small (%d bytes)", stat.Size())
 	}
-
 	fmt.Printf("\nEpisode %d downloaded successfully!\n", episodeNum)
 	printDownloadLocation(episodePath)
 	return d.promptPlayDownloaded(episodeNum, episodePath)
 }
 
-// downloadEpisodeWithProgress downloads an episode with progress model and Bubble Tea program
-func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
-	// Check if URL is empty or invalid
+// downloadMethod identifies which downloader backend handles a URL.
+type downloadMethod int
+
+const (
+	methodHTTP downloadMethod = iota
+	methodYtDlp
+)
+
+// selectDownloadMethod is the pure URL-routing rule used by
+// downloadEpisodeWithProgress. Extracted so it can be tested exhaustively
+// without invoking any actual download.
+//
+// Returns (primary, fallback, hasFallback). When hasFallback is true the
+// caller must invoke fallback if primary errors.
+func selectDownloadMethod(videoURL string) (primary, fallback downloadMethod, hasFallback bool) {
+	switch {
+	case strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8"):
+		return methodYtDlp, methodHTTP, false
+	case strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com"):
+		return methodYtDlp, methodHTTP, false
+	case strings.Contains(videoURL, "blogger.com"):
+		return methodYtDlp, methodHTTP, false
+	case strings.Contains(videoURL, "sharepoint.com"):
+		return methodHTTP, methodYtDlp, true
+	case strings.Contains(videoURL, "allanime") || strings.Contains(videoURL, "allmanga"):
+		return methodYtDlp, methodHTTP, false
+	default:
+		return methodHTTP, methodYtDlp, false
+	}
+}
+
+// downloadEpisodeWithProgress downloads an episode with progress model and a
+// progress sender (production: *tea.Program; tests: mock).
+func (d *EpisodeDownloader) downloadEpisodeWithProgress(videoURL, destPath string, progressModel *progressModel, program progressSender) error {
 	if videoURL == "" {
 		return fmt.Errorf("empty video URL provided")
 	}
-
-	// Inspired by ani-cli download logic
-	// Check URL type and use appropriate download method
-
-	// For m3u8 streams (HLS) - use yt-dlp like ani-cli
-	if strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "master.m3u8") {
-		fmt.Println("Detected HLS stream, using yt-dlp download (ani-cli style)")
-		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
+	primary, fallback, hasFallback := selectDownloadMethod(videoURL)
+	err := d.runMethod(primary, videoURL, destPath, progressModel, program)
+	if err != nil && hasFallback {
+		fmt.Printf("Primary download failed: %v, trying fallback\n", err)
+		return d.runMethod(fallback, videoURL, destPath, progressModel, program)
 	}
-
-	// For wixmp.com URLs (common in AllAnime) - use yt-dlp
-	if strings.Contains(videoURL, "wixmp.com") || strings.Contains(videoURL, "repackager.wixmp.com") {
-		fmt.Println("Detected wixmp URL, using yt-dlp download")
-		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
-	}
-
-	// For blogger.com URLs - use yt-dlp
-	if strings.Contains(videoURL, "blogger.com") {
-		fmt.Println("Detected blogger URL, using yt-dlp download")
-		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
-	}
-
-	// For sharepoint URLs (AllAnime) - try HTTP first, fallback to yt-dlp
-	if strings.Contains(videoURL, "sharepoint.com") {
-		fmt.Println("Detected SharePoint URL, trying HTTP download first")
-		err := d.downloadHTTPWithProgress(videoURL, destPath, progressModel, program)
-		if err != nil {
-			fmt.Printf("HTTP download failed: %v, trying yt-dlp fallback\n", err)
-			return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
-		}
-		return nil
-	}
-
-	// For any AllAnime URL, try yt-dlp as default
-	if strings.Contains(videoURL, "allanime") || strings.Contains(videoURL, "allmanga") {
-		fmt.Println("Detected AllAnime URL, using yt-dlp download")
-		return d.downloadM3U8WithYtDlp(videoURL, destPath, progressModel, program)
-	}
-
-	// For regular MP4 URLs - use HTTP download
-	fmt.Println("Using HTTP download for regular MP4 URL")
-	return d.downloadHTTPWithProgress(videoURL, destPath, progressModel, program)
+	return err
 }
 
-// downloadHTTPWithProgress downloads via HTTP with progress tracking
-func (d *EpisodeDownloader) downloadHTTPWithProgress(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
-	// Create HTTP client with longer timeout for video downloads
-	client := &http.Client{
-		Transport: api.SafeTransport(10 * time.Minute), // Much longer transport timeout
-		Timeout:   0,                                   // No overall timeout - let it download completely
+// runMethod dispatches to the actual download backend.
+func (d *EpisodeDownloader) runMethod(m downloadMethod, videoURL, destPath string, pm *progressModel, program progressSender) error {
+	switch m {
+	case methodHTTP:
+		return d.downloadHTTPWithProgress(videoURL, destPath, pm, program)
+	case methodYtDlp:
+		return d.downloadM3U8WithYtDlp(videoURL, destPath, pm, program)
+	default:
+		return fmt.Errorf("unknown download method: %d", m)
 	}
+}
 
-	// Get the file
+// downloadHTTPWithProgress downloads via HTTP with progress tracking.
+// HTTP client and progress sender are injectable via downloaderOptions.
+func (d *EpisodeDownloader) downloadHTTPWithProgress(videoURL, destPath string, progressModel *progressModel, program progressSender) error {
+	client := d.httpClient()
+
 	resp, err := client.Get(videoURL)
 	if err != nil {
 		return fmt.Errorf("failed to start download: %w", err)
@@ -937,8 +978,9 @@ func (d *EpisodeDownloader) downloadHTTPWithProgress(videoURL, destPath string, 
 	return nil
 }
 
-// downloadM3U8WithYtDlp downloads m3u8/HLS streams using go-ytdlp library
-func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, progressModel *progressModel, program *tea.Program) error {
+// downloadM3U8WithYtDlp downloads m3u8/HLS streams using go-ytdlp library.
+// Progress sender is injectable via downloaderOptions for testing.
+func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, progressModel *progressModel, program progressSender) error {
 	program.Send(statusMsg("Starting yt-dlp download (using go-ytdlp library)..."))
 
 	// Create directory if it doesn't exist
