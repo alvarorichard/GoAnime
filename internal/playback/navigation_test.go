@@ -220,17 +220,9 @@ func TestCheckIfSeriesEnhanced_HandlesError(t *testing.T) {
 	assert.GreaterOrEqual(t, total, 0)
 }
 
-// --- SelectInitialEpisode ---
-//
-// SelectInitialEpisode calls player.SelectEpisodeWithFuzzyFinder which opens
-// a tcell TUI. We cannot drive it from a test, so this is a symbol-pin only.
-// The underlying player package has dedicated tests for the fuzzy-finder.
-
-func TestSelectInitialEpisode_SymbolPin(t *testing.T) {
-	t.Parallel()
-	// existence guard: catches accidental rename/removal
-	_ = SelectInitialEpisode
-}
+// SelectInitialEpisode is fully covered by select_initial_episode_test.go
+// (injected mock selector + table-driven parseEpisodeSelection). Removed the
+// old symbol pin to avoid dead noise.
 
 // --- PlayEpisode: drive entry until videoErr triggers an early return. ---
 // We cannot drive the full TUI happy path, but with a bogus URL the call to

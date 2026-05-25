@@ -203,22 +203,46 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	return nil
 }
 
+// selectEpisodeFuncType matches player.SelectEpisodeWithFuzzyFinder so tests
+// can swap in a mock that doesn't open a TUI.
+type selectEpisodeFuncType func(episodes []models.Episode) (string, string, error)
+
+// extractEpisodeNumberFuncType matches player.ExtractEpisodeNumber for
+// symmetric injection — keeps the entire SelectInitialEpisode pipeline
+// driveable without touching the player package state.
+type extractEpisodeNumberFuncType func(s string) string
+
+// selectEpisodeFunc and extractEpisodeNumberFunc are package-level
+// indirections injected by tests. Production code never touches them.
+var (
+	selectEpisodeFunc       selectEpisodeFuncType       = player.SelectEpisodeWithFuzzyFinder
+	extractEpisodeNumberFunc extractEpisodeNumberFuncType = player.ExtractEpisodeNumber
+)
+
+// SelectInitialEpisode runs the fuzzy-finder selector then parses the result.
+// The TUI call goes through selectEpisodeFunc, so tests inject a mock.
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
-	util.Debugf("[TRACE] SelectInitialEpisode: calling SelectEpisodeWithFuzzyFinder with %d episodes", len(episodes))
-	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
-	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", selectedEpisodeURL, episodeNumberStr, err)
-	if err != nil {
-		// Propagate back request error
-		if errors.Is(err, player.ErrBackRequested) {
+	util.Debugf("[TRACE] SelectInitialEpisode: calling selector with %d episodes", len(episodes))
+	url, numStr, err := selectEpisodeFunc(episodes)
+	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", url, numStr, err)
+	return parseEpisodeSelection(url, numStr, err)
+}
+
+// parseEpisodeSelection is the pure post-processing of a fuzzy-finder result.
+// All branches (back, generic error, atoi success, atoi failure) are exposed
+// here so they can be table-tested without TUI involvement.
+func parseEpisodeSelection(url, numStr string, fuzzyErr error) (string, string, int, error) {
+	if fuzzyErr != nil {
+		if errors.Is(fuzzyErr, player.ErrBackRequested) {
 			return "", "", -1, player.ErrBackRequested
 		}
-		return "", "", 0, err
+		return "", "", 0, fuzzyErr
 	}
-	selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+	epNum, err := strconv.Atoi(extractEpisodeNumberFunc(numStr))
 	if err != nil {
 		return "", "", 0, err
 	}
-	return selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, nil
+	return url, numStr, epNum, nil
 }
 
 func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (string, string, int) {
