@@ -3,6 +3,7 @@ package appflow
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -624,6 +625,14 @@ func TestEnrichFromAniList(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDefaultPromptForName_NoTTYReturnsCancelled(t *testing.T) {
+	// Windows CI: huh.NewInput → tea.Program.Run blocks indefinitely on
+	// ReadConsole instead of returning an error when stdin is not a real TTY.
+	// On Unix CI runners the same call returns an error promptly. Skip on
+	// Windows; the production path is unreachable from a headless test there.
+	if runtime.GOOS == "windows" {
+		t.Skip("huh.NewInput blocks on Windows without a real TTY; cannot drive headlessly")
+	}
+
 	// Lock the mutex even though we don't swap — the package-level prompt is
 	// shared state and the default impl reads no test-mutable globals; this
 	// test only invokes it, but defending against concurrent swaps is cheap.
