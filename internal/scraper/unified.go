@@ -30,8 +30,9 @@ const (
 const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
-	GoyabuType    // PT-BR anime source
-	SuperFlixType // SuperFlix PT-BR movies/series/animes/doramas
+	GoyabuType     // PT-BR anime source
+	SuperFlixType  // SuperFlix PT-BR movies/series/animes/doramas
+	AnimeWorldType // IT anime source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -75,6 +76,7 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
 		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
 		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: NewSuperFlixClient()}
+		manager.scrapers[AnimeWorldType] = &AnimeWorldAdapter{client: NewAnimeWorldClient()}
 
 		globalScraperManager = manager
 	})
@@ -401,6 +403,7 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			strings.Contains(anime.Name, "[PT-BR]") ||
 			strings.Contains(anime.Name, "[Portuguese]") ||
 			strings.Contains(anime.Name, "[Português]") ||
+			strings.Contains(anime.Name, "[Italian]") ||
 			strings.Contains(anime.Name, "[Multilanguage]") ||
 			strings.Contains(anime.Name, "[Movie]") ||
 			strings.Contains(anime.Name, "[TV]")
@@ -462,6 +465,7 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"9anime", counts["9Anime"],
 		"goyabu", counts["Goyabu"],
 		"superflix", counts["SuperFlix"],
+		"animeWorld", counts["AnimeWorld"],
 		"total", len(results))
 }
 
@@ -533,6 +537,8 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "Goyabu"
 	case SuperFlixType:
 		return "SuperFlix"
+	case AnimeWorldType:
+		return "AnimeWorld"
 	default:
 		return "Desconhecido"
 	}
@@ -549,6 +555,8 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case SuperFlixType:
 		return "[PT-BR]"
+	case AnimeWorldType:
+		return "[Italian]"
 	default:
 		return "[Unknown]"
 	}
@@ -763,4 +771,29 @@ func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
 // Useful for testing with mock servers.
 func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
 	return &SuperFlixAdapter{client: client}
+}
+
+// AnimeWorldAdapter adapts AnimeWorldClient to UnifiedScraper interface
+type AnimeWorldAdapter struct {
+	client *AnimeWorldClient
+}
+
+func (a *AnimeWorldAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *AnimeWorldAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *AnimeWorldAdapter) GetStreamURL(episodeURL string, _ ...any) (string, map[string]string, error) {
+	streamURL, err := a.client.GetStreamURL(episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	return streamURL, map[string]string{"source": "animeworld"}, nil
+}
+
+func (a *AnimeWorldAdapter) GetType() ScraperType {
+	return AnimeWorldType
 }
