@@ -91,14 +91,7 @@ type goyabuSearchResult struct {
 // SearchAnime searches for anime on goyabu.io
 // Uses the WordPress REST API search endpoint
 func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
-	// Normalize query: replace hyphens/underscores with spaces for WordPress search
-	// (CLI args arrive hyphenated like "cavaleiro-do-zodiaco" but Goyabu needs spaces)
-	query = strings.TrimSpace(query)
-	query = strings.ReplaceAll(query, "-", " ")
-	query = strings.ReplaceAll(query, "_", " ")
-	for strings.Contains(query, "  ") {
-		query = strings.ReplaceAll(query, "  ", " ")
-	}
+	query = normalizeQuery(query)
 
 	util.Debug("Goyabu search", "query", query)
 
@@ -793,6 +786,28 @@ func (c *GoyabuClient) sleep() {
 }
 
 func (c *GoyabuClient) resolveURL(base, ref string) string {
+	if strings.HasPrefix(ref, "http") {
+		return ref
+	}
+	if strings.HasPrefix(ref, "/") {
+		return base + ref
+	}
+	return base + "/" + ref
+}
+
+// normalizeQuery replaces hyphens/underscores with spaces.
+// (CLI args arrive hyphenated like "cavaleiro-do-zodiaco" but some scrapers needs spaces)
+func normalizeQuery(query string) string {
+	query = strings.TrimSpace(query)
+	query = strings.ReplaceAll(query, "-", " ")
+	query = strings.ReplaceAll(query, "_", " ")
+	for strings.Contains(query, "  ") {
+		query = strings.ReplaceAll(query, "  ", " ")
+	}
+	return query
+}
+
+func resolveURL(base, ref string) string {
 	if strings.HasPrefix(ref, "http") {
 		return ref
 	}
