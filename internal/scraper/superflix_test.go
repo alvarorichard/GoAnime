@@ -2115,8 +2115,8 @@ func TestEnsureJSONResponse_BlankBodyWithBadStatus_2026_04_30(t *testing.T) {
 // evening reproduced a 1-day-of-leak window. Pin two boundary cases on
 // a fixed clock so neither timezone nor wall-clock drift can hide a
 // regression:
-//   1. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-03 → must be filtered
-//   2. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-02 → must be kept
+//  1. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-03 → must be filtered
+//  2. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-02 → must be kept
 func TestFilterEpisodesByAirDate_TomorrowIsNotKept_2026_05_02(t *testing.T) {
 	t.Parallel()
 

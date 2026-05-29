@@ -11,7 +11,7 @@ import (
 // minimalModel is the simplest possible Bubble Tea model for construction tests.
 type minimalModel struct{}
 
-func (m minimalModel) Init() tea.Cmd                        { return nil }
+func (m minimalModel) Init() tea.Cmd                       { return nil }
 func (m minimalModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return m, nil }
 func (m minimalModel) View() tea.View                      { return tea.NewView("") }
 

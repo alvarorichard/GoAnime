@@ -362,7 +362,7 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
-// Movie/TV routing: SuperFlix and FlixHQ both flow through the enhanced API,
+	// Movie/TV routing: SuperFlix and FlixHQ both flow through the enhanced API,
 	// which dispatches by anime.Source internally. Label logs by the actual
 	// source so triage isn't misled into thinking SuperFlix failures came from
 	// FlixHQ.

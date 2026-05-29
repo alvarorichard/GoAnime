@@ -56,8 +56,8 @@ type progressSender interface {
 // the corresponding helper method falls back to a production default when the
 // field is nil. Tests set these via SetTestHooks (test-only constructor).
 type downloaderOptions struct {
-	httpClient *http.Client                 // override SafeTransport client
-	sleep      func(time.Duration)          // override time.Sleep (skip waits)
+	httpClient *http.Client                   // override SafeTransport client
+	sleep      func(time.Duration)            // override time.Sleep (skip waits)
 	newSender  func(tea.Model) progressSender // override tui.NewProgram
 }
 

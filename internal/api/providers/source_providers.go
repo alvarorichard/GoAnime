@@ -301,4 +301,3 @@ func (p *superFlixProvider) FetchStreamURL(_ context.Context, episode *models.Ep
 	}
 	return url, nil
 }
-

@@ -423,4 +423,3 @@ func TestSelectQualityFromOptions_EmptyDataReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "", selectQualityFromOptions(nil, "best"))
 }
-

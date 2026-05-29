@@ -86,7 +86,7 @@ func makeInjectedDownloader(t *testing.T) (*EpisodeDownloader, *mockProgressSend
 	d := makeEpisodeDownloader(t, "Foo", makeEpisodes(1), false)
 	d.opts = downloaderOptions{
 		httpClient: &http.Client{Timeout: 5 * time.Second}, // bypass SafeTransport for loopback
-		sleep:      func(time.Duration) {},                  // skip the 1s/500ms pauses
+		sleep:      func(time.Duration) {},                 // skip the 1s/500ms pauses
 		newSender:  func(tea.Model) progressSender { return sender },
 	}
 	return d, sender

@@ -600,4 +600,3 @@ func withClosedStdin(t *testing.T) {
 		_ = f.Close()
 	})
 }
-

@@ -215,7 +215,7 @@ type extractEpisodeNumberFuncType func(s string) string
 // selectEpisodeFunc and extractEpisodeNumberFunc are package-level
 // indirections injected by tests. Production code never touches them.
 var (
-	selectEpisodeFunc       selectEpisodeFuncType       = player.SelectEpisodeWithFuzzyFinder
+	selectEpisodeFunc        selectEpisodeFuncType        = player.SelectEpisodeWithFuzzyFinder
 	extractEpisodeNumberFunc extractEpisodeNumberFuncType = player.ExtractEpisodeNumber
 )
 
