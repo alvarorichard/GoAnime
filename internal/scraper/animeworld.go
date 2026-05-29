@@ -22,11 +22,11 @@ const (
 	animeWorldSource     = "AnimeWorld"
 )
 
+// animeWorldEpisodeURLPattern matches AnimeWorld play paths, e.g. /play/naruto-ita.9XRsD/TMWIn.
+// It also matches bare anime pages since they share the same /play/ prefix.
 var animeWorldEpisodeURLPattern = regexp.MustCompile(`^/play/[^/?#]+(/[^/?#]+)?$`)
 
-// TODO CHECK ALSO THE MANAGER THERE ARE ADAOTER ETC... I DONT THINK THIS SHOULD IMPLEMENT THE SCRAPER INTERFACE, BUT MAYBE AN ADAPTER MUST BE USED!
-// ALSO FOR SCRAPERTYPE I DUNNOOOO. GOYABUCLIENT DOESNT IMPLEMENT INTERFACE, BUT ITS IN A ADAPTOR
-// QUEL MAP PUZZA, NON CI STA DOCUMENTAZIONE CHE DICE CHE COSA E'
+// AnimeWorldClient handles interactions with animeworld.ac.
 type AnimeWorldClient struct {
 	client        *http.Client
 	baseURL       string
@@ -37,6 +37,7 @@ type AnimeWorldClient struct {
 	scraperType   ScraperType
 }
 
+// NewAnimeWorldClient creates a ready-to-use AnimeWorld client.
 func NewAnimeWorldClient() *AnimeWorldClient {
 	return &AnimeWorldClient{
 		client:        util.NewFastClient(),
@@ -49,53 +50,58 @@ func NewAnimeWorldClient() *AnimeWorldClient {
 	}
 }
 
-// SearchAnime searches for anime on animeworld.ac
+// SearchAnime searches animeworld.ac for the given query and returns matching anime.
 func (c *AnimeWorldClient) SearchAnime(query string) ([]*models.Anime, error) {
-	// query "attacco dei giganti"
-	// url => https://www.animeworld.ac/search?keyword=attacco+dei+giganti
 	query = normalizeQuery(query)
-
 	util.Debug("AnimeWorld search", "query", query)
-
-	searchURL := c.buildRequestURL(query)
-	return c.searchAnimeHTML(searchURL)
+	return c.searchAnimeHTML(c.buildRequestURL(query))
 }
 
-// GetAnimeEpisodes scrapes the episodes of an anime given its URL
+// GetAnimeEpisodes returns all episodes for the anime at animeURL.
 func (c *AnimeWorldClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	util.Debug("AnimeWorld episodes", "url", animeURL)
 	if err := c.validateEpisodeURL(animeURL); err != nil {
 		return nil, err
 	}
 	return c.searchAnimeEpisodesHTML(animeURL)
 }
 
-// GetStreamURL fetches the video source URL of an episode
+// GetStreamURL returns the direct video URL for the episode at episodeURL.
+// It tries the JSON API first and falls back to HTML scraping.
 func (c *AnimeWorldClient) GetStreamURL(episodeURL string) (string, error) {
+	util.Debug("AnimeWorld stream URL", "url", episodeURL)
 	if err := c.validateEpisodeURL(episodeURL); err != nil {
 		return "", err
 	}
+
 	source, apiErr := c.searchVideoURLApi(episodeURL)
 	if apiErr == nil {
+		util.Debug("AnimeWorld stream URL found via API", "url", source)
 		return source, nil
 	}
-	// fallback to HTML
+	util.Debug("AnimeWorld API strategy failed, trying HTML fallback", "error", apiErr)
+
 	source, htmlErr := c.searchVideoURLHTML(episodeURL)
 	if htmlErr == nil {
+		util.Debug("AnimeWorld stream URL found via HTML", "url", source)
 		return source, nil
 	}
-	return "", fmt.Errorf("AnimeWorld search failed for episode URL: %s: %w",
-		episodeURL,
-		errors.Join(apiErr, htmlErr))
+	util.Debug("AnimeWorld HTML strategy failed", "error", htmlErr)
+
+	return "", fmt.Errorf("AnimeWorld: all strategies failed for %s: %w",
+		episodeURL, errors.Join(apiErr, htmlErr))
 }
 
+// searchAnimeHTML fetches searchURL and extracts anime search results.
 func (c *AnimeWorldClient) searchAnimeHTML(searchURL string) ([]*models.Anime, error) {
-	doc, err := c.fetchDoc(searchURL, "AnimeWorld Anime search HTML")
+	doc, err := c.fetchDoc(searchURL, "AnimeWorld search")
 	if err != nil {
 		return nil, err
 	}
 	return c.extractAnimeSearchResults(doc)
 }
 
+// extractAnimeSearchResults parses the .film-list grid into Anime models.
 func (c *AnimeWorldClient) extractAnimeSearchResults(doc *goquery.Document) ([]*models.Anime, error) {
 	var anime []*models.Anime
 
@@ -106,10 +112,7 @@ func (c *AnimeWorldClient) extractAnimeSearchResults(doc *goquery.Document) ([]*
 		if name == "" || href == "" {
 			return
 		}
-
-		// unhandled error: an empty imgURL is self-explanatory
 		imgURL, _ := s.Find("a.poster img").Attr("src")
-
 		anime = append(anime, &models.Anime{
 			Name:      name,
 			URL:       resolveURL(c.baseURL, href),
@@ -118,173 +121,175 @@ func (c *AnimeWorldClient) extractAnimeSearchResults(doc *goquery.Document) ([]*
 			MediaType: models.MediaTypeAnime,
 		})
 	})
+
+	util.Debug("AnimeWorld search results", "count", len(anime))
 	return anime, nil
 }
 
+// searchAnimeEpisodesHTML fetches the anime page and extracts its episode list.
 func (c *AnimeWorldClient) searchAnimeEpisodesHTML(animeURL string) ([]models.Episode, error) {
-	doc, err := c.fetchDoc(animeURL, "AnimeWorld Episodes search HTML")
+	doc, err := c.fetchDoc(animeURL, "AnimeWorld episodes")
 	if err != nil {
 		return nil, err
 	}
 	return c.extractEpisodesSearchResults(doc)
 }
 
-// TODO NUM EPISODE CHECK IF BREAKS THE APPLICATION
-
-// animeWorldRawEpisodes represents the raw episode data scraped from World Anime
-type animeWorldRawEpisodes struct {
-	episodeNumberStr string
-	episodeNumber    int
-	episodeURL       string
+// rawEpisode holds intermediate episode data before conversion to models.Episode.
+type rawEpisode struct {
+	numberStr string
+	number    int
+	url       string
 }
 
-// extractEpisodesSearchResults ignores episodes that for some resons are not found
+// extractEpisodesSearchResults parses episode links from the anime page.
 //
-// handles also the case of a "double episode". It's not common, but sometimes
-// a video source contains two episodes one after others. Probably because it was aired in this way in Italy
-// A double episode can be for example "45-46"
-// I don't know how to handle this case for the Num field in models.Episode.
+// AnimeWorld occasionally airs two episodes back-to-back; in that case
+// data-episode-num contains a range like "45-46". The Num field is set to
+// the first episode in the range; the full string is preserved in Number.
 func (c *AnimeWorldClient) extractEpisodesSearchResults(doc *goquery.Document) ([]models.Episode, error) {
-	var episodes []animeWorldRawEpisodes
-	doc.Find("ul.episodes li.episode a").Each(func(i int, s *goquery.Selection) {
-		numberStr, exists := s.Attr("data-episode-num")
+	var raw []rawEpisode
+
+	doc.Find("ul.episodes li.episode a").Each(func(_ int, s *goquery.Selection) {
+		numStr, exists := s.Attr("data-episode-num")
 		if !exists {
 			return
 		}
-		num, err := strconv.Atoi(numberStr)
+		num, err := strconv.Atoi(numStr)
 		if err != nil {
+			util.Debug("AnimeWorld skipping episode with non-integer num", "data-episode-num", numStr)
 			return
 		}
 		href, exists := s.Attr("href")
 		if !exists {
 			return
 		}
-
-		episodes = append(episodes, animeWorldRawEpisodes{
-			episodeNumberStr: fmt.Sprintf("%d", num),
-			episodeNumber:    num,
-			episodeURL:       href,
+		raw = append(raw, rawEpisode{
+			numberStr: fmt.Sprintf("%d", num),
+			number:    num,
+			url:       href,
 		})
 	})
-	return c.adjustEpisodes(episodes), nil
+
+	episodes := c.normalizeEpisodes(raw)
+	util.Debug("AnimeWorld episodes parsed", "count", len(episodes))
+	return episodes, nil
 }
 
-// adjustEpisodes synchronizes the episode name number with the episode name if there are double episodes
-// Otherwise just maps to []models.Episode. See Tests for more info
-func (c *AnimeWorldClient) adjustEpisodes(rawEps []animeWorldRawEpisodes) []models.Episode {
-	var episodes []models.Episode
+// normalizeEpisodes converts raw episode data to models.Episode, resolving
+// double-episode ranges (e.g. "45-46") to their first episode number.
+func (c *AnimeWorldClient) normalizeEpisodes(rawEps []rawEpisode) []models.Episode {
+	episodes := make([]models.Episode, 0, len(rawEps))
 	for _, raw := range rawEps {
-		// Parse the actual episode number from the string (handles "3", "3-4", etc.)
-		firstNum := raw.episodeNumber // fallback if parsing fails
-		if parts := strings.SplitN(raw.episodeNumberStr, "-", 2); len(parts) > 0 {
+		firstNum := raw.number
+		if parts := strings.SplitN(raw.numberStr, "-", 2); len(parts) > 0 {
 			if n, err := strconv.Atoi(parts[0]); err == nil {
 				firstNum = n
 			}
 		}
 		episodes = append(episodes, models.Episode{
-			Number: "Episodio " + raw.episodeNumberStr,
+			Number: "Episodio " + raw.numberStr,
 			Num:    firstNum,
-			URL:    resolveURL(c.baseURL, raw.episodeURL),
+			URL:    resolveURL(c.baseURL, raw.url),
 		})
 	}
 	return episodes
 }
 
+// animeWorldAPIResponse is the JSON shape returned by /api/episode/info.
 type animeWorldAPIResponse struct {
-	Grabber string `json:"grabber"` // source URL
+	Grabber string `json:"grabber"` // direct video URL
 	Name    string `json:"name"`
 	Target  string `json:"target"`
 }
 
-// searchVideoURLApi fetches the videoURL source of the episode from the AnimeWorld api.
-// This is the preferred way.
+// searchVideoURLApi resolves the video URL for episodeURL via the AnimeWorld JSON API.
 func (c *AnimeWorldClient) searchVideoURLApi(episodeURL string) (string, error) {
-	// extract the episode ID
 	episodeID, err := c.extractEpisodeIDFromURL(episodeURL)
 	if err != nil {
 		return "", err
 	}
+
+	util.Debug("AnimeWorld API request", "episodeID", episodeID)
+
 	reqURL := fmt.Sprintf("%s?id=%s", c.episodeApiURL, episodeID)
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("request creation failed: %w", err)
+		return "", fmt.Errorf("create API request: %w", err)
 	}
+	c.decorateRequest(req)
+
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("AnimeWorld api call: %w", err)
+		return "", fmt.Errorf("API call failed: %w", err)
 	}
-	defer resp.Body.Close()
-	var rBody animeWorldAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rBody); err != nil {
-		return "", fmt.Errorf("AnimeWorld animeWorldAPIResponse unmarshalling: %w", err)
+	defer func() { _ = resp.Body.Close() }()
+
+	if err := checkHTTPStatus(resp, "AnimeWorld episode API"); err != nil {
+		return "", err
 	}
-	if rBody.Grabber == "" {
-		return "", fmt.Errorf("AnimeWorld no episode url found from the api")
+
+	var body animeWorldAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("decode API response: %w", err)
 	}
-	return rBody.Grabber, nil
+	if body.Grabber == "" {
+		util.Debug("AnimeWorld API returned empty grabber", "episodeID", episodeID)
+		return "", errors.New("API returned no video URL")
+	}
+
+	util.Debug("AnimeWorld API response", "grabber", body.Grabber, "name", body.Name)
+	return body.Grabber, nil
 }
 
+// extractEpisodeIDFromURL returns the last path segment of episodeURL, which
+// AnimeWorld uses as the episode ID (e.g. "TMWIn" from /play/naruto.9XRsD/TMWIn).
 func (c *AnimeWorldClient) extractEpisodeIDFromURL(episodeURL string) (string, error) {
-	// Example episode URL: https://www.animeworld.ac/play/naruto-shippuden-ita.9XRsD/TMWIn
-	// ID: TMWIn
-	lastDotIndex := strings.LastIndex(episodeURL, "/")
-	if lastDotIndex == -1 {
-		return "", errors.New("invalid URL format: episode ID not found")
+	idx := strings.LastIndex(episodeURL, "/")
+	if idx == -1 || idx == len(episodeURL)-1 {
+		return "", fmt.Errorf("cannot extract episode ID from URL: %s", episodeURL)
 	}
-	episodeID := episodeURL[lastDotIndex+1:]
-	if len(episodeID) == 0 {
-		return "", errors.New("invalid URL format: episode ID is empty")
-	}
-	return episodeID, nil
+	return episodeURL[idx+1:], nil
 }
 
-// searchVideoURLHTML fetches the video source URL of the episode.
-// AnimeWorld can offer more than one URL. The first scraped URL is returned
+// searchVideoURLHTML scrapes the download links from the episode page as a
+// fallback when the API is unavailable.
 func (c *AnimeWorldClient) searchVideoURLHTML(episodeURL string) (string, error) {
-	doc, err := c.fetchDoc(episodeURL, "AnimeWorld episode video source fetch HTML")
+	doc, err := c.fetchDoc(episodeURL, "AnimeWorld episode page")
 	if err != nil {
-		return "", fmt.Errorf("AnimeWorld failed to parse HTML: %s", episodeURL)
+		return "", err
 	}
 
-	get := func(selector string) (string, bool) {
+	for _, selector := range []string{"#alternativeDownloadLink", "#downloadLink"} {
 		sel := doc.Find(selector)
 		if sel.Length() == 0 {
-			return "", false
+			util.Debug("AnimeWorld HTML selector miss", "selector", selector)
+			continue
 		}
-
 		href, ok := sel.Attr("href")
 		if !ok {
-			return "", false
+			util.Debug("AnimeWorld HTML selector found but no href", "selector", selector)
+			continue
 		}
-
-		vURL, err := c.normalizeAnimeWorldVideoURL(href)
+		videoURL, err := c.normalizeVideoURL(href)
 		if err != nil {
-			return "", false
+			util.Debug("AnimeWorld video URL normalization failed", "selector", selector, "href", href, "error", err)
+			continue
 		}
-
-		return vURL, true
+		util.Debug("AnimeWorld HTML selector hit", "selector", selector, "url", videoURL)
+		return videoURL, nil
 	}
 
-	// preference order
-	if url, ok := get("#alternativeDownloadLink"); ok {
-		return url, nil
-	}
-
-	if url, ok := get("#downloadLink"); ok {
-		return url, nil
-	}
-
-	return "", fmt.Errorf("AnimeWorld no video source found for episode: %s", episodeURL)
+	return "", fmt.Errorf("no video source found for episode: %s", episodeURL)
 }
 
-// fetchDoc makes an HTTP call to the given url and parses the HTML to a goquery.Document struct.
-// It requires a httpSource string that will be used by checkHTTPStatus
+// fetchDoc performs a GET request to url with retries and returns the parsed HTML document.
 func (c *AnimeWorldClient) fetchDoc(url, httpSource string) (*goquery.Document, error) {
 	var lastErr error
-	attempts := c.maxRetries + 1
 
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := range c.maxRetries + 1 {
 		if attempt > 0 {
+			util.Debug("AnimeWorld retrying request", "source", httpSource, "attempt", attempt+1, "url", url)
 			time.Sleep(c.retryDelay)
 		}
 
@@ -297,84 +302,80 @@ func (c *AnimeWorldClient) fetchDoc(url, httpSource string) (*goquery.Document, 
 		resp, err := c.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("request failed (attempt %d): %w", attempt+1, err)
+			util.Debug("AnimeWorld request error", "source", httpSource, "attempt", attempt+1, "error", err)
 			continue
 		}
 
 		if err := checkHTTPStatus(resp, httpSource); err != nil {
 			_ = resp.Body.Close()
-			lastErr = fmt.Errorf("bad animeWorldAPIResponse (attempt %d): %w", attempt+1, err)
+			lastErr = fmt.Errorf("bad response (attempt %d): %w", attempt+1, err)
+			util.Debug("AnimeWorld bad HTTP status", "source", httpSource, "status", resp.StatusCode, "attempt", attempt+1)
 			continue
 		}
 
 		doc, err := goquery.NewDocumentFromReader(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse HTML: %w", err)
+			return nil, fmt.Errorf("parse HTML: %w", err)
 		}
 
+		util.Debug("AnimeWorld page fetched", "source", httpSource, "status", resp.StatusCode, "url", url)
 		return doc, nil
 	}
 
 	return nil, lastErr
 }
 
+// buildRequestURL constructs the search endpoint URL for the given query.
 func (c *AnimeWorldClient) buildRequestURL(query string) string {
-	query = strings.ReplaceAll(query, " ", "+")
-	return fmt.Sprintf("%s/search?keyword=%s", c.baseURL, query)
+	return fmt.Sprintf("%s/search?keyword=%s", c.baseURL, url.QueryEscape(query))
 }
 
+// decorateRequest adds standard browser-like headers to req.
 func (c *AnimeWorldClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Accept-Language", "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	// referer? try if you get 403
 }
 
-// validateEpisodeURL works also on anime URL because AnimeWorld
-// the anime URL and the URL of the first episode of the first season
-// is the same
+// validateEpisodeURL returns an error if episodeURL does not match the expected
+// AnimeWorld /play/ path pattern. Anime page URLs are also accepted because
+// AnimeWorld uses the same /play/ prefix for both.
 func (c *AnimeWorldClient) validateEpisodeURL(episodeURL string) error {
 	u, err := url.Parse(episodeURL)
 	if err != nil {
-		return fmt.Errorf("AnimeWorld invalid URL: %s", episodeURL)
+		return fmt.Errorf("invalid URL %q: %w", episodeURL, err)
 	}
 	if !animeWorldEpisodeURLPattern.MatchString(u.Path) {
-		return fmt.Errorf("AnimeWorld invalid URL path: %s", u.String())
+		return fmt.Errorf("unexpected URL path %q", u.String())
 	}
 	return nil
 }
 
-// normalizeAnimeWorldVideoURL converts wrapper URLs (download-file.php?id=...)
-// into direct .mp4 URLs by extracting the id parameter.
-// Returns the original URL if already a direct .mp4 link.
-func (c *AnimeWorldClient) normalizeAnimeWorldVideoURL(raw string) (string, error) {
+// normalizeVideoURL converts download-file.php?id=<path> wrapper URLs into
+// direct .mp4 URLs. Already-direct .mp4 URLs are returned unchanged.
+func (c *AnimeWorldClient) normalizeVideoURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("invalid url: %w", err)
+		return "", fmt.Errorf("invalid video URL: %w", err)
 	}
 
-	// Case 1: download-file.php?id=...
 	if strings.Contains(u.Path, "download-file.php") {
 		id := u.Query().Get("id")
 		if id == "" {
-			return "", fmt.Errorf("missing id in url: %s", raw)
+			return "", fmt.Errorf("missing id parameter in URL: %s", raw)
 		}
-
-		// build proper URL using url.URL
-		normalized := &url.URL{
+		return (&url.URL{
 			Scheme: u.Scheme,
 			Host:   u.Host,
-			Path:   fmt.Sprintf("/%s", strings.TrimPrefix(id, "/")),
-		}
-
-		return normalized.String(), nil
+			Path:   "/" + strings.TrimPrefix(id, "/"),
+		}).String(), nil
 	}
 
-	// Case 2: already direct mp4
 	if strings.HasSuffix(u.Path, ".mp4") {
 		return u.String(), nil
 	}
 
-	return "", fmt.Errorf("unsupported video url: %s", raw)
+	return "", fmt.Errorf("unsupported video URL: %s", raw)
 }

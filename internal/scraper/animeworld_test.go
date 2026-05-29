@@ -48,7 +48,7 @@ const animeWorldEpisodesFixture = `
 </html>
 `
 
-// Unit tests SEARCH ANIME
+// --- SearchAnime ---
 
 func TestAnimeWorldSearchAnime(t *testing.T) {
 	t.Parallel()
@@ -115,18 +115,18 @@ func TestAnimeWorldSearchAnime_RetriesGiveUp(t *testing.T) {
 	assert.Equal(t, int32(3), atomic.LoadInt32(&calls), "should attempt maxRetries+1 times")
 }
 
-// Unit tests GET ANIME EPISODES
+// --- normalizeEpisodes ---
 
-func TestAnimeWorld_adjustEpisodes(t *testing.T) {
+func TestAnimeWorld_normalizeEpisodes(t *testing.T) {
 	client := NewAnimeWorldClient()
 
-	raws := []animeWorldRawEpisodes{
-		{episodeNumberStr: "1", episodeNumber: 1, episodeURL: "/ep1"},
-		{episodeNumberStr: "2", episodeNumber: 2, episodeURL: "/ep2"},
-		{episodeNumberStr: "3-4", episodeNumber: 3, episodeURL: "/ep34"},
-		{episodeNumberStr: "5-6", episodeNumber: 4, episodeURL: "/ep56"},
-		{episodeNumberStr: "7", episodeNumber: 5, episodeURL: "/ep7"},
-		{episodeNumberStr: "8-9", episodeNumber: 6, episodeURL: "/ep89"},
+	raws := []rawEpisode{
+		{numberStr: "1", number: 1, url: "/ep1"},
+		{numberStr: "2", number: 2, url: "/ep2"},
+		{numberStr: "3-4", number: 3, url: "/ep34"},
+		{numberStr: "5-6", number: 4, url: "/ep56"},
+		{numberStr: "7", number: 5, url: "/ep7"},
+		{numberStr: "8-9", number: 6, url: "/ep89"},
 	}
 	expected := []models.Episode{
 		{Number: "Episodio 1", Num: 1, URL: client.baseURL + "/ep1"},
@@ -137,14 +137,15 @@ func TestAnimeWorld_adjustEpisodes(t *testing.T) {
 		{Number: "Episodio 8-9", Num: 8, URL: client.baseURL + "/ep89"},
 	}
 
-	assert.Equal(t, expected, client.adjustEpisodes(raws))
+	assert.Equal(t, expected, client.normalizeEpisodes(raws))
 }
+
+// --- GetAnimeEpisodes ---
 
 func TestAnimeWorldGetAnimeEpisodes(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-
 	mux.HandleFunc("/play/naruto-ita1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, err := fmt.Fprint(w, animeWorldEpisodesFixture)
@@ -162,7 +163,6 @@ func TestAnimeWorldGetAnimeEpisodes(t *testing.T) {
 	animeURL := fmt.Sprintf("%s/play/naruto-ita1", client.baseURL)
 
 	eps, err := client.GetAnimeEpisodes(animeURL)
-
 	assert.NoError(t, err)
 	assert.Len(t, eps, 6)
 	for i, ep := range eps {
@@ -174,10 +174,11 @@ func TestAnimeWorldGetAnimeEpisodes(t *testing.T) {
 
 func TestAnimeWorldGetAnimeEpisodes_NoEpisode(t *testing.T) {
 	t.Parallel()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/play/naruto-ita1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, err := fmt.Fprint(w, "<html> <body> </body> </html>")
+		_, err := fmt.Fprint(w, "<html><body></body></html>")
 		require.NoError(t, err)
 	})
 	srv := httptest.NewServer(mux)
@@ -188,19 +189,17 @@ func TestAnimeWorldGetAnimeEpisodes_NoEpisode(t *testing.T) {
 	client.maxRetries = 0
 	client.retryDelay = 0
 
-	animeURL := fmt.Sprintf("%s/play/naruto-ita1", client.baseURL)
-
-	eps, err := client.GetAnimeEpisodes(animeURL)
-
+	eps, err := client.GetAnimeEpisodes(fmt.Sprintf("%s/play/naruto-ita1", srv.URL))
 	assert.NoError(t, err)
 	assert.Empty(t, eps)
 }
 
-// Unit tests GET STREAM URL
+// --- GetStreamURL ---
+
 const (
-	animeWorldhellsingEpPath    = "/play/hellsing-ep1"
-	animeWorldhellsingDirectMP4 = "https://srv28-greeneyes.sweetpixel.org/DDL/ANIME/HellsingITA/Hellsing_Ep_01_ITA.mp4"
-	animeWorldhellsingWrapURL   = "https://srv28-greeneyes.sweetpixel.org/download-file.php?id=DDL/ANIME/HellsingITA/Hellsing_Ep_01_ITA.mp4"
+	animeWorldHellsingEpPath    = "/play/hellsing-ep1"
+	animeWorldHellsingDirectMP4 = "https://srv28-greeneyes.sweetpixel.org/DDL/ANIME/HellsingITA/Hellsing_Ep_01_ITA.mp4"
+	animeWorldHellsingWrapURL   = "https://srv28-greeneyes.sweetpixel.org/download-file.php?id=DDL/ANIME/HellsingITA/Hellsing_Ep_01_ITA.mp4"
 )
 
 // Snippet taken from a real animeworld.ac episode page (Hellsing ep. 1).
@@ -218,7 +217,7 @@ func newAnimeWorldTestClient(t *testing.T, body string) (*AnimeWorldClient, stri
 	t.Helper()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(animeWorldhellsingEpPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(animeWorldHellsingEpPath, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, body)
 	})
@@ -230,7 +229,7 @@ func newAnimeWorldTestClient(t *testing.T, body string) (*AnimeWorldClient, stri
 	c.maxRetries = 0
 	c.retryDelay = 0
 
-	return c, srv.URL + animeWorldhellsingEpPath
+	return c, srv.URL + animeWorldHellsingEpPath
 }
 
 // Both links present → alternative (direct .mp4) wins.
@@ -240,7 +239,7 @@ func TestAnimeWorldGetStreamURL_PrefersAlternativeLink(t *testing.T) {
 
 	streamURL, err := client.GetStreamURL(epURL)
 	require.NoError(t, err)
-	assert.Equal(t, animeWorldhellsingDirectMP4, streamURL)
+	assert.Equal(t, animeWorldHellsingDirectMP4, streamURL)
 }
 
 // Only #downloadLink present → wrapper URL is normalized to the direct mp4.
@@ -248,12 +247,12 @@ func TestAnimeWorldGetStreamURL_FallsBackToDownloadLink(t *testing.T) {
 	t.Parallel()
 	body := fmt.Sprintf(`<html><body><center>
 		<a href="%s" id="downloadLink">Diretto</a>
-	</center></body></html>`, animeWorldhellsingWrapURL)
+	</center></body></html>`, animeWorldHellsingWrapURL)
 	client, epURL := newAnimeWorldTestClient(t, body)
 
 	streamURL, err := client.GetStreamURL(epURL)
 	require.NoError(t, err)
-	assert.Equal(t, animeWorldhellsingDirectMP4, streamURL)
+	assert.Equal(t, animeWorldHellsingDirectMP4, streamURL)
 }
 
 // Page has no recognized links.
@@ -266,7 +265,7 @@ func TestAnimeWorldGetStreamURL_NoLinks(t *testing.T) {
 	assert.Contains(t, err.Error(), "no video source found")
 }
 
-// download-file.php wrapper without the id param → normalize fails, no fallback.
+// download-file.php wrapper without the id param → normalize fails, falls through to error.
 func TestAnimeWorldGetStreamURL_DownloadLinkMissingID(t *testing.T) {
 	t.Parallel()
 	body := `<html><body><center>
@@ -285,12 +284,12 @@ func TestAnimeWorldGetStreamURL_FallsThroughBadAlternative(t *testing.T) {
 	body := fmt.Sprintf(`<html><body><center>
 		<a href="not-a-url" id="alternativeDownloadLink">Alt</a>
 		<a href="%s" id="downloadLink">Diretto</a>
-	</center></body></html>`, animeWorldhellsingWrapURL)
+	</center></body></html>`, animeWorldHellsingWrapURL)
 	client, epURL := newAnimeWorldTestClient(t, body)
 
 	streamURL, err := client.GetStreamURL(epURL)
 	require.NoError(t, err)
-	assert.Equal(t, animeWorldhellsingDirectMP4, streamURL)
+	assert.Equal(t, animeWorldHellsingDirectMP4, streamURL)
 }
 
 // URL doesn't match /play/<slug> → validation rejects it before any HTTP call.
@@ -300,14 +299,14 @@ func TestAnimeWorldGetStreamURL_InvalidEpisodeURL(t *testing.T) {
 
 	_, err := client.GetStreamURL("https://www.animeworld.ac/not-a-play-path")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid URL path")
+	assert.Contains(t, err.Error(), "unexpected URL path")
 }
 
 // Server replies non-2xx → bubbles up as an error.
 func TestAnimeWorldGetStreamURL_ServerError(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.HandleFunc(animeWorldhellsingEpPath, func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc(animeWorldHellsingEpPath, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
 	srv := httptest.NewServer(mux)
@@ -318,12 +317,12 @@ func TestAnimeWorldGetStreamURL_ServerError(t *testing.T) {
 	client.maxRetries = 0
 	client.retryDelay = 0
 
-	_, err := client.GetStreamURL(srv.URL + animeWorldhellsingEpPath)
+	_, err := client.GetStreamURL(srv.URL + animeWorldHellsingEpPath)
 	require.Error(t, err)
 }
 
-// download url selection
-// download url selection
+// --- normalizeVideoURL ---
+
 func TestAnimeWorldNormalizationStreamURL(t *testing.T) {
 	t.Parallel()
 
@@ -331,7 +330,7 @@ func TestAnimeWorldNormalizationStreamURL(t *testing.T) {
 		name    string
 		input   string
 		want    string
-		wantErr string // substring match; empty = no error. No sentinel error
+		wantErr string // substring match; empty = no error
 	}{
 		{
 			name:  "wrapper url is normalized to direct mp4",
@@ -366,12 +365,12 @@ func TestAnimeWorldNormalizationStreamURL(t *testing.T) {
 		{
 			name:    "non-mp4 non-wrapper url is rejected",
 			input:   "https://example.com/stream/playlist.m3u8",
-			wantErr: "unsupported video url",
+			wantErr: "unsupported video URL",
 		},
 		{
 			name:    "malformed url is rejected",
 			input:   "http://[::1",
-			wantErr: "invalid url",
+			wantErr: "invalid video URL",
 		},
 	}
 
@@ -380,7 +379,7 @@ func TestAnimeWorldNormalizationStreamURL(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := c.normalizeAnimeWorldVideoURL(tt.input)
+			got, err := c.normalizeVideoURL(tt.input)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -392,8 +391,11 @@ func TestAnimeWorldNormalizationStreamURL(t *testing.T) {
 	}
 }
 
+// --- API path ---
+
 func TestAnimeWorldStreamURL_FromAPI(t *testing.T) {
 	t.Parallel()
+
 	streamURL := "https://www.animeworld.ac/jojo.mp4"
 	epID := "TMWIn"
 	episodeURL := fmt.Sprintf("https://www.animeworld.ac/play/%s", epID)
@@ -401,7 +403,6 @@ func TestAnimeWorldStreamURL_FromAPI(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, epID, r.URL.Query().Get("id"))
-
 		w.Header().Set("Content-Type", "application/json")
 		b, err := json.Marshal(animeWorldAPIResponse{
 			Grabber: streamURL,
