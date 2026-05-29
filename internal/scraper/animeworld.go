@@ -1,3 +1,4 @@
+// Package scraper provides web scraping functionality for animeworld.ac
 package scraper
 
 import (
@@ -18,7 +19,7 @@ import (
 
 const (
 	animeWorldBase       = "https://www.animeworld.ac"
-	animeWorldApiEpisode = "https://www.animeworld.ac/api/episode/info"
+	animeWorldAPIEpisode = "https://www.animeworld.ac/api/episode/info"
 	animeWorldSource     = "AnimeWorld"
 )
 
@@ -30,7 +31,7 @@ var animeWorldEpisodeURLPattern = regexp.MustCompile(`^/play/[^/?#]+(/[^/?#]+)?$
 type AnimeWorldClient struct {
 	client        *http.Client
 	baseURL       string
-	episodeApiURL string
+	episodeAPIURL string
 	userAgent     string
 	maxRetries    int
 	retryDelay    time.Duration
@@ -42,7 +43,7 @@ func NewAnimeWorldClient() *AnimeWorldClient {
 	return &AnimeWorldClient{
 		client:        util.NewFastClient(),
 		baseURL:       animeWorldBase,
-		episodeApiURL: animeWorldApiEpisode,
+		episodeAPIURL: animeWorldAPIEpisode,
 		userAgent:     UserAgent,
 		maxRetries:    2,
 		retryDelay:    300 * time.Millisecond,
@@ -212,7 +213,7 @@ func (c *AnimeWorldClient) searchVideoURLApi(episodeURL string) (string, error) 
 
 	util.Debug("AnimeWorld API request", "episodeID", episodeID)
 
-	reqURL := fmt.Sprintf("%s?id=%s", c.episodeApiURL, episodeID)
+	reqURL := fmt.Sprintf("%s?id=%s", c.episodeAPIURL, episodeID)
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create API request: %w", err)

@@ -80,7 +80,7 @@ func TestAnimeWorldSearchAnime(t *testing.T) {
 func TestAnimeWorldSearchAnime_Empty(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `<html><body><div class="film-list"></div></body></html>`)
 	}))
 	defer srv.Close()
@@ -146,7 +146,7 @@ func TestAnimeWorldGetAnimeEpisodes(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/play/naruto-ita1", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/play/naruto-ita1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, err := fmt.Fprint(w, animeWorldEpisodesFixture)
 		require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestAnimeWorldStreamURL_FromAPI(t *testing.T) {
 	defer s.Close()
 
 	client := NewAnimeWorldClient()
-	client.episodeApiURL = s.URL
+	client.episodeAPIURL = s.URL
 
 	respURL, err := client.GetStreamURL(episodeURL)
 	assert.NoError(t, err)
