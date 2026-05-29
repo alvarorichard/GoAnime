@@ -114,6 +114,10 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		t := scraper.SuperFlixType
 		scraperType = &t
 		util.Debug("Searching specific source", "source", "SuperFlix")
+	case "animeworld":
+		t := scraper.AnimeWorldType
+		scraperType = &t
+		util.Debug("Searching specific source", "source", "AnimeWorld")
 	case "ptbr", "pt-br":
 		isPTBR = true
 		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu + SuperFlix)")
@@ -153,8 +157,11 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 				anime.Source = "Animefire.io"
 			case strings.Contains(anime.URL, "goyabu"):
 				anime.Source = "Goyabu"
+			case strings.Contains(anime.URL, "animeworld"):
+				anime.Source = "AnimeWorld"
 			}
-			}
+
+		}
 
 		// Language tags are already added by unified.go, don't duplicate them here
 	}
@@ -167,6 +174,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 		"AllAnime", breakdown.AllAnime,
 		"SuperFlix", breakdown.SuperFlix,
 		"Goyabu", breakdown.Goyabu,
+		"AnimeWorld", breakdown.AnimeWorld,
 	)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
@@ -277,6 +285,8 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 		sourceName = "Animefire.io"
 	case anime.Source == "Goyabu":
 		sourceName = "Goyabu"
+	case anime.Source == "AnimeWorld":
+		sourceName = "AnimeWorld"
 	case strings.Contains(anime.Name, "[English]"):
 		// Priority 2: Check language tags
 		sourceName = "AllAnime"
@@ -341,6 +351,12 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)
 		}
 		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
+	case sourceName == "AnimeWorld":
+		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimeWorldType)
+		if scErr != nil {
+			return nil, fmt.Errorf("failed to get AnimeWorld scraper: %w", scErr)
+		}
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	default:
 		// For others, use the original API function
 		episodes, err = GetAnimeEpisodes(anime.URL)
@@ -400,6 +416,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	case sourceLower == "goyabu":
 		scraperType = scraper.GoyabuType
 		sourceName = "Goyabu"
+	case sourceLower == "animeworld":
+		scraperType = scraper.AnimeWorldType
+		sourceName = "AnimeWorld"
 	case strings.Contains(anime.Name, "[English]"):
 		// Priority 2: Check language tags (AllAnime = English)
 		scraperType = scraper.AllAnimeType
@@ -427,6 +446,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	case strings.Contains(anime.URL, "allanime"):
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime"
+	case strings.Contains(anime.Name, "animeworld"):
+		scraperType = scraper.AnimeWorldType
+		sourceName = "AnimeWorld"
 	default:
 		scraperType = scraper.AllAnimeType
 		sourceName = "AllAnime (default)"
@@ -461,6 +483,9 @@ func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality s
 	case scraper.GoyabuType:
 		util.Debug("Processing through Goyabu")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
+	case scraper.AnimeWorldType:
+		util.Debug("Processing through AnimeWorld")
+		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
 	default:
 		util.Debug("Processing through Animefire.io")
 		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
@@ -549,6 +574,7 @@ func sanitizeFilename(name string) string {
 	name = strings.ReplaceAll(name, "[Português]", "")
 	name = strings.ReplaceAll(name, "(Legendado)", "")
 	name = strings.ReplaceAll(name, "(Dublado)", "")
+	name = strings.ReplaceAll(name, "[Italian]", "")
 	name = strings.TrimSpace(name)
 
 	// Replace invalid characters
@@ -571,7 +597,6 @@ func downloadFromURL(_ string, _ string) error {
 func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
 }
-
 
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return GetAnimeEpisodesEnhanced(anime)
@@ -753,10 +778,11 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 // diagnostic line. Counted via countSourceBreakdown so the predicate stays
 // testable in isolation.
 type sourceBreakdown struct {
-	AnimeFire int
-	AllAnime  int
-	SuperFlix int
-	Goyabu    int
+	AnimeFire  int
+	AllAnime   int
+	SuperFlix  int
+	Goyabu     int
+	AnimeWorld int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -778,13 +804,15 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.SuperFlix++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
+		case anime.Source == "AnimeWorld":
+			b.AnimeWorld++
 		}
 	}
 	return b
 }
 
 // languagePriority returns a sort key for language-based ordering.
-// Lower values sort first: Portuguese → Multilanguage → English → Movies/TV → Unknown.
+// Lower values sort first: Portuguese → Multilanguage → English → Italian → Movies/TV → Unknown.
 func languagePriority(name string) int {
 	lower := strings.ToLower(name)
 	// Check for [PT-BR] anywhere (covers "[Movie] [PT-BR] ...", "[TV] [PT-BR] ...", etc.)
@@ -796,9 +824,11 @@ func languagePriority(name string) int {
 		return 1
 	case strings.HasPrefix(lower, "[english]"):
 		return 2
-	case strings.HasPrefix(lower, "[movie]") || strings.HasPrefix(lower, "[tv]") || strings.HasPrefix(lower, "[movies/tv]"):
+	case strings.HasPrefix(lower, "[italian]"):
 		return 3
-	default:
+	case strings.HasPrefix(lower, "[movie]") || strings.HasPrefix(lower, "[tv]") || strings.HasPrefix(lower, "[movies/tv]"):
 		return 4
+	default:
+		return 5
 	}
 }

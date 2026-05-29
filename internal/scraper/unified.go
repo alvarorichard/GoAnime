@@ -797,3 +797,11 @@ func (a *AnimeWorldAdapter) GetStreamURL(episodeURL string, _ ...any) (string, m
 func (a *AnimeWorldAdapter) GetType() ScraperType {
 	return AnimeWorldType
 }
+
+func (a *AnimeWorldAdapter) GetClient() *AnimeWorldClient {
+	return a.client
+}
+
+func NewAnimeWorldAdapterWithClient(client *AnimeWorldClient) *AnimeWorldAdapter {
+	return &AnimeWorldAdapter{client: client}
+}

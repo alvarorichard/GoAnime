@@ -43,10 +43,11 @@ func TestLanguagePriority(t *testing.T) {
 		{"movie + ptbr", "[Movie] [PT-BR] Inception", 0},
 		{"multilanguage", "[Multilanguage] Naruto", 1},
 		{"english", "[English] Naruto", 2},
-		{"movie", "[Movie] Inception", 3},
-		{"tv", "[TV] Show", 3},
-		{"movies tv", "[Movies/TV] Show", 3},
-		{"unknown default", "Plain title", 4},
+		{"italian tag", "[Italian] Naruto", 3},
+		{"movie", "[Movie] Inception", 4},
+		{"tv", "[TV] Show", 4},
+		{"movies tv", "[Movies/TV] Show", 4},
+		{"unknown default", "Plain title", 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

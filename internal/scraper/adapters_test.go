@@ -42,3 +42,12 @@ func TestNewSuperFlixAdapterWithClient(t *testing.T) {
 	assert.Same(t, client, a.GetClient())
 	assert.Equal(t, SuperFlixType, a.GetType())
 }
+
+func TestNewAnimeWorldAdapterWithClient(t *testing.T) {
+	t.Parallel()
+	client := NewAnimeWorldClient()
+	a := NewAnimeWorldAdapterWithClient(client)
+	require.NotNil(t, a)
+	assert.Same(t, client, a.GetClient())
+	assert.Equal(t, AnimeWorldType, a.GetType())
+}
