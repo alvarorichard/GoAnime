@@ -19,6 +19,7 @@ result
 goanime
 goanime-test
 build/goanime-local
+bin
 
 #Ignore vscode AI rules
 .github/copilot-instructions.md
