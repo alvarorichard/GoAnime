@@ -68,13 +68,13 @@
 ---
 
 ## FASE 5 ✅ — Unified Adapters (~45 funções)
-**Pacotes:** `scraper/unified.go` (adapters ativos: AnimeFire, Goyabu, AllAnime, SuperFlix)
+**Pacotes:** `scraper/unified.go` (adapters ativos: AnimeFire, Goyabu, AllAnime)
 
-Cada adapter tem ~4-5 métodos (SearchAnime, GetAnimeEpisodes, GetStreamURL, GetType, GetClient). Total ~40 métodos de adapters + NewSuperFlixAdapterWithClient.
+Cada adapter tem ~4-5 métodos (SearchAnime, GetAnimeEpisodes, GetStreamURL, GetType, GetClient). Total ~40 métodos de adapters.
 
 **Tipo:** Unit + MockScraper (reutilizar `MockScraper` de `unified_test.go`)
 
-**Verificação:** `go test ./internal/scraper/ -run "TestAdapter|TestSuperFlixAdapter" -v -race`
+**Verificação:** `go test ./internal/scraper/ -run "TestAdapter" -v -race`
 
 ---
 
@@ -113,12 +113,12 @@ NineAnime (9animetv.to) removido em 2026-05-17 — site caiu. Restantes scrapers
 
 ---
 
-## FASE 10 ✅ — SuperFlix + MediaManager (~69 funções)
-**Arquivos:** `superflix.go`(9), `media_manager.go`(60)
+## FASE 10 ✅ — MediaManager (~60 funções)
+**Arquivos:** `media_manager.go`(60)
 
-AnimeDrive removido em 2026-05-17. MediaManager agora anime-only.
+AnimeDrive removido em 2026-05-17. SuperFlix removido em 2026-06-03 (captcha Turnstile intransponível). MediaManager agora anime-only.
 
-**Verificação:** `go test ./internal/scraper/ -run "TestSuperFlix|TestMediaManager" -v -race`
+**Verificação:** `go test ./internal/scraper/ -run "TestMediaManager" -v -race`
 
 ---
 
@@ -289,7 +289,7 @@ Lista completa em `.test_manifests/p15_api_util.txt` e `TEST_PLAN_FUNCTIONS.md` 
 - `anime.go`: `GetEpisodeData`, `GetMovieData`, `FetchAnimeDetails`, `enrichAnimeData`, `httpPostFast`, `safeClose` (mover via injection)
 - `anime_url_title.go`: `FetchAnimeFromAniListWithURL`
 - `aniskip.go`: `GetAniSkipData`, `GetAndParseAniSkipData`
-- `enhanced.go`: `SearchAnimeEnhanced`, `GetAnimeEpisodesEnhanced`, `GetEpisodeStreamURL`, `DownloadEpisodeEnhanced`, `DownloadEpisodeRangeEnhanced`, `downloadFromURL`, `GetSuperFlixEpisodes`, `GetSuperFlixStreamURL`
+- `enhanced.go`: `SearchAnimeEnhanced`, `GetAnimeEpisodesEnhanced`, `GetEpisodeStreamURL`, `DownloadEpisodeEnhanced`, `DownloadEpisodeRangeEnhanced`, `downloadFromURL`
 - `episode_providers.go`: `FetchEpisodeData` per provider, `getAniListIDFromMAL`, `getKitsuAnimeID`
 
 #### `internal/util/` (30 funcs)
@@ -617,7 +617,7 @@ go tool cover -func=coverage.out | awk '$NF == "0.0%"' | grep -v "examples\|cmd/
 | 7 | FlixHQ | — | ❌ (removido 2026-05-17) |
 | 8 | SFlix | — | ❌ (removido 2026-05-17) |
 | 9 | AnimeFire + Goyabu + AllAnime | ~29 | ✅ (NineAnime removido 2026-05-17) |
-| 10 | SuperFlix + MediaManager | ~69 | ✅ (AnimeDrive removido 2026-05-17) |
+| 10 | MediaManager | ~60 | ✅ (AnimeDrive removido 2026-05-17, SuperFlix removido 2026-06-03) |
 | 11 | Player Completo | ~128 | ✅ |
 | 12 | Downloader Completo | ~84 | ✅ |
 | 13 | API Movie + Enhanced + Providers | ~100 | ✅ (2026-05-18) |

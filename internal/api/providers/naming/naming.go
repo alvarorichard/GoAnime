@@ -71,7 +71,7 @@ func SanitizeFilename(name string) string {
 
 // CleanTitle removes source tags like [English], [PT-BR], [AllAnime] etc. from a title.
 func CleanTitle(title string) string {
-	tagPattern := regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|AnimeFire|AnimeDrive|Goyabu|SuperFlix|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
+	tagPattern := regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|AnimeFire|AnimeDrive|Goyabu|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
 	clean := tagPattern.ReplaceAllString(title, "")
 	clean = strings.TrimSpace(clean)
 	if clean == "" {

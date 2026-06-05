@@ -193,7 +193,7 @@ func TestScraperManager_SearchAnimePTBR_BothReturn(t *testing.T) {
 
 	manager := NewScraperManagerForTest()
 	manager.RegisterScraperForTest(AnimefireType, afMock)
-	// GoyabuType and SuperFlixType not registered → errors silently ignored
+	// GoyabuType not registered → errors silently ignored
 
 	results, err := manager.SearchAnimePTBR("Naruto")
 	require.NoError(t, err)

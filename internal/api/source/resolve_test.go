@@ -16,7 +16,6 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
-		{"SuperFlix", "SuperFlix", SuperFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -49,7 +48,6 @@ func TestResolve_NameTags(t *testing.T) {
 		{"english tag", "Naruto [English]", AllAnime},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
-		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,7 +69,6 @@ func TestResolve_URLPatterns(t *testing.T) {
 		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
 		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
 		{"allanime URL", "https://allanime.to/anime/abc", AllAnime},
-		{"superflix URL", "https://superflix.to/naruto", SuperFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

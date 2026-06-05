@@ -362,10 +362,9 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
-// Movie/TV routing: SuperFlix and FlixHQ both flow through the enhanced API,
-	// which dispatches by anime.Source internally. Label logs by the actual
-	// source so triage isn't misled into thinking SuperFlix failures came from
-	// FlixHQ.
+	// Movie/TV routing: movie/TV sources (e.g. FlixHQ) flow through the enhanced
+	// API, which dispatches by anime.Source internally. Label logs by the actual
+	// source so triage isn't misled about which source a failure came from.
 	if isMovieOrTVSourcePlayer(anime) {
 		sourceLabel := anime.Source
 		if sourceLabel == "" {
@@ -462,16 +461,15 @@ func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
 	return false
 }
 
-// Helper function to check if anime is from FlixHQ source (player module)
 // isMovieOrTVSourcePlayer routes any movie/TV content through the enhanced API,
-// which dispatches by anime.Source (SuperFlix, FlixHQ, ...). Despite the legacy
-// name, this is not FlixHQ-specific — SuperFlix selections also reach this
-// branch because their MediaType is MediaTypeMovie/MediaTypeTV.
+// which dispatches by anime.Source (FlixHQ, ...). Despite the legacy name, this
+// is not FlixHQ-specific — any selection whose MediaType is MediaTypeMovie/
+// MediaTypeTV reaches this branch.
 func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	if anime == nil {
 		return false
 	}
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" {
+	if anime.Source == "SFlix" {
 		return true
 	}
 	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {

@@ -1,3 +1,21 @@
+# GoAnime Release Notes - Version 1.8.6
+
+Release date: 2026-06-03
+
+## Highlights
+
+- **SuperFlix Source Removed**: SuperFlix integration deleted entirely. The upstream site placed every player page behind an interactive Cloudflare Turnstile captcha that cannot be solved by a TLS-impersonating HTTP client or by headless-browser automation (go-rod and Playwright, both Chromium and Firefox, were all detected and blocked). With stream extraction no longer possible, the scraper, source kind, provider registration, season-map enrichment path, and all associated tests were purged. Remaining sources (AllAnime, AnimeFire, Goyabu) are unaffected.
+
+## Removed
+
+- Delete `internal/scraper/superflix.go` (`SuperFlixClient` and the full player→tokens→bootstrap→source→video pipeline) and its dedicated test suites.
+- Remove the `SuperFlix` source kind (`internal/api/source`), the `SuperFlixType` scraper type, the `SuperFlixAdapter`, and the `superFlixProvider` registration.
+- Remove `GetSuperFlixEpisodes` / `GetSuperFlixStreamURL` and the SuperFlix dispatch branches from the enhanced API; drop the SuperFlix entry from the source breakdown.
+- Remove the SuperFlix-based TMDB season-map fallback (`buildSeasonMapFromSuperFlix`) from metadata enrichment.
+- Drop SuperFlix from the `--source` CLI options, PT-BR multi-source search, help text, and source/name-tag regexes.
+
+---
+
 # GoAnime Release Notes - Version 1.8.5
 
 Release date: 2026-05-20

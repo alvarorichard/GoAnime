@@ -126,7 +126,7 @@ Os 25 arquivos abaixo concentram **~750 das 1033 funções a 0%**. Cobrir eles �
 
 | Categoria | Testes Novos | Funções Cobertas |
 |---|---|---|
-| **Scrapers** (flixhq, sflix, nineanime, animedrive, superflix, goyabu, allanime, media_manager) | ~65 | ~270 |
+| **Scrapers** (flixhq, sflix, nineanime, animedrive, goyabu, allanime, media_manager) | ~65 | ~270 |
 | **Player** (player, playvideo, download, scraper) | ~31 | ~123 |
 | **API** (anime, api, enhanced, episodes, allanime_smart, aniskip) | ~25 | ~78 |
 | **Downloader** (downloader, movie_downloader, nineanime_downloader) | ~15 | ~77 |
@@ -243,7 +243,7 @@ TestAnimeDrive_GetType_ReturnsAnimeDriveType
 TestAnimeDrive_SearchAnime_EmptyResults
 ```
 
-#### `scraper/allanime.go` + `animefire.go` + `goyabu.go` + `superflix.go` — 7 testes
+#### `scraper/allanime.go` + `animefire.go` + `goyabu.go` — 6 testes
 
 ```
 TestAllAnime_GetType_ReturnsAllAnimeType
@@ -252,7 +252,6 @@ TestAnimeFire_SearchAnime_ParsesHTML
 TestAnimeFire_GetStreamURL_ParsesVideoJSON
 TestGoyabu_SearchAnime_ParsesHTML
 TestGoyabu_GetStreamURL_ExtractsPlayer
-TestSuperFlix_SearchAnime_ParsesHTML
 ```
 
 #### `scraper/movie/flixhq.go` + `movie/sflix.go` — 5 testes

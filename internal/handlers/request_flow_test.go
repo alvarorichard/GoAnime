@@ -487,7 +487,7 @@ func TestSelectMedia_AllTypeBranches(t *testing.T) {
 
 	results := []*models.Anime{
 		{Name: "Movie Title", MediaType: models.MediaTypeMovie, Source: "AllAnime", Year: "2023"},
-		{Name: "TV Show", MediaType: models.MediaTypeTV, Source: "SuperFlix"},
+		{Name: "TV Show", MediaType: models.MediaTypeTV, Source: "FlixHQ"},
 		{Name: "Anime Title", MediaType: models.MediaTypeAnime, Source: "AllAnime"},
 		{Name: "Unknown Type", Source: "AllAnime"}, // empty MediaType → empty typeTag
 	}

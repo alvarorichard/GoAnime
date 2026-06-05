@@ -360,14 +360,14 @@ func TestSearchAnime_SlowSourceDoesNotBlockFastSource(t *testing.T) {
 }
 
 // =============================================================================
-// Test: Slow scraper (SuperFlix-like) results are always included
+// Test: Slow scraper results are always included
 // =============================================================================
 
 func TestSearchAnime_SlowScraperAlwaysIncluded(t *testing.T) {
 	t.Parallel()
 
-	// Simulate 4 fast scrapers that respond in <50ms and 1 slow scraper that
-	// responds in ~500ms (like SuperFlix doing HTML scraping).  With the old
+	// Simulate 2 fast scrapers that respond in <50ms and 1 slow scraper that
+	// responds in ~500ms (like an HTML-scraping source).  With the old
 	// early-return logic (3.5s + 0.6s grace), the slow scraper would be
 	// dropped.  Now we wait for ALL scrapers to finish.
 	manager := &ScraperManager{
@@ -383,11 +383,11 @@ func TestSearchAnime_SlowScraperAlwaysIncluded(t *testing.T) {
 		}
 	}
 
-	slowSuperFlix := &MockScraper{
+	slowGoyabu := &MockScraper{
 		searchFunc: func(query string) ([]*models.Anime, error) {
 			time.Sleep(500 * time.Millisecond) // Significantly slower
 			return []*models.Anime{
-				{Name: "Black Clover", URL: "superflix-bc", MediaType: models.MediaTypeTV},
+				{Name: "Black Clover", URL: "goyabu-bc", MediaType: models.MediaTypeTV},
 			}, nil
 		},
 	}
@@ -400,28 +400,24 @@ func TestSearchAnime_SlowScraperAlwaysIncluded(t *testing.T) {
 	fast2.scraperType = AnimefireType
 	manager.scrapers[AnimefireType] = fast2
 
-	fast3 := fast("Goyabu Hit")
-	fast3.scraperType = GoyabuType
-	manager.scrapers[GoyabuType] = fast3
-
-	slowSuperFlix.scraperType = SuperFlixType
-	manager.scrapers[SuperFlixType] = slowSuperFlix
+	slowGoyabu.scraperType = GoyabuType
+	manager.scrapers[GoyabuType] = slowGoyabu
 
 	results, err := manager.SearchAnime("black clover", nil)
 	require.NoError(t, err)
 
-	// ALL 4 sources must be present — the slow scraper must NOT be dropped.
-	assert.Len(t, results, 4, "All 4 scraper results must be included")
+	// ALL 3 sources must be present — the slow scraper must NOT be dropped.
+	assert.Len(t, results, 3, "All 3 scraper results must be included")
 
-	// Verify SuperFlix result is present
-	hasSuperFlix := false
+	// Verify the slow scraper's result is present
+	hasGoyabu := false
 	for _, r := range results {
-		if r.Source == "SuperFlix" {
-			hasSuperFlix = true
+		if r.Source == "Goyabu" {
+			hasGoyabu = true
 			break
 		}
 	}
-	assert.True(t, hasSuperFlix, "SuperFlix results must be included even though it was slower")
+	assert.True(t, hasGoyabu, "Goyabu results must be included even though it was slower")
 }
 
 // =============================================================================

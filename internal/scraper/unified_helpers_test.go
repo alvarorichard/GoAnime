@@ -72,7 +72,6 @@ func TestScraperManager_GetScraperDisplayName(t *testing.T) {
 		{AllAnimeType, "AllAnime"},
 		{AnimefireType, "Animefire.io"},
 		{GoyabuType, "Goyabu"},
-		{SuperFlixType, "SuperFlix"},
 		{ScraperType(999), "Desconhecido"},
 	}
 	for _, tt := range tests {
@@ -90,7 +89,6 @@ func TestScraperManager_GetLanguageTag(t *testing.T) {
 		{AllAnimeType, "[English]"},
 		{AnimefireType, "[PT-BR]"},
 		{GoyabuType, "[PT-BR]"},
-		{SuperFlixType, "[PT-BR]"},
 		{ScraperType(999), "[Unknown]"},
 	}
 	for _, tt := range tests {
@@ -124,7 +122,6 @@ func TestLogSearchSummary_DebugEnabled(t *testing.T) {
 		{Source: "AllAnime"},
 		{Source: "Animefire.io"},
 		{Source: "Goyabu"},
-		{Source: "SuperFlix"},
 	}
 	assert.NotPanics(t, func() { sm.logSearchSummary(results) })
 }

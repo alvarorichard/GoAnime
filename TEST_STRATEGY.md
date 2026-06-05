@@ -184,7 +184,6 @@ func TestFlixHQ_SearchAnime(t *testing.T) {
 | `animefire.go` (8) | HTML parsing | **Unit + httptest** | HTML fixtures |
 | `animedrive.go` (21) | HTML parsing | **Unit + httptest** | HTML fixtures |
 | `goyabu.go` (7) | HTML parsing | **Unit + httptest** | HTML fixtures |
-| `superflix.go` (9) | HTML + API | **Unit + httptest** | HTML + JSON |
 | `media_manager.go` (60) | Orquestração | **Unit + MockScraper** | Reutilizar `MockScraper` existente |
 
 ### `internal/player/player.go` (40 funções)

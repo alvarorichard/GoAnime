@@ -29,7 +29,6 @@ func TestHasProvider_RegisteredProviders(t *testing.T) {
 	assert.True(t, HasProvider(source.AllAnime))
 	assert.True(t, HasProvider(source.AnimeFire))
 	assert.True(t, HasProvider(source.Goyabu))
-	assert.True(t, HasProvider(source.SuperFlix))
 }
 
 func TestHasProvider_UnknownReturnsFalse(t *testing.T) {

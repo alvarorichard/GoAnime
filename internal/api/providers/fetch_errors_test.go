@@ -88,64 +88,6 @@ func TestGoyabuProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// superFlixProvider.FetchEpisodes / FetchStreamURL
-// ---------------------------------------------------------------------------
-
-func TestSuperFlixProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://superflix.gs/serie/1234", Source: "SuperFlix"}
-	_, err := p.FetchEpisodes(context.Background(), anime)
-	require.Error(t, err)
-}
-
-func TestSuperFlixProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		URL:    "https://superflix.gs/serie/1234",
-		Source: "SuperFlix",
-	}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "https://superflix.gs/ep/1"}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// EpisodeNumber (already has test in source_providers_test.go, but ensure
-// the existing test covers the edge cases — not duplicated here)
-// superFlixProvider.FetchStreamURL with MediaTypeMovie path
-// ---------------------------------------------------------------------------
-
-func TestSuperFlixProvider_FetchStreamURL_MoviePath(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		Source:    "SuperFlix",
-		MediaType: models.MediaTypeMovie,
-	}
-	ep := &models.Episode{Number: "1", Num: 1}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
-	require.Error(t, err)
-}
-
-func TestSuperFlixProvider_FetchStreamURL_WithSeason(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		Source:        "SuperFlix",
-		CurrentSeason: 2,
-	}
-	ep := &models.Episode{Number: "3", Num: 3}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
 // ForKind integration (verifies factory + error path for unknown kind)
 // ---------------------------------------------------------------------------
 

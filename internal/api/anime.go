@@ -525,7 +525,7 @@ func CleanTitle(title string) string {
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|animefire|animedrive|9anime|goyabu|superflix|flixhq|sflix` +
+		`allanime|animefire|animedrive|9anime|goyabu|flixhq|sflix` +
 		`).*$`)
 	cleaned = strings.TrimSpace(reSpaceDashNoise.ReplaceAllString(cleaned, ""))
 

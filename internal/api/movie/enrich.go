@@ -146,7 +146,7 @@ func EnrichWithOMDb(media *models.Media) error {
 
 	var omdbMedia *OMDbMedia
 
-	// Fast path: if we already have an IMDB ID (e.g. from SuperFlix), look up
+	// Fast path: if we already have an IMDB ID, look up
 	// directly by ID. This avoids the problem where OMDb title search fails
 	// for localized names (e.g. "Dois Homens e Meio" → not found).
 	if media.IMDBID != "" {

@@ -57,8 +57,6 @@
 - L561: `downloadFromURL`
 - L568: `SearchAnimeWithSource`
 - L573: `GetAnimeEpisodesWithSource`
-- L578: `GetSuperFlixEpisodes`
-- L689: `GetSuperFlixStreamURL`
 
 **episode_providers.go**
 - L367: `getKitsuAnimeID`

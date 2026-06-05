@@ -19,7 +19,7 @@ import (
 type ScraperType int
 
 // Timeout configurations – we wait for ALL sources to finish (or the hard
-// timeout) so that slower scrapers like SuperFlix are never silently dropped.
+// timeout) so that slower scrapers are never silently dropped.
 const (
 	// searchTimeout is the maximum time to wait for all scrapers.
 	searchTimeout = 15 * time.Second
@@ -30,8 +30,7 @@ const (
 const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
-	GoyabuType    // PT-BR anime source
-	SuperFlixType // SuperFlix PT-BR movies/series/animes/doramas
+	GoyabuType // PT-BR anime source
 )
 
 // UnifiedScraper provides a common interface for all scrapers
@@ -74,7 +73,6 @@ func NewScraperManager() *ScraperManager {
 		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
 		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
 		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
-		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: NewSuperFlixClient()}
 
 		globalScraperManager = manager
 	})
@@ -155,7 +153,7 @@ type searchResult struct {
 
 // searchAllScrapersConcurrent searches all scrapers in parallel and waits for
 // every scraper to finish (or the hard searchTimeout to expire).  This ensures
-// slower sources like SuperFlix are never silently dropped.
+// slower sources are never silently dropped.
 func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.Anime, error) {
 	util.Debug("Starting concurrent search across all sources", "query", query)
 
@@ -406,22 +404,8 @@ func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType Scrape
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			switch scraperType {
-			case SuperFlixType:
-				// SuperFlix is PT-BR. Movies get [Movie], TV series get [TV],
-				// but anime/dorama only need [PT-BR].
-				switch anime.MediaType {
-				case models.MediaTypeMovie:
-					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
-				case models.MediaTypeTV:
-					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
-				default:
-					anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
-				}
-			default:
-				languageTag := sm.getLanguageTag(scraperType)
-				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
-			}
+			languageTag := sm.getLanguageTag(scraperType)
+			anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
 		}
 
 		// Add audio type for PT-BR sources only when detectable
@@ -461,13 +445,12 @@ func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
 		"flixHQ", counts["FlixHQ"],
 		"9anime", counts["9Anime"],
 		"goyabu", counts["Goyabu"],
-		"superflix", counts["SuperFlix"],
 		"total", len(results))
 }
 
 // SearchAnimePTBR searches PT-BR sources (AnimeFire and Goyabu) concurrently
 func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
-	ptbrTypes := []ScraperType{AnimefireType, GoyabuType, SuperFlixType}
+	ptbrTypes := []ScraperType{AnimefireType, GoyabuType}
 
 	var (
 		allResults []*models.Anime
@@ -531,8 +514,6 @@ func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string 
 		return "Animefire.io"
 	case GoyabuType:
 		return "Goyabu"
-	case SuperFlixType:
-		return "SuperFlix"
 	default:
 		return "Desconhecido"
 	}
@@ -546,8 +527,6 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	case AnimefireType:
 		return "[PT-BR]"
 	case GoyabuType:
-		return "[PT-BR]"
-	case SuperFlixType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -670,97 +649,4 @@ func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (string,
 
 func (a *GoyabuAdapter) GetType() ScraperType {
 	return GoyabuType
-}
-
-// SuperFlixAdapter adapts SuperFlixClient to UnifiedScraper interface
-type SuperFlixAdapter struct {
-	client *SuperFlixClient
-}
-
-func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
-	media, err := a.client.SearchMedia(query)
-	if err != nil {
-		return nil, err
-	}
-
-	var animes []*models.Anime
-	for _, m := range media {
-		animes = append(animes, m.ToAnimeModel())
-	}
-	return animes, nil
-}
-
-func (a *SuperFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	// For SuperFlix, animeURL contains the TMDB ID
-	return nil, fmt.Errorf("for SuperFlix, use GetSuperFlixEpisodes in enhanced.go")
-}
-
-func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
-	// episodeURL = TMDB ID
-	// options[0] = media type ("filme" or "serie")
-	// options[1] = season (optional)
-	// options[2] = episode number (optional)
-	mediaType := "filme"
-	season := ""
-	episode := ""
-
-	if len(options) > 0 {
-		if s, ok := options[0].(string); ok {
-			mediaType = s
-		}
-	}
-	if len(options) > 1 {
-		if s, ok := options[1].(string); ok {
-			season = s
-		}
-	}
-	if len(options) > 2 {
-		if s, ok := options[2].(string); ok {
-			episode = s
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	result, err := a.client.GetStreamURL(ctx, mediaType, episodeURL, season, episode)
-	if err != nil {
-		return "", nil, err
-	}
-
-	metadata := make(map[string]string)
-	metadata["source"] = "superflix"
-	metadata["referer"] = result.Referer
-	metadata["title"] = result.Title
-
-	if len(result.Subtitles) > 0 {
-		var subURLs, subLabels []string
-		for _, sub := range result.Subtitles {
-			subURLs = append(subURLs, sub.URL)
-			subLabels = append(subLabels, sub.Lang)
-		}
-		metadata["subtitles"] = strings.Join(subURLs, ",")
-		metadata["subtitle_labels"] = strings.Join(subLabels, ",")
-	}
-
-	if len(result.DefaultAudio) > 0 {
-		metadata["audio_lang"] = result.DefaultAudio[0]
-	}
-
-	return result.StreamURL, metadata, nil
-}
-
-func (a *SuperFlixAdapter) GetType() ScraperType {
-	return SuperFlixType
-}
-
-// GetClient returns the underlying SuperFlix client for direct access
-func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
-	return a.client
-}
-
-// NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
-// Useful for testing with mock servers.
-func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
-	return &SuperFlixAdapter{client: client}
 }

@@ -1,13 +1,13 @@
 package api
 
-// Regression suite for the FlixHQ/SuperFlix "season selection abort" bug.
+// Regression suite for the FlixHQ "season selection abort" bug.
 //
 // Discovered:  2026-04-27 — user-supplied debug log
 //              ("00:08:12 ERRO  GoAnime  : Failed to get episodes:
 //              failed to fetch episodes: season selection cancelled: abort")
 // Fixed:       2026-04-27 — same-day fix in this commit.
-// Root cause:  internal/api/enhanced.go GetFlixHQEpisodes (FlixHQ) and
-//              GetSuperFlixEpisodes (SuperFlix) wrapped fuzzyfinder.ErrAbort
+// Root cause:  internal/api/enhanced.go GetFlixHQEpisodes (FlixHQ) wrapped
+//              fuzzyfinder.ErrAbort
 //              as `fmt.Errorf("season selection cancelled: %w", err)` and
 //              returned it. Because that error chain was not ErrBackToSearch,
 //              the playback handler (internal/handlers/playback.go) bailed
@@ -18,7 +18,7 @@ package api
 // Blast radius:user-facing — ESC during season selection (a routine action
 //              for "wrong show, let me search again") terminated the program
 //              with a fatal-looking log line. Especially likely to bite users
-//              of FlixHQ/SuperFlix because every TV show on those sources
+//              of FlixHQ because every TV show on that source
 //              prompts for a season.
 //
 // The tests below pin three invariants:
@@ -39,7 +39,7 @@ import (
 )
 
 // mapSeasonSelectionErr mirrors the production predicate from
-// internal/api/enhanced.go (GetFlixHQEpisodes and GetSuperFlixEpisodes).
+// internal/api/enhanced.go (GetFlixHQEpisodes).
 // Keeping the predicate in one tiny helper means this test pins the exact
 // shape of the mapping rather than just observing some end-to-end behaviour.
 func mapSeasonSelectionErr(err error) error {

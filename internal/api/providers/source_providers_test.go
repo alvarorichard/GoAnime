@@ -56,11 +56,3 @@ func TestGoyabuProvider_KindAndHasSeasons(t *testing.T) {
 	assert.Equal(t, source.Goyabu, p.Kind())
 	assert.False(t, p.HasSeasons())
 }
-
-func TestSuperFlixProvider_KindAndHasSeasons(t *testing.T) {
-	t.Parallel()
-	p, err := ForKind(source.SuperFlix)
-	require.NoError(t, err)
-	assert.Equal(t, source.SuperFlix, p.Kind())
-	assert.True(t, p.HasSeasons())
-}

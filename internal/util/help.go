@@ -134,7 +134,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, Goyabu, and SuperFlix with automatic fallback.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, and Goyabu with automatic fallback.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")

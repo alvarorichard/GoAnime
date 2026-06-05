@@ -36,12 +36,6 @@ var sourceDefs = []SourceDefinition{
 		URLMatchers: []string{"goyabu"},
 	},
 	{
-		Kind:        SuperFlix,
-		Explicit:    []string{"SuperFlix"},
-		Tags:        []string{"[superflix]"},
-		URLMatchers: []string{"superflix"},
-	},
-	{
 		Kind:        AllAnime,
 		Explicit:    []string{"AllAnime"},
 		Tags:        []string{"[english]"},

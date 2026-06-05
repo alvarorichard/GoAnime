@@ -12,7 +12,6 @@ const (
 	AllAnime  SourceKind = "AllAnime"
 	AnimeFire SourceKind = "AnimeFire"
 	Goyabu    SourceKind = "Goyabu"
-	SuperFlix SourceKind = "SuperFlix"
 
 	// Unknown is returned when no definition matches. Downstream treats it as
 	// best-effort AllAnime, but logs a warning for investigation.
@@ -30,5 +29,4 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AllAnime:  scraper.AllAnimeType,
 	AnimeFire: scraper.AnimefireType,
 	Goyabu:    scraper.GoyabuType,
-	SuperFlix: scraper.SuperFlixType,
 }

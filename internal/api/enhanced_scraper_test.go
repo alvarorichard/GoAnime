@@ -58,54 +58,7 @@ func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.Unif
 	t.Cleanup(func() { newScraperMgr = prev })
 }
 
-// --- GetSuperFlixEpisodes ---
-
-func TestGetSuperFlixEpisodes_EmptyURL(t *testing.T) {
-	t.Parallel()
-	media := &models.Anime{Source: "SuperFlix", URL: ""}
-	_, err := GetSuperFlixEpisodes(media)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no TMDB ID")
-}
-
-func TestGetSuperFlixEpisodes_MovieType(t *testing.T) {
-	t.Parallel()
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "12345",
-		Name:      "Avengers",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetSuperFlixEpisodes(media)
-	require.NoError(t, err)
-	require.Len(t, eps, 1)
-	assert.Equal(t, "1", eps[0].Number)
-	assert.Equal(t, 1, eps[0].Num)
-	assert.Equal(t, "12345", eps[0].URL)
-	assert.Equal(t, "Avengers", eps[0].Title.English)
-}
-
 // --- GetAnimeEpisodesEnhanced ---
-
-func TestGetAnimeEpisodesEnhanced_SuperFlixSource_EmptyURL(t *testing.T) {
-	// SuperFlix with empty URL errors immediately — no scraper manager needed.
-	media := &models.Anime{Source: "SuperFlix", URL: ""}
-	_, err := GetAnimeEpisodesEnhanced(media)
-	require.Error(t, err)
-}
-
-func TestGetAnimeEpisodesEnhanced_SuperFlixSource_MovieType(t *testing.T) {
-	// SuperFlix movie path returns 1 episode with no network call.
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "98765",
-		Name:      "Inception",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetAnimeEpisodesEnhanced(media)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
 
 func TestGetAnimeEpisodesEnhanced_AllAnimeSource(t *testing.T) {
 	mock := &mockEpiScraper{

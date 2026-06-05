@@ -762,7 +762,7 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	// Use go-ytdlp library (no external binary required on PATH).
-	// 60-minute timeout: movies from SuperFlix/FlixHQ can be 2+ hours of video;
+	// 60-minute timeout: movies from FlixHQ can be 2+ hours of video;
 	// a 10-minute timeout was killing yt-dlp mid-download ("signal: killed").
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
@@ -1208,7 +1208,7 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 	animeURL := anime.URL
 
 	// Source-aware routing: use anime.Source to determine the correct resolver.
-	// Sources like SuperFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
+	// Sources like FlixHQ, 9Anime, Goyabu, and AnimeDrive use
 	// source-specific identifiers or HTTP pages that need scraper-specific
 	// resolution instead of the legacy generic page extractor.
 	source := anime.Source

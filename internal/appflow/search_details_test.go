@@ -46,7 +46,7 @@ func TestFetchAnimeDetails_MovieSource_NoPanic(t *testing.T) {
 	}
 	anime := &models.Anime{
 		Name:   "Spirited Away",
-		Source: "SuperFlix",
+		Source: "SFlix",
 		// MediaType left as zero (not MediaTypeMovie) to avoid TMDB call
 	}
 	defer func() {

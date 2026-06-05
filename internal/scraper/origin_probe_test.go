@@ -23,7 +23,7 @@ package scraper
 //              between (a) their network being slow, (b) the site being dead,
 //              and (c) the GoAnime client being broken.
 // Blast radius:diagnostic-only — search results were already correct (the
-//              source was correctly skipped, SuperFlix etc. still returned
+//              source was correctly skipped, other sources still returned
 //              results). The bug was that the WARN line lied about the
 //              cause, and users repeatedly opened issues asking us to
 //              "fix flixhq" when the actual fix was on the upstream side.
@@ -184,5 +184,4 @@ func TestScraperManager_BaseURLForKnownTypes(t *testing.T) {
 	assert.Empty(t, sm.getScraperBaseURL(GoyabuType),
 		"Goyabu serves challenge pages on its homepage")
 	assert.Empty(t, sm.getScraperBaseURL(AnimefireType))
-	assert.Empty(t, sm.getScraperBaseURL(SuperFlixType))
 }

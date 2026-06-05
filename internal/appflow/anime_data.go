@@ -168,14 +168,12 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 	if anime == nil {
 		return
 	}
-	// For FlixHQ/SuperFlix movies/TV shows: skip AniList, optionally enrich.
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" ||
+	// For FlixHQ movies/TV shows: skip AniList, optionally enrich via TMDB.
+	if anime.Source == "SFlix" ||
 		anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
-		if anime.Source != "SuperFlix" {
-			if err := sourceDetailsFetchFn(anime); err != nil {
-				util.Debugf("Failed to enrich content with TMDB: %v", err)
-			}
+		if err := sourceDetailsFetchFn(anime); err != nil {
+			util.Debugf("Failed to enrich content with TMDB: %v", err)
 		}
 		return
 	}

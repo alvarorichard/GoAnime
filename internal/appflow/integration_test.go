@@ -114,24 +114,6 @@ func TestFetchAnimeDetailsCore_NilAnime(t *testing.T) {
 	assert.NotPanics(t, func() { fetchAnimeDetailsCore(nil) })
 }
 
-func TestFetchAnimeDetailsCore_SuperFlixSkipsAll(t *testing.T) {
-	var aniCount, srcCount int32
-	withOverrides(t, appflowOverrides{
-		aniList: func(string) (*models.AniListResponse, error) {
-			atomic.AddInt32(&aniCount, 1)
-			return nil, nil
-		},
-		sourceDetails: func(*models.Anime) error {
-			atomic.AddInt32(&srcCount, 1)
-			return nil
-		},
-	})
-
-	fetchAnimeDetailsCore(&models.Anime{Name: "Spirited Away", Source: "SuperFlix"})
-	assert.Equal(t, int32(0), atomic.LoadInt32(&aniCount), "SuperFlix must skip AniList")
-	assert.Equal(t, int32(0), atomic.LoadInt32(&srcCount), "SuperFlix must skip source details")
-}
-
 func TestFetchAnimeDetailsCore_SFlixCallsSourceOnly(t *testing.T) {
 	var aniCount, srcCount int32
 	withOverrides(t, appflowOverrides{

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -162,7 +164,7 @@ func TestSearchAnime_InvalidPageURLReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestEnrichAnimeData_SuperFlixSkipsAniList(t *testing.T) {
+func TestEnrichAnimeData_SFlixSkipsAniList(t *testing.T) {
 	anime := &models.Anime{
 		Name:      "Inception",
 		Source:    "SFlix",
@@ -223,16 +225,6 @@ func TestSearchAnimeEnhanced_NoResultsReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGetEpisodeStreamURL_SuperFlixDispatch(t *testing.T) {
-	// SuperFlix branch needs a real network call to fetch the stream; we can
-	// only assert it does not panic and returns an error when no TMDB ID is
-	// available.
-	anime := &models.Anime{Source: "SuperFlix", URL: ""}
-	episode := &models.Episode{Number: "1", URL: ""}
-	_, err := GetEpisodeStreamURL(episode, anime, "best")
-	require.Error(t, err)
-}
-
 func TestGetEpisodeStreamURL_AllAnimeRoutingNoPanic(t *testing.T) {
 	anime := &models.Anime{Source: "AllAnime", URL: "Bnp4XYZ"}
 	episode := &models.Episode{Number: "1", URL: ""}
@@ -266,37 +258,14 @@ func TestSearchAnimeWithSource_DelegatesToEnhanced(t *testing.T) {
 }
 
 func TestGetAnimeEpisodesWithSource_DelegatesToEnhanced(t *testing.T) {
-	// SuperFlix branch with empty URL surfaces a TMDB error → exercise the
-	// delegation through a path that reliably errors without network access.
-	anime := &models.Anime{Source: "SuperFlix", URL: ""}
+	// A mock AllAnime scraper that returns an error proves the wrapper delegates
+	// to GetAnimeEpisodesEnhanced — no network access required.
+	injectScraper(t, scraper.AllAnimeType, &mockEpiScraper{
+		epsErr: errors.New("boom"),
+		tp:     scraper.AllAnimeType,
+	})
+	anime := &models.Anime{Source: "AllAnime", URL: "Bnp4XYZ"}
 	_, err := GetAnimeEpisodesWithSource(anime)
-	require.Error(t, err)
-}
-
-func TestGetSuperFlixEpisodes_MissingTMDBErrors(t *testing.T) {
-	_, err := GetSuperFlixEpisodes(&models.Anime{Source: "SuperFlix", URL: ""})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "TMDB")
-}
-
-func TestGetSuperFlixEpisodes_MovieReturnsSingleEpisode(t *testing.T) {
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "12345",
-		Name:      "TestMovie",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetSuperFlixEpisodes(media)
-	require.NoError(t, err)
-	require.Len(t, eps, 1)
-	assert.Equal(t, "12345", eps[0].URL)
-	assert.Equal(t, "TestMovie", eps[0].Title.English)
-}
-
-func TestGetSuperFlixStreamURL_NetworkErrorPropagates(t *testing.T) {
-	media := &models.Anime{Source: "SuperFlix", URL: "00000000", MediaType: models.MediaTypeMovie}
-	episode := &models.Episode{Number: "1", URL: "00000000"}
-	_, err := GetSuperFlixStreamURL(media, episode, "best")
 	require.Error(t, err)
 }
 
