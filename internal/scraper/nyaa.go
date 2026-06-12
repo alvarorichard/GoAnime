@@ -2,7 +2,8 @@ package scraper
 
 import (
 	"errors"
-	"net/http"
+	"net/http",
+	"github.com/cenkalti/rain"
 )
 
 const (
