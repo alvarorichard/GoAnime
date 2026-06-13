@@ -28,7 +28,10 @@ func TestSearchAnime(t *testing.T) {
 	anchors := doc.Find("a[title][href]")
 
 	anchors.Each(func(i int, s *goquery.Selection) {
-		t.Log(anchors.Nodes[i].Attr[1])
+			// iterate over all attributes of the anchor node
+			for _, attr := range anchors.Nodes[i].Attr {
+				t.Logf("attr: %s=%s", attr.Key, attr.Val)
+			}
 	})
 }
 
