@@ -24,6 +24,7 @@ func newTestSuperFlixClient(serverURL string) *SuperFlixClient {
 	c := NewSuperFlixClient()
 	c.baseURL = serverURL
 	c.client = &http.Client{Timeout: 5 * time.Second, Transport: http.DefaultTransport} // bypass SSRF-safe transport for localhost
+	c.browserSolver = nil                                                               // use the plain-HTTP episode path against httptest
 	c.maxRetries = 0
 	c.retryDelay = 0
 	return c
@@ -1977,13 +1978,16 @@ func TestRegexPatterns(t *testing.T) {
 // than the cryptic JSON decode error.
 // =============================================================================
 
-func TestSuperFlixBase_PointsToBestHost_2026_05_18(t *testing.T) {
+func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
 	t.Parallel()
 	// Pinning the canonical host. If this needs to change in the future,
 	// also update internal/api/providers/metadata/metadata.go.
-	// 2026-05-18: .online started 301-redirecting to .best, breaking POSTs
-	// to /player/bootstrap (Go downgrades POST→GET on redirect).
-	assert.Equal(t, "https://superflixapi.best", SuperFlixBase)
+	// 2026-05-18: .online started 301-redirecting to .best, breaking POSTs.
+	// 2026-06-05: .best now 301-redirects to .fit (same POST→GET downgrade),
+	// and .fit gates the player page behind a Cloudflare Turnstile served on
+	// a plain HTTP 200 — handled by cfFallbackTransport.shouldInspect.
+	// 2026-06-18: .fit went dead (NXDOMAIN) and rotated to .cyou.
+	assert.Equal(t, "https://superflixapi.cyou", SuperFlixBase)
 }
 
 func TestBootstrap_HTMLResponseSurfacesActionableError_2026_04_30(t *testing.T) {
@@ -2115,8 +2119,8 @@ func TestEnsureJSONResponse_BlankBodyWithBadStatus_2026_04_30(t *testing.T) {
 // evening reproduced a 1-day-of-leak window. Pin two boundary cases on
 // a fixed clock so neither timezone nor wall-clock drift can hide a
 // regression:
-//   1. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-03 → must be filtered
-//   2. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-02 → must be kept
+//  1. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-03 → must be filtered
+//  2. now=2026-05-02 03:30 UTC, ep.air_date=2026-05-02 → must be kept
 func TestFilterEpisodesByAirDate_TomorrowIsNotKept_2026_05_02(t *testing.T) {
 	t.Parallel()
 

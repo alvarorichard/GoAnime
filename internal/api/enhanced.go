@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -154,7 +155,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			case strings.Contains(anime.URL, "goyabu"):
 				anime.Source = "Goyabu"
 			}
-			}
+		}
 
 		// Language tags are already added by unified.go, don't duplicate them here
 	}
@@ -572,7 +573,6 @@ func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
 }
 
-
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return GetAnimeEpisodesEnhanced(anime)
 }
@@ -611,7 +611,28 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	var allEpisodes map[string][]scraper.SuperFlixEpisode
 	var episodesErr error
 	runWithSpinner("Loading seasons...", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Preferred path: list episodes from the keyless, public TVmaze API using
+		// the IMDB id SuperFlix gives us in search. This is browser-free — no
+		// Turnstile gate, no headed Firefox window during browsing. SuperFlix uses
+		// standard TMDB season/episode numbering, which TVmaze matches, so the
+		// resulting (season, episode) pairs drive the /serie/{tmdb}/{s}/{e} embed
+		// directly.
+		if media.IMDBID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if eps, err := scraper.GetEpisodesFromTVmaze(ctx, http.DefaultClient, media.IMDBID); err == nil && len(eps) > 0 {
+				allEpisodes = eps
+				return
+			} else if err != nil {
+				util.Debug("TVmaze episode listing failed, falling back to browser", "imdb", media.IMDBID, "err", err)
+			}
+		}
+
+		// Fallback: drive the gated SuperFlix frontend through the headed browser.
+		// Generous timeout: the player page may sit behind a Cloudflare Turnstile
+		// gate that NewSuperFlixClient solves with a headed Firefox (10–40s). Must
+		// exceed the client's solve budget or the solve gets cancelled mid-flight.
+		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
 		defer cancel()
 		allEpisodes, episodesErr = sfClient.GetEpisodes(ctx, tmdbID)
 	})
@@ -711,7 +732,10 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	var result *scraper.SuperFlixStreamResult
 	var streamErr error
 	runWithSpinner("Loading stream...", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		// Generous timeout: the pipeline's first request may hit a Cloudflare
+		// Turnstile gate that the client solves with a headed Firefox (10–40s).
+		// Must exceed the client's solve budget or the solve gets cancelled.
+		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
 		defer cancel()
 		result, streamErr = sfClient.GetStreamURL(ctx, sfType, tmdbID, season, epNum)
 	})

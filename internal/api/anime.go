@@ -95,8 +95,7 @@ func FetchAnimeDetails(anime *models.Anime) error {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			fmt.Printf("error get details")
-
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(response.Body)
 

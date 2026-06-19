@@ -720,7 +720,10 @@ func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (stri
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Generous timeout: the first request in the pipeline may hit a Cloudflare
+	// Turnstile gate the client solves with a headed Firefox (10–40s); a
+	// shorter deadline cancels the solve mid-flight.
+	ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
 	defer cancel()
 
 	result, err := a.client.GetStreamURL(ctx, mediaType, episodeURL, season, episode)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,25 +30,42 @@ var ErrSuperFlixNoServers = errors.New("superflix: no servers available for this
 
 const (
 	// SuperFlixBase is the canonical SuperFlix host. Previous hosts
-	// (`superflixapi.rest`, `superflixapi.online`) now 301-redirect here;
-	// Go's http.Client follows the redirect but downgrades the POST to a GET
+	// (`superflixapi.rest`, `superflixapi.online`, `superflixapi.best`,
+	// `superflixapi.fit`) 301-redirect to whichever alias is live; Go's
+	// http.Client follows the redirect but downgrades the POST to a GET
 	// (dropping the body), which makes /player/bootstrap return HTML 404 and
-	// break JSON decoding.
-	SuperFlixBase      = "https://superflixapi.best"
-	SuperFlixUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	// break JSON decoding — so we target the live host directly. `.fit` went
+	// dead (NXDOMAIN) 2026-06-18 and rotated to `.cyou`.
+	SuperFlixBase = "https://superflixapi.cyou"
+	// SuperFlixEmbedHost is the warezcdn embed host listed in the frontend's
+	// window.__PLAYER_APIS__. Loading https://warezcdn.lat/{filme|serie}/<tmdb>
+	// in a cross-origin iframe funnels through Turnstile to the rotating player
+	// host whose getVideo endpoint returns the signed HLS master. Verified live
+	// 2026-06-09. superflixapi.cyou is the current API alias if this rotates out.
+	SuperFlixEmbedHost = "warezcdn.lat"
+	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
+	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
+	// the User-Agent that solved the challenge; if the HTTP client then sends a
+	// different UA, CF rejects the clearance and re-challenges in a loop. A
+	// Firefox-on-Linux UA is used because the solver drives a real Firefox.
+	SuperFlixUserAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
 )
 
 // Pre-compiled regexes for SuperFlix scraper
 var (
-	sfCSRFTokenRe    = regexp.MustCompile(`var CSRF_TOKEN\s*=\s*"([^"]+)"`)
-	sfPageTokenRe    = regexp.MustCompile(`var PAGE_TOKEN\s*=\s*"([^"]+)"`)
-	sfContentIDRe    = regexp.MustCompile(`var INITIAL_CONTENT_ID\s*=\s*(\d+)`)
-	sfContentTypeRe  = regexp.MustCompile(`var CONTENT_TYPE\s*=\s*"([^"]+)"`)
-	sfTitleRe        = regexp.MustCompile(`<title>(?:Player \| )?(.+?)</title>`)
-	sfAllEpisodesRe  = regexp.MustCompile(`var ALL_EPISODES\s*=\s*(\{.+?\});`)
-	sfDefaultAudioRe = regexp.MustCompile(`var defaultAudio\s*=\s*(\[.+?\]);`)
-	sfSubtitleRe     = regexp.MustCompile(`var playerjsSubtitle\s*=\s*"(.+?)";`)
-	sfSubPartRe      = regexp.MustCompile(`\[(.+?)\](https?://.+)`)
+	sfCSRFTokenRe   = regexp.MustCompile(`var CSRF_TOKEN\s*=\s*"([^"]+)"`)
+	sfPageTokenRe   = regexp.MustCompile(`var PAGE_TOKEN\s*=\s*"([^"]+)"`)
+	sfContentIDRe   = regexp.MustCompile(`var INITIAL_CONTENT_ID\s*=\s*(\d+)`)
+	sfContentTypeRe = regexp.MustCompile(`var CONTENT_TYPE\s*=\s*"([^"]+)"`)
+	sfTitleRe       = regexp.MustCompile(`<title>(?:Player \| )?(.+?)</title>`)
+	sfAllEpisodesRe = regexp.MustCompile(`var ALL_EPISODES\s*=\s*(\{.+?\});`)
+	// Current rotating frontend injects the full per-season dataset (with
+	// air_date, title, epi_num) as `window.allEpisodes = {...};` and renders the
+	// anchors client-side from it. The blob carries metadata the anchors don't.
+	sfWindowAllEpisodesRe = regexp.MustCompile(`window\.allEpisodes\s*=\s*(\{.+?\});`)
+	sfDefaultAudioRe      = regexp.MustCompile(`var defaultAudio\s*=\s*(\[.+?\]);`)
+	sfSubtitleRe          = regexp.MustCompile(`var playerjsSubtitle\s*=\s*"(.+?)";`)
+	sfSubPartRe           = regexp.MustCompile(`\[(.+?)\](https?://.+)`)
 )
 
 // SuperFlixTokens holds the tokens extracted from a SuperFlix player page
@@ -101,12 +119,16 @@ type SuperFlixMedia struct {
 
 // SuperFlixClient handles interactions with SuperFlix
 type SuperFlixClient struct {
-	client      *http.Client
-	baseURL     string
-	userAgent   string
-	maxRetries  int
-	retryDelay  time.Duration
-	searchCache sync.Map
+	client    *http.Client
+	baseURL   string
+	userAgent string
+	// browserSolver drives the headed browser for episode discovery on the
+	// rotating, gated frontend. nil in tests (SetTestConfig) so GetEpisodes
+	// falls back to the plain HTTP path against an httptest server.
+	browserSolver cfSolver
+	maxRetries    int
+	retryDelay    time.Duration
+	searchCache   sync.Map
 }
 
 // NormalizeSuperFlixImageURL converts SuperFlix CloudFront proxy URLs to direct TMDB image URLs.
@@ -133,12 +155,33 @@ func NormalizeSuperFlixImageURL(imageURL string) string {
 	return imageURL
 }
 
-// NewSuperFlixClient creates a new SuperFlix client
+// NewSuperFlixClient creates a new SuperFlix client.
+//
+// The HTTP client is wrapped with cfFallbackTransport: on a 403/503/429
+// response carrying Cloudflare-challenge markers, the request is replayed
+// through a real, headed Firefox (driven via Playwright) to obtain a
+// cf_clearance cookie, which is then attached to the retried request and
+// every subsequent request for the same host via the cookie jar.
 func NewSuperFlixClient() *SuperFlixClient {
+	jar, _ := newCookieJar()
+	base := safeScraperTransport(30 * time.Second)
+	transport := &cfFallbackTransport{
+		base:   base,
+		solver: defaultCFSolver,
+		jar:    jar,
+		// Solve budget. The CF gate may need a manual Turnstile checkbox click
+		// in the real Chrome window, so allow ~3min. After the first solve the
+		// persistent Chrome profile usually clears it automatically in seconds.
+		timeout: 180 * time.Second,
+	}
 	return &SuperFlixClient{
 		client: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: safeScraperTransport(30 * time.Second),
+			// Wall-clock cap on the ENTIRE Do, including a CF browser solve.
+			// Must exceed the solve budget above. Fast (non-challenged)
+			// requests still return immediately — this only raises the ceiling.
+			Timeout:   210 * time.Second,
+			Transport: transport,
+			Jar:       jar,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return fmt.Errorf("too many redirects")
@@ -146,10 +189,11 @@ func NewSuperFlixClient() *SuperFlixClient {
 				return nil
 			},
 		},
-		baseURL:    SuperFlixBase,
-		userAgent:  SuperFlixUserAgent,
-		maxRetries: 2,
-		retryDelay: 200 * time.Millisecond,
+		baseURL:       SuperFlixBase,
+		userAgent:     SuperFlixUserAgent,
+		browserSolver: defaultCFSolver,
+		maxRetries:    2,
+		retryDelay:    200 * time.Millisecond,
 	}
 }
 
@@ -164,6 +208,7 @@ func (c *SuperFlixClient) decorateRequest(req *http.Request) {
 func (c *SuperFlixClient) SetTestConfig(baseURL string, httpClient *http.Client) {
 	c.baseURL = baseURL
 	c.client = httpClient
+	c.browserSolver = nil // force the plain-HTTP episode path against httptest
 	c.maxRetries = 0
 	c.retryDelay = 0
 }
@@ -397,19 +442,105 @@ func (c *SuperFlixClient) ExtractTokens(html string) *SuperFlixTokens {
 	return tokens
 }
 
-// ExtractEpisodes extracts ALL_EPISODES from the player page JS
+// ExtractEpisodes extracts episodes from a SuperFlix player/serie page.
+//
+// Two formats are supported:
+//   - Legacy player page: a `var ALL_EPISODES = {...}` JS object (air-date
+//     filtered, since it can contain unreleased placeholders).
+//   - Current rotating frontend (superflix.bond / primeflix.mom /
+//     lospobreflix.site / …): episodes rendered as
+//     `<a data-season data-episode data-episode-id href="/episodio/...">`.
+//     These are already release-filtered by the site, so no air-date pass.
 func (c *SuperFlixClient) ExtractEpisodes(html string) (map[string][]SuperFlixEpisode, error) {
-	m := sfAllEpisodesRe.FindStringSubmatch(html)
-	if len(m) < 2 {
-		return nil, nil
+	if m := sfAllEpisodesRe.FindStringSubmatch(html); len(m) >= 2 {
+		var result map[string][]SuperFlixEpisode
+		if err := json.Unmarshal([]byte(m[1]), &result); err != nil {
+			return nil, fmt.Errorf("failed to parse ALL_EPISODES: %w", err)
+		}
+		return filterEpisodesByAirDate(result, time.Now()), nil
 	}
 
+	if blob := parseWindowAllEpisodes(html); len(blob) > 0 {
+		return blob, nil
+	}
+
+	if fe := parseFrontendEpisodes(html); len(fe) > 0 {
+		return fe, nil
+	}
+	return nil, nil
+}
+
+// parseWindowAllEpisodes reads the `window.allEpisodes = {...};` blob the current
+// rotating frontend injects. Unlike the rendered anchors (which expose only
+// season/episode numbers), the blob carries every season at once with full
+// metadata — title, epi_num and air_date. Episodes are air-date filtered the
+// same way as the legacy ALL_EPISODES blob, since the dataset can include
+// unreleased placeholders.
+func parseWindowAllEpisodes(html string) map[string][]SuperFlixEpisode {
+	m := sfWindowAllEpisodesRe.FindStringSubmatch(html)
+	if len(m) < 2 {
+		return nil
+	}
 	var result map[string][]SuperFlixEpisode
 	if err := json.Unmarshal([]byte(m[1]), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse ALL_EPISODES: %w", err)
+		util.Debug("SuperFlix: failed to parse window.allEpisodes", "err", err)
+		return nil
 	}
+	return filterEpisodesByAirDate(result, time.Now())
+}
 
-	return filterEpisodesByAirDate(result, time.Now()), nil
+// parseFrontendEpisodes reads episodes from the rotating SuperFlix frontend
+// serie page. Each `<a data-episode-id>` anchor carries the season and episode
+// numbers we need to build the player URL later. Only the currently-loaded
+// season's episodes are present on a given page (other seasons live at
+// /serie/<slug>/<n>); GetEpisodes fetches those separately and merges.
+func parseFrontendEpisodes(html string) map[string][]SuperFlixEpisode {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+	out := make(map[string][]SuperFlixEpisode)
+	doc.Find("a[data-episode-id]").Each(func(_ int, a *goquery.Selection) {
+		season, _ := a.Attr("data-season")
+		epnum, _ := a.Attr("data-episode")
+		if season == "" || epnum == "" {
+			return
+		}
+		out[season] = append(out[season], SuperFlixEpisode{
+			EpiNum: json.Number(epnum),
+			Title:  "Episódio " + epnum,
+		})
+	})
+	return out
+}
+
+// parseFrontendSeasons returns the distinct season numbers linked on a frontend
+// serie page (the season dropdown / "/serie/<slug>/<n>" links).
+func parseFrontendSeasons(html string) []string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var seasons []string
+	re := regexp.MustCompile(`/serie/[a-z0-9-]+/(\d+)$`)
+	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
+		href, _ := a.Attr("href")
+		href = strings.SplitN(href, "?", 2)[0]
+		href = strings.SplitN(href, "#", 2)[0]
+		if mm := re.FindStringSubmatch(href); len(mm) > 1 {
+			if !seen[mm[1]] {
+				seen[mm[1]] = true
+				seasons = append(seasons, mm[1])
+			}
+		}
+	})
+	sort.Slice(seasons, func(i, j int) bool {
+		ai, _ := strconv.Atoi(seasons[i])
+		aj, _ := strconv.Atoi(seasons[j])
+		return ai < aj
+	})
+	return seasons
 }
 
 // filterEpisodesByAirDate drops episodes with empty/"null" air_date and
@@ -697,8 +828,28 @@ func (c *SuperFlixClient) GetVideoAPI(ctx context.Context, playerBaseURL, videoH
 	return streamURL, result.VideoImage, nil
 }
 
-// GetStreamURL is the full pipeline: player page → tokens → bootstrap → source → redirect → video API
+// embedStreamSolver is the subset of the browser solver used to extract a live
+// stream by driving the warezcdn embed through its Turnstile gate and capturing
+// the player's getVideo response. The transport's cfSolver interface stays
+// minimal (Solve only); only the real *cfBrowserSolver implements this, so the
+// type assertion in GetStreamURL is false for test fakes / a nil solver.
+type embedStreamSolver interface {
+	SniffEmbedStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error)
+}
+
+// GetStreamURL resolves the playable stream for SuperFlix content.
+//
+// The legacy player-page→tokens→bootstrap→source pipeline is dead: the current
+// site serves a Turnstile-gated embed with no inline tokens. So in production
+// (browser solver present) we drive the embed through the gate and sniff the
+// player's getVideo response for the signed HLS master. The legacy pipeline
+// below is retained only for the httptest-backed unit tests (which null out the
+// browser solver via SetTestConfig).
 func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, season, episode string) (*SuperFlixStreamResult, error) {
+	if solver, ok := c.browserSolver.(embedStreamSolver); ok {
+		return c.getStreamViaBrowser(ctx, solver, mediaType, mediaID, season, episode)
+	}
+
 	html, err := c.GetPlayerPage(ctx, mediaType, mediaID, season, episode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load player page: %w", err)
@@ -793,13 +944,175 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	return result, nil
 }
 
-// GetEpisodes returns the seasons and episodes for a series
+// getStreamViaBrowser resolves the stream, preferring a browser-free path.
+//
+// The only browser-gated step is mapping tmdb→(playerHost, videoHash) through
+// warezcdn's Turnstile gate. The player host's getVideo endpoint that turns that
+// pair into a fresh signed HLS link is NOT gated, so once the pair is cached we
+// replay over plain HTTP with no browser. The headed browser therefore runs only
+// on the FIRST play of a title — or when the cached host rotates out and the
+// HTTP getVideo fails, which transparently falls back to a re-solve.
+func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedStreamSolver, mediaType, mediaID, season, episode string) (*SuperFlixStreamResult, error) {
+	key := streamCacheKey(mediaType, mediaID, season, episode)
+
+	// 1. Cached (host, hash) → pure-HTTP getVideo, no browser.
+	if ent, ok := defaultStreamCache.get(key); ok {
+		referer := ent.Host + "/video/" + ent.Hash
+		streamURL, thumb, err := c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer)
+		if err == nil && streamURL != "" {
+			util.Debug("SuperFlix stream from cache (no browser)", "key", key, "host", ent.Host)
+			return &SuperFlixStreamResult{
+				StreamURL: streamURL,
+				Referer:   ent.Host + "/",
+				Thumb:     NormalizeSuperFlixImageURL(thumb),
+			}, nil
+		}
+		util.Debug("SuperFlix cached stream stale, re-solving", "key", key, "err", err)
+	}
+
+	// 2. Cache miss / stale → drive the headed browser through the gate once,
+	//    capture the stream + (host, hash), and cache the pair for next time.
+	var embedURL string
+	if mediaType == "serie" {
+		s, e := season, episode
+		if s == "" {
+			s = "1"
+		}
+		if e == "" {
+			e = "1"
+		}
+		embedURL = fmt.Sprintf("https://%s/serie/%s/%s/%s", SuperFlixEmbedHost, mediaID, s, e)
+	} else {
+		embedURL = fmt.Sprintf("https://%s/filme/%s", SuperFlixEmbedHost, mediaID)
+	}
+
+	res, err := solver.SniffEmbedStream(ctx, embedURL, 0)
+	if err != nil {
+		return nil, fmt.Errorf("superflix embed stream sniff failed (%s): %w", embedURL, err)
+	}
+
+	defaultStreamCache.put(key, streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash})
+
+	referer := res.Referer
+	if referer == "" {
+		referer = "https://" + SuperFlixEmbedHost + "/"
+	}
+	return &SuperFlixStreamResult{
+		StreamURL: res.StreamURL,
+		Referer:   referer,
+	}, nil
+}
+
+// GetEpisodes returns the seasons and episodes for a series.
+//
+// Legacy player pages embed every season in one ALL_EPISODES blob. The current
+// rotating frontend renders only the loaded season's episodes per page and
+// links the others at /serie/<slug>/<n>, so when we detect that format we fetch
+// each remaining season (via the gateway serie/<tmdb>/<n>, which redirects to
+// the right frontend season) and merge. Per-season fetches reuse the already
+// cleared CF profile, so they don't re-trigger the challenge.
 func (c *SuperFlixClient) GetEpisodes(ctx context.Context, tmdbID string) (map[string][]SuperFlixEpisode, error) {
+	// Production path: drive the browser solver directly. It returns the final
+	// (rotating) frontend URL, which we need to resolve the per-season links
+	// onto the right domain. The transport/HTTP path can't expose that.
+	if c.browserSolver != nil {
+		return c.getEpisodesViaBrowser(ctx, tmdbID)
+	}
+
+	// Test path (SetTestConfig): plain HTTP against an httptest server.
 	html, err := c.GetPlayerPage(ctx, "serie", tmdbID, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load player page: %w", err)
 	}
 	return c.ExtractEpisodes(html)
+}
+
+// getEpisodesViaBrowser solves the serie page, parses the loaded season, then
+// solves each remaining season's frontend URL and merges. Per-season solves
+// reuse the warm CF profile, so they don't re-trigger the challenge.
+func (c *SuperFlixClient) getEpisodesViaBrowser(ctx context.Context, tmdbID string) (map[string][]SuperFlixEpisode, error) {
+	base := strings.TrimSuffix(c.baseURL, "/")
+	res, err := c.browserSolver.Solve(ctx, base+"/serie/"+tmdbID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load serie page: %w", err)
+	}
+
+	episodes := make(map[string][]SuperFlixEpisode)
+
+	// Legacy ALL_EPISODES (rare now) carries every season in one shot.
+	if legacy, lErr := c.ExtractEpisodes(res.HTML); lErr == nil && sfAllEpisodesRe.MatchString(res.HTML) {
+		return legacy, nil
+	}
+
+	// Current frontend injects every season with air_date in window.allEpisodes,
+	// so a single solve covers all seasons — no per-season fetch needed.
+	if blob := parseWindowAllEpisodes(res.HTML); len(blob) > 0 {
+		return blob, nil
+	}
+
+	for s, eps := range parseFrontendEpisodes(res.HTML) {
+		episodes[s] = eps
+	}
+
+	// Resolve the other seasons' URLs against the solved frontend domain and
+	// fetch each that we don't already have.
+	for season, seasonURL := range resolveFrontendSeasonURLs(res.HTML, res.FinalURL) {
+		if _, ok := episodes[season]; ok {
+			continue
+		}
+		sres, sErr := c.browserSolver.Solve(ctx, seasonURL, 0)
+		if sErr != nil {
+			util.Debug("SuperFlix: failed to load season page", "season", season, "url", seasonURL, "err", sErr)
+			continue
+		}
+		for s, eps := range parseFrontendEpisodes(sres.HTML) {
+			if _, ok := episodes[s]; !ok {
+				episodes[s] = eps
+			}
+		}
+	}
+
+	if len(episodes) == 0 {
+		return nil, nil
+	}
+	return episodes, nil
+}
+
+// resolveFrontendSeasonURLs maps season number -> absolute URL for every
+// /serie/<slug>/<n> link on a frontend serie page, resolved against the page's
+// final (post-redirect) URL so they hit the correct rotating domain.
+func resolveFrontendSeasonURLs(html, finalURL string) map[string]string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil
+	}
+	var basePtr *url.URL
+	if finalURL != "" {
+		basePtr, _ = url.Parse(finalURL)
+	}
+	re := regexp.MustCompile(`/serie/[a-z0-9-]+/(\d+)$`)
+	out := make(map[string]string)
+	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
+		href, _ := a.Attr("href")
+		clean := strings.SplitN(href, "?", 2)[0]
+		clean = strings.SplitN(clean, "#", 2)[0]
+		m := re.FindStringSubmatch(clean)
+		if m == nil {
+			return
+		}
+		season := m[1]
+		if _, ok := out[season]; ok {
+			return
+		}
+		abs := clean
+		if basePtr != nil {
+			if ref, perr := url.Parse(clean); perr == nil {
+				abs = basePtr.ResolveReference(ref).String()
+			}
+		}
+		out[season] = abs
+	})
+	return out
 }
 
 // ToAnimeModel converts SuperFlixMedia to models.Anime for compatibility
