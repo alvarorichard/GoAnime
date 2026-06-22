@@ -16,6 +16,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// skipUnlessLiveBrowser skips tests whose only code path drives a real headed
+// browser (SuperFlix's Cloudflare Turnstile solver). There is no injection seam
+// at the api layer, so on runners with system Chrome present these tests launch
+// a live browser, run for minutes, and trip the race detector inside
+// playwright-go's frame dispatcher. Set GOANIME_LIVE_BROWSER_TESTS=1 to run them.
+func skipUnlessLiveBrowser(t *testing.T) {
+	t.Helper()
+	if os.Getenv("GOANIME_LIVE_BROWSER_TESTS") == "" {
+		t.Skip("skipping live headed-browser test; set GOANIME_LIVE_BROWSER_TESTS=1 to run")
+	}
+}
+
 // withJikan swaps jikanBaseURL for the given test server URL and restores it
 // at test end. Tests using this MUST run serially (no t.Parallel) because
 // jikanBaseURL is a package-level var.
@@ -224,9 +236,12 @@ func TestSearchAnimeEnhanced_NoResultsReturnsError(t *testing.T) {
 }
 
 func TestGetEpisodeStreamURL_SuperFlixDispatch(t *testing.T) {
-	// SuperFlix branch needs a real network call to fetch the stream; we can
-	// only assert it does not panic and returns an error when no TMDB ID is
-	// available.
+	// The SuperFlix branch builds a real client whose browser solver drives a
+	// headed Chrome through Cloudflare Turnstile — there is no injection seam at
+	// this layer. On runners with Chrome present (e.g. macOS CI) this launches a
+	// live browser, runs for minutes, and races inside playwright-go's frame
+	// dispatcher. Opt in explicitly; skip in the hermetic unit suite.
+	skipUnlessLiveBrowser(t)
 	anime := &models.Anime{Source: "SuperFlix", URL: ""}
 	episode := &models.Episode{Number: "1", URL: ""}
 	_, err := GetEpisodeStreamURL(episode, anime, "best")
@@ -294,6 +309,9 @@ func TestGetSuperFlixEpisodes_MovieReturnsSingleEpisode(t *testing.T) {
 }
 
 func TestGetSuperFlixStreamURL_NetworkErrorPropagates(t *testing.T) {
+	// See TestGetEpisodeStreamURL_SuperFlixDispatch: this reaches the live
+	// headed-browser solver and is non-hermetic. Opt in explicitly.
+	skipUnlessLiveBrowser(t)
 	media := &models.Anime{Source: "SuperFlix", URL: "00000000", MediaType: models.MediaTypeMovie}
 	episode := &models.Episode{Number: "1", URL: "00000000"}
 	_, err := GetSuperFlixStreamURL(media, episode, "best")
