@@ -415,6 +415,14 @@ func FlagParser() (string, error) {
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
 
+	// SuperFlix Cloudflare-bypass browser flags. These surface the previously
+	// env-only knobs (GOANIME_SF_*) as discoverable CLI options; each just sets
+	// the corresponding env var so the deeper scraper code keeps reading os.Getenv.
+	sfHeadlessFlag := fs.Bool("sf-headless", false, "run the Cloudflare-bypass browser headless (advanced; Turnstile usually rejects headless)")
+	sfBundledFlag := fs.Bool("sf-bundled", false, "force Playwright's bundled Chromium for the bypass instead of system Chrome")
+	sfBrowserFlag := fs.String("sf-browser", "", "browser channel for the Cloudflare bypass (e.g. chrome, chrome-beta, msedge); default: auto")
+	sfMaskFlag := fs.Bool("sf-mask", false, "enable fingerprint masking for the bypass browser (advanced escape hatch)")
+
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
 	upscaleOutputFlag := fs.String("upscale-output", "", "output path for upscaled file (default: input_upscaled.ext)")
@@ -438,6 +446,22 @@ func FlagParser() (string, error) {
 			return "", ErrHelpRequested
 		}
 		return "", err
+	}
+
+	// Apply SuperFlix bypass-browser flags by exporting the env vars the scraper
+	// reads. Only set when provided so an unset flag never overrides an env var
+	// the user exported manually.
+	if *sfHeadlessFlag {
+		_ = os.Setenv("GOANIME_SF_HEADLESS", "1")
+	}
+	if *sfBundledFlag {
+		_ = os.Setenv("GOANIME_SF_BUNDLED", "1")
+	}
+	if *sfBrowserFlag != "" {
+		_ = os.Setenv("GOANIME_SF_CHROME_CHANNEL", *sfBrowserFlag)
+	}
+	if *sfMaskFlag {
+		_ = os.Setenv("GOANIME_SF_MASK", "1")
 	}
 
 	// Set debug mode based on flag (set unconditionally for consistency)

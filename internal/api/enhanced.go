@@ -39,6 +39,48 @@ func isStdoutTerminal() bool {
 	return stdoutIsTerminal
 }
 
+// sfBrowserSpinnerHint is appended to SuperFlix spinner titles so the headed
+// browser window that may pop up to clear Cloudflare is expected, not mysterious,
+// and the user knows the manual-checkbox fallback. Kept terse to fit one line.
+const sfBrowserSpinnerHint = " (a browser may open to pass Cloudflare — click the checkbox if it appears)"
+
+// Indirection points for preflightSuperFlixBrowser, overridable in tests so the
+// notice logic can be exercised without a real display, cache marker, or logger.
+var (
+	sfHeadlessEnvFn  = scraper.HeadlessEnvironment
+	sfSetupPendingFn = scraper.BrowserSetupPending
+	sfWarnFn         = util.Warn
+	sfInfoFn         = util.Info
+)
+
+// preflightSuperFlixBrowser emits the spinner-safe, pre-solve notices for the
+// Cloudflare-bypass browser: a one-time first-run setup notice and a warning
+// when there is no graphical display to show the headed browser. Both run
+// OUTSIDE runWithSpinner so they cannot corrupt the spinner line.
+func preflightSuperFlixBrowser() {
+	// Warn first: on a headless host the bypass is likely to fail, so the user
+	// should see this before the (one-time) setup notice or the spinner.
+	if sfHeadlessEnvFn() {
+		sfWarnFn("No graphical display detected ($DISPLAY/$WAYLAND_DISPLAY unset). SuperFlix needs a visible browser window to clear Cloudflare, so this may fail. Run on a desktop session, or pass --sf-headless to try anyway.")
+	}
+	if sfSetupPendingFn() {
+		sfInfoFn("First SuperFlix run: preparing the browser used to bypass Cloudflare (one-time setup, may download up to ~150MB)…")
+	}
+}
+
+// describeSuperFlixErr turns the low-level bypass-browser failure into an
+// actionable, user-facing message. The original error is wrapped so debug logs
+// and errors.Is callers still see the root cause.
+func describeSuperFlixErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, scraper.ErrPlaywrightUnavailable) {
+		return fmt.Errorf("could not start the Cloudflare-bypass browser. The first run needs internet to download a browser engine; installing Google Chrome lets GoAnime reuse it and skip that download: %w", err)
+	}
+	return err
+}
+
 // runWithSpinner runs the action with a spinner if stdout is a terminal,
 // otherwise runs the action directly. This ensures CI and non-interactive
 // environments work correctly since huh/v2 spinner may skip the Action
@@ -608,9 +650,11 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// For TV shows / series, get seasons and episodes
 	util.Debug("SuperFlix: Processing TV show/series, getting episodes")
 
+	preflightSuperFlixBrowser()
+
 	var allEpisodes map[string][]scraper.SuperFlixEpisode
 	var episodesErr error
-	runWithSpinner("Loading seasons...", func() {
+	runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
 		// Preferred path: list episodes from the keyless, public TVmaze API using
 		// the IMDB id SuperFlix gives us in search. This is browser-free — no
 		// Turnstile gate, no headed Firefox window during browsing. SuperFlix uses
@@ -637,7 +681,7 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		allEpisodes, episodesErr = sfClient.GetEpisodes(ctx, tmdbID)
 	})
 	if episodesErr != nil {
-		return nil, fmt.Errorf("failed to get episodes: %w", episodesErr)
+		return nil, fmt.Errorf("failed to get episodes: %w", describeSuperFlixErr(episodesErr))
 	}
 
 	if len(allEpisodes) == 0 {
@@ -729,9 +773,11 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 
 	util.Debug("Getting SuperFlix stream", "tmdbID", tmdbID, "type", sfType, "season", season, "episode", epNum)
 
+	preflightSuperFlixBrowser()
+
 	var result *scraper.SuperFlixStreamResult
 	var streamErr error
-	runWithSpinner("Loading stream...", func() {
+	runWithSpinner("Loading stream..."+sfBrowserSpinnerHint, func() {
 		// Generous timeout: the pipeline's first request may hit a Cloudflare
 		// Turnstile gate that the client solves with a headed Firefox (10–40s).
 		// Must exceed the client's solve budget or the solve gets cancelled.
@@ -740,7 +786,7 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 		result, streamErr = sfClient.GetStreamURL(ctx, sfType, tmdbID, season, epNum)
 	})
 	if streamErr != nil {
-		return "", fmt.Errorf("failed to get SuperFlix stream: %w", streamErr)
+		return "", fmt.Errorf("failed to get SuperFlix stream: %w", describeSuperFlixErr(streamErr))
 	}
 
 	// Store referer globally for mpv playback

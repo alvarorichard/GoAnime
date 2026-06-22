@@ -81,11 +81,13 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString("\n")
 	helpContent.WriteString(descriptionStyle.Render("    Interactive mode - search and select anime from a beautiful menu"))
 	helpContent.WriteString("\n")
-	helpContent.WriteString(commandStyle.Render("  goanime ") + parameterStyle.Render("[options]"))
+	helpContent.WriteString(commandStyle.Render("  goanime "))
+	helpContent.WriteString(parameterStyle.Render("[options]"))
 	helpContent.WriteString("\n")
 	helpContent.WriteString(descriptionStyle.Render("    Run with specific options"))
 	helpContent.WriteString("\n")
-	helpContent.WriteString(commandStyle.Render("  goanime ") + parameterStyle.Render("[options] [anime name]"))
+	helpContent.WriteString(commandStyle.Render("  goanime "))
+	helpContent.WriteString(parameterStyle.Render("[options] [anime name]"))
 	helpContent.WriteString("\n")
 	helpContent.WriteString(descriptionStyle.Render("    Direct search for anime (use spaces, not hyphens)"))
 	helpContent.WriteString("\n")
@@ -110,6 +112,19 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
+	helpContent.WriteString("\n")
+
+	// SuperFlix / Cloudflare bypass section
+	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(sectionTitleStyle.Render("Cloudflare Bypass (SuperFlix):"))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(descriptionStyle.Render("    SuperFlix may be behind Cloudflare Turnstile. GoAnime opens a real browser window to clear it automatically; if a checkbox appears, just click it. The first run sets up the browser engine (one-time, may download up to ~150MB). These flags tune that behavior."))
+	helpContent.WriteString("\n")
+	addOption(&helpContent, "--sf-browser", "Browser channel to use for the bypass (e.g. chrome, chrome-beta, msedge). Default: auto-detect system Chrome, else bundled Chromium.")
+	addOption(&helpContent, "--sf-bundled", "Force Playwright's bundled Chromium instead of system Chrome.")
+	addOption(&helpContent, "--sf-headless", "Run the bypass browser headless (advanced; Turnstile usually rejects headless, so leave off unless you know what you're doing).")
+	addOption(&helpContent, "--sf-mask", "Enable browser fingerprint masking (advanced escape hatch; off by default because it usually breaks the challenge).")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -166,6 +181,8 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
 	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
 	addExample(&helpContent, "goanime -d --source goyabu \"naruto\" 1", "Download from Goyabu (Portuguese)")
+	addExample(&helpContent, "goanime --sf-browser chrome \"loki\"", "Use system Chrome for the SuperFlix Cloudflare bypass")
+	addExample(&helpContent, "goanime --sf-bundled \"loki\"", "Force the bundled Chromium for the bypass")
 	helpContent.WriteString("\n")
 
 	// Upscale Examples section

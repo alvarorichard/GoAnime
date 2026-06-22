@@ -166,12 +166,41 @@ func sanitizeProfileSegment(s string) string {
 	return b.String()
 }
 
+// browserSetupMarkerPath is the on-disk marker proving the Cloudflare-bypass
+// browser engine has been initialized successfully at least once on this
+// machine. Its absence means the next init may download Playwright's driver and
+// (when system Chrome is missing) a bundled Chromium — up to ~150MB — which can
+// look frozen behind a spinner. Callers check BrowserSetupPending to warn first.
+func browserSetupMarkerPath() string {
+	cache, _ := os.UserCacheDir()
+	return filepath.Join(cache, "goanime", ".browser-ready")
+}
+
+// BrowserSetupPending reports whether the Cloudflare-bypass browser engine has
+// not yet been set up on this machine (first-ever use). Callers can surface a
+// one-time "preparing browser" notice before a long, otherwise silent first run.
+func BrowserSetupPending() bool {
+	_, err := os.Stat(browserSetupMarkerPath())
+	return err != nil
+}
+
+// markBrowserReady records that the bypass browser engine initialized
+// successfully, so BrowserSetupPending stops returning true on later runs.
+// Best-effort: a write failure only means the first-run notice may show again.
+func markBrowserReady() {
+	p := browserSetupMarkerPath()
+	// 0o700 dir / 0o600 file to match solverProfileDir's owner-only perms in
+	// this same cache tree (and satisfy gosec G301/G306).
+	_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	_ = os.WriteFile(p, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
+}
+
 // launchSolverContext launches a headed, persistent, low-fingerprint browser
 // context. A non-empty channel selects a system browser distribution (e.g.
 // "chrome"); empty uses Playwright's bundled Chromium.
-func launchSolverContext(pw *playwright.Playwright, profileDir, channel string) (playwright.BrowserContext, error) {
+func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, headless bool) (playwright.BrowserContext, error) {
 	opts := playwright.BrowserTypeLaunchPersistentContextOptions{
-		Headless: playwright.Bool(os.Getenv("GOANIME_SF_HEADLESS") != ""),
+		Headless: playwright.Bool(headless),
 		// Strip the "Chrome is being controlled by automated test software"
 		// switch — its presence is a Turnstile tell.
 		IgnoreDefaultArgs: []string{"--enable-automation"},
@@ -219,12 +248,12 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 		return s.pctx, nil
 	}
 
-	forceBundled := os.Getenv("GOANIME_SF_BUNDLED") != ""
+	cfg := loadSuperflixConfig()
 
 	// Install the Playwright driver (node). Skip the browser download when we can
 	// drive system Chrome. Reuse the driver across context rebuilds.
 	if s.pw == nil {
-		if err := installPlaywright(!forceBundled); err != nil {
+		if err := installPlaywright(!cfg.ForceBundled); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrPlaywrightUnavailable, err)
 		}
 		pw, err := playwright.Run()
@@ -236,21 +265,18 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 
 	cache, _ := os.UserCacheDir()
 
-	channel := os.Getenv("GOANIME_SF_CHROME_CHANNEL")
-	if channel == "" && !forceBundled {
-		channel = "chrome"
-	}
+	channel := cfg.resolveChannel()
 
 	// Try system Chrome first; on failure (not installed), download + use bundled
 	// Chromium. Separate profile dirs so a Chrome-created and a Chromium-created
 	// profile never clash.
-	pctx, err := launchSolverContext(s.pw, solverProfileDir(cache, channel), channel)
+	pctx, err := launchSolverContext(s.pw, solverProfileDir(cache, channel), channel, cfg.Headless)
 	if err != nil && channel != "" {
 		util.Debug("SuperFlix: system Chrome unavailable, falling back to bundled Chromium", "err", err)
 		if instErr := installPlaywright(false); instErr != nil {
 			return nil, fmt.Errorf("%w: %v", ErrPlaywrightUnavailable, instErr)
 		}
-		pctx, err = launchSolverContext(s.pw, solverProfileDir(cache, ""), "")
+		pctx, err = launchSolverContext(s.pw, solverProfileDir(cache, ""), "", cfg.Headless)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("launch browser: %w", err)
@@ -266,7 +292,7 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 	// (top page redirects through serie/<id>?cfv=<JWT> to the real content).
 	// Kept behind GOANIME_SF_MASK as an opt-in escape hatch for hosts/future
 	// Turnstile builds where the bare fingerprint is rejected instead.
-	if os.Getenv("GOANIME_SF_MASK") != "" {
+	if cfg.Mask {
 		_ = pctx.AddInitScript(playwright.Script{Content: playwright.String(webdriverMaskScript)})
 	}
 
@@ -299,6 +325,10 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 	})
 
 	s.pctx = pctx
+
+	// Record first successful setup so the one-time "preparing browser" notice
+	// (BrowserSetupPending) is not shown on later runs.
+	markBrowserReady()
 
 	// Close the browser/driver on program exit (SIGINT/normal). Register once.
 	if !s.cleanupRegistered {
