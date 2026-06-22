@@ -39,10 +39,10 @@ func isStdoutTerminal() bool {
 	return stdoutIsTerminal
 }
 
-// sfBrowserSpinnerHint is appended to SuperFlix spinner titles so the headed
-// browser window that may pop up to clear Cloudflare is expected, not mysterious,
-// and the user knows the manual-checkbox fallback. Kept terse to fit one line.
-const sfBrowserSpinnerHint = " (a browser may open to pass Cloudflare — click the checkbox if it appears)"
+// sfBrowserSpinnerHint is appended to SuperFlix spinner titles so the browser
+// window that may pop up is expected, not alarming. Plain language only: a lay
+// user must understand it at a glance, so no "Cloudflare"/"Turnstile" jargon.
+const sfBrowserSpinnerHint = " — a browser may open to check you're human; just wait (click the box if one shows)"
 
 // Indirection points for preflightSuperFlixBrowser, overridable in tests so the
 // notice logic can be exercised without a real display, cache marker, or logger.
@@ -58,27 +58,53 @@ var (
 // when there is no graphical display to show the headed browser. Both run
 // OUTSIDE runWithSpinner so they cannot corrupt the spinner line.
 func preflightSuperFlixBrowser() {
-	// Warn first: on a headless host the bypass is likely to fail, so the user
+	// Warn first: on a screenless host the check can't be shown, so the user
 	// should see this before the (one-time) setup notice or the spinner.
+	// Plain language only — no "$DISPLAY"/"Cloudflare"/"headless" jargon.
 	if sfHeadlessEnvFn() {
-		sfWarnFn("No graphical display detected ($DISPLAY/$WAYLAND_DISPLAY unset). SuperFlix needs a visible browser window to clear Cloudflare, so this may fail. Run on a desktop session, or pass --sf-headless to try anyway.")
+		sfWarnFn("⚠️  SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
 	}
 	if sfSetupPendingFn() {
-		sfInfoFn("First SuperFlix run: preparing the browser used to bypass Cloudflare (one-time setup, may download up to ~150MB)…")
+		sfInfoFn("⏳ First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
 	}
 }
 
-// describeSuperFlixErr turns the low-level bypass-browser failure into an
-// actionable, user-facing message. The original error is wrapped so debug logs
-// and errors.Is callers still see the root cause.
+// friendlyError carries a plain-language message for the user while keeping the
+// technical cause reachable via Unwrap (so errors.Is and debug tooling still see
+// the root cause). Error() returns ONLY the friendly text, so the raw cause —
+// which may contain jargon — is never shown to a lay user.
+type friendlyError struct {
+	msg   string
+	cause error
+}
+
+func (e *friendlyError) Error() string { return e.msg }
+func (e *friendlyError) Unwrap() error { return e.cause }
+
+// isGateTimeout reports whether err is the SuperFlix "are you human?" check that
+// ran out of time. It is a plain fmt.Errorf (not a sentinel), so it is matched
+// by its stable substring rather than errors.Is.
+func isGateTimeout(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "gate not cleared")
+}
+
+// describeSuperFlixErr converts a low-level SuperFlix failure into a short,
+// plain-language, icon-prefixed message a non-technical user can act on at a
+// glance — no "Cloudflare"/"Turnstile"/"Playwright" jargon, and the raw cause is
+// hidden from Error() but kept reachable via errors.Is/Unwrap.
 func describeSuperFlixErr(err error) error {
-	if err == nil {
+	switch {
+	case err == nil:
 		return nil
+	case errors.Is(err, scraper.ErrPlaywrightUnavailable):
+		return &friendlyError{cause: err, msg: "⚠️  Couldn't open the helper browser. The first time you use SuperFlix, GoAnime needs internet to set it up — check your connection and try again. Tip: installing Google Chrome makes this faster."}
+	case errors.Is(err, scraper.ErrSuperFlixNoServers):
+		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
+	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
+		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
+	default:
+		return err
 	}
-	if errors.Is(err, scraper.ErrPlaywrightUnavailable) {
-		return fmt.Errorf("could not start the Cloudflare-bypass browser. The first run needs internet to download a browser engine; installing Google Chrome lets GoAnime reuse it and skip that download: %w", err)
-	}
-	return err
 }
 
 // runWithSpinner runs the action with a spinner if stdout is a terminal,
