@@ -19,14 +19,14 @@ require (
 	charm.land/log/v2 v2.0.0
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.0.225
-	github.com/enetx/surf v1.0.200
+	github.com/enetx/surf v1.0.201
 	github.com/lrstanley/go-ytdlp v1.3.5
-	github.com/playwright-community/playwright-go v0.5700.1
+	github.com/playwright-community/playwright-go v0.6000.0
 	github.com/tr1xem/go-discordrpc v1.0.0
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.1 // indirect
+	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260622092850-f39628c8a989 // indirect
@@ -40,7 +40,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/enetx/http v1.0.28 // indirect
 	github.com/enetx/http2 v1.0.26 // indirect
-	github.com/enetx/http3 v1.0.7 // indirect
+	github.com/enetx/http3 v1.0.8 // indirect
 	github.com/enetx/iter v0.0.0-20250912135656-f1583323588f // indirect
 	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect
-	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af // indirect
+	github.com/refraction-networking/utls v1.8.3-0.20260623165621-880e27d8b0e5 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/wzshiming/socks5 v0.7.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
