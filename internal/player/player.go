@@ -534,6 +534,7 @@ func filterMPVArgs(args []string) []string {
 		"--audio-file=",         // External audio file
 		"--http-header-fields=", // HTTP headers for HLS streams
 		"--stream-lavf-o=",      // FFmpeg/lavf options for streaming protocols
+		"--demuxer-lavf-o=",     // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
 		"--referrer=",           // HTTP referrer for streaming
 		"--user-agent=",         // HTTP user agent for streaming
 		// Anime4K real-time upscaling shaders

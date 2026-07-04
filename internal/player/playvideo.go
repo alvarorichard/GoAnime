@@ -76,6 +76,111 @@ func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
 	return append(mpvArgs, hlsAllowAllExtensionsArg)
 }
 
+// playbackArgsInput captures every decision that determines the mpv argument
+// list. playVideo gathers these (some via interactive prompts, globals, and
+// tracking side effects) and hands them to buildPlaybackArgs, so the actual
+// argument assembly — including the HLS referer + allowed_extensions wiring that
+// makes SuperFlix audio play — is deterministic and unit-testable without
+// launching mpv.
+type playbackArgsInput struct {
+	VideoURL         string
+	IsHLS            bool
+	Is9Anime         bool
+	UpscalingEnabled bool
+	ShaderArgs       []string
+	Wayland          bool
+	CanImpersonate   bool
+	Title            string // "" → no --force-media-title
+	IsMovieOrTV      bool
+	AudioLang        string
+	SubsLang         string
+	SubArgs          []string
+	ResumeTime       int
+}
+
+// buildPlaybackArgs assembles the full mpv argument list from resolved inputs.
+// It is pure (no I/O, no globals, no prompts) so the exact argument set — and in
+// particular that HLS streams carry BOTH the Referer header and the
+// allowed_extensions=ALL demuxer flag — can be pinned by tests. Keep it in sync
+// with StartVideo's own base args; this covers only the per-playback args.
+func buildPlaybackArgs(in playbackArgsInput) []string {
+	mpvArgs := []string{
+		"--cache=yes",
+		"--demuxer-max-bytes=300M",
+		"--demuxer-readahead-secs=20",
+		"--audio-display=no",
+	}
+
+	if in.UpscalingEnabled {
+		// Shader-based upscaling: gpu-next (libplacebo) + no hw decode so shaders
+		// can process frames.
+		mpvArgs = append(mpvArgs, "--vo=gpu-next", "--hwdec=no")
+		mpvArgs = append(mpvArgs, in.ShaderArgs...)
+	} else {
+		mpvArgs = append(mpvArgs,
+			"--no-config",
+			"--hwdec=auto-safe",
+			"--vo=gpu",
+			"--profile=fast",
+			"--video-latency-hacks=yes",
+		)
+	}
+
+	if in.Wayland {
+		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
+	}
+
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS)
+	// Relax the HLS segment-extension allowlist so alternative-audio renditions
+	// with disguised segment extensions load (fixes video-plays-but-no-audio on
+	// SuperFlix/FirePlayer streams).
+	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
+
+	// For 9Anime (Cloudflare-protected CDNs), route playback through yt-dlp with
+	// Chrome TLS impersonation so ffmpeg's TLS fingerprint is not rejected.
+	if in.IsHLS && in.Is9Anime {
+		referer := playbackReferer
+		if referer == "" {
+			referer = defaultHLSReferer
+		}
+		mpvArgs = append(mpvArgs,
+			"--script-opts=ytdl_hook-try_ytdl_first=yes",
+			fmt.Sprintf("--ytdl-raw-options-append=referer=%s", referer),
+		)
+		if in.CanImpersonate {
+			mpvArgs = append(mpvArgs, "--ytdl-raw-options-append=impersonate=chrome")
+		}
+	}
+
+	// For googlevideo.com URLs served through our local Blogger proxy, disable
+	// yt-dlp so mpv fetches from 127.0.0.1 directly.
+	if strings.Contains(in.VideoURL, "127.0.0.1") && strings.Contains(in.VideoURL, "blogger_proxy") {
+		mpvArgs = append(mpvArgs, "--ytdl=no")
+	}
+
+	if in.Title != "" {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--force-media-title=%s", in.Title))
+	}
+
+	// Audio/subtitle language preferences only for movies/TV (FlixHQ etc.).
+	if in.IsMovieOrTV {
+		mpvArgs = append(mpvArgs,
+			fmt.Sprintf("--alang=%s", in.AudioLang),
+			fmt.Sprintf("--slang=%s", in.SubsLang),
+		)
+	}
+
+	// External subtitle files (already gated + resolved by the caller).
+	mpvArgs = append(mpvArgs, in.SubArgs...)
+
+	// HLS resume is handled by seeking after start (--start is unreliable on HLS).
+	if in.ResumeTime > 0 && !in.IsHLS {
+		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", in.ResumeTime))
+	}
+
+	return mpvArgs
+}
+
 // waitForVideoReady waits for the HLS video to be ready for playback
 // Returns true if video is ready, false if timeout
 func waitForVideoReady(socketPath string) bool {
@@ -343,50 +448,11 @@ func playVideo(
 	shaderArgs := upscaler.GetMPVShaderArgs(upscaler.CurrentShaderMode)
 	upscalingEnabled := len(shaderArgs) > 0
 
-	// Set up mpv arguments for optimal playback
-	mpvArgs := []string{
-		"--cache=yes",
-		"--demuxer-max-bytes=300M",
-		"--demuxer-readahead-secs=20",
-		"--audio-display=no",
-	}
+	// --- Gather every decision that drives the mpv argument list ------------
+	// The heavy lifting (interactive prompts, globals, tracking) happens here;
+	// the deterministic assembly is delegated to buildPlaybackArgs so the exact
+	// arg set is unit-testable without launching mpv.
 
-	// When using shaders, we need specific GPU settings
-	if upscalingEnabled {
-		// For shader-based upscaling:
-		// - Use gpu-next (libplacebo) for best shader support on macOS
-		// - Disable hw decoding so shaders can process frames
-		// - Remove --no-config to allow shader loading
-		mpvArgs = append(mpvArgs,
-			"--vo=gpu-next", // libplacebo-based renderer with better shader support
-			"--hwdec=no",    // Disable hw decoding so shaders can process frames
-		)
-		mpvArgs = append(mpvArgs, shaderArgs...)
-		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.CurrentShaderMode))
-		util.Debugf("Shader args: %v", shaderArgs)
-	} else {
-		// Standard playback without shaders
-		mpvArgs = append(mpvArgs,
-			"--no-config",
-			"--hwdec=auto-safe",
-			"--vo=gpu",
-			"--profile=fast",
-			"--video-latency-hacks=yes",
-		)
-	}
-
-	// On Linux with Wayland, explicitly set the GPU context so mpv does not
-	// fall back to an X11 context (which may be unavailable on pure-Wayland
-	// sessions) and end up playing audio-only without a video window.
-	if runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != "" {
-		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
-		util.Debugf("Wayland session detected — forcing gpu-context=wayland")
-	}
-
-	// For HLS streams we need to add HTTP headers for proper playback — many
-	// streaming servers require specific User-Agent and Referer headers. Use the
-	// shared LooksLikeHLS helper so detection stays consistent (case-insensitive,
-	// and also catching /hls/ URLs that lack a .m3u8 extension).
 	isHLSStream := LooksLikeHLS(videoURL)
 
 	// Determine the anime source for source-specific playback configuration.
@@ -398,49 +464,9 @@ func playVideo(
 		is9Anime = updater.GetAnime().Source == "9Anime"
 	}
 
-	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, videoURL, isHLSStream)
-	// Relax the HLS segment-extension allowlist so alternative-audio renditions
-	// with disguised segment extensions load (fixes video-plays-but-no-audio on
-	// SuperFlix/FirePlayer streams).
-	mpvArgs = appendHLSDemuxerArgs(mpvArgs, isHLSStream)
-	if playbackReferer != "" {
-		if isHLSStream {
-			util.Debugf("HLS stream detected - Referer: %s", playbackReferer)
-		} else {
-			util.Debugf("HTTP stream detected - Referer: %s", playbackReferer)
-		}
-	}
-
-	if isHLSStream {
-		referer := playbackReferer
-		if referer == "" {
-			referer = defaultHLSReferer
-		}
-
-		// For 9Anime (and other Cloudflare-protected CDNs), route playback through
-		// yt-dlp with Chrome TLS impersonation to bypass Cloudflare fingerprint checks.
-		// Without this, ffmpeg's TLS fingerprint is rejected and the stream never loads.
-		if is9Anime {
-			mpvArgs = append(mpvArgs,
-				"--script-opts=ytdl_hook-try_ytdl_first=yes",
-				fmt.Sprintf("--ytdl-raw-options-append=referer=%s", referer),
-			)
-			if util.YtdlpCanImpersonate() {
-				mpvArgs = append(mpvArgs, "--ytdl-raw-options-append=impersonate=chrome")
-			}
-			util.Debugf("9Anime stream detected - enabling yt-dlp with Chrome TLS impersonation")
-		}
-	}
-
-	// For googlevideo.com URLs served through our local Blogger proxy,
-	// disable yt-dlp so mpv fetches from 127.0.0.1 directly.
-	if strings.Contains(videoURL, "127.0.0.1") && strings.Contains(videoURL, "blogger_proxy") {
-		mpvArgs = append(mpvArgs, "--ytdl=no")
-		util.Debugf("Blogger proxy URL detected - disabling yt-dlp")
-	}
-
-	// Set MPV window title to clean anime name + season/episode (or just name for movies)
+	// MPV window title: clean anime name + season/episode (or just name for movies).
 	titleSnap := snapshotMedia()
+	title := ""
 	if titleSnap.AnimeName != "" {
 		// Display sanitizer, NOT the filename one: a window title may keep
 		// colons etc. ("Need for Speed: O Filme" must not lose its ':').
@@ -448,72 +474,87 @@ func playVideo(
 		// Also strip parenthesized dub/sub tags like (Dublado), (Legendado), (SUB)
 		cleanName = dubSubTagRe.ReplaceAllString(cleanName, " ")
 		cleanName = strings.TrimSpace(cleanName)
-		var title string
 		if titleSnap.MediaType == "movie" {
-			// Movies: just show the movie name (no S01E01)
 			title = cleanName
 		} else {
-			// TV shows and anime: show season/episode
 			title = fmt.Sprintf("%s S%02dE%02d", cleanName, titleSnap.AnimeSeason, currentEpisodeNum)
 		}
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--force-media-title=%s", title))
 	}
 
-	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ)
-	// Check if this is a movie/TV content by examining the updater's anime source
+	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ).
 	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
-		// Update exact media type for download path organization
+		// Update exact media type for download path organization.
 		if anime.MediaType != "" && titleSnap.MediaType == "" {
 			SetExactMediaType(string(anime.MediaType))
 		}
 	}
 
+	audioLang, subsLang := "", ""
 	if isMovieOrTV {
-		// Audio and subtitle language preferences only for movies/TV
-		audioLang := util.GlobalAudioLanguage
+		audioLang = util.GlobalAudioLanguage
 		if audioLang == "" {
-			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English
+			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English.
 			audioLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
 		}
-		subsLang := util.GlobalSubsLanguage
+		subsLang = util.GlobalSubsLanguage
 		if subsLang == "" {
 			subsLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
 		}
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--alang=%s", audioLang))
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--slang=%s", subsLang))
 		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
 	}
 
-	// Add external subtitle files if available (FlixHQ / 9Anime subtitles)
-	// This follows the lobster.sh implementation for external subtitles
+	// External subtitle files (FlixHQ / 9Anime). For 9Anime, ALWAYS prompt the
+	// user to pick a subtitle language after every episode selection.
+	var subArgs []string
 	if isMovieOrTV || is9Anime {
-		// For 9Anime (multi-language platform), ALWAYS prompt the user to select
-		// their preferred subtitle language after every episode selection, without
-		// exception. This ensures the user explicitly chooses subtitles each time.
 		if is9Anime {
 			util.PromptSubtitleLanguage()
 		} else if len(util.GlobalSubtitles) > 1 {
-			// For other sources (FlixHQ), use the standard selection
 			util.SelectSubtitles()
 		}
-		subArgs := util.GetSubtitleArgs()
+		subArgs = util.GetSubtitleArgs()
 		if len(subArgs) > 0 {
-			mpvArgs = append(mpvArgs, subArgs...)
 			util.Debugf("Added external subtitles: %v", subArgs)
 		}
 	}
 
-	// Initialize tracking and check for resume time
+	// YtdlpCanImpersonate is only consulted on the 9Anime HLS path; keep the call
+	// gated so non-9Anime playback doesn't pay for it.
+	canImpersonate := false
+	if isHLSStream && is9Anime {
+		canImpersonate = util.YtdlpCanImpersonate()
+	}
+
+	wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""
+	if upscalingEnabled {
+		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.CurrentShaderMode))
+		util.Debugf("Shader args: %v", shaderArgs)
+	}
+	if wayland {
+		util.Debugf("Wayland session detected — forcing gpu-context=wayland")
+	}
+
+	// Initialize tracking and check for resume time (may show a resume dialog).
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
 
-	// For HLS streams, we'll seek after playback starts instead of using --start
-	// because --start doesn't work reliably with HLS streams
-	if resumeTime > 0 && !isHLSStream {
-		mpvArgs = append(mpvArgs, fmt.Sprintf("--start=+%d", resumeTime))
-	}
+	mpvArgs := buildPlaybackArgs(playbackArgsInput{
+		VideoURL:         videoURL,
+		IsHLS:            isHLSStream,
+		Is9Anime:         is9Anime,
+		UpscalingEnabled: upscalingEnabled,
+		ShaderArgs:       shaderArgs,
+		Wayland:          wayland,
+		CanImpersonate:   canImpersonate,
+		Title:            title,
+		IsMovieOrTV:      isMovieOrTV,
+		AudioLang:        audioLang,
+		SubsLang:         subsLang,
+		SubArgs:          subArgs,
+		ResumeTime:       resumeTime,
+	})
 
 	// Fetch AniSkip data asynchronously (AniSkip API is keyed on MAL ID)
 	skipDataChan := fetchAniSkipAsync(malID, currentEpisodeNum, currentEpisode)

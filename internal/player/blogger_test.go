@@ -153,6 +153,23 @@ func TestFilterMPVArgs_YtdlNoAllowed(t *testing.T) {
 	})
 }
 
+// Same class of bug as #3: the audio fix flag --demuxer-lavf-o=allowed_extensions=ALL
+// (which lets HLS alternative-audio renditions with disguised segment extensions
+// load — see appendHLSDemuxerArgs) is useless if filterMPVArgs strips it before
+// exec. The allowlist has --stream-lavf-o= but originally lacked --demuxer-lavf-o=,
+// so the flag was silently dropped and playback stayed audio-less. This pins the
+// flag's survival through the filter.
+func TestFilterMPVArgs_DemuxerLavfOAllowed(t *testing.T) {
+	filtered := filterMPVArgs([]string{
+		"--cache=yes",
+		hlsAllowAllExtensionsArg,
+		"--http-header-fields=Referer: https://x/",
+	})
+	assert.Contains(t, filtered, hlsAllowAllExtensionsArg,
+		"--demuxer-lavf-o=allowed_extensions=ALL MUST pass through filterMPVArgs; "+
+			"otherwise the HLS audio fix never reaches mpv and video plays silent")
+}
+
 func TestFilterMPVArgs_Whitelist(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -172,6 +189,8 @@ func TestFilterMPVArgs_Whitelist(t *testing.T) {
 		{"ytdl", "--ytdl=no", true},
 		{"sub-file", "--sub-file=/tmp/subs.srt", true},
 		{"glsl-shader", "--glsl-shader=/path/to/shader.glsl", true},
+		{"stream-lavf-o", "--stream-lavf-o=reconnect=1", true},
+		{"demuxer-lavf-o", "--demuxer-lavf-o=allowed_extensions=ALL", true},
 		// Blocked args
 		{"exec", "--script=/tmp/evil.lua", false},
 		{"unknown", "--evil-flag=true", false},

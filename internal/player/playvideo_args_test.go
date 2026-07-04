@@ -104,3 +104,100 @@ func TestHLSAllowAllExtensionsArgValue(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "--demuxer-lavf-o=allowed_extensions=ALL", hlsAllowAllExtensionsArg)
 }
+
+// TestBuildPlaybackArgs pins the full mpv argument set the player assembles for
+// each kind of stream. This is the wiring guard: it proves a SuperFlix HLS
+// stream carries BOTH the Referer header AND allowed_extensions=ALL (the audio
+// fix), that a local file carries neither, and that the 9Anime / upscaling /
+// resume branches produce their expected flags. Not parallel: it sets the
+// global referer that appendPlaybackRefererArgs reads.
+func TestBuildPlaybackArgs(t *testing.T) {
+	restore := snapshotGlobalReferer()
+	defer restore()
+	util.SetGlobalReferer("https://ref.test")
+
+	t.Run("SuperFlix HLS movie carries referer + allowed_extensions + langs", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:    "https://cdn.test/master.m3u8",
+			IsHLS:       true,
+			IsMovieOrTV: true,
+			AudioLang:   "por",
+			SubsLang:    "por",
+			Title:       "Psicose",
+		})
+		assert.Contains(t, args, hlsAllowAllExtensionsArg, "the audio fix flag must be present for HLS")
+		assert.Contains(t, args, "--http-header-fields=Referer: https://ref.test")
+		assert.Contains(t, args, "--alang=por")
+		assert.Contains(t, args, "--slang=por")
+		assert.Contains(t, args, "--force-media-title=Psicose")
+		// Base args always present.
+		assert.Contains(t, args, "--cache=yes")
+		// Must NOT take the 9Anime yt-dlp path.
+		assert.NotContains(t, args, "--script-opts=ytdl_hook-try_ytdl_first=yes")
+	})
+
+	t.Run("local non-HLS file carries neither referer nor allowed_extensions", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL: "/tmp/episode.mp4",
+			IsHLS:    false,
+		})
+		assert.NotContains(t, args, hlsAllowAllExtensionsArg)
+		assert.NotContains(t, args, "--http-header-fields=Referer: https://ref.test")
+		assert.NotContains(t, args, "--alang=por")
+		assert.Contains(t, args, "--no-config", "non-upscaled playback uses the standard profile")
+	})
+
+	t.Run("9Anime HLS adds yt-dlp impersonation plus the audio fix", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:       "https://9anime.cdn/master.m3u8",
+			IsHLS:          true,
+			Is9Anime:       true,
+			CanImpersonate: true,
+		})
+		assert.Contains(t, args, hlsAllowAllExtensionsArg)
+		assert.Contains(t, args, "--script-opts=ytdl_hook-try_ytdl_first=yes")
+		assert.Contains(t, args, "--ytdl-raw-options-append=referer=https://ref.test")
+		assert.Contains(t, args, "--ytdl-raw-options-append=impersonate=chrome")
+	})
+
+	t.Run("9Anime without impersonation support omits the impersonate flag", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:       "https://9anime.cdn/master.m3u8",
+			IsHLS:          true,
+			Is9Anime:       true,
+			CanImpersonate: false,
+		})
+		assert.Contains(t, args, "--script-opts=ytdl_hook-try_ytdl_first=yes")
+		assert.NotContains(t, args, "--ytdl-raw-options-append=impersonate=chrome")
+	})
+
+	t.Run("upscaling swaps the render profile and injects shader args", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:         "/tmp/x.mp4",
+			UpscalingEnabled: true,
+			ShaderArgs:       []string{"--glsl-shader=/a.glsl"},
+		})
+		assert.Contains(t, args, "--vo=gpu-next")
+		assert.Contains(t, args, "--hwdec=no")
+		assert.Contains(t, args, "--glsl-shader=/a.glsl")
+		assert.NotContains(t, args, "--no-config", "upscaling must not use the standard profile")
+	})
+
+	t.Run("resume adds --start for non-HLS but not for HLS", func(t *testing.T) {
+		nonHLS := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4", ResumeTime: 30})
+		assert.Contains(t, nonHLS, "--start=+30")
+
+		hls := buildPlaybackArgs(playbackArgsInput{VideoURL: "https://cdn/master.m3u8", IsHLS: true, ResumeTime: 30})
+		assert.NotContains(t, hls, "--start=+30", "HLS resume is handled by seeking, not --start")
+	})
+
+	t.Run("external subtitle args are appended verbatim", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:    "https://cdn/master.m3u8",
+			IsHLS:       true,
+			IsMovieOrTV: true,
+			SubArgs:     []string{"--sub-file=/tmp/pt.srt"},
+		})
+		assert.Contains(t, args, "--sub-file=/tmp/pt.srt")
+	})
+}
