@@ -210,8 +210,13 @@ func getBoolValue(data map[string]any, field string) bool {
 
 // Enrich anime data from AniList
 func enrichAnimeData(anime *models.Anime) error {
-	// Use TMDB enrichment for FlixHQ movies/TV shows
-	if anime.Source == "SFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	// Use TMDB/OMDb enrichment for movie/TV catalogs. SuperFlix is included by
+	// SOURCE, not just media type: its catalog tags western animation (e.g.
+	// "Os Simpsons") as anime, which would otherwise fall through to AniList —
+	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
+	// challenge for nothing. Mirrors appflow.fetchAnimeDetailsCore.
+	if anime.Source == "SFlix" || anime.Source == "SuperFlix" ||
+		anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
 		return movie.EnrichMedia(anime)
 	}

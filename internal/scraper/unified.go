@@ -27,6 +27,15 @@ const (
 	perScraperTimeout = 12 * time.Second
 )
 
+// stragglerGrace bounds how long the aggregate search keeps waiting for the
+// remaining sources ONCE at least one source has delivered results. Healthy
+// sources answer in 1–3s; a source that is still silent this long after a
+// sibling answered is almost always dead (hanging until perScraperTimeout),
+// and holding every search hostage for it makes the whole app feel frozen.
+// Cut sources are logged, not silently dropped. Variable so tests can shrink
+// it.
+var stragglerGrace = 5 * time.Second
+
 const (
 	AllAnimeType ScraperType = iota
 	AnimefireType
@@ -198,7 +207,11 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 		close(resultChan)
 	}()
 
-	// Collect results – wait for ALL scrapers to finish or the context to expire.
+	// Collect results – wait for ALL scrapers to finish, the context to expire,
+	// or the straggler grace window to elapse after the first batch of results.
+	// graceTimer stays nil (blocking its select arm forever) until some source
+	// delivers results.
+	var graceTimer <-chan time.Time
 	for {
 		select {
 		case res, ok := <-resultChan:
@@ -231,7 +244,18 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 				util.Debug("Search results received",
 					"source", sm.getScraperDisplayName(res.scraperType),
 					"count", len(res.results))
+
+				// First results are in: stop waiting the full perScraperTimeout
+				// for the remaining sources — give them the grace window only.
+				if graceTimer == nil {
+					graceTimer = time.After(stragglerGrace)
+				}
 			}
+
+		case <-graceTimer:
+			util.Debug("Straggler grace elapsed, returning collected results",
+				"grace", stragglerGrace)
+			goto done
 
 		case <-ctx.Done():
 			util.Debug("Search timeout reached, returning collected results")

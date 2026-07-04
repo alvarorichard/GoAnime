@@ -976,11 +976,12 @@ var (
 	scoreRe      = regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
 )
 
-// SanitizeForFilename removes characters that are not allowed in file/directory names
-// and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
-// It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
-// and language/source/metadata tags that many anime sources append to titles.
-func SanitizeForFilename(name string) string {
+// stripSourceMetadata removes the language/source/metadata noise that anime
+// sources append to titles — bracketed tags ([PT-BR], [Movie], [HD], …),
+// trailing parenthesized 9anime metadata, ratings (e.g. "7.27") and age
+// classifications (e.g. "A14", "L") — while leaving the title's own
+// punctuation intact.
+func stripSourceMetadata(name string) string {
 	// Remove bracketed tags: [English], [Multilanguage], [Movie], [9Anime], [HD], etc.
 	name = bracketTagRe.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)
@@ -995,7 +996,23 @@ func SanitizeForFilename(name string) string {
 	// classifications like "A14", "A12", "A16", "A18", "L", "AL".
 	// These are commonly appended by AllAnime/AnimeFire sources.
 	// Pattern: strip trailing tokens that look like scores or classifications.
-	name = stripTrailingAnimeMetadata(name)
+	return stripTrailingAnimeMetadata(name)
+}
+
+// collapseSpaces reduces runs of spaces to one and trims the ends.
+func collapseSpaces(name string) string {
+	for strings.Contains(name, "  ") {
+		name = strings.ReplaceAll(name, "  ", " ")
+	}
+	return strings.TrimSpace(name)
+}
+
+// SanitizeForFilename removes characters that are not allowed in file/directory names
+// and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
+// It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
+// and language/source/metadata tags that many anime sources append to titles.
+func SanitizeForFilename(name string) string {
+	name = stripSourceMetadata(name)
 
 	// Remove characters not allowed in filenames across platforms
 	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
@@ -1004,11 +1021,16 @@ func SanitizeForFilename(name string) string {
 	}
 	// Remove trailing dots and spaces (problematic on Windows)
 	name = strings.TrimRight(name, ". ")
-	// Collapse multiple spaces
-	for strings.Contains(name, "  ") {
-		name = strings.ReplaceAll(name, "  ", " ")
-	}
-	return strings.TrimSpace(name)
+	return collapseSpaces(name)
+}
+
+// SanitizeForDisplayTitle cleans a title for on-screen display (mpv window
+// title, Discord presence): source/metadata tags are stripped exactly like
+// SanitizeForFilename, but the title's own punctuation is preserved — display
+// surfaces have no filename restrictions, so "Need for Speed: O Filme" must
+// keep its colon instead of degrading to "Need for Speed O Filme".
+func SanitizeForDisplayTitle(name string) string {
+	return collapseSpaces(stripSourceMetadata(name))
 }
 
 // strip9AnimeParenMeta removes trailing parenthesized metadata appended by 9anime

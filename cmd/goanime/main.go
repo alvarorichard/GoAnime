@@ -39,7 +39,11 @@ func main() {
 				// tui.TerminalResetSequence.
 				_ = term.Restore(intFd, origState)
 				tui.RestoreTerminalStdout()
-				fmt.Fprint(os.Stdout, "\n")
+				// Hand the shell a blank screen: leftover TUI frames (spinner,
+				// fuzzyfinder, progress bars) otherwise stay glued around the
+				// next prompt. Scrolls the old content into scrollback rather
+				// than erasing it, so final messages remain reachable.
+				tui.ClearViewportStdout()
 			}
 		}
 	}

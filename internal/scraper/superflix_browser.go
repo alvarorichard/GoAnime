@@ -11,8 +11,10 @@ import (
 	"net/http"
 	neturl "net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -176,12 +178,93 @@ func browserSetupMarkerPath() string {
 	return filepath.Join(cache, "goanime", ".browser-ready")
 }
 
-// BrowserSetupPending reports whether the Cloudflare-bypass browser engine has
-// not yet been set up on this machine (first-ever use). Callers can surface a
-// one-time "preparing browser" notice before a long, otherwise silent first run.
+// BrowserSetupPending reports whether the next Cloudflare-bypass browser init
+// is likely to be slow: either first-ever use (no marker), or the marker exists
+// but no usable browser binary does anymore — e.g. system Chrome was removed
+// since the marker was written, forcing a silent multi-minute bundled-Chromium
+// download behind the spinner. Callers surface a "preparing browser" notice
+// before that otherwise invisible wait.
 func BrowserSetupPending() bool {
-	_, err := os.Stat(browserSetupMarkerPath())
-	return err != nil
+	if _, err := os.Stat(browserSetupMarkerPath()); err != nil {
+		return true
+	}
+	cfg := loadSuperflixConfig()
+	switch cfg.resolveChannel() {
+	case "chrome":
+		// Chrome preferred, bundled Chromium is the fallback: setup is only
+		// pending when NEITHER is present.
+		return !systemChromeAvailableFn() && !bundledChromiumInstalledFn()
+	case "":
+		return !bundledChromiumInstalledFn()
+	default:
+		// Custom channel via GOANIME_SF_CHROME_CHANNEL: the user manages that
+		// install themselves; don't second-guess it.
+		return false
+	}
+}
+
+// Indirection points for the browser-availability probes, overridable in tests
+// so BrowserSetupPending can be exercised without depending on what happens to
+// be installed on the machine running the tests.
+var (
+	systemChromeAvailableFn    = systemChromeAvailable
+	bundledChromiumInstalledFn = bundledChromiumInstalled
+)
+
+// systemChromeAvailable reports whether a system Google Chrome install exists
+// where Playwright's "chrome" channel will look for it.
+func systemChromeAvailable() bool {
+	switch runtime.GOOS {
+	case "windows":
+		for _, base := range []string{
+			os.Getenv("ProgramFiles"),
+			os.Getenv("ProgramFiles(x86)"),
+			os.Getenv("LOCALAPPDATA"),
+		} {
+			if base == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe")); err == nil {
+				return true
+			}
+		}
+		return false
+	case "darwin":
+		_, err := os.Stat("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+		return err == nil
+	default:
+		for _, name := range []string{"google-chrome", "google-chrome-stable", "chrome"} {
+			if _, err := exec.LookPath(name); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// bundledChromiumInstalled reports whether Playwright's bundled Chromium has
+// already been downloaded into its browsers cache (PLAYWRIGHT_BROWSERS_PATH or
+// the ms-playwright dir under the user cache), meaning the fallback launch
+// won't need a fresh ~150MB download.
+func bundledChromiumInstalled() bool {
+	dir := os.Getenv("PLAYWRIGHT_BROWSERS_PATH")
+	if dir == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return false
+		}
+		dir = filepath.Join(cache, "ms-playwright")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "chromium-") {
+			return true
+		}
+	}
+	return false
 }
 
 // markBrowserReady records that the bypass browser engine initialized
@@ -273,6 +356,12 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 	pctx, err := launchSolverContext(s.pw, solverProfileDir(cache, channel), channel, cfg.Headless)
 	if err != nil && channel != "" {
 		util.Debug("SuperFlix: system Chrome unavailable, falling back to bundled Chromium", "err", err)
+		if !bundledChromiumInstalled() {
+			// This download is ~150MB and installPlaywright discards its
+			// progress output, so without this line the app looks frozen
+			// behind the spinner for minutes.
+			util.Info("⏳ Chrome not found — downloading a helper browser (~150 MB, one time only). This can take a few minutes…")
+		}
 		if instErr := installPlaywright(false); instErr != nil {
 			return nil, fmt.Errorf("%w: %v", ErrPlaywrightUnavailable, instErr)
 		}
@@ -725,13 +814,19 @@ type getVideoResponse struct {
 // real (signed) HLS URL.
 var sfGetVideoRe = regexp.MustCompile(`(?i)/player/index\.php\?.*do=getVideo`)
 
-// SniffEmbedStream loads a warezcdn embed URL (e.g. https://warezcdn.lat/filme/
-// 1048794 or /serie/76479/1/1) inside a genuine cross-origin iframe so it runs
-// in iframe Sec-Fetch context (how the embed is meant to be served), lets the
-// persistent profile auto-clear Turnstile, then captures the player's
+// sfDirectMediaRe matches actual media traffic (HLS playlists/segments, MP4)
+// the player itself fetches once it starts playing. Narrower than sfMediaRe:
+// it must NOT match the getVideo/securedLink API URLs, only real media, since
+// it feeds SniffEmbedStream's last-resort capture below.
+var sfDirectMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/hls/|master\.txt`)
+
+// SniffEmbedStream loads a SuperFlix embed URL (e.g. https://superflixapi.pro/
+// filme/1048794 or /serie/76479/1/1) inside a genuine cross-origin iframe so it
+// runs in iframe Sec-Fetch context (how the embed is meant to be served), lets
+// the persistent profile auto-clear Turnstile, then captures the player's
 // `do=getVideo` JSON response and returns its signed HLS master URL.
 //
-// This is the live extraction path (verified 2026-06-09): the embed funnels to a
+// This is the live extraction path (verified 2026-07-04): the embed funnels to a
 // rotating player host (currently a punycode domain) that answers getVideo with
 // {"securedLink":"https://…/cdn/hls/<hash>/master.m3u8?md5=…&expires=…"}, a plain
 // multivariant HLS playlist mpv plays directly (no cookie, referer optional).
@@ -770,6 +865,32 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	var mu sync.Mutex
 	var streamURL, referer, ua, playerHost, videoHash string
 	found := make(chan struct{}, 1)
+
+	// Last-resort capture: the raw media traffic the player emits once it starts
+	// playing. If the (rotating) player host changes the getVideo contract —
+	// different endpoint, POST body params, new JSON shape — the OnResponse
+	// capture below goes blind while the video visibly plays in the solver
+	// window. The first HLS/MP4 request IS the playable URL (mpv replays the
+	// master.m3u8 directly), so record it and let the wait loop adopt it after
+	// giving getVideo a grace period to produce the preferred signed link.
+	var fbURL, fbRef, fbUA string
+	var fbAt time.Time
+	page.OnRequest(func(r playwright.Request) {
+		u := r.URL()
+		if !sfDirectMediaRe.MatchString(u) {
+			return
+		}
+		mu.Lock()
+		if fbURL == "" {
+			fbURL = u
+			fbAt = time.Now()
+			if h, hErr := r.AllHeaders(); hErr == nil {
+				fbRef = h["referer"]
+				fbUA = h["user-agent"]
+			}
+		}
+		mu.Unlock()
+	})
 
 	page.OnResponse(func(resp playwright.Response) {
 		u := resp.URL()
@@ -857,6 +978,18 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := streamURL
+		// Adopt the raw media URL only after getVideo has had a grace period
+		// to deliver the preferred signed link — the media request fires right
+		// after getVideo answers, so if getVideo capture works it always wins.
+		if got == "" && fbURL != "" && time.Since(fbAt) > 8*time.Second {
+			streamURL = fbURL
+			referer = fbRef
+			if ua == "" {
+				ua = fbUA
+			}
+			got = streamURL
+			util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic", "url", fbURL)
+		}
 		mu.Unlock()
 		if got != "" {
 			break
@@ -899,6 +1032,16 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 
 	mu.Lock()
 	defer mu.Unlock()
+	if streamURL == "" && fbURL != "" {
+		// Timed out waiting for getVideo but the player did fetch media —
+		// nothing better is coming, so take what it played.
+		streamURL = fbURL
+		referer = fbRef
+		if ua == "" {
+			ua = fbUA
+		}
+		util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic", "url", fbURL)
+	}
 	if streamURL == "" {
 		return nil, fmt.Errorf("no getVideo stream captured within %s", timeout)
 	}
@@ -922,8 +1065,9 @@ func moveWindow(page playwright.Page, x, y int) {
 		`() => { try { window.moveTo(%d, %d); window.resizeTo(1100, 800); } catch (e) {} }`, x, y))
 }
 
-// embedHostParentURL is the ungated homepage of the embed host (warezcdn.lat) —
-// the same-origin parent the player iframe is injected under.
+// embedHostParentURL is the ungated homepage of the embed host
+// (superflixapi.pro) — the same-origin parent the player iframe is injected
+// under.
 func embedHostParentURL(embedURL string) string {
 	parentURL := "https://" + SuperFlixEmbedHost + "/"
 	if pu, err := neturl.Parse(embedURL); err == nil && pu.Host != "" {

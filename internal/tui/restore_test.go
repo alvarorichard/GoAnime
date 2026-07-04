@@ -74,3 +74,35 @@ func TestRestoreTerminalStateEndsAtColumnZero(t *testing.T) {
 		t.Errorf("TerminalResetSequence must end with a carriage return so the prompt starts at column 0")
 	}
 }
+
+// TestClearViewport verifies the exit-time screen clear scrolls content into
+// scrollback (bottom-jump + height newlines) instead of erasing it in place,
+// then homes the cursor and erases the blank viewport.
+func TestClearViewport(t *testing.T) {
+	tests := []struct {
+		name         string
+		height       int
+		wantNewlines int
+	}{
+		{"real height", 24, 24},
+		{"zero height falls back to default", 0, defaultViewportHeight},
+		{"negative height falls back to default", -3, defaultViewportHeight},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			ClearViewport(&buf, tt.height)
+			got := buf.String()
+
+			want := "\x1b[9999;1H" + strings.Repeat("\n", tt.wantNewlines) + "\x1b[H\x1b[2J"
+			if got != want {
+				t.Errorf("ClearViewport(%d) wrote %q, want %q", tt.height, got, want)
+			}
+			// Scrollback safety: the destructive erase must come only AFTER
+			// the newlines that push the old content into scrollback.
+			if strings.Contains(got[:len(got)-len("\x1b[H\x1b[2J")], "\x1b[2J") {
+				t.Errorf("erase must be the final step, after content is scrolled out")
+			}
+		})
+	}
+}

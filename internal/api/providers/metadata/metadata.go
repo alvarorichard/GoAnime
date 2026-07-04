@@ -703,10 +703,11 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 		return nil
 	}
 
-	// Step 1: Search SuperFlix. Use the canonical .cyou host directly: legacy
-	// hosts (.rest, .online, .best, .fit) 301-redirect here and Go's http.Client
-	// downgrades POSTs to GETs across the redirect, which breaks the player API.
-	searchURL := "https://superflixapi.cyou/pesquisar?s=" + url.QueryEscape(cleanName)
+	// Step 1: Search SuperFlix. Use the canonical .pro host directly: legacy
+	// hosts (.rest, .online, .best, .fit, .cyou, .lifestyle) 301-redirect here
+	// and Go's http.Client downgrades POSTs to GETs across the redirect, which
+	// breaks the player API.
+	searchURL := "https://superflixapi.pro/pesquisar?s=" + url.QueryEscape(cleanName)
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil
@@ -742,13 +743,13 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	// Step 2: Fetch episode data from player page
 	// Must include Referer and Sec-Fetch-* headers or SuperFlix returns
 	// "ACESSO RESTRITO" instead of the actual player page with ALL_EPISODES.
-	epURL := "https://superflixapi.cyou/serie/" + tmdbID
+	epURL := "https://superflixapi.pro/serie/" + tmdbID
 	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, nil)
 	if err != nil {
 		return nil
 	}
 	req2.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req2.Header.Set("Referer", "https://superflixapi.cyou/")
+	req2.Header.Set("Referer", "https://superflixapi.pro/")
 	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req2.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
 	req2.Header.Set("Sec-Fetch-Dest", "iframe")

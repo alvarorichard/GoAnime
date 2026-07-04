@@ -10,11 +10,11 @@ import (
 )
 
 // TestSuperFlixGetVideoSniff_Live is a live recon harness: it drives the
-// warezcdn embed through Turnstile and logs the first getVideo request (and any
+// SuperFlix embed through Turnstile and logs the first getVideo request (and any
 // server-chooser UI it finds). Diagnostic only — no assertions. Requires a real
 // browser + network.
 func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
-	skipInCI(t) // launches a real browser + hits warezcdn; recon-only, never in CI
+	skipInCI(t) // launches a real browser + hits the live site; recon-only, never in CI
 	if testing.Short() {
 		t.Skip("skipping live browser recon in -short")
 	}
@@ -41,8 +41,8 @@ func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
 		}
 	})
 
-	page.Goto("https://warezcdn.lat/", playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded, Timeout: playwright.Float(40000)})
-	page.Evaluate(`(src)=>{document.body.innerHTML='<iframe src="'+src+'" allow="autoplay; encrypted-media; fullscreen" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>'}`, "https://warezcdn.lat/serie/76479/5/8")
+	page.Goto("https://"+SuperFlixEmbedHost+"/", playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded, Timeout: playwright.Float(40000)})
+	page.Evaluate(`(src)=>{document.body.innerHTML='<iframe src="'+src+'" allow="autoplay; encrypted-media; fullscreen" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>'}`, "https://"+SuperFlixEmbedHost+"/serie/76479/5/8")
 
 	// wait past turnstile, dump chooser, then auto-click
 	dumped := false

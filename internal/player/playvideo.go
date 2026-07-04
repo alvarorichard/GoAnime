@@ -55,6 +55,27 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 	return append(mpvArgs, fmt.Sprintf("--http-header-fields=Referer: %s", referer)), referer
 }
 
+// hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
+// mpv fetches segments served with disguised extensions (.js/.css/.woff, …).
+// Some providers (e.g. SuperFlix's FirePlayer host) obfuscate their HLS
+// segments this way AND serve the separate alternative-audio rendition's
+// segments with the same disguised extensions. mpv's builtin ffmpeg only
+// relaxes the check for the main variant (it auto-sets extension_picky=0), so
+// the audio rendition stays blocked by the stricter `allowed_extensions`
+// allowlist — the stream then plays video with NO audio. Forcing
+// allowed_extensions=ALL lets the audio rendition load too. It only widens a
+// check, never restricts, so it is safe for well-behaved HLS sources as well.
+const hlsAllowAllExtensionsArg = "--demuxer-lavf-o=allowed_extensions=ALL"
+
+// appendHLSDemuxerArgs adds HLS-specific demuxer options to mpvArgs when the
+// stream is HLS, and returns mpvArgs unchanged otherwise.
+func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
+	if !isHLSStream {
+		return mpvArgs
+	}
+	return append(mpvArgs, hlsAllowAllExtensionsArg)
+}
+
 // waitForVideoReady waits for the HLS video to be ready for playback
 // Returns true if video is ready, false if timeout
 func waitForVideoReady(socketPath string) bool {
@@ -376,6 +397,10 @@ func playVideo(
 	}
 
 	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, videoURL, isHLSStream)
+	// Relax the HLS segment-extension allowlist so alternative-audio renditions
+	// with disguised segment extensions load (fixes video-plays-but-no-audio on
+	// SuperFlix/FirePlayer streams).
+	mpvArgs = appendHLSDemuxerArgs(mpvArgs, isHLSStream)
 	if playbackReferer != "" {
 		if isHLSStream {
 			util.Debugf("HLS stream detected - Referer: %s", playbackReferer)
@@ -415,7 +440,9 @@ func playVideo(
 	// Set MPV window title to clean anime name + season/episode (or just name for movies)
 	titleSnap := snapshotMedia()
 	if titleSnap.AnimeName != "" {
-		cleanName := util.SanitizeForFilename(titleSnap.AnimeName)
+		// Display sanitizer, NOT the filename one: a window title may keep
+		// colons etc. ("Need for Speed: O Filme" must not lose its ':').
+		cleanName := util.SanitizeForDisplayTitle(titleSnap.AnimeName)
 		// Also strip parenthesized dub/sub tags like (Dublado), (Legendado), (SUB)
 		cleanName = dubSubTagRe.ReplaceAllString(cleanName, " ")
 		cleanName = strings.TrimSpace(cleanName)

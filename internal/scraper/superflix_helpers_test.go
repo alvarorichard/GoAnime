@@ -25,7 +25,7 @@ func TestSameSiteFromPlaywright(t *testing.T) {
 func TestEmbedHostParentURL(t *testing.T) {
 	t.Parallel()
 	tests := map[string]string{
-		"https://warezcdn.lat/filme/1":     "https://warezcdn.lat/",
+		"https://superflixapi.pro/filme/1": "https://superflixapi.pro/",
 		"https://sub.host.com/serie/1/2/3": "https://sub.host.com/",
 		"http://other.tld/x":               "http://other.tld/",
 		"":                                 "https://" + SuperFlixEmbedHost + "/", // no host → fallback

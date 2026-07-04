@@ -124,6 +124,14 @@ func runWithSpinner(title string, action func()) {
 		action()
 		return
 	}
+	// Background probes (e.g. per-source search diagnostics) log through
+	// util.Warn/Info while the spinner is animating. Those writes land on
+	// the same stderr the spinner redraws, interleaving with its frames and
+	// leaving garbled output behind once the spinner exits. Route console
+	// logs to the file only for the spinner's lifetime, same as the
+	// download progress bars do (internal/player/download.go).
+	restoreConsoleLogs := util.SuppressConsoleLogging()
+	defer restoreConsoleLogs()
 	awaitActionThroughRunner(action, func(wrapped func()) {
 		_ = tui.RunClean(func() error {
 			return spinner.New().

@@ -1987,7 +1987,9 @@ func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
 	// and .fit gates the player page behind a Cloudflare Turnstile served on
 	// a plain HTTP 200 — handled by cfFallbackTransport.shouldInspect.
 	// 2026-06-18: .fit went dead (NXDOMAIN) and rotated to .cyou.
-	assert.Equal(t, "https://superflixapi.cyou", SuperFlixBase)
+	// 2026-07-04: .cyou→.lifestyle→.pro; .lifestyle 301-redirects to .pro, so
+	// we pin the real canonical host .pro (confirmed via the embed cfv token).
+	assert.Equal(t, "https://superflixapi.pro", SuperFlixBase)
 }
 
 func TestBootstrap_HTMLResponseSurfacesActionableError_2026_04_30(t *testing.T) {

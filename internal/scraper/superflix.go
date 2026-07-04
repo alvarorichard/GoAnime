@@ -31,18 +31,22 @@ var ErrSuperFlixNoServers = errors.New("superflix: no servers available for this
 const (
 	// SuperFlixBase is the canonical SuperFlix host. Previous hosts
 	// (`superflixapi.rest`, `superflixapi.online`, `superflixapi.best`,
-	// `superflixapi.fit`) 301-redirect to whichever alias is live; Go's
-	// http.Client follows the redirect but downgrades the POST to a GET
-	// (dropping the body), which makes /player/bootstrap return HTML 404 and
-	// break JSON decoding — so we target the live host directly. `.fit` went
-	// dead (NXDOMAIN) 2026-06-18 and rotated to `.cyou`.
-	SuperFlixBase = "https://superflixapi.cyou"
-	// SuperFlixEmbedHost is the warezcdn embed host listed in the frontend's
-	// window.__PLAYER_APIS__. Loading https://warezcdn.lat/{filme|serie}/<tmdb>
-	// in a cross-origin iframe funnels through Turnstile to the rotating player
-	// host whose getVideo endpoint returns the signed HLS master. Verified live
-	// 2026-06-09. superflixapi.cyou is the current API alias if this rotates out.
-	SuperFlixEmbedHost = "warezcdn.lat"
+	// `superflixapi.fit`, `superflixapi.cyou`, `superflixapi.lifestyle`)
+	// 301-redirect to whichever alias is live; Go's http.Client follows the
+	// redirect but downgrades the POST to a GET (dropping the body), which makes
+	// /player/bootstrap return HTML 404 and break JSON decoding — so we target
+	// the live host directly. `.lifestyle` redirects to `.pro` (the current
+	// canonical host, confirmed 2026-07-04 via the embed's `cfv` session token,
+	// which carries `"host":"superflixapi.pro"`).
+	SuperFlixBase = "https://superflixapi.pro"
+	// SuperFlixEmbedHost is the host that serves the Turnstile-gated player
+	// embed. The frontend no longer funnels through warezcdn.lat (which now
+	// gates behind Google reCAPTCHA + a QR-scan we can't solve); instead the API
+	// host itself serves https://superflixapi.pro/{filme|serie}/<tmdb>, which
+	// clears Cloudflare Turnstile (handled by the cfBrowserSolver) and then the
+	// player's getVideo endpoint returns the signed HLS master. Confirmed live
+	// 2026-07-04 for both /filme and /serie.
+	SuperFlixEmbedHost = "superflixapi.pro"
 	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
 	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
 	// the User-Agent that solved the challenge; if the HTTP client then sends a
@@ -947,7 +951,8 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 // getStreamViaBrowser resolves the stream, preferring a browser-free path.
 //
 // The only browser-gated step is mapping tmdb→(playerHost, videoHash) through
-// warezcdn's Turnstile gate. The player host's getVideo endpoint that turns that
+// the embed host's Cloudflare Turnstile gate. The player host's getVideo
+// endpoint that turns that
 // pair into a fresh signed HLS link is NOT gated, so once the pair is cached we
 // replay over plain HTTP with no browser. The headed browser therefore runs only
 // on the FIRST play of a title — or when the cached host rotates out and the
@@ -991,7 +996,12 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		return nil, fmt.Errorf("superflix embed stream sniff failed (%s): %w", embedURL, err)
 	}
 
-	defaultStreamCache.put(key, streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash})
+	// The raw-media fallback capture has no player host/hash (those come only
+	// from the getVideo URL); caching an empty pair would just force a doomed
+	// GetVideoAPI round-trip before every future re-solve.
+	if res.PlayerHost != "" && res.VideoHash != "" {
+		defaultStreamCache.put(key, streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash})
+	}
 
 	referer := res.Referer
 	if referer == "" {

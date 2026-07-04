@@ -2,7 +2,11 @@ package tui
 
 import (
 	"io"
+	"math"
 	"os"
+	"strings"
+
+	"golang.org/x/term"
 )
 
 // TerminalResetSequence is the full set of ANSI/DEC sequences that return a
@@ -52,4 +56,40 @@ func RestoreTerminalState(w io.Writer) {
 // the exit-cleanup path.
 func RestoreTerminalStdout() {
 	RestoreTerminalState(os.Stdout)
+}
+
+// defaultViewportHeight is used when the real terminal height can't be
+// queried (not a terminal, or the size call fails).
+const defaultViewportHeight = 50
+
+// ClearViewport leaves the visible screen blank with the cursor at the
+// top-left, WITHOUT destroying what was on it: the cursor is first moved to
+// the bottom row, then `height` newlines scroll every visible line up into
+// the terminal's scrollback, and only the (now blank) viewport is erased.
+// This is deliberately different from a plain \x1b[2J clear, which erases the
+// viewport in place and loses any final output (error messages, the debug-log
+// path) with it.
+func ClearViewport(w io.Writer, height int) {
+	if height <= 0 {
+		height = defaultViewportHeight
+	}
+	// \x1b[9999;1H — jump to the bottom row (clamped by the terminal), so the
+	// newline count needed to scroll the whole viewport out is exactly height.
+	// \x1b[H\x1b[2J — home the cursor and erase the now-empty screen so no
+	// stray cell survives.
+	_, _ = io.WriteString(w, "\x1b[9999;1H"+strings.Repeat("\n", height)+"\x1b[H\x1b[2J")
+}
+
+// ClearViewportStdout clears the visible screen on stdout (preserving
+// scrollback) using the real terminal height when available. Used by the exit
+// cleanup so GoAnime always hands the shell a clean screen, as leftover TUI
+// frames otherwise pollute the next prompt.
+func ClearViewportStdout() {
+	height := 0
+	if fd := os.Stdout.Fd(); fd <= math.MaxInt && term.IsTerminal(int(fd)) {
+		if _, h, err := term.GetSize(int(fd)); err == nil {
+			height = h
+		}
+	}
+	ClearViewport(os.Stdout, height)
 }

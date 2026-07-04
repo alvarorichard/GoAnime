@@ -171,7 +171,13 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			util.Debugf("AniList error response: %s", string(body))
+			// Cap the logged body: a Cloudflare challenge page is ~6KB of
+			// HTML/JS per attempt that buries the rest of the debug log.
+			snippet := string(body)
+			if len(snippet) > 300 {
+				snippet = snippet[:300] + "… (truncated)"
+			}
+			util.Debugf("AniList error response (%d bytes): %s", len(body), snippet)
 			lastErr = fmt.Errorf("AniList returned: %s", resp.Status)
 			continue
 		}
