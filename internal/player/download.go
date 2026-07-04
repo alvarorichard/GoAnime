@@ -255,8 +255,7 @@ func isBloggerProxyURL(u string) bool {
 // that serve HLS playlists without a .m3u8 extension.
 func LooksLikeHLS(u string) bool {
 	lower := strings.ToLower(u)
-	return strings.Contains(lower, ".m3u8") ||
-		strings.Contains(lower, "m3u8") ||
+	return strings.Contains(lower, "m3u8") ||
 		strings.Contains(lower, "/hls/")
 }
 

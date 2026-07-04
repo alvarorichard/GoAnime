@@ -841,6 +841,38 @@ type embedStreamSolver interface {
 	SniffEmbedStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error)
 }
 
+// sniffEmbedStreamAttempts is how many times the browser path drives the embed
+// through the Turnstile gate before giving up. The managed challenge is
+// probabilistic — it can fail to auto-pass on a cold tick — so a single
+// re-solve rescues the common first-play flake instead of bouncing the user
+// back to the search screen. Capped at 2 so the worst case (2×90s solve) still
+// fits inside the caller's 210s context budget (see GetSuperFlixStreamURL).
+const sniffEmbedStreamAttempts = 2
+
+// sniffEmbedStreamWithRetry drives SniffEmbedStream up to
+// sniffEmbedStreamAttempts times, retrying only transient solve failures (a gate
+// that did not clear in time). It stops immediately once the context is done, so
+// a user abort or an exhausted deadline is never retried, and it emits a
+// user-facing notice before a retry so the wait does not look like a hang.
+func sniffEmbedStreamWithRetry(ctx context.Context, solver embedStreamSolver, embedURL string) (*CFStreamResult, error) {
+	var lastErr error
+	for attempt := 1; attempt <= sniffEmbedStreamAttempts; attempt++ {
+		res, err := solver.SniffEmbedStream(ctx, embedURL, 0)
+		if err == nil {
+			return res, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break // context cancelled/expired — do not burn another solve
+		}
+		if attempt < sniffEmbedStreamAttempts {
+			util.Info("Verification didn't complete on the first try — retrying once...")
+			util.Debug("SuperFlix embed sniff retry", "attempt", attempt, "err", err)
+		}
+	}
+	return nil, lastErr
+}
+
 // GetStreamURL resolves the playable stream for SuperFlix content.
 //
 // The legacy player-page→tokens→bootstrap→source pipeline is dead: the current
@@ -991,7 +1023,7 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		embedURL = fmt.Sprintf("https://%s/filme/%s", SuperFlixEmbedHost, mediaID)
 	}
 
-	res, err := solver.SniffEmbedStream(ctx, embedURL, 0)
+	res, err := sniffEmbedStreamWithRetry(ctx, solver, embedURL)
 	if err != nil {
 		return nil, fmt.Errorf("superflix embed stream sniff failed (%s): %w", embedURL, err)
 	}

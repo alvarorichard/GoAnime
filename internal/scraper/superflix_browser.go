@@ -224,6 +224,7 @@ func systemChromeAvailable() bool {
 			if base == "" {
 				continue
 			}
+			// #nosec G703 -- base is a trusted Windows env var (ProgramFiles/LOCALAPPDATA); the path suffix is a constant, and os.Stat only probes existence (no open/read/write/exec).
 			if _, err := os.Stat(filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe")); err == nil {
 				return true
 			}

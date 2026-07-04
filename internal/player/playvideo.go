@@ -383,9 +383,11 @@ func playVideo(
 		util.Debugf("Wayland session detected — forcing gpu-context=wayland")
 	}
 
-	// For HLS streams (.m3u8), we need to add HTTP headers for proper playback
-	// Many streaming servers require specific User-Agent and Referer headers
-	isHLSStream := strings.Contains(videoURL, ".m3u8") || strings.Contains(videoURL, "m3u8")
+	// For HLS streams we need to add HTTP headers for proper playback — many
+	// streaming servers require specific User-Agent and Referer headers. Use the
+	// shared LooksLikeHLS helper so detection stays consistent (case-insensitive,
+	// and also catching /hls/ URLs that lack a .m3u8 extension).
+	isHLSStream := LooksLikeHLS(videoURL)
 
 	// Determine the anime source for source-specific playback configuration.
 	// Use the globally-stored anime source (set during stream resolution) so
