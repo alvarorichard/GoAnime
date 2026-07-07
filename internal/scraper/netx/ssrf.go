@@ -2,7 +2,7 @@
 //
 // Duplicates the core SSRF dial-check from internal/api to avoid an import
 // cycle (api → scraper → api).
-package scraper
+package netx
 
 import (
 	"context"
@@ -14,9 +14,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-// isDisallowedIP returns true if the IP is loopback, private, multicast, or
+// IsDisallowedIP returns true if the IP is loopback, private, multicast, or
 // unspecified — mirrors api.IsDisallowedIP.
-func isDisallowedIP(hostIP string) bool {
+func IsDisallowedIP(hostIP string) bool {
 	ip := net.ParseIP(hostIP)
 	if ip == nil {
 		return true
@@ -24,8 +24,8 @@ func isDisallowedIP(hostIP string) bool {
 	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()
 }
 
-// safeDialFunc establishes a connection and rejects disallowed IPs.
-func safeDialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Config) (net.Conn, error) {
+// SafeDialFunc establishes a connection and rejects disallowed IPs.
+func SafeDialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Config) (net.Conn, error) {
 	dialer := &net.Dialer{Timeout: timeout}
 	var conn net.Conn
 	var err error
@@ -42,22 +42,22 @@ func safeDialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Co
 		_ = conn.Close()
 		return nil, errors.New("failed to parse remote address")
 	}
-	if isDisallowedIP(ip) {
+	if IsDisallowedIP(ip) {
 		_ = conn.Close()
 		return nil, errors.New("ip address is not allowed")
 	}
 	return conn, nil
 }
 
-// safeScraperTransport returns an *http.Transport with SSRF-safe dial hooks.
-func safeScraperTransport(timeout time.Duration) *http.Transport {
+// SafeScraperTransport returns an *http.Transport with SSRF-safe dial hooks.
+func SafeScraperTransport(timeout time.Duration) *http.Transport {
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	return &http.Transport{
 		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-			return safeDialFunc(network, addr, timeout, nil)
+			return SafeDialFunc(network, addr, timeout, nil)
 		},
 		DialTLSContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-			return safeDialFunc(network, addr, timeout, tlsConfig)
+			return SafeDialFunc(network, addr, timeout, tlsConfig)
 		},
 		TLSHandshakeTimeout: timeout,
 		MaxIdleConns:        100,

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,7 @@ func TestCircuitBreaker_IsOpen_EmptyState(t *testing.T) {
 func TestCircuitBreaker_RecordFailure_OpensAfterThreshold(t *testing.T) {
 	t.Parallel()
 	cb := newSourceCircuitBreaker()
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}
 
 	for i := 0; i < cb.threshold-1; i++ {
 		assert.False(t, cb.recordFailure(AllAnimeType, diag), i)
@@ -43,7 +44,7 @@ func TestCircuitBreaker_RecordFailure_OpensAfterThreshold(t *testing.T) {
 func TestCircuitBreaker_RecordFailure_IgnoresNonRetryableKinds(t *testing.T) {
 	t.Parallel()
 	cb := newSourceCircuitBreaker()
-	diag := &SourceDiagnostic{Kind: DiagnosticParserBroken}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticParserBroken}
 	for i := 0; i < cb.threshold+1; i++ {
 		assert.False(t, cb.recordFailure(AllAnimeType, diag))
 	}
@@ -56,13 +57,13 @@ func TestCircuitBreaker_RecordFailure_NilNoOp(t *testing.T) {
 	cb := newSourceCircuitBreaker()
 	assert.False(t, cb.recordFailure(AllAnimeType, nil))
 	var nilCB *sourceCircuitBreaker
-	assert.False(t, nilCB.recordFailure(AllAnimeType, &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}))
+	assert.False(t, nilCB.recordFailure(AllAnimeType, &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}))
 }
 
 func TestCircuitBreaker_RecordSuccess_Resets(t *testing.T) {
 	t.Parallel()
 	cb := newSourceCircuitBreaker()
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}
 	for i := 0; i < cb.threshold; i++ {
 		cb.recordFailure(AllAnimeType, diag)
 	}
@@ -78,7 +79,7 @@ func TestCircuitBreaker_IsOpen_ClearsAfterCooldown(t *testing.T) {
 	cb.now = func() time.Time { return now }
 	cb.cooldown = time.Minute
 
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}
 	for i := 0; i < cb.threshold; i++ {
 		cb.recordFailure(AllAnimeType, diag)
 	}
@@ -101,7 +102,7 @@ func TestEnsureCircuitBreaker_Idempotent(t *testing.T) {
 func TestScraperManager_RecordSourceSuccessAndFailure(t *testing.T) {
 	t.Parallel()
 	sm := &ScraperManager{}
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}
 
 	for i := 0; i < defaultSourceFailureThreshold; i++ {
 		sm.recordSourceFailure(AllAnimeType, diag)
@@ -118,6 +119,6 @@ func TestScraperManager_RecordSourceSuccessAndFailure(t *testing.T) {
 
 func TestSentinelDistinct(t *testing.T) {
 	t.Parallel()
-	diag := &SourceDiagnostic{Kind: DiagnosticDecryptBroken, Err: errors.New("x")}
-	assert.False(t, errors.Is(diag, ErrSourceUnavailable))
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticDecryptBroken, Err: errors.New("x")}
+	assert.False(t, errors.Is(diag, netx.ErrSourceUnavailable))
 }

@@ -1,4 +1,4 @@
-package scraper
+package netx
 
 import (
 	"net/http"
@@ -15,13 +15,13 @@ func TestSafeDialFunc_RejectsLoopback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	t.Cleanup(srv.Close)
 
-	_, err := safeDialFunc("tcp", srv.Listener.Addr().String(), 2*time.Second, nil)
+	_, err := SafeDialFunc("tcp", srv.Listener.Addr().String(), 2*time.Second, nil)
 	assert.Error(t, err)
 }
 
 func TestSafeScraperTransport(t *testing.T) {
 	t.Parallel()
-	tr := safeScraperTransport(5 * time.Second)
+	tr := SafeScraperTransport(5 * time.Second)
 	require.NotNil(t, tr)
 	assert.NotNil(t, tr.DialContext)
 	assert.NotNil(t, tr.DialTLSContext)

@@ -19,13 +19,14 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+
 	// Blank import: the providers package self-registers every live Source in
 	// its init(). Without it the registry is empty and dispatch resolves
 	// nothing. Consolidated into a single wiring file in a later phase (S3).
 	_ "github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	g "github.com/enetx/g"
@@ -130,7 +131,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Checks if the server responded with a 200 OK or 206 Partial Content status.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return 0, scraper.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+			return 0, netx.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
 		}
 		// Returns an error if the server does not support partial content (required for ranged requests).
 		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)

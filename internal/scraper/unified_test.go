@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -723,13 +724,13 @@ func TestSearchAnime_QueryPassedCorrectly(t *testing.T) {
 }
 
 // =============================================================================
-// Test: ErrSourceUnavailable sentinel is preserved through errors.Join
+// Test: netx.ErrSourceUnavailable sentinel is preserved through errors.Join
 // =============================================================================
 
 func TestSearchAnime_AllSourcesUnavailable_SentinelChainPreserved(t *testing.T) {
 	t.Parallel()
 
-	unavailableErr := fmt.Errorf("blocked by Cloudflare: %w", ErrSourceUnavailable)
+	unavailableErr := fmt.Errorf("blocked by Cloudflare: %w", netx.ErrSourceUnavailable)
 
 	allAnimeMock := &MockScraper{
 		searchFunc: func(_ string) ([]*models.Anime, error) {
@@ -746,8 +747,8 @@ func TestSearchAnime_AllSourcesUnavailable_SentinelChainPreserved(t *testing.T) 
 	_, err := manager.SearchAnime("one piece", nil)
 
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable),
-		"errors.Is should find ErrSourceUnavailable in the chain, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable),
+		"errors.Is should find netx.ErrSourceUnavailable in the chain, got: %v", err)
 }
 
 // =============================================================================

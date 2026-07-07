@@ -18,6 +18,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -168,7 +169,7 @@ func NormalizeSuperFlixImageURL(imageURL string) string {
 // every subsequent request for the same host via the cookie jar.
 func NewSuperFlixClient() *SuperFlixClient {
 	jar, _ := newCookieJar()
-	base := safeScraperTransport(30 * time.Second)
+	base := netx.SafeScraperTransport(30 * time.Second)
 	transport := &cfFallbackTransport{
 		base:   base,
 		solver: defaultCFSolver,
@@ -684,7 +685,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 	// Use the client's transport if available, otherwise fall back to safe transport
 	transport := c.client.Transport
 	if transport == nil {
-		transport = safeScraperTransport(30 * time.Second)
+		transport = netx.SafeScraperTransport(30 * time.Second)
 	}
 
 	// Use a client that does NOT follow redirects automatically

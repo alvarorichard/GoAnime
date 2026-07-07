@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,5 +116,5 @@ func TestAnimefireGetEpisodeStreamURLBlockedPage(t *testing.T) {
 
 	_, err := client.GetEpisodeStreamURL(server.URL + "/anime/5/episode/1")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable), "challenge page should yield ErrSourceUnavailable, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable), "challenge page should yield netx.ErrSourceUnavailable, got: %v", err)
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -297,7 +298,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime search"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime search"); err != nil {
 		return nil, err
 	}
 
@@ -306,7 +307,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := checkHTMLResponse(resp, body, "AllAnime search"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime search"); err != nil {
 		return nil, err
 	}
 
@@ -410,7 +411,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID, mode string) ([]string, error)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime episodes list"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime episodes list"); err != nil {
 		return nil, err
 	}
 
@@ -419,7 +420,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID, mode string) ([]string, error)
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := checkHTMLResponse(resp, body, "AllAnime episodes list"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime episodes list"); err != nil {
 		return nil, err
 	}
 
@@ -707,7 +708,7 @@ func (c *AllAnimeClient) tryPersistedQueryGET(varsBytes []byte) ([]byte, error) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime episode URL (GET)"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime episode URL (GET)"); err != nil {
 		return nil, err
 	}
 
@@ -715,7 +716,7 @@ func (c *AllAnimeClient) tryPersistedQueryGET(varsBytes []byte) ([]byte, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to read GET response: %w", err)
 	}
-	if err := checkHTMLResponse(resp, body, "AllAnime episode URL (GET)"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime episode URL (GET)"); err != nil {
 		return nil, err
 	}
 	return body, nil
@@ -748,7 +749,7 @@ func (c *AllAnimeClient) legacyPOST(varsBytes []byte) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime episode URL (POST)"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime episode URL (POST)"); err != nil {
 		return nil, err
 	}
 
@@ -756,7 +757,7 @@ func (c *AllAnimeClient) legacyPOST(varsBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read POST response: %w", err)
 	}
-	if err := checkHTMLResponse(resp, body, "AllAnime episode URL (POST)"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime episode URL (POST)"); err != nil {
 		return nil, err
 	}
 	return body, nil
@@ -1093,7 +1094,7 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime links"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime links"); err != nil {
 		return nil, err
 	}
 
@@ -1102,7 +1103,7 @@ func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := checkHTMLResponse(resp, body, "AllAnime links"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime links"); err != nil {
 		return nil, err
 	}
 
@@ -1337,7 +1338,7 @@ func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "AllAnime filemoon"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "AllAnime filemoon"); err != nil {
 		return nil, err
 	}
 
@@ -1345,7 +1346,7 @@ func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, 
 	if err != nil {
 		return nil, fmt.Errorf("filemoon: failed to read response: %w", err)
 	}
-	if err := checkHTMLResponse(resp, body, "AllAnime filemoon"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "AllAnime filemoon"); err != nil {
 		return nil, err
 	}
 

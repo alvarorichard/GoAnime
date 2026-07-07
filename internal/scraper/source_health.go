@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 )
 
 // SourceHealthStatus is the result class for a provider health probe.
@@ -30,7 +31,7 @@ type SourceHealthResult struct {
 	Status      SourceHealthStatus
 	Results     int
 	Duration    time.Duration
-	Diagnostic  *SourceDiagnostic
+	Diagnostic  *netx.SourceDiagnostic
 	Description string
 }
 
@@ -70,9 +71,9 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 
 	scraper, exists := sm.scrapers[source]
 	if !exists {
-		diagnostic := NewInternalBugError(sourceName, "health-check", "scraper not registered", nil)
+		diagnostic := netx.NewInternalBugError(sourceName, "health-check", "scraper not registered", nil)
 		result.Status = SourceHealthFailed
-		result.Diagnostic = DiagnoseError(sourceName, "health-check", diagnostic)
+		result.Diagnostic = netx.DiagnoseError(sourceName, "health-check", diagnostic)
 		result.Duration = time.Since(startedAt)
 		result.Description = result.Diagnostic.UserMessage()
 		return result
@@ -102,7 +103,7 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 	case outcome := <-done:
 		result.Duration = time.Since(startedAt)
 		if outcome.err != nil {
-			diagnostic := DiagnoseError(sourceName, "health-check", outcome.err)
+			diagnostic := netx.DiagnoseError(sourceName, "health-check", outcome.err)
 			result.Diagnostic = diagnostic
 			result.Description = diagnostic.UserMessage()
 			if diagnostic.ShouldSkipHealthCheck() {
@@ -115,7 +116,7 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 
 		result.Results = len(outcome.results)
 		if len(outcome.results) == 0 {
-			diagnostic := DiagnoseError(sourceName, "health-check", NewParserError(sourceName, "health-check", "known query returned zero results", nil))
+			diagnostic := netx.DiagnoseError(sourceName, "health-check", netx.NewParserError(sourceName, "health-check", "known query returned zero results", nil))
 			result.Status = SourceHealthFailed
 			result.Diagnostic = diagnostic
 			result.Description = diagnostic.UserMessage()
@@ -128,7 +129,7 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 
 	case <-ctx.Done():
 		result.Duration = time.Since(startedAt)
-		diagnostic := DiagnoseError(sourceName, "health-check", ctx.Err())
+		diagnostic := netx.DiagnoseError(sourceName, "health-check", ctx.Err())
 		result.Status = SourceHealthSkipped
 		result.Diagnostic = diagnostic
 		result.Description = diagnostic.UserMessage()

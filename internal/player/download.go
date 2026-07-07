@@ -22,15 +22,15 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"golang.org/x/term"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/lrstanley/go-ytdlp"
+	"golang.org/x/term"
 )
 
 // Pre-compiled regexes for download quality parsing
@@ -134,7 +134,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 				util.Logger.Warn("Error closing response body", "error", cErr)
 			}
 			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
-				return scraper.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
+				return netx.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
 			}
 			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
 			staleRetries++
@@ -1064,7 +1064,7 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return scraper.NewDownloadExpiredError("Download", "http", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+			return netx.NewDownloadExpiredError("Download", "http", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
 		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}

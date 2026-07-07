@@ -1,4 +1,4 @@
-package scraper
+package netx
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 // merely mentions the word "cloudflare" in footer text, terms-of-service
 // links, or user comments was being misclassified as a Cloudflare challenge,
 // short-circuiting GetEpisodeStreamURL before any extraction strategy ran.
-// checkChallengeDocument must only fire on phrases that are unique to actual
+// CheckChallengeDocument must only fire on phrases that are unique to actual
 // challenge interstitials.
 func TestCheckChallengeDocument_DoesNotFalsePositiveOnCloudflareMention(t *testing.T) {
 	t.Parallel()
@@ -63,7 +63,7 @@ func TestCheckChallengeDocument_DoesNotFalsePositiveOnCloudflareMention(t *testi
 				t.Fatalf("parse html: %v", err)
 			}
 
-			if err := checkChallengeDocument(doc, "test-source"); err != nil {
+			if err := CheckChallengeDocument(doc, "test-source"); err != nil {
 				t.Fatalf("expected nil for legitimate page mentioning 'cloudflare', got %v", err)
 			}
 		})
@@ -92,7 +92,7 @@ func TestCheckChallengeDocument_EveryAllowlistedPhraseTriggers(t *testing.T) {
 				t.Fatalf("parse html: %v", err)
 			}
 
-			err = checkChallengeDocument(doc, "test-source")
+			err = CheckChallengeDocument(doc, "test-source")
 			if err == nil {
 				t.Fatalf("phrase %q must trigger a challenge, got nil", phrase)
 			}
@@ -121,7 +121,7 @@ func TestCheckChallengeDocument_PhraseMatchIsCaseInsensitive(t *testing.T) {
 				t.Fatalf("parse html: %v", err)
 			}
 
-			if err := checkChallengeDocument(doc, "test-source"); err == nil {
+			if err := CheckChallengeDocument(doc, "test-source"); err == nil {
 				t.Fatalf("uppercase phrase %q must trigger, got nil", upper)
 			}
 		})
@@ -171,7 +171,7 @@ func TestCheckChallengeDocument_PhraseInAttributeDoesNotTrigger(t *testing.T) {
 				t.Fatalf("parse html: %v", err)
 			}
 
-			if err := checkChallengeDocument(doc, "test-source"); err != nil {
+			if err := CheckChallengeDocument(doc, "test-source"); err != nil {
 				t.Fatalf("attribute-only phrase must not trigger; got %v", err)
 			}
 		})
@@ -203,7 +203,7 @@ func TestCheckChallengeDocument_EmptyAndMinimalDocs(t *testing.T) {
 				t.Fatalf("parse html: %v", err)
 			}
 
-			if err := checkChallengeDocument(doc, "test-source"); err != nil {
+			if err := CheckChallengeDocument(doc, "test-source"); err != nil {
 				t.Fatalf("minimal document must not trigger, got %v", err)
 			}
 		})
@@ -223,8 +223,8 @@ func TestCheckChallengeDocument_IsIdempotent(t *testing.T) {
 		t.Fatalf("parse html: %v", err)
 	}
 
-	first := checkChallengeDocument(doc, "src-a")
-	second := checkChallengeDocument(doc, "src-a")
+	first := CheckChallengeDocument(doc, "src-a")
+	second := CheckChallengeDocument(doc, "src-a")
 
 	if (first == nil) != (second == nil) {
 		t.Fatalf("non-idempotent: first=%v second=%v", first, second)
@@ -248,7 +248,7 @@ func TestCheckChallengeDocument_PropagatesSourceLabel(t *testing.T) {
 	}
 
 	for _, label := range []string{"Goyabu episode page", "AnimeFire search", "AnimeFire episodes"} {
-		err := checkChallengeDocument(doc, label)
+		err := CheckChallengeDocument(doc, label)
 		if err == nil {
 			t.Fatalf("expected challenge error, got nil")
 		}
@@ -303,7 +303,7 @@ func TestCheckChallengeDocument_DetectsRealChallenges(t *testing.T) {
 				t.Fatalf("parse html: %v", err)
 			}
 
-			err = checkChallengeDocument(doc, "test-source")
+			err = CheckChallengeDocument(doc, "test-source")
 			if err == nil {
 				t.Fatalf("expected challenge error, got nil")
 			}

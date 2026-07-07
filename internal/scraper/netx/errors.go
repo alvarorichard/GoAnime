@@ -1,5 +1,4 @@
-// Package scraper provides shared scraper guards and error helpers.
-package scraper
+package netx
 
 import (
 	"bytes"
@@ -21,18 +20,18 @@ var ErrSourceUnavailable = errors.New("source unavailable")
 // valid absolute playback URL.
 var ErrInvalidStreamURL = errors.New("invalid stream url")
 
-// checkHTTPStatus wraps blocking upstream statuses with ErrSourceUnavailable so
+// CheckHTTPStatus wraps blocking upstream statuses with ErrSourceUnavailable so
 // callers can differentiate provider-side issues from local parsing failures.
-func checkHTTPStatus(resp *http.Response, source string) error {
+func CheckHTTPStatus(resp *http.Response, source string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return NewHTTPStatusError(source, "http", resp.StatusCode)
 	}
 	return nil
 }
 
-// checkHTMLResponse detects HTML challenge or error pages where JSON payloads
+// CheckHTMLResponse detects HTML challenge or error pages where JSON payloads
 // are expected.
-func checkHTMLResponse(resp *http.Response, body []byte, source string) error {
+func CheckHTMLResponse(resp *http.Response, body []byte, source string) error {
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
 		return NewBlockedChallengeError(source, "http", "returned HTML instead of JSON", nil)
 	}
@@ -62,11 +61,11 @@ var challengeBodyPhrases = []string{
 	"attention required! | cloudflare",
 }
 
-// checkChallengeDocument detects common Cloudflare/challenge pages in HTML
+// CheckChallengeDocument detects common Cloudflare/challenge pages in HTML
 // responses that should be classified as a source-unavailable condition.
 // Returns the matching marker via debug log when triggered so misclassifications
 // are diagnosable from logs.
-func checkChallengeDocument(doc *goquery.Document, source string) error {
+func CheckChallengeDocument(doc *goquery.Document, source string) error {
 	title := strings.ToLower(strings.TrimSpace(doc.Find("title").First().Text()))
 	if strings.Contains(title, "just a moment") ||
 		strings.Contains(title, "attention required") ||
@@ -92,8 +91,8 @@ func checkChallengeDocument(doc *goquery.Document, source string) error {
 	return nil
 }
 
-// validateStreamURL ensures extracted playback URLs are absolute HTTP(S) URLs.
-func validateStreamURL(rawURL, source string) (string, error) {
+// ValidateStreamURL ensures extracted playback URLs are absolute HTTP(S) URLs.
+func ValidateStreamURL(rawURL, source string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return "", fmt.Errorf("%s returned malformed stream URL: %w", source, ErrInvalidStreamURL)

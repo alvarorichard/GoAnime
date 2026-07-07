@@ -1,11 +1,11 @@
 // Package scraper — End-to-end regression suite for issue #166.
 //
 // Issue #166 (reported 2026-04-28): Goyabu episodes were silently failing
-// because checkChallengeDocument's body-text scan included a bare
+// because netx.CheckChallengeDocument's body-text scan included a bare
 // strings.Contains(body, "cloudflare") check. Any legitimate Goyabu page
 // (footer credit, ToS link, user comment) mentioning the word "cloudflare"
 // was misclassified as a Cloudflare challenge, causing GetEpisodeStreamURL
-// to return ErrSourceUnavailable before the strategy chain ever ran. The
+// to return netx.ErrSourceUnavailable before the strategy chain ever ran. The
 // resulting "no video source found" / "no valid video URL found" error was
 // blind — no log line indicated the false-positive cause.
 //
@@ -21,6 +21,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 )
 
 // realGoyabuEpisodePage returns HTML that mirrors the structure of a real
@@ -65,7 +67,7 @@ func realGoyabuEpisodePage(streamURL string) string {
 }
 
 // goyabuChallengePage returns an HTML body that should trigger
-// checkChallengeDocument via the named signal. The signal name is one of
+// netx.CheckChallengeDocument via the named signal. The signal name is one of
 // the keys defined inside the function and lets a single helper drive
 // every challenge variant from the table-driven test below.
 func goyabuChallengePage(signal string) string {
@@ -139,7 +141,7 @@ func TestIssue166_LegitimateGoyabuPageWithCloudflareMentionStillResolves(t *test
 	defer srv.Close()
 
 	// playersData[0].url must be a valid absolute http(s) URL because
-	// validateStreamURL guards on scheme + host. Use the test server's
+	// netx.ValidateStreamURL guards on scheme + host. Use the test server's
 	// origin so the round-trip succeeds without contacting the internet.
 	streamURL = srv.URL + "/blogger-embed?token=AD6v5dyTESTTOKEN"
 
@@ -155,8 +157,8 @@ func TestIssue166_LegitimateGoyabuPageWithCloudflareMentionStillResolves(t *test
 	if got != streamURL {
 		t.Fatalf("expected stream URL %q, got %q", streamURL, got)
 	}
-	if errors.Is(err, ErrSourceUnavailable) {
-		t.Fatalf("must NOT be classified as ErrSourceUnavailable")
+	if errors.Is(err, netx.ErrSourceUnavailable) {
+		t.Fatalf("must NOT be classified as netx.ErrSourceUnavailable")
 	}
 }
 
@@ -207,8 +209,8 @@ func TestIssue166_AllRealChallengeSignalsStillTrigger(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected challenge error for signal %q, got nil", sig)
 			}
-			if !errors.Is(err, ErrSourceUnavailable) {
-				t.Fatalf("signal %q: expected ErrSourceUnavailable in chain, got %v", sig, err)
+			if !errors.Is(err, netx.ErrSourceUnavailable) {
+				t.Fatalf("signal %q: expected netx.ErrSourceUnavailable in chain, got %v", sig, err)
 			}
 		})
 	}
@@ -282,9 +284,9 @@ func TestIssue166_NoFalsePositiveForCommonContentMentions(t *testing.T) {
 			// No playersData is intentional — we want to assert the
 			// challenge check did not fire. The downstream strategies
 			// will fail with a different error, but it must not be
-			// ErrSourceUnavailable.
+			// netx.ErrSourceUnavailable.
 			_, err := client.GetEpisodeStreamURL(srv.URL + "/episode")
-			if errors.Is(err, ErrSourceUnavailable) {
+			if errors.Is(err, netx.ErrSourceUnavailable) {
 				t.Fatalf("legitimate page %q was misclassified as a challenge: %v", tc.name, err)
 			}
 		})

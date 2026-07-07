@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1635,7 +1636,7 @@ func TestIsDisallowedIP(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.disallowed, isDisallowedIP(tc.ip))
+			assert.Equal(t, tc.disallowed, netx.IsDisallowedIP(tc.ip))
 		})
 	}
 }
@@ -1652,9 +1653,9 @@ func TestCheckHTTPStatus_Blocked(t *testing.T) {
 		t.Run(fmt.Sprintf("status_%d", code), func(t *testing.T) {
 			t.Parallel()
 			resp := &http.Response{StatusCode: code}
-			err := checkHTTPStatus(resp, "test")
+			err := netx.CheckHTTPStatus(resp, "test")
 			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrSourceUnavailable)
+			assert.ErrorIs(t, err, netx.ErrSourceUnavailable)
 		})
 	}
 }
@@ -1663,7 +1664,7 @@ func TestCheckHTTPStatus_Success(t *testing.T) {
 	t.Parallel()
 
 	resp := &http.Response{StatusCode: http.StatusOK}
-	err := checkHTTPStatus(resp, "test")
+	err := netx.CheckHTTPStatus(resp, "test")
 	assert.NoError(t, err)
 }
 
@@ -1671,16 +1672,16 @@ func TestCheckHTTPStatus_OtherError(t *testing.T) {
 	t.Parallel()
 
 	resp := &http.Response{StatusCode: http.StatusNotFound}
-	err := checkHTTPStatus(resp, "test")
+	err := netx.CheckHTTPStatus(resp, "test")
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrSourceUnavailable, "404 is not a source-unavailable error")
+	assert.NotErrorIs(t, err, netx.ErrSourceUnavailable, "404 is not a source-unavailable error")
 }
 
 func TestCheckHTMLResponse_JSONContentType(t *testing.T) {
 	t.Parallel()
 
 	resp := &http.Response{Header: http.Header{"Content-Type": []string{"application/json"}}}
-	err := checkHTMLResponse(resp, []byte(`{"ok":true}`), "test")
+	err := netx.CheckHTMLResponse(resp, []byte(`{"ok":true}`), "test")
 	assert.NoError(t, err)
 }
 
@@ -1688,18 +1689,18 @@ func TestCheckHTMLResponse_HTMLContentType(t *testing.T) {
 	t.Parallel()
 
 	resp := &http.Response{Header: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}}}
-	err := checkHTMLResponse(resp, []byte(`<html>`), "test")
+	err := netx.CheckHTMLResponse(resp, []byte(`<html>`), "test")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrSourceUnavailable)
+	assert.ErrorIs(t, err, netx.ErrSourceUnavailable)
 }
 
 func TestCheckHTMLResponse_HTMLBody(t *testing.T) {
 	t.Parallel()
 
 	resp := &http.Response{Header: http.Header{"Content-Type": []string{"application/octet-stream"}}}
-	err := checkHTMLResponse(resp, []byte(`  <html>`), "test")
+	err := netx.CheckHTMLResponse(resp, []byte(`  <html>`), "test")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrSourceUnavailable)
+	assert.ErrorIs(t, err, netx.ErrSourceUnavailable)
 }
 
 func TestValidateStreamURL(t *testing.T) {
@@ -1723,10 +1724,10 @@ func TestValidateStreamURL(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			result, err := validateStreamURL(tc.url, "test")
+			result, err := netx.ValidateStreamURL(tc.url, "test")
 			if tc.expectErr {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, ErrInvalidStreamURL)
+				assert.ErrorIs(t, err, netx.ErrInvalidStreamURL)
 			} else {
 				require.NoError(t, err)
 				assert.NotEmpty(t, result)

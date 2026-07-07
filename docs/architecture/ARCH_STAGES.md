@@ -200,7 +200,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 **Verificação:** `go build ./... && go test ./... -short -race`
 
-### ⬜ Etapa 3.2 — Criar `scraper/netx/`, mover plumbing compartilhado
+### ✅ Etapa 3.2 — Criar `scraper/netx/`, mover plumbing compartilhado
 
 **Arquivos a mover:** `ssrf.go`, `errors.go`, `source_diagnostic.go`,
 `source_health.go`, `source_circuit.go` (+ seus `_test.go`) → `internal/scraper/netx/`.
@@ -300,14 +300,32 @@ _(atualizar após cada etapa)_
 | 2 | 2.1 ResolveURL | ✅ | 2026-07-06 |
 | 2 | 2.2 Unknown explícito | ✅ | 2026-07-06 |
 | 3 | 3.1 Apagar camadas antigas + nomes §2 | ✅ | 2026-07-07 |
-| 3 | 3.2 `scraper/netx/` | ⬜ | — |
+| 3 | 3.2 `scraper/netx/` | ✅ | 2026-07-07 |
 | 3 | 3.3 Extrair SuperFlix | ⬜ | — |
 | 3 | 3.4 Extrair allanime/animefire/goyabu | ⬜ | — |
 | 3 | 3.5 Rename + doc.go | ⬜ | — |
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 3.2 — criar `scraper/netx/` e mover o plumbing compartilhado.
+**Próxima etapa:** 3.3 — extrair SuperFlix para `scraper/providers/superflix/` (maior etapa; provável 🔄).
+
+**Notas da ETAPA 3.2 (2026-07-07):**
+- Movidos para `internal/scraper/netx/` (com `doc.go`): `ssrf.go`, `errors.go`,
+  `source_diagnostic.go` + testes. Exportados na mudança: `CheckHTTPStatus`,
+  `CheckHTMLResponse`, `CheckChallengeDocument`, `ValidateStreamURL`,
+  `IsDisallowedIP`, `SafeDialFunc`, `SafeScraperTransport` (eram unexported no
+  god-package). Consumidores atualizados: pacote scraper inteiro,
+  `player/download.go`, `player/scraper.go`, `pkg/goanime/errors.go`.
+- **Desvio do §6.6 (registrado):** `source_health.go` e `source_circuit.go`
+  NÃO foram para netx — são métodos/estado do `ScraperManager` (mapas por
+  `ScraperType`); movê-los criaria ciclo netx↔scraper. São estado do manager,
+  não plumbing puro. Revisitar quando o manager encolher (3.5) ou o breaker
+  for re-chaveado por `source.SourceKind` (candidato natural: Fase 4/5).
+- Testes divididos pelo dono real: `TestScraperManager_BaseURLForKnownTypes` →
+  `scraper/manager_baseurl_test.go`; testes de integração circuit/health (usam
+  `MockScraper`/`createTestManager`) → `scraper/diagnostic_integration_test.go`.
+  Testes puros de diagnostic/probe/ssrf/errors foram com seus arquivos.
+- Suíte -race verde · golangci-lint 0 issues.
 
 **Notas da ETAPA 3.1 (2026-07-07):**
 - **API final do §2 no ar:** `Resolve(a *models.Anime) (Source, ResolvedSource)`

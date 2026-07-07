@@ -99,7 +99,7 @@ func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 
 	client := NewSuperFlixClient()
 	// Plain client so getVideo reaches the httptest server (the production
-	// safeScraperTransport blocks loopback as an anti-SSRF measure).
+	// netx.SafeScraperTransport blocks loopback as an anti-SSRF measure).
 	client.client = srv.Client()
 	client.browserSolver = &failingEmbedSolver{t: t}
 

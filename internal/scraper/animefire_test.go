@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,7 +90,7 @@ func TestAnimefireSearchDetectsChallengePage(t *testing.T) {
 
 	_, err := client.SearchAnime("naruto")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable), "expected netx.ErrSourceUnavailable, got: %v", err)
 }
 
 func TestAnimefireExtractsVideoFromIframe(t *testing.T) {

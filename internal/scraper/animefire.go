@@ -14,6 +14,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -77,7 +78,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if err := checkHTTPStatus(resp, "AnimeFire search"); err != nil {
+		if err := netx.CheckHTTPStatus(resp, "AnimeFire search"); err != nil {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
@@ -98,7 +99,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if err := checkChallengeDocument(doc, "AnimeFire search"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "AnimeFire search"); err != nil {
 			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -220,7 +221,7 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 			return nil, lastErr
 		}
 
-		if err := checkHTTPStatus(resp, "AnimeFire episodes"); err != nil {
+		if err := netx.CheckHTTPStatus(resp, "AnimeFire episodes"); err != nil {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
@@ -241,7 +242,7 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 			return nil, lastErr
 		}
 
-		if err := checkChallengeDocument(doc, "AnimeFire episodes"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "AnimeFire episodes"); err != nil {
 			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -317,7 +318,7 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 			return "", lastErr
 		}
 
-		if err := checkHTTPStatus(resp, "AnimeFire episode page"); err != nil {
+		if err := netx.CheckHTTPStatus(resp, "AnimeFire episode page"); err != nil {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
@@ -338,7 +339,7 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 			return "", lastErr
 		}
 
-		if err := checkChallengeDocument(doc, "AnimeFire episode page"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "AnimeFire episode page"); err != nil {
 			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -382,7 +383,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 			return
 		}
 
-		validatedURL, err := validateStreamURL(src, "AnimeFire")
+		validatedURL, err := netx.ValidateStreamURL(src, "AnimeFire")
 		if err != nil {
 			return
 		}
@@ -403,10 +404,10 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 
 	// Method 2: Look for video element with src attribute
 	if videoSrc, exists := doc.Find("video source").Attr("src"); exists && videoSrc != "" {
-		return validateStreamURL(videoSrc, "AnimeFire")
+		return netx.ValidateStreamURL(videoSrc, "AnimeFire")
 	}
 	if videoSrc, exists := doc.Find("video").Attr("src"); exists && videoSrc != "" {
-		return validateStreamURL(videoSrc, "AnimeFire")
+		return netx.ValidateStreamURL(videoSrc, "AnimeFire")
 	}
 
 	// Method 3: Look for iframe with Blogger video
@@ -420,7 +421,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	})
 	if iframeSrc != "" {
 		util.Debug("Found Blogger iframe", "src", iframeSrc)
-		return validateStreamURL(iframeSrc, "AnimeFire")
+		return netx.ValidateStreamURL(iframeSrc, "AnimeFire")
 	}
 
 	// Method 4: Look for data-video, data-src, data-url attributes in various elements
@@ -435,7 +436,7 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	for i, selector := range selectors {
 		if elem := doc.Find(selector); elem.Length() > 0 {
 			if val, exists := elem.Attr(attrs[i]); exists && val != "" {
-				return validateStreamURL(val, "AnimeFire")
+				return netx.ValidateStreamURL(val, "AnimeFire")
 			}
 		}
 	}
@@ -444,13 +445,13 @@ func (c *AnimefireClient) extractVideoURL(doc *goquery.Document) (string, error)
 	html, err := doc.Html()
 	if err == nil {
 		if matches := extractAnimefireBloggerURL(html); matches != "" {
-			return validateStreamURL(matches, "AnimeFire")
+			return netx.ValidateStreamURL(matches, "AnimeFire")
 		}
 
 		for _, re := range []*regexp.Regexp{animefireMp4Re, animefireM3U8Re} {
 			if re.MatchString(html) {
 				if matches := re.FindString(html); matches != "" {
-					return validateStreamURL(matches, "AnimeFire")
+					return netx.ValidateStreamURL(matches, "AnimeFire")
 				}
 			}
 		}

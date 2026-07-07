@@ -20,6 +20,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -127,7 +128,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "Goyabu search API"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "Goyabu search API"); err != nil {
 		util.Debug("Goyabu API unavailable, trying HTML fallback", "error", err)
 		return c.searchAnimeHTML(query)
 	}
@@ -137,7 +138,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := checkHTMLResponse(resp, body, "Goyabu search API"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "Goyabu search API"); err != nil {
 		util.Debug("Goyabu API returned HTML, trying HTML fallback", "error", err)
 		return c.searchAnimeHTML(query)
 	}
@@ -192,7 +193,7 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "Goyabu homepage"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "Goyabu homepage"); err != nil {
 		return "", err
 	}
 
@@ -203,7 +204,7 @@ func (c *GoyabuClient) fetchNonce() (string, error) {
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 	if err == nil {
-		if err := checkChallengeDocument(doc, "Goyabu homepage"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "Goyabu homepage"); err != nil {
 			return "", err
 		}
 	}
@@ -242,7 +243,7 @@ func (c *GoyabuClient) searchAnimeHTML(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if err := checkHTTPStatus(resp, "Goyabu search HTML"); err != nil {
+		if err := netx.CheckHTTPStatus(resp, "Goyabu search HTML"); err != nil {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
@@ -258,7 +259,7 @@ func (c *GoyabuClient) searchAnimeHTML(query string) ([]*models.Anime, error) {
 			return nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
 
-		if err := checkChallengeDocument(doc, "Goyabu search HTML"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "Goyabu search HTML"); err != nil {
 			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -368,7 +369,7 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 			return nil, lastErr
 		}
 
-		if err := checkHTTPStatus(resp, "Goyabu episodes"); err != nil {
+		if err := netx.CheckHTTPStatus(resp, "Goyabu episodes"); err != nil {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
@@ -386,7 +387,7 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 		if err == nil {
-			if err := checkChallengeDocument(doc, "Goyabu episodes"); err != nil {
+			if err := netx.CheckChallengeDocument(doc, "Goyabu episodes"); err != nil {
 				lastErr = err
 				if c.shouldRetry(attempt) {
 					c.sleep()
@@ -517,7 +518,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "Goyabu episode page"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "Goyabu episode page"); err != nil {
 		return "", err
 	}
 
@@ -536,24 +537,24 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	// Strategy 1: Look for direct video URL in the page
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(pageHTML))
 	if err == nil {
-		if err := checkChallengeDocument(doc, "Goyabu episode page"); err != nil {
+		if err := netx.CheckChallengeDocument(doc, "Goyabu episode page"); err != nil {
 			return "", err
 		}
 
 		// Check for iframe with video embed
 		if src, exists := doc.Find("iframe").Attr("src"); exists && src != "" {
 			util.Debug("Goyabu strategy 1 hit: iframe", "src", src)
-			return validateStreamURL(src, "Goyabu")
+			return netx.ValidateStreamURL(src, "Goyabu")
 		}
 
 		// Check for video element
 		if src, exists := doc.Find("video source").Attr("src"); exists && src != "" {
 			util.Debug("Goyabu strategy 1 hit: video source", "src", src)
-			return validateStreamURL(src, "Goyabu")
+			return netx.ValidateStreamURL(src, "Goyabu")
 		}
 		if src, exists := doc.Find("video[data-video-src]").Attr("data-video-src"); exists && src != "" {
 			util.Debug("Goyabu strategy 1 hit: video[data-video-src]", "src", src)
-			return validateStreamURL(src, "Goyabu")
+			return netx.ValidateStreamURL(src, "Goyabu")
 		}
 		util.Debug("Goyabu strategy 1 miss: no iframe/video element in DOM")
 	} else {
@@ -579,7 +580,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 		matches := re.FindStringSubmatch(pageHTML)
 		if len(matches) >= 2 {
 			util.Debug("Goyabu strategy 3 hit: video URL pattern", "patternIdx", i, "url", matches[1])
-			return validateStreamURL(matches[1], "Goyabu")
+			return netx.ValidateStreamURL(matches[1], "Goyabu")
 		}
 	}
 	util.Debug("Goyabu strategy 3 miss: no video URL patterns matched")
@@ -587,7 +588,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	// Strategy 4: Return Blogger embed URL as last resort (video player can handle it)
 	if bloggerURL != "" {
 		util.Debug("Using Blogger embed URL as fallback", "url", bloggerURL)
-		return validateStreamURL(bloggerURL, "Goyabu")
+		return netx.ValidateStreamURL(bloggerURL, "Goyabu")
 	}
 
 	c.dumpEpisodePageDiagnostic(episodeURL, body, resp)
@@ -710,7 +711,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkHTTPStatus(resp, "Goyabu blogger decode"); err != nil {
+	if err := netx.CheckHTTPStatus(resp, "Goyabu blogger decode"); err != nil {
 		return "", err
 	}
 
@@ -719,7 +720,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 		return "", fmt.Errorf("failed to read AJAX response: %w", err)
 	}
 
-	if err := checkHTMLResponse(resp, body, "Goyabu blogger decode"); err != nil {
+	if err := netx.CheckHTMLResponse(resp, body, "Goyabu blogger decode"); err != nil {
 		return "", err
 	}
 
@@ -729,7 +730,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 		// Maybe it returned a direct URL string
 		urlStr := strings.TrimSpace(string(body))
 		if strings.HasPrefix(urlStr, "http") {
-			return validateStreamURL(urlStr, "Goyabu")
+			return netx.ValidateStreamURL(urlStr, "Goyabu")
 		}
 		return "", fmt.Errorf("failed to parse AJAX response: %w", err)
 	}
@@ -751,7 +752,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 				}
 			}
 			if bestURL != "" {
-				return validateStreamURL(bestURL, "Goyabu")
+				return netx.ValidateStreamURL(bestURL, "Goyabu")
 			}
 		}
 	}
@@ -764,7 +765,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 		for _, key := range []string{"url", "file", "src", "video_url", "stream_url"} {
 			if val, ok := obj[key]; ok {
 				if urlStr, ok := val.(string); ok && strings.HasPrefix(urlStr, "http") {
-					return validateStreamURL(urlStr, "Goyabu")
+					return netx.ValidateStreamURL(urlStr, "Goyabu")
 				}
 			}
 		}

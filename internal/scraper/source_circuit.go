@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 type sourceCircuitState struct {
 	failures       int
 	openUntil      time.Time
-	lastDiagnostic *SourceDiagnostic
+	lastDiagnostic *netx.SourceDiagnostic
 }
 
 type sourceCircuitBreaker struct {
@@ -35,7 +37,7 @@ func newSourceCircuitBreaker() *sourceCircuitBreaker {
 	}
 }
 
-func (cb *sourceCircuitBreaker) isOpen(source ScraperType) (time.Time, *SourceDiagnostic, bool) {
+func (cb *sourceCircuitBreaker) isOpen(source ScraperType) (time.Time, *netx.SourceDiagnostic, bool) {
 	if cb == nil {
 		return time.Time{}, nil, false
 	}
@@ -69,7 +71,7 @@ func (cb *sourceCircuitBreaker) recordSuccess(source ScraperType) {
 	delete(cb.states, source)
 }
 
-func (cb *sourceCircuitBreaker) recordFailure(source ScraperType, diagnostic *SourceDiagnostic) bool {
+func (cb *sourceCircuitBreaker) recordFailure(source ScraperType, diagnostic *netx.SourceDiagnostic) bool {
 	if cb == nil || diagnostic == nil || !diagnostic.ShouldOpenCircuit() {
 		return false
 	}
@@ -103,7 +105,7 @@ func (sm *ScraperManager) ensureCircuitBreaker() *sourceCircuitBreaker {
 	return sm.breaker
 }
 
-func (sm *ScraperManager) circuitOpenDiagnostic(source ScraperType) (*SourceDiagnostic, time.Duration, bool) {
+func (sm *ScraperManager) circuitOpenDiagnostic(source ScraperType) (*netx.SourceDiagnostic, time.Duration, bool) {
 	breaker := sm.ensureCircuitBreaker()
 	openUntil, lastDiagnostic, ok := breaker.isOpen(source)
 	if !ok {
@@ -116,12 +118,12 @@ func (sm *ScraperManager) circuitOpenDiagnostic(source ScraperType) (*SourceDiag
 		message = fmt.Sprintf("%s; last failure: %s", message, lastDiagnostic.UserMessage())
 	}
 
-	diagnostic := &SourceDiagnostic{
+	diagnostic := &netx.SourceDiagnostic{
 		Source:  sourceName,
 		Layer:   "circuit-breaker",
-		Kind:    DiagnosticSourceUnavailable,
+		Kind:    netx.DiagnosticSourceUnavailable,
 		Message: message,
-		Err:     ErrSourceUnavailable,
+		Err:     netx.ErrSourceUnavailable,
 	}
 
 	return diagnostic, time.Until(openUntil), true
@@ -131,6 +133,6 @@ func (sm *ScraperManager) recordSourceSuccess(source ScraperType) {
 	sm.ensureCircuitBreaker().recordSuccess(source)
 }
 
-func (sm *ScraperManager) recordSourceFailure(source ScraperType, diagnostic *SourceDiagnostic) bool {
+func (sm *ScraperManager) recordSourceFailure(source ScraperType, diagnostic *netx.SourceDiagnostic) bool {
 	return sm.ensureCircuitBreaker().recordFailure(source, diagnostic)
 }

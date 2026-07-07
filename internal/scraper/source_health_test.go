@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +49,7 @@ func TestCheckSourceHealth_UnregisteredFails(t *testing.T) {
 func TestCheckSourceHealth_CircuitOpenSkips(t *testing.T) {
 	t.Parallel()
 	sm := &ScraperManager{scrapers: map[ScraperType]UnifiedScraper{AllAnimeType: nil}}
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
+	diag := &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable}
 	for i := 0; i < defaultSourceFailureThreshold; i++ {
 		sm.recordSourceFailure(AllAnimeType, diag)
 	}

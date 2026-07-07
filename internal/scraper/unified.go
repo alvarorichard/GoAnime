@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -137,7 +138,7 @@ func (sm *ScraperManager) searchSpecificScraper(query string, scraperType Scrape
 
 	results, err := scraper.SearchAnime(query)
 	if err != nil {
-		diagnostic := DiagnoseError(sourceName, "search", err)
+		diagnostic := netx.DiagnoseError(sourceName, "search", err)
 		if sm.recordSourceFailure(scraperType, diagnostic) {
 			util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
 		}
@@ -223,7 +224,7 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 			if res.err != nil {
 				errorsMutex.Lock()
 				sourceName := sm.getScraperDisplayName(res.scraperType)
-				diagnostic := DiagnoseError(sourceName, "search", res.err)
+				diagnostic := netx.DiagnoseError(sourceName, "search", res.err)
 				util.Debug("Search error", "source", sourceName, "kind", diagnostic.Kind, "error", diagnostic)
 				if sm.recordSourceFailure(res.scraperType, diagnostic) {
 					util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
@@ -335,7 +336,7 @@ func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType,
 		// If we know the source's base URL, run a quick probe so the
 		// resulting diagnostic can distinguish "site is dead" (e.g.
 		// Cloudflare 522) from "site is just slow today".
-		enrichedErr := EnrichTimeoutWithProbe(ctx, sourceName, "search",
+		enrichedErr := netx.EnrichTimeoutWithProbe(ctx, sourceName, "search",
 			sm.getScraperBaseURL(st), timeoutErr, originProbeBudget)
 
 		return searchResult{

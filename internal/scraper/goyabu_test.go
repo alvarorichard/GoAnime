@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -364,7 +365,7 @@ func TestGoyabuSearchAnimeClassifiesBlockedHTMLAsSourceUnavailable(t *testing.T)
 
 	_, err := client.SearchAnime("naruto")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable), "expected netx.ErrSourceUnavailable, got: %v", err)
 }
 
 func TestGoyabuGetEpisodeStreamURLBlockedPage(t *testing.T) {
@@ -383,7 +384,7 @@ func TestGoyabuGetEpisodeStreamURLBlockedPage(t *testing.T) {
 
 	_, err := client.GetEpisodeStreamURL(server.URL + "/episode/blocked")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable), "expected netx.ErrSourceUnavailable, got: %v", err)
 }
 
 func TestGoyabuDecodeBloggerTokenClassifiesHTMLAsSourceUnavailable(t *testing.T) {
@@ -406,7 +407,7 @@ func TestGoyabuDecodeBloggerTokenClassifiesHTMLAsSourceUnavailable(t *testing.T)
 
 	_, err := client.decodeBloggerToken("token123")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable), "expected ErrSourceUnavailable, got: %v", err)
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable), "expected netx.ErrSourceUnavailable, got: %v", err)
 }
 
 // ===========================================================================

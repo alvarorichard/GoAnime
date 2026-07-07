@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,7 +146,7 @@ func TestAllAnimeSearchAnimeClassifiesHTMLPayloadAsSourceUnavailable(t *testing.
 
 	_, err := newTestClient(server.URL).SearchAnime("One Piece")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestAllAnimeSearchAnimeValidJSONParsesCorrectly(t *testing.T) {
@@ -173,7 +174,7 @@ func TestAllAnimeSearchAnimeClassifies403AsSourceUnavailable(t *testing.T) {
 
 	_, err := newTestClient(server.URL).SearchAnime("One Piece")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable(t *testing.T) {
@@ -186,7 +187,7 @@ func TestAllAnimeGetEpisodesListClassifiesHTMLPayloadAsSourceUnavailable(t *test
 
 	_, err := newTestClient(server.URL).GetEpisodesList("some-id", "sub")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestAllAnimeGetEpisodeURLClassifiesHTMLAsSourceUnavailable(t *testing.T) {
@@ -199,7 +200,7 @@ func TestAllAnimeGetEpisodeURLClassifiesHTMLAsSourceUnavailable(t *testing.T) {
 
 	_, _, err := newTestClient(server.URL).GetEpisodeURL("anime-id", "1", "sub", "best")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestAllAnimeGetEpisodeURL503ClassifiesAsSourceUnavailable(t *testing.T) {
@@ -211,24 +212,24 @@ func TestAllAnimeGetEpisodeURL503ClassifiesAsSourceUnavailable(t *testing.T) {
 
 	_, _, err := newTestClient(server.URL).GetEpisodeURL("anime-id", "1", "sub", "best")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestCheckHTMLResponseByteFallback(t *testing.T) {
 	t.Parallel()
 	resp := &http.Response{Header: make(http.Header)}
 	body := []byte("\r\n<!DOCTYPE html><html><body>blocked</body></html>")
-	err := checkHTMLResponse(resp, body, "test-source")
+	err := netx.CheckHTMLResponse(resp, body, "test-source")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestCheckHTTPStatusNonBlockingCodeReturnsPlainError(t *testing.T) {
 	t.Parallel()
 	resp := &http.Response{StatusCode: http.StatusNotFound}
-	err := checkHTTPStatus(resp, "test-source")
+	err := netx.CheckHTTPStatus(resp, "test-source")
 	require.Error(t, err)
-	assert.False(t, errors.Is(err, ErrSourceUnavailable))
+	assert.False(t, errors.Is(err, netx.ErrSourceUnavailable))
 	assert.Contains(t, err.Error(), "404")
 }
 
@@ -242,7 +243,7 @@ func TestAllAnimeGetLinksClassifiesHTMLContentTypeAsSourceUnavailable(t *testing
 
 	_, err := newTestClient(server.URL).getLinks(server.URL + "/links")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
@@ -254,7 +255,7 @@ func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
 
 	_, err := newTestClient(server.URL).getLinks(server.URL + "/links")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,7 +1217,7 @@ func TestGetEpisodesListRateLimited(t *testing.T) {
 
 	_, err := newTestClient(server.URL).GetEpisodesList("abc", "sub")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 }
 
 // ---------------------------------------------------------------------------
@@ -1661,24 +1662,24 @@ func TestHTTPStatusCodes(t *testing.T) {
 		{200, false},
 		{301, true}, // redirect is non-2xx
 		{400, true}, // bad request
-		{403, true}, // forbidden -> ErrSourceUnavailable
-		{429, true}, // rate limited -> ErrSourceUnavailable
+		{403, true}, // forbidden -> netx.ErrSourceUnavailable
+		{429, true}, // rate limited -> netx.ErrSourceUnavailable
 		{500, true}, // internal server error
-		{503, true}, // service unavailable -> ErrSourceUnavailable
+		{503, true}, // service unavailable -> netx.ErrSourceUnavailable
 	}
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("status_%d", tt.code), func(t *testing.T) {
 			t.Parallel()
 			resp := &http.Response{StatusCode: tt.code}
-			err := checkHTTPStatus(resp, "test")
+			err := netx.CheckHTTPStatus(resp, "test")
 			if tt.code >= 200 && tt.code < 300 {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
 			}
 			if tt.code == 403 || tt.code == 429 || tt.code == 503 {
-				assert.True(t, errors.Is(err, ErrSourceUnavailable))
+				assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 			}
 		})
 	}
@@ -1729,7 +1730,7 @@ func TestGetLinksIntermittentFailures(t *testing.T) {
 	// First call fails
 	_, err := client.getLinks(server.URL)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSourceUnavailable))
+	assert.True(t, errors.Is(err, netx.ErrSourceUnavailable))
 
 	// Second call succeeds
 	links, err := client.getLinks(server.URL)
