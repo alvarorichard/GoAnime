@@ -404,16 +404,16 @@ cmd/goanime                                      (entrypoint)
 
 ### 6.4 Root & docs cleanup (R1: intuitive)
 
-**Done.** The root previously carried loose planning docs and a mis-cased file:
+The repo root currently carries loose planning docs and a mis-cased file:
 
 ```
 TEST_PLAN.md  TEST_PLAN_FUNCTIONS.md  TEST_STAGES.md  TEST_STRATEGY.md   → docs/testing/
 claude.md                                                                → CLAUDE.md
 ```
 
-The four `TEST_*.md` now live in `docs/testing/` (their relative cross-links
-move with them) and `claude.md` is `CLAUDE.md`. The root shows only what a
-visitor expects: README(s), CHANGELOG, CLAUDE.md, LICENSE, build manifests.
+Move the four `TEST_*.md` into `docs/testing/` and rename `claude.md` →
+`CLAUDE.md`. The root then shows only what a visitor expects: README,
+CHANGELOG, LICENSE, build manifests.
 
 ### 6.5 How the structure serves each requirement
 
@@ -502,6 +502,52 @@ rests on proven ground:
 > imports in ONE obvious file (e.g. `internal/api/providers/register.go`) so the
 > active set stays readable in one glance — the best of both worlds.
 
+### Prior art, shipped: Curd v2.0.0 (sibling project, identical problem)
+
+Curd (`Wraient/curd`) is a CLI anime player in the same niche as GoAnime. In its
+**v2.0.0** release (Jun 2026) it shipped a **compile-time provider registry** that
+is, point for point, **Model B plus the optional-capability layer of Model C**.
+This is the strongest validation in this document: not a stdlib analogy but a
+direct peer that hit the same "rotating sources" wall and resolved it exactly the
+way §2–§4 recommend — in production, today.
+
+**Mapping — this proposal ⇄ what Curd actually shipped:**
+
+| This document | Curd v2.0.0 equivalent |
+|---|---|
+| Model B: self-describing source, `Register(s)` in `init()` | `providers.Register(Meta, factory)` in each `register.go` |
+| `Descriptor{Kind, Tags, URLMatchers, …}` (identity as data) | `Meta{Name, Aliases, Referrer, DefaultDisabled, …}` |
+| One source = one self-contained unit (R1/R2) | one package `internal/providers/<name>/` per source |
+| Model C: minimal interface + optional capabilities via type-assert (`Seasoned`, `Searchable`, `BrowserGated`) | optional `ModeResolver`, `HintResolver`, `IDResolver`, discovered by type assertion |
+| Rec. 1 nuance: all self-registers in ONE wiring file | `internal/loadproviders/load.go` (one blank-import list) |
+| §6.2 DAG: providers never import upward | hard rule "providers must not import `internal`"; they use a `curdhost` hooks package |
+| §7 rec. 5: no gRPC / `.so` plugins, single binary | stated non-goal; compile-time modules only |
+
+**What to adopt from Curd — additions on top of B/C:**
+
+| # | Steal | Why it helps | Req |
+|---|---|---|---|
+| **S1** | **Runtime disable via config** — a `DisabledProviders=[…]` list plus a per-source `DefaultDisabled` flag in the `Descriptor`, turning a source off **without a rebuild or release**. | A host rotation or a suddenly-broken source becomes a one-line config edit, not a wait-for-release. It is the manual, user-facing complement to the automatic circuit breaker: the breaker reacts to failures at runtime; the config kill-switch lets a human pre-empt a known-bad source. | R3 R5 |
+| **S2** | **An explicit host-services layer** (Curd's `curdhost`) — a small package of typed hooks (`HTTPClient()`, `Log()`, `StoragePath()`, …) that source packages consume **instead of importing the layers above them**. | §6.2 draws the no-cycle DAG; this is how to *enforce* it concretely. The shared HTTP client / cookie jar / cache path (R6, build-once) reach a leaf source package through this seam with no import cycle, and the seam is trivially mockable in tests. | R3 R5 R6 |
+| **S3** | **One wiring file, confirmed** — Curd keeps every source's blank import in a single `load.go`. | Validates the §7 rec. 1 "nuance" with a shipping peer: the active-source set stays readable in one glance. Adopt it as settled, not as an open question. | R1 R2 |
+
+**What NOT to copy from Curd — GoAnime is already ahead here:**
+
+- **Context.** Curd's `Provider` interface has **no `context.Context`**
+  (`SearchAnime(query, mode)`, `GetEpisodeURL(cfg, id, ep)`). The context-first
+  interface in §1a/§2 is strictly better for clean timeout / Ctrl-C cancellation
+  with no goroutine leaks. **Keep `ctx` on every method; do not regress to Curd's
+  signature.** (R3)
+- **Failure-handling depth.** Curd's whole answer to a broken source is the manual
+  config kill-switch (S1). GoAnime already has typed `SourceDiagnostic`,
+  `source_circuit.go`, `source_health.go`, and an explicit `Unknown` (§0). Treat
+  S1 as a **complement** to those, not a replacement — adopt the config switch
+  *and* keep the structured, automatic isolation. (R5)
+
+**Net:** Curd proves the chosen direction ships and scales for this exact domain.
+Fold in S1–S3, keep GoAnime's context-first interface and structured failure
+isolation, and the result is strictly a **superset** of both designs.
+
 ---
 
 ## 8. Risk notes
@@ -546,7 +592,7 @@ measured, not estimated (Go 1.26.3, 33 packages, ~32.7k src LOC, ~40.8k test LOC
 | C5 | **gofmt drift** | ~10 source files are not `gofmt`-clean → formatting isn't enforced in practice. | R3 |
 | C6 | **Dependency weight** | **73** direct dependencies for a CLI — supply-chain surface and build cost. | R3 R6 |
 | C7 | **Missing OSS health files** | No `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, or `ARCHITECTURE.md` (this doc fills the last). | R1 |
-| C8 | **Naming hacks / root clutter** (**done**) | Test renames: ~~`zzchooser_test.go`~~ → `superflix_getvideo_sniff_live_test.go`, ~~`ci_skip_test.go`~~ → `skip_in_ci_test.go`, ~~`source_diagnostic_extras_test.go`~~ → `source_diagnostic_errors_test.go`, ~~`superflix_helpers_more_test.go`~~ → `superflix_helpers_test.go`. Root: ~~`claude.md`~~ → `CLAUDE.md`; four `TEST_*.md` → `docs/testing/`. | R1 |
+| C8 | **Naming hacks / root clutter** | `zzchooser_test.go` (zz-sort hack), `ci_skip_test.go` (catch-all), `claude.md` (mis-cased), four `TEST_*.md` loose at root. | R1 |
 
 ### Verdict
 
@@ -569,6 +615,12 @@ change; it directly resolves R1/R2/R3 and is the thing a reviewer notices first.
 6. **C8** — rename the hack files; move `TEST_*.md` to `docs/testing/`; `claude.md`
    → `CLAUDE.md`.
 7. **C6** — audit direct deps; drop anything a small CLI doesn't need.
+8. **S1 + S2 + S3** (from §7, validated by Curd v2.0.0) — while wiring the
+   registry (C1), add a `DisabledProviders` config kill-switch (S1) and a
+   `curdhost`-style host-services package (S2), and keep all self-registers in one
+   wiring file (S3). All three are low-cost and harden R3/R5/R6 without touching
+   user-visible behavior. Keep the context-first interface — do **not** adopt
+   Curd's `ctx`-less signatures.
 
 None of these require changing user-visible behavior; all are gated by the green
 suite and reversible.
