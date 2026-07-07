@@ -132,7 +132,7 @@ go build ./...
 go test ./... -short -race
 ```
 
-### ⬜ Etapa 1.2 — `GetVideoURLForEpisodeEnhanced` vira wrapper fino
+### ✅ Etapa 1.2 — `GetVideoURLForEpisodeEnhanced` vira wrapper fino
 
 **Arquivos:** `internal/player/scraper.go`, `internal/api/enhanced.go`.
 
@@ -296,7 +296,7 @@ _(atualizar após cada etapa)_
 | 0 | 0.1 Núcleo Model B | ✅ | 2026-07-06 |
 | 0 | 0.2 Migrar 4 providers | ✅ | 2026-07-06 |
 | 1 | 1.1 ctx ponta a ponta | ✅ | 2026-07-06 |
-| 1 | 1.2 Wrapper fino | ⬜ | — |
+| 1 | 1.2 Wrapper fino | ✅ | 2026-07-06 |
 | 2 | 2.1 ResolveURL | ⬜ | — |
 | 2 | 2.2 Unknown explícito | ⬜ | — |
 | 3 | 3.1 Apagar camadas antigas | ⬜ | — |
@@ -307,7 +307,32 @@ _(atualizar após cada etapa)_
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 1.2 — `GetVideoURLForEpisodeEnhanced` vira wrapper fino sobre `source.ResolveSource` → `FetchStreamURL(ctx, …)`.
+**Próxima etapa:** 2.1 — URL-only via `ResolveSourceURL`; deletar a síntese fake-AllAnime.
+
+**Notas da ETAPA 1.2 (2026-07-06) — Phase 1 do §5 COMPLETA:**
+- `GetVideoURLForEpisodeEnhanced` agora despacha via `source.ResolveSource` →
+  `Source.FetchStreamURL(ctx, …)`. Blank import de `api/providers` em
+  `player/scraper.go` popula o registry (consolidar num wiring file único = S3, backlog).
+- **Paridade por delegação:** cada provider delega às MESMAS funções api que o
+  caminho antigo chamava — AllAnime: `GetEpisodeStreamURLEnhanced` (seta referer
+  global!) com fallback `GetEpisodeStreamURL`; SuperFlix: `GetSuperFlixStreamURL`
+  (spinner, preflight browser, referer/legendas globais, erros amigáveis);
+  AnimeFire/Goyabu: adapter direto com paridade completa (quality, empty-check,
+  `ClearGlobalSubtitles`/`SetGlobalAnimeSource`). Vars injetáveis
+  (`superFlixStreamFn` etc.) são o seam de teste; corpos migram para pacotes
+  por source na Fase 3.
+- **Política transitória no wrapper** (espelha o legado byte a byte, morre na
+  Fase 2/3): `isMovieOrTVSourcePlayer` decide mensagens de erro + pula extração;
+  `resolved.Kind == AllAnime` → erro sem fallback; demais → fallback silencioso
+  `GetVideoURLForEpisode`. `Unknown` → best-effort AllAnime via `Registered`.
+- api/enhanced.go NÃO foi rewired (viraria ciclo providers↔api); ele é o motor
+  por baixo dos providers até a Fase 3 deletar o branching (step 7 do §5).
+- Verificação: suíte curta -race verde · `TestSuperFlixStreamRevival_Live` PASS
+  · `RealSuperFlix_SearchAndVerify` PASS · `RealSuperFlix_GetEpisodes` FALHA
+  **pré-existente** (air_date vazio vindo do upstream; falha igual sem o diff —
+  confirmado via stash).
+- 4 testes novos de wiring em `player/source_dispatch_test.go` (dispatch via
+  registry, política AllAnime/movie-TV, best-effort Unknown).
 
 **Notas da ETAPA 1.1 (2026-07-06):**
 - Cadeia real difere do doc: `handlers/media.go` NÃO chama o dispatch; o handler

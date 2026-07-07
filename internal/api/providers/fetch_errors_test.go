@@ -4,9 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,14 +33,74 @@ func TestAllAnimeProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestAllAnimeProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &allAnimeProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://allanime.to/anime/abc123", Source: "AllAnime"}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "ep-url"}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
+// restoreStreamFns resets the stream-fetch indirections after a test stubbed
+// them. Tests that stub these globals must NOT run in parallel.
+func restoreStreamFns(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		allAnimeEnhancedStreamFn = api.GetEpisodeStreamURLEnhanced
+		fallbackStreamFn = api.GetEpisodeStreamURL
+		superFlixStreamFn = api.GetSuperFlixStreamURL
+	})
+}
+
+func TestAllAnimeProvider_FetchStreamURL(t *testing.T) {
+	// Stubs package-level fn indirections — not parallel.
+	p := &allAnimeProvider{}
+	anime := &models.Anime{URL: "hHjXnUTda", Source: "AllAnime"}
+	ep := &models.Episode{Number: "1", Num: 1, URL: "hHjXnUTda"}
+
+	t.Run("enhanced path wins", func(t *testing.T) {
+		restoreStreamFns(t)
+		allAnimeEnhancedStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			return "https://cdn.example/enhanced.m3u8", nil
+		}
+		fallbackStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			t.Error("fallback must not run when enhanced succeeds")
+			return "", nil
+		}
+		url, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
+		require.NoError(t, err)
+		assert.Equal(t, "https://cdn.example/enhanced.m3u8", url)
+	})
+
+	t.Run("falls back to regular enhanced API", func(t *testing.T) {
+		restoreStreamFns(t)
+		allAnimeEnhancedStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			return "", assert.AnError
+		}
+		fallbackStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			return "https://cdn.example/regular.m3u8", nil
+		}
+		url, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
+		require.NoError(t, err)
+		assert.Equal(t, "https://cdn.example/regular.m3u8", url)
+	})
+
+	t.Run("both paths failing surfaces error", func(t *testing.T) {
+		restoreStreamFns(t)
+		allAnimeEnhancedStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			return "", assert.AnError
+		}
+		fallbackStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			return "", assert.AnError
+		}
+		_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "allAnime stream")
+	})
+
+	t.Run("cancelled context returns immediately", func(t *testing.T) {
+		restoreStreamFns(t)
+		allAnimeEnhancedStreamFn = func(_ *models.Episode, _ *models.Anime, _ string) (string, error) {
+			t.Error("must not fetch with cancelled context")
+			return "", nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := p.FetchStreamURL(ctx, ep, anime, "best")
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -100,49 +162,50 @@ func TestSuperFlixProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestSuperFlixProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		URL:    "https://superflix.gs/serie/1234",
-		Source: "SuperFlix",
-	}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "https://superflix.gs/ep/1"}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
-}
+func TestSuperFlixProvider_FetchStreamURL(t *testing.T) {
+	// Stubs package-level fn indirections and reads global anime source — not parallel.
+	p := &superFlixProvider{}
+	anime := &models.Anime{URL: "1234", Source: "SuperFlix", MediaType: models.MediaTypeTV}
+	ep := &models.Episode{Number: "3", Num: 3, URL: "1234", SeasonID: "2"}
 
-// ---------------------------------------------------------------------------
-// EpisodeNumber (already has test in source_providers_test.go, but ensure
-// the existing test covers the edge cases — not duplicated here)
-// superFlixProvider.FetchStreamURL with MediaTypeMovie path
-// ---------------------------------------------------------------------------
+	t.Run("delegates to the full SuperFlix UX path", func(t *testing.T) {
+		restoreStreamFns(t)
+		var gotAnime *models.Anime
+		var gotEp *models.Episode
+		var gotQuality string
+		superFlixStreamFn = func(a *models.Anime, e *models.Episode, q string) (string, error) {
+			gotAnime, gotEp, gotQuality = a, e, q
+			return "https://cdn.example/sf.m3u8", nil
+		}
+		url, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
+		require.NoError(t, err)
+		assert.Equal(t, "https://cdn.example/sf.m3u8", url)
+		assert.Same(t, anime, gotAnime)
+		assert.Same(t, ep, gotEp)
+		assert.Equal(t, "best", gotQuality)
+		assert.Equal(t, "SuperFlix", util.GetGlobalAnimeSource(), "entry side effect must tag the global source")
+	})
 
-func TestSuperFlixProvider_FetchStreamURL_MoviePath(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		Source:    "SuperFlix",
-		MediaType: models.MediaTypeMovie,
-	}
-	ep := &models.Episode{Number: "1", Num: 1}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
-	require.Error(t, err)
-}
+	t.Run("error passthrough", func(t *testing.T) {
+		restoreStreamFns(t)
+		superFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (string, error) {
+			return "", assert.AnError
+		}
+		_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
+		require.ErrorIs(t, err, assert.AnError)
+	})
 
-func TestSuperFlixProvider_FetchStreamURL_WithSeason(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{
-		Source:        "SuperFlix",
-		CurrentSeason: 2,
-	}
-	ep := &models.Episode{Number: "3", Num: 3}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
+	t.Run("cancelled context returns immediately", func(t *testing.T) {
+		restoreStreamFns(t)
+		superFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (string, error) {
+			t.Error("must not fetch with cancelled context")
+			return "", nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := p.FetchStreamURL(ctx, ep, anime, "best")
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 // ---------------------------------------------------------------------------

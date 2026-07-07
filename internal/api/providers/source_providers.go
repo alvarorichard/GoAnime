@@ -4,9 +4,21 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/util"
+)
+
+// Stream-fetch indirections. Production points at the proven api layer — the
+// exact functions the legacy player dispatch called — so switching dispatch to
+// the Source registry cannot change behavior. Tests swap these to avoid
+// network. The api bodies migrate into per-source packages in Phase 3.
+var (
+	allAnimeEnhancedStreamFn = api.GetEpisodeStreamURLEnhanced
+	fallbackStreamFn         = api.GetEpisodeStreamURL
+	superFlixStreamFn        = api.GetSuperFlixStreamURL
 )
 
 // EpisodeNumber extracts the episode number string from an Episode model.
@@ -70,17 +82,17 @@ func (p *allAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime)
 	return adapter.GetAnimeEpisodes(animeID)
 }
 
-func (p *allAnimeProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	adapter, err := p.manager().GetScraper(scraper.AllAnimeType)
-	if err != nil {
+// FetchStreamURL mirrors the legacy player dispatch for AllAnime: the
+// navigation-aware enhanced path first (it sets the global referer mpv needs),
+// then the regular enhanced API.
+func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	animeID := source.ExtractAllAnimeID(anime.URL)
-	epNum := EpisodeNumber(episode)
-	if quality == "" {
-		quality = "best"
+	if url, err := allAnimeEnhancedStreamFn(episode, anime, quality); err == nil {
+		return url, nil
 	}
-	url, _, err := adapter.GetStreamURL(animeID, epNum, quality)
+	url, err := fallbackStreamFn(episode, anime, quality)
 	if err != nil {
 		return "", fmt.Errorf("allAnime stream: %w", err)
 	}
@@ -128,14 +140,29 @@ func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *animeFireProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStreamURL mirrors api.GetEpisodeStreamURL's AnimeFire branch: same
+// global side effects, same adapter call including the quality argument.
+func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
 	adapter, err := p.manager().GetScraper(scraper.AnimefireType)
 	if err != nil {
 		return "", err
 	}
-	url, _, err := adapter.GetStreamURL(episode.URL)
+	if quality == "" {
+		quality = "best"
+	}
+	url, _, err := adapter.GetStreamURL(episode.URL, quality)
 	if err != nil {
 		return "", fmt.Errorf("animeFire stream: %w", err)
+	}
+	if url == "" {
+		return "", fmt.Errorf("empty stream URL returned from Animefire.io")
 	}
 	return url, nil
 }
@@ -181,7 +208,16 @@ func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) (
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *goyabuProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStreamURL mirrors api.GetEpisodeStreamURL's Goyabu branch: same global
+// side effects, same adapter call (Goyabu takes no quality argument).
+func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
 	adapter, err := p.manager().GetScraper(scraper.GoyabuType)
 	if err != nil {
 		return "", err
@@ -189,6 +225,9 @@ func (p *goyabuProvider) FetchStreamURL(_ context.Context, episode *models.Episo
 	url, _, err := adapter.GetStreamURL(episode.URL)
 	if err != nil {
 		return "", fmt.Errorf("goyabu stream: %w", err)
+	}
+	if url == "" {
+		return "", fmt.Errorf("empty stream URL returned from Goyabu")
 	}
 	return url, nil
 }
@@ -357,23 +396,16 @@ func (p *superFlixProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *superFlixProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	adapter, err := p.manager().GetScraper(scraper.SuperFlixType)
-	if err != nil {
+// FetchStreamURL mirrors api.GetEpisodeStreamURL's SuperFlix branch: the same
+// entry side effects, then the full UX path (browser preflight notices,
+// spinner, global referer/subtitles, friendly errors) via GetSuperFlixStreamURL.
+func (p *superFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	epNum := EpisodeNumber(episode)
-	mediaType := "serie"
-	if anime.MediaType == models.MediaTypeMovie {
-		mediaType = "filme"
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
 	}
-	season := "1"
-	if anime.CurrentSeason > 0 {
-		season = fmt.Sprintf("%d", anime.CurrentSeason)
-	}
-	url, _, err := adapter.GetStreamURL(episode.URL, mediaType, season, epNum)
-	if err != nil {
-		return "", fmt.Errorf("superFlix stream: %w", err)
-	}
-	return url, nil
+	return superFlixStreamFn(anime, episode, quality)
 }

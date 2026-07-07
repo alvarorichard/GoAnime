@@ -110,9 +110,10 @@ func main() {
 		}
 		// Check if error is movie download request (FlixHQ/SFlix)
 		if err == util.ErrMovieDownloadRequested {
-			if movieDownloadErr := handlers.HandleMovieDownloadRequest(); movieDownloadErr != nil {
-				util.Errorf("%v", util.ErrorHandler(movieDownloadErr))
-			}
+			// Movie/TV download is currently a permanent stub that always
+			// returns an explanatory error (scrapers removed) — log it
+			// unconditionally.
+			util.Errorf("%v", util.ErrorHandler(handlers.HandleMovieDownloadRequest()))
 			return
 		}
 		// Check if error is upscale request

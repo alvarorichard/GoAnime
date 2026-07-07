@@ -19,6 +19,11 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	// Blank import: the providers package self-registers every live Source in
+	// its init(). Without it the registry is empty and dispatch resolves
+	// nothing. Consolidated into a single wiring file in a later phase (S3).
+	_ "github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -368,42 +373,46 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 	}
 
-	// Movie/TV routing: SuperFlix and FlixHQ both flow through the enhanced API,
-	// which dispatches by anime.Source internally. Label logs by the actual
-	// source so triage isn't misled into thinking SuperFlix failures came from
-	// FlixHQ.
-	if isMovieOrTVSourcePlayer(anime) {
-		sourceLabel := anime.Source
-		if sourceLabel == "" {
-			sourceLabel = "movie/TV"
+	// ── Model B dispatch: resolve once via the source registry, then fetch
+	// through the resolved Source (each Source delegates to the same api
+	// functions the legacy chain called, so behavior is unchanged). The old
+	// helpers survive below only as the transitional error/extraction policy;
+	// Phase 3 deletes them together with the api-level branching.
+	src, resolved := source.ResolveSource(anime)
+	if src == nil {
+		// Unknown: preserve the legacy best-effort AllAnime default until
+		// Phase 2 makes the fallback explicit and configurable.
+		bestEffort, ok := source.Registered(resolved.BestEffortKind())
+		if !ok {
+			return "", fmt.Errorf("no source registered for %q (%s)", resolved.BestEffortKind(), resolved.Reason)
 		}
-		util.Debug("Movie/TV source detected", "source", sourceLabel, "mediaType", anime.MediaType, "episodeURL", episode.URL)
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			util.Debug("Movie/TV stream URL obtained", "source", sourceLabel, "url", streamURL)
-			return streamURL, nil
-		}
-		util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
-		return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
+		src = bestEffort
 	}
+	util.Debug("Source resolved", "kind", src.Describe().Kind, "reason", resolved.Reason)
 
-	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
-		if err == nil {
-			return streamURL, nil
-		}
-	}
-
-	// Use the regular enhanced API to get stream URL
-	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+	streamURL, err := src.FetchStreamURL(ctx, episode, anime, util.GlobalQuality)
 	if err != nil {
-		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
-			return GetVideoURLForEpisode(episode.URL)
+		// Transitional error policy — mirrors the legacy chain exactly.
+		if isMovieOrTVSourcePlayer(anime) {
+			sourceLabel := anime.Source
+			if sourceLabel == "" {
+				sourceLabel = "movie/TV"
+			}
+			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
+			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		// For AllAnime, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		if resolved.Kind == source.AllAnime {
+			// For AllAnime, return the error instead of trying legacy method
+			return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		}
+		// Legacy silent fallback for the remaining sources — removed in Phase 2.
+		return GetVideoURLForEpisode(episode.URL)
+	}
+
+	// Movie/TV URLs are returned as-is, exactly as the legacy chain did.
+	if isMovieOrTVSourcePlayer(anime) {
+		util.Debug("Movie/TV stream URL obtained", "source", anime.Source, "url", streamURL)
+		return streamURL, nil
 	}
 
 	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire

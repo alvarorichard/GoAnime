@@ -156,9 +156,8 @@ func TestHandleMovieDownloadRequest_PropagatesError(t *testing.T) {
 	t.Cleanup(func() { util.GlobalDownloadRequest = prev })
 
 	err := HandleMovieDownloadRequest()
-	if err != nil {
-		assert.Contains(t, err.Error(), "movie download failed")
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no longer supported")
 }
 
 // --- SearchMedia ---
