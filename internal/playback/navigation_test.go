@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"sync"
@@ -239,7 +240,7 @@ func TestPlayEpisode_VideoURLErrorReturnsBack(t *testing.T) {
 	eps := []models.Episode{{Number: "1", Num: 1, URL: "http://127.0.0.1:1/bogus/ep1"}}
 	mu := &sync.Mutex{}
 	pause := false
-	err := PlayEpisode(anime, eps, 1, eps[0].URL, "1", false, &pause, mu)
+	err := PlayEpisode(context.Background(), anime, eps, 1, eps[0].URL, "1", false, &pause, mu)
 	require.Error(t, err)
 }
 

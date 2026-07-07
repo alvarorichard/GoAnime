@@ -1,6 +1,7 @@
 package player
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -1321,7 +1322,10 @@ func switchEpisode(newIndex int, episodes []models.Episode, malID, anilistID int
 		anime = &models.Anime{URL: storedURL, Source: guessedSource}
 	}
 
-	targetURL, err := GetVideoURLForEpisodeEnhanced(&target, anime)
+	// switchEpisode runs inside the mpv key-event loop, which has no context
+	// today; Background is the sanctioned placeholder until that loop is
+	// context-aware.
+	targetURL, err := GetVideoURLForEpisodeEnhanced(context.Background(), &target, anime)
 	if err != nil {
 		return fmt.Errorf("failed to get video URL: %w", err)
 	}

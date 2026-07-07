@@ -45,9 +45,17 @@ jobs:
         run: |
           $headers = @{ "User-Agent" = "GoAnime-CI" }
           if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest" -Headers $headers
-          $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-v3-*.7z" } | Select-Object -First 1
-          if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" } | Select-Object -First 1 }
+          # mpv-winbuild publishes separate releases per arch, so /releases/latest
+          # may be an aarch64-only release. Scan recent releases for the first
+          # one carrying an x86_64 build.
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/zhongfly/mpv-winbuild/releases?per_page=15" -Headers $headers
+          $asset = $null
+          foreach ($release in $releases) {
+            $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-v3-*.7z" } | Select-Object -First 1
+            if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -like "mpv-x86_64-*.7z" } | Select-Object -First 1 }
+            if ($asset) { Write-Host "Using release $($release.tag_name)"; break }
+          }
+          if (-not $asset) { Write-Error "No x86_64 mpv asset found in the 15 most recent mpv-winbuild releases"; exit 1 }
           Write-Host "Downloading $($asset.name)..."
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv.7z -Headers @{ "Accept"="application/octet-stream"; "User-Agent"="GoAnime-CI" }
           7z x mpv.7z -ompv_tmp -y

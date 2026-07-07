@@ -18,6 +18,7 @@ import (
 )
 
 func PlayEpisode(
+	ctx context.Context,
 	anime *models.Anime,
 	episodes []models.Episode,
 	episodeNum int,
@@ -92,7 +93,7 @@ func PlayEpisode(
 
 	go func() {
 		defer wg.Done()
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(currentEpisodeCopy, anime)
+		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(ctx, currentEpisodeCopy, anime)
 	}()
 
 	wg.Wait()
@@ -132,7 +133,7 @@ func PlayEpisode(
 	// This populates the season map so episodes like Black Clover ep 52 go to
 	// Season 02 instead of Season 01.
 	enricher := metadata.NewEnricher()
-	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
+	seasonMap, _ := enricher.EnrichAnime(ctx, anime)
 	player.SetSeasonMap(seasonMap)
 
 	// Update metadata after enrichment (AniList may have populated IDs)

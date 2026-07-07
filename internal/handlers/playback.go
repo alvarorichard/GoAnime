@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -19,6 +20,11 @@ import (
 func HandlePlaybackMode(animeName string) {
 	timer := util.StartTimer("PlaybackMode:Total")
 	defer timer.Stop()
+
+	// Root context for the playback session. Today it is Background; once the
+	// dispatch path honors ctx end to end, this becomes the single place to
+	// hook signal-aware cancellation (signal.NotifyContext).
+	ctx := context.Background()
 
 	// Initialize the beautiful logger
 	util.InitLogger()
@@ -132,9 +138,9 @@ func HandlePlaybackMode(animeName string) {
 
 		playbackTimer := util.StartTimer("Playback:Handle")
 		if series {
-			playbackErr = playback.HandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
+			playbackErr = playback.HandleSeries(ctx, anime, episodes, totalEpisodes, discordManager.IsEnabled())
 		} else {
-			playbackErr = playback.HandleMovie(anime, episodes, discordManager.IsEnabled())
+			playbackErr = playback.HandleMovie(ctx, anime, episodes, discordManager.IsEnabled())
 		}
 		playbackTimer.Stop()
 

@@ -1,7 +1,7 @@
 # GoAnime — Migração de Arquitetura por Fases (Model B → hook para C)
 
 > **LEIA ISTO PRIMEIRO** ao continuar a migração de arquitetura.
-> **Decisão de referência:** `ARCHITECTURE.md` §4 (Recommendation), §5 (Migration plan), §6 (Repo layout), §7 (prior art).
+> **Decisão de referência:** `docs/ARCHITECTURE.md` §4 (Recommendation), §5 (Migration plan), §6 (Repo layout), §7 (prior art).
 > **Meta:** colapsar os três dispatchers vivos (`player/scraper.go`, `api/enhanced.go`,
 > `scraper/unified.go`) em um único caminho declarativo (`source.Resolve` →
 > `Source.FetchStreamURL(ctx, …)`), sem quebrar comportamento visível ao usuário.
@@ -24,6 +24,34 @@
    `go build ./...` e `go test ./... -short -race` são o mínimo antes de marcar ✅.
 
 Símbolos: ⬜ não iniciada · 🔄 parcial (continuar na próxima sessão) · ✅ completa.
+
+## Conformidade com docs/ARCHITECTURE.md — REGRA
+
+**A recomendação (§4) é lei:** Model B agora, capacidades do Model C só quando um
+source real precisar (SuperFlix primeiro). O estado FINAL do código deve bater
+com o §2 Model B **exatamente** — interface, assinaturas e nomes. Estados
+intermediários podem diferir apenas no que o próprio §5 autoriza ("the new path
+can shadow the old until the final deletion").
+
+Mapeamento etapa ↔ step do §5 (Migration plan):
+
+| Etapa deste plano | Step do §5 | Observação |
+|---|---|---|
+| 0.1 | Phase 0, step 1 | `Source`+`Descriptor`+`Priority`+`Register`/`Resolve` scanning `Describe()` |
+| 0.2 | Phase 0, step 2 | providers de `source_providers.go` → self-describing, um por vez |
+| 1.1 | Phase 1, step 4 | ctx ponta a ponta (executado antes do step 3 para isolar risco; o estado ao FIM da Fase 1 é idêntico ao do doc) |
+| 1.2 | Phase 1, step 3 | wrapper fino `Resolve(anime)` → `FetchStreamURL(ctx, …)` |
+| 2.1 | Phase 2, step 5 | `ResolveURL` + source; deletar síntese fake-AllAnime |
+| 2.2 | Phase 2, step 6 | `Unknown` explícito; best-effort só se configurado |
+| 3.1 | Phase 3, step 7 | deletar 3 dispatchers + **rename para nomes exatos do §2** |
+| 3.2–3.5 | Phase 3, step 8 (§6.6 ordem 1→5) | netx → superflix → demais → rename manager → doc.go |
+| 4.1 | Phase 4, step 9 | `Seasoned`/`BrowserGated` só no SuperFlix, via type-assert |
+| 5.1 (backlog) | §9 punch-list item 8 (S1–S3) | fora do §5; não bloqueia a recomendação |
+
+Nota sobre o exemplo `Register(&Source{client: NewClient()})` do §2: a construção
+no `init()` deve ser **barata** (struct). Máquina pesada (browser, ScraperManager)
+inicializa lazy no primeiro uso — é o que o R6 ("built once and reused, lazily")
+e o §1a exigem. O snippet é ilustrativo; os requisitos §0 são normativos.
 
 ---
 
@@ -86,7 +114,7 @@ go test ./internal/api/providers/... ./internal/api/source/... -v -race -count=1
 
 ## FASE 1 — Fio único de dispatch (⚠️ toca o caminho ao vivo)
 
-### ⬜ Etapa 1.1 — `context.Context` ponta a ponta (mecânico, sem trocar lógica)
+### ✅ Etapa 1.1 — `context.Context` ponta a ponta (mecânico, sem trocar lógica)
 
 **Arquivos:** `internal/playback/movie.go`, `internal/playback/common.go`,
 `internal/player/playvideo.go`, `internal/handlers/media.go`,
@@ -154,14 +182,20 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 ## FASE 3 — Deletar & organizar
 
-### ⬜ Etapa 3.1 — Apagar as três camadas antigas
+### ⬜ Etapa 3.1 — Apagar as três camadas antigas + nomes finais do §2
 
 **Arquivos:** `internal/player/scraper.go` (helpers `isXSourcePlayer`),
 `internal/api/enhanced.go` (branching por `anime.Source`),
-`internal/scraper/unified.go` (`switch` de adapters no `ScraperManager`).
+`internal/scraper/unified.go` (`switch` de adapters no `ScraperManager`),
+`internal/api/source/` (definition.go/resolve.go antigos).
 
 - Só entra depois que 1.2 + 2.1 + 2.2 estão ✅ e estáveis por pelo menos uma
   sessão. Apagar o código morto deixado como rede de segurança na Etapa 1.2.
+- **OBRIGATÓRIO (conformidade §2 Model B):** com o `Resolve` antigo morto,
+  renomear para a API exata do doc — `ResolveSource` → `Resolve(a *models.Anime)
+  (Source, ResolvedSource)` e `ResolveSourceURL` → `ResolveURL`. Apagar
+  `sourceDefs`/`SourceDefinition` (a lógica de matching migra para métodos do
+  `Descriptor`). Os testes anti-drift morrem junto (não há mais dois caminhos).
 - `go build` pega qualquer referência esquecida — se compilar, está seguro remover.
 
 **Verificação:** `go build ./... && go test ./... -short -race`
@@ -261,7 +295,7 @@ _(atualizar após cada etapa)_
 |---|---|:---:|---|
 | 0 | 0.1 Núcleo Model B | ✅ | 2026-07-06 |
 | 0 | 0.2 Migrar 4 providers | ✅ | 2026-07-06 |
-| 1 | 1.1 ctx ponta a ponta | ⬜ | — |
+| 1 | 1.1 ctx ponta a ponta | ✅ | 2026-07-06 |
 | 1 | 1.2 Wrapper fino | ⬜ | — |
 | 2 | 2.1 ResolveURL | ⬜ | — |
 | 2 | 2.2 Unknown explícito | ⬜ | — |
@@ -273,7 +307,21 @@ _(atualizar após cada etapa)_
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 1.1 — `context.Context` ponta a ponta (mecânico, sem trocar lógica).
+**Próxima etapa:** 1.2 — `GetVideoURLForEpisodeEnhanced` vira wrapper fino sobre `source.ResolveSource` → `FetchStreamURL(ctx, …)`.
+
+**Notas da ETAPA 1.1 (2026-07-06):**
+- Cadeia real difere do doc: `handlers/media.go` NÃO chama o dispatch; o handler
+  real é `handlers/playback.go` (`HandlePlaybackMode`). Cadeia encanada:
+  `HandlePlaybackMode` (raiz, `context.Background()` com comentário apontando o
+  futuro `signal.NotifyContext`) → `HandleSeries`/`HandleMovie` → `PlayEpisode`
+  → `player.GetVideoURLForEpisodeEnhanced(ctx, …)`.
+- `player/playvideo.go switchEpisode` roda no event-loop de teclas do mpv (sem
+  ctx hoje) → usa `context.Background()` com comentário; tornar o loop
+  context-aware fica para depois.
+- `GetVideoURLForEpisodeEnhanced` honra `ctx.Err()` na entrada (testado com
+  ctx cancelado); propagação downstream completa acontece na 1.2.
+- Bônus: `PlayEpisode` agora passa o ctx real ao `metadata.Enricher` (antes era
+  `context.Background()` hardcoded).
 
 **Notas da FASE 0 (2026-07-06):**
 - Novo `internal/api/source/source.go`: `Descriptor` (com `Priority`), interface

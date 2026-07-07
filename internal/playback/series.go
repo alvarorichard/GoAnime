@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -21,7 +22,7 @@ func printEpisodeNotFoundMsg() {
 	util.Warnf("This episode does not exist in this source. Try another episode.")
 }
 
-func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	tui.ResetTerminal()
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
@@ -52,6 +53,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	for {
 		err := PlayEpisode(
+			ctx,
 			anime,
 			episodes,
 			selectedEpisodeNum,
@@ -102,7 +104,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
 					}
@@ -153,7 +155,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
 					}
@@ -215,7 +217,7 @@ type extractEpisodeNumberFuncType func(s string) string
 // selectEpisodeFunc and extractEpisodeNumberFunc are package-level
 // indirections injected by tests. Production code never touches them.
 var (
-	selectEpisodeFunc       selectEpisodeFuncType       = player.SelectEpisodeWithFuzzyFinder
+	selectEpisodeFunc        selectEpisodeFuncType        = player.SelectEpisodeWithFuzzyFinder
 	extractEpisodeNumberFunc extractEpisodeNumberFuncType = player.ExtractEpisodeNumber
 )
 

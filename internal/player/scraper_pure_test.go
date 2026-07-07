@@ -1,6 +1,7 @@
 package player
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -325,16 +326,24 @@ func TestGetVideoURLForEpisode_AllAnimeShortIDRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "use enhanced API")
 }
 
+func TestGetVideoURLForEpisodeEnhanced_CancelledContextReturnsImmediately(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := GetVideoURLForEpisodeEnhanced(ctx, &models.Episode{URL: "http://example.com/x"}, nil)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestGetVideoURLForEpisodeEnhanced_NilAnimeWithShortIDReturnsError(t *testing.T) {
 	// Nil anime + short ID → must surface an error rather than guess.
-	_, err := GetVideoURLForEpisodeEnhanced(&models.Episode{URL: "shortid"}, nil)
+	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), &models.Episode{URL: "shortid"}, nil)
 	require.Error(t, err)
 }
 
 func TestGetVideoURLForEpisodeEnhanced_NilAnimeHTTPDelegatesToLegacy(t *testing.T) {
 	// Nil anime + HTTP URL → delegates to GetVideoURLForEpisode →
 	// extractVideoURL (SafeGet blocked on loopback) returns an error.
-	_, err := GetVideoURLForEpisodeEnhanced(&models.Episode{URL: "http://127.0.0.1:1/x"}, nil)
+	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), &models.Episode{URL: "http://127.0.0.1:1/x"}, nil)
 	require.Error(t, err)
 }
 
@@ -342,7 +351,7 @@ func TestGetVideoURLForEpisodeEnhanced_AllAnimeSourceRoutesEnhanced(t *testing.T
 	// AllAnime source → routes through enhanced API. With short bogus ID
 	// the underlying client fails and an error surfaces.
 	anime := &models.Anime{Source: "AllAnime", URL: "shortid"}
-	_, err := GetVideoURLForEpisodeEnhanced(&models.Episode{URL: "shortid", Number: "1"}, anime)
+	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), &models.Episode{URL: "shortid", Number: "1"}, anime)
 	require.Error(t, err)
 }
 
