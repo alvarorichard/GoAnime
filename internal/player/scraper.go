@@ -349,28 +349,26 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			return GetVideoURLForEpisode(episode.URL)
 		}
 
-		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
-		if isLikelyAllAnimeID(episode.URL) {
-			if util.IsDebug {
-				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
-			}
-			tmpAnime := &models.Anime{
-				URL:    episode.URL,
-				Source: "AllAnime",
-				Name:   "[AllAnime]",
-			}
-			// Ensure episode number is set
-			if episode.Number == "" && episode.Num > 0 {
-				episode.Number = fmt.Sprintf("%d", episode.Num)
-			}
-			if episode.Number == "" {
-				episode.Number = "1"
-			}
-			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
+		// URL-only resolution goes through the source registry — no more
+		// hardcoded fake-AllAnime guess (R3). The minimal anime context is
+		// derived from what the registry itself matched, never assumed.
+		src, resolved := source.ResolveSourceURL(episode.URL)
+		if src == nil {
+			return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 		}
-
-		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
-		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
+		util.Debug("URL-only source resolved", "kind", resolved.Kind, "reason", resolved.Reason)
+		urlOnlyAnime := &models.Anime{
+			URL:    episode.URL,
+			Source: string(resolved.Kind),
+		}
+		// Ensure episode number is set
+		if episode.Number == "" && episode.Num > 0 {
+			episode.Number = fmt.Sprintf("%d", episode.Num)
+		}
+		if episode.Number == "" {
+			episode.Number = "1"
+		}
+		return src.FetchStreamURL(ctx, episode, urlOnlyAnime, util.GlobalQuality)
 	}
 
 	// ── Model B dispatch: resolve once via the source registry, then fetch
@@ -380,8 +378,14 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 	// Phase 3 deletes them together with the api-level branching.
 	src, resolved := source.ResolveSource(anime)
 	if src == nil {
-		// Unknown: preserve the legacy best-effort AllAnime default until
-		// Phase 2 makes the fallback explicit and configurable.
+		// Unknown source at the dispatch boundary — never silent (R4/R5):
+		// warn loudly, and only fall back to best-effort AllAnime when the
+		// user hasn't opted into strict resolution.
+		if util.StrictSourceResolution() {
+			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort fallback disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
+		}
+		util.Warn("unrecognized source; dispatching best-effort AllAnime (set GOANIME_STRICT_SOURCE=1 to fail instead)",
+			"anime", anime.Name, "url", anime.URL, "reason", resolved.Reason)
 		bestEffort, ok := source.Registered(resolved.BestEffortKind())
 		if !ok {
 			return "", fmt.Errorf("no source registered for %q (%s)", resolved.BestEffortKind(), resolved.Reason)

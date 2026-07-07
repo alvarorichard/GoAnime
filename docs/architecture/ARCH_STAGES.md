@@ -158,7 +158,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 ## FASE 2 — Endurecer as bordas
 
-### ⬜ Etapa 2.1 — `ResolveURL` substitui a síntese fake-AllAnime
+### ✅ Etapa 2.1 — `ResolveURL` substitui a síntese fake-AllAnime
 
 **Arquivo:** `internal/player/scraper.go` (bloco `anime == nil` que hoje monta um
 `models.Anime` falso de AllAnime).
@@ -168,7 +168,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 **Verificação:** `go build ./... && go test ./... -short -race`
 
-### ⬜ Etapa 2.2 — `Unknown` explícito na borda do dispatch
+### ✅ Etapa 2.2 — `Unknown` explícito na borda do dispatch
 
 **Arquivos:** `internal/player/scraper.go`, `internal/api/enhanced.go`.
 
@@ -297,8 +297,8 @@ _(atualizar após cada etapa)_
 | 0 | 0.2 Migrar 4 providers | ✅ | 2026-07-06 |
 | 1 | 1.1 ctx ponta a ponta | ✅ | 2026-07-06 |
 | 1 | 1.2 Wrapper fino | ✅ | 2026-07-06 |
-| 2 | 2.1 ResolveURL | ⬜ | — |
-| 2 | 2.2 Unknown explícito | ⬜ | — |
+| 2 | 2.1 ResolveURL | ✅ | 2026-07-06 |
+| 2 | 2.2 Unknown explícito | ✅ | 2026-07-06 |
 | 3 | 3.1 Apagar camadas antigas | ⬜ | — |
 | 3 | 3.2 `scraper/netx/` | ⬜ | — |
 | 3 | 3.3 Extrair SuperFlix | ⬜ | — |
@@ -307,7 +307,22 @@ _(atualizar após cada etapa)_
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 2.1 — URL-only via `ResolveSourceURL`; deletar a síntese fake-AllAnime.
+**Próxima etapa:** 3.1 — apagar as três camadas antigas + rename para nomes exatos do §2
+(pré-requisito: 1.2/2.x estáveis por pelo menos uma sessão de uso real).
+
+**Notas da FASE 2 (2026-07-06):**
+- 2.1: bloco `anime == nil` agora usa `source.ResolveSourceURL(episode.URL)`;
+  o contexto mínimo (`Source: string(resolved.Kind)`) deriva do que o registry
+  casou — a síntese hardcoded fake-AllAnime foi deletada. URLs HTTP sem dono
+  continuam na extração legacy (decisão: mudança mínima; a extração legacy
+  morre na Fase 3). Valor não-casado → erro explícito, nunca palpite.
+- 2.2: borda do dispatch com `Unknown` nunca é silenciosa — `util.Warn` alto
+  ("unrecognized source; dispatching best-effort AllAnime") e a env
+  `GOANIME_STRICT_SOURCE=1|true` (novo `util.StrictSourceResolution()`)
+  transforma o fallback em erro. Default mantém o best-effort (compatibilidade);
+  o kill-switch por config completo é o S1 da Fase 5.
+- Testes: +4 no player (`source_dispatch_test.go`), +1 no util. Suíte -race
+  verde, golangci-lint 0 issues.
 
 **Notas da ETAPA 1.2 (2026-07-06) — Phase 1 do §5 COMPLETA:**
 - `GetVideoURLForEpisodeEnhanced` agora despacha via `source.ResolveSource` →

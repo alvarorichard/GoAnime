@@ -41,6 +41,15 @@ var (
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 )
 
+// StrictSourceResolution reports whether the GOANIME_STRICT_SOURCE environment
+// variable ("1" or "true") disables the best-effort AllAnime fallback for
+// media whose source cannot be recognized — unrecognized input then surfaces
+// as an error instead of being guessed (R4/R5).
+func StrictSourceResolution() bool {
+	v := os.Getenv("GOANIME_STRICT_SOURCE")
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 // SetGlobalSubtitles stores subtitles for the current playback session
 func SetGlobalSubtitles(subs []SubtitleInfo) {
 	GlobalSubtitles = subs
