@@ -117,7 +117,7 @@ func TestAnimeFireProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
 }
 
 func TestAnimeFireProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	t.Parallel()
+	// Mutates util globals (ClearGlobalSubtitles/SetGlobalAnimeSource) — not parallel.
 	t.Cleanup(ResetForTesting)
 	p := &animeFireProvider{sm: emptyManager()}
 	anime := &models.Anime{URL: "https://animefire.io/anime/naruto", Source: "AnimeFire"}
@@ -140,7 +140,7 @@ func TestGoyabuProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
 }
 
 func TestGoyabuProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	t.Parallel()
+	// Mutates util globals (ClearGlobalSubtitles/SetGlobalAnimeSource) — not parallel.
 	t.Cleanup(ResetForTesting)
 	p := &goyabuProvider{sm: emptyManager()}
 	anime := &models.Anime{URL: "https://goyabu.io/anime/naruto", Source: "Goyabu"}

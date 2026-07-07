@@ -86,27 +86,65 @@ func TestRegisteredByPriority(t *testing.T) {
 	assert.Equal(t, []SourceKind{"zz-low-prio", "ab-tie", "bb-tie", "aa-high-prio"}, kinds)
 }
 
-func TestDescriptorDefinition(t *testing.T) {
+func TestDescriptorMatchNonExplicit(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
 		Kind:        SuperFlix,
-		Priority:    30,
-		Explicit:    []string{"SuperFlix"},
 		Tags:        []string{"[superflix]"},
 		URLMatchers: []string{"superflix"},
 		MediaTypes:  []models.MediaType{models.MediaTypeMovie},
 		ShortID:     true,
 	}
-	def := d.definition()
-	assert.Equal(t, d.Kind, def.Kind)
-	assert.Equal(t, d.Explicit, def.Explicit)
-	assert.Equal(t, d.Tags, def.Tags)
-	assert.Equal(t, d.URLMatchers, def.URLMatchers)
-	assert.Equal(t, d.MediaTypes, def.MediaTypes)
-	assert.Equal(t, d.ShortID, def.ShortID)
+	tests := []struct {
+		name       string
+		anime      *models.Anime
+		wantOK     bool
+		wantReason string
+	}{
+		{"media type", &models.Anime{MediaType: models.MediaTypeMovie}, true, "MediaType=movie"},
+		{"name tag", &models.Anime{Name: "Filme [SuperFlix]"}, true, "tag [superflix]"},
+		{"url matcher", &models.Anime{URL: "https://superflix.to/x"}, true, "URL contains superflix"},
+		{"short ID", &models.Anime{URL: "hHjXnUTda"}, true, "short ID"},
+		{"no match", &models.Anime{Name: "X", URL: "https://example.com/1"}, false, ""},
+		{"empty anime", &models.Anime{}, false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reason, ok := d.matchNonExplicit(tt.anime)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantReason, reason)
+		})
+	}
 }
 
-func TestResolveSource(t *testing.T) {
+func TestDescriptorMatchURL(t *testing.T) {
+	t.Parallel()
+	d := Descriptor{
+		Kind:        AllAnime,
+		URLMatchers: []string{"allanime"},
+		ShortID:     true,
+	}
+	tests := []struct {
+		name   string
+		url    string
+		wantOK bool
+	}{
+		{"url matcher", "https://allanime.to/anime/x", true},
+		{"short ID", "hHjXnUTda", true},
+		{"empty", "", false},
+		{"no match", "https://example.com/v", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, ok := d.matchURL(tt.url)
+			assert.Equal(t, tt.wantOK, ok)
+		})
+	}
+}
+
+func TestResolve(t *testing.T) {
 	animeFire := newFake(AnimeFire, 10, func(d *Descriptor) {
 		d.Explicit = []string{"Animefire.io", "AnimeFire"}
 		d.Tags = []string{"[animefire]"}
@@ -144,7 +182,7 @@ func TestResolveSource(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			src, resolved := ResolveSource(tt.anime)
+			src, resolved := Resolve(tt.anime)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 			if tt.wantSrc == nil {
 				assert.Nil(t, src)
@@ -161,7 +199,7 @@ func TestResolveSource(t *testing.T) {
 		restore := SwapRegistryForTesting(high, low)
 		t.Cleanup(restore)
 
-		src, resolved := ResolveSource(&models.Anime{URL: "https://shared.example/x"})
+		src, resolved := Resolve(&models.Anime{URL: "https://shared.example/x"})
 		assert.Equal(t, SourceKind("low-kind"), resolved.Kind)
 		assert.Same(t, Source(low), src)
 	})
@@ -170,13 +208,13 @@ func TestResolveSource(t *testing.T) {
 		restore := SwapRegistryForTesting()
 		t.Cleanup(restore)
 
-		src, resolved := ResolveSource(&models.Anime{Name: "Naruto [PT-BR]"})
+		src, resolved := Resolve(&models.Anime{Name: "Naruto [PT-BR]"})
 		assert.Nil(t, src)
 		assert.Equal(t, Unknown, resolved.Kind)
 	})
 }
 
-func TestResolveSourceURL(t *testing.T) {
+func TestResolveURL(t *testing.T) {
 	animeFire := newFake(AnimeFire, 10, func(d *Descriptor) { d.URLMatchers = []string{"animefire"} })
 	allAnime := newFake(AllAnime, 40, func(d *Descriptor) {
 		d.URLMatchers = []string{"allanime"}
@@ -199,7 +237,7 @@ func TestResolveSourceURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			src, resolved := ResolveSourceURL(tt.url)
+			src, resolved := ResolveURL(tt.url)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 			assert.Equal(t, tt.wantNil, src == nil)
 		})

@@ -48,49 +48,6 @@ func TestExtractResolution(t *testing.T) {
 	}
 }
 
-func TestIsNumericString(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		s    string
-		want bool
-	}{
-		{"int", "12", true},
-		{"decimal", "12.5", true},
-		{"text", "abc", false},
-		{"mixed", "1a2", false},
-		{"empty", "", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, isNumericString(tt.s))
-		})
-	}
-}
-
-func TestIsLikelyAllAnimeID(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		s    string
-		want bool
-	}{
-		{"id-like", "hHjXnUTda", true},
-		{"http rejected", "https://x/y", false},
-		{"numeric rejected", "12345", false},
-		{"too short", "abc", false},
-		{"too long", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", false},
-		{"no letter", "1234567", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, isLikelyAllAnimeID(tt.s))
-		})
-	}
-}
-
 func TestDownloadFolderFormatter(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -152,49 +109,6 @@ func TestIsPlayableVideoURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, isPlayableVideoURL(tt.url))
-		})
-	}
-}
-
-func TestIsAllAnimeSourcePlayer(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		anime *models.Anime
-		want  bool
-	}{
-		{"nil", nil, false},
-		{"source field", &models.Anime{Source: "AllAnime"}, true},
-		{"url contains allanime", &models.Anime{URL: "https://allanime.to/x"}, true},
-		{"short id", &models.Anime{URL: "hHjXnUTda"}, true},
-		{"animedrive short rejected", &models.Anime{URL: "animesdrive"}, false},
-		{"animefire", &models.Anime{Source: "AnimeFire"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, isAllAnimeSourcePlayer(tt.anime))
-		})
-	}
-}
-
-func TestIsAnimeDriveSourcePlayer(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		anime *models.Anime
-		want  bool
-	}{
-		{"nil", nil, false},
-		{"source", &models.Anime{Source: "AnimeDrive"}, true},
-		{"name tag", &models.Anime{Name: "Naruto [AnimeDrive]"}, true},
-		{"url", &models.Anime{URL: "https://animesdrive.blog/x"}, true},
-		{"unrelated", &models.Anime{Source: "AllAnime"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, isAnimeDriveSourcePlayer(tt.anime))
 		})
 	}
 }

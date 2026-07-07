@@ -33,7 +33,7 @@ func (s *stubSource) FetchStreamURL(_ context.Context, e *models.Episode, a *mod
 }
 
 // TestGetVideoURLForEpisodeEnhanced_DispatchesThroughSourceRegistry proves the
-// wrapper routes through source.ResolveSource → Source.FetchStreamURL instead
+// wrapper routes through source.Resolve → Source.FetchStreamURL instead
 // of the legacy per-source chain.
 func TestGetVideoURLForEpisodeEnhanced_DispatchesThroughSourceRegistry(t *testing.T) {
 	// Swaps the global source registry — not parallel.
@@ -94,7 +94,7 @@ func TestGetVideoURLForEpisodeEnhanced_MovieTVErrorKeepsSourceLabel(t *testing.T
 }
 
 // TestGetVideoURLForEpisodeEnhanced_NilAnimeShortIDRoutesThroughRegistry pins
-// Phase 2.1: URL-only resolution goes through source.ResolveSourceURL and the
+// Phase 2.1: URL-only resolution goes through source.ResolveURL and the
 // minimal anime context comes from the resolution — no fake-AllAnime synthesis.
 func TestGetVideoURLForEpisodeEnhanced_NilAnimeShortIDRoutesThroughRegistry(t *testing.T) {
 	// Swaps the global source registry — not parallel.

@@ -7,11 +7,10 @@ import (
 	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // Descriptor is a source's self-declared identity (Model B).
-// It carries the same matching data as SourceDefinition plus an explicit
+// It carries the source's matching data plus an explicit
 // Priority, so resolution order is deterministic data — never init() order.
 type Descriptor struct {
 	Kind        SourceKind
@@ -23,17 +22,62 @@ type Descriptor struct {
 	ShortID     bool               // If true, accepts AllAnime-style short alphanumeric IDs
 }
 
-// definition converts a Descriptor to a SourceDefinition so both resolution
-// paths share the exact same matching logic during the migration.
-func (d Descriptor) definition() SourceDefinition {
-	return SourceDefinition{
-		Kind:        d.Kind,
-		Explicit:    d.Explicit,
-		Tags:        d.Tags,
-		URLMatchers: d.URLMatchers,
-		MediaTypes:  d.MediaTypes,
-		ShortID:     d.ShortID,
+// matchNonExplicit checks all match criteria except the explicit Source field.
+// Resolve handles explicit matching in a separate first pass so the Source
+// field always wins regardless of Priority ordering.
+func (d Descriptor) matchNonExplicit(anime *models.Anime) (string, bool) {
+	// Priority 2: MediaType
+	if anime.MediaType != "" {
+		for _, mt := range d.MediaTypes {
+			if anime.MediaType == mt {
+				return "MediaType=" + string(mt), true
+			}
+		}
 	}
+
+	// Priority 3: Name tags
+	if anime.Name != "" {
+		lower := strings.ToLower(anime.Name)
+		for _, tag := range d.Tags {
+			if strings.Contains(lower, tag) {
+				return "tag " + tag, true
+			}
+		}
+	}
+
+	// Priority 4: URL patterns
+	if anime.URL != "" {
+		lowerURL := strings.ToLower(anime.URL)
+		for _, pat := range d.URLMatchers {
+			if strings.Contains(lowerURL, pat) {
+				return "URL contains " + pat, true
+			}
+		}
+	}
+
+	// Priority 5: Short ID (AllAnime-style)
+	if d.ShortID && IsAllAnimeShortID(anime.URL) {
+		return "short ID", true
+	}
+
+	return "", false
+}
+
+// matchURL checks whether a raw URL matches this descriptor's URL patterns.
+func (d Descriptor) matchURL(url string) (string, bool) {
+	if url == "" {
+		return "", false
+	}
+	lower := strings.ToLower(url)
+	for _, pat := range d.URLMatchers {
+		if strings.Contains(lower, pat) {
+			return "URL contains " + pat, true
+		}
+	}
+	if d.ShortID && IsAllAnimeShortID(url) {
+		return "short ID", true
+	}
+	return "", false
 }
 
 // Source is a self-describing media source: identity (Describe) and behavior
@@ -92,76 +136,6 @@ func registeredByPriority() []Source {
 		return di.Kind < dj.Kind
 	})
 	return srcs
-}
-
-// ResolveSource determines the source for an anime by scanning the registered
-// sources' Describe() data. Same precedence as Resolve:
-//
-//  1. Explicit anime.Source field (checked across ALL sources first)
-//  2. anime.MediaType
-//  3. Tags in anime.Name
-//  4. URL pattern / short ID
-//
-// If nothing matches, returns (nil, Kind=Unknown) with a warning log — the
-// caller decides whether to fall back (BestEffortKind + Registered).
-func ResolveSource(anime *models.Anime) (Source, ResolvedSource) {
-	if anime == nil {
-		return nil, ResolvedSource{Kind: Unknown, Reason: "nil anime"}
-	}
-
-	srcs := registeredByPriority()
-
-	// Priority 1: Explicit Source field (highest priority, check all sources first)
-	if anime.Source != "" {
-		for _, s := range srcs {
-			d := s.Describe()
-			for _, e := range d.Explicit {
-				if anime.Source == e {
-					return s, ResolvedSource{Kind: d.Kind, Reason: "explicit Source=" + e}
-				}
-			}
-		}
-	}
-
-	// Priority 2+: MediaType, tags, URL, shortID (lowest Priority wins)
-	for _, s := range srcs {
-		d := s.Describe()
-		def := d.definition()
-		if reason, ok := def.matchNonExplicit(anime); ok {
-			return s, ResolvedSource{Kind: d.Kind, Reason: reason}
-		}
-	}
-
-	// PT-BR tag without specific source → default AnimeFire
-	if anime.Name != "" {
-		lower := strings.ToLower(anime.Name)
-		if strings.Contains(lower, "[pt-br]") || strings.Contains(lower, "[portugu") {
-			if s, ok := Registered(AnimeFire); ok {
-				return s, ResolvedSource{Kind: AnimeFire, Reason: "PT-BR language tag (default AnimeFire)"}
-			}
-		}
-	}
-
-	util.Warn("source resolution fell through to Unknown", "anime", anime.Name, "url", anime.URL)
-	return nil, ResolvedSource{Kind: Unknown, Reason: "no match, best-effort AllAnime"}
-}
-
-// ResolveSourceURL resolves a source from a raw URL string only, scanning the
-// registered sources. Used when no models.Anime context is available.
-func ResolveSourceURL(rawURL string) (Source, ResolvedSource) {
-	if rawURL == "" {
-		return nil, ResolvedSource{Kind: Unknown, Reason: "empty URL"}
-	}
-
-	for _, s := range registeredByPriority() {
-		d := s.Describe()
-		def := d.definition()
-		if reason, ok := def.matchURL(rawURL); ok {
-			return s, ResolvedSource{Kind: d.Kind, Reason: reason}
-		}
-	}
-
-	return nil, ResolvedSource{Kind: Unknown, Reason: "URL not matched"}
 }
 
 // SwapRegistryForTesting replaces the registry with the given sources and

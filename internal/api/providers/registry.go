@@ -66,7 +66,7 @@ func ForKind(kind source.SourceKind) (Provider, error) {
 // ForAnime resolves the source and returns the appropriate provider.
 // Convenience function combining source.Resolve() + ForKind().
 func ForAnime(anime *models.Anime) (Provider, source.ResolvedSource, error) {
-	resolved := source.Resolve(anime)
+	_, resolved := source.Resolve(anime)
 	kind := resolved.BestEffortKind()
 	p, err := ForKind(kind)
 	if err != nil {

@@ -36,8 +36,6 @@ import (
 // Pre-compiled regexes for player scraper (avoid per-call compilation)
 var (
 	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-	isNumericRe         = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-	hasLetterRe         = regexp.MustCompile(`[A-Za-z]`)
 	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
 	bloggerPatternRe    = regexp.MustCompile(`^https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)$`)
 	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
@@ -352,7 +350,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		// URL-only resolution goes through the source registry — no more
 		// hardcoded fake-AllAnime guess (R3). The minimal anime context is
 		// derived from what the registry itself matched, never assumed.
-		src, resolved := source.ResolveSourceURL(episode.URL)
+		src, resolved := source.ResolveURL(episode.URL)
 		if src == nil {
 			return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 		}
@@ -376,7 +374,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 	// functions the legacy chain called, so behavior is unchanged). The old
 	// helpers survive below only as the transitional error/extraction policy;
 	// Phase 3 deletes them together with the api-level branching.
-	src, resolved := source.ResolveSource(anime)
+	src, resolved := source.Resolve(anime)
 	if src == nil {
 		// Unknown source at the dispatch boundary — never silent (R4/R5):
 		// warn loudly, and only fall back to best-effort AllAnime when the
@@ -441,46 +439,6 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 	return streamURL, nil
 }
 
-// Helper function to check if anime is from AllAnime source (player module)
-func isAllAnimeSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") &&
-		!strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if anime is from AnimeDrive source (player module)
-func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AnimeDrive" {
-		return true
-	}
-	if strings.Contains(anime.Name, "[AnimeDrive]") {
-		return true
-	}
-	if strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-	return false
-}
-
 // Helper function to check if anime is from FlixHQ source (player module)
 // isMovieOrTVSourcePlayer routes any movie/TV content through the enhanced API,
 // which dispatches by anime.Source (SuperFlix, FlixHQ, ...). Despite the legacy
@@ -498,30 +456,6 @@ func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	}
 	if strings.Contains(anime.URL, "flixhq") {
 		return true
-	}
-	return false
-}
-
-// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
-func isNumericString(s string) bool {
-	if s == "" {
-		return false
-	}
-	return isNumericRe.MatchString(s)
-}
-
-// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
-func isLikelyAllAnimeID(s string) bool {
-	if strings.Contains(s, "http") {
-		return false
-	}
-	if isNumericString(s) {
-		return false
-	}
-	// Typical AllAnime IDs are short-ish alphanumeric strings
-	if len(s) >= 6 && len(s) < 30 {
-		// Must contain at least one letter
-		return hasLetterRe.MatchString(s)
 	}
 	return false
 }

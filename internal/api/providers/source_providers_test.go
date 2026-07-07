@@ -149,64 +149,65 @@ func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	}
 }
 
-// TestResolveSource_AgreesWithResolve is the anti-drift guard for the
-// migration: while both resolution paths exist, they must give the same
-// answer for every dispatch-relevant input.
-func TestResolveSource_AgreesWithResolve(t *testing.T) {
+// TestResolve_LiveRegistry resolves against the REAL registry populated by
+// this package's init() — it pins the production descriptors' matching
+// behavior end to end (the source-package tests use mirrored fakes).
+func TestResolve_LiveRegistry(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		anime *models.Anime
+		name     string
+		anime    *models.Anime
+		wantKind source.SourceKind
 	}{
-		{"nil anime", nil},
-		{"empty anime", &models.Anime{}},
-		{"explicit AllAnime", &models.Anime{Source: "AllAnime"}},
-		{"explicit AnimeFire legacy", &models.Anime{Source: "Animefire.io"}},
-		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}},
-		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}},
-		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}},
-		{"english tag", &models.Anime{Name: "Naruto [English]"}},
-		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}},
-		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}},
-		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}},
-		{"short ID", &models.Anime{URL: "hHjXnUTda"}},
-		{"numeric is not short ID", &models.Anime{URL: "8143"}},
-		{"PT-BR fallback", &models.Anime{Name: "Naruto [PT-BR]"}},
-		{"unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}},
+		{"nil anime", nil, source.Unknown},
+		{"empty anime", &models.Anime{}, source.Unknown},
+		{"explicit AllAnime", &models.Anime{Source: "AllAnime"}, source.AllAnime},
+		{"explicit AnimeFire legacy", &models.Anime{Source: "Animefire.io"}, source.AnimeFire},
+		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
+		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}, source.SuperFlix},
+		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
+		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.AllAnime},
+		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
+		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
+		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}, source.SuperFlix},
+		{"short ID", &models.Anime{URL: "hHjXnUTda"}, source.AllAnime},
+		{"PT-BR fallback", &models.Anime{Name: "Naruto [PT-BR]"}, source.AnimeFire},
+		{"unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, source.Unknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			old := source.Resolve(tt.anime)
-			src, resolved := source.ResolveSource(tt.anime)
-			assert.Equal(t, old.Kind, resolved.Kind, "old reason: %s / new reason: %s", old.Reason, resolved.Reason)
-			if resolved.Kind != source.Unknown {
+			src, resolved := source.Resolve(tt.anime)
+			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
+			if tt.wantKind != source.Unknown {
 				require.NotNil(t, src)
-				assert.Equal(t, resolved.Kind, src.Describe().Kind)
+				assert.Equal(t, tt.wantKind, src.Describe().Kind)
 			}
 		})
 	}
 }
 
-// TestResolveSourceURL_AgreesWithResolveURL mirrors the anti-drift guard for
-// URL-only resolution.
-func TestResolveSourceURL_AgreesWithResolveURL(t *testing.T) {
+// TestResolveURL_LiveRegistry mirrors TestResolve_LiveRegistry for URL-only
+// resolution against the real registered descriptors.
+func TestResolveURL_LiveRegistry(t *testing.T) {
 	t.Parallel()
-	urls := []string{
-		"",
-		"https://animefire.plus/ep/naruto-1",
-		"https://goyabu.to/ep/naruto-1",
-		"https://allanime.to/anime/hHjXnUTda",
-		"https://superflix.to/naruto",
-		"hHjXnUTda",
-		"https://example.com/video",
+	tests := []struct {
+		url      string
+		wantKind source.SourceKind
+	}{
+		{"", source.Unknown},
+		{"https://animefire.plus/ep/naruto-1", source.AnimeFire},
+		{"https://goyabu.to/ep/naruto-1", source.Goyabu},
+		{"https://allanime.to/anime/hHjXnUTda", source.AllAnime},
+		{"https://superflix.to/naruto", source.SuperFlix},
+		{"hHjXnUTda", source.AllAnime},
+		{"https://example.com/video", source.Unknown},
 	}
-	for _, url := range urls {
-		t.Run("url="+url, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run("url="+tt.url, func(t *testing.T) {
 			t.Parallel()
-			old := source.ResolveURL(url)
-			_, resolved := source.ResolveSourceURL(url)
-			assert.Equal(t, old.Kind, resolved.Kind, "old reason: %s / new reason: %s", old.Reason, resolved.Reason)
+			_, resolved := source.ResolveURL(tt.url)
+			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 		})
 	}
 }

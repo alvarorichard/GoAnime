@@ -182,7 +182,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 ## FASE 3 — Deletar & organizar
 
-### ⬜ Etapa 3.1 — Apagar as três camadas antigas + nomes finais do §2
+### ✅ Etapa 3.1 — Apagar as três camadas antigas + nomes finais do §2
 
 **Arquivos:** `internal/player/scraper.go` (helpers `isXSourcePlayer`),
 `internal/api/enhanced.go` (branching por `anime.Source`),
@@ -299,7 +299,7 @@ _(atualizar após cada etapa)_
 | 1 | 1.2 Wrapper fino | ✅ | 2026-07-06 |
 | 2 | 2.1 ResolveURL | ✅ | 2026-07-06 |
 | 2 | 2.2 Unknown explícito | ✅ | 2026-07-06 |
-| 3 | 3.1 Apagar camadas antigas | ⬜ | — |
+| 3 | 3.1 Apagar camadas antigas + nomes §2 | ✅ | 2026-07-07 |
 | 3 | 3.2 `scraper/netx/` | ⬜ | — |
 | 3 | 3.3 Extrair SuperFlix | ⬜ | — |
 | 3 | 3.4 Extrair allanime/animefire/goyabu | ⬜ | — |
@@ -307,8 +307,29 @@ _(atualizar após cada etapa)_
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 3.1 — apagar as três camadas antigas + rename para nomes exatos do §2
-(pré-requisito: 1.2/2.x estáveis por pelo menos uma sessão de uso real).
+**Próxima etapa:** 3.2 — criar `scraper/netx/` e mover o plumbing compartilhado.
+
+**Notas da ETAPA 3.1 (2026-07-07):**
+- **API final do §2 no ar:** `Resolve(a *models.Anime) (Source, ResolvedSource)`
+  e `ResolveURL(url) (Source, ResolvedSource)` — assinaturas exatas do doc.
+  `definition.go` (`sourceDefs`/`SourceDefinition`) DELETADO; matching agora são
+  métodos do `Descriptor` (`matchNonExplicit`/`matchURL`), com testes dedicados.
+  Registry é a única fonte de resolução; testes anti-drift removidos (não há
+  mais dois caminhos) e substituídos por `TestResolve_LiveRegistry`/`TestResolveURL_LiveRegistry`
+  em providers (validam os descriptors REAIS registrados via init()).
+- **Deletados do player** (prod-dead): `isAllAnimeSourcePlayer`,
+  `isAnimeDriveSourcePlayer`, `isLikelyAllAnimeID`, `isNumericString` e os
+  regexes órfãos (`isNumericRe`, `hasLetterRe`) + seus testes.
+- **Escopo re-anotado (honesto):** o branching de `api/enhanced.go` e o
+  `ScraperManager`/adapters de `unified.go` NÃO puderam ser apagados aqui —
+  são o motor por baixo dos providers desde a 1.2. Eles morrem nas Etapas
+  3.3–3.5, quando os corpos migrarem para os pacotes por source.
+  `isMovieOrTVSourcePlayer` também sobrevive como política transitória de
+  erro/extração no wrapper (morre quando a política normalizar).
+- Corrida de dados em teste corrigida: testes de `FetchStreamURL`
+  (AnimeFire/Goyabu) mutam globals de util → sem `t.Parallel()`.
+- Pré-requisito de "uma sessão de uso real" foi dispensado pelo usuário ao
+  pedir a etapa; a rede de segurança agora é o git history do PR #1391.
 
 **Notas da FASE 2 (2026-07-06):**
 - 2.1: bloco `anime == nil` agora usa `source.ResolveSourceURL(episode.URL)`;
