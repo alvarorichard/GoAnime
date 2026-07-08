@@ -307,19 +307,22 @@ func TestSearchAnime_ConcurrentExecution(t *testing.T) {
 
 	manager := createTestManager(allAnimeMock, animefireMock)
 
-	start := time.Now()
 	results, err := manager.SearchAnime("test", nil)
-	totalDuration := time.Since(start)
 
 	require.NoError(t, err)
 	assert.Len(t, results, 2)
 
-	// If running concurrently, total time should be ~100ms, not ~200ms
-	// Allow some buffer for test environment variations
-	assert.Less(t, totalDuration, 180*time.Millisecond,
-		"Searches should run concurrently, not sequentially")
-
-	// Verify both started around the same time (within 50ms of each other)
+	// Concurrency is proven by the START overlap, not by wall-clock total:
+	// each mock sleeps 100ms, so a SEQUENTIAL manager would start the second
+	// search only after the first's sleep finished (startDiff ≥ 100ms). A
+	// concurrent manager starts both together (startDiff ≈ 0). We therefore
+	// assert the two starts are comfortably below that 100ms sequential floor.
+	//
+	// The previous version also asserted totalDuration < 180ms, but that is a
+	// flaky absolute wall-clock bound: on a loaded CI runner time.Sleep(100ms)
+	// overshoots (observed ~298ms on windows-latest) even when the searches
+	// genuinely ran in parallel. The start-overlap check below is the correct,
+	// runner-speed-independent signal.
 	mu.Lock()
 	startDiff := allAnimeStart.Sub(animefireStart)
 	if startDiff < 0 {
@@ -327,8 +330,8 @@ func TestSearchAnime_ConcurrentExecution(t *testing.T) {
 	}
 	mu.Unlock()
 
-	assert.Less(t, startDiff, 50*time.Millisecond,
-		"Both searches should start nearly simultaneously")
+	assert.Less(t, startDiff, 80*time.Millisecond,
+		"both searches must start together (sequential execution would stagger them by ≥100ms)")
 }
 
 // =============================================================================
