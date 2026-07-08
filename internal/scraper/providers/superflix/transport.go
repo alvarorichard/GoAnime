@@ -172,6 +172,25 @@ func shouldInspect(resp *http.Response) bool {
 	return false
 }
 
+// noBrowserSolveKey marks requests that must never escalate to the headed
+// browser. Multi-source search is the main user: SuperFlix is only one of
+// several sources being queried, and popping a browser window during a search
+// is disproportionate — the challenge is returned as-is and the search simply
+// yields no SuperFlix results. The browser stays reserved for the play path
+// (episodes/stream), where the user explicitly chose SuperFlix content.
+type noBrowserSolveKey struct{}
+
+// WithoutBrowserSolve returns a context that forbids the Cloudflare browser
+// solver for requests carrying it.
+func WithoutBrowserSolve(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noBrowserSolveKey{}, true)
+}
+
+func browserSolveForbidden(ctx context.Context) bool {
+	v, _ := ctx.Value(noBrowserSolveKey{}).(bool)
+	return v
+}
+
 func (t *cfFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Once a solve has happened, force every request to carry the browser's UA
 	// so the UA-bound cf_clearance cookie stays valid.
@@ -219,6 +238,14 @@ func (t *cfFallbackTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	if t.solver == nil {
 		// CF detected but no solver wired (test/headless-disabled path).
 		// Restore body so caller sees the real challenge HTML.
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, nil
+	}
+
+	if browserSolveForbidden(req.Context()) {
+		// Caller opted out of the headed browser (e.g. search). Hand the
+		// challenge back as-is; it surfaces as a plain HTTP failure.
+		util.Debug("SuperFlix CF challenge detected but browser solve is disabled for this request", "url", req.URL.String(), "status", resp.StatusCode)
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return resp, nil
 	}

@@ -236,7 +236,7 @@ Mesmo padrão da 3.3, um de cada vez: `allanime.go` (+test) →
 **Verificação (rodar após cada um dos três, não só no final):**
 `go build ./... && go test ./... -short -race`
 
-### ⬜ Etapa 3.5 — Renomear `unified.go` → `manager.go`; limpeza final de raiz
+### ✅ Etapa 3.5 — Renomear `unified.go` → `manager.go`; limpeza final de raiz
 
 - Renomear arquivo, remover prefixos de pacote agora redundantes.
 - Confirmar que a limpeza de raiz do §6.4 já está feita (já está: `TEST_*.md` em
@@ -303,12 +303,22 @@ _(atualizar após cada etapa)_
 | 3 | 3.2 `scraper/netx/` | ✅ | 2026-07-07 |
 | 3 | 3.3 Extrair SuperFlix | ✅ | 2026-07-07 |
 | 3 | 3.4 Extrair allanime/animefire/goyabu | ✅ | 2026-07-08 |
-| 3 | 3.5 Rename + doc.go | ⬜ | — |
+| 3 | 3.5 Rename + doc.go | ✅ | 2026-07-08 |
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 3.5 — rename `unified.go` → `manager.go` + `doc.go`s + limpeza final
-(inclui pendência: dividir `allanime/client.go` ~1500 linhas por responsabilidade, como feito no superflix).
+**Próxima etapa:** 4.1 — `Seasoned` + `BrowserGated` no SuperFlix (Model C sob demanda).
+
+**Notas da ETAPA 3.5 (2026-07-08) — FASE 3 COMPLETA:**
+- `unified.go` → `manager.go` (e `unified_*_test.go` → `manager_*_test.go`).
+- `allanime/client.go` (1561 linhas) dividido por responsabilidade: `client.go`
+  (77 — struct/constructores) + `crypto.go` (284 — AES-GCM, decode de payloads)
+  + `search.go` (148) + `episodes.go` (267) + `stream.go` (832 — pipeline
+  GraphQL→sources→links→quality; denso mas coeso).
+- `doc.go` dos subpacotes novos (netx + 4 providers) já criados nas etapas
+  anteriores; §6.4 (raiz/docs) já estava feito. C4 completo (todos os pacotes
+  com doc.go) permanece item do punch-list geral, fora desta fase.
+- Suíte -race verde · lint 0 issues · vet limpo.
 
 **Notas da ETAPA 3.4 (2026-07-08):**
 - Extraídos para `providers/allanime|animefire|goyabu/` (cada um com `doc.go`):

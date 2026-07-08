@@ -46,8 +46,14 @@ func (c *SuperFlixClient) SearchMedia(query string) ([]*SuperFlixMedia, error) {
 	return c.SearchMediaWithContext(context.Background(), query)
 }
 
-// SearchMediaWithContext searches with context support
+// SearchMediaWithContext searches with context support.
+//
+// Search never escalates to the headed browser (WithoutBrowserSolve): the
+// user is querying ALL sources at once here, and only the play path — where
+// SuperFlix content was explicitly chosen — may open a browser window. If the
+// gate is closed, search just returns no SuperFlix results (R6).
 func (c *SuperFlixClient) SearchMediaWithContext(ctx context.Context, query string) ([]*SuperFlixMedia, error) {
+	ctx = WithoutBrowserSolve(ctx)
 	// CLI args arrive hyphenated like "the-boys" (TreatingAnimeName joins
 	// words with dashes), but SuperFlix's search engine treats the dash as
 	// a literal character and returns "Nenhum resultado encontrado".

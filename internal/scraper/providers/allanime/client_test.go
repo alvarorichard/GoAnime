@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -54,8 +53,7 @@ func encryptToBeParsed(t *testing.T, plaintext string) string {
 // encryptToBeParsedWithNonce uses an explicit nonce for deterministic tests.
 func encryptToBeParsedWithNonce(t *testing.T, plaintext string, nonce []byte) string {
 	t.Helper()
-	key := sha256.Sum256([]byte(allAnimeKeyPhrase))
-	block, err := aes.NewCipher(key[:])
+	block, err := aes.NewCipher(allAnimeKey)
 	require.NoError(t, err)
 	gcm, err := cipher.NewGCM(block)
 	require.NoError(t, err)
@@ -264,10 +262,9 @@ func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
 
 func TestAllAnimeKeyMatchesOpenSSL(t *testing.T) {
 	t.Parallel()
-	// sha256("Xot36i3lK3:v1") — updated 2026-04-24 when AllAnime rotated the key.
-	// Verify: printf '%s' 'Xot36i3lK3:v1' | openssl dgst -sha256
-	expected := "a254aa27c410f297bd04ba33a0c0df7ff4e706bf3ae27271c6703f84e750f552"
-	assert.Equal(t, expected, hex.EncodeToString(allAnimeKey))
+	// Literal 32-byte hex key, rotated 2026-07-08 (ani-cli PR #1772). It is no
+	// longer derived from a passphrase; it must equal the constant verbatim.
+	assert.Equal(t, allAnimeKeyHex, hex.EncodeToString(allAnimeKey))
 }
 
 func TestAllAnimeKeyLength(t *testing.T) {
@@ -438,7 +435,7 @@ func TestDecodeToBeParsedBadBase64(t *testing.T) {
 
 func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 	t.Parallel()
-	// 12 bytes < 30 (minimum for GCM: 1+12+16+1) → too short
+	// 12 bytes < 29 (GCM minimum: 1 version + 12 nonce + 16 tag) → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 12))
 	_, err := decodeToBeParsed(blob)
 	require.Error(t, err)
@@ -447,30 +444,38 @@ func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 
 func TestDecodeToBeParsedExactly13BytesMinimal(t *testing.T) {
 	t.Parallel()
-	// 13 bytes < 30 → too short
+	// 13 bytes < 29 → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 13))
 	_, err := decodeToBeParsed(blob)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
 
-func TestDecodeToBeParsedExactly29BytesStillTooShort(t *testing.T) {
+func TestDecodeToBeParsedExactly28BytesTooShort(t *testing.T) {
 	t.Parallel()
-	// Updated 2026-04-24: GCM requires ≥ 30 bytes (1 version + 12 nonce + 16 tag + 1 plaintext).
-	// 29 bytes is still too short.
+	// GCM minimum is 29 bytes (1 version + 12 nonce + 16 tag + 0 plaintext).
+	// 28 bytes trips the length guard before any crypto runs.
+	blob := base64.StdEncoding.EncodeToString(make([]byte, 28))
+	_, err := decodeToBeParsed(blob)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too short")
+}
+
+func TestDecodeToBeParsedAllZeroBytesFailsAuth(t *testing.T) {
+	t.Parallel()
+	// A 29-byte all-zero blob passes the length guard but is not a valid GCM
+	// message (the zero tag won't authenticate), so Open rejects it.
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 29))
 	_, err := decodeToBeParsed(blob)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "too short")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GCM decrypt failed")
 }
 
 func TestDecodeToBeParsedCorruptedCiphertext(t *testing.T) {
 	t.Parallel()
-	// Updated 2026-04-29: cipher swapped GCM → CTR (ani-cli e5523a9b /
-	// 1ccbf71f). CTR has no authentication, so tampering doesn't error
-	// at the cipher layer — instead the XORed plaintext is garbage that
-	// fails downstream JSON / regex parsing. We still surface an error,
-	// just from a different layer.
+	// GCM authenticates: flipping any ciphertext byte makes Open reject the
+	// blob outright, before parsing ever runs (this is exactly what restored
+	// the integrity guarantee the CTR interlude had dropped).
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--0809","sourceName":"P1"}]}}}`
 	blob := encryptToBeParsed(t, plaintext)
 
@@ -484,8 +489,8 @@ func TestDecodeToBeParsedCorruptedCiphertext(t *testing.T) {
 
 	_, err = decodeToBeParsed(corruptBlob)
 	require.Error(t, err, "tampered ciphertext must not produce a usable result")
-	assert.Contains(t, err.Error(), "no source URLs found",
-		"CTR has no auth — error must come from downstream parsing of the garbage plaintext")
+	assert.Contains(t, err.Error(), "GCM decrypt failed",
+		"GCM authenticates — tampering must be rejected at the cipher layer")
 }
 
 func TestDecodeToBeParsedTruncatedCiphertext(t *testing.T) {
@@ -495,7 +500,7 @@ func TestDecodeToBeParsedTruncatedCiphertext(t *testing.T) {
 
 	raw, err := base64.StdEncoding.DecodeString(blob)
 	require.NoError(t, err)
-	// 16 bytes < 30 minimum → "too short" before GCM is even attempted
+	// 16 bytes < 29 minimum → "too short" before GCM is even attempted
 	truncated := base64.StdEncoding.EncodeToString(raw[:16])
 
 	_, err = decodeToBeParsed(truncated)
@@ -1846,18 +1851,13 @@ func TestGetEpisodeURLConcurrentCalls(t *testing.T) {
 
 func TestDecodeToBeParsedCrossValidateWithOpenSSL(t *testing.T) {
 	// Deterministic test: verify our Go GCM encryption/decryption round-trips correctly.
-	// Updated 2026-04-24: CTR → GCM, key rotated to "Xot36i3lK3:v1".
-	// ani-cli reference: https://github.com/pystardust/ani-cli/commit/e5523a9b480f67ee878a0cc075043313cc58e07d
+	// Updated 2026-07-08: key rotated to the literal hex key (ani-cli PR #1772).
 	t.Parallel()
 
 	nonce, _ := hex.DecodeString("aabbccddeeff00112233aabb")
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--504c4c484b021717","sourceName":"TestProvider"}]}}}`
 
-	// Encrypt using new key + GCM
-	key := sha256.Sum256([]byte("Xot36i3lK3:v1"))
-	assert.Equal(t, allAnimeKey, key[:], "key derivation must be consistent")
-
-	block, err := aes.NewCipher(key[:])
+	block, err := aes.NewCipher(allAnimeKey)
 	require.NoError(t, err)
 	gcm, err := cipher.NewGCM(block)
 	require.NoError(t, err)
