@@ -16,6 +16,7 @@ import (
 	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -47,8 +48,8 @@ const sfBrowserSpinnerHint = " — a browser may open to check you're human; jus
 // Indirection points for preflightSuperFlixBrowser, overridable in tests so the
 // notice logic can be exercised without a real display, cache marker, or logger.
 var (
-	sfHeadlessEnvFn  = scraper.HeadlessEnvironment
-	sfSetupPendingFn = scraper.BrowserSetupPending
+	sfHeadlessEnvFn  = superflix.HeadlessEnvironment
+	sfSetupPendingFn = superflix.BrowserSetupPending
 	sfWarnFn         = util.Warn
 	sfInfoFn         = util.Info
 )
@@ -96,9 +97,9 @@ func describeSuperFlixErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, scraper.ErrPlaywrightUnavailable):
+	case errors.Is(err, superflix.ErrPlaywrightUnavailable):
 		return &friendlyError{cause: err, msg: "⚠️  Couldn't open the helper browser. The first time you use SuperFlix, GoAnime needs internet to set it up — check your connection and try again. Tip: installing Google Chrome makes this faster."}
-	case errors.Is(err, scraper.ErrSuperFlixNoServers):
+	case errors.Is(err, superflix.ErrSuperFlixNoServers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
@@ -399,13 +400,13 @@ func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
 			return nil, fmt.Errorf("failed to get AllAnime scraper: %w", scErr)
 		}
 
-		// Cast to AllAnime client to access enhanced features
-		if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
-			episodes, err = allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
-			util.Debug("AniSkip integration enabled", "malID", anime.MalID)
-		} else {
-			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-		}
+		// NOTE: a previous version tried to cast scraperInstance directly to
+		// *AllAnimeClient to call GetAnimeEpisodesWithAniSkip, but the manager
+		// always holds the adapter, so that cast never succeeded and the plain
+		// path below is what always ran in production. The AniSkip-integrated
+		// listing remains available via the adapter's Client() accessor if it
+		// is ever intentionally enabled.
+		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
 	case sourceName == "Animefire.io":
 		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimefireType)
 		if scErr != nil {
@@ -655,7 +656,7 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 
 // GetSuperFlixEpisodes handles episodes/content for SuperFlix movies and TV shows
 func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
-	sfClient := scraper.NewSuperFlixClient()
+	sfClient := superflix.NewSuperFlixClient()
 
 	// media.URL contains the TMDB ID for SuperFlix
 	tmdbID := media.URL
@@ -686,7 +687,7 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	preflightSuperFlixBrowser()
 
-	var allEpisodes map[string][]scraper.SuperFlixEpisode
+	var allEpisodes map[string][]superflix.SuperFlixEpisode
 	var episodesErr error
 	runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
 		// Preferred path: list episodes from the keyless, public TVmaze API using
@@ -698,7 +699,7 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		if media.IMDBID != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			if eps, err := scraper.GetEpisodesFromTVmaze(ctx, http.DefaultClient, media.IMDBID); err == nil && len(eps) > 0 {
+			if eps, err := superflix.GetEpisodesFromTVmaze(ctx, http.DefaultClient, media.IMDBID); err == nil && len(eps) > 0 {
 				allEpisodes = eps
 				return
 			} else if err != nil {
@@ -789,7 +790,7 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 // GetEpisodeStreamURL — duplicating them here produced two identical
 // "Stored anime source: SuperFlix" debug lines per playback.
 func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
-	sfClient := scraper.NewSuperFlixClient()
+	sfClient := superflix.NewSuperFlixClient()
 
 	tmdbID := episode.URL
 	if tmdbID == "" {
@@ -809,7 +810,7 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 
 	preflightSuperFlixBrowser()
 
-	var result *scraper.SuperFlixStreamResult
+	var result *superflix.SuperFlixStreamResult
 	var streamErr error
 	runWithSpinner("Loading stream..."+sfBrowserSpinnerHint, func() {
 		// Generous timeout: the pipeline's first request may hit a Cloudflare

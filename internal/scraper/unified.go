@@ -13,6 +13,10 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -81,10 +85,10 @@ func NewScraperManager() *ScraperManager {
 		}
 
 		// Initialize scrapers
-		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: NewAllAnimeClient()}
-		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: NewAnimefireClient()}
-		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: NewGoyabuClient()}
-		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: NewSuperFlixClient()}
+		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: allanime.NewAllAnimeClient()}
+		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: animefire.NewAnimefireClient()}
+		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: goyabu.NewGoyabuClient()}
+		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}
 
 		globalScraperManager = manager
 	})
@@ -579,13 +583,13 @@ func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
 	}
 }
 
-// AllAnimeAdapter adapts AllAnimeClient to UnifiedScraper interface
+// AllAnimeAdapter adapts allanime.AllAnimeClient to UnifiedScraper interface
 type AllAnimeAdapter struct {
-	client *AllAnimeClient
+	client *allanime.AllAnimeClient
 }
 
-// Client returns the underlying AllAnimeClient for direct access to enhanced features.
-func (a *AllAnimeAdapter) Client() *AllAnimeClient {
+// Client returns the underlying allanime.AllAnimeClient for direct access to enhanced features.
+func (a *AllAnimeAdapter) Client() *allanime.AllAnimeClient {
 	return a.client
 }
 
@@ -649,9 +653,9 @@ func (a *AllAnimeAdapter) GetType() ScraperType {
 	return AllAnimeType
 }
 
-// AnimefireAdapter adapts AnimefireClient to UnifiedScraper interface
+// AnimefireAdapter adapts animefire.AnimefireClient to UnifiedScraper interface
 type AnimefireAdapter struct {
-	client *AnimefireClient
+	client *animefire.AnimefireClient
 }
 
 func (a *AnimefireAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
@@ -673,9 +677,9 @@ func (a *AnimefireAdapter) GetType() ScraperType {
 	return AnimefireType
 }
 
-// GoyabuAdapter adapts GoyabuClient to UnifiedScraper interface
+// GoyabuAdapter adapts goyabu.GoyabuClient to UnifiedScraper interface
 type GoyabuAdapter struct {
-	client *GoyabuClient
+	client *goyabu.GoyabuClient
 }
 
 func (a *GoyabuAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
@@ -697,9 +701,9 @@ func (a *GoyabuAdapter) GetType() ScraperType {
 	return GoyabuType
 }
 
-// SuperFlixAdapter adapts SuperFlixClient to UnifiedScraper interface
+// SuperFlixAdapter adapts superflix.SuperFlixClient to UnifiedScraper interface
 type SuperFlixAdapter struct {
-	client *SuperFlixClient
+	client *superflix.SuperFlixClient
 }
 
 func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
@@ -783,12 +787,12 @@ func (a *SuperFlixAdapter) GetType() ScraperType {
 }
 
 // GetClient returns the underlying SuperFlix client for direct access
-func (a *SuperFlixAdapter) GetClient() *SuperFlixClient {
+func (a *SuperFlixAdapter) GetClient() *superflix.SuperFlixClient {
 	return a.client
 }
 
 // NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
 // Useful for testing with mock servers.
-func NewSuperFlixAdapterWithClient(client *SuperFlixClient) *SuperFlixAdapter {
+func NewSuperFlixAdapterWithClient(client *superflix.SuperFlixClient) *SuperFlixAdapter {
 	return &SuperFlixAdapter{client: client}
 }

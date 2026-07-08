@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,15 +84,15 @@ func TestDescribeSuperFlixErr(t *testing.T) {
 		{name: "unrelated error untouched", in: other, wantSame: true},
 		{
 			name:       "playwright unavailable -> setup hint, still matchable",
-			in:         fmt.Errorf("launch failed: %w", scraper.ErrPlaywrightUnavailable),
-			wantWraps:  scraper.ErrPlaywrightUnavailable,
+			in:         fmt.Errorf("launch failed: %w", superflix.ErrPlaywrightUnavailable),
+			wantWraps:  superflix.ErrPlaywrightUnavailable,
 			wantSubstr: "helper browser",
 			translated: true,
 		},
 		{
 			name:       "no servers -> try later hint",
-			in:         fmt.Errorf("fetch: %w", scraper.ErrSuperFlixNoServers),
-			wantWraps:  scraper.ErrSuperFlixNoServers,
+			in:         fmt.Errorf("fetch: %w", superflix.ErrSuperFlixNoServers),
+			wantWraps:  superflix.ErrSuperFlixNoServers,
 			wantSubstr: "No video sources",
 			translated: true,
 		},

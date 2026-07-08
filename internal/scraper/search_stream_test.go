@@ -5,114 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// ---------------------------------------------------------------------------
-// AnimefireClient.GetAnimeEpisodes
-// ---------------------------------------------------------------------------
-
-func TestAnimefireClient_GetAnimeEpisodes_Success(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>`+
-			`<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" href="/ep/1">Episódio 1</a>`+
-			`<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" href="/ep/2">Episódio 2</a>`+
-			`</body></html>`)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := NewAnimefireClient()
-	client.baseURL = srv.URL
-	client.maxRetries = 0
-	client.retryDelay = 0
-
-	episodes, err := client.GetAnimeEpisodes(srv.URL + "/anime/test")
-	require.NoError(t, err)
-	assert.Len(t, episodes, 2)
-}
-
-func TestAnimefireClient_GetAnimeEpisodes_HTTPError(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := NewAnimefireClient()
-	client.baseURL = srv.URL
-	client.maxRetries = 0
-	client.retryDelay = 0
-
-	_, err := client.GetAnimeEpisodes(srv.URL + "/anime/test")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// AnimefireClient.parseEpisodes (covered via GetAnimeEpisodes above, but
-// also tested directly via a goquery document)
-// ---------------------------------------------------------------------------
-
-func TestAnimefireClient_ParseEpisodes_ReturnsEpisodes(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>`+
-			`<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" href="/ep/5">Episódio 5</a>`+
-			`<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" href="/ep/6">Episódio 6</a>`+
-			`</body></html>`)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := NewAnimefireClient()
-	client.baseURL = srv.URL
-	client.maxRetries = 0
-	client.retryDelay = 0
-
-	episodes, err := client.GetAnimeEpisodes(srv.URL + "/anime/x")
-	require.NoError(t, err)
-	// parseEpisodes is called internally — verify its output
-	assert.Len(t, episodes, 2)
-	assert.Equal(t, 5, episodes[0].Num)
-	assert.Equal(t, 6, episodes[1].Num)
-}
-
-// ---------------------------------------------------------------------------
-// AnimefireClient.GetAnimeDetails
-// ---------------------------------------------------------------------------
-
-func TestAnimefireClient_GetAnimeDetails_ReturnsError(t *testing.T) {
-	t.Parallel()
-	client := NewAnimefireClient()
-	anime, err := client.GetAnimeDetails("https://animefire.io/anime/naruto")
-	assert.Nil(t, anime)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "API layer")
-}
-
-// ---------------------------------------------------------------------------
-// GoyabuClient.sleep
-// ---------------------------------------------------------------------------
-
-func TestGoyabuClient_Sleep_ZeroDelay(t *testing.T) {
-	t.Parallel()
-	client := NewGoyabuClient()
-	client.retryDelay = 0
-	// Must return without blocking
-	client.sleep()
-}
-
-func TestGoyabuClient_Sleep_SmallDelay(t *testing.T) {
-	t.Parallel()
-	client := NewGoyabuClient()
-	client.retryDelay = 1 * time.Millisecond
-	start := time.Now()
-	client.sleep()
-	assert.GreaterOrEqual(t, time.Since(start), time.Millisecond)
-}
 
 // ---------------------------------------------------------------------------
 // MediaManager.GetAnimeStreamURL
@@ -221,7 +121,7 @@ func TestAllAnimeAdapter_GetAnimeEpisodes_ServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := newTestClient(srv.URL)
+	client := allanime.NewClientForTest(srv.URL)
 	adapter := &AllAnimeAdapter{client: client}
 
 	_, err := adapter.GetAnimeEpisodes("test-anime-id")
@@ -239,7 +139,7 @@ func TestAllAnimeAdapter_GetStreamURL_ServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := newTestClient(srv.URL)
+	client := allanime.NewClientForTest(srv.URL)
 	adapter := &AllAnimeAdapter{client: client}
 
 	_, _, err := adapter.GetStreamURL("test-anime-id", "1", "best", "sub")
@@ -259,10 +159,7 @@ func TestAnimefireAdapter_GetAnimeEpisodes_Success(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	afClient := NewAnimefireClient()
-	afClient.baseURL = srv.URL
-	afClient.maxRetries = 0
-	afClient.retryDelay = 0
+	afClient := animefire.NewClientForTest(srv.URL)
 
 	adapter := &AnimefireAdapter{client: afClient}
 	episodes, err := adapter.GetAnimeEpisodes(srv.URL + "/anime/test")
@@ -281,10 +178,7 @@ func TestAnimefireAdapter_GetStreamURL_HTTPError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	afClient := NewAnimefireClient()
-	afClient.baseURL = srv.URL
-	afClient.maxRetries = 0
-	afClient.retryDelay = 0
+	afClient := animefire.NewClientForTest(srv.URL)
 
 	adapter := &AnimefireAdapter{client: afClient}
 	_, metadata, err := adapter.GetStreamURL(srv.URL + "/ep/1")
@@ -304,10 +198,7 @@ func TestGoyabuAdapter_GetAnimeEpisodes_HTTPError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	gClient := NewGoyabuClient()
-	gClient.baseURL = srv.URL
-	gClient.maxRetries = 0
-	gClient.retryDelay = 0
+	gClient := goyabu.NewClientForTest(srv.URL)
 
 	adapter := &GoyabuAdapter{client: gClient}
 	_, err := adapter.GetAnimeEpisodes(srv.URL + "/anime/test")
@@ -325,10 +216,7 @@ func TestGoyabuAdapter_GetStreamURL_HTTPError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	gClient := NewGoyabuClient()
-	gClient.baseURL = srv.URL
-	gClient.maxRetries = 0
-	gClient.retryDelay = 0
+	gClient := goyabu.NewClientForTest(srv.URL)
 
 	adapter := &GoyabuAdapter{client: gClient}
 	_, metadata, err := adapter.GetStreamURL(srv.URL + "/ep/1")

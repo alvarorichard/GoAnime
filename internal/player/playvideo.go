@@ -17,7 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -881,7 +881,7 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 
 				// For AllAnime episodes, also try to set chapter markers (like Curd does)
 				if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
-					allAnimeClient := scraper.NewAllAnimeClient()
+					allAnimeClient := allanime.NewAllAnimeClient()
 					if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
 						util.Debugf("Failed to set chapter markers: %v", chapterErr)
 					}

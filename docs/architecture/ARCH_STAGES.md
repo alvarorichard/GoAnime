@@ -209,7 +209,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 
 **Verificação:** `go build ./... && go test ./... -short -race`
 
-### ⬜ Etapa 3.3 — Extrair SuperFlix → `scraper/providers/superflix/` (maior etapa — provável 🔄 em 2 sessões)
+### ✅ Etapa 3.3 — Extrair SuperFlix → `scraper/providers/superflix/` (feita em 1 sessão)
 
 **Arquivos (11 fontes + 14 testes hoje flat em `internal/scraper/`):**
 `superflix.go`, `superflix_browser.go`, `superflix_cf.go`, `superflix_config.go`,
@@ -227,7 +227,7 @@ go test ./internal/scraper/ -run "RealSuperFlix" -v
 **Verificação:** `go build ./... && go test ./... -short -race` +
 `go test ./internal/scraper/providers/superflix/... -run "RealSuperFlix|Live" -v`
 
-### ⬜ Etapa 3.4 — Extrair `allanime/`, `animefire/`, `goyabu/`
+### ✅ Etapa 3.4 — Extrair `allanime/`, `animefire/`, `goyabu/`
 
 Mesmo padrão da 3.3, um de cada vez: `allanime.go` (+test) →
 `scraper/providers/allanime/`; `animefire.go` (+test) →
@@ -301,13 +301,69 @@ _(atualizar após cada etapa)_
 | 2 | 2.2 Unknown explícito | ✅ | 2026-07-06 |
 | 3 | 3.1 Apagar camadas antigas + nomes §2 | ✅ | 2026-07-07 |
 | 3 | 3.2 `scraper/netx/` | ✅ | 2026-07-07 |
-| 3 | 3.3 Extrair SuperFlix | ⬜ | — |
-| 3 | 3.4 Extrair allanime/animefire/goyabu | ⬜ | — |
+| 3 | 3.3 Extrair SuperFlix | ✅ | 2026-07-07 |
+| 3 | 3.4 Extrair allanime/animefire/goyabu | ✅ | 2026-07-08 |
 | 3 | 3.5 Rename + doc.go | ⬜ | — |
 | 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 3.3 — extrair SuperFlix para `scraper/providers/superflix/` (maior etapa; provável 🔄).
+**Próxima etapa:** 3.5 — rename `unified.go` → `manager.go` + `doc.go`s + limpeza final
+(inclui pendência: dividir `allanime/client.go` ~1500 linhas por responsabilidade, como feito no superflix).
+
+**Notas da ETAPA 3.4 (2026-07-08):**
+- Extraídos para `providers/allanime|animefire|goyabu/` (cada um com `doc.go`):
+  fontes viraram `client.go`; testes foram junto (`client_test.go`,
+  `ctr_regression_test.go`, `stream_test.go`, `issue166_regression_test.go`).
+- `AllAnimeClient.GetType()` DELETADO — só existia para satisfazer UnifiedScraper
+  num cast que nunca sucedia (o manager sempre guardou adapters); manteria um
+  ciclo provider→scraper. Adapters continuam donos de GetType.
+- Descoberta relacionada: o cast `scraperInstance.(*AllAnimeClient)` em
+  `api/enhanced.go` (caminho AniSkip de GetAnimeEpisodesEnhanced) era CÓDIGO
+  MORTO em produção — substituído pelo caminho que sempre rodou, com NOTE
+  explicando; reativar AniSkip ali é decisão consciente futura via
+  `adapter.Client()`.
+- `UserAgent` compartilhado (definido no allanime, usado por animefire/goyabu)
+  → movido para `netx.UserAgent`; SuperFlix mantém o dele (UA atado ao browser
+  que resolve o CF).
+- `search_stream_test.go` dividido pelo dono: white-box de clients →
+  `animefire/scrape_test.go` + `goyabu/sleep_test.go`; testes de
+  MediaManager/Manager/Adapters ficaram, usando os novos seams
+  `<pkg>.NewClientForTest(url)` (padrão do superflix, replicado nos 3).
+- Consumidores atualizados: `unified.go`, `api/enhanced.go`,
+  `api/allanime_enhanced.go`, `playback/allanime_navigation.go`,
+  `player/playvideo.go`, `adapters_test.go`.
+- `.vscode/settings.json` criado com `explorer.compactFolders: false` (pedido
+  do usuário: árvore sem compactar `providers/superflix` numa linha).
+- Suíte -race verde · lint 0 issues · vet limpo.
+
+**Notas da ETAPA 3.3 (2026-07-07):**
+- 7 fontes + 19 testes + 1 fixture movidos para `internal/scraper/providers/superflix/`
+  com prefixo `superflix_` dropado dos nomes (§6.3): `client.go` (era superflix.go),
+  `browser.go`, `cf.go`, `config.go`, `streamcache.go`, `transport.go`, `tvmaze.go`
+  + `doc.go`. Fontes eram leaf puro (zero símbolos do scraper restante) → moveram
+  todos de uma vez, sem seam temporário.
+- `superflix_test.go` (2214 linhas) foi DIVIDIDO pelo dono real dos símbolos:
+  testes de `SuperFlixAdapter`/`tagResults`/`ScraperManager`/`sortPTBRFirst` →
+  `scraper/superflix_adapter_test.go` (ficam com unified.go); testes de guards →
+  `netx/response_guard_test.go`; o resto moveu como `client_test.go`.
+- `integration_test.go` era black-box (`scraper_test`) → moveu inteiro como
+  `superflix_test` (o teste ThroughScraperManager importa scraper sem ciclo).
+- Novo seam de teste exportado: `superflix.NewClientForTest(serverURL)` (padrão
+  `NewScraperManagerForTest`) — usado pelos testes do adapter que ficaram.
+- `skip_in_ci_test.go` do scraper (catch-all do C8) DELETADO — helper duplicado
+  para o pacote superflix; todos os usuários estavam lá.
+- `SuperFlixAdapter` permanece em `unified.go` importando o subpacote, como §6.6.
+- Verificação: suíte -race verde · lint 0 issues · live: Revival PASS, Sniff
+  PASS, SearchAndVerify PASS, host-pin PASS · GetEpisodes FAIL pré-existente
+  (air_date upstream, mesma da 1.2).
+- **Pós-polish (2026-07-08, ataca C2):** os dois god-files divididos por
+  responsabilidade (§6.3, mesmo pacote = zero risco): `client.go` (1248) →
+  `client.go` (client/config/constructores) + `types.go` (modelos+ToAnimeModel)
+  + `search.go` + `stream.go` (pipeline bootstrap→getVideo) + `episodes.go`;
+  `browser.go` (1388) → `browser.go` (solver core) + `setup.go`
+  (install/profile/marker) + `sniff.go` (captura de stream do embed) +
+  `gate.go` (helpers de página/Turnstile). Maior arquivo do pacote agora: 548
+  linhas. Suíte -race verde, lint 0 issues.
 
 **Notas da ETAPA 3.2 (2026-07-07):**
 - Movidos para `internal/scraper/netx/` (com `doc.go`): `ssrf.go`, `errors.go`,

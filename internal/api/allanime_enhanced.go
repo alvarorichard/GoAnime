@@ -7,6 +7,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -80,17 +81,17 @@ func GetAllAnimeEpisodeURLDirect(anime *models.Anime, episodeNumber string, qual
 	// Use the cached scraper manager to get the AllAnime client (avoids re-creating each time)
 	sm := scraper.NewScraperManager()
 	scraperInstance, scErr := sm.GetScraper(scraper.AllAnimeType)
-	var client *scraper.AllAnimeClient
+	var client *allanime.AllAnimeClient
 	if scErr == nil {
 		if adapter, ok := scraperInstance.(interface {
-			Client() *scraper.AllAnimeClient
+			Client() *allanime.AllAnimeClient
 		}); ok {
 			client = adapter.Client()
 		}
 	}
 	if client == nil {
 		// Fallback: create directly (shouldn't happen with singleton manager)
-		client = scraper.NewAllAnimeClient()
+		client = allanime.NewAllAnimeClient()
 	}
 	animeID := extractAllAnimeIDAPI(anime.URL)
 

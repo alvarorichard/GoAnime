@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -23,7 +23,7 @@ var (
 type AllAnimeNavigator struct {
 	animeID  string
 	episodes []string
-	client   *scraper.AllAnimeClient
+	client   *allanime.AllAnimeClient
 }
 
 // NewAllAnimeNavigator creates a new navigator for AllAnime content
@@ -37,7 +37,7 @@ func NewAllAnimeNavigator(anime *models.Anime) (*AllAnimeNavigator, error) {
 		return nil, fmt.Errorf("could not extract anime ID from URL: %s", anime.URL)
 	}
 
-	client := scraper.NewAllAnimeClient()
+	client := allanime.NewAllAnimeClient()
 	navigator := &AllAnimeNavigator{
 		animeID: animeID,
 		client:  client,
