@@ -391,7 +391,16 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		}
 		src = bestEffort
 	}
-	util.Debug("Source resolved", "kind", src.Describe().Kind, "reason", resolved.Reason)
+	util.Debug("Source resolved", "kind", src.Describe().Kind,
+		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
+
+	// Model C capability: warm up a browser-gated source before fetching. For a
+	// non-gated source this is an explicit (logged) no-op; for SuperFlix on a
+	// display-less box it fails fast with a clear reason instead of stalling on
+	// a browser that can never appear.
+	if err := source.WarmUp(ctx, src); err != nil {
+		return "", err
+	}
 
 	streamURL, err := src.FetchStreamURL(ctx, episode, anime, util.GlobalQuality)
 	if err != nil {

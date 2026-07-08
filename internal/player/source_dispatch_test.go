@@ -170,3 +170,63 @@ func TestGetVideoURLForEpisodeEnhanced_UnknownFallsBackToRegisteredAllAnime(t *t
 	assert.Equal(t, "https://cdn.example/best-effort.mp4", url)
 	assert.Same(t, anime, stub.gotAnime, "best-effort dispatch must reach the AllAnime source")
 }
+
+// gatedStubSource is a stubSource that also implements source.BrowserGated so
+// the dispatch's WarmUp step can be exercised.
+type gatedStubSource struct {
+	stubSource
+	warmUpErr error
+	warmedUp  bool
+}
+
+func (g *gatedStubSource) WarmUp(_ context.Context) error {
+	g.warmedUp = true
+	return g.warmUpErr
+}
+
+// TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch pins the
+// Model C consumer: a browser-gated source is warmed up before FetchStreamURL,
+// and a WarmUp failure fails the dispatch fast — FetchStreamURL is never reached.
+func TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch(t *testing.T) {
+	// Swaps the global source registry — not parallel.
+	stub := &gatedStubSource{
+		stubSource: stubSource{
+			desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+			url:  "https://cdn.example/should-not-be-reached.m3u8",
+		},
+		warmUpErr: assert.AnError,
+	}
+	restore := source.SwapRegistryForTesting(stub)
+	t.Cleanup(restore)
+
+	anime := &models.Anime{Source: "SuperFlix", URL: "1234", MediaType: models.MediaTypeTV}
+	ep := &models.Episode{Number: "1", URL: "1234"}
+
+	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
+	require.Error(t, err, "a failed warm-up must fail the dispatch")
+	assert.True(t, stub.warmedUp, "WarmUp must run for a browser-gated source")
+	assert.Nil(t, stub.gotAnime, "FetchStreamURL must NOT be reached when warm-up fails")
+}
+
+// TestGetVideoURLForEpisodeEnhanced_WarmUpSuccessProceedsToFetch pins the happy
+// path: a browser-gated source that warms up cleanly proceeds to FetchStreamURL.
+func TestGetVideoURLForEpisodeEnhanced_WarmUpSuccessProceedsToFetch(t *testing.T) {
+	// Swaps the global source registry — not parallel.
+	stub := &gatedStubSource{
+		stubSource: stubSource{
+			desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+			url:  "https://cdn.example/sf.m3u8",
+		},
+	}
+	restore := source.SwapRegistryForTesting(stub)
+	t.Cleanup(restore)
+
+	anime := &models.Anime{Source: "SuperFlix", URL: "1234", MediaType: models.MediaTypeTV}
+	ep := &models.Episode{Number: "1", URL: "1234"}
+
+	url, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
+	require.NoError(t, err)
+	assert.Equal(t, "https://cdn.example/sf.m3u8", url)
+	assert.True(t, stub.warmedUp, "WarmUp must run before the fetch")
+	assert.Same(t, anime, stub.gotAnime, "FetchStreamURL must run after a clean warm-up")
+}

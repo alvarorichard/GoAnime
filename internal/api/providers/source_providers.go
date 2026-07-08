@@ -8,6 +8,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -386,7 +387,26 @@ func (p *superFlixProvider) Describe() source.Descriptor {
 }
 
 func (p *superFlixProvider) Kind() source.SourceKind { return source.SuperFlix }
-func (p *superFlixProvider) HasSeasons() bool        { return true }
+
+// HasSeasons satisfies both providers.Provider and the source.Seasoned
+// capability: SuperFlix is a movie/TV catalog organized into seasons.
+func (p *superFlixProvider) HasSeasons() bool { return true }
+
+// WarmUp satisfies the source.BrowserGated capability. SuperFlix clears a
+// Cloudflare Turnstile gate with a headed browser; if there is no graphical
+// display (and the user hasn't opted into headless), that solve is doomed, so
+// fail fast here with a plain-language reason instead of letting the user wait
+// out a browser that can never appear. The check is cheap and performs no
+// eager solve — the happy path (display present) returns nil immediately.
+func (p *superFlixProvider) WarmUp(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if superflix.HeadlessEnvironment() {
+		return fmt.Errorf("SuperFlix needs a graphical browser to pass its \"are you human?\" check, but no screen was found — run GoAnime on your desktop session, or pass --sf-headless to try anyway")
+	}
+	return nil
+}
 
 func (p *superFlixProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
 	adapter, err := p.manager().GetScraper(scraper.SuperFlixType)

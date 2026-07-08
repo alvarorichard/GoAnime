@@ -249,7 +249,7 @@ Mesmo padrão da 3.3, um de cada vez: `allanime.go` (+test) →
 
 ## FASE 4 — Capacidades sob demanda (Model C)
 
-### ⬜ Etapa 4.1 — `Seasoned` + `BrowserGated` no SuperFlix
+### ✅ Etapa 4.1 — `Seasoned` + `BrowserGated` no SuperFlix
 
 **Arquivo:** `internal/api/source/source.go` (novas interfaces opcionais),
 `internal/scraper/providers/superflix/` (implementação).
@@ -304,10 +304,34 @@ _(atualizar após cada etapa)_
 | 3 | 3.3 Extrair SuperFlix | ✅ | 2026-07-07 |
 | 3 | 3.4 Extrair allanime/animefire/goyabu | ✅ | 2026-07-08 |
 | 3 | 3.5 Rename + doc.go | ✅ | 2026-07-08 |
-| 4 | 4.1 Seasoned + BrowserGated | ⬜ | — |
+| 4 | 4.1 Seasoned + BrowserGated | ✅ | 2026-07-08 |
 | 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
 
-**Próxima etapa:** 4.1 — `Seasoned` + `BrowserGated` no SuperFlix (Model C sob demanda).
+**Próxima etapa:** 5.1 (backlog opcional — S1 kill-switch, S2 host-services, S3 wiring único).
+O plano principal (Fases 0–4) está COMPLETO: Model B no ar + hook para C entregue.
+
+**Notas da ETAPA 4.1 (2026-07-08) — FASE 4 COMPLETA, plano principal fechado:**
+- Vocabulário Model C em `internal/api/source/capabilities.go`: interfaces
+  opcionais `Seasoned` (`HasSeasons() bool`) e `BrowserGated` (`WarmUp(ctx) error`),
+  descobertas por type-assert. Helpers `IsSeasoned`/`IsBrowserGated`/`WarmUp`
+  encapsulam a assertion com log explícito (R5: capability ausente é visível,
+  nunca no-op silencioso).
+- SuperFlix é o ÚNICO consumidor (regra do §4): implementa `WarmUp` (fail-fast
+  se `HeadlessEnvironment()` — sem display e sem `--sf-headless`; barato, sem
+  solve eager) e já satisfazia `Seasoned` via `HasSeasons()→true`.
+  `BrowserGated` é type-assert limpo (só SuperFlix); `Seasoned` é transitório
+  (os outros carregam `HasSeasons()→false` da Provider antiga, mas `IsSeasoned`
+  dá a resposta certa).
+- Consumidor real no dispatch (`player/scraper.go`): após `source.Resolve`,
+  loga `seasoned`/`browserGated` e chama `source.WarmUp(ctx, src)` antes de
+  `FetchStreamURL` — SuperFlix headless falha rápido com mensagem clara em vez
+  de travar num browser que nunca abre; fontes não-gated são no-op logado.
+  Sem duplicar o preflight interno (WarmUp aborta antes de chegar nele).
+- Testes: +4 (source helpers), +3 (providers: só SuperFlix é gated/seasoned;
+  WarmUp headless/cancelamento), +2 (player dispatch: WarmUp falha→aborta antes
+  do fetch; sucesso→prossegue). Suíte -race verde, lint 0 issues.
+- NÃO introduzidas `Searchable`/`EpisodeLister` — sem segundo source que precise
+  (evita over-engineering, §4).
 
 **Notas da ETAPA 3.5 (2026-07-08) — FASE 3 COMPLETA:**
 - `unified.go` → `manager.go` (e `unified_*_test.go` → `manager_*_test.go`).
