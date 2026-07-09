@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
@@ -67,7 +68,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	if request.IsAll {
 		util.Infof("Downloading ALL episodes of %s", anime.Name)
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
 			dlErr := player.HandleBatchDownload(eps, anime)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
@@ -92,7 +93,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
 			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
-			eps, err := api.GetAnimeEpisodesEnhanced(anime)
+			eps, err := providers.FetchEpisodes(context.Background(), anime)
 			if err == nil && len(eps) > 0 {
 				dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 				if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
@@ -118,7 +119,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			return nil
 		}
 
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
 			dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {

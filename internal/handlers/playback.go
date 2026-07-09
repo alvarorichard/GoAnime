@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -28,6 +30,17 @@ func HandlePlaybackMode(animeName string) {
 
 	// Initialize the beautiful logger
 	util.InitLogger()
+
+	// Confirm the manual kill-switch (S1) visibly: if the user disabled any
+	// source via GOANIME_DISABLED_SOURCES, say so once at startup so a turned-
+	// off source is never a silent surprise (R5).
+	if disabled := source.DisabledSources(); len(disabled) > 0 {
+		names := make([]string, len(disabled))
+		for i, k := range disabled {
+			names[i] = string(k)
+		}
+		util.Warnf("Sources disabled by config (GOANIME_DISABLED_SOURCES): %s", strings.Join(names, ", "))
+	}
 
 	// Pre-warm connections are now started in main() so they run while the
 	// user is still typing the anime name. This call is a noop (sync.Once).

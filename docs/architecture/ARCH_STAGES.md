@@ -273,17 +273,83 @@ type BrowserGated interface { WarmUp(ctx context.Context) error }
 > Não bloqueia a recomendação central (Model B + hook para C). Fazer só depois
 > da Fase 4, se/quando o time quiser o kill-switch manual.
 
-### ⬜ Etapa 5.1 — `DisabledProviders` (S1) + seam de host-services (S2) + wiring único (S3)
+### ✅ Etapa 5.1 — S1 (kill-switch) implementado; S2 + S3 avaliados e dispensados
 
-- S1: lista de sources desabilitadas via config, mais um `DefaultDisabled` no
-  `Descriptor` — desligar um source quebrado sem rebuild.
-- S2: pacote `hostservices` (ou nome equivalente) com hooks tipados
-  (`HTTPClient()`, `Log()`, `StoragePath()`) que os pacotes de source consomem
-  em vez de importar camadas acima deles.
-- S3: consolidar todos os `import _ ".../providers/..."` num único arquivo de
-  wiring (ex.: `internal/api/providers/register.go`).
+**Notas da ETAPA 5.1 (2026-07-08) — S1 feito, S2/S3 dispensados após avaliação:**
 
-**Verificação:** `go build ./... && go test ./... -short -race`
+Avaliação do estado real antes de implementar (grounded no código):
+- **S2 (host-services) — DISPENSADO.** O objetivo era impedir providers de
+  importar "para cima". Verificado: os providers de produção importam SÓ
+  `netx`/`util`/`models` — e `util` é leaf (fundo do DAG §6.2). Importar `util`
+  não é importar para cima; o problema que o S2 resolveria não existe aqui.
+  Adicionar `hostservices` seria indireção morta (§7 rec. 5: "adopt the
+  patterns, not the heavy machinery").
+- **S3 (wiring único) — DISPENSADO.** O Curd precisa de `load.go` porque cada
+  source é pacote separado blank-importado. Aqui os 4 se auto-registram no
+  `init()` de UM pacote (`api/providers/source_providers.go`), puxado por UM
+  único blank import (`player/scraper.go`). O "set ativo num relance" já é um
+  lugar só; mover a linha seria cosmético.
+- **S1 (kill-switch) — IMPLEMENTADO** (único com ganho real: complemento manual
+  do circuit breaker automático).
+
+Implementação do S1:
+- `util.SourceDisabled`/`SourceForceEnabled` (parse de `GOANIME_DISABLED_SOURCES`
+  / `GOANIME_ENABLED_SOURCES`, case-insensitive e dot-forgiving via
+  `canonSourceToken`). Fica no `util` (leaf) para busca E dispatch honrarem o
+  mesmo switch sem ciclo de import.
+- `Descriptor.DefaultDisabled` + `source.IsEnabled`/`Enabled`/`DisabledSources`
+  + filtro em `registeredByPriority` (source desabilitado nunca resolve; log
+  Debug por skip — R5). Player best-effort usa `source.Enabled`.
+- Busca (`ScraperManager.searchAllScrapersConcurrent` + `searchSpecificScraper`)
+  pula sources desabilitados com Warn.
+- Confirmação visível no startup (`HandlePlaybackMode`): Warn listando sources
+  desligados (R5: kill-switch nunca é surpresa silenciosa).
+- Testes: +2 util, +4 source, +2 scraper. Live: `GOANIME_DISABLED_SOURCES=AllAnime,SuperFlix`
+  → busca real retornou 21 resultados, nenhum das fontes desligadas.
+
+**Verificação:** `go build ./... && go test ./... -short -race` — verde · lint 0 issues.
+
+---
+
+## FASE 6 — Fechar o gap de dispatch (episódios + busca no registry)
+
+> Descoberto na auditoria de 2026-07-08: o registry cobria só o STREAM-play; a
+> BUSCA (ScraperManager) e os EPISÓDIOS (switch de `enhanced.go`) ainda rodavam
+> nos dispatchers antigos. Objetivo: unificar os dois no registry e então
+> deletar o switch de `enhanced.go` + o `ScraperManager`.
+
+### ✅ Etapa 6.1 — Episódios pelo registry (feito, verificado)
+
+- Novo `providers.FetchEpisodes(ctx, anime)` (`api/providers/dispatch.go`):
+  `source.Resolve` (honra kill-switch S1 + best-effort) → normaliza `anime.Source`
+  quando vazio → `src.FetchEpisodes`. Equivalente ao switch de `GetAnimeEpisodesEnhanced`.
+- SuperFlix provider `FetchEpisodes` corrigido: era stub-adapter (errava); agora
+  delega a `api.GetSuperFlixEpisodes` via `superFlixEpisodesFn` (seletor de
+  temporada UX-idêntico, sem mover código de UI → evita a inversão de dependência).
+- Callers VIVOS roteados pro registry: `appflow/anime_data.go` (busca→play),
+  `download/workflow.go` (3 chamadas), `playback/series.go` (change-anime).
+- `GetAnimeEpisodesEnhanced` ainda VIVE para 2 callers api-internos
+  (`series.go:IsSeriesEnhanced`, `allanime_smart.go:DownloadAllAnimeSmartRange`) —
+  deletá-lo exige a inversão `api↔providers` (Etapa 6.3).
+- Testes: +4 dispatch. Live: AllAnime 500, AnimeFire 219, Goyabu 500 episódios
+  pelo registry. Suíte -race verde, lint 0 issues.
+
+### ⬜ Etapa 6.2 — Busca pelo registry (`Searchable` capability) — PRECISA DE TTY
+
+- Adicionar `source.Searchable { Search(ctx, query) }`; providers implementam
+  delegando aos adapters. Criar orquestrador de busca concorrente no registry
+  que MOVE o circuit breaker + straggler + tagging do `ScraperManager`.
+- **Bloqueio de verificação:** a seleção da busca usa fuzzyfinder (TTY). Fazer
+  numa sessão com TTY para verificar o fluxo interativo.
+
+### ⬜ Etapa 6.3 — Deletar os dispatchers antigos (inversão `api↔providers`)
+
+- Mover os corpos de `enhanced.go` (switch de stream, `GetSuperFlixEpisodes`) e a
+  orquestração de busca para `providers`/pacotes por source, invertendo o import
+  `providers→api`. Realocar `IsSeriesEnhanced` e `DownloadAllAnimeSmartRange` para
+  fora do `api`. Então deletar `GetAnimeEpisodesEnhanced`, o switch de
+  `GetEpisodeStreamURL` e o `ScraperManager`.
+- **Só depois de 6.2**, com TTY para verificar seletor de temporada + busca.
 
 ---
 
@@ -305,7 +371,7 @@ _(atualizar após cada etapa)_
 | 3 | 3.4 Extrair allanime/animefire/goyabu | ✅ | 2026-07-08 |
 | 3 | 3.5 Rename + doc.go | ✅ | 2026-07-08 |
 | 4 | 4.1 Seasoned + BrowserGated | ✅ | 2026-07-08 |
-| 5 | 5.1 S1+S2+S3 (opcional) | ⬜ | — |
+| 5 | 5.1 S1 feito · S2/S3 dispensados | ✅ | 2026-07-08 |
 
 **Próxima etapa:** 5.1 (backlog opcional — S1 kill-switch, S2 host-services, S3 wiring único).
 O plano principal (Fases 0–4) está COMPLETO: Model B no ar + hook para C entregue.

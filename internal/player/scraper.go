@@ -385,9 +385,9 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		}
 		util.Warn("unrecognized source; dispatching best-effort AllAnime (set GOANIME_STRICT_SOURCE=1 to fail instead)",
 			"anime", anime.Name, "url", anime.URL, "reason", resolved.Reason)
-		bestEffort, ok := source.Registered(resolved.BestEffortKind())
+		bestEffort, ok := source.Enabled(resolved.BestEffortKind())
 		if !ok {
-			return "", fmt.Errorf("no source registered for %q (%s)", resolved.BestEffortKind(), resolved.Reason)
+			return "", fmt.Errorf("no enabled source for %q (%s); it may be turned off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
 		}
 		src = bestEffort
 	}

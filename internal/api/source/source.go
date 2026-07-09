@@ -20,6 +20,12 @@ type Descriptor struct {
 	URLMatchers []string           // Lowercase substrings to match in anime.URL
 	MediaTypes  []models.MediaType // MediaType values that map to this source
 	ShortID     bool               // If true, accepts AllAnime-style short alphanumeric IDs
+
+	// DefaultDisabled marks a source that is OFF unless the user opts in via
+	// GOANIME_ENABLED_SOURCES (ARCHITECTURE.md §7 S1). Use it for experimental
+	// or fragile sources that shouldn't ship live. Independent of the always-
+	// available GOANIME_DISABLED_SOURCES kill-switch.
+	DefaultDisabled bool
 }
 
 // matchNonExplicit checks all match criteria except the explicit Source field.
@@ -122,11 +128,14 @@ func Registered(kind SourceKind) (Source, bool) {
 // two sources declare the same Priority.
 func registeredByPriority() []Source {
 	registryMu.RLock()
-	srcs := make([]Source, 0, len(registry))
+	snapshot := make([]Source, 0, len(registry))
 	for _, s := range registry {
-		srcs = append(srcs, s)
+		snapshot = append(snapshot, s)
 	}
 	registryMu.RUnlock()
+
+	// Drop config-disabled sources so they never resolve (S1 kill-switch).
+	srcs := filterEnabled(snapshot)
 
 	sort.Slice(srcs, func(i, j int) bool {
 		di, dj := srcs[i].Describe(), srcs[j].Describe()

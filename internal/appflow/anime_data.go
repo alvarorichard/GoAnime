@@ -1,6 +1,7 @@
 package appflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 
 	"charm.land/huh/v2"
 	"charm.land/huh/v2/spinner"
@@ -32,8 +34,12 @@ var (
 	// sourceDetailsFetchFn enriches anime with provider-specific details.
 	sourceDetailsFetchFn = api.FetchAnimeDetails
 
-	// getAnimeEpisodesEnhancedFn returns the episode list for an anime.
-	getAnimeEpisodesEnhancedFn = api.GetAnimeEpisodesEnhanced
+	// getAnimeEpisodesEnhancedFn returns the episode list for an anime. It now
+	// dispatches through the Model B registry (providers.FetchEpisodes) instead
+	// of api's legacy per-source switch.
+	getAnimeEpisodesEnhancedFn = func(anime *models.Anime) ([]models.Episode, error) {
+		return providers.FetchEpisodes(context.Background(), anime)
+	}
 
 	// getAnimeEpisodesLegacyFn returns episodes by URL (legacy API).
 	getAnimeEpisodesLegacyFn = api.GetAnimeEpisodes

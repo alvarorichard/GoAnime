@@ -20,6 +20,12 @@ var (
 	allAnimeEnhancedStreamFn = api.GetEpisodeStreamURLEnhanced
 	fallbackStreamFn         = api.GetEpisodeStreamURL
 	superFlixStreamFn        = api.GetSuperFlixStreamURL
+
+	// superFlixEpisodesFn is the SuperFlix episode listing (season picker via
+	// TVmaze/browser). SuperFlix's *adapter* GetAnimeEpisodes is a stub that
+	// errors, so the provider delegates here — the same UX the legacy episode
+	// switch called.
+	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
 
 // EpisodeNumber extracts the episode number string from an Episode model.
@@ -408,12 +414,15 @@ func (p *superFlixProvider) WarmUp(ctx context.Context) error {
 	return nil
 }
 
-func (p *superFlixProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.manager().GetScraper(scraper.SuperFlixType)
-	if err != nil {
+// FetchEpisodes lists SuperFlix content. Unlike the anime sources, this is not
+// a flat adapter call: it runs the season picker (TVmaze-first, browser
+// fallback) and sets anime.CurrentSeason. Delegated to the proven api path so
+// the interactive UX is byte-identical to the legacy episode switch.
+func (p *superFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return adapter.GetAnimeEpisodes(anime.URL)
+	return superFlixEpisodesFn(anime)
 }
 
 // FetchStreamURL mirrors api.GetEpisodeStreamURL's SuperFlix branch: the same

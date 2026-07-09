@@ -133,6 +133,10 @@ func (sm *ScraperManager) searchSpecificScraper(query string, scraperType Scrape
 	}
 
 	sourceName := sm.getScraperDisplayName(scraperType)
+	if util.SourceDisabled(sourceName) {
+		util.Warn("Search source disabled by config", "source", sourceName)
+		return nil, fmt.Errorf("source %s is disabled via GOANIME_DISABLED_SOURCES", sourceName)
+	}
 	if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(scraperType); open {
 		util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
 		return nil, fmt.Errorf("busca pulada em %s: %w", sourceName, diagnostic)
@@ -191,6 +195,10 @@ func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.A
 	// Launch all scrapers concurrently
 	for sType, scraper := range sm.scrapers {
 		sourceName := sm.getScraperDisplayName(sType)
+		if util.SourceDisabled(sourceName) {
+			util.Warn("Search source disabled by config; skipping", "source", sourceName)
+			continue
+		}
 		if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(sType); open {
 			util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
 			searchErrors = append(searchErrors, diagnostic.UserMessage())

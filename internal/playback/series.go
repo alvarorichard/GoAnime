@@ -10,6 +10,7 @@ import (
 
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -378,8 +379,8 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 			return nil, nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
 		}
 
-		// Get episodes for the new anime using enhanced API
-		episodes, err := api.GetAnimeEpisodesEnhanced(anime)
+		// Get episodes for the new anime via the Model B registry.
+		episodes, err := providers.FetchEpisodes(context.Background(), anime)
 		if err != nil {
 			if i < maxRetries-1 {
 				util.Errorf("Failed to get episodes for: %s", anime.Name)
