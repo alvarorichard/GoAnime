@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"charm.land/huh/v2/spinner"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
@@ -167,30 +168,49 @@ func awaitActionThroughRunner(action func(), runner func(wrapped func())) {
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
 
+// SearchFetchFunc fans out a free-text search across the given source kinds
+// (empty = all) and returns the aggregated, language-tagged results. It is a
+// seam so the api package can dispatch through the Model B registry
+// (providers.SearchAll) without importing providers (which would cycle). The
+// providers package wires it in its init(); if unset, the search falls back to
+// the ScraperManager engine.
+type SearchFetchFunc func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error)
+
+var searchFetchFn SearchFetchFunc
+
+// SetSearchFetch installs the registry-backed search fan-out. Called from
+// providers.init().
+func SetSearchFetch(f SearchFetchFunc) { searchFetchFn = f }
+
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
-func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
+func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
 	scraperManager := scraper.NewScraperManager()
 
 	var scraperType *scraper.ScraperType
+	var registryKinds []source.SourceKind
 	isPTBR := false
 
 	// If a specific source is requested, honor it
-	switch strings.ToLower(source) {
+	switch strings.ToLower(src) {
 	case "allanime":
 		t := scraper.AllAnimeType
 		scraperType = &t
+		registryKinds = []source.SourceKind{source.AllAnime}
 		util.Debug("Searching specific source", "source", "AllAnime")
 	case "animefire":
 		t := scraper.AnimefireType
 		scraperType = &t
+		registryKinds = []source.SourceKind{source.AnimeFire}
 		util.Debug("Searching specific source", "source", "AnimeFire")
 	case "goyabu":
 		t := scraper.GoyabuType
 		scraperType = &t
+		registryKinds = []source.SourceKind{source.Goyabu}
 		util.Debug("Searching specific source", "source", "Goyabu")
 	case "superflix":
 		t := scraper.SuperFlixType
 		scraperType = &t
+		registryKinds = []source.SourceKind{source.SuperFlix}
 		util.Debug("Searching specific source", "source", "SuperFlix")
 	case "ptbr", "pt-br":
 		isPTBR = true
@@ -205,9 +225,14 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	var animes []*models.Anime
 	var searchErr error
 	runWithSpinner("Searching for anime...", func() {
-		if isPTBR {
+		switch {
+		case isPTBR:
+			// PT-BR subset path keeps its dedicated ordering (ScraperManager).
 			animes, searchErr = scraperManager.SearchAnimePTBR(name)
-		} else {
+		case searchFetchFn != nil:
+			// Model B registry fan-out (providers.SearchAll).
+			animes, searchErr = searchFetchFn(context.Background(), name, registryKinds)
+		default:
 			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
 		}
 	})

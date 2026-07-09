@@ -28,6 +28,16 @@ var (
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
 
+// searchViaManager delegates a single-source search to the ScraperManager's
+// searchSpecificScraper path, which already applies the per-source circuit
+// breaker, the S1 kill-switch, diagnostics, and language tagging. Every
+// provider's Search reuses it, so the proven per-source machinery is not
+// duplicated — the registry only adds the concurrent fan-out (SearchAll).
+func searchViaManager(sm *scraper.ScraperManager, st scraper.ScraperType, query string) ([]*models.Anime, error) {
+	t := st
+	return sm.SearchAnime(query, &t)
+}
+
 // EpisodeNumber extracts the episode number string from an Episode model.
 // Returns "" if indeterminate — caller must decide how to handle.
 func EpisodeNumber(ep *models.Episode) string {
@@ -79,6 +89,13 @@ func (p *allAnimeProvider) Describe() source.Descriptor {
 
 func (p *allAnimeProvider) Kind() source.SourceKind { return source.AllAnime }
 func (p *allAnimeProvider) HasSeasons() bool        { return false }
+
+func (p *allAnimeProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return searchViaManager(p.manager(), scraper.AllAnimeType, query)
+}
 
 func (p *allAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
 	adapter, err := p.manager().GetScraper(scraper.AllAnimeType)
@@ -138,6 +155,13 @@ func (p *animeFireProvider) Describe() source.Descriptor {
 
 func (p *animeFireProvider) Kind() source.SourceKind { return source.AnimeFire }
 func (p *animeFireProvider) HasSeasons() bool        { return false }
+
+func (p *animeFireProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return searchViaManager(p.manager(), scraper.AnimefireType, query)
+}
 
 func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
 	adapter, err := p.manager().GetScraper(scraper.AnimefireType)
@@ -206,6 +230,13 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 
 func (p *goyabuProvider) Kind() source.SourceKind { return source.Goyabu }
 func (p *goyabuProvider) HasSeasons() bool        { return false }
+
+func (p *goyabuProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return searchViaManager(p.manager(), scraper.GoyabuType, query)
+}
 
 func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
 	adapter, err := p.manager().GetScraper(scraper.GoyabuType)
@@ -397,6 +428,13 @@ func (p *superFlixProvider) Kind() source.SourceKind { return source.SuperFlix }
 // HasSeasons satisfies both providers.Provider and the source.Seasoned
 // capability: SuperFlix is a movie/TV catalog organized into seasons.
 func (p *superFlixProvider) HasSeasons() bool { return true }
+
+func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return searchViaManager(p.manager(), scraper.SuperFlixType, query)
+}
 
 // WarmUp satisfies the source.BrowserGated capability. SuperFlix clears a
 // Cloudflare Turnstile gate with a headed browser; if there is no graphical

@@ -2,7 +2,9 @@ package providers
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -77,4 +79,96 @@ func TestFetchEpisodes_ExplicitSourceNotOverwritten(t *testing.T) {
 	_, err := FetchEpisodes(context.Background(), anime)
 	require.NoError(t, err)
 	assert.Equal(t, "Animefire.io", anime.Source, "an explicitly-set source must be left untouched")
+}
+
+// searchStubSource implements source.Searchable for SearchAll tests.
+type searchStubSource struct {
+	epStubSource
+	results []*models.Anime
+	sErr    error
+	delay   time.Duration
+	calls   int32
+}
+
+func (s *searchStubSource) Search(ctx context.Context, _ string) ([]*models.Anime, error) {
+	atomic.AddInt32(&s.calls, 1)
+	if s.delay > 0 {
+		select {
+		case <-time.After(s.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.results, s.sErr
+}
+
+func newSearchStub(kind source.SourceKind, results []*models.Anime, err error) *searchStubSource {
+	return &searchStubSource{
+		epStubSource: epStubSource{desc: source.Descriptor{Kind: kind, Priority: 1}},
+		results:      results,
+		sErr:         err,
+	}
+}
+
+func TestSearchAll_FansOutOverRegistry(t *testing.T) {
+	// Swaps the global registry — not parallel.
+	a := newSearchStub(source.AllAnime, []*models.Anime{{Name: "[English] Naruto"}}, nil)
+	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "[PT-BR] Naruto"}}, nil)
+	restore := source.SwapRegistryForTesting(a, g)
+	t.Cleanup(restore)
+
+	got, err := SearchAll(context.Background(), "naruto")
+	require.NoError(t, err)
+	assert.Len(t, got, 2, "results from all searchable sources must be aggregated")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&a.calls))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+}
+
+func TestSearchAll_SpecificKindFilter(t *testing.T) {
+	// Swaps the global registry — not parallel.
+	a := newSearchStub(source.AllAnime, []*models.Anime{{Name: "AA"}}, nil)
+	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "GY"}}, nil)
+	restore := source.SwapRegistryForTesting(a, g)
+	t.Cleanup(restore)
+
+	got, err := SearchAll(context.Background(), "x", source.Goyabu)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "GY", got[0].Name)
+	assert.Equal(t, int32(0), atomic.LoadInt32(&a.calls), "non-selected source must not be searched")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+}
+
+func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
+	// Swaps the global registry — not parallel.
+	ok := newSearchStub(source.AllAnime, []*models.Anime{{Name: "AA"}}, nil)
+	bad := newSearchStub(source.Goyabu, nil, assert.AnError)
+	restore := source.SwapRegistryForTesting(ok, bad)
+	t.Cleanup(restore)
+
+	got, err := SearchAll(context.Background(), "x")
+	require.NoError(t, err, "one failing source must not fail the whole search")
+	assert.Len(t, got, 1)
+}
+
+func TestSearchAll_AllFailReturnsError(t *testing.T) {
+	// Swaps the global registry — not parallel.
+	b1 := newSearchStub(source.AllAnime, nil, assert.AnError)
+	b2 := newSearchStub(source.Goyabu, nil, assert.AnError)
+	restore := source.SwapRegistryForTesting(b1, b2)
+	t.Cleanup(restore)
+
+	_, err := SearchAll(context.Background(), "x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "all sources failed")
+}
+
+func TestSearchAll_NoSearchableSource(t *testing.T) {
+	// Swaps the global registry with a non-searchable source — not parallel.
+	restore := source.SwapRegistryForTesting(&epStubSource{desc: source.Descriptor{Kind: "plain", Priority: 1}})
+	t.Cleanup(restore)
+
+	_, err := SearchAll(context.Background(), "x")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no searchable source")
 }

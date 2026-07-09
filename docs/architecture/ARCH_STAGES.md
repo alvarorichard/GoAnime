@@ -334,22 +334,52 @@ Implementação do S1:
 - Testes: +4 dispatch. Live: AllAnime 500, AnimeFire 219, Goyabu 500 episódios
   pelo registry. Suíte -race verde, lint 0 issues.
 
-### ⬜ Etapa 6.2 — Busca pelo registry (`Searchable` capability) — PRECISA DE TTY
+### ✅ Etapa 6.2 — Busca pelo registry (`Searchable` capability) — feito, verificado
 
-- Adicionar `source.Searchable { Search(ctx, query) }`; providers implementam
-  delegando aos adapters. Criar orquestrador de busca concorrente no registry
-  que MOVE o circuit breaker + straggler + tagging do `ScraperManager`.
-- **Bloqueio de verificação:** a seleção da busca usa fuzzyfinder (TTY). Fazer
-  numa sessão com TTY para verificar o fluxo interativo.
+- `source.Searchable { Search(ctx, query) }` (capability Model C) + helper
+  `source.ActiveSources()` (sources habilitados por prioridade, respeita S1).
+- Os 4 providers implementam `Search` delegando a
+  `sm.SearchAnime(query, &type)` (= `searchSpecificScraper`) — REUSA breaker +
+  kill-switch + diagnostics + tagging, **sem duplicar** o motor.
+- `providers.SearchAll(ctx, query, kinds...)` (`dispatch.go`): fan-out
+  concorrente sobre `ActiveSources()` filtrado por `Searchable`, com straggler
+  grace (5s) + timeout agregado (15s); tolera falha por-source; kindFilter para
+  busca de source específico.
+- Ciclo `api↔providers` resolvido com SEAM de função: `api.SetSearchFetch`
+  (chamado por `providers.init()`) — `SearchAnimeEnhanced` usa o seam quando
+  ligado, senão cai no ScraperManager. Sem `api` importar `providers`.
+- Verificação: suíte -race verde · lint 0 issues · +6 testes (fan-out, filtro,
+  tolerância a falha, all-fail, no-searchable). Live: `SearchAll("naruto")` =
+  64 resultados das 4 fontes, todos com tag de idioma.
+- **Gap conhecido (aceito p/ 6.3):** `SearchAll` reusa o breaker via
+  `searchSpecificScraper`, que NÃO tem per-source timeout + origin-probe (só o
+  `searchAllScrapersConcurrent` tinha). Um source que trava não trippa o breaker
+  por timeout (mas o straggler/timeout agregado sempre limita a espera do
+  caller). Volta completo na 6.3 com adapters ctx-aware. Path PT-BR
+  (`SearchAnimePTBR`) e `media_manager` seguem no ScraperManager até a 6.3.
 
 ### ⬜ Etapa 6.3 — Deletar os dispatchers antigos (inversão `api↔providers`)
 
-- Mover os corpos de `enhanced.go` (switch de stream, `GetSuperFlixEpisodes`) e a
-  orquestração de busca para `providers`/pacotes por source, invertendo o import
-  `providers→api`. Realocar `IsSeriesEnhanced` e `DownloadAllAnimeSmartRange` para
-  fora do `api`. Então deletar `GetAnimeEpisodesEnhanced`, o switch de
-  `GetEpisodeStreamURL` e o `ScraperManager`.
-- **Só depois de 6.2**, com TTY para verificar seletor de temporada + busca.
+Pré-requisito: 6.1 ✅ + 6.2 ✅ (feitos). O que falta para o delete final:
+
+1. **Adapters ctx-aware** (`UnifiedScraper.SearchAnime`/`GetAnimeEpisodes`/
+   `GetStreamURL` recebem `ctx`). Sem isso o per-source timeout + origin-probe
+   não migram para `SearchAll` (gap conhecido da 6.2).
+2. **Inverter `providers→api`**: mover os corpos de `enhanced.go` (switch de
+   `GetEpisodeStreamURL`, `GetSuperFlixEpisodes` com o seletor de temporada) e
+   `SearchAnimePTBR` para `providers`/pacotes por source. Isso arrasta deps de
+   UI (spinner/tui/fuzzyfinder) para `providers` — avaliar mover a seleção para
+   `appflow`.
+3. **Realocar** `api/series.go:IsSeriesEnhanced` e
+   `api/allanime_smart.go:DownloadAllAnimeSmartRange` para fora do `api` (são
+   chamados só de `playback`/`download`), liberando o delete de
+   `GetAnimeEpisodesEnhanced`.
+4. **Migrar** `media_manager.go` e o path PT-BR para `providers.SearchAll`.
+5. Então deletar: `GetAnimeEpisodesEnhanced`, o switch de `GetEpisodeStreamURL`,
+   e o `ScraperManager` (com sua `ScraperType` machinery).
+
+- **Requer TTY** para verificar seletor de temporada (SuperFlix) + seleção da
+  busca antes do delete. Também requer soak-test de concorrência do breaker.
 
 ---
 

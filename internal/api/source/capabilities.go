@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -28,6 +29,17 @@ type Seasoned interface {
 	HasSeasons() bool
 }
 
+// Searchable marks a source that can be searched by free-text query. Every
+// live source is searchable today, but keeping it optional means a
+// stream-only or URL-only source could exist without carrying a Search method.
+// The registry-wide search (providers.SearchAll) fans out over the sources
+// that implement this.
+type Searchable interface {
+	// Search returns matches for the query, already language-tagged for the
+	// source. Implementations should be safe to call concurrently.
+	Search(ctx context.Context, query string) ([]*models.Anime, error)
+}
+
 // BrowserGated marks a source that must drive a headed browser to clear a bot
 // gate (e.g. SuperFlix's Cloudflare Turnstile). Pure-HTTP anime sources don't
 // implement it, so they never carry browser methods.
@@ -38,6 +50,14 @@ type BrowserGated interface {
 	// fast with a clear reason instead of deep inside the solve. Implementations
 	// must stay cheap and side-effect-light — no eager solve on the happy path.
 	WarmUp(ctx context.Context) error
+}
+
+// ActiveSources returns the enabled registered sources ordered by Priority.
+// Config-disabled sources (S1 kill-switch) are excluded. Registry-wide
+// operations — like the search fan-out — iterate this instead of a hardcoded
+// source list, so adding a source needs no edit here.
+func ActiveSources() []Source {
+	return registeredByPriority()
 }
 
 // IsSeasoned reports whether src advertises season organization. The type
