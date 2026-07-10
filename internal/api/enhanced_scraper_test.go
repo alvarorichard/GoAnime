@@ -35,7 +35,31 @@ func (m *mockEpiScraper) GetType() scraper.ScraperType {
 	return m.tp
 }
 
+// wireEpisodesSeam installs the registry episode seam (episodesFetchFn) so
+// DownloadEpisode*Enhanced — which fetch episodes through the registry since
+// the per-source switch was deleted in 6.3 — see the given episodes/error
+// without importing the providers package (which would cycle).
+func wireEpisodesSeam(t *testing.T, eps []models.Episode, err error) {
+	t.Helper()
+	prev := episodesFetchFn
+	episodesFetchFn = func(*models.Anime) ([]models.Episode, error) { return eps, err }
+	t.Cleanup(func() { episodesFetchFn = prev })
+}
+
+// wireStreamSeam installs the registry stream seam (streamFetchFn) — the
+// counterpart for the deleted GetEpisodeStreamURL switch — so
+// DownloadEpisode*Enhanced resolve stream URLs without importing providers.
+func wireStreamSeam(t *testing.T, url string, err error) {
+	t.Helper()
+	prev := streamFetchFn
+	streamFetchFn = func(*models.Episode, *models.Anime, string) (string, error) { return url, err }
+	t.Cleanup(func() { streamFetchFn = prev })
+}
+
 // injectScraper wires a mock for scraperType into newScraperMgr and restores on cleanup.
+// When the mock is a *mockEpiScraper, it also wires the episode seam so callers
+// that fetch episodes via the registry (DownloadEpisode*Enhanced) see the same
+// episodes/error the scraper mock carries.
 func injectScraper(t *testing.T, scraperType scraper.ScraperType, mock scraper.UnifiedScraper) {
 	t.Helper()
 	mgr := scraper.NewScraperManagerForTest()
@@ -43,10 +67,15 @@ func injectScraper(t *testing.T, scraperType scraper.ScraperType, mock scraper.U
 	prev := newScraperMgr
 	newScraperMgr = func() *scraper.ScraperManager { return mgr }
 	t.Cleanup(func() { newScraperMgr = prev })
+	if m, ok := mock.(*mockEpiScraper); ok {
+		wireEpisodesSeam(t, m.episodes, m.epsErr)
+	}
 }
 
-// injectMultiScraper wires multiple mock scrapers (e.g. for DownloadEpisodeEnhanced which
-// calls both GetAnimeEpisodesEnhanced and GetEpisodeStreamURL, each calling newScraperMgr).
+// injectMultiScraper wires multiple mock scrapers for DownloadEpisode*Enhanced,
+// whose episode fetch now goes through the registry seam and whose stream-URL
+// fetch still goes through newScraperMgr. The AllAnime mock's episodes feed the
+// episode seam; every mock feeds the stream-URL manager.
 func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.UnifiedScraper) {
 	t.Helper()
 	mgr := scraper.NewScraperManagerForTest()
@@ -56,6 +85,10 @@ func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.Unif
 	prev := newScraperMgr
 	newScraperMgr = func() *scraper.ScraperManager { return mgr }
 	t.Cleanup(func() { newScraperMgr = prev })
+	if m, ok := mocks[scraper.AllAnimeType].(*mockEpiScraper); ok {
+		wireEpisodesSeam(t, m.episodes, m.epsErr)
+		wireStreamSeam(t, m.stURL, m.stErr)
+	}
 }
 
 // --- GetSuperFlixEpisodes ---
@@ -85,373 +118,11 @@ func TestGetSuperFlixEpisodes_MovieType(t *testing.T) {
 	assert.Equal(t, "Avengers", eps[0].Title.English)
 }
 
-// --- GetAnimeEpisodesEnhanced ---
-
-func TestGetAnimeEpisodesEnhanced_SuperFlixSource_EmptyURL(t *testing.T) {
-	// SuperFlix with empty URL errors immediately — no scraper manager needed.
-	media := &models.Anime{Source: "SuperFlix", URL: ""}
-	_, err := GetAnimeEpisodesEnhanced(media)
-	require.Error(t, err)
-}
-
-func TestGetAnimeEpisodesEnhanced_SuperFlixSource_MovieType(t *testing.T) {
-	// SuperFlix movie path returns 1 episode with no network call.
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "98765",
-		Name:      "Inception",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetAnimeEpisodesEnhanced(media)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
-
-func TestGetAnimeEpisodesEnhanced_AllAnimeSource(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
-	}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
-
-func TestGetAnimeEpisodesEnhanced_AnimefireSource(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AnimefireType,
-	}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "Animefire.io", Name: "Naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
-
-func TestGetAnimeEpisodesEnhanced_GoyabuSource(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.GoyabuType,
-	}
-	injectScraper(t, scraper.GoyabuType, mock)
-
-	anime := &models.Anime{Source: "Goyabu", Name: "Naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
-
-func TestGetAnimeEpisodesEnhanced_EnglishTag(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
-	}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [English]", URL: "naruto-id"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "AllAnime", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_PTBRTagGoyabuURL(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.GoyabuType,
-	}
-	injectScraper(t, scraper.GoyabuType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [PT-BR]", URL: "https://goyabu.com/naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "Goyabu", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_PTBRTagAnimefireURL(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AnimefireType,
-	}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [PT-BR]", URL: "https://animefire.net/naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "Animefire.io", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_PortuguesTag(t *testing.T) {
-	// [Português] tag falls into the PT-BR branch; non-goyabu URL → AnimeFire.
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AnimefireType,
-	}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [Português]", URL: "https://other.net/naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-}
-
-func TestGetAnimeEpisodesEnhanced_URLShortIDAllAnime(t *testing.T) {
-	// Short ID (< 30 chars, no http) is identified as AllAnime.
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
-	}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "abc123XYZ"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "AllAnime", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_URLAnimeFire(t *testing.T) {
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AnimefireType,
-	}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "https://animefire.net/animes/naruto"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "Animefire.io", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_DefaultFallback_AllAnimeScraper(t *testing.T) {
-	// Unknown source/URL hits the default switch case (sourceName="AllAnime (default)"),
-	// which still routes through the AllAnime scraper branch.
-	mock := &mockEpiScraper{
-		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
-	}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "Unknown", Name: "SomePlainAnime", URL: "https://other-site.net/anime"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Equal(t, "AllAnime", anime.Source)
-}
-
-func TestGetAnimeEpisodesEnhanced_ScraperReturnsError(t *testing.T) {
-	mock := &mockEpiScraper{
-		epsErr: errors.New("upstream scraper failed"),
-		tp:     scraper.AllAnimeType,
-	}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
-	_, err := GetAnimeEpisodesEnhanced(anime)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get episodes")
-}
-
-func TestGetAnimeEpisodesEnhanced_ScraperNotFound(t *testing.T) {
-	// Empty test manager — no scraper registered → GetScraper returns error.
-	prev := newScraperMgr
-	newScraperMgr = func() *scraper.ScraperManager { return scraper.NewScraperManagerForTest() }
-	t.Cleanup(func() { newScraperMgr = prev })
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
-	_, err := GetAnimeEpisodesEnhanced(anime)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AllAnime scraper")
-}
-
-func TestGetAnimeEpisodesEnhanced_NoEpisodesFoundLogs(t *testing.T) {
-	// Empty episode list exercises the "No episodes found" branch.
-	mock := &mockEpiScraper{episodes: nil, tp: scraper.AnimefireType}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "Animefire.io", Name: "NoEpAnime"}
-	eps, err := GetAnimeEpisodesEnhanced(anime)
-	require.NoError(t, err)
-	assert.Empty(t, eps)
-}
-
-// --- GetEpisodeStreamURL ---
-
-func TestGetEpisodeStreamURL_AllAnimeSource(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/ep1.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.Equal(t, "http://stream.test/ep1.m3u8", url)
-}
-
-func TestGetEpisodeStreamURL_AnimefireSource(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/animefire.m3u8", tp: scraper.AnimefireType}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "Animefire.io", Name: "Naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://animefire.net/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.Equal(t, "http://stream.test/animefire.m3u8", url)
-}
-
-func TestGetEpisodeStreamURL_GoyabuSource(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/goyabu.m3u8", tp: scraper.GoyabuType}
-	injectScraper(t, scraper.GoyabuType, mock)
-
-	anime := &models.Anime{Source: "Goyabu", Name: "Naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://goyabu.com/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.Equal(t, "http://stream.test/goyabu.m3u8", url)
-}
-
-func TestGetEpisodeStreamURL_EnglishTag(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/en.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [English]", URL: "naruto-id"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_PTBRTagGoyabuURL(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/goyabu.m3u8", tp: scraper.GoyabuType}
-	injectScraper(t, scraper.GoyabuType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [PT-BR]", URL: "https://goyabu.com/naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://goyabu.com/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_PTBRTagAnimefireURL(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/af.m3u8", tp: scraper.AnimefireType}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto [PT-BR]", URL: "https://animefire.net/naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://animefire.net/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_URLShortIDAllAnime(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/short.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "abc123XYZ"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_URLContainsAnimeFire(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/af2.m3u8", tp: scraper.AnimefireType}
-	injectScraper(t, scraper.AnimefireType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "https://animefire.net/animes/naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://animefire.net/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_URLContainsGoyabu(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/goyabu2.m3u8", tp: scraper.GoyabuType}
-	injectScraper(t, scraper.GoyabuType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "https://goyabu.com/naruto"}
-	ep := &models.Episode{Number: "1", URL: "http://goyabu.com/ep/1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_URLContainsAllAnime(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/aa2.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "", Name: "Naruto", URL: "https://allanime.to/naruto"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_DefaultFallback(t *testing.T) {
-	mock := &mockEpiScraper{stURL: "http://stream.test/default.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "UnknownSource", Name: "SomePlainAnime", URL: "https://other.net/anime"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_EmptyStreamURL(t *testing.T) {
-	// Mock returns empty stream URL → function returns error.
-	mock := &mockEpiScraper{stURL: "", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty stream URL")
-}
-
-func TestGetEpisodeStreamURL_ScraperError(t *testing.T) {
-	mock := &mockEpiScraper{stErr: errors.New("scraper failed"), tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get stream URL")
-}
-
-func TestGetEpisodeStreamURL_DefaultQuality(t *testing.T) {
-	// Empty quality string defaults to "best" internally.
-	mock := &mockEpiScraper{stURL: "http://stream.test/default-q.m3u8", tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
-	ep := &models.Episode{Number: "1"}
-	url, err := GetEpisodeStreamURL(ep, anime, "") // empty quality
-	require.NoError(t, err)
-	assert.NotEmpty(t, url)
-}
-
-func TestGetEpisodeStreamURL_ScraperNotFound(t *testing.T) {
-	prev := newScraperMgr
-	newScraperMgr = func() *scraper.ScraperManager { return scraper.NewScraperManagerForTest() }
-	t.Cleanup(func() { newScraperMgr = prev })
-
-	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURL(ep, anime, "best")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get scraper")
-}
+// NOTE: the per-source episode SWITCH (GetAnimeEpisodesEnhanced) was deleted in
+// Etapa 6.3. Source detection is now source.Resolve (covered by
+// providers.TestResolve_LiveRegistry) and dispatch by providers.FetchEpisodes
+// (covered by providers.TestFetchEpisodes_*). SuperFlix-specific episode logic
+// stays covered by TestGetSuperFlixEpisodes_* above.
 
 // --- DownloadEpisodeEnhanced ---
 

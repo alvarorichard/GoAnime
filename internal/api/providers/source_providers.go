@@ -17,14 +17,10 @@ import (
 // the Source registry cannot change behavior. Tests swap these to avoid
 // network. The api bodies migrate into per-source packages in Phase 3.
 var (
-	allAnimeEnhancedStreamFn = api.GetEpisodeStreamURLEnhanced
-	fallbackStreamFn         = api.GetEpisodeStreamURL
-	superFlixStreamFn        = api.GetSuperFlixStreamURL
-
-	// superFlixEpisodesFn is the SuperFlix episode listing (season picker via
-	// TVmaze/browser). SuperFlix's *adapter* GetAnimeEpisodes is a stub that
-	// errors, so the provider delegates here — the same UX the legacy episode
-	// switch called.
+	// superFlixStreamFn / superFlixEpisodesFn keep SuperFlix delegating to the
+	// api package's UX-heavy paths (spinner, browser preflight, season picker).
+	// AllAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
+	superFlixStreamFn   = api.GetSuperFlixStreamURL
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
 
@@ -106,19 +102,37 @@ func (p *allAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime)
 	return adapter.GetAnimeEpisodes(animeID)
 }
 
-// FetchStreamURL mirrors the legacy player dispatch for AllAnime: the
-// navigation-aware enhanced path first (it sets the global referer mpv needs),
-// then the regular enhanced API.
+// FetchStreamURL resolves the AllAnime stream directly through the AllAnime
+// adapter (self-contained — no delegation to the api package). The adapter's
+// GetStreamURL drives the client's navigation-aware GetEpisodeURL and returns
+// the referer in its metadata, which mpv needs; we publish it globally, exactly
+// as the deleted api enhanced-navigation path did.
 func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if url, err := allAnimeEnhancedStreamFn(episode, anime, quality); err == nil {
-		return url, nil
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
 	}
-	url, err := fallbackStreamFn(episode, anime, quality)
+	adapter, err := p.manager().GetScraper(scraper.AllAnimeType)
+	if err != nil {
+		return "", err
+	}
+	animeID := source.ExtractAllAnimeID(anime.URL)
+	epNum := EpisodeNumber(episode)
+	if quality == "" {
+		quality = "best"
+	}
+	url, metadata, err := adapter.GetStreamURL(animeID, epNum, quality)
 	if err != nil {
 		return "", fmt.Errorf("allAnime stream: %w", err)
+	}
+	if url == "" {
+		return "", fmt.Errorf("empty stream URL returned from AllAnime")
+	}
+	if ref := metadata["referer"]; ref != "" {
+		util.SetGlobalReferer(ref)
 	}
 	return url, nil
 }

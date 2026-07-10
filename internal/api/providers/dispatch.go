@@ -37,6 +37,12 @@ func init() {
 	api.SetSearchFetch(func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error) {
 		return SearchAll(ctx, query, kinds...)
 	})
+	api.SetEpisodesFetch(func(anime *models.Anime) ([]models.Episode, error) {
+		return FetchEpisodes(context.Background(), anime)
+	})
+	api.SetStreamFetch(func(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+		return FetchStreamURL(context.Background(), episode, anime, quality)
+	})
 }
 
 // SearchAll fans out a query across the enabled, Searchable sources in the
@@ -167,4 +173,35 @@ func FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, 
 
 	util.Debug("Fetching episodes via registry", "kind", src.Describe().Kind, "reason", resolved.Reason)
 	return src.FetchEpisodes(ctx, anime)
+}
+
+// FetchStreamURL resolves an episode's stream URL through the Model B registry
+// — the declarative replacement for api.GetEpisodeStreamURL's per-source
+// switch. Same resolution semantics as FetchEpisodes (kill-switch + best-effort
+// fallback), then delegates to the resolved Source's FetchStreamURL, which
+// warms up a browser-gated source first.
+func FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if anime == nil {
+		return "", fmt.Errorf("cannot fetch stream for a nil anime")
+	}
+
+	src, resolved := source.Resolve(anime)
+	if src == nil {
+		if util.StrictSourceResolution() {
+			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
+		}
+		best, ok := source.Enabled(resolved.BestEffortKind())
+		if !ok {
+			return "", fmt.Errorf("no enabled source for %q (%s); it may be off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
+		}
+		util.Warn("unrecognized source; resolving stream best-effort", "anime", anime.Name, "kind", best.Describe().Kind, "reason", resolved.Reason)
+		src = best
+	}
+
+	if err := source.WarmUp(ctx, src); err != nil {
+		return "", err
+	}
+
+	util.Debug("Fetching stream via registry", "kind", src.Describe().Kind, "reason", resolved.Reason)
+	return src.FetchStreamURL(ctx, episode, anime, quality)
 }

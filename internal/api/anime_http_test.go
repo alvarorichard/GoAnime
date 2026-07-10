@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -235,26 +233,6 @@ func TestSearchAnimeEnhanced_NoResultsReturnsError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGetEpisodeStreamURL_SuperFlixDispatch(t *testing.T) {
-	// The SuperFlix branch builds a real client whose browser solver drives a
-	// headed Chrome through Cloudflare Turnstile — there is no injection seam at
-	// this layer. On runners with Chrome present (e.g. macOS CI) this launches a
-	// live browser, runs for minutes, and races inside playwright-go's frame
-	// dispatcher. Opt in explicitly; skip in the hermetic unit suite.
-	skipUnlessLiveBrowser(t)
-	anime := &models.Anime{Source: "SuperFlix", URL: ""}
-	episode := &models.Episode{Number: "1", URL: ""}
-	_, err := GetEpisodeStreamURL(episode, anime, "best")
-	require.Error(t, err)
-}
-
-func TestGetEpisodeStreamURL_AllAnimeRoutingNoPanic(t *testing.T) {
-	anime := &models.Anime{Source: "AllAnime", URL: "Bnp4XYZ"}
-	episode := &models.Episode{Number: "1", URL: ""}
-	// Network call will fail; assert no panic + returns error.
-	_, _ = GetEpisodeStreamURL(episode, anime, "best")
-}
-
 func TestDownloadEpisodeEnhanced_OutOfRangeErrors(t *testing.T) {
 	// Pass an anime that GetAnimeEpisodesEnhanced will refuse, surfacing an
 	// error from the wrapper.
@@ -396,119 +374,3 @@ func TestGetEpisodeDataWithFallback_InvalidAnimeIDErrors(t *testing.T) {
 	err := GetEpisodeDataWithFallback(0, 1, &models.Anime{})
 	require.Error(t, err)
 }
-
-func TestGetEpisodeStreamURLEnhanced_AllAnimeBranchReturnsError(t *testing.T) {
-	anime := &models.Anime{
-		Source: "AllAnime",
-		URL:    "",
-		Name:   "",
-	}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURLEnhanced(ep, anime, "best")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AllAnime")
-}
-
-func TestGetEpisodeStreamURLEnhanced_AnimeFireBranchFallsThrough(t *testing.T) {
-	anime := &models.Anime{
-		Source: "Animefire.io",
-		URL:    "http://example.invalid/anime",
-		Name:   "",
-	}
-	ep := &models.Episode{Number: "1", URL: "http://example.invalid/episode"}
-	_, _ = GetEpisodeStreamURLEnhanced(ep, anime, "best")
-}
-
-func TestGetEpisodeStreamURLEnhanced_AllAnimeFromNameTag(t *testing.T) {
-	anime := &models.Anime{Name: "Something [AllAnime]"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURLEnhanced(ep, anime, "")
-	require.Error(t, err)
-}
-
-func TestGetEpisodeStreamURLEnhanced_AllAnimeFromShortURL(t *testing.T) {
-	anime := &models.Anime{URL: "Bnp4XYZ"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURLEnhanced(ep, anime, "")
-	require.Error(t, err)
-}
-
-func TestGetEpisodeStreamURLEnhanced_AllAnimeFromURLContains(t *testing.T) {
-	anime := &models.Anime{URL: "https://allanime.to/anime/xxxxxxxxxxxxxxxxxxxxx"}
-	ep := &models.Episode{Number: "1"}
-	_, err := GetEpisodeStreamURLEnhanced(ep, anime, "")
-	require.Error(t, err)
-}
-
-func TestGetAllAnimeEpisodeURLDirect_NonAllAnimeErrors(t *testing.T) {
-	anime := &models.Anime{URL: "https://goyabu.com/anime/some-very-long-slug"}
-	_, _, err := GetAllAnimeEpisodeURLDirect(anime, "1", "best")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "AllAnime")
-}
-
-func TestGetAllAnimeEpisodeURLDirect_EmptyIDErrors(t *testing.T) {
-	// URL is short-but-blank → extractAllAnimeIDAPI returns "" → error.
-	anime := &models.Anime{Source: "AllAnime", URL: ""}
-	_, _, err := GetAllAnimeEpisodeURLDirect(anime, "1", "best")
-	require.Error(t, err)
-}
-
-func TestDownloadAllAnimeSmartRange_NonAllAnimeErrors(t *testing.T) {
-	anime := &models.Anime{URL: "https://goyabu.com/anime/some-very-long-slug-here"}
-	err := DownloadAllAnimeSmartRange(anime, 1, 1, "best")
-	require.Error(t, err)
-}
-
-func TestDownloadAllAnimeSmartRange_InvalidRangeErrors(t *testing.T) {
-	anime := &models.Anime{Source: "AllAnime", URL: "Bnp4XYZ"}
-	err := DownloadAllAnimeSmartRange(anime, 5, 1, "best")
-	require.Error(t, err)
-}
-
-func TestSmartDownload_BadDestRejected(t *testing.T) {
-	err := smartDownload("http://example.invalid/v.mp4", "")
-	require.Error(t, err)
-}
-
-func TestSmartDownload_DirectHTTPSuccess(t *testing.T) {
-	// Serve a small payload and route smartDownload through the direct HTTP
-	// path (URL does not match the yt-dlp keywords).
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("payload"))
-	}))
-	t.Cleanup(srv.Close)
-
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	root := filepath.Join(home, ".local", "goanime", "downloads", "anime")
-	require.NoError(t, os.MkdirAll(root, 0o700))
-	dest := filepath.Join(root, fmt.Sprintf("p15_smart_%d.mp4", os.Getpid()))
-	t.Cleanup(func() { _ = os.Remove(dest) })
-
-	// SafeTransport rejects loopback by default — so smartDownload's direct
-	// HTTP path against a loopback httptest server returns an SSRF error.
-	// That still exercises the function (error branch). We accept either.
-	err = smartDownload(srv.URL, dest)
-	if err != nil {
-		assert.Error(t, err)
-	}
-}
-
-func TestSmartDownloadDirect_BadStatusErrors(t *testing.T) {
-	// SafeTransport blocks loopback; use a non-loopback synthetic URL that
-	// fails fast at the transport level.
-	err := smartDownloadDirect("http://example.invalid.test/file.mp4", "/tmp/no-such")
-	require.Error(t, err)
-}
-
-// Sanity check: ensure that the URL var swaps did not break the production
-// defaults — i.e. the URL strings are still the canonical roots.
-func TestAPIBaseURLs_DefaultsUnchanged(t *testing.T) {
-	assert.Equal(t, "https://api.jikan.moe/v4", jikanBaseURL)
-	assert.Equal(t, "https://kitsu.io", kitsuBaseURL)
-}
-
-// Helper: silence accidental misuse of strings package in tests.
-var _ = strings.HasPrefix

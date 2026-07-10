@@ -30,7 +30,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 		"quality", quality)
 
 	// Fetch episodes using enhanced path (enables AniSkip enrichment)
-	episodes, err := GetAnimeEpisodesEnhanced(anime)
+	episodes, err := fetchEpisodesViaRegistry(anime)
 	if err != nil {
 		return fmt.Errorf("failed to get episodes: %w", err)
 	}
@@ -328,12 +328,12 @@ func resolveStreamURLForEpisode(ep *models.Episode, anime *models.Anime, quality
 	if ep == nil || anime == nil {
 		return "", fmt.Errorf("nil episode or anime")
 	}
-	url, err := GetEpisodeStreamURLEnhanced(ep, anime, quality)
+	url, err := fetchStreamViaRegistry(ep, anime, quality)
 	if err == nil && url != "" {
 		util.Debug("Stream URL resolved (enhanced)", "len", len(url))
 		return url, nil
 	}
-	url, err = GetEpisodeStreamURL(ep, anime, quality)
+	url, err = fetchStreamViaRegistry(ep, anime, quality)
 	if err != nil || url == "" {
 		return "", fmt.Errorf("fallback stream URL resolution failed: %w", err)
 	}

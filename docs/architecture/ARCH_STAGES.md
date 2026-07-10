@@ -358,9 +358,57 @@ Implementação do S1:
   caller). Volta completo na 6.3 com adapters ctx-aware. Path PT-BR
   (`SearchAnimePTBR`) e `media_manager` seguem no ScraperManager até a 6.3.
 
-### ⬜ Etapa 6.3 — Deletar os dispatchers antigos (inversão `api↔providers`)
+### 🔄 Etapa 6.3 — Deletar os dispatchers antigos (parcial: switch de episódios DELETADO)
 
-Pré-requisito: 6.1 ✅ + 6.2 ✅ (feitos). O que falta para o delete final:
+**6.3a ✅ (2026-07-08) — `GetAnimeEpisodesEnhanced` DELETADO.** O switch de
+episódios (100 linhas, 29 checagens `anime.Source==`) morreu. Substituído por um
+seam simétrico ao da busca: `api.SetEpisodesFetch` (ligado por `providers.init()`
+→ `providers.FetchEpisodes`). Os 5 callers api-internos (series, allanime_smart,
+download x3) usam `fetchEpisodesViaRegistry`. 15 testes do switch deletados
+(cobertura equivalente já em `providers.TestResolve_LiveRegistry` +
+`TestFetchEpisodes_*`); os 2 do SuperFlix já existiam apontando pra
+`GetSuperFlixEpisodes`. Helpers de teste de download religam o seam via
+`mockEpiScraper`. Live: download path lista 219 episódios pelo registry.
+Suíte -race verde, lint 0 issues.
+
+**6.3b ✅ (2026-07-08) — switch de stream `GetEpisodeStreamURL` DELETADO.**
+- AllAnime provider tornado auto-contido: `FetchStreamURL` chama o adapter
+  direto (`GetStreamURL` → client `GetEpisodeURL`) + publica o referer do
+  metadata. Não delega mais ao api. Removidas `allAnimeEnhancedStreamFn`/`fallbackStreamFn`.
+- Novo `providers.FetchStreamURL(ctx,...)` (dispatch.go): resolve + WarmUp +
+  delega, espelhando `FetchEpisodes`. Stream seam `api.SetStreamFetch` ligado
+  por `providers.init()`.
+- Callers roteados: `player/download.go` (3 sites → `providers.FetchStreamURL`,
+  loop AllAnime deduplicado), api-internos (enhanced.go DownloadEpisode*,
+  allanime_smart) → `fetchStreamViaRegistry`.
+- DELETADOS: `GetEpisodeStreamURL` (switch, 111 linhas), `GetEpisodeStreamURLEnhanced`,
+  `GetAllAnimeEpisodeURLDirect`, `extractAllAnimeIDAPI`. Mantido `isAllAnimeSourceAPI`
+  (usado por allanime_smart). ~24 testes obsoletos removidos (cobertura em
+  `providers` + `source.Resolve`); helpers de download religam ambos os seams.
+- Live: AllAnime + Goyabu resolvem stream pelo registry. Suíte -race verde, lint 0.
+
+**6.3c 🔄 (2026-07-08) — busca 100% no registry; `ScraperManager` mantido como motor interno.**
+- Caminho PT-BR (`SearchAnimeEnhanced` isPTBR) roteado para
+  `providers.SearchAll(kinds=AnimeFire,Goyabu,SuperFlix)`. Live: 36 resultados,
+  zero AllAnime. Nenhum caminho de busca do fluxo principal usa mais o fan-out
+  do ScraperManager (só `SearchAnimePTBR`/`SearchAnime` como fallback quando o
+  seam não está ligado — production-dead).
+- **DECISÃO (avaliação honesta):** o objetivo do §5 ("colapsar os 3 dispatchers
+  vivos num caminho declarativo") está ATINGIDO — episódios, stream E busca
+  passam pelo registry. O `ScraperManager` NÃO é mais um dispatcher vivo: virou
+  motor interno (fan-out concorrente + breaker + health + tagging) que os
+  providers usam para episódios/stream via `GetScraper` e a busca reusa via
+  `searchSpecificScraper`. Deletá-lo fisicamente exigiria: reescrever todos os
+  métodos dos providers para client-direto, RELOCAR o breaker/tagging/timeout
+  (search-only, vivem no manager), migrar `MediaManager` (handlers), e apagar a
+  enum `ScraperType` — multi-sessão, nos caminhos mais usados, TTY-gated
+  (seleção de busca, seletor de temporada, quality picker AnimeFire), com
+  retorno arquitetural decrescente. Fica como cleanup opcional, não como
+  requisito de dispatch.
+
+**Restante (6.3d, cleanup opcional — dedicado + TTY):** providers client-direto,
+relocar breaker/health/tagging p/ netx (por `SourceKind`), migrar MediaManager,
+deletar ScraperManager + adapters + ScraperType.
 
 1. **Adapters ctx-aware** (`UnifiedScraper.SearchAnime`/`GetAnimeEpisodes`/
    `GetStreamURL` recebem `ctx`). Sem isso o per-source timeout + origin-probe
