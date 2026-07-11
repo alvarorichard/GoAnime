@@ -102,6 +102,17 @@ func Is9AnimeSource() bool {
 	return GlobalAnimeSource == "9Anime"
 }
 
+// IsSuperFlixSource returns true if the current stream is from SuperFlix.
+//
+// SuperFlix streams are multi-audio HLS with an external Portuguese subtitle
+// track, so they need mpv's audio/subtitle language preferences applied — for
+// EVERY media type, not just movies/TV. Its anime and dorama entries carry the
+// same tracks, and gating those preferences on IsMovieOrTV silently dropped both
+// the chosen audio track and the subtitles for them.
+func IsSuperFlixSource() bool {
+	return GlobalAnimeSource == "SuperFlix"
+}
+
 // subtitleOption maps a display label to a sentinel value for subtitle selection.
 type subtitleOption struct {
 	Label string

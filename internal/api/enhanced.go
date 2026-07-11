@@ -657,6 +657,97 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	return episodes, nil
 }
 
+// sfServerListBudget caps how long we spend fetching the server list.
+//
+// The list is an ENHANCEMENT: it buys the user a choice of source, and it names
+// each one dublado or legendado. But the stream plays fine without it, so it must
+// never make playback slower than it was before it existed. The tokened player
+// page is Cloudflare-gated and we refuse to solve that gate for a nicety (a solve
+// costs minutes — Mushoku Tensei burned 3m19s on one), so the attempt is a cheap
+// probe: it either lands quickly or we fall back to the embed sniff, which is what
+// the old code did unconditionally.
+//
+// When the list DOES land, the whole stream then resolves over plain HTTP and no
+// browser runs at all — faster than the old path, not slower.
+const sfServerListBudget = 15 * time.Second
+
+// Stream seams. Split out so the "servers first, sniff as a fallback" ordering is
+// testable without a network or a headed browser.
+var (
+	sfGetServersFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) ([]superflix.SuperFlixServer, *superflix.SuperFlixTokens, error) {
+		return c.GetServers(ctx, mediaType, mediaID, season, episode)
+	}
+	sfStreamFromServerFn = func(c *superflix.SuperFlixClient, ctx context.Context, tokens *superflix.SuperFlixTokens, serverID string) (*superflix.SuperFlixStreamResult, error) {
+		return c.StreamFromServer(ctx, tokens, serverID)
+	}
+	sfSniffStreamFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
+		return c.GetStreamURL(ctx, mediaType, mediaID, season, episode)
+	}
+)
+
+// superFlixStream resolves a SuperFlix stream, preferring the path that lets the
+// user actually choose.
+//
+// The server list (player page → /player/bootstrap) is the only place SuperFlix
+// exposes BOTH the available sources and whether each is dublado or legendado. So
+// we try that first and let the user pick. It can fail — the site serves a
+// token-less shell much of the time — and then we fall back to the embed sniff,
+// which always yields *a* stream but offers no choice at all. That fallback is why
+// playback used to silently take whatever the embed happened to play.
+//
+// The returned server is nil on the fallback path, telling the caller it must ask
+// about the audio itself.
+func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season, epNum string) (*superflix.SuperFlixStreamResult, *superflix.SuperFlixServer, error) {
+	var (
+		servers []superflix.SuperFlixServer
+		tokens  *superflix.SuperFlixTokens
+		listErr error
+	)
+	runWithSpinner("Loading servers...", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), sfServerListBudget)
+		defer cancel()
+		servers, tokens, listErr = sfGetServersFn(sfClient, ctx, sfType, tmdbID, season, epNum)
+	})
+
+	if listErr == nil && len(servers) > 0 {
+		// Ask outside the spinner: a picker under a spinner is unreadable.
+		chosen, err := selectSuperFlixServer(tmdbID, servers)
+		if err == nil {
+			var result *superflix.SuperFlixStreamResult
+			var streamErr error
+			runWithSpinner("Loading stream...", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+				defer cancel()
+				result, streamErr = sfStreamFromServerFn(sfClient, ctx, tokens, chosen.IDString())
+			})
+			if streamErr == nil {
+				util.Debug("SuperFlix stream from chosen server", "server", chosen.Name, "type", chosen.Type)
+				return result, &chosen, nil
+			}
+			// The chosen server refused: fall through to the sniff rather than
+			// dead-ending on a source the user cannot re-pick from here.
+			util.Warn("SuperFlix: the chosen server failed; falling back", "server", chosen.Name, "error", streamErr)
+		}
+	} else {
+		util.Debug("SuperFlix: server list unavailable; falling back to the embed sniff", "err", listErr)
+	}
+
+	var result *superflix.SuperFlixStreamResult
+	var streamErr error
+	runWithSpinner("Loading stream..."+sfBrowserSpinnerHint, func() {
+		// Generous timeout: the pipeline's first request may hit a Cloudflare
+		// Turnstile gate that the client solves with a headed Firefox (10–40s).
+		// Must exceed the client's solve budget or the solve gets cancelled.
+		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+		defer cancel()
+		result, streamErr = sfSniffStreamFn(sfClient, ctx, sfType, tmdbID, season, epNum)
+	})
+	if streamErr != nil {
+		return nil, nil, streamErr
+	}
+	return result, nil, nil
+}
+
 // GetSuperFlixStreamURL gets the stream URL for SuperFlix content.
 //
 // Subtitle clearing and global-source tagging are handled by the only caller,
@@ -683,18 +774,9 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 
 	preflightSuperFlixBrowser()
 
-	var result *superflix.SuperFlixStreamResult
-	var streamErr error
-	runWithSpinner("Loading stream..."+sfBrowserSpinnerHint, func() {
-		// Generous timeout: the pipeline's first request may hit a Cloudflare
-		// Turnstile gate that the client solves with a headed Firefox (10–40s).
-		// Must exceed the client's solve budget or the solve gets cancelled.
-		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
-		defer cancel()
-		result, streamErr = sfClient.GetStreamURL(ctx, sfType, tmdbID, season, epNum)
-	})
-	if streamErr != nil {
-		return "", fmt.Errorf("failed to get SuperFlix stream: %w", describeSuperFlixErr(streamErr))
+	result, chosen, err := superFlixStream(sfClient, tmdbID, sfType, season, epNum)
+	if err != nil {
+		return "", fmt.Errorf("failed to get SuperFlix stream: %w", describeSuperFlixErr(err))
 	}
 
 	// Store referer globally for mpv playback
@@ -708,7 +790,36 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 		util.Debug("SuperFlix cover set from stream thumbnail", "url", result.Thumb)
 	}
 
-	// Store subtitles globally for playback
+	// Pick the audio track.
+	//
+	// When the server list was reachable the user already answered "dublado or
+	// legendado" by picking a server, so asking again would be asking twice. Only on
+	// the fallback path (embed sniff, no server list) do we have to ask, and there
+	// the multi-audio HLS is the only lever we have.
+	var alang string
+	if chosen != nil {
+		alang = audioForServer(*chosen, result.DefaultAudio)
+		util.Debug("SuperFlix audio derived from the chosen server",
+			"server", chosen.Name, "type", chosen.Type, "alang", alang)
+	} else if opt, ok := selectSuperFlixAudio(tmdbID, result.DefaultAudio, len(result.Subtitles) > 0); ok {
+		alang = mpvAudioLanguage(opt)
+		util.Debug("SuperFlix audio chosen from the stream's tracks", "code", opt.Code, "alang", alang)
+	}
+	if alang != "" {
+		util.GlobalAudioLanguage = alang
+	}
+
+	// Load every subtitle track the stream ships, always.
+	//
+	// An earlier version withheld them whenever the dub was selected, reasoning that
+	// Portuguese subtitles over Portuguese audio merely echo the dialogue. That was
+	// a behavior change nobody asked for and it broke real viewing: subtitles that
+	// had always been there stopped appearing. Worse, the flag defaulted to "off",
+	// so a stream that exposed no audio-track list — or a user who had pinned
+	// --audio-lang — silently lost its subtitles too.
+	//
+	// Availability is not the same as display: mpv can turn a track off, but it
+	// cannot show one we never handed it. --no-subs remains the way to opt out.
 	if len(result.Subtitles) > 0 && !util.GlobalNoSubs {
 		var subInfos []util.SubtitleInfo
 		for _, sub := range result.Subtitles {

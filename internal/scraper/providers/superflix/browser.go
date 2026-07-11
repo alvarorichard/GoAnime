@@ -107,6 +107,27 @@ const webdriverMaskScript = `(() => {
 })();`
 
 // launchSolverContext launches a headed, persistent, low-fingerprint browser
+// solverHoldingPage is what the headed solver window shows before it navigates,
+// instead of a bare about:blank that looks like a crash. Plain language only — the
+// person seeing it did not ask for a browser and should not meet jargon.
+const solverHoldingPage = `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
+	`<title>GoAnime</title></head>` +
+	`<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;` +
+	`background:#0f1116;color:#e6e6e6;font-family:system-ui,sans-serif;text-align:center">` +
+	`<div><div style="font-size:40px;margin-bottom:16px">🌙 GoAnime</div>` +
+	`<div style="font-size:18px">Preparando o vídeo do SuperFlix…</div>` +
+	`<div style="font-size:14px;color:#9aa0aa;margin-top:10px">` +
+	`Esta janela é normal e vai fechar sozinha. Se aparecer uma caixa “sou humano”, clique nela.</div>` +
+	`</div></body></html>`
+
+// brandSolverPage paints the holding page. Best-effort and non-fatal: it is
+// cosmetic, so a failure must never stop a solve.
+func brandSolverPage(page playwright.Page) {
+	_ = page.SetContent(solverHoldingPage, playwright.PageSetContentOptions{
+		Timeout: playwright.Float(2000),
+	})
+}
+
 // context. A non-empty channel selects a system browser distribution (e.g.
 // "chrome"); empty uses Playwright's bundled Chromium.
 func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, headless bool) (playwright.BrowserContext, error) {
@@ -289,6 +310,13 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 			return nil, fmt.Errorf("create page: %w", err)
 		}
 	}
+
+	// This window is headed and onscreen (Turnstile requires it). Until we
+	// navigate, its tab sits at a stark blank "about:blank" that reads as a hung or
+	// broken browser — the #184-adjacent report was exactly that confusion. Paint a
+	// branded holding page so the user knows GoAnime opened it on purpose and that
+	// it will close itself.
+	brandSolverPage(page)
 
 	if _, err := page.Goto(targetURL, playwright.PageGotoOptions{
 		Timeout:   playwright.Float(float64(timeout.Milliseconds())),

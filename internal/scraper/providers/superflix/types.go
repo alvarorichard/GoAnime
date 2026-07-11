@@ -25,8 +25,53 @@ type SuperFlixTokens struct {
 
 // SuperFlixServer represents a streaming server option
 type SuperFlixServer struct {
+	// ID is either a number (159462) or a string ("native_media:233831"), so it
+	// stays raw until the caller needs it as text.
 	ID   json.RawMessage `json:"ID"`
 	Name string          `json:"name"`
+
+	// Type is the audio track this server carries, and it is what the site's own
+	// player uses to build its "Dublado" / "Legendado" tabs:
+	//   1 = Dublado (Portuguese dub)
+	//   2 = Legendado (original audio, Portuguese subtitles)
+	// A title can offer several servers of the same type, and some episodes offer
+	// only one type — Tehran S1E1, for example, is dubbed-only.
+	Type int `json:"type"`
+
+	// IsFile marks a direct MP4 rather than a streaming server. It is stable
+	// across episodes (unlike a server's name, which embeds its per-episode id),
+	// so it is what makes remembering the user's pick possible.
+	IsFile bool `json:"is_file"`
+
+	// CanDownload is advisory metadata from the site; kept so a future download
+	// path can honor it.
+	CanDownload bool `json:"can_download"`
+}
+
+// Audio track types as the SuperFlix player labels them.
+const (
+	SuperFlixAudioDubbed    = 1 // Dublado
+	SuperFlixAudioSubtitled = 2 // Legendado
+)
+
+// IDString renders the raw ID as text, handling both the numeric and the string
+// form SuperFlix mixes in the same list.
+func (s SuperFlixServer) IDString() string {
+	var str string
+	if err := json.Unmarshal(s.ID, &str); err == nil {
+		return str
+	}
+	var num json.Number
+	if err := json.Unmarshal(s.ID, &num); err == nil {
+		return num.String()
+	}
+	return ""
+}
+
+// IsFallback reports whether SuperFlix is offering a placeholder rather than a
+// real source. Its own player filters these out before showing the server list.
+func (s SuperFlixServer) IsFallback() bool {
+	return strings.HasPrefix(strings.ToLower(s.IDString()), "fallback")
 }
 
 // SuperFlixSubtitle represents a subtitle track

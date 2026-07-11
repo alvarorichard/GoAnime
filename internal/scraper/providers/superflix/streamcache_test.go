@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,13 @@ func (f *failingEmbedSolver) SniffEmbedStream(context.Context, string, time.Dura
 func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 	// Not parallel: mutates the package-global defaultStreamCache.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The cache path makes two plain-HTTP calls: getVideo for a fresh signed
+		// link, and the player page for the subtitle/audio tracks.
+		if strings.HasPrefix(r.URL.Path, "/video/") {
+			assert.Equal(t, "/video/data123", r.URL.Path)
+			_, _ = fmt.Fprint(w, realPlayerPage)
+			return
+		}
 		assert.Contains(t, r.URL.RawQuery, "do=getVideo")
 		assert.Equal(t, "data123", r.URL.Query().Get("data"))
 		w.Header().Set("Content-Type", "application/json")
@@ -108,6 +116,13 @@ func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 	require.NotNil(t, res)
 	assert.Contains(t, res.StreamURL, "master.m3u8")
 	assert.Equal(t, srv.URL+"/", res.Referer)
+
+	// The cache path used to return a bare stream — no subtitles, no audio info —
+	// so a replayed episode silently lost both. It must carry them now.
+	assert.Equal(t, []string{"por", "und", "eng", "spa", "kor", "jpn", "chi", "und"}, res.DefaultAudio,
+		"a cached replay must still know which audio tracks the stream has")
+	require.Len(t, res.Subtitles, 1, "a cached replay must still carry the subtitle track")
+	assert.Equal(t, "Portuguese", res.Subtitles[0].Lang)
 }
 
 // srv0 returns the request's own scheme+host (the httptest base) so the fixture

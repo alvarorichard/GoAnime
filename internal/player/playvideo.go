@@ -482,19 +482,29 @@ func playVideo(
 		}
 	}
 
-	// Only apply audio/subtitle language preferences for movies/TV (FlixHQ).
+	// Audio/subtitle language preferences apply to movies/TV (FlixHQ) and to
+	// SuperFlix.
+	//
+	// SuperFlix must be matched by SOURCE, not by media type: its streams are
+	// multi-audio HLS with an external Portuguese subtitle track regardless of
+	// whether the entry is a movie, a series, an anime or a dorama. Gating on
+	// IsMovieOrTV alone silently threw away both the audio track the user picked
+	// and the subtitles for every SuperFlix anime.
+	isSuperFlix := util.IsSuperFlixSource()
 	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
+		isSuperFlix = isSuperFlix || strings.EqualFold(anime.Source, "SuperFlix")
 		// Update exact media type for download path organization.
 		if anime.MediaType != "" && titleSnap.MediaType == "" {
 			SetExactMediaType(string(anime.MediaType))
 		}
 	}
+	wantsLangPrefs := isMovieOrTV || isSuperFlix
 
 	audioLang, subsLang := "", ""
-	if isMovieOrTV {
+	if wantsLangPrefs {
 		audioLang = util.GlobalAudioLanguage
 		if audioLang == "" {
 			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English.
@@ -504,13 +514,13 @@ func playVideo(
 		if subsLang == "" {
 			subsLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
 		}
-		util.Debugf("Movie/TV detected - applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
+		util.Debugf("Applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
 	}
 
-	// External subtitle files (FlixHQ / 9Anime). For 9Anime, ALWAYS prompt the
-	// user to pick a subtitle language after every episode selection.
+	// External subtitle files (FlixHQ / SuperFlix / 9Anime). For 9Anime, ALWAYS
+	// prompt the user to pick a subtitle language after every episode selection.
 	var subArgs []string
-	if isMovieOrTV || is9Anime {
+	if wantsLangPrefs || is9Anime {
 		if is9Anime {
 			util.PromptSubtitleLanguage()
 		} else if len(util.GlobalSubtitles) > 1 {

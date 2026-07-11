@@ -3,6 +3,7 @@ package superflix
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,6 +79,168 @@ func (c *SuperFlixClient) ExtractTokens(html string) *SuperFlixTokens {
 }
 
 // Bootstrap calls /player/bootstrap to get server list
+// maxPlayerPageAttempts bounds the retry in playerPageWithTokens, and
+// playerPageRetryDelay spaces the attempts out.
+//
+// SuperFlix answers the same player URL with several page variants, and only some
+// carry PAGE_TOKEN. Retrying is the only lever, but it has to stay CHEAP: the
+// tokened variant is Cloudflare-gated, and we refuse to pay a browser solve for it
+// (see playerPageWithTokens), so most attempts simply miss and the caller falls
+// back. Four attempts cost ~4s and still catch the ungated variant when the site
+// serves one; more would just tax every play for a diminishing chance.
+//
+// The delay is not decoration: hammering the origin earns a plain-text "Too many
+// requests" that locks the server list out for minutes — a self-inflicted wound,
+// since the fallback then has to do all the work anyway.
+const (
+	maxPlayerPageAttempts = 4
+	playerPageRetryDelay  = 800 * time.Millisecond
+)
+
+// ErrSuperFlixRateLimited is returned when SuperFlix answers "Too many requests".
+//
+// It arrives as a 200 with a 17-byte plain-text body, so nothing upstream treats
+// it as an error — callers must not retry into it, only back off.
+var ErrSuperFlixRateLimited = errors.New("superflix: rate limited (too many requests)")
+
+// isRateLimited reports whether a response body is SuperFlix's rate-limit notice
+// rather than a page.
+func isRateLimited(html string) bool {
+	if len(html) > 200 {
+		return false
+	}
+	return strings.Contains(strings.ToLower(html), "too many requests")
+}
+
+// playerPageWithTokens loads the REAL player page — the one carrying PAGE_TOKEN
+// and the content id, without which /player/bootstrap cannot be called — retrying
+// past the token-less page variants SuperFlix keeps serving.
+//
+// The retry deliberately REUSES the client, cf_clearance cookie and all. An
+// earlier version rebuilt the transport between attempts, on the theory that the
+// shell was sticky per connection. That threw away the Cloudflare clearance, so
+// every attempt re-armed the gate and paid a fresh headed-browser solve: measured
+// against Mushoku Tensei, attempt 1 took 3m02s, attempt 2 took 1m56s, and the rest
+// blew the deadline. Whatever a fresh transport might buy, it cannot be worth
+// re-solving Cloudflare eight times.
+func (c *SuperFlixClient) playerPageWithTokens(ctx context.Context, mediaType, mediaID, season, episode string) (*SuperFlixTokens, error) {
+	var lastErr error
+
+	// The server list must never escalate to the headed browser. It is an
+	// enhancement — it buys the user a choice of source and of dublado/legendado —
+	// while the stream plays without it, so it has no business paying the most
+	// expensive operation in the system. Some titles put a Cloudflare gate in front
+	// of the player page and each solve costs MINUTES (Mushoku Tensei: 3m19s on the
+	// first request, 1m19s on the second, then deadline). Forbidding the solve turns
+	// that into a fast miss, and the caller falls back to the embed sniff — which
+	// owns the browser anyway.
+	ctx = WithoutBrowserSolve(ctx)
+
+	for attempt := range maxPlayerPageAttempts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if attempt > 0 {
+			select {
+			case <-time.After(playerPageRetryDelay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		html, err := c.GetPlayerPage(ctx, mediaType, mediaID, season, episode)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		// SuperFlix serves its rate-limit notice as a 200 with a plain-text body, so
+		// it reaches us looking like a page. Retrying into it only digs the hole
+		// deeper — give up on the server list and let the caller fall back.
+		if isRateLimited(html) {
+			return nil, ErrSuperFlixRateLimited
+		}
+
+		// CSRF_TOKEN is deliberately empty on the current pages (`var CSRF_TOKEN = ""`),
+		// so requiring it — as this code used to — rejected every real page and made
+		// the server list unreachable. PAGE_TOKEN is the one bootstrap validates.
+		tokens := c.ExtractTokens(html)
+		if tokens.PageToken != "" && tokens.ContentID != "" {
+			util.Debug("SuperFlix: got the real player page", "attempt", attempt+1, "contentID", tokens.ContentID)
+			return tokens, nil
+		}
+		lastErr = fmt.Errorf("player page carried no tokens (%d bytes — the shell, not the player)", len(html))
+	}
+
+	return nil, fmt.Errorf("could not load a SuperFlix player page with tokens after %d attempts: %w", maxPlayerPageAttempts, lastErr)
+}
+
+// GetServers lists the servers SuperFlix offers for a title/episode, each tagged
+// Dublado or Legendado (see SuperFlixServer.Type).
+//
+// This is the only path that exposes them. The embed page the browser sniff lands
+// on is a bare player shell with no server list, which is why stream resolution
+// used to silently take whatever the embed happened to play — the user could
+// choose neither the server nor the audio.
+//
+// Placeholder entries (the site's own "fallback" options) are dropped, exactly as
+// the upstream player drops them before rendering its list.
+func (c *SuperFlixClient) GetServers(ctx context.Context, mediaType, mediaID, season, episode string) ([]SuperFlixServer, *SuperFlixTokens, error) {
+	tokens, err := c.playerPageWithTokens(ctx, mediaType, mediaID, season, episode)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	servers, err := c.Bootstrap(ctx, tokens)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list servers: %w", err)
+	}
+
+	real := make([]SuperFlixServer, 0, len(servers))
+	for _, s := range servers {
+		if s.IsFallback() || s.IDString() == "" {
+			continue
+		}
+		real = append(real, s)
+	}
+	if len(real) == 0 {
+		return nil, nil, fmt.Errorf("%w (contentid=%s)", ErrSuperFlixNoServers, tokens.ContentID)
+	}
+
+	util.Debug("SuperFlix servers", "count", len(real), "contentID", tokens.ContentID)
+	return real, tokens, nil
+}
+
+// StreamFromServer resolves the stream for one specific server, so the caller can
+// honor the user's pick instead of guessing.
+func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFlixTokens, serverID string) (*SuperFlixStreamResult, error) {
+	redirectURL, err := c.GetSourceURL(ctx, serverID, tokens)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source URL: %w", err)
+	}
+
+	playerBaseURL, videoHash, playerHTML, err := c.ResolveRedirect(ctx, redirectURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
+	}
+
+	referer := fmt.Sprintf("%s/video/%s", playerBaseURL, videoHash)
+	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get video from API: %w", err)
+	}
+
+	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)
+	return &SuperFlixStreamResult{
+		StreamURL:    streamURL,
+		Title:        tokens.Title,
+		Referer:      playerBaseURL + "/",
+		Thumb:        NormalizeSuperFlixImageURL(thumbURL),
+		DefaultAudio: defaultAudio,
+		Subtitles:    subtitles,
+	}, nil
+}
+
 func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens) ([]SuperFlixServer, error) {
 	bootstrapURL := c.baseURL + "/player/bootstrap"
 
@@ -258,6 +421,50 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 	}
 
 	return baseURL, videoHash, string(body), nil
+}
+
+// fetchPlayerExtras loads the external player page for (host, hash) and pulls out
+// the HLS audio-track languages and the external subtitle tracks.
+//
+// This exists because the browser path — the one production actually takes — used
+// to return a stream with NO subtitles and NO audio info at all: it sniffs the
+// media URL out of the network traffic and never reads the player page that
+// carries them. The player host is not behind the Cloudflare gate (that is why
+// GetVideoAPI can replay over plain HTTP), so recovering them costs one ordinary
+// GET and no browser.
+//
+// Failure is non-fatal: extras enrich playback (subtitle tracks, dub-vs-original
+// audio) but the stream plays without them, so callers ignore the error.
+func (c *SuperFlixClient) fetchPlayerExtras(ctx context.Context, host, hash string) (defaultAudio []string, subtitles []SuperFlixSubtitle) {
+	if host == "" || hash == "" {
+		return nil, nil
+	}
+	pageURL := host + "/video/" + hash
+
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		util.Debug("SuperFlix: player extras request failed", "url", pageURL, "err", err)
+		return nil, nil
+	}
+	req.Header.Set("Referer", host+"/")
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		util.Debug("SuperFlix: player extras fetch failed", "url", pageURL, "err", err)
+		return nil, nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		util.Debug("SuperFlix: player extras read failed", "url", pageURL, "err", err)
+		return nil, nil
+	}
+
+	defaultAudio, subtitles = c.ExtractPlayerExtras(string(body))
+	util.Debug("SuperFlix player extras", "audio", defaultAudio, "subtitles", len(subtitles))
+	return defaultAudio, subtitles
 }
 
 // ExtractPlayerExtras extracts defaultAudio and subtitles from the external player HTML
@@ -500,10 +707,13 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		streamURL, thumb, err := c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer)
 		if err == nil && streamURL != "" {
 			util.Debug("SuperFlix stream from cache (no browser)", "key", key, "host", ent.Host)
+			audio, subs := c.fetchPlayerExtras(ctx, ent.Host, ent.Hash)
 			return &SuperFlixStreamResult{
-				StreamURL: streamURL,
-				Referer:   ent.Host + "/",
-				Thumb:     NormalizeSuperFlixImageURL(thumb),
+				StreamURL:    streamURL,
+				Referer:      ent.Host + "/",
+				Thumb:        NormalizeSuperFlixImageURL(thumb),
+				DefaultAudio: audio,
+				Subtitles:    subs,
 			}, nil
 		}
 		util.Debug("SuperFlix cached stream stale, re-solving", "key", key, "err", err)
@@ -541,8 +751,16 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	if referer == "" {
 		referer = "https://" + SuperFlixEmbedHost + "/"
 	}
+
+	// The sniff only yields the media URL; the subtitle tracks and the HLS audio
+	// languages live on the player page, which is not gated. Fetch them so the
+	// browser path is as rich as the plain-HTTP one (it used to return neither).
+	audio, subs := c.fetchPlayerExtras(ctx, res.PlayerHost, res.VideoHash)
+
 	return &SuperFlixStreamResult{
-		StreamURL: res.StreamURL,
-		Referer:   referer,
+		StreamURL:    res.StreamURL,
+		Referer:      referer,
+		DefaultAudio: audio,
+		Subtitles:    subs,
 	}, nil
 }
