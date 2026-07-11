@@ -126,16 +126,6 @@ func isRateLimited(html string) bool {
 func (c *SuperFlixClient) playerPageWithTokens(ctx context.Context, mediaType, mediaID, season, episode string) (*SuperFlixTokens, error) {
 	var lastErr error
 
-	// The server list must never escalate to the headed browser. It is an
-	// enhancement — it buys the user a choice of source and of dublado/legendado —
-	// while the stream plays without it, so it has no business paying the most
-	// expensive operation in the system. Some titles put a Cloudflare gate in front
-	// of the player page and each solve costs MINUTES (Mushoku Tensei: 3m19s on the
-	// first request, 1m19s on the second, then deadline). Forbidding the solve turns
-	// that into a fast miss, and the caller falls back to the embed sniff — which
-	// owns the browser anyway.
-	ctx = WithoutBrowserSolve(ctx)
-
 	for attempt := range maxPlayerPageAttempts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -186,6 +176,17 @@ func (c *SuperFlixClient) playerPageWithTokens(ctx context.Context, mediaType, m
 // Placeholder entries (the site's own "fallback" options) are dropped, exactly as
 // the upstream player drops them before rendering its list.
 func (c *SuperFlixClient) GetServers(ctx context.Context, mediaType, mediaID, season, episode string) ([]SuperFlixServer, *SuperFlixTokens, error) {
+	// The server list must never escalate to the headed browser. It is an
+	// enhancement — it buys the user a choice of source and of dublado/legendado —
+	// while the stream plays without it, so it has no business paying the most
+	// expensive operation in the system. Some titles put a Cloudflare gate in front
+	// of the player page and each solve costs MINUTES (Mushoku Tensei: 3m19s on the
+	// first request, 1m19s on the second, then deadline). Forbidding the solve — for
+	// BOTH the player page and the bootstrap POST below — turns that into a fast
+	// miss, and the caller falls back to the embed sniff, which owns the browser
+	// anyway.
+	ctx = WithoutBrowserSolve(ctx)
+
 	tokens, err := c.playerPageWithTokens(ctx, mediaType, mediaID, season, episode)
 	if err != nil {
 		return nil, nil, err
@@ -196,19 +197,19 @@ func (c *SuperFlixClient) GetServers(ctx context.Context, mediaType, mediaID, se
 		return nil, nil, fmt.Errorf("failed to list servers: %w", err)
 	}
 
-	real := make([]SuperFlixServer, 0, len(servers))
+	playable := make([]SuperFlixServer, 0, len(servers))
 	for _, s := range servers {
 		if s.IsFallback() || s.IDString() == "" {
 			continue
 		}
-		real = append(real, s)
+		playable = append(playable, s)
 	}
-	if len(real) == 0 {
+	if len(playable) == 0 {
 		return nil, nil, fmt.Errorf("%w (contentid=%s)", ErrSuperFlixNoServers, tokens.ContentID)
 	}
 
-	util.Debug("SuperFlix servers", "count", len(real), "contentID", tokens.ContentID)
-	return real, tokens, nil
+	util.Debug("SuperFlix servers", "count", len(playable), "contentID", tokens.ContentID)
+	return playable, tokens, nil
 }
 
 // StreamFromServer resolves the stream for one specific server, so the caller can
