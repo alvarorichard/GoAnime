@@ -783,12 +783,37 @@ func TestIntegration_RealSuperFlix_GetEpisodes(t *testing.T) {
 	require.True(t, exists, "should have season 1")
 	assert.NotEmpty(t, s1, "season 1 should have episodes")
 
-	// Verify episode structure
+	assertEpisodesReleased(t, episodes)
+}
+
+// assertEpisodesReleased checks the placeholder-filter invariant on a live
+// listing.
+//
+// air_date may legitimately be EMPTY: the rotating frontend renders episodes as
+// <a data-episode-id> anchors that carry no date (the site release-filters those
+// itself), so only the legacy ALL_EPISODES / window.allEpisodes blobs supply one.
+// Asserting NotEmpty here made these tests flaky — they failed whenever the site
+// served the anchor format and passed only when it served nothing at all (the old
+// silent-empty path skipped the test entirely, so it was passing vacuously).
+//
+// What must never happen is a "null" or future air_date: that means an unreleased
+// placeholder slipped through filterEpisodesByAirDate.
+func assertEpisodesReleased(t *testing.T, episodes map[string][]superflix.SuperFlixEpisode) {
+	t.Helper()
 	for seasonNum, eps := range episodes {
 		for _, ep := range eps {
 			assert.NotEmpty(t, ep.EpiNum, "episode number must not be empty in season %s", seasonNum)
-			assert.NotEmpty(t, ep.AirDate, "air_date must not be empty after filtering")
 			assert.NotEqual(t, "null", ep.AirDate, "air_date must not be 'null'")
+			if ep.AirDate == "" {
+				continue // anchor format exposes no date
+			}
+			aired, err := time.Parse("2006-01-02", ep.AirDate)
+			if err != nil {
+				continue // unrecognized shape; the "null" check above still applies
+			}
+			assert.False(t, aired.After(time.Now()),
+				"unreleased placeholder leaked past the air-date filter: season %s ep %s airs %s",
+				seasonNum, ep.EpiNum, ep.AirDate)
 		}
 	}
 }
@@ -816,14 +841,8 @@ func TestIntegration_RealSuperFlix_GetEpisodes_NarutoPlaceholderFilter(t *testin
 		t.Skip("No episodes returned (API may have changed)")
 	}
 
-	// Verify episode structure - any episode that passed the filter MUST have a valid air_date
-	for seasonNum, eps := range episodes {
-		for _, ep := range eps {
-			assert.NotEmpty(t, ep.EpiNum, "episode number must not be empty in season %s", seasonNum)
-			assert.NotEmpty(t, ep.AirDate, "air_date must not be empty after filtering")
-			assert.NotEqual(t, "null", ep.AirDate, "air_date must not be 'null'")
-		}
-	}
+	// No episode that passed the filter may carry a "null" or future air_date.
+	assertEpisodesReleased(t, episodes)
 }
 
 // =============================================================================

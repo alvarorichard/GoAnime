@@ -153,7 +153,11 @@ func TestGetEpisodesViaBrowser_TopLevelSolveError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to load serie page")
 }
 
-func TestGetEpisodesViaBrowser_NoEpisodesReturnsNil(t *testing.T) {
+// A solved page with nothing to parse is a scrape failure, not a title with zero
+// episodes. Returning (nil, nil) here — the old behavior — made the two
+// indistinguishable and surfaced to the user as a bare "no seasons found"
+// (issue #184), so it must report an error carrying ErrSuperFlixNoEpisodeList.
+func TestGetEpisodesViaBrowser_NoEpisodesReturnsError(t *testing.T) {
 	t.Parallel()
 	solver := &scriptedSolver{
 		solveByURL: map[string]*CFSolveResult{
@@ -165,7 +169,8 @@ func TestGetEpisodesViaBrowser_NoEpisodesReturnsNil(t *testing.T) {
 	c.browserSolver = solver
 
 	got, err := c.GetEpisodes(context.Background(), "0")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSuperFlixNoEpisodeList)
 	assert.Nil(t, got)
 }
 

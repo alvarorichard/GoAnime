@@ -19,6 +19,18 @@ import (
 // "this episode has no source on SuperFlix" rather than retrying.
 var ErrSuperFlixNoServers = errors.New("superflix: no servers available for this content")
 
+// ErrSuperFlixNoEpisodeList is returned when a serie page is solved successfully
+// but carries no episode list to parse.
+//
+// This is a scrape failure, not a content signal: SuperFlix increasingly answers
+// /serie/<tmdb> with an embed-only shell ("Embed | <name>", a signed player
+// iframe and nothing else), and it does so non-deterministically — the same title
+// may render the full frontend on one solve and the bare shell on the next. The
+// browser-free TVmaze listing is therefore the reliable path; this error tells
+// callers the browser fallback found nothing to work with, so they can say so
+// instead of reporting a bare "no seasons found".
+var ErrSuperFlixNoEpisodeList = errors.New("superflix: page exposed no episode list")
+
 const (
 	// SuperFlixBase is the canonical SuperFlix host. Previous hosts
 	// (`superflixapi.rest`, `superflixapi.online`, `superflixapi.best`,

@@ -219,9 +219,25 @@ func (c *SuperFlixClient) getEpisodesViaBrowser(ctx context.Context, tmdbID stri
 	}
 
 	if len(episodes) == 0 {
-		return nil, nil
+		// Returning (nil, nil) here used to make an unparseable page look like a
+		// title that simply has no episodes, which surfaced to the user as a bare
+		// "no seasons found" with nothing to act on. Report it as the scrape
+		// failure it is, and say which page defeated us.
+		return nil, fmt.Errorf("%w: solved %s but it exposed no episode list (title=%q)",
+			ErrSuperFlixNoEpisodeList, res.FinalURL, pageTitle(res.HTML))
 	}
 	return episodes, nil
+}
+
+// pageTitle pulls <title> out of a page for diagnostics. SuperFlix increasingly
+// answers with an "Embed | <name>" shell that carries only a player iframe and
+// no episode list, so the title is the quickest way to see that in a log.
+func pageTitle(html string) string {
+	m := sfTitleRe.FindStringSubmatch(html)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 // resolveFrontendSeasonURLs maps season number -> absolute URL for every

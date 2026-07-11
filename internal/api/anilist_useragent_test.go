@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,18 @@ func TestAniListPost_SendsNonBrowserUserAgent(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
 		"a browser-shaped UA would have been 403'd by AniList")
 	assert.Contains(t, string(body), `"id":20`)
+}
+
+// The root cause of #184 in one assertion: AniList must never travel on the
+// shared surf clients. They impersonate Chrome and rewrite the User-Agent to a
+// browser one, which AniList answers with a 403 — and no header the caller sets
+// can survive that, so this is a property of the transport, not of the request.
+func TestAniListClient_IsNotTheImpersonatingSharedClient(t *testing.T) {
+	t.Parallel()
+	assert.NotSame(t, util.GetSharedClient(), aniListClient,
+		"AniList must not use the Chrome-impersonating shared client")
+	assert.NotSame(t, util.GetFastClient(), aniListClient,
+		"AniList must not use the Chrome-impersonating fast client")
 }
 
 func TestAniListPost_ReturnsBodyAndStatus(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,8 @@ func describeSuperFlixErr(err error) error {
 		return &friendlyError{cause: err, msg: "⚠️  Couldn't open the helper browser. The first time you use SuperFlix, GoAnime needs internet to set it up — check your connection and try again. Tip: installing Google Chrome makes this faster."}
 	case errors.Is(err, superflix.ErrSuperFlixNoServers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
+	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
+		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AllAnime)."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
 	default:
@@ -470,6 +473,98 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 	return fetchEpisodesViaRegistry(anime)
 }
 
+// sortedSeasonNumbers returns the season keys in ascending numeric order.
+//
+// A plain string sort is wrong here: it orders "10" before "2", so a show with
+// ten or more seasons lists them scrambled. Non-numeric keys (TVmaze exposes
+// year-based "seasons" for some long-running anime) fall back to string order and
+// sort after the numeric ones, keeping the result deterministic.
+func sortedSeasonNumbers(allEpisodes map[string][]superflix.SuperFlixEpisode) []string {
+	seasons := make([]string, 0, len(allEpisodes))
+	for k := range allEpisodes {
+		seasons = append(seasons, k)
+	}
+	sort.Slice(seasons, func(i, j int) bool {
+		ni, erri := strconv.Atoi(seasons[i])
+		nj, errj := strconv.Atoi(seasons[j])
+		switch {
+		case erri == nil && errj == nil:
+			return ni < nj
+		case erri == nil:
+			return true // numeric seasons before non-numeric ones
+		case errj == nil:
+			return false
+		default:
+			return seasons[i] < seasons[j]
+		}
+	})
+	return seasons
+}
+
+// Episode-listing seams. Split out so the TVmaze-first ordering (the fix for the
+// "no seasons found" dead end in issue #184) is testable without a network or a
+// headed browser.
+var (
+	sfTVmazeEpisodesFn = func(ctx context.Context, imdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+		return superflix.GetEpisodesFromTVmaze(ctx, http.DefaultClient, imdbID)
+	}
+	sfBrowserEpisodesFn = func(ctx context.Context, c *superflix.SuperFlixClient, tmdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+		return c.GetEpisodes(ctx, tmdbID)
+	}
+)
+
+// fetchSuperFlixSeasons lists a series' seasons, preferring the browser-free
+// TVmaze listing and only falling back to the headed browser when TVmaze cannot
+// answer.
+//
+// The order matters. SuperFlix now frequently serves /serie/<tmdb> as an
+// embed-only shell with no episode list at all — and does so non-deterministically
+// — so scraping it is unreliable, while TVmaze (keyed on the IMDB id SuperFlix
+// returns in search) is deterministic and needs no browser. Putting TVmaze first
+// also keeps the "a browser window will open" warnings out of the common path:
+// they are emitted only if we actually reach the browser.
+func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.Anime, tmdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+	var allEpisodes map[string][]superflix.SuperFlixEpisode
+
+	if media.IMDBID != "" {
+		runWithSpinner("Loading seasons...", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			eps, err := sfTVmazeEpisodesFn(ctx, media.IMDBID)
+			if err != nil {
+				util.Debug("TVmaze episode listing failed; falling back to the browser", "imdb", media.IMDBID, "err", err)
+				return
+			}
+			allEpisodes = eps
+		})
+	}
+
+	if len(allEpisodes) == 0 {
+		preflightSuperFlixBrowser()
+
+		var episodesErr error
+		runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
+			// Generous timeout: the player page may sit behind a Cloudflare Turnstile
+			// gate that NewSuperFlixClient solves with a headed Firefox (10–40s). Must
+			// exceed the client's solve budget or the solve gets cancelled mid-flight.
+			ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+			defer cancel()
+			allEpisodes, episodesErr = sfBrowserEpisodesFn(ctx, sfClient, tmdbID)
+		})
+		if episodesErr != nil {
+			return nil, fmt.Errorf("failed to get episodes: %w", describeSuperFlixErr(episodesErr))
+		}
+	}
+
+	if len(allEpisodes) == 0 {
+		return nil, &friendlyError{
+			cause: fmt.Errorf("superflix: no seasons for tmdb=%s (imdb=%q): TVmaze had no listing and the SuperFlix page exposed no episode list", tmdbID, media.IMDBID),
+			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AllAnime).",
+		}
+	}
+	return allEpisodes, nil
+}
+
 // GetSuperFlixEpisodes handles episodes/content for SuperFlix movies and TV shows
 func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	sfClient := superflix.NewSuperFlixClient()
@@ -501,50 +596,12 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// For TV shows / series, get seasons and episodes
 	util.Debug("SuperFlix: Processing TV show/series, getting episodes")
 
-	preflightSuperFlixBrowser()
-
-	var allEpisodes map[string][]superflix.SuperFlixEpisode
-	var episodesErr error
-	runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
-		// Preferred path: list episodes from the keyless, public TVmaze API using
-		// the IMDB id SuperFlix gives us in search. This is browser-free — no
-		// Turnstile gate, no headed Firefox window during browsing. SuperFlix uses
-		// standard TMDB season/episode numbering, which TVmaze matches, so the
-		// resulting (season, episode) pairs drive the /serie/{tmdb}/{s}/{e} embed
-		// directly.
-		if media.IMDBID != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			if eps, err := superflix.GetEpisodesFromTVmaze(ctx, http.DefaultClient, media.IMDBID); err == nil && len(eps) > 0 {
-				allEpisodes = eps
-				return
-			} else if err != nil {
-				util.Debug("TVmaze episode listing failed, falling back to browser", "imdb", media.IMDBID, "err", err)
-			}
-		}
-
-		// Fallback: drive the gated SuperFlix frontend through the headed browser.
-		// Generous timeout: the player page may sit behind a Cloudflare Turnstile
-		// gate that NewSuperFlixClient solves with a headed Firefox (10–40s). Must
-		// exceed the client's solve budget or the solve gets cancelled mid-flight.
-		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
-		defer cancel()
-		allEpisodes, episodesErr = sfClient.GetEpisodes(ctx, tmdbID)
-	})
-	if episodesErr != nil {
-		return nil, fmt.Errorf("failed to get episodes: %w", describeSuperFlixErr(episodesErr))
+	allEpisodes, err := fetchSuperFlixSeasons(sfClient, media, tmdbID)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(allEpisodes) == 0 {
-		return nil, fmt.Errorf("no seasons found")
-	}
-
-	// Sort season numbers
-	var seasonNums []string
-	for k := range allEpisodes {
-		seasonNums = append(seasonNums, k)
-	}
-	sort.Strings(seasonNums)
+	seasonNums := sortedSeasonNumbers(allEpisodes)
 
 	// Build season labels for selection
 	var seasonLabels []string
