@@ -643,10 +643,10 @@ func TestIntegration_SuperFlix_PartialTokens(t *testing.T) {
 }
 
 // =============================================================================
-// Integration Test: Search → Adapter → ScraperManager flow
+// Integration Test: Search → SuperFlixAdapter flow
 // =============================================================================
 
-func TestIntegration_SuperFlix_ThroughScraperManager(t *testing.T) {
+func TestIntegration_SuperFlix_ThroughAdapter(t *testing.T) {
 	t.Parallel()
 
 	mixedHTML := `<html><body>

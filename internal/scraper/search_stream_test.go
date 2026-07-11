@@ -6,45 +6,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// ---------------------------------------------------------------------------
-// ScraperManager.SearchAnimePTBR
-// ---------------------------------------------------------------------------
-
-func TestScraperManager_SearchAnimePTBR_BothReturn(t *testing.T) {
-	t.Parallel()
-	afMock := &MockScraper{
-		searchFunc: func(q string) ([]*models.Anime, error) {
-			return []*models.Anime{{Name: "Naruto AF", Source: "AnimeFire"}}, nil
-		},
-	}
-	afMock.scraperType = AnimefireType
-
-	manager := NewScraperManagerForTest()
-	manager.RegisterScraperForTest(AnimefireType, afMock)
-	// GoyabuType and SuperFlixType not registered → errors silently ignored
-
-	results, err := manager.SearchAnimePTBR("Naruto")
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	// SearchAnimePTBR tags AnimeFire results with [PT-BR] prefix
-	assert.Contains(t, results[0].Name, "Naruto AF")
-}
-
-func TestScraperManager_SearchAnimePTBR_AllFail(t *testing.T) {
-	t.Parallel()
-	manager := NewScraperManagerForTest()
-	// No PT-BR scrapers registered
-	_, err := manager.SearchAnimePTBR("Naruto")
-	require.Error(t, err)
-}
 
 // ---------------------------------------------------------------------------
 // AllAnimeAdapter.GetAnimeEpisodes

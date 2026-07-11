@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
@@ -12,64 +11,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSourceCircuitBreakerSkipsAfterRepeatedOriginFailures(t *testing.T) {
-	unavailableErr := netx.NewHTTPStatusError("AllAnime", "search", 521)
-	allAnimeMock := &MockScraper{
-		searchFunc: func(_ string) ([]*models.Anime, error) {
-			return nil, unavailableErr
-		},
-	}
-	animefireMock := &MockScraper{
-		searchFunc: func(_ string) ([]*models.Anime, error) {
-			return []*models.Anime{{Name: "Naruto", URL: "ok"}}, nil
-		},
-	}
-
-	manager := createTestManager(allAnimeMock, animefireMock)
-	manager.breaker = newSourceCircuitBreaker()
-	manager.breaker.threshold = 2
-	manager.breaker.cooldown = time.Minute
-
-	for range 2 {
-		results, err := manager.SearchAnime("naruto", nil)
-		require.NoError(t, err)
-		require.Len(t, results, 1)
-	}
-
-	results, err := manager.SearchAnime("naruto", nil)
-	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, int32(2), allAnimeMock.searchCallCount.Load(), "open circuit should skip the failing source")
-	assert.Equal(t, int32(3), animefireMock.searchCallCount.Load())
-}
-
+// TestCheckSourceHealthFailsOnParserBreakButSkipsOffline pins the health
+// classification: an offline/blocked origin (HTTP 521) is SKIPPED so CI doesn't
+// fail on upstream outages, while a source that responds but no longer parses
+// (parser break) is FAILED so a real regression is caught.
 func TestCheckSourceHealthFailsOnParserBreakButSkipsOffline(t *testing.T) {
 	t.Parallel()
 
-	manager := &ScraperManager{
-		scrapers: map[ScraperType]UnifiedScraper{
-			AllAnimeType: &MockScraper{
-				scraperType: AllAnimeType,
-				searchFunc: func(_ string) ([]*models.Anime, error) {
-					return nil, netx.NewHTTPStatusError("AllAnime", "search", 521)
-				},
-			},
-			AnimefireType: &MockScraper{
-				scraperType: AnimefireType,
-				searchFunc: func(_ string) ([]*models.Anime, error) {
-					return nil, fmt.Errorf("no video URL found in AJAX response")
-				},
-			},
+	offlineMock := &MockScraper{
+		scraperType: AllAnimeType,
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, netx.NewHTTPStatusError("AllAnime", "search", 521)
 		},
-		breaker: newSourceCircuitBreaker(),
+	}
+	parserMock := &MockScraper{
+		scraperType: AnimefireType,
+		searchFunc: func(_ string) ([]*models.Anime, error) {
+			return nil, fmt.Errorf("no video URL found in AJAX response")
+		},
 	}
 
-	offline := manager.CheckSourceHealth(context.Background(), AllAnimeType, "naruto")
+	offline := checkSourceHealthWith(context.Background(), AllAnimeType, offlineMock, "naruto")
 	assert.Equal(t, SourceHealthSkipped, offline.Status)
 	require.NotNil(t, offline.Diagnostic)
 	assert.Equal(t, netx.DiagnosticSourceUnavailable, offline.Diagnostic.Kind)
 
-	parserBroken := manager.CheckSourceHealth(context.Background(), AnimefireType, "naruto")
+	parserBroken := checkSourceHealthWith(context.Background(), AnimefireType, parserMock, "naruto")
 	assert.Equal(t, SourceHealthFailed, parserBroken.Status)
 	require.NotNil(t, parserBroken.Diagnostic)
 	assert.Equal(t, netx.DiagnosticParserBroken, parserBroken.Diagnostic.Kind)

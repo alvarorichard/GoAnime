@@ -1,45 +1,30 @@
-// Package scraper provides a unified interface for different anime sources
+// Package scraper provides per-source adapters over a unified interface.
+//
+// The multi-source search/dispatch engine that used to live here (ScraperManager)
+// has been replaced by the Model B registry in internal/api/providers: sources
+// self-register and are fanned out by providers.SearchAll / source.Resolve. What
+// remains here is the adapter layer — thin wrappers that expose each per-source
+// client through the UnifiedScraper interface — plus NewAdapter, which the
+// providers build lazily and own directly.
 package scraper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
-	"github.com/alvarorichard/Goanime/internal/util"
 )
 
 // ScraperType represents different scraper types
 type ScraperType int
-
-// Timeout configurations – we wait for ALL sources to finish (or the hard
-// timeout) so that slower scrapers like SuperFlix are never silently dropped.
-const (
-	// searchTimeout is the maximum time to wait for all scrapers.
-	searchTimeout = 15 * time.Second
-	// perScraperTimeout is the timeout for individual scrapers.
-	perScraperTimeout = 12 * time.Second
-)
-
-// stragglerGrace bounds how long the aggregate search keeps waiting for the
-// remaining sources ONCE at least one source has delivered results. Healthy
-// sources answer in 1–3s; a source that is still silent this long after a
-// sibling answered is almost always dead (hanging until perScraperTimeout),
-// and holding every search hostage for it makes the whole app feel frozen.
-// Cut sources are logged, not silently dropped. Variable so tests can shrink
-// it.
-var stragglerGrace = 5 * time.Second
 
 const (
 	AllAnimeType ScraperType = iota
@@ -56,49 +41,10 @@ type UnifiedScraper interface {
 	GetType() ScraperType
 }
 
-// ScraperManager manages multiple scrapers
-type ScraperManager struct {
-	scrapers  map[ScraperType]UnifiedScraper
-	breaker   *sourceCircuitBreaker
-	breakerMu sync.Mutex
-}
-
-// Singleton ScraperManager — scrapers are stateless HTTP clients, no need to recreate
-var (
-	globalScraperManager     *ScraperManager
-	globalScraperManagerOnce sync.Once
-)
-
-// PreWarmScraperManager triggers background initialization of the scraper
-// manager singleton so it's ready when the first search happens.
-func PreWarmScraperManager() {
-	go func() { NewScraperManager() }()
-}
-
-// NewScraperManager returns a cached scraper manager singleton.
-// Scrapers are stateless HTTP clients so a single instance is reused.
-func NewScraperManager() *ScraperManager {
-	globalScraperManagerOnce.Do(func() {
-		manager := &ScraperManager{
-			scrapers: make(map[ScraperType]UnifiedScraper),
-			breaker:  newSourceCircuitBreaker(),
-		}
-
-		// Initialize scrapers
-		manager.scrapers[AllAnimeType] = &AllAnimeAdapter{client: allanime.NewAllAnimeClient()}
-		manager.scrapers[AnimefireType] = &AnimefireAdapter{client: animefire.NewAnimefireClient()}
-		manager.scrapers[GoyabuType] = &GoyabuAdapter{client: goyabu.NewGoyabuClient()}
-		manager.scrapers[SuperFlixType] = &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}
-
-		globalScraperManager = manager
-	})
-	return globalScraperManager
-}
-
 // NewAdapter constructs a standalone UnifiedScraper adapter for the given type,
 // wrapping a freshly-built per-source client. It lets the Model B providers own
-// their scraper directly (no ScraperManager / GetScraper indirection); the
-// clients are cheap, lazy structs so construction does no network I/O.
+// their scraper directly; the clients are cheap, lazy structs so construction
+// does no network I/O.
 func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 	switch t {
 	case AllAnimeType:
@@ -114,267 +60,36 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 	}
 }
 
-// NewScraperManagerForTest creates an empty ScraperManager with no scrapers.
-// Use RegisterScraperForTest to inject mocks. Only for tests.
-func NewScraperManagerForTest() *ScraperManager {
-	return &ScraperManager{
-		scrapers: make(map[ScraperType]UnifiedScraper),
-		breaker:  newSourceCircuitBreaker(),
+// scraperDisplayName returns a stable display name for the scraper type. It is
+// the canonical Source spelling used by result tagging and diagnostics.
+func scraperDisplayName(scraperType ScraperType) string {
+	switch scraperType {
+	case AllAnimeType:
+		return "AllAnime"
+	case AnimefireType:
+		return "Animefire.io"
+	case GoyabuType:
+		return "Goyabu"
+	case SuperFlixType:
+		return "SuperFlix"
+	default:
+		return "Desconhecido"
 	}
 }
 
-// RegisterScraperForTest adds a scraper to a test manager. Only for tests.
-func (sm *ScraperManager) RegisterScraperForTest(t ScraperType, s UnifiedScraper) {
-	sm.scrapers[t] = s
-}
-
-// SearchAnime searches across all available scrapers with enhanced Portuguese messaging.
-// All sources are queried concurrently and results are collected until every
-// scraper finishes or the hard timeout expires.
-func (sm *ScraperManager) SearchAnime(query string, scraperType *ScraperType) ([]*models.Anime, error) {
-	timer := util.StartTimer("SearchAnime:Total")
-	defer timer.Stop()
-
-	util.PerfCount("search_requests")
-
-	if scraperType != nil {
-		return sm.searchSpecificScraper(query, *scraperType)
-	}
-
-	return sm.searchAllScrapersConcurrent(query)
-}
-
-// searchSpecificScraper searches using a single specific scraper
-func (sm *ScraperManager) searchSpecificScraper(query string, scraperType ScraperType) ([]*models.Anime, error) {
-	scraper, exists := sm.scrapers[scraperType]
-	if !exists {
-		return nil, fmt.Errorf("scraper type %v not found", scraperType)
-	}
-
-	sourceName := sm.getScraperDisplayName(scraperType)
-	if util.SourceDisabled(sourceName) {
-		util.Warn("Search source disabled by config", "source", sourceName)
-		return nil, fmt.Errorf("source %s is disabled via GOANIME_DISABLED_SOURCES", sourceName)
-	}
-	if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(scraperType); open {
-		util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
-		return nil, fmt.Errorf("busca pulada em %s: %w", sourceName, diagnostic)
-	}
-
-	util.Debug("Searching specific scraper", "scraper", sourceName)
-
-	results, err := scraper.SearchAnime(query)
-	if err != nil {
-		diagnostic := netx.DiagnoseError(sourceName, "search", err)
-		if sm.recordSourceFailure(scraperType, diagnostic) {
-			util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
-		}
-		return nil, fmt.Errorf("busca falhou em %s: %w", sourceName, diagnostic)
-	}
-	sm.recordSourceSuccess(scraperType)
-
-	// Add language tags
-	sm.tagResults(results, scraperType)
-
-	if len(results) > 0 {
-		util.Debug("Search completed", "scraper", sourceName, "results", len(results))
-	}
-
-	return results, nil
-}
-
-// searchResult holds the result from a single scraper goroutine
-type searchResult struct {
-	scraperType ScraperType
-	results     []*models.Anime
-	err         error
-}
-
-// searchAllScrapersConcurrent searches all scrapers in parallel and waits for
-// every scraper to finish (or the hard searchTimeout to expire).  This ensures
-// slower sources like SuperFlix are never silently dropped.
-func (sm *ScraperManager) searchAllScrapersConcurrent(query string) ([]*models.Anime, error) {
-	util.Debug("Starting concurrent search across all sources", "query", query)
-
-	ctx, cancel := context.WithTimeout(context.Background(), searchTimeout)
-	defer cancel()
-
-	// Thread-safe result collection
-	var (
-		allResults         []*models.Anime
-		resultsMutex       sync.Mutex
-		searchErrors       []string
-		searchSourceErrors []error
-		errorsMutex        sync.Mutex
-	)
-
-	resultChan := make(chan searchResult, len(sm.scrapers))
-	var wg sync.WaitGroup
-
-	// Launch all scrapers concurrently
-	for sType, scraper := range sm.scrapers {
-		sourceName := sm.getScraperDisplayName(sType)
-		if util.SourceDisabled(sourceName) {
-			util.Warn("Search source disabled by config; skipping", "source", sourceName)
-			continue
-		}
-		if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(sType); open {
-			util.Warn("Search source skipped", "source", sourceName, "diagnostic", diagnostic.UserMessage(), "retry_after", retryAfter.Round(time.Second))
-			searchErrors = append(searchErrors, diagnostic.UserMessage())
-			searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, diagnostic))
-			continue
-		}
-
-		wg.Add(1)
-		go func(st ScraperType, s UnifiedScraper) {
-			defer wg.Done()
-			result := sm.searchWithTimeout(ctx, st, s, query)
-			resultChan <- result
-		}(sType, scraper)
-	}
-
-	// Close channel when all goroutines complete
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	// Collect results – wait for ALL scrapers to finish, the context to expire,
-	// or the straggler grace window to elapse after the first batch of results.
-	// graceTimer stays nil (blocking its select arm forever) until some source
-	// delivers results.
-	var graceTimer <-chan time.Time
-	for {
-		select {
-		case res, ok := <-resultChan:
-			if !ok {
-				// Channel closed – all scrapers finished.
-				goto done
-			}
-
-			if res.err != nil {
-				errorsMutex.Lock()
-				sourceName := sm.getScraperDisplayName(res.scraperType)
-				diagnostic := netx.DiagnoseError(sourceName, "search", res.err)
-				util.Debug("Search error", "source", sourceName, "kind", diagnostic.Kind, "error", diagnostic)
-				if sm.recordSourceFailure(res.scraperType, diagnostic) {
-					util.Warn("Source circuit breaker opened", "source", sourceName, "diagnostic", diagnostic.UserMessage())
-				}
-				searchErrors = append(searchErrors, diagnostic.UserMessage())
-				searchSourceErrors = append(searchSourceErrors, fmt.Errorf("%s: %w", sourceName, diagnostic))
-				errorsMutex.Unlock()
-				continue
-			}
-
-			sm.recordSourceSuccess(res.scraperType)
-			if len(res.results) > 0 {
-				sm.tagResults(res.results, res.scraperType)
-				resultsMutex.Lock()
-				allResults = append(allResults, res.results...)
-				resultsMutex.Unlock()
-
-				util.Debug("Search results received",
-					"source", sm.getScraperDisplayName(res.scraperType),
-					"count", len(res.results))
-
-				// First results are in: stop waiting the full perScraperTimeout
-				// for the remaining sources — give them the grace window only.
-				if graceTimer == nil {
-					graceTimer = time.After(stragglerGrace)
-				}
-			}
-
-		case <-graceTimer:
-			util.Debug("Straggler grace elapsed, returning collected results",
-				"grace", stragglerGrace)
-			goto done
-
-		case <-ctx.Done():
-			util.Debug("Search timeout reached, returning collected results")
-			goto done
-		}
-	}
-
-done:
-	// Log warnings for failed sources
-	errorsMutex.Lock()
-	if len(searchErrors) > 0 {
-		for _, errMsg := range searchErrors {
-			util.Warn("Search source diagnostic", "details", errMsg)
-		}
-	}
-	errorsMutex.Unlock()
-
-	resultsMutex.Lock()
-	finalResults := allResults
-	resultsMutex.Unlock()
-
-	if len(finalResults) == 0 {
-		util.Debug("No anime found", "query", query)
-		errorsMutex.Lock()
-		defer errorsMutex.Unlock()
-		if len(searchErrors) > 0 {
-			return nil, fmt.Errorf("no anime found with name: %s (some sources failed: %s): %w", query, strings.Join(searchErrors, "; "), errors.Join(searchSourceErrors...))
-		}
-		return nil, fmt.Errorf("no anime found with name: %s", query)
-	}
-
-	// Sort results: PT-BR first, then everything else
-	sortPTBRFirst(finalResults)
-
-	sm.logSearchSummary(finalResults)
-	return finalResults, nil
-}
-
-// searchWithTimeout executes a single scraper search with timeout
-func (sm *ScraperManager) searchWithTimeout(ctx context.Context, st ScraperType, s UnifiedScraper, query string) searchResult {
-	sourceName := sm.getScraperDisplayName(st)
-	timer := util.StartTimer("Search:" + sourceName)
-	util.Debug("Searching in source", "source", sourceName)
-
-	// Create individual timeout context
-	scraperCtx, scraperCancel := context.WithTimeout(ctx, perScraperTimeout)
-	defer scraperCancel()
-
-	// Channel for search result
-	done := make(chan searchResult, 1)
-
-	go func() {
-		results, err := s.SearchAnime(query)
-		done <- searchResult{
-			scraperType: st,
-			results:     results,
-			err:         err,
-		}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case result := <-done:
-		timer.Stop()
-		if result.err == nil {
-			util.PerfCount("search_success:" + sourceName)
-		} else {
-			util.PerfCount("search_error:" + sourceName)
-		}
-		return result
-	case <-scraperCtx.Done():
-		timer.Stop()
-		util.PerfCount("search_timeout:" + sourceName)
-		util.Debug("Search timeout", "source", sourceName)
-
-		timeoutErr := fmt.Errorf("search timed out after %v", perScraperTimeout)
-		// If we know the source's base URL, run a quick probe so the
-		// resulting diagnostic can distinguish "site is dead" (e.g.
-		// Cloudflare 522) from "site is just slow today".
-		enrichedErr := netx.EnrichTimeoutWithProbe(ctx, sourceName, "search",
-			sm.getScraperBaseURL(st), timeoutErr, originProbeBudget)
-
-		return searchResult{
-			scraperType: st,
-			results:     nil,
-			err:         enrichedErr,
-		}
+// scraperLanguageTag returns the language tag prefix for a source.
+func scraperLanguageTag(scraperType ScraperType) string {
+	switch scraperType {
+	case AllAnimeType:
+		return "[English]"
+	case AnimefireType:
+		return "[PT-BR]"
+	case GoyabuType:
+		return "[PT-BR]"
+	case SuperFlixType:
+		return "[PT-BR]"
+	default:
+		return "[Unknown]"
 	}
 }
 
@@ -389,7 +104,7 @@ func sortPTBRFirst(results []*models.Anime) {
 	})
 }
 
-// ptbrTitleCleanRe are compiled regexes for cleaning PT-BR anime titles
+// ptbr* are compiled regexes for cleaning PT-BR anime titles
 var (
 	ptbrSpaceRe      = regexp.MustCompile(`\s+`)
 	ptbrAgeRatingRe  = regexp.MustCompile(`\bA\d{2}\b`)
@@ -401,7 +116,7 @@ var (
 // cleanPTBRTitle removes noise from PT-BR anime titles such as ratings ("8.39"),
 // age ratings ("A16"), type suffixes ("(TV)"), and extra whitespace.
 func cleanPTBRTitle(title string) string {
-	// Strip dublado/legendado labels — they will be re-added by tagResults
+	// Strip dublado/legendado labels — they will be re-added by tagging
 	title = ptbrDubLegRe.ReplaceAllString(title, "")
 
 	// Normalise whitespace (handles newlines / tabs from goquery.Text())
@@ -423,7 +138,7 @@ func cleanPTBRTitle(title string) string {
 }
 
 // needsMediaTypeDisambig pre-scans results and returns a set of lowercased
-// titles that appear with more than one MediaType in the batch.  Only those
+// titles that appear with more than one MediaType in the batch. Only those
 // entries need an explicit [Movie]/[TV] disambiguation tag.
 func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
 	titleTypes := make(map[string]models.MediaType, len(results))
@@ -439,175 +154,6 @@ func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
 		}
 	}
 	return ambiguous
-}
-
-// tagResults adds language tags and source metadata to results
-func (sm *ScraperManager) tagResults(results []*models.Anime, scraperType ScraperType) {
-	sourceName := sm.getScraperDisplayName(scraperType)
-	isPTBR := scraperType == AnimefireType || scraperType == GoyabuType
-
-	for _, anime := range results {
-		// Clean PT-BR titles before tagging
-		if isPTBR {
-			anime.Name = cleanPTBRTitle(anime.Name)
-		}
-
-		// Check if the anime name already has any language tag
-		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
-			strings.Contains(anime.Name, "[PT-BR]") ||
-			strings.Contains(anime.Name, "[Portuguese]") ||
-			strings.Contains(anime.Name, "[Português]") ||
-			strings.Contains(anime.Name, "[Multilanguage]") ||
-			strings.Contains(anime.Name, "[Movie]") ||
-			strings.Contains(anime.Name, "[TV]")
-
-		if !hasLanguageTag {
-			switch scraperType {
-			case SuperFlixType:
-				// SuperFlix is PT-BR. Movies get [Movie], TV series get [TV],
-				// but anime/dorama only need [PT-BR].
-				switch anime.MediaType {
-				case models.MediaTypeMovie:
-					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)
-				case models.MediaTypeTV:
-					anime.Name = fmt.Sprintf("[TV] [PT-BR] %s", anime.Name)
-				default:
-					anime.Name = fmt.Sprintf("[PT-BR] %s", anime.Name)
-				}
-			default:
-				languageTag := sm.getLanguageTag(scraperType)
-				anime.Name = fmt.Sprintf("%s %s", languageTag, anime.Name)
-			}
-		}
-
-		// Add audio type for PT-BR sources only when detectable
-		if isPTBR {
-			lowerURL := strings.ToLower(anime.URL)
-			lowerName := strings.ToLower(anime.Name)
-			if strings.Contains(lowerName, "dublado") || strings.Contains(lowerURL, "dublado") {
-				if !strings.Contains(anime.Name, "(Dublado)") {
-					anime.Name += " (Dublado)"
-				}
-			} else if strings.Contains(lowerName, "legendado") || strings.Contains(lowerURL, "legendado") {
-				if !strings.Contains(anime.Name, "(Legendado)") {
-					anime.Name += " (Legendado)"
-				}
-			}
-		}
-
-		anime.Source = sourceName
-	}
-}
-
-// logSearchSummary logs a summary of search results by source
-func (sm *ScraperManager) logSearchSummary(results []*models.Anime) {
-	if !util.IsDebug {
-		return
-	}
-
-	counts := make(map[string]int)
-	for _, anime := range results {
-		counts[anime.Source]++
-	}
-
-	util.Debug("Search summary",
-		"animeFire", counts["Animefire.io"],
-		"allAnime", counts["AllAnime"],
-		"animeDrive", counts["AnimeDrive"],
-		"flixHQ", counts["FlixHQ"],
-		"9anime", counts["9Anime"],
-		"goyabu", counts["Goyabu"],
-		"superflix", counts["SuperFlix"],
-		"total", len(results))
-}
-
-// SearchAnimePTBR searches PT-BR sources (AnimeFire and Goyabu) concurrently
-func (sm *ScraperManager) SearchAnimePTBR(query string) ([]*models.Anime, error) {
-	ptbrTypes := []ScraperType{AnimefireType, GoyabuType, SuperFlixType}
-
-	var (
-		allResults []*models.Anime
-		mu         sync.Mutex
-		wg         sync.WaitGroup
-	)
-
-	for _, st := range ptbrTypes {
-		wg.Add(1)
-		go func(scraperType ScraperType) {
-			defer wg.Done()
-			results, err := sm.searchSpecificScraper(query, scraperType)
-			if err != nil {
-				util.Debug("PT-BR search error", "source", sm.getScraperDisplayName(scraperType), "error", err)
-				return
-			}
-			mu.Lock()
-			allResults = append(allResults, results...)
-			mu.Unlock()
-		}(st)
-	}
-
-	wg.Wait()
-
-	if len(allResults) == 0 {
-		return nil, fmt.Errorf("no PT-BR results found for: %s", query)
-	}
-	return allResults, nil
-}
-
-// GetScraper returns a specific scraper by type
-func (sm *ScraperManager) GetScraper(scraperType ScraperType) (UnifiedScraper, error) {
-	if scraper, exists := sm.scrapers[scraperType]; exists {
-		return scraper, nil
-	}
-	return nil, fmt.Errorf("scraper type %v not found", scraperType)
-}
-
-// getScraperBaseURL returns the homepage URL for sources we can reach over plain
-// HTTP — used by the post-timeout probe to surface "Cloudflare 522/origin down"
-// instead of the generic "search timed out". Returns "" for sources that have
-// no probable HTML root (GraphQL endpoints, opaque APIs, etc.).
-func (sm *ScraperManager) getScraperBaseURL(scraperType ScraperType) string {
-	// Currently no source has a usable homepage probe target. Keep the hook
-	// in case future scrapers want post-timeout origin probing.
-	_ = scraperType
-	return ""
-}
-
-// originProbeBudget bounds how long the post-timeout origin probe is allowed
-// to add on top of an already-timed-out search. Kept short so the user does
-// not pay much extra latency just to learn whether the site is dead.
-var originProbeBudget = 3 * time.Second
-
-// getScraperDisplayName returns a Portuguese display name for the scraper type
-func (sm *ScraperManager) getScraperDisplayName(scraperType ScraperType) string {
-	switch scraperType {
-	case AllAnimeType:
-		return "AllAnime"
-	case AnimefireType:
-		return "Animefire.io"
-	case GoyabuType:
-		return "Goyabu"
-	case SuperFlixType:
-		return "SuperFlix"
-	default:
-		return "Desconhecido"
-	}
-}
-
-// getLanguageTag returns a language tag for the source
-func (sm *ScraperManager) getLanguageTag(scraperType ScraperType) string {
-	switch scraperType {
-	case AllAnimeType:
-		return "[English]"
-	case AnimefireType:
-		return "[PT-BR]"
-	case GoyabuType:
-		return "[PT-BR]"
-	case SuperFlixType:
-		return "[PT-BR]"
-	default:
-		return "[Unknown]"
-	}
 }
 
 // AllAnimeAdapter adapts allanime.AllAnimeClient to UnifiedScraper interface

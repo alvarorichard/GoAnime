@@ -10,7 +10,6 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/handlers"
 	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"golang.org/x/term"
@@ -85,11 +84,11 @@ func main() {
 	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
 	player.PreWarmMPVPath()
 
-	// Pre-initialize HTTP clients and scraper manager in background so the
-	// first search doesn't pay the Chrome TLS + scraper setup cost
+	// Pre-initialize HTTP clients in background so the first search doesn't pay
+	// the Chrome TLS setup cost. The per-source scraper adapters are cheap, lazy
+	// structs the Model B providers build on first use — no pre-warm needed.
 	util.PreWarmClients()
 	util.PreWarmConnections()
-	scraper.PreWarmScraperManager()
 
 	animeName, err := util.FlagParser()
 	if err != nil {

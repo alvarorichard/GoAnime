@@ -406,7 +406,7 @@ Suíte -race verde, lint 0 issues.
   retorno arquitetural decrescente. Fica como cleanup opcional, não como
   requisito de dispatch.
 
-**6.3d 🔄 (2026-07-08) — breaker + tagging PORTADOS; busca self-contained (providers seguram adapters).**
+**6.3d ✅ (2026-07-11) — breaker + tagging PORTADOS; busca self-contained; `ScraperManager` DELETADO (passo 4).**
 FEITO nesta sessão (parte conceitual mais difícil):
 - **Breaker portado** → `netx/circuit.go` (`netx.CircuitBreaker`, genérico por
   string, +8 testes). Não depende mais do `ScraperManager`.
@@ -455,18 +455,37 @@ FALTA para o delete físico do `ScraperManager` (mecânico, mas toca MediaManage
      que ninguém mais usa (os providers constroem adapters via `NewAdapter`).
    - Health diagnostic (`CheckAllSourcesHealth`) — usado pelo CI
      (`TestSourceHealthLive`, tag `sourcehealth`).
-4. **FALTA — delete físico do struct `ScraperManager`:**
-   - Repontar/deletar `PreWarmScraperManager` (aquecer os adapters do registry,
-     ou virar no-op + remover a chamada no `main.go`).
-   - Migrar o health diagnostic (`source_health.go`) para o registry (health por
-     `providers.Search` por source) + atualizar `TestSourceHealthLive`.
-   - Deletar `ScraperManager` struct + `SearchAnime`/`searchSpecificScraper`/
-     `searchAllScrapersConcurrent`/`SearchAnimePTBR`/`GetScraper`/breaker
-     (`source_circuit.go`)/`getScraperDisplayName`/`tagResults`/`getLanguageTag`/
-     `cleanPTBRTitle`/`searchWithTimeout` + os testes do manager. MANTER os TIPOS
-     de adapter (os providers os constroem via `NewAdapter`) e `ScraperType`.
-   - **TTY:** verificar seleção de busca + seletor de temporada + quality picker
-     antes/depois (fluxo `handlers/media.go` é morto, mas a busca real não).
+4. ✅ **FEITO (2026-07-11) — struct `ScraperManager` DELETADO.**
+   - **Validação live antes do delete:** busca (64 resultados das 4 fontes,
+     todas tagueadas) + E2E AnimeFire (busca→episódios→stream) + E2E Goyabu
+     (293 eps→stream) OK pelo registry. AllAnime falhou, mas é **upstream** (a
+     chamada direta ao client — código intocado — falha idêntica; o `aaReq`
+     rotacionou de novo). AnimeFire HTTP 500 = site instável no momento. Nenhuma
+     regressão do dispatch.
+   - `PreWarmScraperManager` + a chamada em `main.go` REMOVIDOS (adapters são
+     structs baratos que os providers constroem lazy no primeiro uso; import
+     `scraper` órfão do `main.go` removido).
+   - Health diagnostic MIGRADO para funções standalone em `source_health.go`
+     (`CheckSourceHealth`/`CheckAllSourcesHealth`/`checkSourceHealthWith` via
+     `NewAdapter`, sem breaker — classificação offline/parser vem do
+     `netx.DiagnoseError`). `TestSourceHealthLive` (tag `sourcehealth`, CI)
+     reescrito para as funções novas + `healthTargets()`.
+   - `ScraperManager` struct + singleton + `SearchAnime`/`searchSpecificScraper`/
+     `searchAllScrapersConcurrent`/`searchWithTimeout`/`SearchAnimePTBR`/
+     `GetScraper`/`tagResults`/`logSearchSummary`/`NewScraperManagerForTest`/
+     `RegisterScraperForTest` DELETADOS. Breaker (`source_circuit.go` + `_test`)
+     DELETADO. `getScraperDisplayName`/`getLanguageTag` viraram funções de pacote
+     (`scraperDisplayName`/`scraperLanguageTag`); `getScraperBaseURL` removido.
+     MANTIDOS: tipos de adapter (`*Adapter` + `NewAdapter`), `ScraperType`,
+     helpers puros (`sortPTBRFirst`/`cleanPTBRTitle`/`needsMediaTypeDisambig`),
+     `NewSuperFlixAdapterWithClient`.
+   - **SDK público** (`pkg/goanime`): `NewClient` reapontado do `ScraperManager`
+     para `registryManager` (busca via `providers.SearchAll`, per-source via
+     `scraper.NewAdapter`) — o SDK agora passa pelo mesmo path do CLI.
+   - Testes: `MockScraper` realocado (`mockscraper_test.go`); testes do engine
+     morto deletados (`manager_test`, `manager_straggler_test`, `disabled_source_test`,
+     `manager_baseurl_test`); demais reescritos. Suíte `-short -race` verde,
+     `go vet ./...` limpo, `sourcehealth` compila.
 
 1. **Adapters ctx-aware** (`UnifiedScraper.SearchAnime`/`GetAnimeEpisodes`/
    `GetStreamURL` recebem `ctx`). Sem isso o per-source timeout + origin-probe

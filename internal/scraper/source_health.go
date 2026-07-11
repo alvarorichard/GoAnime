@@ -1,10 +1,9 @@
-// Package scraper implements provider search, stream extraction, and source diagnostics.
+// Package scraper implements per-source adapters and source diagnostics.
 package scraper
 
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -45,19 +44,16 @@ func DefaultHealthCheckQuery(source ScraperType) string {
 	}
 }
 
-// AvailableSources returns registered scraper types in deterministic order.
-func (sm *ScraperManager) AvailableSources() []ScraperType {
-	sources := make([]ScraperType, 0, len(sm.scrapers))
-	for source := range sm.scrapers {
-		sources = append(sources, source)
-	}
-	slices.Sort(sources)
-	return sources
+// healthTargets returns the source types to probe, in deterministic order.
+func healthTargets() []ScraperType {
+	return []ScraperType{AllAnimeType, AnimefireType, GoyabuType, SuperFlixType}
 }
 
-// CheckSourceHealth probes one provider and classifies the result for CI/app diagnostics.
-func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperType, query string) SourceHealthResult {
-	sourceName := sm.getScraperDisplayName(source)
+// checkSourceHealthWith probes a single scraper (which may be nil) and classifies
+// the outcome for CI/app diagnostics. It is the injection seam: tests pass a mock
+// scraper, while the live entry points build a real adapter via NewAdapter.
+func checkSourceHealthWith(ctx context.Context, source ScraperType, sc UnifiedScraper, query string) SourceHealthResult {
+	sourceName := scraperDisplayName(source)
 	if query == "" {
 		query = DefaultHealthCheckQuery(source)
 	}
@@ -69,22 +65,12 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 		Query:      query,
 	}
 
-	scraper, exists := sm.scrapers[source]
-	if !exists {
+	if sc == nil {
 		diagnostic := netx.NewInternalBugError(sourceName, "health-check", "scraper not registered", nil)
 		result.Status = SourceHealthFailed
 		result.Diagnostic = netx.DiagnoseError(sourceName, "health-check", diagnostic)
 		result.Duration = time.Since(startedAt)
 		result.Description = result.Diagnostic.UserMessage()
-		return result
-	}
-
-	if diagnostic, retryAfter, open := sm.circuitOpenDiagnostic(source); open {
-		diagnostic.Message = fmt.Sprintf("%s; retry after %s", diagnostic.Message, retryAfter.Round(time.Second))
-		result.Status = SourceHealthSkipped
-		result.Diagnostic = diagnostic
-		result.Duration = time.Since(startedAt)
-		result.Description = diagnostic.UserMessage()
 		return result
 	}
 
@@ -95,7 +81,7 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 
 	done := make(chan searchOutcome, 1)
 	go func() {
-		results, err := scraper.SearchAnime(query)
+		results, err := sc.SearchAnime(query)
 		done <- searchOutcome{results: results, err: err}
 	}()
 
@@ -137,12 +123,18 @@ func (sm *ScraperManager) CheckSourceHealth(ctx context.Context, source ScraperT
 	}
 }
 
-// CheckAllSourcesHealth probes all registered providers in deterministic order.
-func (sm *ScraperManager) CheckAllSourcesHealth(ctx context.Context) []SourceHealthResult {
-	sources := sm.AvailableSources()
-	results := make([]SourceHealthResult, 0, len(sources))
-	for _, source := range sources {
-		results = append(results, sm.CheckSourceHealth(ctx, source, DefaultHealthCheckQuery(source)))
+// CheckSourceHealth builds the live adapter for source and probes it.
+func CheckSourceHealth(ctx context.Context, source ScraperType, query string) SourceHealthResult {
+	sc, _ := NewAdapter(source)
+	return checkSourceHealthWith(ctx, source, sc, query)
+}
+
+// CheckAllSourcesHealth probes all live sources in deterministic order.
+func CheckAllSourcesHealth(ctx context.Context) []SourceHealthResult {
+	targets := healthTargets()
+	results := make([]SourceHealthResult, 0, len(targets))
+	for _, source := range targets {
+		results = append(results, CheckSourceHealth(ctx, source, DefaultHealthCheckQuery(source)))
 	}
 	return results
 }
