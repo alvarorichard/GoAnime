@@ -151,45 +151,24 @@ func TestEnrichAnimeData_AniListFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "AniList enrichment failed")
 }
 
-func TestHttpPost_Success(t *testing.T) {
-	var gotBody []byte
+func TestAniListPost_Success(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "POST", r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		gotBody = make([]byte, 7)
-		_, _ = r.Body.Read(gotBody)
 		_, _ = fmt.Fprint(w, `{"ok":true}`)
 	}))
 	t.Cleanup(srv.Close)
 
-	resp, err := httpPost(srv.URL, []byte(`{"test":1}`))
+	resp, body, err := aniListPost(srv.URL, []byte(`{"test":1}`))
 	require.NoError(t, err)
-	defer resp.Body.Close()
 	assert.Equal(t, 200, resp.StatusCode)
+	assert.Contains(t, string(body), `"ok":true`)
 }
 
-func TestHttpPost_InvalidURLErrors(t *testing.T) {
+func TestAniListPost_InvalidURLErrors(t *testing.T) {
 	t.Parallel()
-	_, err := httpPost("\x00invalid", nil)
-	require.Error(t, err)
-}
-
-func TestHttpPostFast_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "POST", r.Method)
-		_, _ = fmt.Fprint(w, `{"fast":true}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	resp, err := httpPostFast(srv.URL, []byte(`{"query":"test"}`))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, 200, resp.StatusCode)
-}
-
-func TestHttpPostFast_InvalidURLErrors(t *testing.T) {
-	t.Parallel()
-	_, err := httpPostFast("\x00invalid", nil)
+	_, _, err := aniListPost("\x00invalid", nil)
 	require.Error(t, err)
 }
 

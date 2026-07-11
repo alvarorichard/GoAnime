@@ -100,11 +100,10 @@ func (p *AniListProvider) FetchEpisodeData(animeID int, episodeNo int, anime *mo
 		return fmt.Errorf("JSON marshal failed: %w", err)
 	}
 
-	resp, err := httpPost("https://graphql.anilist.co", jsonData)
+	resp, body, err := aniListPost("https://graphql.anilist.co", jsonData)
 	if err != nil {
 		return fmt.Errorf("AniList request failed: %w", err)
 	}
-	defer safeClose(resp.Body, "AniList episode response")
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("AniList returned: %s", resp.Status)
@@ -131,7 +130,7 @@ func (p *AniListProvider) FetchEpisodeData(animeID int, episodeNo int, anime *mo
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("JSON decode failed: %w", err)
 	}
 
@@ -342,11 +341,10 @@ func getAniListIDFromMAL(malID int) (int, error) {
 		return 0, err
 	}
 
-	resp, err := httpPost("https://graphql.anilist.co", jsonData)
+	_, body, err := aniListPost("https://graphql.anilist.co", jsonData)
 	if err != nil {
 		return 0, err
 	}
-	defer safeClose(resp.Body, "AniList MAL lookup response")
 
 	var result struct {
 		Data struct {
@@ -356,7 +354,7 @@ func getAniListIDFromMAL(malID int) (int, error) {
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return 0, err
 	}
 

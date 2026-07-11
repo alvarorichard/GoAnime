@@ -1,0 +1,13 @@
+{
+  // internal/scraper/source_health_live_test.go is behind `//go:build sourcehealth`
+  // (CI runs it with `go test -tags sourcehealth`). Without this flag gopls skips
+  // the file and reports "No packages found for open file".
+  "gopls": {
+    "build.buildFlags": ["-tags=sourcehealth"]
+  },
+  "go.buildTags": "sourcehealth",
+  "go.testTags": "sourcehealth",
+
+  // Show nested dirs one per line instead of collapsing them into a/b/c.
+  "explorer.compactFolders": false
+}

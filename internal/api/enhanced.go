@@ -364,9 +364,11 @@ func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
 	}
 	util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
 
-	// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
+	// Enrich with AniList data for images and metadata. Best-effort: episodes and
+	// playback work without it, so a failure here is a warning, not an error
+	// (issue #184).
 	if err := enrichAnimeData(selectedAnime); err != nil {
-		util.Errorf("Error enriching anime data: %v", err)
+		util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
 	}
 
 	return selectedAnime, nil

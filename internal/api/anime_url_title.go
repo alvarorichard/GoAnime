@@ -4,7 +4,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -156,17 +155,9 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 			continue
 		}
 
-		resp, err := httpPostFast(aniListEndpoint, jsonData)
+		resp, body, err := aniListPost(aniListEndpoint, jsonData)
 		if err != nil {
 			lastErr = fmt.Errorf("AniList request failed: %w", err)
-			continue
-		}
-
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-		safeClose(resp.Body, "AniList response body")
-
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response: %w", err)
 			continue
 		}
 
