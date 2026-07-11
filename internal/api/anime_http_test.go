@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,8 +229,15 @@ func TestRunWithSpinner_NonTerminalRunsActionDirectly(t *testing.T) {
 }
 
 func TestSearchAnimeEnhanced_NoResultsReturnsError(t *testing.T) {
-	// With no actual scrapers reachable (offline/short test) the scraper
-	// manager returns empty results → "no results found" error path.
+	// Search dispatches through the registry seam (providers.SearchAll in prod).
+	// Wire a stub returning no results to exercise the "no results" error path
+	// without importing providers (which would cycle).
+	prev := searchFetchFn
+	searchFetchFn = func(context.Context, string, []source.SourceKind) ([]*models.Anime, error) {
+		return nil, fmt.Errorf("no results found for: %s", "zzz")
+	}
+	t.Cleanup(func() { searchFetchFn = prev })
+
 	_, err := SearchAnimeEnhanced("zzz-no-such-anime-xyz-12345", "unknown-source")
 	require.Error(t, err)
 }

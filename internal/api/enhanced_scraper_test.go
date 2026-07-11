@@ -56,35 +56,22 @@ func wireStreamSeam(t *testing.T, url string, err error) {
 	t.Cleanup(func() { streamFetchFn = prev })
 }
 
-// injectScraper wires a mock for scraperType into newScraperMgr and restores on cleanup.
-// When the mock is a *mockEpiScraper, it also wires the episode seam so callers
-// that fetch episodes via the registry (DownloadEpisode*Enhanced) see the same
-// episodes/error the scraper mock carries.
-func injectScraper(t *testing.T, scraperType scraper.ScraperType, mock scraper.UnifiedScraper) {
+// injectScraper wires the registry episode seam from a *mockEpiScraper so
+// episode-level DownloadEpisode*Enhanced tests see the mock's episodes/error.
+// The scraperType arg is retained for call-site clarity; the ScraperManager it
+// once fed no longer exists.
+func injectScraper(t *testing.T, _ scraper.ScraperType, mock scraper.UnifiedScraper) {
 	t.Helper()
-	mgr := scraper.NewScraperManagerForTest()
-	mgr.RegisterScraperForTest(scraperType, mock)
-	prev := newScraperMgr
-	newScraperMgr = func() *scraper.ScraperManager { return mgr }
-	t.Cleanup(func() { newScraperMgr = prev })
 	if m, ok := mock.(*mockEpiScraper); ok {
 		wireEpisodesSeam(t, m.episodes, m.epsErr)
 	}
 }
 
-// injectMultiScraper wires multiple mock scrapers for DownloadEpisode*Enhanced,
-// whose episode fetch now goes through the registry seam and whose stream-URL
-// fetch still goes through newScraperMgr. The AllAnime mock's episodes feed the
-// episode seam; every mock feeds the stream-URL manager.
+// injectMultiScraper wires both the episode and stream registry seams from the
+// AllAnime mock so stream-reaching DownloadEpisode*Enhanced tests see the mock's
+// episodes and stream URL/error.
 func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.UnifiedScraper) {
 	t.Helper()
-	mgr := scraper.NewScraperManagerForTest()
-	for tp, m := range mocks {
-		mgr.RegisterScraperForTest(tp, m)
-	}
-	prev := newScraperMgr
-	newScraperMgr = func() *scraper.ScraperManager { return mgr }
-	t.Cleanup(func() { newScraperMgr = prev })
 	if m, ok := mocks[scraper.AllAnimeType].(*mockEpiScraper); ok {
 		wireEpisodesSeam(t, m.episodes, m.epsErr)
 		wireStreamSeam(t, m.stURL, m.stErr)

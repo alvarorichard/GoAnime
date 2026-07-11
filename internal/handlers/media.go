@@ -2,12 +2,14 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -20,12 +22,35 @@ var (
 	findResultFn = tui.Find[*models.Anime]
 )
 
-// mediaSource is the subset of scraper.MediaManager that handlers depend on.
-// It exists so tests can substitute a fake without spinning up network.
+// mediaSource is the subset the media handler depends on. It exists so tests
+// can substitute a fake without spinning up network.
 type mediaSource interface {
 	SearchAnimeOnly(query string) ([]*models.Anime, error)
 	SearchAll(query string) ([]*models.Anime, error)
 	GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, mode string) (string, map[string]string, error)
+}
+
+// registryMediaSource implements mediaSource on top of the Model B registry
+// (providers.SearchAll + source dispatch), replacing the deleted
+// scraper.MediaManager.
+type registryMediaSource struct{}
+
+func (registryMediaSource) SearchAll(query string) ([]*models.Anime, error) {
+	return providers.SearchAll(context.Background(), query)
+}
+
+func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error) {
+	return providers.SearchAll(context.Background(), query, source.AllAnime, source.AnimeFire)
+}
+
+func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (string, map[string]string, error) {
+	src, resolved := source.Resolve(anime)
+	if src == nil {
+		return "", nil, fmt.Errorf("unrecognized source for %q (%s)", anime.Name, resolved.Reason)
+	}
+	ep := &models.Episode{Number: episodeNum, URL: anime.URL}
+	url, err := src.FetchStreamURL(context.Background(), ep, anime, quality)
+	return url, nil, err
 }
 
 // MediaHandler handles media selection and playback operations
@@ -39,7 +64,7 @@ type MediaHandler struct {
 // NewMediaHandler creates a new MediaHandler
 func NewMediaHandler() *MediaHandler {
 	return &MediaHandler{
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: registryMediaSource{},
 		provider:     "Vidcloud",
 		quality:      "best",
 		subsLanguage: "english",

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
@@ -24,14 +25,15 @@ var (
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
 
-// searchViaManager delegates a single-source search to the ScraperManager's
-// searchSpecificScraper path, which already applies the per-source circuit
-// breaker, the S1 kill-switch, diagnostics, and language tagging. Every
-// provider's Search reuses it, so the proven per-source machinery is not
-// duplicated — the registry only adds the concurrent fan-out (SearchAll).
-func searchViaManager(sm *scraper.ScraperManager, st scraper.ScraperType, query string) ([]*models.Anime, error) {
-	t := st
-	return sm.SearchAnime(query, &t)
+// lazyGetAdapter returns a standalone adapter for a scraper type, built once and
+// cached. This is how each Model B provider owns its scraper directly, without
+// the ScraperManager.
+func lazyGetAdapter(once *sync.Once, cache *scraper.UnifiedScraper, st scraper.ScraperType) (scraper.UnifiedScraper, error) {
+	once.Do(func() { *cache, _ = scraper.NewAdapter(st) })
+	if *cache == nil {
+		return nil, fmt.Errorf("no adapter for scraper type %v", st)
+	}
+	return *cache, nil
 }
 
 // EpisodeNumber extracts the episode number string from an Episode model.
@@ -52,24 +54,16 @@ func EpisodeNumber(ep *models.Episode) string {
 // --- AllAnime Provider ---
 
 type allAnimeProvider struct {
-	// sm is injected by the Provider factory (old path). When nil (Model B
-	// path, registered in init), manager() falls back to the lazy global
-	// ScraperManager singleton — nothing is built at init time.
-	sm *scraper.ScraperManager
+	once    sync.Once
+	adapter scraper.UnifiedScraper
 }
 
 func init() {
-	RegisterProvider(source.AllAnime, func(sm *scraper.ScraperManager) Provider {
-		return &allAnimeProvider{sm: sm}
-	})
 	source.Register(&allAnimeProvider{})
 }
 
-func (p *allAnimeProvider) manager() *scraper.ScraperManager {
-	if p.sm != nil {
-		return p.sm
-	}
-	return scraper.NewScraperManager()
+func (p *allAnimeProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AllAnimeType)
 }
 
 func (p *allAnimeProvider) Describe() source.Descriptor {
@@ -83,18 +77,26 @@ func (p *allAnimeProvider) Describe() source.Descriptor {
 	}
 }
 
-func (p *allAnimeProvider) Kind() source.SourceKind { return source.AllAnime }
-func (p *allAnimeProvider) HasSeasons() bool        { return false }
+func (p *allAnimeProvider) HasSeasons() bool { return false }
 
 func (p *allAnimeProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return searchViaManager(p.manager(), scraper.AllAnimeType, query)
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	results, err := adapter.SearchAnime(query)
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AllAnime)
+	return results, nil
 }
 
 func (p *allAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.manager().GetScraper(scraper.AllAnimeType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.E
 	if anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)
 	}
-	adapter, err := p.manager().GetScraper(scraper.AllAnimeType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return "", err
 	}
@@ -140,21 +142,16 @@ func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.E
 // --- AnimeFire Provider ---
 
 type animeFireProvider struct {
-	sm *scraper.ScraperManager
+	once    sync.Once
+	adapter scraper.UnifiedScraper
 }
 
 func init() {
-	RegisterProvider(source.AnimeFire, func(sm *scraper.ScraperManager) Provider {
-		return &animeFireProvider{sm: sm}
-	})
 	source.Register(&animeFireProvider{})
 }
 
-func (p *animeFireProvider) manager() *scraper.ScraperManager {
-	if p.sm != nil {
-		return p.sm
-	}
-	return scraper.NewScraperManager()
+func (p *animeFireProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnimefireType)
 }
 
 func (p *animeFireProvider) Describe() source.Descriptor {
@@ -167,18 +164,26 @@ func (p *animeFireProvider) Describe() source.Descriptor {
 	}
 }
 
-func (p *animeFireProvider) Kind() source.SourceKind { return source.AnimeFire }
-func (p *animeFireProvider) HasSeasons() bool        { return false }
+func (p *animeFireProvider) HasSeasons() bool { return false }
 
 func (p *animeFireProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return searchViaManager(p.manager(), scraper.AnimefireType, query)
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	results, err := adapter.SearchAnime(query)
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AnimeFire)
+	return results, nil
 }
 
 func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.manager().GetScraper(scraper.AnimefireType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +200,7 @@ func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.
 	if anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)
 	}
-	adapter, err := p.manager().GetScraper(scraper.AnimefireType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return "", err
 	}
@@ -215,21 +220,16 @@ func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.
 // --- Goyabu Provider ---
 
 type goyabuProvider struct {
-	sm *scraper.ScraperManager
+	once    sync.Once
+	adapter scraper.UnifiedScraper
 }
 
 func init() {
-	RegisterProvider(source.Goyabu, func(sm *scraper.ScraperManager) Provider {
-		return &goyabuProvider{sm: sm}
-	})
 	source.Register(&goyabuProvider{})
 }
 
-func (p *goyabuProvider) manager() *scraper.ScraperManager {
-	if p.sm != nil {
-		return p.sm
-	}
-	return scraper.NewScraperManager()
+func (p *goyabuProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.GoyabuType)
 }
 
 func (p *goyabuProvider) Describe() source.Descriptor {
@@ -242,18 +242,26 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 	}
 }
 
-func (p *goyabuProvider) Kind() source.SourceKind { return source.Goyabu }
-func (p *goyabuProvider) HasSeasons() bool        { return false }
+func (p *goyabuProvider) HasSeasons() bool { return false }
 
 func (p *goyabuProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return searchViaManager(p.manager(), scraper.GoyabuType, query)
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	results, err := adapter.SearchAnime(query)
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Goyabu)
+	return results, nil
 }
 
 func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.manager().GetScraper(scraper.GoyabuType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +278,7 @@ func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 	if anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)
 	}
-	adapter, err := p.manager().GetScraper(scraper.GoyabuType)
+	adapter, err := p.scraper()
 	if err != nil {
 		return "", err
 	}
@@ -284,147 +292,19 @@ func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 	return url, nil
 }
 
-// --- FlixHQ Provider ---
-//
-// TEMP-DISABLED: entire FlixHQ provider commented out until a fix lands.
-// Restore the init() and the type+methods together.
-/*
-func init() {
-	RegisterProvider(source.FlixHQ, func(sm *scraper.ScraperManager) Provider {
-		return &flixHQProvider{sm: sm}
-	})
-}
-
-type flixHQProvider struct {
-	sm *scraper.ScraperManager
-}
-
-func (p *flixHQProvider) Kind() source.SourceKind { return source.FlixHQ }
-func (p *flixHQProvider) HasSeasons() bool        { return true }
-
-func (p *flixHQProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.sm.GetScraper(scraper.FlixHQType)
-	if err != nil {
-		return nil, err
-	}
-	return adapter.GetAnimeEpisodes(anime.URL)
-}
-
-func (p *flixHQProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	adapter, err := p.sm.GetScraper(scraper.FlixHQType)
-	if err != nil {
-		return "", err
-	}
-	if quality == "" {
-		quality = "auto"
-	}
-	url, _, err := adapter.GetStreamURL(episode.URL, "upcloud", quality, "english")
-	if err != nil {
-		return "", fmt.Errorf("flixHQ stream: %w", err)
-	}
-	return url, nil
-}
-*/
-
-// --- SFlix Provider ---
-//
-// TEMP-DISABLED: entire SFlix provider commented out until a fix lands.
-// Restore the init() and the type+methods together.
-/*
-func init() {
-	RegisterProvider(source.SFlix, func(sm *scraper.ScraperManager) Provider {
-		return &sflixProvider{sm: sm}
-	})
-}
-
-type sflixProvider struct {
-	sm *scraper.ScraperManager
-}
-
-func (p *sflixProvider) Kind() source.SourceKind { return source.SFlix }
-func (p *sflixProvider) HasSeasons() bool        { return true }
-
-func (p *sflixProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.sm.GetScraper(scraper.SFlixType)
-	if err != nil {
-		return nil, err
-	}
-	return adapter.GetAnimeEpisodes(anime.URL)
-}
-
-func (p *sflixProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	adapter, err := p.sm.GetScraper(scraper.SFlixType)
-	if err != nil {
-		return "", err
-	}
-	if quality == "" {
-		quality = "auto"
-	}
-	url, _, err := adapter.GetStreamURL(episode.URL, "upcloud", quality, "english")
-	if err != nil {
-		return "", fmt.Errorf("sflix stream: %w", err)
-	}
-	return url, nil
-}
-*/
-
-// --- NineAnime Provider ---
-//
-// TEMP-DISABLED: entire NineAnime provider commented out until a fix lands.
-// Restore the init() and the type+methods together.
-/*
-func init() {
-	RegisterProvider(source.NineAnime, func(sm *scraper.ScraperManager) Provider {
-		return &nineAnimeProvider{sm: sm}
-	})
-}
-
-type nineAnimeProvider struct {
-	sm *scraper.ScraperManager
-}
-
-func (p *nineAnimeProvider) Kind() source.SourceKind { return source.NineAnime }
-func (p *nineAnimeProvider) HasSeasons() bool        { return false }
-
-func (p *nineAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.sm.GetScraper(scraper.NineAnimeType)
-	if err != nil {
-		return nil, err
-	}
-	return adapter.GetAnimeEpisodes(anime.URL)
-}
-
-func (p *nineAnimeProvider) FetchStreamURL(_ context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	adapter, err := p.sm.GetScraper(scraper.NineAnimeType)
-	if err != nil {
-		return "", err
-	}
-	url, _, err := adapter.GetStreamURL(episode.URL)
-	if err != nil {
-		return "", fmt.Errorf("9anime stream: %w", err)
-	}
-	return url, nil
-}
-*/
-
 // --- SuperFlix Provider ---
 
 type superFlixProvider struct {
-	sm *scraper.ScraperManager
+	once    sync.Once
+	adapter scraper.UnifiedScraper
 }
 
 func init() {
-	RegisterProvider(source.SuperFlix, func(sm *scraper.ScraperManager) Provider {
-		return &superFlixProvider{sm: sm}
-	})
 	source.Register(&superFlixProvider{})
 }
 
-func (p *superFlixProvider) manager() *scraper.ScraperManager {
-	if p.sm != nil {
-		return p.sm
-	}
-	return scraper.NewScraperManager()
+func (p *superFlixProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.SuperFlixType)
 }
 
 func (p *superFlixProvider) Describe() source.Descriptor {
@@ -437,8 +317,6 @@ func (p *superFlixProvider) Describe() source.Descriptor {
 	}
 }
 
-func (p *superFlixProvider) Kind() source.SourceKind { return source.SuperFlix }
-
 // HasSeasons satisfies both providers.Provider and the source.Seasoned
 // capability: SuperFlix is a movie/TV catalog organized into seasons.
 func (p *superFlixProvider) HasSeasons() bool { return true }
@@ -447,7 +325,16 @@ func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return searchViaManager(p.manager(), scraper.SuperFlixType, query)
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	results, err := adapter.SearchAnime(query)
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.SuperFlix)
+	return results, nil
 }
 
 // WarmUp satisfies the source.BrowserGated capability. SuperFlix clears a

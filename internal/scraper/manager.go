@@ -95,6 +95,25 @@ func NewScraperManager() *ScraperManager {
 	return globalScraperManager
 }
 
+// NewAdapter constructs a standalone UnifiedScraper adapter for the given type,
+// wrapping a freshly-built per-source client. It lets the Model B providers own
+// their scraper directly (no ScraperManager / GetScraper indirection); the
+// clients are cheap, lazy structs so construction does no network I/O.
+func NewAdapter(t ScraperType) (UnifiedScraper, error) {
+	switch t {
+	case AllAnimeType:
+		return &AllAnimeAdapter{client: allanime.NewAllAnimeClient()}, nil
+	case AnimefireType:
+		return &AnimefireAdapter{client: animefire.NewAnimefireClient()}, nil
+	case GoyabuType:
+		return &GoyabuAdapter{client: goyabu.NewGoyabuClient()}, nil
+	case SuperFlixType:
+		return &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}, nil
+	default:
+		return nil, fmt.Errorf("no adapter for scraper type %v", t)
+	}
+}
+
 // NewScraperManagerForTest creates an empty ScraperManager with no scrapers.
 // Use RegisterScraperForTest to inject mocks. Only for tests.
 func NewScraperManagerForTest() *ScraperManager {

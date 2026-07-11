@@ -16,7 +16,6 @@ import (
 	"charm.land/huh/v2/spinner"
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -29,9 +28,6 @@ var (
 	stdoutIsTerminal     bool
 	stdoutIsTerminalOnce sync.Once
 )
-
-// newScraperMgr is the ScraperManager constructor. Tests may override it.
-var newScraperMgr = scraper.NewScraperManager
 
 func isStdoutTerminal() bool {
 	stdoutIsTerminalOnce.Do(func() {
@@ -225,59 +221,32 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
 func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
-	scraperManager := scraper.NewScraperManager()
-
-	var scraperType *scraper.ScraperType
+	// Map the optional source selector to the registry kinds to search. Empty
+	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
 	var registryKinds []source.SourceKind
-	isPTBR := false
-
-	// If a specific source is requested, honor it
 	switch strings.ToLower(src) {
 	case "allanime":
-		t := scraper.AllAnimeType
-		scraperType = &t
 		registryKinds = []source.SourceKind{source.AllAnime}
-		util.Debug("Searching specific source", "source", "AllAnime")
 	case "animefire":
-		t := scraper.AnimefireType
-		scraperType = &t
 		registryKinds = []source.SourceKind{source.AnimeFire}
-		util.Debug("Searching specific source", "source", "AnimeFire")
 	case "goyabu":
-		t := scraper.GoyabuType
-		scraperType = &t
 		registryKinds = []source.SourceKind{source.Goyabu}
-		util.Debug("Searching specific source", "source", "Goyabu")
 	case "superflix":
-		t := scraper.SuperFlixType
-		scraperType = &t
 		registryKinds = []source.SourceKind{source.SuperFlix}
-		util.Debug("Searching specific source", "source", "SuperFlix")
 	case "ptbr", "pt-br":
-		isPTBR = true
 		registryKinds = []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}
-		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu + SuperFlix)")
-	default:
-		scraperType = nil
-		util.Debug("Searching all sources", "query", name)
 	}
+	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
-	// Perform the search
-	util.Debug("Searching for anime/media", "query", name)
 	var animes []*models.Anime
 	var searchErr error
 	runWithSpinner("Searching for anime...", func() {
-		switch {
-		case searchFetchFn != nil:
-			// Model B registry fan-out (providers.SearchAll). registryKinds is
-			// empty for an all-source search, the specific kind for a targeted
-			// one, or the PT-BR trio when isPTBR.
-			animes, searchErr = searchFetchFn(context.Background(), name, registryKinds)
-		case isPTBR:
-			animes, searchErr = scraperManager.SearchAnimePTBR(name)
-		default:
-			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
+		if searchFetchFn == nil {
+			searchErr = fmt.Errorf("search dispatch not wired: the providers package must be imported")
+			return
 		}
+		// Model B registry fan-out (providers.SearchAll).
+		animes, searchErr = searchFetchFn(context.Background(), name, registryKinds)
 	})
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)

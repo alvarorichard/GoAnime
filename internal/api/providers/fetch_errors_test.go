@@ -5,122 +5,48 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// emptyManager creates a ScraperManager with no scrapers registered so every
-// GetScraper call returns an error — exercises the error branches of FetchEpisodes
-// and FetchStreamURL without any network activity.
-func emptyManager() *scraper.ScraperManager {
-	return scraper.NewScraperManagerForTest()
+// NOTE: the old *_ScraperNotFound tests injected an empty ScraperManager via the
+// (now-deleted) legacy Provider factory to exercise a "scraper not found" error.
+// Providers now own their adapter directly (scraper.NewAdapter), so that error
+// path no longer exists. The remaining unit-testable contract is entry-time
+// context cancellation and SuperFlix's delegation to the api UX path.
+
+func cancelledCtx() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }
 
-// ---------------------------------------------------------------------------
-// allAnimeProvider.FetchEpisodes / FetchStreamURL
-// ---------------------------------------------------------------------------
-
-func TestAllAnimeProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
+func TestProviders_FetchStreamURL_CancelledContext(t *testing.T) {
 	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &allAnimeProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://allanime.to/anime/abc123", Source: "AllAnime"}
-	_, err := p.FetchEpisodes(context.Background(), anime)
-	require.Error(t, err)
+	anime := &models.Anime{URL: "x", Source: "X"}
+	ep := &models.Episode{Number: "1", URL: "x"}
+
+	for _, p := range []interface {
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	}{
+		&allAnimeProvider{},
+		&animeFireProvider{},
+		&goyabuProvider{},
+	} {
+		_, err := p.FetchStreamURL(cancelledCtx(), ep, anime, "best")
+		require.ErrorIs(t, err, context.Canceled)
+	}
 }
 
-// restoreStreamFns resets the SuperFlix stream indirection after a test
-// stubbed it. Tests that stub this global must NOT run in parallel.
+// restoreStreamFns resets the SuperFlix stream indirection after a test stubbed
+// it. Tests that stub this global must NOT run in parallel.
 func restoreStreamFns(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		superFlixStreamFn = api.GetSuperFlixStreamURL
 	})
-}
-
-func TestAllAnimeProvider_FetchStreamURL(t *testing.T) {
-	anime := &models.Anime{URL: "hHjXnUTda", Source: "AllAnime"}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "hHjXnUTda"}
-
-	t.Run("cancelled context returns immediately", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_, err := (&allAnimeProvider{}).FetchStreamURL(ctx, ep, anime, "best")
-		require.ErrorIs(t, err, context.Canceled)
-	})
-
-	t.Run("scraper-not-found surfaces an error", func(t *testing.T) {
-		// The AllAnime provider now resolves the stream directly via the
-		// adapter; an empty manager makes GetScraper fail.
-		t.Cleanup(ResetForTesting)
-		p := &allAnimeProvider{sm: emptyManager()}
-		_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-		require.Error(t, err)
-	})
-}
-
-// ---------------------------------------------------------------------------
-// animeFireProvider.FetchEpisodes / FetchStreamURL
-// ---------------------------------------------------------------------------
-
-func TestAnimeFireProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &animeFireProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://animefire.io/anime/naruto", Source: "AnimeFire"}
-	_, err := p.FetchEpisodes(context.Background(), anime)
-	require.Error(t, err)
-}
-
-func TestAnimeFireProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	// Mutates util globals (ClearGlobalSubtitles/SetGlobalAnimeSource) — not parallel.
-	t.Cleanup(ResetForTesting)
-	p := &animeFireProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://animefire.io/anime/naruto", Source: "AnimeFire"}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "https://animefire.io/ep/1"}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// goyabuProvider.FetchEpisodes / FetchStreamURL
-// ---------------------------------------------------------------------------
-
-func TestGoyabuProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &goyabuProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://goyabu.io/anime/naruto", Source: "Goyabu"}
-	_, err := p.FetchEpisodes(context.Background(), anime)
-	require.Error(t, err)
-}
-
-func TestGoyabuProvider_FetchStreamURL_ScraperNotFound(t *testing.T) {
-	// Mutates util globals (ClearGlobalSubtitles/SetGlobalAnimeSource) — not parallel.
-	t.Cleanup(ResetForTesting)
-	p := &goyabuProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://goyabu.io/anime/naruto", Source: "Goyabu"}
-	ep := &models.Episode{Number: "1", Num: 1, URL: "https://goyabu.io/ep/1"}
-	_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// superFlixProvider.FetchEpisodes / FetchStreamURL
-// ---------------------------------------------------------------------------
-
-func TestSuperFlixProvider_FetchEpisodes_ScraperNotFound(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	p := &superFlixProvider{sm: emptyManager()}
-	anime := &models.Anime{URL: "https://superflix.gs/serie/1234", Source: "SuperFlix"}
-	_, err := p.FetchEpisodes(context.Background(), anime)
-	require.Error(t, err)
 }
 
 func TestSuperFlixProvider_FetchStreamURL(t *testing.T) {
@@ -162,21 +88,7 @@ func TestSuperFlixProvider_FetchStreamURL(t *testing.T) {
 			t.Error("must not fetch with cancelled context")
 			return "", nil
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_, err := p.FetchStreamURL(ctx, ep, anime, "best")
+		_, err := p.FetchStreamURL(cancelledCtx(), ep, anime, "best")
 		require.ErrorIs(t, err, context.Canceled)
 	})
-}
-
-// ---------------------------------------------------------------------------
-// ForKind integration (verifies factory + error path for unknown kind)
-// ---------------------------------------------------------------------------
-
-func TestForKind_UnknownKind_ReturnsError(t *testing.T) {
-	t.Parallel()
-	t.Cleanup(ResetForTesting)
-	_, err := ForKind(source.SourceKind("__nonexistent_source__"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no provider registered")
 }

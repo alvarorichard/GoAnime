@@ -36,33 +36,29 @@ func TestEpisodeNumber(t *testing.T) {
 
 func TestAllAnimeProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p, err := ForKind(source.AllAnime)
-	require.NoError(t, err)
-	assert.Equal(t, source.AllAnime, p.Kind())
+	p := &allAnimeProvider{}
+	assert.Equal(t, source.AllAnime, p.Describe().Kind)
 	assert.False(t, p.HasSeasons())
 }
 
 func TestAnimeFireProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p, err := ForKind(source.AnimeFire)
-	require.NoError(t, err)
-	assert.Equal(t, source.AnimeFire, p.Kind())
+	p := &animeFireProvider{}
+	assert.Equal(t, source.AnimeFire, p.Describe().Kind)
 	assert.False(t, p.HasSeasons())
 }
 
 func TestGoyabuProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p, err := ForKind(source.Goyabu)
-	require.NoError(t, err)
-	assert.Equal(t, source.Goyabu, p.Kind())
+	p := &goyabuProvider{}
+	assert.Equal(t, source.Goyabu, p.Describe().Kind)
 	assert.False(t, p.HasSeasons())
 }
 
 func TestSuperFlixProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p, err := ForKind(source.SuperFlix)
-	require.NoError(t, err)
-	assert.Equal(t, source.SuperFlix, p.Kind())
+	p := &superFlixProvider{}
+	assert.Equal(t, source.SuperFlix, p.Describe().Kind)
 	assert.True(t, p.HasSeasons())
 }
 
@@ -110,32 +106,38 @@ func TestSuperFlixProvider_Describe(t *testing.T) {
 	assert.False(t, d.ShortID)
 }
 
-func TestAllAnimeProvider_Manager(t *testing.T) {
+// Each provider's scraper() builds a standalone, correctly-typed adapter on the
+// Model B path (nil sm) — no ScraperManager involved.
+func TestAllAnimeProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	sm := scraper.NewScraperManagerForTest()
-	assert.Same(t, sm, (&allAnimeProvider{sm: sm}).manager(), "injected manager must win")
-	assert.NotNil(t, (&allAnimeProvider{}).manager(), "nil sm must fall back to the global singleton")
+	ad, err := (&allAnimeProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.AllAnimeType, ad.GetType())
 }
 
-func TestAnimeFireProvider_Manager(t *testing.T) {
+func TestAnimeFireProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	sm := scraper.NewScraperManagerForTest()
-	assert.Same(t, sm, (&animeFireProvider{sm: sm}).manager(), "injected manager must win")
-	assert.NotNil(t, (&animeFireProvider{}).manager(), "nil sm must fall back to the global singleton")
+	ad, err := (&animeFireProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.AnimefireType, ad.GetType())
 }
 
-func TestGoyabuProvider_Manager(t *testing.T) {
+func TestGoyabuProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	sm := scraper.NewScraperManagerForTest()
-	assert.Same(t, sm, (&goyabuProvider{sm: sm}).manager(), "injected manager must win")
-	assert.NotNil(t, (&goyabuProvider{}).manager(), "nil sm must fall back to the global singleton")
+	ad, err := (&goyabuProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.GoyabuType, ad.GetType())
 }
 
-func TestSuperFlixProvider_Manager(t *testing.T) {
+func TestSuperFlixProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	sm := scraper.NewScraperManagerForTest()
-	assert.Same(t, sm, (&superFlixProvider{sm: sm}).manager(), "injected manager must win")
-	assert.NotNil(t, (&superFlixProvider{}).manager(), "nil sm must fall back to the global singleton")
+	ad, err := (&superFlixProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.SuperFlixType, ad.GetType())
 }
 
 // TestSourceRegistry_LiveSourcesRegistered verifies init() populated the

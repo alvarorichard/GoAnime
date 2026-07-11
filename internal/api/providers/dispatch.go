@@ -10,8 +10,15 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// searchBreaker is the registry-wide per-source circuit breaker for search.
+// It replaces the ScraperManager's breaker (which was keyed by ScraperType);
+// here it is keyed by SourceKind. Package-level so its state persists across
+// searches within a process.
+var searchBreaker = netx.NewCircuitBreaker()
 
 // Aggregate search timing. searchAllTimeout is the hard ceiling for the whole
 // fan-out; stragglerGrace bounds how long we keep waiting for the remaining
@@ -72,6 +79,12 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		if len(want) > 0 && !want[kind] {
 			continue
 		}
+		// Skip a source whose circuit breaker is open (R5): it has been
+		// failing, so don't hammer it — it auto-recovers after the cooldown.
+		if diag, retry, open := searchBreaker.OpenDiagnostic(string(kind), sourceDisplayName(kind)); open {
+			util.Warn("search source skipped (circuit open)", "source", kind, "retry_after", retry.Round(time.Second), "diagnostic", diag.UserMessage())
+			continue
+		}
 		searchers = append(searchers, sr)
 		names = append(names, kind)
 	}
@@ -106,10 +119,16 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 				return finishSearch(query, all, errs)
 			}
 			if res.err != nil {
+				// Feed the breaker so a repeatedly-failing source opens.
+				diag := netx.DiagnoseError(sourceDisplayName(res.kind), "search", res.err)
+				if searchBreaker.RecordFailure(string(res.kind), diag) {
+					util.Warn("search source circuit opened", "source", res.kind, "diagnostic", diag.UserMessage())
+				}
 				util.Debug("search source failed", "source", res.kind, "error", res.err)
 				errs = append(errs, fmt.Errorf("%s: %w", res.kind, res.err))
 				continue
 			}
+			searchBreaker.RecordSuccess(string(res.kind))
 			if len(res.results) > 0 {
 				all = append(all, res.results...)
 				util.Debug("search results received", "source", res.kind, "count", len(res.results))

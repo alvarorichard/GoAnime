@@ -406,9 +406,67 @@ Suíte -race verde, lint 0 issues.
   retorno arquitetural decrescente. Fica como cleanup opcional, não como
   requisito de dispatch.
 
-**Restante (6.3d, cleanup opcional — dedicado + TTY):** providers client-direto,
-relocar breaker/health/tagging p/ netx (por `SourceKind`), migrar MediaManager,
-deletar ScraperManager + adapters + ScraperType.
+**6.3d 🔄 (2026-07-08) — breaker + tagging PORTADOS; busca self-contained (providers seguram adapters).**
+FEITO nesta sessão (parte conceitual mais difícil):
+- **Breaker portado** → `netx/circuit.go` (`netx.CircuitBreaker`, genérico por
+  string, +8 testes). Não depende mais do `ScraperManager`.
+- **Tagging portado** → `providers/tagging.go` (`tagResults`/`cleanPTBRTitle`
+  por `SourceKind`, +5 testes; comportamento idêntico ao legado).
+- **Providers self-contained:** os 4 seguram o próprio adapter via
+  `scraper.NewAdapter` + `lazyGetAdapter` (não usam mais `p.manager().GetScraper`).
+  `Search` = adapter.SearchAnime + `tagResults` (não mais `searchViaManager`).
+  Episódios/stream de AllAnime/AnimeFire/Goyabu = adapter-direto. SuperFlix
+  episódios/stream ainda delegam ao api (`GetSuperFlix*`).
+- **`SearchAll` ganhou o breaker próprio** (`searchBreaker = netx.NewCircuitBreaker()`,
+  por `SourceKind`): pula source com breaker aberto, registra success/failure.
+- Live: busca self-contained = 49 resultados, todos tagueados, das 4 fontes,
+  **zero `ScraperManager` no path de busca**. Suíte -race verde, lint 0 issues.
+- Bônus: revertido bump acidental do `go.mod` (go1.27 → go1.26.5) causado por
+  `go run ...@latest`.
+
+FALTA para o delete físico do `ScraperManager` (mecânico, mas toca MediaManager):
+1. ✅ **FEITO** — `api/enhanced.go` limpo: `newScraperMgr` DELETADO (morto),
+   `SearchAnimeEnhanced` simplificado (exige o seam; fallbacks `SearchAnime`/
+   `SearchAnimePTBR` + `scraperManager` local removidos; import `scraper` órfão
+   removido). Helpers de teste `injectScraper`/`injectMultiScraper` enxutos (só
+   religam os seams episódio/stream; a parte `newScraperMgr` morta saiu).
+   `TestSearchAnimeEnhanced_NoResultsReturnsError` religado via seam-stub.
+   Suíte -race verde, lint 0.
+2. ✅ **FEITO** — factory legado DELETADO: `provider.go` + `registry.go` +
+   `registry_test.go` removidos; `RegisterProvider`/`ForKind`/`ForAnime`/
+   `HasProvider`/`ResetForTesting`/`Provider` interface deletados. Campo `sm` +
+   param `sm` de `lazyGetAdapter` removidos (providers 100% Model B via
+   `source.Register`, seguram adapter próprio). Métodos `Kind()` órfãos
+   removidos (`HasSeasons` fica — usado por `source.Seasoned`). Testes
+   obsoletos (`*_ScraperNotFound`, `TestForKind_*`, `emptyManager`) removidos;
+   `KindAndHasSeasons` reescritos via `Describe().Kind`. Suíte -race verde, lint 0.
+3. ✅ **FEITO** — `MediaManager` DELETADO. `handlers/media.go` agora usa
+   `registryMediaSource` (implementa a interface `mediaSource` via
+   `providers.SearchAll` + `source.Resolve`→`FetchStreamURL`). `NewMediaHandler`
+   nunca era chamado em prod (fluxo morto exercido só por testes com fake);
+   `scraper.NewAdapter` já constrói os adapters direto, então o `MediaManager`
+   (switch por source + wrapper do ScraperManager) saiu inteiro
+   (`media_manager.go` + `_test.go`). Blocos comentados stale FlixHQ/SFlix/
+   NineAnime removidos de `source_providers.go`. Testes obsoletos de
+   `MediaManager` em `search_stream_test.go` removidos. Suíte -race verde, lint 0.
+   **Resultado: o `ScraperManager` está fora de TODOS os fluxos principais**
+   (busca/episódios/stream/media). Sobram só 2 touchpoints:
+   - Pre-warm (`PreWarmScraperManager`, `cmd/main.go:92`) — aquece um singleton
+     que ninguém mais usa (os providers constroem adapters via `NewAdapter`).
+   - Health diagnostic (`CheckAllSourcesHealth`) — usado pelo CI
+     (`TestSourceHealthLive`, tag `sourcehealth`).
+4. **FALTA — delete físico do struct `ScraperManager`:**
+   - Repontar/deletar `PreWarmScraperManager` (aquecer os adapters do registry,
+     ou virar no-op + remover a chamada no `main.go`).
+   - Migrar o health diagnostic (`source_health.go`) para o registry (health por
+     `providers.Search` por source) + atualizar `TestSourceHealthLive`.
+   - Deletar `ScraperManager` struct + `SearchAnime`/`searchSpecificScraper`/
+     `searchAllScrapersConcurrent`/`SearchAnimePTBR`/`GetScraper`/breaker
+     (`source_circuit.go`)/`getScraperDisplayName`/`tagResults`/`getLanguageTag`/
+     `cleanPTBRTitle`/`searchWithTimeout` + os testes do manager. MANTER os TIPOS
+     de adapter (os providers os constroem via `NewAdapter`) e `ScraperType`.
+   - **TTY:** verificar seleção de busca + seletor de temporada + quality picker
+     antes/depois (fluxo `handlers/media.go` é morto, mas a busca real não).
 
 1. **Adapters ctx-aware** (`UnifiedScraper.SearchAnime`/`GetAnimeEpisodes`/
    `GetStreamURL` recebem `ctx`). Sem isso o per-source timeout + origin-probe
