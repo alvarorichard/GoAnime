@@ -11,10 +11,13 @@ import (
 )
 
 type sfStreamHarness struct {
+	cacheCalls  int
 	listCalls   int
 	serverCalls int
 	sniffCalls  int
 	usedServer  string
+	// cached, when non-nil, makes the cache fast-path hit.
+	cached *superflix.SuperFlixStreamResult
 }
 
 func (h *sfStreamHarness) install(
@@ -23,14 +26,20 @@ func (h *sfStreamHarness) install(
 	serverErr error,
 ) {
 	t.Helper()
-	pl, ps, pn := sfGetServersFn, sfStreamFromServerFn, sfSniffStreamFn
-	t.Cleanup(func() { sfGetServersFn, sfStreamFromServerFn, sfSniffStreamFn = pl, ps, pn })
+	pc, pl, ps, pn := sfCachedStreamFn, sfGetServersFn, sfStreamFromServerFn, sfSniffStreamFn
+	t.Cleanup(func() {
+		sfCachedStreamFn, sfGetServersFn, sfStreamFromServerFn, sfSniffStreamFn = pc, pl, ps, pn
+	})
 
+	sfCachedStreamFn = func(_ *superflix.SuperFlixClient, _, _, _, _ string) (*superflix.SuperFlixStreamResult, bool) {
+		h.cacheCalls++
+		return h.cached, h.cached != nil
+	}
 	sfGetServersFn = func(_ *superflix.SuperFlixClient, _ context.Context, _, _, _, _ string) ([]superflix.SuperFlixServer, *superflix.SuperFlixTokens, error) {
 		h.listCalls++
 		return servers, &superflix.SuperFlixTokens{ContentID: "127972"}, listErr
 	}
-	sfStreamFromServerFn = func(_ *superflix.SuperFlixClient, _ context.Context, _ *superflix.SuperFlixTokens, id string) (*superflix.SuperFlixStreamResult, error) {
+	sfStreamFromServerFn = func(_ *superflix.SuperFlixClient, _ context.Context, _ *superflix.SuperFlixTokens, id, _, _, _, _ string) (*superflix.SuperFlixStreamResult, error) {
 		h.serverCalls++
 		h.usedServer = id
 		if serverErr != nil {
@@ -44,11 +53,50 @@ func (h *sfStreamHarness) install(
 	}
 }
 
+// The cache is the FAST path: a previously-resolved episode replays with no
+// server list, no sniff, and no browser. It must be tried before anything else —
+// that is the whole point of it, turning a re-watch/resume into a ~1s open.
+func TestSuperFlixStream_CacheFastPathSkipsEverything(t *testing.T) {
+	stubSFPicker(t, func(prompt string, _ []string) (int, error) {
+		t.Errorf("a cached play must not prompt: %q", prompt)
+		return 0, nil
+	})
+
+	h := &sfStreamHarness{cached: &superflix.SuperFlixStreamResult{StreamURL: "https://cdn/cached.m3u8"}}
+	h.install(t, []superflix.SuperFlixServer{sfServer("1", dub, "S", false)}, nil, nil)
+
+	res, chosen, err := superFlixStream(nil, "103913", "serie", "1", "1")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://cdn/cached.m3u8", res.StreamURL)
+	assert.Nil(t, chosen, "a cached play returns no server; the choice is honored from memory")
+	assert.Equal(t, 1, h.cacheCalls)
+	assert.Zero(t, h.listCalls, "the server list must not be fetched on a cache hit")
+	assert.Zero(t, h.serverCalls)
+	assert.Zero(t, h.sniffCalls, "and no browser sniff either")
+}
+
+// On a cache MISS the normal resolution must proceed — the fast path must not
+// swallow first plays.
+func TestSuperFlixStream_CacheMissProceedsToServerList(t *testing.T) {
+	stubSFPicker(t, func(_ string, _ []string) (int, error) { return 0, nil })
+
+	h := &sfStreamHarness{} // cached == nil → miss
+	h.install(t, []superflix.SuperFlixServer{sfServer("1", dub, "S", false)}, nil, nil)
+
+	res, _, err := superFlixStream(nil, "103913", "serie", "1", "1")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://cdn/chosen.m3u8", res.StreamURL)
+	assert.Equal(t, 1, h.cacheCalls, "the cache is always checked first")
+	assert.Equal(t, 1, h.listCalls, "a miss falls through to the server list")
+}
+
 // The server list is the ONLY path that lets the user choose a source and the
-// audio, so it must be tried first — the sniff, which offers neither, is a
-// fallback and nothing more.
+// audio, so it must be tried before the sniff — the sniff, which offers neither,
+// is a fallback and nothing more.
 func TestSuperFlixStream_PrefersTheServerList(t *testing.T) {
-	stubServerPicker(t, func([]string) (int, error) { return 1, nil }) // pick the MP4
+	stubSFPicker(t, func(_ string, _ []string) (int, error) { return 1, nil }) // second server
 
 	h := &sfStreamHarness{}
 	h.install(t, []superflix.SuperFlixServer{
@@ -69,8 +117,8 @@ func TestSuperFlixStream_PrefersTheServerList(t *testing.T) {
 // When the list is unreachable (the site's shell, a rate limit…), playback must
 // still happen — just without a choice.
 func TestSuperFlixStream_FallsBackToSniff(t *testing.T) {
-	stubServerPicker(t, func([]string) (int, error) {
-		t.Error("nothing to pick from when the list failed")
+	stubSFPicker(t, func(prompt string, _ []string) (int, error) {
+		t.Errorf("nothing to pick from when the list failed: %q", prompt)
 		return 0, nil
 	})
 
@@ -85,10 +133,23 @@ func TestSuperFlixStream_FallsBackToSniff(t *testing.T) {
 	assert.Equal(t, 1, h.sniffCalls)
 }
 
+func TestSuperFlixStream_RestrictedServerListDoesNotRepeatTheSniff(t *testing.T) {
+	h := &sfStreamHarness{}
+	h.install(t, nil, superflix.ErrSuperFlixRestricted, nil)
+
+	res, chosen, err := superFlixStream(nil, "121390", "filme", "", "")
+
+	require.ErrorIs(t, err, superflix.ErrSuperFlixRestricted)
+	assert.Nil(t, res)
+	assert.Nil(t, chosen)
+	assert.Equal(t, 1, h.listCalls)
+	assert.Zero(t, h.sniffCalls, "the terminal restricted shell must not be solved twice")
+}
+
 // A server can be listed and still refuse to play. Dead-ending there would strand
 // the user on a source they cannot re-pick, so we fall through to the sniff.
 func TestSuperFlixStream_ChosenServerFailsFallsBack(t *testing.T) {
-	stubServerPicker(t, func([]string) (int, error) { return 0, nil })
+	stubSFPicker(t, func(_ string, _ []string) (int, error) { return 0, nil })
 
 	h := &sfStreamHarness{}
 	h.install(t, []superflix.SuperFlixServer{

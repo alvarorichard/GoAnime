@@ -20,6 +20,9 @@ import (
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
 func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	// Prepare the mpv path while metadata/stream work is in progress.
+	player.PreWarmMPVPath()
+
 	for {
 		animeMutex := sync.Mutex{}
 		isPaused := false

@@ -37,13 +37,14 @@ func (t *solveFlagTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-// TestGetServers_ForbidsBrowserSolveOnEveryRequest is the guard for the
-// performance regression the #184-adjacent report hit: the server list — an
-// enhancement — was escalating to the headed browser solver, which costs MINUTES
-// per title (Mushoku Tensei hung 3m19s + 1m56s + deadlines). GetServers must mark
-// EVERY request it makes — the player page AND the bootstrap POST — as
-// solve-forbidden, so a gate becomes a fast miss the caller falls back from.
-func TestGetServers_ForbidsBrowserSolveOnEveryRequest(t *testing.T) {
+// TestGetServers_AllowsBrowserSolve pins the correction of a mistaken "fix":
+// getting the server list REQUIRES the Cloudflare solve, because the tokened
+// player page is gated (measured live — without the solve the page never carries
+// tokens and the whole feature is dead). An earlier version forbade the solve here
+// to dodge a hang; the hang was really a client-rebuild bug (fixed separately), so
+// forbidding the solve only removed the feature. GetServers must therefore NOT
+// mark its requests solve-forbidden.
+func TestGetServers_AllowsBrowserSolve(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,19 +67,9 @@ func TestGetServers_ForbidsBrowserSolveOnEveryRequest(t *testing.T) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	require.NotEmpty(t, tr.seen, "GetServers must have made requests")
-
-	var sawPlayerPage, sawBootstrap bool
 	for path, forbidden := range tr.seen {
-		assert.True(t, forbidden, "request to %s must forbid the browser solve", path)
-		switch {
-		case strings.Contains(path, "/player/bootstrap"):
-			sawBootstrap = true
-		case strings.Contains(path, "/serie/"):
-			sawPlayerPage = true
-		}
+		assert.False(t, forbidden, "request to %s must be allowed to solve — the tokened page is gated", path)
 	}
-	assert.True(t, sawPlayerPage, "the player page must have been fetched")
-	assert.True(t, sawBootstrap, "the bootstrap POST must have been made — and covered too")
 }
 
 // StreamFromServer resolves the actual payload, so it MUST stay free to solve the
@@ -108,7 +99,7 @@ func TestStreamFromServer_DoesNotForbidBrowserSolve(t *testing.T) {
 	c.client = &http.Client{Transport: tr}
 
 	tokens := &SuperFlixTokens{ContentID: "1", PageToken: "tok"}
-	_, err := c.StreamFromServer(context.Background(), tokens, "159462")
+	_, err := c.StreamFromServer(context.Background(), tokens, "159462", "serie", "1", "1", "1")
 	require.NoError(t, err)
 
 	tr.mu.Lock()

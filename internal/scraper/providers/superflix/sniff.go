@@ -64,9 +64,16 @@ func readEmbeddedPlayer(ctx context.Context, page playwright.Page, embedURL stri
 			`allow="autoplay; encrypted-media; fullscreen"></iframe></body>`,
 		embedURL,
 	)
+	loadBudget := 15 * time.Second
+	if remaining := time.Until(deadline); remaining < loadBudget {
+		loadBudget = remaining
+	}
+	if loadBudget <= 0 {
+		return "", fmt.Errorf("embedded player frame deadline expired")
+	}
 	if err := page.SetContent(wrapper, playwright.PageSetContentOptions{
 		WaitUntil: playwright.WaitUntilStateLoad,
-		Timeout:   playwright.Float(15000),
+		Timeout:   playwright.Float(float64(loadBudget.Milliseconds())),
 	}); err != nil {
 		return "", fmt.Errorf("set iframe wrapper: %w", err)
 	}
@@ -256,6 +263,12 @@ var sfDirectMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/hls/
 // rotating player host (currently a punycode domain) that answers getVideo with
 // {"securedLink":"https://…/cdn/hls/<hash>/master.m3u8?md5=…&expires=…"}, a plain
 // multivariant HLS playlist mpv plays directly (no cookie, referer optional).
+// restrictedShellGrace is how long the sniff keeps trying after it first sees the
+// "Acesso Restrito" shell — enough for the cross-origin embed read to yield a
+// stream if one is coming, short enough that a genuinely restricted title fails in
+// ~12s instead of spinning the full 90s (×2 solve attempts) the user was hitting.
+const restrictedShellGrace = 12 * time.Second
+
 func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error) {
 	bctx, err := s.init()
 	if err != nil {
@@ -273,13 +286,12 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		return nil, fmt.Errorf("create page: %w", err)
 	}
 	// Onscreen during the solve — Turnstile only auto-passes when the page truly
-	// renders (headless & offscreen both stall it). On exit, tear the WHOLE
-	// context down so no window lingers (the persistent context's default
-	// about:blank tab would otherwise stay visible after we close our page).
-	// init() rebuilds the context on the next solve; the on-disk profile keeps
-	// the warm pass cookie, and pw is reused, so the rebuild is fast.
+	// renders (headless & offscreen both stall it). Close only this tab afterwards:
+	// keeping the persistent context alive retains Chromium's process, connection
+	// pools and first-party challenge state for the next episode. Re-launching the
+	// whole context here was the largest avoidable delay between plays.
 	moveWindow(page, 60, 60)
-	defer s.closeContext()
+	defer func() { _ = page.Close() }()
 
 	// Close ad popunders the embed spawns via window.open so they don't steal the
 	// context. Close in a goroutine — Close() is a protocol round-trip and must
@@ -367,9 +379,14 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// So warm the cookie at the top level first; the same-origin iframe phase
 	// below then reuses it and clears silently. Cheap on a warm profile (the
 	// gate is already cleared, so it returns almost immediately).
-	warmBudget := timeout / 2
-	if warmBudget > 45*time.Second {
-		warmBudget = 45 * time.Second
+	// This is an optimization, never a second timeout.  Keeping it inside the
+	// attempt deadline leaves the iframe recovery enough time to work and makes
+	// a failed warm-up fail within the advertised sniff budget instead of adding
+	// another 45 seconds before that budget even begins.
+	deadline := time.Now().Add(timeout)
+	warmBudget := timeout / 3
+	if warmBudget > 20*time.Second {
+		warmBudget = 20 * time.Second
 	}
 	warmGateTopLevel(page, embedURL, warmBudget)
 
@@ -397,10 +414,10 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// foreground + a little pointer movement) which, with the stealthed fingerprint,
 	// is what tips a managed challenge into auto-passing without interaction.
 	recovered := false
-	embedSeen := false      // have we ever observed a live embed frame?
+	embedSeen := false // have we ever observed a live embed frame?
+	var restrictedSince time.Time
 	_ = page.BringToFront() // surface the solve window once so the challenge renders/focuses
 
-	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := streamURL
@@ -430,12 +447,31 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		if alive {
 			embedSeen = true
 		}
-		if !recovered && (pageBlankedOut(page) || (embedSeen && !alive)) {
+
+		// Third failure mode: the terminal "Acesso Restrito" shell. It is neither
+		// blank nor a live player, so the two detectors above miss it and the loop
+		// would spin the full timeout. Note when we first see it so we can recover
+		// once and then bail fast.
+		restricted := pageShowsRestrictedShell(page)
+		if restricted && restrictedSince.IsZero() {
+			restrictedSince = time.Now()
+			util.Debug("SuperFlix sniff: landed on the restricted 'Acesso Restrito' shell")
+		}
+
+		if !recovered && (pageBlankedOut(page) || (embedSeen && !alive) || restricted) {
 			recovered = true
-			util.Debug("SuperFlix CF solve: same-origin embed blanked the page; retrying cross-origin")
+			util.Debug("SuperFlix CF solve: recovering via cross-origin embed", "restricted", restricted)
 			if err := injectEmbedCrossOrigin(page, embedURL); err != nil {
 				util.Debug("SuperFlix cross-origin re-inject failed", "err", err)
 			}
+		}
+
+		// Fast bail on the restricted shell: the cross-origin embed read got a grace
+		// window to produce a stream; if none came, none is coming from this
+		// content. Return a terminal error so the caller shows a clear message and
+		// does NOT burn another 90s solve retrying.
+		if !restrictedSince.IsZero() && time.Since(restrictedSince) > restrictedShellGrace {
+			return nil, fmt.Errorf("%w (%s)", ErrSuperFlixRestricted, embedURL)
 		}
 
 		// Feed behavioral signals every tick while we're still gated. warezcdn's
@@ -452,7 +488,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-found:
-		case <-time.After(2 * time.Second):
+		case <-time.After(500 * time.Millisecond):
 		}
 	}
 

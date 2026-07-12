@@ -12,8 +12,11 @@ import (
 // (ungated) getVideo endpoint over plain HTTP — no browser — for fresh signed
 // HLS links on every replay.
 type streamCacheEntry struct {
-	Host string `json:"host"` // e.g. https://xn--kcksk7a2bl5le7b6doc1h3f.com
-	Hash string `json:"hash"` // 32-hex warezcdn content id
+	Host         string              `json:"host"` // e.g. https://xn--kcksk7a2bl5le7b6doc1h3f.com
+	Hash         string              `json:"hash"` // 32-hex warezcdn content id
+	DefaultAudio []string            `json:"default_audio,omitempty"`
+	Subtitles    []SuperFlixSubtitle `json:"subtitles,omitempty"`
+	ExtrasCached bool                `json:"extras_cached,omitempty"`
 }
 
 // streamCache persists tmdb→(host,hash) so the headed browser runs only on the
@@ -70,9 +73,6 @@ func (sc *streamCache) put(key string, e streamCacheEntry) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.ensureLoaded()
-	if cur, ok := sc.entries[key]; ok && cur == e {
-		return
-	}
 	sc.entries[key] = e
 	if data, err := json.MarshalIndent(sc.entries, "", "  "); err == nil {
 		_ = os.WriteFile(sc.file(), data, 0o600)

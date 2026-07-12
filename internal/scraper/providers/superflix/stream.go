@@ -83,18 +83,23 @@ func (c *SuperFlixClient) ExtractTokens(html string) *SuperFlixTokens {
 // playerPageRetryDelay spaces the attempts out.
 //
 // SuperFlix answers the same player URL with several page variants, and only some
-// carry PAGE_TOKEN. Retrying is the only lever, but it has to stay CHEAP: the
-// tokened variant is Cloudflare-gated, and we refuse to pay a browser solve for it
-// (see playerPageWithTokens), so most attempts simply miss and the caller falls
-// back. Four attempts cost ~4s and still catch the ungated variant when the site
-// serves one; more would just tax every play for a diminishing chance.
+// carry PAGE_TOKEN. With the browser solve allowed the tokened variant often
+// arrives on the first attempt (measured ~6s warm); the retries cover the site's
+// habit of serving a token-less variant even after the gate is cleared. Once the
+// gate is warm each retry is a cheap ~300ms fetch (no re-solve), so a handful of
+// them costs little and materially lifts the hit rate.
 //
 // The delay is not decoration: hammering the origin earns a plain-text "Too many
 // requests" that locks the server list out for minutes — a self-inflicted wound,
 // since the fallback then has to do all the work anyway.
 const (
-	maxPlayerPageAttempts = 4
-	playerPageRetryDelay  = 800 * time.Millisecond
+	maxPlayerPageAttempts = 6
+	// 300ms is enough spacing to avoid the "Too many requests" wall within a
+	// single play's handful of attempts (that wall came from HUNDREDS of requests
+	// across probing, not from one play), while keeping a full miss — 6 attempts
+	// that all get the token-less variant — down to ~2s before we fall back,
+	// instead of the ~5s the old 800ms spacing cost.
+	playerPageRetryDelay = 300 * time.Millisecond
 )
 
 // ErrSuperFlixRateLimited is returned when SuperFlix answers "Too many requests".
@@ -150,6 +155,13 @@ func (c *SuperFlixClient) playerPageWithTokens(ctx context.Context, mediaType, m
 		if isRateLimited(html) {
 			return nil, ErrSuperFlixRateLimited
 		}
+		// Once the browser has had its short, genuine-iframe grace period, a
+		// restricted shell cannot become a tokened player by issuing the same
+		// top-level request again.  Retrying it six times only keeps the browser
+		// window on screen and delays the stream fallback.
+		if isRestrictedEmbedPage([]byte(html)) {
+			return nil, ErrSuperFlixRestricted
+		}
 
 		// CSRF_TOKEN is deliberately empty on the current pages (`var CSRF_TOKEN = ""`),
 		// so requiring it — as this code used to — rejected every real page and made
@@ -176,17 +188,21 @@ func (c *SuperFlixClient) playerPageWithTokens(ctx context.Context, mediaType, m
 // Placeholder entries (the site's own "fallback" options) are dropped, exactly as
 // the upstream player drops them before rendering its list.
 func (c *SuperFlixClient) GetServers(ctx context.Context, mediaType, mediaID, season, episode string) ([]SuperFlixServer, *SuperFlixTokens, error) {
-	// The server list must never escalate to the headed browser. It is an
-	// enhancement — it buys the user a choice of source and of dublado/legendado —
-	// while the stream plays without it, so it has no business paying the most
-	// expensive operation in the system. Some titles put a Cloudflare gate in front
-	// of the player page and each solve costs MINUTES (Mushoku Tensei: 3m19s on the
-	// first request, 1m19s on the second, then deadline). Forbidding the solve — for
-	// BOTH the player page and the bootstrap POST below — turns that into a fast
-	// miss, and the caller falls back to the embed sniff, which owns the browser
-	// anyway.
-	ctx = WithoutBrowserSolve(ctx)
-
+	// The tokened player page — the only page that yields the server list — sits
+	// behind Cloudflare, so getting it REQUIRES the browser solve. Measured live:
+	// with the persistent profile warm (which it is after any prior SuperFlix play,
+	// and the profile persists on disk across sessions) the solve is ~6s. An earlier
+	// version forbade the solve here to dodge a hang; that just made the whole
+	// feature dead — the page never carried tokens without it.
+	//
+	// The hang that prompted the ban was a DIFFERENT bug: rebuilding the transport
+	// between attempts discarded cf_clearance and re-solved a cold gate every time
+	// (Mushoku Tensei: 3m19s + 1m56s + …). That is fixed by reusing the client (see
+	// playerPageWithTokens). The remaining cold-profile cost — one solve on the very
+	// first play — is unavoidable: the stream itself needs a solve too, so paying it
+	// here, where it also buys the server choice, is strictly better. The caller
+	// bounds this whole call with a budget and falls back to the sniff if it is
+	// exceeded (see sfServerListBudget).
 	tokens, err := c.playerPageWithTokens(ctx, mediaType, mediaID, season, episode)
 	if err != nil {
 		return nil, nil, err
@@ -214,7 +230,7 @@ func (c *SuperFlixClient) GetServers(ctx context.Context, mediaType, mediaID, se
 
 // StreamFromServer resolves the stream for one specific server, so the caller can
 // honor the user's pick instead of guessing.
-func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFlixTokens, serverID string) (*SuperFlixStreamResult, error) {
+func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFlixTokens, serverID, mediaType, mediaID, season, episode string) (*SuperFlixStreamResult, error) {
 	redirectURL, err := c.GetSourceURL(ctx, serverID, tokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source URL: %w", err)
@@ -225,6 +241,12 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
 	}
 
+	// Cache the (host, hash) so the NEXT play of this exact episode replays over
+	// plain HTTP with no browser and no server-list fetch (see TryCachedStream).
+	// This is what turns a re-watch or a resume from an ~8s open into a ~1s one.
+	cacheKey := streamCacheKey(mediaType, mediaID, season, episode)
+	defaultStreamCache.put(cacheKey, streamCacheEntry{Host: playerBaseURL, Hash: videoHash})
+
 	referer := fmt.Sprintf("%s/video/%s", playerBaseURL, videoHash)
 	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
 	if err != nil {
@@ -232,6 +254,18 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 	}
 
 	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)
+	// Server resolution already loaded the player HTML, so retain the audio and
+	// subtitle metadata with the stream key.  A replay can then start with the
+	// complete track list without a second player-page request.
+	if len(defaultAudio) > 0 || len(subtitles) > 0 {
+		defaultStreamCache.put(cacheKey, streamCacheEntry{
+			Host:         playerBaseURL,
+			Hash:         videoHash,
+			DefaultAudio: defaultAudio,
+			Subtitles:    subtitles,
+			ExtrasCached: true,
+		})
+	}
 	return &SuperFlixStreamResult{
 		StreamURL:    streamURL,
 		Title:        tokens.Title,
@@ -240,6 +274,68 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		DefaultAudio: defaultAudio,
 		Subtitles:    subtitles,
 	}, nil
+}
+
+// TryCachedStream replays a previously-resolved stream over plain HTTP — no
+// browser, no server-list fetch. It is the fast path for a repeat or resumed play:
+// the (host, hash) captured last time yields a fresh signed HLS link from the
+// ungated getVideo endpoint, so a re-watch opens in ~1s instead of paying the full
+// Cloudflare + resolution cost again.
+//
+// Returns false on a cache miss, or when the cached host has rotated out (getVideo
+// fails), so the caller re-resolves from scratch.
+func (c *SuperFlixClient) TryCachedStream(ctx context.Context, mediaType, mediaID, season, episode string) (*SuperFlixStreamResult, bool) {
+	return c.streamFromCache(ctx, streamCacheKey(mediaType, mediaID, season, episode))
+}
+
+// streamFromCache is the shared cache-replay used by both TryCachedStream and the
+// browser path's first step.
+func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*SuperFlixStreamResult, bool) {
+	ent, ok := defaultStreamCache.get(key)
+	if !ok {
+		return nil, false
+	}
+	referer := ent.Host + "/video/" + ent.Hash
+
+	// The fresh signed HLS URL and the player metadata are independent HTTP
+	// requests. Run them in the shared bounded parallel executor and wait for
+	// both, so cache replay keeps every subtitle/audio track without paying their
+	// latencies serially.
+	var (
+		streamURL, thumb string
+		streamErr        error
+		audio            = ent.DefaultAudio
+		subs             = ent.Subtitles
+	)
+	util.ParallelExecute(2,
+		func() { streamURL, thumb, streamErr = c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer) },
+		func() {
+			if !ent.ExtrasCached {
+				audio, subs = c.fetchPlayerExtras(ctx, ent.Host, ent.Hash)
+			}
+		},
+	)
+	if streamErr != nil || streamURL == "" {
+		util.Debug("SuperFlix cached stream stale, will re-resolve", "key", key, "err", streamErr)
+		return nil, false
+	}
+	if !ent.ExtrasCached {
+		defaultStreamCache.put(key, streamCacheEntry{
+			Host:         ent.Host,
+			Hash:         ent.Hash,
+			DefaultAudio: audio,
+			Subtitles:    subs,
+			ExtrasCached: len(audio) > 0 || len(subs) > 0,
+		})
+	}
+	util.Debug("SuperFlix stream from cache (no browser, no server list)", "key", key, "host", ent.Host)
+	return &SuperFlixStreamResult{
+		StreamURL:    streamURL,
+		Referer:      ent.Host + "/",
+		Thumb:        NormalizeSuperFlixImageURL(thumb),
+		DefaultAudio: audio,
+		Subtitles:    subs,
+	}, true
 }
 
 func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens) ([]SuperFlixServer, error) {
@@ -575,6 +671,9 @@ func sniffEmbedStreamWithRetry(ctx context.Context, solver embedStreamSolver, em
 		if ctx.Err() != nil {
 			break // context cancelled/expired — do not burn another solve
 		}
+		if errors.Is(err, ErrSuperFlixRestricted) {
+			break // terminal: the content is access-restricted, retrying won't help
+		}
 		if attempt < sniffEmbedStreamAttempts {
 			util.Info("Verification didn't complete on the first try — retrying once...")
 			util.Debug("SuperFlix embed sniff retry", "attempt", attempt, "err", err)
@@ -703,21 +802,8 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	key := streamCacheKey(mediaType, mediaID, season, episode)
 
 	// 1. Cached (host, hash) → pure-HTTP getVideo, no browser.
-	if ent, ok := defaultStreamCache.get(key); ok {
-		referer := ent.Host + "/video/" + ent.Hash
-		streamURL, thumb, err := c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer)
-		if err == nil && streamURL != "" {
-			util.Debug("SuperFlix stream from cache (no browser)", "key", key, "host", ent.Host)
-			audio, subs := c.fetchPlayerExtras(ctx, ent.Host, ent.Hash)
-			return &SuperFlixStreamResult{
-				StreamURL:    streamURL,
-				Referer:      ent.Host + "/",
-				Thumb:        NormalizeSuperFlixImageURL(thumb),
-				DefaultAudio: audio,
-				Subtitles:    subs,
-			}, nil
-		}
-		util.Debug("SuperFlix cached stream stale, re-solving", "key", key, "err", err)
+	if res, ok := c.streamFromCache(ctx, key); ok {
+		return res, nil
 	}
 
 	// 2. Cache miss / stale → drive the headed browser through the gate once,
@@ -744,10 +830,6 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// The raw-media fallback capture has no player host/hash (those come only
 	// from the getVideo URL); caching an empty pair would just force a doomed
 	// GetVideoAPI round-trip before every future re-solve.
-	if res.PlayerHost != "" && res.VideoHash != "" {
-		defaultStreamCache.put(key, streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash})
-	}
-
 	referer := res.Referer
 	if referer == "" {
 		referer = "https://" + SuperFlixEmbedHost + "/"
@@ -757,6 +839,20 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// languages live on the player page, which is not gated. Fetch them so the
 	// browser path is as rich as the plain-HTTP one (it used to return neither).
 	audio, subs := c.fetchPlayerExtras(ctx, res.PlayerHost, res.VideoHash)
+	// ALWAYS cache the (host, hash) — it is the browser-gated fact that makes the
+	// next play skip the solve entirely. Gating the write on extras (which are a
+	// bonus and can transiently fail to fetch) meant a hiccup there forced a full
+	// re-solve on every subsequent play, and left a stale entry in place. Attach the
+	// extras only when we actually got them.
+	if res.PlayerHost != "" && res.VideoHash != "" {
+		ent := streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash}
+		if len(audio) > 0 || len(subs) > 0 {
+			ent.DefaultAudio = audio
+			ent.Subtitles = subs
+			ent.ExtrasCached = true
+		}
+		defaultStreamCache.put(key, ent)
+	}
 
 	return &SuperFlixStreamResult{
 		StreamURL:    res.StreamURL,

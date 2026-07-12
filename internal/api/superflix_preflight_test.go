@@ -109,6 +109,13 @@ func TestDescribeSuperFlixErr(t *testing.T) {
 			wantSubstr: "are you human",
 			translated: true,
 		},
+		{
+			name:       "restricted access -> try another title/source, still matchable",
+			in:         fmt.Errorf("sniff: %w", superflix.ErrSuperFlixRestricted),
+			wantWraps:  superflix.ErrSuperFlixRestricted,
+			wantSubstr: "acesso restrito",
+			translated: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

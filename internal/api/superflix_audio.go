@@ -5,9 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // SuperFlix streams are multi-audio HLS: one manifest carries the Portuguese dub
@@ -186,13 +184,6 @@ func resetSuperFlixAudioChoices() {
 	audioPinned = ""
 }
 
-// sfAudioPickFn shows the audio picker. A seam so the selection logic can be
-// tested without a TTY.
-var sfAudioPickFn = func(labels []string) (int, error) {
-	return tui.Find(labels, func(i int) string { return labels[i] },
-		fuzzyfinder.WithPromptString("Áudio (dublado ou legendado): "))
-}
-
 // selectSuperFlixAudio decides which audio track to play, asking the user only
 // when there is a real decision to make.
 //
@@ -230,13 +221,7 @@ func selectSuperFlixAudio(tmdbID string, codes []string, hasSubtitles bool) (aud
 		labels[i] = o.Label
 	}
 
-	idx, err := sfAudioPickFn(labels)
-	if err != nil || idx < 0 || idx >= len(opts) {
-		util.Debug("SuperFlix audio: picker unavailable, defaulting to the first track", "err", err)
-		rememberSuperFlixAudio(tmdbID, opts[0])
-		return opts[0], true
-	}
-
+	idx := pickOrDefault("Você quer assistir dublado ou legendado? ", labels)
 	rememberSuperFlixAudio(tmdbID, opts[idx])
 	return opts[idx], true
 }

@@ -63,7 +63,10 @@ func warmGateTopLevel(page playwright.Page, embedURL string, budget time.Duratio
 		}
 		humanize(page)
 		clickTurnstile(page)
-		time.Sleep(800 * time.Millisecond)
+		// The warm path normally clears in a few seconds.  Poll often enough to
+		// hand control to the iframe as soon as it does, without busy-looping the
+		// browser process.
+		time.Sleep(350 * time.Millisecond)
 	}
 }
 
@@ -119,6 +122,22 @@ func injectEmbedCrossOrigin(page playwright.Page, embedURL string) error {
 func pageBlankedOut(page playwright.Page) bool {
 	u := page.URL()
 	return u == "" || u == "about:blank"
+}
+
+// pageShowsRestrictedShell reports whether the solver page is parked on
+// SuperFlix's "Visualização Externa / Acesso Restrito" shell.
+//
+// This is a THIRD failure mode distinct from the two blank-out cases: the page is
+// neither blank nor a live player — it renders a real, static "restricted access"
+// card whose only real content is a copy-paste embed iframe. The blank-out
+// detectors miss it, so the sniff loop would otherwise spin its full timeout
+// staring at it (exactly the >1min hang users hit on some titles).
+func pageShowsRestrictedShell(page playwright.Page) bool {
+	c, err := page.Content()
+	if err != nil || c == "" {
+		return false
+	}
+	return isRestrictedEmbedPage([]byte(c))
 }
 
 // embedFrameLive reports whether the solver page still has a live (non-blank)
@@ -325,6 +344,19 @@ func (s *cfBrowserSolver) closeContext() {
 		_ = s.pctx.Close()
 		s.pctx = nil
 	}
+}
+
+// ReleaseSharedBrowser closes the shared solver's visible window once a resolve
+// is done — so it disappears as playback starts instead of lingering through the
+// whole episode. The Playwright driver and the on-disk warm Cloudflare profile
+// are kept, so the next episode relaunches a context in ~1s and still solves fast;
+// a re-watch skips the browser entirely via the stream cache.
+//
+// Called at the API layer AFTER the stream URL is obtained (not inside Solve/the
+// sniff), so a single resolve — which may drive several solves — keeps one window
+// throughout and closes it exactly once at the end.
+func ReleaseSharedBrowser() {
+	defaultCFSolver.closeContext()
 }
 
 // Close releases the persistent Chromium context and the Playwright driver.

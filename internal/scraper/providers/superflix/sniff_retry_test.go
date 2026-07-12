@@ -86,6 +86,21 @@ func TestSniffEmbedStreamWithRetry(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, 1, s.calls, "must not burn a second solve once the context is done")
 	})
+
+	// The "Acesso Restrito" shell is terminal — retrying it just burns another 90s
+	// solve on a page that will never yield a stream. It must fail after ONE
+	// attempt, and the sentinel must survive for the caller's friendly message.
+	t.Run("the restricted-access error is terminal and not retried", func(t *testing.T) {
+		t.Parallel()
+		s := &retrySolver{errs: []error{
+			fmt.Errorf("superflix embed stream sniff failed: %w", ErrSuperFlixRestricted),
+			boom,
+		}}
+		_, err := sniffEmbedStreamWithRetry(context.Background(), s, "https://embed/x")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrSuperFlixRestricted)
+		assert.Equal(t, 1, s.calls, "a restricted-access page must not be retried")
+	})
 }
 
 // TestGetStreamURL_RetriesTransientSniffFailure is the integration counterpart:

@@ -19,6 +19,15 @@ import (
 // "this episode has no source on SuperFlix" rather than retrying.
 var ErrSuperFlixNoServers = errors.New("superflix: no servers available for this content")
 
+// ErrSuperFlixRestricted is returned when the browser sniff lands on SuperFlix's
+// terminal "Visualização Externa / Acesso Restrito" shell and no stream follows.
+//
+// It is a CONTENT signal, not a transient gate flake: the page renders a static
+// "restricted access" card whose only content is a copy-paste embed iframe, and it
+// does not yield a playable stream. Callers must NOT retry it (retrying just burns
+// another 90s solve) and should tell the user to try another title or source.
+var ErrSuperFlixRestricted = errors.New("superflix: content is access-restricted (external-embed only)")
+
 // ErrSuperFlixNoEpisodeList is returned when a serie page is solved successfully
 // but carries no episode list to parse.
 //
@@ -87,6 +96,22 @@ type SuperFlixClient struct {
 	maxRetries    int
 	retryDelay    time.Duration
 	searchCache   sync.Map
+}
+
+var (
+	sharedClientOnce sync.Once
+	sharedClient     *SuperFlixClient
+)
+
+// SharedSuperFlixClient returns the process-wide client used by the interactive
+// API flow. Its HTTP connection pool, cookie jar and solved browser UA survive
+// episode selection and subsequent playback, avoiding a fresh TLS connection and
+// Cloudflare-cookie handoff for every play. SuperFlixClient contains no
+// request-specific mutable state, so net/http's concurrent-safe client/jar can
+// safely serve independent metadata and stream requests in parallel.
+func SharedSuperFlixClient() *SuperFlixClient {
+	sharedClientOnce.Do(func() { sharedClient = NewSuperFlixClient() })
+	return sharedClient
 }
 
 // NewSuperFlixClient creates a new SuperFlix client.

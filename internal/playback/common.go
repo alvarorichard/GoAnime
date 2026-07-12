@@ -28,6 +28,10 @@ func PlayEpisode(
 	isPaused *bool,
 	animeMutex *sync.Mutex,
 ) error {
+	// The executable lookup is independent from stream scraping.  Start it now
+	// so the final handoff to mpv never pays filesystem/PATH probing latency.
+	player.PreWarmMPVPath()
+
 	animeMutex.Lock()
 	anime.Episodes = []models.Episode{{
 		Number: episodeNumberStr,

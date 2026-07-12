@@ -109,19 +109,15 @@ func TestMPVAudioLanguage(t *testing.T) {
 	assert.Equal(t, "xyz", mpvAudioLanguage(audioOption{Code: "xyz"}))
 }
 
-// stubAudioPicker installs a picker and restores the real one afterwards.
+// stubAudioPicker drives the audio-from-tracks fallback prompt through the shared
+// selection seam, exposing a call counter so the "ask once per title" invariants
+// stay easy to state.
 func stubAudioPicker(t *testing.T, pick func([]string) (int, error)) *int {
 	t.Helper()
 	calls := 0
-	prev := sfAudioPickFn
-	sfAudioPickFn = func(labels []string) (int, error) {
+	stubSFPicker(t, func(_ string, labels []string) (int, error) {
 		calls++
 		return pick(labels)
-	}
-	resetSuperFlixAudioChoices()
-	t.Cleanup(func() {
-		sfAudioPickFn = prev
-		resetSuperFlixAudioChoices()
 	})
 	return &calls
 }

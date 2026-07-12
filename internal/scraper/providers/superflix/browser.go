@@ -420,7 +420,16 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 			// the shared `deadline` (especially on the restricted page), which used
 			// to leave readEmbeddedPlayer no time to run at all. ctx still bounds
 			// the overall budget.
-			embedDeadline := time.Now().Add(45 * time.Second)
+			// A restricted shell is not a normal slow player load.  Give its
+			// cross-origin iframe a short chance to produce the real page, then
+			// return control to the caller.  The previous 45s allowance made the
+			// server-list enhancement look hung while Chrome stayed visibly parked
+			// on "Acesso Restrito".
+			embedBudget := 45 * time.Second
+			if isRestrictedEmbedPage([]byte(html)) {
+				embedBudget = restrictedShellGrace
+			}
+			embedDeadline := time.Now().Add(embedBudget)
 			if pf, fErr := readEmbeddedPlayer(ctx, page, embed, embedDeadline); fErr == nil && pf != "" {
 				html = pf
 				finalURL = embed

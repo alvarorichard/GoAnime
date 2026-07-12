@@ -107,6 +107,23 @@ func TestGetServers_RateLimitAbortsImmediately(t *testing.T) {
 	assert.Equal(t, int32(1), hits.Load(), "a rate limit must not be retried into")
 }
 
+func TestGetServers_RestrictedShellAbortsImmediately(t *testing.T) {
+	t.Parallel()
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = fmt.Fprint(w, restrictedShellHTML)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClientForTest(srv.URL)
+	_, _, err := c.GetServers(context.Background(), "filme", "121390", "", "")
+
+	require.ErrorIs(t, err, ErrSuperFlixRestricted)
+	assert.Equal(t, int32(1), hits.Load(), "a restricted shell must not be retried")
+}
+
 func TestGetServers_DropsFallbackPlaceholders(t *testing.T) {
 	t.Parallel()
 

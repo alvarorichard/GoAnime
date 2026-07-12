@@ -101,6 +101,8 @@ func describeSuperFlixErr(err error) error {
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
 	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
 		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AllAnime)."}
+	case errors.Is(err, superflix.ErrSuperFlixRestricted):
+		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AllAnime)."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
 	default:
@@ -567,7 +569,7 @@ func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.An
 
 // GetSuperFlixEpisodes handles episodes/content for SuperFlix movies and TV shows
 func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
-	sfClient := superflix.NewSuperFlixClient()
+	sfClient := superflix.SharedSuperFlixClient()
 
 	// media.URL contains the TMDB ID for SuperFlix
 	tmdbID := media.URL
@@ -659,26 +661,34 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 // sfServerListBudget caps how long we spend fetching the server list.
 //
-// The list is an ENHANCEMENT: it buys the user a choice of source, and it names
-// each one dublado or legendado. But the stream plays fine without it, so it must
-// never make playback slower than it was before it existed. The tokened player
-// page is Cloudflare-gated and we refuse to solve that gate for a nicety (a solve
-// costs minutes — Mushoku Tensei burned 3m19s on one), so the attempt is a cheap
-// probe: it either lands quickly or we fall back to the embed sniff, which is what
-// the old code did unconditionally.
-//
-// When the list DOES land, the whole stream then resolves over plain HTTP and no
-// browser runs at all — faster than the old path, not slower.
-const sfServerListBudget = 15 * time.Second
+// The list is an ENHANCEMENT: it buys the user a choice of source and names each
+// one dublado or legendado. Getting it needs the Cloudflare browser solve (the
+// tokened player page is gated), which is ~6s once the persistent profile is warm
+// — and it is warm after any prior SuperFlix play. This budget bounds the cold
+// case: a brand-new profile whose first-ever solve would run long is cut off here
+// and falls back to the embed sniff, which does its own solve for the stream. So
+// the worst the enhancement can add is this budget, once, on a cold profile.
+const sfServerListBudget = 60 * time.Second
 
-// Stream seams. Split out so the "servers first, sniff as a fallback" ordering is
-// testable without a network or a headed browser.
+// sfCachedStreamBudget bounds the cache-replay fast path. It is pure HTTP (a
+// getVideo call + the player-extras GET), so a couple of round-trips — generous
+// enough to absorb a slow CDN, tight enough that a stale/rotated host fails fast
+// and we fall through to a full resolve.
+const sfCachedStreamBudget = 8 * time.Second
+
+// Stream seams. Split out so the "cache → servers → sniff" ordering is testable
+// without a network or a headed browser.
 var (
+	sfCachedStreamFn = func(c *superflix.SuperFlixClient, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), sfCachedStreamBudget)
+		defer cancel()
+		return c.TryCachedStream(ctx, mediaType, mediaID, season, episode)
+	}
 	sfGetServersFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) ([]superflix.SuperFlixServer, *superflix.SuperFlixTokens, error) {
 		return c.GetServers(ctx, mediaType, mediaID, season, episode)
 	}
-	sfStreamFromServerFn = func(c *superflix.SuperFlixClient, ctx context.Context, tokens *superflix.SuperFlixTokens, serverID string) (*superflix.SuperFlixStreamResult, error) {
-		return c.StreamFromServer(ctx, tokens, serverID)
+	sfStreamFromServerFn = func(c *superflix.SuperFlixClient, ctx context.Context, tokens *superflix.SuperFlixTokens, serverID, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
+		return c.StreamFromServer(ctx, tokens, serverID, mediaType, mediaID, season, episode)
 	}
 	sfSniffStreamFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
 		return c.GetStreamURL(ctx, mediaType, mediaID, season, episode)
@@ -698,6 +708,16 @@ var (
 // The returned server is nil on the fallback path, telling the caller it must ask
 // about the audio itself.
 func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season, epNum string) (*superflix.SuperFlixStreamResult, *superflix.SuperFlixServer, error) {
+	// Fast path: an episode played before replays straight from the cached
+	// (host, hash) over plain HTTP — no Cloudflare solve, no server-list fetch, no
+	// browser. This is the difference between a re-watch or a resume opening in ~1s
+	// versus paying the whole pipeline again. A nil server is returned because the
+	// choice was already made last time and is honored from the per-title memory.
+	if cached, ok := sfCachedStreamFn(sfClient, sfType, tmdbID, season, epNum); ok {
+		util.Debug("SuperFlix: served from stream cache (fast path)")
+		return cached, nil, nil
+	}
+
 	var (
 		servers []superflix.SuperFlixServer
 		tokens  *superflix.SuperFlixTokens
@@ -708,6 +728,12 @@ func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season
 		defer cancel()
 		servers, tokens, listErr = sfGetServersFn(sfClient, ctx, sfType, tmdbID, season, epNum)
 	})
+	if errors.Is(listErr, superflix.ErrSuperFlixRestricted) {
+		// The browser already tried the only viable recovery (reading the signed
+		// iframe as a cross-origin embed). Starting the separate sniff path would
+		// repeat the same restricted-page wait, so surface its actionable error now.
+		return nil, nil, listErr
+	}
 
 	if listErr == nil && len(servers) > 0 {
 		// Ask outside the spinner: a picker under a spinner is unreadable.
@@ -718,7 +744,7 @@ func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season
 			runWithSpinner("Loading stream...", func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
 				defer cancel()
-				result, streamErr = sfStreamFromServerFn(sfClient, ctx, tokens, chosen.IDString())
+				result, streamErr = sfStreamFromServerFn(sfClient, ctx, tokens, chosen.IDString(), sfType, tmdbID, season, epNum)
 			})
 			if streamErr == nil {
 				util.Debug("SuperFlix stream from chosen server", "server", chosen.Name, "type", chosen.Type)
@@ -754,7 +780,7 @@ func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season
 // GetEpisodeStreamURL — duplicating them here produced two identical
 // "Stored anime source: SuperFlix" debug lines per playback.
 func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
-	sfClient := superflix.NewSuperFlixClient()
+	sfClient := superflix.SharedSuperFlixClient()
 
 	tmdbID := episode.URL
 	if tmdbID == "" {
@@ -773,6 +799,11 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	util.Debug("Getting SuperFlix stream", "tmdbID", tmdbID, "type", sfType, "season", season, "episode", epNum)
 
 	preflightSuperFlixBrowser()
+
+	// Close the solver window once the URL is resolved (or failed), so it does not
+	// linger through playback. No-op on the cache fast path (no window was opened);
+	// the warm on-disk profile keeps the next episode's solve fast.
+	defer superflix.ReleaseSharedBrowser()
 
 	result, chosen, err := superFlixStream(sfClient, tmdbID, sfType, season, epNum)
 	if err != nil {
@@ -799,6 +830,9 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	var alang string
 	if chosen != nil {
 		alang = audioForServer(*chosen, result.DefaultAudio)
+		// Record the audio too, so a cached repeat of this title — which returns no
+		// server (chosen == nil) — replays the same audio without re-asking.
+		rememberServerAudioChoice(tmdbID, *chosen)
 		util.Debug("SuperFlix audio derived from the chosen server",
 			"server", chosen.Name, "type", chosen.Type, "alang", alang)
 	} else if opt, ok := selectSuperFlixAudio(tmdbID, result.DefaultAudio, len(result.Subtitles) > 0); ok {

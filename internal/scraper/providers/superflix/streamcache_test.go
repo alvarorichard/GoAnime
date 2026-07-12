@@ -125,6 +125,38 @@ func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 	assert.Equal(t, "Portuguese", res.Subtitles[0].Lang)
 }
 
+func TestStreamCache_PersistsExtrasForTheNextReplay(t *testing.T) {
+	// Not parallel: swaps the package-level cache.
+	var playerPageHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/video/") {
+			playerPageHits++
+			_, _ = fmt.Fprint(w, realPlayerPage)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"securedLink":"%s/cdn/master.m3u8"}`, srv0(r))
+	}))
+	t.Cleanup(srv.Close)
+
+	saved := defaultStreamCache
+	t.Cleanup(func() { defaultStreamCache = saved })
+	defaultStreamCache = &streamCache{path: filepath.Join(t.TempDir(), "c.json")}
+	key := streamCacheKey("filme", "42", "", "")
+	defaultStreamCache.put(key, streamCacheEntry{Host: srv.URL, Hash: "data42"})
+
+	c := NewClientForTest(srv.URL)
+	first, ok := c.TryCachedStream(context.Background(), "filme", "42", "", "")
+	require.True(t, ok)
+	require.NotEmpty(t, first.Subtitles, "first replay must wait for subtitle extraction")
+	assert.Equal(t, 1, playerPageHits)
+
+	second, ok := c.TryCachedStream(context.Background(), "filme", "42", "", "")
+	require.True(t, ok)
+	require.NotEmpty(t, second.Subtitles, "cached subtitle metadata must survive the next replay")
+	assert.Equal(t, 1, playerPageHits, "second replay must reuse cached extras, not refetch them")
+}
+
 // srv0 returns the request's own scheme+host (the httptest base) so the fixture
 // JSON points back at the test server.
 func srv0(r *http.Request) string {
