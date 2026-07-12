@@ -131,13 +131,20 @@ func pageBlankedOut(page playwright.Page) bool {
 // neither blank nor a live player — it renders a real, static "restricted access"
 // card whose only real content is a copy-paste embed iframe. The blank-out
 // detectors miss it, so the sniff loop would otherwise spin its full timeout
-// staring at it (exactly the >1min hang users hit on some titles).
+// staring at it (exactly the >40s hang users hit on some titles).
+//
+// It scans EVERY frame, not just the top document: the sniff injects the embed as
+// a same-origin iframe, which moves the restricted card off the top document and
+// into the child frame — checking only the top page missed it entirely (the cause
+// of the >40s hang). Cross-origin frames simply fail Content() and are skipped,
+// which is fine: by then restrictedSince is already set and the grace timer bails.
 func pageShowsRestrictedShell(page playwright.Page) bool {
-	c, err := page.Content()
-	if err != nil || c == "" {
-		return false
+	for _, fr := range page.Frames() {
+		if c, err := fr.Content(); err == nil && c != "" && isRestrictedEmbedPage([]byte(c)) {
+			return true
+		}
 	}
-	return isRestrictedEmbedPage([]byte(c))
+	return false
 }
 
 // embedFrameLive reports whether the solver page still has a live (non-blank)
@@ -333,30 +340,43 @@ func sameSiteFromPlaywright(s *playwright.SameSiteAttribute) http.SameSite {
 	}
 }
 
-// closeContext closes only the browser context (the visible window) after a
-// solve, keeping the Playwright driver (s.pw) so init() can relaunch a fresh
-// context quickly on the next solve. This is why no window lingers after a
-// stream resolves. Uses lifeMu (not the solve mutex). Safe if already nil.
-func (s *cfBrowserSolver) closeContext() {
-	s.lifeMu.Lock()
-	defer s.lifeMu.Unlock()
-	if s.pctx != nil {
-		_ = s.pctx.Close()
-		s.pctx = nil
-	}
-}
-
-// ReleaseSharedBrowser closes the shared solver's visible window once a resolve
-// is done — so it disappears as playback starts instead of lingering through the
-// whole episode. The Playwright driver and the on-disk warm Cloudflare profile
-// are kept, so the next episode relaunches a context in ~1s and still solves fast;
-// a re-watch skips the browser entirely via the stream cache.
+// ReleaseSharedBrowser closes the shared solver window once a resolve is done, so
+// it does not linger on-screen through playback.
+//
+// It fully closes the browser CONTEXT (window and tabs) rather than just hiding
+// it: moving the window off-screen was unreliable — some window managers clamp the
+// coordinates back on-screen, leaving the window visible during playback. Closing
+// is the only thing that reliably makes it disappear. The Playwright driver (s.pw)
+// and the on-disk warm Cloudflare profile are kept, so the next episode relaunches
+// a context in ~1s and still solves fast; a re-watch skips the browser entirely
+// via the stream cache.
 //
 // Called at the API layer AFTER the stream URL is obtained (not inside Solve/the
 // sniff), so a single resolve — which may drive several solves — keeps one window
-// throughout and closes it exactly once at the end.
+// throughout and closes it exactly once at the end. No-op when no window is open
+// (e.g. the cache fast path).
 func ReleaseSharedBrowser() {
 	defaultCFSolver.closeContext()
+}
+
+// closeContext closes only the browser context (the visible window), keeping the
+// Playwright driver (s.pw) so init() relaunches a fresh context quickly on the
+// next solve.
+//
+// It detaches the context under lifeMu and then runs the actual Close — a
+// protocol round-trip + Chromium teardown — in the BACKGROUND, so the caller (a
+// post-resolve defer) returns immediately and playback starts without waiting for
+// the window to finish disappearing. Nil'ing s.pctx before the async close means
+// a following init() sees no context and launches a fresh one, never handing back
+// the one being torn down. Safe if already nil.
+func (s *cfBrowserSolver) closeContext() {
+	s.lifeMu.Lock()
+	pctx := s.pctx
+	s.pctx = nil
+	s.lifeMu.Unlock()
+	if pctx != nil {
+		go func() { _ = pctx.Close() }()
+	}
 }
 
 // Close releases the persistent Chromium context and the Playwright driver.

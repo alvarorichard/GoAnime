@@ -167,6 +167,32 @@ func TestSuperFlixStream_ChosenServerFailsFallsBack(t *testing.T) {
 	assert.Equal(t, 1, h.sniffCalls)
 }
 
+// The early release is only a speed win if it fires BEFORE StreamFromServer's
+// round-trips, not after — that is what makes the window vanish ~5s sooner rather
+// than lingering through the picker and the HTTP calls. This pins that ordering by
+// recording whether any StreamFromServer call had happened when the release fired.
+func TestSuperFlixStream_ReleasesBrowserBeforeStreamFromServer(t *testing.T) {
+	stubSFPicker(t, func(string, []string) (int, error) { return 0, nil })
+
+	h := &sfStreamHarness{}
+	h.install(t, []superflix.SuperFlixServer{sfServer("9", dub, "S", false)}, nil, nil)
+
+	prev := sfReleaseBrowserFn
+	t.Cleanup(func() { sfReleaseBrowserFn = prev })
+	releasedBeforeStream := false
+	sfReleaseBrowserFn = func() {
+		if h.serverCalls == 0 {
+			releasedBeforeStream = true
+		}
+	}
+
+	_, _, err := superFlixStream(nil, "103913", "serie", "1", "1")
+	require.NoError(t, err)
+
+	assert.True(t, releasedBeforeStream, "the window must be released before StreamFromServer runs, not after")
+	assert.Equal(t, 1, h.serverCalls)
+}
+
 // installReleaseSpy stubs the browser-release seam and returns a call counter.
 func installReleaseSpy(t *testing.T) *int {
 	t.Helper()
@@ -206,7 +232,12 @@ func TestGetSuperFlixStreamURL_ReleasesBrowserOnEveryPath(t *testing.T) {
 		url, err := GetSuperFlixStreamURL(movie, ep, "best")
 		require.NoError(t, err)
 		assert.Equal(t, "https://cdn/chosen.m3u8", url)
-		assert.Equal(t, 1, *released)
+		// Twice on this path by design: an EARLY release the moment the server list
+		// is in hand (the browser's solve is done; the picker + StreamFromServer are
+		// plain HTTP), so the window closes ~5s sooner instead of lingering through
+		// them — plus the deferred catch-all. Releasing is idempotent, so the extra
+		// call is a harmless no-op.
+		assert.Equal(t, 2, *released, "server-list path releases early, then again via the defer")
 	})
 
 	t.Run("sniff fallback", func(t *testing.T) {

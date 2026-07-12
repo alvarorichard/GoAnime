@@ -177,7 +177,8 @@ func TestGetEpisodesViaBrowser_NoEpisodesReturnsError(t *testing.T) {
 // --- getStreamViaBrowser cascade -------------------------------------------
 
 func TestGetStreamViaBrowser_EmbedURLShape(t *testing.T) {
-	t.Parallel()
+	// NOT parallel: the subtests swap the package-global defaultStreamCache, which
+	// races with any other parallel test touching it.
 	cases := []struct {
 		name                     string
 		mtype, mid, season, epis string

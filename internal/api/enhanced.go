@@ -739,6 +739,15 @@ func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season
 	}
 
 	if listErr == nil && len(servers) > 0 {
+		// The server list is in hand, which means the browser already did its one
+		// job — the Cloudflare solve. Everything left (the picker, then
+		// StreamFromServer's source/redirect/getVideo) is plain HTTP that reuses the
+		// warm cookie from the client's jar, so close the window NOW instead of at
+		// the end. That makes it disappear ~5s sooner — before the picker and the
+		// stream round-trips, not after. If the chosen server fails and we fall to
+		// the sniff below, that path re-launches the browser itself.
+		sfReleaseBrowserFn()
+
 		// Ask outside the spinner: a picker under a spinner is unreadable.
 		chosen, err := selectSuperFlixServer(tmdbID, servers)
 		if err == nil {

@@ -140,6 +140,12 @@ func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, 
 			"--disable-blink-features=AutomationControlled",
 			"--no-first-run",
 			"--no-default-browser-check",
+			// We close the context abruptly between plays (to make the window
+			// disappear during playback), which Chrome flags as a dirty shutdown and
+			// greets the next launch with a "Restore pages?" bubble. That bubble
+			// overlays the solver page and can block the challenge, so suppress it.
+			"--hide-crash-restore-bubble",
+			"--disable-session-crashed-bubble",
 			// The window MUST be a real, onscreen, non-headless browser for
 			// Cloudflare Turnstile to auto-pass: headless is detected and an
 			// offscreen/occluded window gets throttled so the challenge stalls
