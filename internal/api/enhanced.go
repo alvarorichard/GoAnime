@@ -693,6 +693,9 @@ var (
 	sfSniffStreamFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
 		return c.GetStreamURL(ctx, mediaType, mediaID, season, episode)
 	}
+	// sfReleaseBrowserFn closes the solver window after a resolve. A seam so tests
+	// can assert it fires on every path (cache hit, server list, sniff, error).
+	sfReleaseBrowserFn = superflix.ReleaseSharedBrowser
 )
 
 // superFlixStream resolves a SuperFlix stream, preferring the path that lets the
@@ -802,8 +805,9 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 
 	// Close the solver window once the URL is resolved (or failed), so it does not
 	// linger through playback. No-op on the cache fast path (no window was opened);
-	// the warm on-disk profile keeps the next episode's solve fast.
-	defer superflix.ReleaseSharedBrowser()
+	// the warm on-disk profile keeps the next episode's solve fast. Via a seam so
+	// tests can assert it fires on every resolve path.
+	defer sfReleaseBrowserFn()
 
 	result, chosen, err := superFlixStream(sfClient, tmdbID, sfType, season, epNum)
 	if err != nil {
