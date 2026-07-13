@@ -79,10 +79,10 @@ func seasonYearRange(eps []superflix.SuperFlixEpisode) string {
 			last = y
 		}
 	}
-	switch {
-	case first == "":
+	switch first {
+	case "":
 		return ""
-	case first == last:
+	case last:
 		return first
 	default:
 		return first + "-" + last
