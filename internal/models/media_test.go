@@ -193,6 +193,32 @@ func TestMedia_GetGenresDisplay(t *testing.T) {
 	}
 }
 
+func TestMedia_HasInteractiveEpisodeFlow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		source string
+		mt     MediaType
+		want   bool
+	}{
+		{"sflix by source", "SFlix", MediaTypeAnime, true},
+		{"superflix by source even when tagged anime", "SuperFlix", MediaTypeAnime, true},
+		{"superflix with empty media type", "SuperFlix", "", true},
+		{"movie by media type", "AllAnime", MediaTypeMovie, true},
+		{"tv by media type", "AllAnime", MediaTypeTV, true},
+		{"regular anime source", "AllAnime", MediaTypeAnime, false},
+		{"animefire anime", "Animefire.io", MediaTypeAnime, false},
+		{"empty everything", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := &Media{Source: tt.source, MediaType: tt.mt}
+			assert.Equal(t, tt.want, m.HasInteractiveEpisodeFlow())
+		})
+	}
+}
+
 func TestMedia_GetRuntimeDisplay(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -78,9 +78,11 @@ func HandlePlaybackMode(animeName string) {
 		var episodes []models.Episode
 		var epErr error
 
-		needsInteractiveEpisodes := anime.Source == "SFlix" ||
-			anime.MediaType == models.MediaTypeMovie ||
-			anime.MediaType == models.MediaTypeTV
+		// SuperFlix must be matched by source, not just media type: its catalog
+		// tags western animation as anime, which previously slipped into the
+		// parallel branch and ran the details spinner concurrently with the
+		// season-selection fuzzyfinder (spinner frames ate the prompt text).
+		needsInteractiveEpisodes := anime.HasInteractiveEpisodeFlow()
 
 		if needsInteractiveEpisodes {
 			// Sequential: details first (spinner), then episodes (may show fuzzyfinder)

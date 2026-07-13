@@ -219,8 +219,7 @@ func enrichAnimeData(anime *models.Anime) error {
 	// "Os Simpsons") as anime, which would otherwise fall through to AniList —
 	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
 	// challenge for nothing. Mirrors appflow.fetchAnimeDetailsCore.
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" ||
-		anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	if anime.HasInteractiveEpisodeFlow() {
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
 		return movie.EnrichMedia(anime)
 	}

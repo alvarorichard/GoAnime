@@ -175,8 +175,7 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 		return
 	}
 	// For FlixHQ/SuperFlix movies/TV shows: skip AniList, optionally enrich.
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" ||
-		anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	if anime.HasInteractiveEpisodeFlow() {
 		util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
 		if anime.Source != "SuperFlix" {
 			if err := sourceDetailsFetchFn(anime); err != nil {
@@ -242,7 +241,11 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	var episodes []models.Episode
 	var fetchErr error
 
-	if anime.Source == "SFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	// No spinner when the fetch can open its own UI (season-selection
+	// fuzzyfinder): a spinner animating over the finder eats the prompt text
+	// and corrupts terminal state. HasInteractiveEpisodeFlow matches SuperFlix
+	// by source because its catalog tags western animation as anime.
+	if anime.HasInteractiveEpisodeFlow() {
 		episodes, fetchErr = getAnimeEpisodesEnhancedFn(anime)
 	} else {
 		runSpinnerFn("Loading episodes...", func() {

@@ -605,17 +605,8 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	seasonNums := sortedSeasonNumbers(allEpisodes)
 
-	// Build season labels for selection
-	var seasonLabels []string
-	for _, sn := range seasonNums {
-		epCount := len(allEpisodes[sn])
-		seasonLabels = append(seasonLabels, fmt.Sprintf("Season %s (%d episodes)", sn, epCount))
-	}
-
-	// Let user select a season
-	seasonIdx, err := tui.Find(seasonLabels, func(i int) string {
-		return seasonLabels[i]
-	}, fuzzyfinder.WithPromptString("Select season: "))
+	// Let user select a season (auto-selects when there is only one)
+	selectedSeason, err := selectSuperFlixSeason(media, seasonNums, allEpisodes)
 	if err != nil {
 		if errors.Is(err, fuzzyfinder.ErrAbort) {
 			return nil, ErrBackToSearch
@@ -623,7 +614,6 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		return nil, fmt.Errorf("season selection cancelled: %w", err)
 	}
 
-	selectedSeason := seasonNums[seasonIdx]
 	epList := allEpisodes[selectedSeason]
 	util.Debug("Selected season", "season", selectedSeason, "episodes", len(epList))
 
