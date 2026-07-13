@@ -120,7 +120,7 @@ sudo mv goanime-linux-amd64 /usr/local/bin/goanime
 
 **Strongly Recommended:** Use our installer for the best experience.
 
-1.  Download and run the [GoAnime Windows Installer](https://github.com/alvarorichard/GoAnime/releases/latest/download/GoAnimeInstaller.exe).
+1.  Download and run the [GoAnime Windows Installer](https://github.com/alvarorichard/GoAnime/releases/latest).
 2.  Install `mpv` for Windows and ensure it is available in your system's path.
 
 ## How to use
