@@ -1,7 +1,7 @@
 version: "2"
 
 run:
-  timeout: 15m
+  timeout: 20m
   modules-download-mode: readonly
 
 linters:

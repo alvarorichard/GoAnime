@@ -354,10 +354,10 @@ func TestEnrichAnime_SuperFlixFallback(t *testing.T) {
 		<div class="card">
 			<h3>Black Clover</h3>
 			<button data-msg="Copiar TMDB" data-copy="73223">TMDB</button>
-			<button data-msg="Copiar Link" data-copy="https://superflixapi.best/serie/73223">Link</button>
+			<button data-msg="Copiar Link" data-copy="https://superflixapi.pro/serie/73223">Link</button>
 		</div>
 	</body></html>`
-	mock.responses["GET:superflixapi.best/pesquisar"] = &http.Response{
+	mock.responses["GET:superflixapi.pro/pesquisar"] = &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(searchHTML)),
 	}
@@ -377,7 +377,7 @@ func TestEnrichAnime_SuperFlixFallback(t *testing.T) {
 		`{"epi_num":"16","title":"ep","air_date":"2021-03-30"}` +
 		`]};`
 	playerHTML := `<html><body><script>` + allEpisodes + `</script></body></html>`
-	mock.responses["GET:superflixapi.best/serie/73223"] = &http.Response{
+	mock.responses["GET:superflixapi.pro/serie/73223"] = &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(playerHTML)),
 	}

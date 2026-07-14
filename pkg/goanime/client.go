@@ -3,19 +3,69 @@
 package goanime
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/api/source"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/pkg/goanime/types"
 )
 
-// Client is the main client for interacting with anime sources
-type Client struct {
-	manager *scraper.ScraperManager
+// Manager abstracts the scraper backend used by Client. registryManager (the
+// default) satisfies it on top of the Model B registry.
+type Manager interface {
+	SearchAnime(query string, scraperType *scraper.ScraperType) ([]*models.Anime, error)
+	GetScraper(scraperType scraper.ScraperType) (scraper.UnifiedScraper, error)
 }
 
-// NewClient creates a new GoAnime client with all available scrapers
+// Client is the main client for interacting with anime sources
+type Client struct {
+	manager Manager
+}
+
+// NewClient creates a new GoAnime client backed by the Model B registry.
 func NewClient() *Client {
 	return &Client{
-		manager: scraper.NewScraperManager(),
+		manager: registryManager{},
+	}
+}
+
+// registryManager implements Manager over the Model B registry: searches fan out
+// through providers.SearchAll and per-source access builds a standalone adapter
+// via scraper.NewAdapter — the same paths the CLI uses, so the SDK stays in sync
+// with app behavior (kill-switch, tagging, circuit breaker) for free.
+type registryManager struct{}
+
+func (registryManager) SearchAnime(query string, scraperType *scraper.ScraperType) ([]*models.Anime, error) {
+	if scraperType != nil {
+		kind, ok := scraperKind(*scraperType)
+		if !ok {
+			return nil, fmt.Errorf("unknown scraper type %v", *scraperType)
+		}
+		return providers.SearchAll(context.Background(), query, kind)
+	}
+	return providers.SearchAll(context.Background(), query)
+}
+
+func (registryManager) GetScraper(scraperType scraper.ScraperType) (scraper.UnifiedScraper, error) {
+	return scraper.NewAdapter(scraperType)
+}
+
+// scraperKind maps an internal ScraperType to its Model B SourceKind.
+func scraperKind(st scraper.ScraperType) (source.SourceKind, bool) {
+	switch st {
+	case scraper.AllAnimeType:
+		return source.AllAnime, true
+	case scraper.AnimefireType:
+		return source.AnimeFire, true
+	case scraper.GoyabuType:
+		return source.Goyabu, true
+	case scraper.SuperFlixType:
+		return source.SuperFlix, true
+	default:
+		return "", false
 	}
 }
 
@@ -131,6 +181,11 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 
 	// For AnimeFire, the episode URL is the direct episode page
 	return scr.GetStreamURL(episode.URL)
+}
+
+// NewClientForTest creates a Client backed by a custom Manager. Only for tests.
+func NewClientForTest(manager Manager) *Client {
+	return &Client{manager: manager}
 }
 
 // GetAvailableSources returns a list of all available scraper sources.

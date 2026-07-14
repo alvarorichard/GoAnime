@@ -28,6 +28,16 @@ const (
 	GitHubAPI   = "https://api.github.com/repos/" + GitHubOwner + "/" + GitHubRepo
 )
 
+// Injectable hooks (overridden by tests).
+var (
+	releaseAPIURL       = GitHubAPI + "/releases/latest"
+	findAssetFn         = findAssetForPlatform
+	downloadFn          = downloadAsset
+	osExecutableFn      = os.Executable
+	replaceExecutableFn = replaceExecutable
+	runForm             = tui.RunClean
+)
+
 // GitHubRelease represents a GitHub release
 type GitHubRelease struct {
 	TagName string `json:"tag_name"`
@@ -41,7 +51,7 @@ type GitHubRelease struct {
 
 // CheckForUpdates checks if a new version is available on GitHub
 func CheckForUpdates() (*GitHubRelease, bool, error) {
-	return checkForUpdatesFromURL(GitHubAPI+"/releases/latest", version.Version)
+	return checkForUpdatesFromURL(releaseAPIURL, version.Version)
 }
 
 // checkForUpdatesFromURL is the internal implementation that accepts a custom
@@ -85,7 +95,7 @@ func checkForUpdatesFromURL(apiURL, currentVer string) (*GitHubRelease, bool, er
 // PerformUpdate downloads and installs the latest version
 func PerformUpdate(release *GitHubRelease) error {
 	// Find the appropriate asset for current platform
-	assetURL, assetName, err := findAssetForPlatform(release)
+	assetURL, assetName, err := findAssetFn(release)
 	if err != nil {
 		return err
 	}
@@ -93,7 +103,7 @@ func PerformUpdate(release *GitHubRelease) error {
 	util.Infof("Downloading update: %s", assetName)
 
 	// Download the asset
-	tempFile, err := downloadAsset(assetURL, assetName)
+	tempFile, err := downloadFn(assetURL, assetName)
 	if err != nil {
 		return fmt.Errorf("failed to download update: %w", err)
 	}
@@ -120,7 +130,7 @@ func PerformUpdate(release *GitHubRelease) error {
 	defer cleanupUpdateFile()
 
 	// Get current executable path
-	currentExe, err := os.Executable()
+	currentExe, err := osExecutableFn()
 	if err != nil {
 		return fmt.Errorf("failed to get current executable path: %w", err)
 	}
@@ -137,7 +147,7 @@ func PerformUpdate(release *GitHubRelease) error {
 	}()
 
 	// Replace current executable
-	if err := replaceExecutable(currentExe, updateFile); err != nil {
+	if err := replaceExecutableFn(currentExe, updateFile); err != nil {
 		// Try to restore backup if replacement fails
 		if _, backupErr := os.Stat(backupFile); backupErr == nil {
 			if restoreErr := copyFile(backupFile, currentExe); restoreErr != nil {
@@ -307,7 +317,7 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 		),
 	)
 
-	if err := tui.RunClean(form.Run); err != nil {
+	if err := runForm(form.Run); err != nil {
 		return false, fmt.Errorf("failed to show update prompt: %w", err)
 	}
 

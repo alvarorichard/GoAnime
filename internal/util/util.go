@@ -41,6 +41,15 @@ var (
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 )
 
+// StrictSourceResolution reports whether the GOANIME_STRICT_SOURCE environment
+// variable ("1" or "true") disables the best-effort AllAnime fallback for
+// media whose source cannot be recognized — unrecognized input then surfaces
+// as an error instead of being guessed (R4/R5).
+func StrictSourceResolution() bool {
+	v := os.Getenv("GOANIME_STRICT_SOURCE")
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
 // SetGlobalSubtitles stores subtitles for the current playback session
 func SetGlobalSubtitles(subs []SubtitleInfo) {
 	GlobalSubtitles = subs
@@ -91,6 +100,17 @@ func GetGlobalAnimeSource() string {
 // Is9AnimeSource returns true if the current stream is from 9Anime
 func Is9AnimeSource() bool {
 	return GlobalAnimeSource == "9Anime"
+}
+
+// IsSuperFlixSource returns true if the current stream is from SuperFlix.
+//
+// SuperFlix streams are multi-audio HLS with an external Portuguese subtitle
+// track, so they need mpv's audio/subtitle language preferences applied — for
+// EVERY media type, not just movies/TV. Its anime and dorama entries carry the
+// same tracks, and gating those preferences on IsMovieOrTV silently dropped both
+// the chosen audio track and the subtitles for them.
+func IsSuperFlixSource() bool {
+	return GlobalAnimeSource == "SuperFlix"
 }
 
 // subtitleOption maps a display label to a sentinel value for subtitle selection.
@@ -415,6 +435,14 @@ func FlagParser() (string, error) {
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
 
+	// SuperFlix Cloudflare-bypass browser flags. These surface the previously
+	// env-only knobs (GOANIME_SF_*) as discoverable CLI options; each just sets
+	// the corresponding env var so the deeper scraper code keeps reading os.Getenv.
+	sfHeadlessFlag := fs.Bool("sf-headless", false, "run the Cloudflare-bypass browser headless (advanced; Turnstile usually rejects headless)")
+	sfBundledFlag := fs.Bool("sf-bundled", false, "force Playwright's bundled Chromium for the bypass instead of system Chrome")
+	sfBrowserFlag := fs.String("sf-browser", "", "browser channel for the Cloudflare bypass (e.g. chrome, chrome-beta, msedge); default: auto")
+	sfMaskFlag := fs.Bool("sf-mask", false, "enable fingerprint masking for the bypass browser (advanced escape hatch)")
+
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
 	upscaleOutputFlag := fs.String("upscale-output", "", "output path for upscaled file (default: input_upscaled.ext)")
@@ -438,6 +466,22 @@ func FlagParser() (string, error) {
 			return "", ErrHelpRequested
 		}
 		return "", err
+	}
+
+	// Apply SuperFlix bypass-browser flags by exporting the env vars the scraper
+	// reads. Only set when provided so an unset flag never overrides an env var
+	// the user exported manually.
+	if *sfHeadlessFlag {
+		_ = os.Setenv("GOANIME_SF_HEADLESS", "1")
+	}
+	if *sfBundledFlag {
+		_ = os.Setenv("GOANIME_SF_BUNDLED", "1")
+	}
+	if *sfBrowserFlag != "" {
+		_ = os.Setenv("GOANIME_SF_CHROME_CHANNEL", *sfBrowserFlag)
+	}
+	if *sfMaskFlag {
+		_ = os.Setenv("GOANIME_SF_MASK", "1")
 	}
 
 	// Set debug mode based on flag (set unconditionally for consistency)
@@ -952,11 +996,12 @@ var (
 	scoreRe      = regexp.MustCompile(`\s+\d{1,2}\.\d{1,2}\s*$`)
 )
 
-// SanitizeForFilename removes characters that are not allowed in file/directory names
-// and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
-// It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
-// and language/source/metadata tags that many anime sources append to titles.
-func SanitizeForFilename(name string) string {
+// stripSourceMetadata removes the language/source/metadata noise that anime
+// sources append to titles — bracketed tags ([PT-BR], [Movie], [HD], …),
+// trailing parenthesized 9anime metadata, ratings (e.g. "7.27") and age
+// classifications (e.g. "A14", "L") — while leaving the title's own
+// punctuation intact.
+func stripSourceMetadata(name string) string {
 	// Remove bracketed tags: [English], [Multilanguage], [Movie], [9Anime], [HD], etc.
 	name = bracketTagRe.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)
@@ -971,7 +1016,23 @@ func SanitizeForFilename(name string) string {
 	// classifications like "A14", "A12", "A16", "A18", "L", "AL".
 	// These are commonly appended by AllAnime/AnimeFire sources.
 	// Pattern: strip trailing tokens that look like scores or classifications.
-	name = stripTrailingAnimeMetadata(name)
+	return stripTrailingAnimeMetadata(name)
+}
+
+// collapseSpaces reduces runs of spaces to one and trims the ends.
+func collapseSpaces(name string) string {
+	for strings.Contains(name, "  ") {
+		name = strings.ReplaceAll(name, "  ", " ")
+	}
+	return strings.TrimSpace(name)
+}
+
+// SanitizeForFilename removes characters that are not allowed in file/directory names
+// and returns a cleaned version of the name suitable for Plex/Jellyfin media libraries.
+// It also strips ratings (e.g. "7.27"), age classifications (e.g. "A14", "L"),
+// and language/source/metadata tags that many anime sources append to titles.
+func SanitizeForFilename(name string) string {
+	name = stripSourceMetadata(name)
 
 	// Remove characters not allowed in filenames across platforms
 	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
@@ -980,11 +1041,16 @@ func SanitizeForFilename(name string) string {
 	}
 	// Remove trailing dots and spaces (problematic on Windows)
 	name = strings.TrimRight(name, ". ")
-	// Collapse multiple spaces
-	for strings.Contains(name, "  ") {
-		name = strings.ReplaceAll(name, "  ", " ")
-	}
-	return strings.TrimSpace(name)
+	return collapseSpaces(name)
+}
+
+// SanitizeForDisplayTitle cleans a title for on-screen display (mpv window
+// title, Discord presence): source/metadata tags are stripped exactly like
+// SanitizeForFilename, but the title's own punctuation is preserved — display
+// surfaces have no filename restrictions, so "Need for Speed: O Filme" must
+// keep its colon instead of degrading to "Need for Speed O Filme".
+func SanitizeForDisplayTitle(name string) string {
+	return collapseSpaces(stripSourceMetadata(name))
 }
 
 // strip9AnimeParenMeta removes trailing parenthesized metadata appended by 9anime

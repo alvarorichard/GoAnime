@@ -4,9 +4,46 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// registerProductionLikeSources swaps the registry for fakes carrying the live
+// descriptors (mirrored from the providers' Describe methods) so resolution
+// scenarios run against production-like matching data. The providers package
+// itself cannot be imported here (import cycle), so the real registrations are
+// asserted by the resolution tests in internal/api/providers.
+func registerProductionLikeSources(t *testing.T) {
+	t.Helper()
+	restore := SwapRegistryForTesting(
+		newFake(AnimeFire, 10, func(d *Descriptor) {
+			d.Explicit = []string{"Animefire.io", "AnimeFire"}
+			d.Tags = []string{"[animefire]"}
+			d.URLMatchers = []string{"animefire"}
+		}),
+		newFake(Goyabu, 20, func(d *Descriptor) {
+			d.Explicit = []string{"Goyabu"}
+			d.Tags = []string{"[goyabu]"}
+			d.URLMatchers = []string{"goyabu"}
+		}),
+		newFake(SuperFlix, 30, func(d *Descriptor) {
+			d.Explicit = []string{"SuperFlix"}
+			d.Tags = []string{"[superflix]"}
+			d.URLMatchers = []string{"superflix"}
+		}),
+		newFake(AllAnime, 40, func(d *Descriptor) {
+			d.Explicit = []string{"AllAnime"}
+			d.Tags = []string{"[english]"}
+			d.URLMatchers = []string{"allanime"}
+			d.ShortID = true
+		}),
+	)
+	t.Cleanup(restore)
+}
+
 func TestResolve_ExplicitSource(t *testing.T) {
+	// Swaps the global registry — not parallel.
+	registerProductionLikeSources(t)
 	tests := []struct {
 		name     string
 		source   string
@@ -20,27 +57,26 @@ func TestResolve_ExplicitSource(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{Source: tt.source}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(Source=%q) = %s (%s), want %s", tt.source, got.Kind, got.Reason, tt.wantKind)
-			}
+			src, got := Resolve(&models.Anime{Source: tt.source})
+			assert.Equal(t, tt.wantKind, got.Kind, "reason: %s", got.Reason)
+			require.NotNil(t, src)
+			assert.Equal(t, tt.wantKind, src.Describe().Kind)
 		})
 	}
 }
 
 func TestResolve_ExplicitSourceTrumpsURL(t *testing.T) {
+	registerProductionLikeSources(t)
 	anime := &models.Anime{
 		Source: "Goyabu",
 		URL:    "https://animefire.plus/something",
 	}
-	got := Resolve(anime)
-	if got.Kind != Goyabu {
-		t.Errorf("explicit Source should win over URL, got %s (%s)", got.Kind, got.Reason)
-	}
+	_, got := Resolve(anime)
+	assert.Equal(t, Goyabu, got.Kind, "explicit Source should win over URL (reason: %s)", got.Reason)
 }
 
 func TestResolve_NameTags(t *testing.T) {
+	registerProductionLikeSources(t)
 	tests := []struct {
 		name     string
 		animName string
@@ -53,16 +89,14 @@ func TestResolve_NameTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{Name: tt.animName}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(Name=%q) = %s (%s), want %s", tt.animName, got.Kind, got.Reason, tt.wantKind)
-			}
+			_, got := Resolve(&models.Anime{Name: tt.animName})
+			assert.Equal(t, tt.wantKind, got.Kind, "reason: %s", got.Reason)
 		})
 	}
 }
 
 func TestResolve_URLPatterns(t *testing.T) {
+	registerProductionLikeSources(t)
 	tests := []struct {
 		name     string
 		url      string
@@ -75,16 +109,14 @@ func TestResolve_URLPatterns(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{URL: tt.url}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(URL=%q) = %s (%s), want %s", tt.url, got.Kind, got.Reason, tt.wantKind)
-			}
+			_, got := Resolve(&models.Anime{URL: tt.url})
+			assert.Equal(t, tt.wantKind, got.Kind, "reason: %s", got.Reason)
 		})
 	}
 }
 
 func TestResolve_ShortID(t *testing.T) {
+	registerProductionLikeSources(t)
 	tests := []struct {
 		name     string
 		url      string
@@ -95,58 +127,53 @@ func TestResolve_ShortID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			anime := &models.Anime{URL: tt.url}
-			got := Resolve(anime)
-			if got.Kind != tt.wantKind {
-				t.Errorf("Resolve(URL=%q) = %s, want %s", tt.url, got.Kind, tt.wantKind)
-			}
+			_, got := Resolve(&models.Anime{URL: tt.url})
+			assert.Equal(t, tt.wantKind, got.Kind)
 		})
 	}
 }
 
 func TestResolve_NumericOnlyIsNotShortID(t *testing.T) {
-	anime := &models.Anime{URL: "8143"}
-	got := Resolve(anime)
+	registerProductionLikeSources(t)
+	_, got := Resolve(&models.Anime{URL: "8143"})
 	if got.Kind == AllAnime && got.Reason == "short ID" {
 		t.Error("purely numeric '8143' should not match as AllAnime short ID")
 	}
 }
 
 func TestResolve_PTBRFallback(t *testing.T) {
-	anime := &models.Anime{Name: "Naruto [PT-BR]"}
-	got := Resolve(anime)
-	if got.Kind != AnimeFire {
-		t.Errorf("[PT-BR] tag without source should default to AnimeFire, got %s", got.Kind)
-	}
+	registerProductionLikeSources(t)
+	src, got := Resolve(&models.Anime{Name: "Naruto [PT-BR]"})
+	assert.Equal(t, AnimeFire, got.Kind, "[PT-BR] tag without source should default to AnimeFire")
+	require.NotNil(t, src)
+	assert.Equal(t, AnimeFire, src.Describe().Kind)
 }
 
 func TestResolve_NilAnime(t *testing.T) {
-	got := Resolve(nil)
-	if got.Kind != Unknown {
-		t.Errorf("nil anime should return Unknown, got %s", got.Kind)
-	}
+	registerProductionLikeSources(t)
+	src, got := Resolve(nil)
+	assert.Equal(t, Unknown, got.Kind)
+	assert.Nil(t, src)
 }
 
 func TestResolve_EmptyAnime(t *testing.T) {
-	got := Resolve(&models.Anime{})
-	if got.Kind != Unknown {
-		t.Errorf("empty anime should return Unknown, got %s", got.Kind)
-	}
+	registerProductionLikeSources(t)
+	src, got := Resolve(&models.Anime{})
+	assert.Equal(t, Unknown, got.Kind)
+	assert.Nil(t, src)
 }
 
 func TestResolve_BestEffortKind(t *testing.T) {
+	t.Parallel()
 	r := ResolvedSource{Kind: Unknown, Reason: "test"}
-	if r.BestEffortKind() != AllAnime {
-		t.Errorf("BestEffortKind for Unknown should be AllAnime, got %s", r.BestEffortKind())
-	}
+	assert.Equal(t, AllAnime, r.BestEffortKind(), "BestEffortKind for Unknown should be AllAnime")
 
 	r2 := ResolvedSource{Kind: Goyabu, Reason: "test"}
-	if r2.BestEffortKind() != Goyabu {
-		t.Errorf("BestEffortKind for Goyabu should be Goyabu, got %s", r2.BestEffortKind())
-	}
+	assert.Equal(t, Goyabu, r2.BestEffortKind())
 }
 
-func TestResolveURL(t *testing.T) {
+func TestResolveURL_ProductionDescriptors(t *testing.T) {
+	registerProductionLikeSources(t)
 	tests := []struct {
 		name     string
 		url      string
@@ -161,15 +188,15 @@ func TestResolveURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveURL(tt.url)
-			if got.Kind != tt.wantKind {
-				t.Errorf("ResolveURL(%q) = %s (%s), want %s", tt.url, got.Kind, got.Reason, tt.wantKind)
-			}
+			src, got := ResolveURL(tt.url)
+			assert.Equal(t, tt.wantKind, got.Kind, "reason: %s", got.Reason)
+			assert.Equal(t, tt.wantKind == Unknown, src == nil)
 		})
 	}
 }
 
 func TestIsAllAnimeShortID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  bool
@@ -186,14 +213,14 @@ func TestIsAllAnimeShortID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := IsAllAnimeShortID(tt.input); got != tt.want {
-				t.Errorf("IsAllAnimeShortID(%q) = %v, want %v", tt.input, got, tt.want)
-			}
+			t.Parallel()
+			assert.Equal(t, tt.want, IsAllAnimeShortID(tt.input))
 		})
 	}
 }
 
 func TestExtractAllAnimeID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -204,24 +231,18 @@ func TestExtractAllAnimeID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := ExtractAllAnimeID(tt.input); got != tt.want {
-				t.Errorf("ExtractAllAnimeID(%q) = %q, want %q", tt.input, got, tt.want)
-			}
+			t.Parallel()
+			assert.Equal(t, tt.want, ExtractAllAnimeID(tt.input))
 		})
 	}
 }
 
 func TestScraperTypeFor(t *testing.T) {
+	t.Parallel()
 	st, ok := ScraperTypeFor(AllAnime)
-	if !ok {
-		t.Fatal("ScraperTypeFor(AllAnime) should return true")
-	}
-	if st != 0 {
-		t.Errorf("ScraperTypeFor(AllAnime) = %d, want 0", st)
-	}
+	require.True(t, ok, "ScraperTypeFor(AllAnime) should return true")
+	assert.Equal(t, 0, int(st))
 
 	_, ok = ScraperTypeFor(Unknown)
-	if ok {
-		t.Error("ScraperTypeFor(Unknown) should return false")
-	}
+	assert.False(t, ok, "ScraperTypeFor(Unknown) should return false")
 }

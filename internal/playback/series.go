@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -21,7 +23,7 @@ func printEpisodeNotFoundMsg() {
 	util.Warnf("This episode does not exist in this source. Try another episode.")
 }
 
-func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
+func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	tui.ResetTerminal()
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
@@ -52,6 +54,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 
 	for {
 		err := PlayEpisode(
+			ctx,
 			anime,
 			episodes,
 			selectedEpisodeNum,
@@ -102,7 +105,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
 					}
@@ -153,7 +156,7 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 			if !series {
 				// If new anime is a movie, handle it differently
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(anime, episodes, discordEnabled); err != nil {
+				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
 					}
@@ -203,22 +206,46 @@ func HandleSeries(anime *models.Anime, episodes []models.Episode, totalEpisodes 
 	return nil
 }
 
+// selectEpisodeFuncType matches player.SelectEpisodeWithFuzzyFinder so tests
+// can swap in a mock that doesn't open a TUI.
+type selectEpisodeFuncType func(episodes []models.Episode) (string, string, error)
+
+// extractEpisodeNumberFuncType matches player.ExtractEpisodeNumber for
+// symmetric injection — keeps the entire SelectInitialEpisode pipeline
+// driveable without touching the player package state.
+type extractEpisodeNumberFuncType func(s string) string
+
+// selectEpisodeFunc and extractEpisodeNumberFunc are package-level
+// indirections injected by tests. Production code never touches them.
+var (
+	selectEpisodeFunc        selectEpisodeFuncType        = player.SelectEpisodeWithFuzzyFinder
+	extractEpisodeNumberFunc extractEpisodeNumberFuncType = player.ExtractEpisodeNumber
+)
+
+// SelectInitialEpisode runs the fuzzy-finder selector then parses the result.
+// The TUI call goes through selectEpisodeFunc, so tests inject a mock.
 func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
-	util.Debugf("[TRACE] SelectInitialEpisode: calling SelectEpisodeWithFuzzyFinder with %d episodes", len(episodes))
-	selectedEpisodeURL, episodeNumberStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
-	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", selectedEpisodeURL, episodeNumberStr, err)
-	if err != nil {
-		// Propagate back request error
-		if errors.Is(err, player.ErrBackRequested) {
+	util.Debugf("[TRACE] SelectInitialEpisode: calling selector with %d episodes", len(episodes))
+	url, numStr, err := selectEpisodeFunc(episodes)
+	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", url, numStr, err)
+	return parseEpisodeSelection(url, numStr, err)
+}
+
+// parseEpisodeSelection is the pure post-processing of a fuzzy-finder result.
+// All branches (back, generic error, atoi success, atoi failure) are exposed
+// here so they can be table-tested without TUI involvement.
+func parseEpisodeSelection(url, numStr string, fuzzyErr error) (string, string, int, error) {
+	if fuzzyErr != nil {
+		if errors.Is(fuzzyErr, player.ErrBackRequested) {
 			return "", "", -1, player.ErrBackRequested
 		}
-		return "", "", 0, err
+		return "", "", 0, fuzzyErr
 	}
-	selectedEpisodeNum, err := strconv.Atoi(player.ExtractEpisodeNumber(episodeNumberStr))
+	epNum, err := strconv.Atoi(extractEpisodeNumberFunc(numStr))
 	if err != nil {
 		return "", "", 0, err
 	}
-	return selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, nil
+	return url, numStr, epNum, nil
 }
 
 func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (string, string, int) {
@@ -352,8 +379,8 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 			return nil, nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
 		}
 
-		// Get episodes for the new anime using enhanced API
-		episodes, err := api.GetAnimeEpisodesEnhanced(anime)
+		// Get episodes for the new anime via the Model B registry.
+		episodes, err := providers.FetchEpisodes(context.Background(), anime)
 		if err != nil {
 			if i < maxRetries-1 {
 				util.Errorf("Failed to get episodes for: %s", anime.Name)

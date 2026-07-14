@@ -190,3 +190,49 @@ func TestPerfTracker_ConcurrentCounters(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, int64(100), pt.GetCounter("hits"))
 }
+
+func TestPrintReport_EnabledWithData(t *testing.T) {
+	withPerfEnabled(t)
+
+	pt := &PerfTracker{
+		metrics:  make(map[string]*PerfMetric),
+		started:  time.Now().Add(-10 * time.Second),
+		counters: make(map[string]*int64),
+	}
+
+	// Slow entry (TotalTime > 5s) → perfSlowStyle for total
+	pt.Record("SlowOperation", 6*time.Second)
+	// Fast entry (TotalTime < 500ms) → perfFastStyle for total
+	pt.Record("FastOp", 100*time.Millisecond)
+	// Medium entry (500ms ≤ TotalTime ≤ 5s) → perfValueStyle for total
+	pt.Record("MediumOperation", 2*time.Second)
+	// Long name (> 38 chars) → truncation branch
+	pt.Record("VeryLongOperationNameThatExceedsThirtyEightCharactersLimit", 300*time.Millisecond)
+	// Slow average (avg > 2s): two records → avg = 3s
+	pt.Record("SlowAvgOp", 3*time.Second)
+	pt.Record("SlowAvgOp", 3*time.Second)
+	// Fast average (avg < 200ms): two records → avg = 50ms
+	pt.Record("FastAvgOp", 50*time.Millisecond)
+	pt.Record("FastAvgOp", 50*time.Millisecond)
+	// Medium average (200ms ≤ avg ≤ 2s)
+	pt.Record("MedAvgOp", 500*time.Millisecond)
+	pt.Record("MedAvgOp", 500*time.Millisecond)
+	// Counter branch
+	pt.IncrementCounter("cache_hits")
+	pt.IncrementCounter("cache_hits")
+
+	assert.NotPanics(t, func() { pt.PrintReport() })
+}
+
+func TestPrintReport_EnabledEmpty(t *testing.T) {
+	withPerfEnabled(t)
+
+	pt := &PerfTracker{
+		metrics:  make(map[string]*PerfMetric),
+		started:  time.Now(),
+		counters: make(map[string]*int64),
+	}
+
+	// No metrics, no counters — exercises early-return paths for both sections.
+	assert.NotPanics(t, func() { pt.PrintReport() })
+}

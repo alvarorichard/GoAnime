@@ -13,36 +13,42 @@ type ResolvedSource struct {
 	Reason string     // Human-readable explanation for debugging.
 }
 
-// Resolve determines the canonical source for an anime by iterating sourceDefs.
-// It is called ONCE per anime; the result is passed to downstream layers.
+// Resolve determines the source for an anime by scanning the registered
+// sources' Describe() data, ordered by Priority. It is called ONCE per anime.
 //
-// Precedence per definition (first match wins):
-//  1. Explicit anime.Source field
+// Precedence (first match wins):
+//
+//  1. Explicit anime.Source field (checked across ALL sources first)
 //  2. anime.MediaType
 //  3. Tags in anime.Name
 //  4. URL pattern / short ID
 //
-// If nothing matches, returns Kind=Unknown with a warning log.
-func Resolve(anime *models.Anime) ResolvedSource {
+// If nothing matches, returns (nil, Kind=Unknown) with a warning log — the
+// caller decides whether to fall back (BestEffortKind + Registered).
+func Resolve(anime *models.Anime) (Source, ResolvedSource) {
 	if anime == nil {
-		return ResolvedSource{Kind: Unknown, Reason: "nil anime"}
+		return nil, ResolvedSource{Kind: Unknown, Reason: "nil anime"}
 	}
 
-	// Priority 1: Explicit Source field (highest priority, check all defs first)
+	srcs := registeredByPriority()
+
+	// Priority 1: Explicit Source field (highest priority, check all sources first)
 	if anime.Source != "" {
-		for i := range sourceDefs {
-			for _, s := range sourceDefs[i].Explicit {
-				if anime.Source == s {
-					return ResolvedSource{Kind: sourceDefs[i].Kind, Reason: "explicit Source=" + s}
+		for _, s := range srcs {
+			d := s.Describe()
+			for _, e := range d.Explicit {
+				if anime.Source == e {
+					return s, ResolvedSource{Kind: d.Kind, Reason: "explicit Source=" + e}
 				}
 			}
 		}
 	}
 
-	// Priority 2+: MediaType, tags, URL, shortID (first def match wins)
-	for i := range sourceDefs {
-		if reason, ok := sourceDefs[i].matchNonExplicit(anime); ok {
-			return ResolvedSource{Kind: sourceDefs[i].Kind, Reason: reason}
+	// Priority 2+: MediaType, tags, URL, shortID (lowest Priority wins)
+	for _, s := range srcs {
+		d := s.Describe()
+		if reason, ok := d.matchNonExplicit(anime); ok {
+			return s, ResolvedSource{Kind: d.Kind, Reason: reason}
 		}
 	}
 
@@ -50,28 +56,32 @@ func Resolve(anime *models.Anime) ResolvedSource {
 	if anime.Name != "" {
 		lower := strings.ToLower(anime.Name)
 		if strings.Contains(lower, "[pt-br]") || strings.Contains(lower, "[portugu") {
-			return ResolvedSource{Kind: AnimeFire, Reason: "PT-BR language tag (default AnimeFire)"}
+			if s, ok := Registered(AnimeFire); ok {
+				return s, ResolvedSource{Kind: AnimeFire, Reason: "PT-BR language tag (default AnimeFire)"}
+			}
 		}
 	}
 
 	util.Warn("source resolution fell through to Unknown", "anime", anime.Name, "url", anime.URL)
-	return ResolvedSource{Kind: Unknown, Reason: "no match, best-effort AllAnime"}
+	return nil, ResolvedSource{Kind: Unknown, Reason: "no match, best-effort AllAnime"}
 }
 
-// ResolveURL resolves a source from a raw URL string only.
-// Used when no models.Anime context is available (e.g. direct URL playback).
-func ResolveURL(rawURL string) ResolvedSource {
+// ResolveURL resolves a source from a raw URL string only, scanning the
+// registered sources. Used when no models.Anime context is available
+// (e.g. direct URL playback).
+func ResolveURL(rawURL string) (Source, ResolvedSource) {
 	if rawURL == "" {
-		return ResolvedSource{Kind: Unknown, Reason: "empty URL"}
+		return nil, ResolvedSource{Kind: Unknown, Reason: "empty URL"}
 	}
 
-	for i := range sourceDefs {
-		if reason, ok := sourceDefs[i].matchURL(rawURL); ok {
-			return ResolvedSource{Kind: sourceDefs[i].Kind, Reason: reason}
+	for _, s := range registeredByPriority() {
+		d := s.Describe()
+		if reason, ok := d.matchURL(rawURL); ok {
+			return s, ResolvedSource{Kind: d.Kind, Reason: reason}
 		}
 	}
 
-	return ResolvedSource{Kind: Unknown, Reason: "URL not matched"}
+	return nil, ResolvedSource{Kind: Unknown, Reason: "URL not matched"}
 }
 
 // BestEffortKind returns the effective SourceKind for dispatch.

@@ -2,6 +2,7 @@ package player
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +19,14 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+
+	// Blank import: the providers package self-registers every live Source in
+	// its init(). Without it the registry is empty and dispatch resolves
+	// nothing. Consolidated into a single wiring file in a later phase (S3).
+	_ "github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	g "github.com/enetx/g"
@@ -30,8 +37,6 @@ import (
 // Pre-compiled regexes for player scraper (avoid per-call compilation)
 var (
 	downloadFolderRe    = regexp.MustCompile(`https?://[^/]+/video/([^/?]+)`)
-	isNumericRe         = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-	hasLetterRe         = regexp.MustCompile(`[A-Za-z]`)
 	videoURLPatternRe   = regexp.MustCompile(`https?://[^\s<>"]+?\.(?:mp4|m3u8)`)
 	bloggerPatternRe    = regexp.MustCompile(`^https://www\.blogger\.com/video\.g\?token=([A-Za-z0-9_-]+)$`)
 	tokenRe             = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
@@ -126,7 +131,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Checks if the server responded with a 200 OK or 206 Partial Content status.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return 0, scraper.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+			return 0, netx.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
 		}
 		// Returns an error if the server does not support partial content (required for ranged requests).
 		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
@@ -321,8 +326,13 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support
-func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime) (string, error) {
+// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support.
+// ctx is honored at entry today; full downstream propagation lands when this
+// becomes a thin wrapper over source.Resolve → FetchStreamURL(ctx, …).
+func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode, anime *models.Anime) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	util.Debug("GetVideoURLForEpisodeEnhanced called", "episodeURL", episode.URL, "episodeNum", episode.Number)
 	if anime != nil {
 		util.Debug("Anime context", "name", anime.Name, "source", anime.Source, "mediaType", anime.MediaType, "url", anime.URL)
@@ -338,66 +348,83 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 			return GetVideoURLForEpisode(episode.URL)
 		}
 
-		// If episode.URL looks like an AllAnime ID, synthesize minimal anime context
-		if isLikelyAllAnimeID(episode.URL) {
-			if util.IsDebug {
-				util.Debugf("No anime context; detected AllAnime ID '%s'. Using enhanced API with synthetic anime context.", episode.URL)
-			}
-			tmpAnime := &models.Anime{
-				URL:    episode.URL,
-				Source: "AllAnime",
-				Name:   "[AllAnime]",
-			}
-			// Ensure episode number is set
-			if episode.Number == "" && episode.Num > 0 {
-				episode.Number = fmt.Sprintf("%d", episode.Num)
-			}
-			if episode.Number == "" {
-				episode.Number = "1"
-			}
-			return api.GetEpisodeStreamURLEnhanced(episode, tmpAnime, util.GlobalQuality)
+		// URL-only resolution goes through the source registry — no more
+		// hardcoded fake-AllAnime guess (R3). The minimal anime context is
+		// derived from what the registry itself matched, never assumed.
+		src, resolved := source.ResolveURL(episode.URL)
+		if src == nil {
+			return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
 		}
-
-		// If it's likely just an episode number without anime context, we cannot resolve via enhanced API
-		return "", fmt.Errorf("cannot resolve stream without anime context for episode %s; missing anime identifier", episode.Number)
+		util.Debug("URL-only source resolved", "kind", resolved.Kind, "reason", resolved.Reason)
+		urlOnlyAnime := &models.Anime{
+			URL:    episode.URL,
+			Source: string(resolved.Kind),
+		}
+		// Ensure episode number is set
+		if episode.Number == "" && episode.Num > 0 {
+			episode.Number = fmt.Sprintf("%d", episode.Num)
+		}
+		if episode.Number == "" {
+			episode.Number = "1"
+		}
+		return src.FetchStreamURL(ctx, episode, urlOnlyAnime, util.GlobalQuality)
 	}
 
-// Movie/TV routing: SuperFlix and FlixHQ both flow through the enhanced API,
-	// which dispatches by anime.Source internally. Label logs by the actual
-	// source so triage isn't misled into thinking SuperFlix failures came from
-	// FlixHQ.
-	if isMovieOrTVSourcePlayer(anime) {
-		sourceLabel := anime.Source
-		if sourceLabel == "" {
-			sourceLabel = "movie/TV"
+	// ── Model B dispatch: resolve once via the source registry, then fetch
+	// through the resolved Source (each Source delegates to the same api
+	// functions the legacy chain called, so behavior is unchanged). The old
+	// helpers survive below only as the transitional error/extraction policy;
+	// Phase 3 deletes them together with the api-level branching.
+	src, resolved := source.Resolve(anime)
+	if src == nil {
+		// Unknown source at the dispatch boundary — never silent (R4/R5):
+		// warn loudly, and only fall back to best-effort AllAnime when the
+		// user hasn't opted into strict resolution.
+		if util.StrictSourceResolution() {
+			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort fallback disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
 		}
-		util.Debug("Movie/TV source detected", "source", sourceLabel, "mediaType", anime.MediaType, "episodeURL", episode.URL)
-		streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
-		if err == nil {
-			util.Debug("Movie/TV stream URL obtained", "source", sourceLabel, "url", streamURL)
-			return streamURL, nil
+		util.Warn("unrecognized source; dispatching best-effort AllAnime (set GOANIME_STRICT_SOURCE=1 to fail instead)",
+			"anime", anime.Name, "url", anime.URL, "reason", resolved.Reason)
+		bestEffort, ok := source.Enabled(resolved.BestEffortKind())
+		if !ok {
+			return "", fmt.Errorf("no enabled source for %q (%s); it may be turned off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
 		}
-		util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
-		return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
+		src = bestEffort
+	}
+	util.Debug("Source resolved", "kind", src.Describe().Kind,
+		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
+
+	// Model C capability: warm up a browser-gated source before fetching. For a
+	// non-gated source this is an explicit (logged) no-op; for SuperFlix on a
+	// display-less box it fails fast with a clear reason instead of stalling on
+	// a browser that can never appear.
+	if err := source.WarmUp(ctx, src); err != nil {
+		return "", err
 	}
 
-	// Try AllAnime enhanced navigation first if applicable
-	if isAllAnimeSourcePlayer(anime) {
-		streamURL, err := api.GetEpisodeStreamURLEnhanced(episode, anime, util.GlobalQuality)
-		if err == nil {
-			return streamURL, nil
-		}
-	}
-
-	// Use the regular enhanced API to get stream URL
-	streamURL, err := api.GetEpisodeStreamURL(episode, anime, util.GlobalQuality)
+	streamURL, err := src.FetchStreamURL(ctx, episode, anime, util.GlobalQuality)
 	if err != nil {
-		// Only use legacy fallback for non-AllAnime sources
-		if !isAllAnimeSourcePlayer(anime) {
-			return GetVideoURLForEpisode(episode.URL)
+		// Transitional error policy — mirrors the legacy chain exactly.
+		if isMovieOrTVSourcePlayer(anime) {
+			sourceLabel := anime.Source
+			if sourceLabel == "" {
+				sourceLabel = "movie/TV"
+			}
+			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
+			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		// For AllAnime, return the error instead of trying legacy method
-		return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		if resolved.Kind == source.AllAnime {
+			// For AllAnime, return the error instead of trying legacy method
+			return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		}
+		// Legacy silent fallback for the remaining sources — removed in Phase 2.
+		return GetVideoURLForEpisode(episode.URL)
+	}
+
+	// Movie/TV URLs are returned as-is, exactly as the legacy chain did.
+	if isMovieOrTVSourcePlayer(anime) {
+		util.Debug("Movie/TV stream URL obtained", "source", anime.Source, "url", streamURL)
+		return streamURL, nil
 	}
 
 	// The enhanced API may return intermediate URLs (Blogger embeds, AnimeFire
@@ -422,46 +449,6 @@ func GetVideoURLForEpisodeEnhanced(episode *models.Episode, anime *models.Anime)
 	return streamURL, nil
 }
 
-// Helper function to check if anime is from AllAnime source (player module)
-func isAllAnimeSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AllAnime" {
-		return true
-	}
-
-	if strings.Contains(anime.URL, "allanime") {
-		return true
-	}
-
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") &&
-		!strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if anime is from AnimeDrive source (player module)
-func isAnimeDriveSourcePlayer(anime *models.Anime) bool {
-	if anime == nil {
-		return false
-	}
-	if anime.Source == "AnimeDrive" {
-		return true
-	}
-	if strings.Contains(anime.Name, "[AnimeDrive]") {
-		return true
-	}
-	if strings.Contains(anime.URL, "animesdrive") {
-		return true
-	}
-	return false
-}
-
 // Helper function to check if anime is from FlixHQ source (player module)
 // isMovieOrTVSourcePlayer routes any movie/TV content through the enhanced API,
 // which dispatches by anime.Source (SuperFlix, FlixHQ, ...). Despite the legacy
@@ -479,30 +466,6 @@ func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	}
 	if strings.Contains(anime.URL, "flixhq") {
 		return true
-	}
-	return false
-}
-
-// Helper: detect if a string is purely numeric (e.g., "12" or "12.5")
-func isNumericString(s string) bool {
-	if s == "" {
-		return false
-	}
-	return isNumericRe.MatchString(s)
-}
-
-// Helper: detect if the value looks like an AllAnime ID (short, non-HTTP, alphanumeric with letters)
-func isLikelyAllAnimeID(s string) bool {
-	if strings.Contains(s, "http") {
-		return false
-	}
-	if isNumericString(s) {
-		return false
-	}
-	// Typical AllAnime IDs are short-ish alphanumeric strings
-	if len(s) >= 6 && len(s) < 30 {
-		// Must contain at least one letter
-		return hasLetterRe.MatchString(s)
 	}
 	return false
 }

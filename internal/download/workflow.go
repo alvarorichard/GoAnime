@@ -7,12 +7,17 @@ import (
 	"fmt"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// workflowSearchFn is the anime search function used by HandleDownloadRequest.
+// Tests may override it to avoid spawning a real TUI search.
+var workflowSearchFn = appflow.SearchAnimeWithRetry
 
 // HandleDownloadRequest processes a download request from command line
 func HandleDownloadRequest(request *util.DownloadRequest) error {
@@ -26,7 +31,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	util.Infof("Using source: %s, quality: %s", source, quality)
 
-	anime, err := appflow.SearchAnimeWithRetry(request.AnimeName)
+	anime, err := workflowSearchFn(request.AnimeName)
 	if err != nil {
 		util.Errorf("Failed to search for anime: %v", err)
 		return err
@@ -63,7 +68,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 	if request.IsAll {
 		util.Infof("Downloading ALL episodes of %s", anime.Name)
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
 			dlErr := player.HandleBatchDownload(eps, anime)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
@@ -88,7 +93,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
 			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
-			eps, err := api.GetAnimeEpisodesEnhanced(anime)
+			eps, err := providers.FetchEpisodes(context.Background(), anime)
 			if err == nil && len(eps) > 0 {
 				dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 				if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
@@ -114,7 +119,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 			return nil
 		}
 
-		eps, err := api.GetAnimeEpisodesEnhanced(anime)
+		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
 			dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {

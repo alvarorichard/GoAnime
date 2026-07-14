@@ -2,20 +2,60 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
+// Testable hooks: tests may override these to bypass real TUI / network.
+var (
+	runFormFn    = tui.RunClean
+	findFn       = tui.Find[string]
+	findResultFn = tui.Find[*models.Anime]
+)
+
+// mediaSource is the subset the media handler depends on. It exists so tests
+// can substitute a fake without spinning up network.
+type mediaSource interface {
+	SearchAnimeOnly(query string) ([]*models.Anime, error)
+	SearchAll(query string) ([]*models.Anime, error)
+	GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, mode string) (string, map[string]string, error)
+}
+
+// registryMediaSource implements mediaSource on top of the Model B registry
+// (providers.SearchAll + source dispatch), replacing the deleted
+// scraper.MediaManager.
+type registryMediaSource struct{}
+
+func (registryMediaSource) SearchAll(query string) ([]*models.Anime, error) {
+	return providers.SearchAll(context.Background(), query)
+}
+
+func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error) {
+	return providers.SearchAll(context.Background(), query, source.AllAnime, source.AnimeFire)
+}
+
+func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (string, map[string]string, error) {
+	src, resolved := source.Resolve(anime)
+	if src == nil {
+		return "", nil, fmt.Errorf("unrecognized source for %q (%s)", anime.Name, resolved.Reason)
+	}
+	ep := &models.Episode{Number: episodeNum, URL: anime.URL}
+	url, err := src.FetchStreamURL(context.Background(), ep, anime, quality)
+	return url, nil, err
+}
+
 // MediaHandler handles media selection and playback operations
 type MediaHandler struct {
-	mediaManager *scraper.MediaManager
+	mediaManager mediaSource
 	provider     string
 	quality      string
 	subsLanguage string
@@ -24,7 +64,7 @@ type MediaHandler struct {
 // NewMediaHandler creates a new MediaHandler
 func NewMediaHandler() *MediaHandler {
 	return &MediaHandler{
-		mediaManager: scraper.NewMediaManager(),
+		mediaManager: registryMediaSource{},
 		provider:     "Vidcloud",
 		quality:      "best",
 		subsLanguage: "english",
@@ -59,7 +99,7 @@ func (mh *MediaHandler) SearchMedia(query string, contentType models.MediaType) 
 // SelectMediaType prompts user to select media type
 func (mh *MediaHandler) SelectMediaType() (models.MediaType, error) {
 	items := []string{"Anime", "Search All"}
-	idx, err := tui.Find(items, func(i int) string {
+	idx, err := findFn(items, func(i int) string {
 		return items[i]
 	}, fuzzyfinder.WithPromptString("Select content type: "))
 	if err != nil {
@@ -80,7 +120,7 @@ func (mh *MediaHandler) SelectMedia(results []*models.Anime) (*models.Anime, err
 		return nil, fmt.Errorf("no results to select from")
 	}
 
-	idx, err := tui.Find(results, func(i int) string {
+	idx, err := findResultFn(results, func(i int) string {
 		r := results[i]
 		typeTag := ""
 		switch r.MediaType {
@@ -125,7 +165,7 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 		prompt := huh.NewInput().
 			Title("Search").
 			Value(&searchQuery)
-		if err := tui.RunClean(prompt.Run); err != nil {
+		if err := runFormFn(prompt.Run); err != nil {
 			return nil, err
 		}
 		query = searchQuery
@@ -165,7 +205,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 			return nil
 		})
 
-	if err := tui.RunClean(prompt.Run); err != nil {
+	if err := runFormFn(prompt.Run); err != nil {
 		return nil, err
 	}
 	if episodeNum == "" {
@@ -173,7 +213,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 	}
 
 	modeItems := []string{"Sub (Subtitled)", "Dub (English Dubbed)"}
-	modeIdx, err := tui.Find(modeItems, func(i int) string {
+	modeIdx, err := findFn(modeItems, func(i int) string {
 		return modeItems[i]
 	}, fuzzyfinder.WithPromptString("Select audio: "))
 	if err != nil {

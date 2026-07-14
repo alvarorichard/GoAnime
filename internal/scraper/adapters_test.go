@@ -3,6 +3,8 @@ package scraper
 import (
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,14 +31,14 @@ func TestGoyabuAdapter_GetType(t *testing.T) {
 // Adapter GetClient / Client tests
 func TestAllAnimeAdapter_Client(t *testing.T) {
 	t.Parallel()
-	client := NewAllAnimeClient()
+	client := allanime.NewAllAnimeClient()
 	a := &AllAnimeAdapter{client: client}
 	assert.Same(t, client, a.Client())
 }
 
 func TestNewSuperFlixAdapterWithClient(t *testing.T) {
 	t.Parallel()
-	client := NewSuperFlixClient()
+	client := superflix.NewSuperFlixClient()
 	a := NewSuperFlixAdapterWithClient(client)
 	require.NotNil(t, a)
 	assert.Same(t, client, a.GetClient())

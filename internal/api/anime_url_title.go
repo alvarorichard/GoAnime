@@ -4,7 +4,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -156,22 +155,20 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 			continue
 		}
 
-		resp, err := httpPostFast(aniListEndpoint, jsonData)
+		resp, body, err := aniListPost(aniListEndpoint, jsonData)
 		if err != nil {
 			lastErr = fmt.Errorf("AniList request failed: %w", err)
 			continue
 		}
 
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-		safeClose(resp.Body, "AniList response body")
-
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response: %w", err)
-			continue
-		}
-
 		if resp.StatusCode != http.StatusOK {
-			util.Debugf("AniList error response: %s", string(body))
+			// Cap the logged body: a Cloudflare challenge page is ~6KB of
+			// HTML/JS per attempt that buries the rest of the debug log.
+			snippet := string(body)
+			if len(snippet) > 300 {
+				snippet = snippet[:300] + "… (truncated)"
+			}
+			util.Debugf("AniList error response (%d bytes): %s", len(body), snippet)
 			lastErr = fmt.Errorf("AniList returned: %s", resp.Status)
 			continue
 		}

@@ -185,14 +185,14 @@ func TestNewRichPresenceUpdater_FieldsSet(t *testing.T) {
 	mu := &sync.Mutex{}
 	called := false
 	mpv := func(_ string, _ []any) (any, error) { called = true; return nil, nil }
-	rpu := NewRichPresenceUpdater(a, &paused, mu, 5*time.Second, 1500*time.Second, "/tmp/sock", mpv)
+	rpu := NewRichPresenceUpdater(a, &paused, mu, 5*time.Second, 1500*time.Second, "mpv_test.sock", mpv)
 	require.NotNil(t, rpu)
 	assert.Same(t, a, rpu.GetAnime())
 	assert.Same(t, &paused, rpu.GetIsPaused())
 	assert.Same(t, mu, rpu.GetAnimeMutex())
 	assert.Equal(t, 5*time.Second, rpu.GetUpdateFreq())
 	assert.Equal(t, 1500*time.Second, rpu.GetEpisodeDuration())
-	assert.Equal(t, "/tmp/sock", rpu.GetSocketPath())
+	assert.Equal(t, "mpv_test.sock", rpu.GetSocketPath())
 	assert.False(t, rpu.IsEpisodeStarted())
 	assert.False(t, called)
 }

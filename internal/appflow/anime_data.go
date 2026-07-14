@@ -1,6 +1,7 @@
 package appflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 
 	"charm.land/huh/v2"
 	"charm.land/huh/v2/spinner"
@@ -16,12 +18,83 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// Injectable package-level dependencies. Tests swap these via the
+// helpers in *_test.go (which serialise on appflowOverrideMu). Production
+// callers never touch them.
+var (
+	// searchEnhancedFn is the underlying search implementation.
+	searchEnhancedFn = api.SearchAnimeEnhanced
+
+	// searchWithRetryFn is the per-attempt search used inside SearchAnimeWithRetry.
+	searchWithRetryFn = api.SearchAnimeEnhanced
+
+	// aniListFetchFn fetches AniList metadata for an anime title.
+	aniListFetchFn = api.FetchAnimeFromAniList
+
+	// sourceDetailsFetchFn enriches anime with provider-specific details.
+	sourceDetailsFetchFn = api.FetchAnimeDetails
+
+	// getAnimeEpisodesEnhancedFn returns the episode list for an anime. It now
+	// dispatches through the Model B registry (providers.FetchEpisodes) instead
+	// of api's legacy per-source switch.
+	getAnimeEpisodesEnhancedFn = func(anime *models.Anime) ([]models.Episode, error) {
+		return providers.FetchEpisodes(context.Background(), anime)
+	}
+
+	// getAnimeEpisodesLegacyFn returns episodes by URL (legacy API).
+	getAnimeEpisodesLegacyFn = api.GetAnimeEpisodes
+
+	// runSpinnerFn wraps a long action in a TUI spinner. Default uses
+	// huh.spinner + tui.RunClean. Tests inject a synchronous passthrough.
+	runSpinnerFn = defaultRunSpinner
+
+	// promptForNameFn asks the user for a new search name. Default uses
+	// huh.NewInput inside tui.RunClean. Tests inject a scripted sequence.
+	promptForNameFn = defaultPromptForName
+)
+
+// defaultRunSpinner is the production spinner wrapper. It is replaced by
+// tests with a synchronous passthrough so the action runs inline.
+func defaultRunSpinner(title string, action func()) {
+	_ = tui.RunClean(func() error {
+		return spinner.New().
+			Title(title).
+			Type(spinner.Dots).
+			Action(action).
+			Run()
+	})
+}
+
+// defaultPromptForName is the production prompt. Returns the user's input
+// trimmed, or an error if cancelled / empty / TTY unavailable.
+func defaultPromptForName(_ string) (string, error) {
+	var newName string
+	prompt := huh.NewInput().
+		Title("Search Again").
+		Description("Enter a new anime name to search for:").
+		Value(&newName).
+		Validate(func(v string) error {
+			if len(strings.TrimSpace(v)) < 2 {
+				return fmt.Errorf("anime name must be at least 2 characters")
+			}
+			return nil
+		})
+	if err := tui.RunClean(prompt.Run); err != nil {
+		return "", fmt.Errorf("search cancelled by user")
+	}
+	name := strings.TrimSpace(newName)
+	if name == "" {
+		return "", fmt.Errorf("search cancelled: empty name provided")
+	}
+	return name, nil
+}
+
 // SearchAnime searches for an anime by name using the globally configured source.
 func SearchAnime(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Use enhanced API with source selection (spinner is inside api.SearchAnimeEnhanced)
-	anime, err := api.SearchAnimeEnhanced(name, util.GlobalSource)
+	anime, err := searchEnhancedFn(name, util.GlobalSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -35,7 +108,7 @@ func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
 	// Buscar em ambas as fontes (spinner is inside api.SearchAnimeEnhanced)
-	anime, err := api.SearchAnimeEnhanced(name, "")
+	anime, err := searchEnhancedFn(name, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -59,7 +132,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		} else {
 			util.Debugf("Searching for: %s (searching all sources)", currentName)
 		}
-		anime, searchErr := api.SearchAnimeEnhanced(currentName, source)
+		anime, searchErr := searchWithRetryFn(currentName, source)
 
 		if searchErr == nil && anime != nil {
 			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))
@@ -76,136 +149,107 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 
 		util.Infof("Please enter a new search term.")
 
-		// Prompt user for new input
-		var newName string
-		prompt := huh.NewInput().
-			Title("Search Again").
-			Description("Enter a new anime name to search for:").
-			Value(&newName).
-			Validate(func(v string) error {
-				if len(strings.TrimSpace(v)) < 2 {
-					return fmt.Errorf("anime name must be at least 2 characters")
-				}
-				return nil
-			})
-
-		if promptErr := tui.RunClean(prompt.Run); promptErr != nil {
-			return nil, fmt.Errorf("search cancelled by user")
+		nextName, promptErr := promptForNameFn(currentName)
+		if promptErr != nil {
+			return nil, promptErr
 		}
+		currentName = nextName
+	}
+}
 
-		currentName = strings.TrimSpace(newName)
-		if currentName == "" {
-			return nil, fmt.Errorf("search cancelled: empty name provided")
+// FetchAnimeDetails enriches anime with metadata from AniList and/or the
+// source provider. Spinner runs around the enrichment via runSpinnerFn.
+func FetchAnimeDetails(anime *models.Anime) {
+	detailsStart := time.Now()
+	runSpinnerFn("Fetching anime details...", func() {
+		fetchAnimeDetailsCore(anime)
+	})
+	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
+}
+
+// fetchAnimeDetailsCore is the pure orchestration: branch on source / metadata
+// state, dispatch to aniListFetchFn / sourceDetailsFetchFn. Fully testable
+// with mocks — no TUI, no time-sensitive code paths.
+func fetchAnimeDetailsCore(anime *models.Anime) {
+	if anime == nil {
+		return
+	}
+	// For FlixHQ/SuperFlix movies/TV shows: skip AniList, optionally enrich.
+	if anime.HasInteractiveEpisodeFlow() {
+		util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
+		if anime.Source != "SuperFlix" {
+			if err := sourceDetailsFetchFn(anime); err != nil {
+				util.Debugf("Failed to enrich content with TMDB: %v", err)
+			}
+		}
+		return
+	}
+
+	needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
+	needsSourceDetails := anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to")
+
+	switch {
+	case needsAniList && needsSourceDetails:
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			enrichFromAniList(anime)
+		}()
+		go func() {
+			defer wg.Done()
+			if err := sourceDetailsFetchFn(anime); err != nil {
+				util.Debugf("Failed to fetch anime details from source: %v", err)
+			}
+		}()
+		wg.Wait()
+	case needsAniList:
+		enrichFromAniList(anime)
+	default:
+		util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
+		if needsSourceDetails {
+			if err := sourceDetailsFetchFn(anime); err != nil {
+				util.Debugf("Failed to fetch anime details from source: %v", err)
+			}
 		}
 	}
 }
 
-func FetchAnimeDetails(anime *models.Anime) {
-	detailsStart := time.Now()
-
-	// Use spinner while fetching details
-	_ = tui.RunClean(func() error {
-		return spinner.New().
-			Title("Fetching anime details...").
-			Type(spinner.Dots).
-			Action(func() {
-				// For FlixHQ/SuperFlix movies/TV shows, use TMDB enrichment instead of AniList
-				if anime.Source == "SFlix" || anime.Source == "SuperFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-					util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
-					// SuperFlix stores TMDB ID in URL, not a web page URL, so skip the old page scraping
-					if anime.Source != "SuperFlix" {
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to enrich content with TMDB: %v", err)
-						}
-					}
-					util.Debugf("[PERF] FetchAnimeDetails (movie/TV) completed in %v", time.Since(detailsStart))
-					return
-				}
-
-				// Skip AniList enrichment if already done during search (enrichAnimeData)
-				needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
-				needsSourceDetails := anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to")
-
-				switch {
-				case needsAniList && needsSourceDetails:
-					// Both needed — run in parallel
-					var wg sync.WaitGroup
-					wg.Add(2)
-
-					go func() {
-						defer wg.Done()
-						aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
-						if err != nil {
-							util.Debugf("Failed to fetch from AniList: %v", err)
-							return
-						}
-						anime.AnilistID = aniListInfo.Data.Media.ID
-						anime.MalID = aniListInfo.Data.Media.IDMal
-						anime.Details = aniListInfo.Data.Media
-						if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
-							anime.ImageURL = cover
-						}
-						util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
-					}()
-
-					go func() {
-						defer wg.Done()
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to fetch anime details from source: %v", err)
-						}
-					}()
-
-					wg.Wait()
-				case needsAniList:
-					aniListInfo, err := api.FetchAnimeFromAniList(anime.Name)
-					if err != nil {
-						util.Debugf("Failed to fetch from AniList: %v", err)
-					} else {
-						anime.AnilistID = aniListInfo.Data.Media.ID
-						anime.MalID = aniListInfo.Data.Media.IDMal
-						anime.Details = aniListInfo.Data.Media
-						if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
-							anime.ImageURL = cover
-						}
-						util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
-					}
-				default:
-					util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
-					if needsSourceDetails {
-						if err := api.FetchAnimeDetails(anime); err != nil {
-							util.Debugf("Failed to fetch anime details from source: %v", err)
-						}
-					}
-				}
-			}).
-			Run()
-	})
-
-	util.Debugf("[PERF] FetchAnimeDetails completed in %v", time.Since(detailsStart))
+// enrichFromAniList fetches AniList metadata via aniListFetchFn and applies
+// it to the anime. Errors are logged at debug level and ignored — the call
+// site treats AniList as best-effort.
+func enrichFromAniList(anime *models.Anime) {
+	aniListInfo, err := aniListFetchFn(anime.Name)
+	if err != nil {
+		util.Debugf("Failed to fetch from AniList: %v", err)
+		return
+	}
+	anime.AnilistID = aniListInfo.Data.Media.ID
+	anime.MalID = aniListInfo.Data.Media.IDMal
+	anime.Details = aniListInfo.Data.Media
+	if cover := aniListInfo.Data.Media.CoverImage.Large; cover != "" {
+		anime.ImageURL = cover
+	}
+	util.Debugf("Anime enriched with AniList data - ID: %d, MAL: %d", anime.AnilistID, anime.MalID)
 }
 
 // GetAnimeEpisodes fetches the episode list for the given anime from its source.
+// FlixHQ content bypasses the spinner since it has its own UI interactions.
 func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
 	var episodes []models.Episode
 	var fetchErr error
 
-	// For FlixHQ content, don't wrap in spinner here because GetFlixHQEpisodes
-	// has UI interactions (season selection) and handles its own spinners for network calls
-	if anime.Source == "SFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
-		episodes, fetchErr = api.GetAnimeEpisodesEnhanced(anime)
+	// No spinner when the fetch can open its own UI (season-selection
+	// fuzzyfinder): a spinner animating over the finder eats the prompt text
+	// and corrupts terminal state. HasInteractiveEpisodeFlow matches SuperFlix
+	// by source because its catalog tags western animation as anime.
+	if anime.HasInteractiveEpisodeFlow() {
+		episodes, fetchErr = getAnimeEpisodesEnhancedFn(anime)
 	} else {
-		// Use spinner while fetching episodes for non-FlixHQ content
-		_ = tui.RunClean(func() error {
-			return spinner.New().
-				Title("Loading episodes...").
-				Type(spinner.Dots).
-				Action(func() {
-					// Use enhanced API for episode fetching
-					episodes, fetchErr = api.GetAnimeEpisodesEnhanced(anime)
-				}).
-				Run()
+		runSpinnerFn("Loading episodes...", func() {
+			episodes, fetchErr = getAnimeEpisodesEnhancedFn(anime)
 		})
 	}
 
@@ -220,22 +264,15 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 	return episodes, nil
 }
 
-// GetAnimeEpisodesLegacy - compatibility function for old URL-based calls
+// GetAnimeEpisodesLegacy is the URL-based compatibility shim.
 func GetAnimeEpisodesLegacy(url string) ([]models.Episode, error) {
 	episodesStart := time.Now()
 
 	var episodes []models.Episode
 	var fetchErr error
 
-	// Use spinner while fetching episodes
-	_ = tui.RunClean(func() error {
-		return spinner.New().
-			Title("Loading episodes...").
-			Type(spinner.Dots).
-			Action(func() {
-				episodes, fetchErr = api.GetAnimeEpisodes(url)
-			}).
-			Run()
+	runSpinnerFn("Loading episodes...", func() {
+		episodes, fetchErr = getAnimeEpisodesLegacyFn(url)
 	})
 
 	if fetchErr != nil {

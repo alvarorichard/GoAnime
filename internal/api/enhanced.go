@@ -6,15 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"charm.land/huh/v2/spinner"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -35,6 +38,78 @@ func isStdoutTerminal() bool {
 	return stdoutIsTerminal
 }
 
+// sfBrowserSpinnerHint is appended to SuperFlix spinner titles so the browser
+// window that may pop up is expected, not alarming. Plain language only: a lay
+// user must understand it at a glance, so no "Cloudflare"/"Turnstile" jargon.
+const sfBrowserSpinnerHint = " — a browser may open to check you're human; just wait (click the box if one shows)"
+
+// Indirection points for preflightSuperFlixBrowser, overridable in tests so the
+// notice logic can be exercised without a real display, cache marker, or logger.
+var (
+	sfHeadlessEnvFn  = superflix.HeadlessEnvironment
+	sfSetupPendingFn = superflix.BrowserSetupPending
+	sfWarnFn         = util.Warn
+	sfInfoFn         = util.Info
+)
+
+// preflightSuperFlixBrowser emits the spinner-safe, pre-solve notices for the
+// Cloudflare-bypass browser: a one-time first-run setup notice and a warning
+// when there is no graphical display to show the headed browser. Both run
+// OUTSIDE runWithSpinner so they cannot corrupt the spinner line.
+func preflightSuperFlixBrowser() {
+	// Warn first: on a screenless host the check can't be shown, so the user
+	// should see this before the (one-time) setup notice or the spinner.
+	// Plain language only — no "$DISPLAY"/"Cloudflare"/"headless" jargon.
+	if sfHeadlessEnvFn() {
+		sfWarnFn("⚠️  SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
+	}
+	if sfSetupPendingFn() {
+		sfInfoFn("⏳ First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
+	}
+}
+
+// friendlyError carries a plain-language message for the user while keeping the
+// technical cause reachable via Unwrap (so errors.Is and debug tooling still see
+// the root cause). Error() returns ONLY the friendly text, so the raw cause —
+// which may contain jargon — is never shown to a lay user.
+type friendlyError struct {
+	msg   string
+	cause error
+}
+
+func (e *friendlyError) Error() string { return e.msg }
+func (e *friendlyError) Unwrap() error { return e.cause }
+
+// isGateTimeout reports whether err is the SuperFlix "are you human?" check that
+// ran out of time. It is a plain fmt.Errorf (not a sentinel), so it is matched
+// by its stable substring rather than errors.Is.
+func isGateTimeout(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "gate not cleared")
+}
+
+// describeSuperFlixErr converts a low-level SuperFlix failure into a short,
+// plain-language, icon-prefixed message a non-technical user can act on at a
+// glance — no "Cloudflare"/"Turnstile"/"Playwright" jargon, and the raw cause is
+// hidden from Error() but kept reachable via errors.Is/Unwrap.
+func describeSuperFlixErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, superflix.ErrPlaywrightUnavailable):
+		return &friendlyError{cause: err, msg: "⚠️  Couldn't open the helper browser. The first time you use SuperFlix, GoAnime needs internet to set it up — check your connection and try again. Tip: installing Google Chrome makes this faster."}
+	case errors.Is(err, superflix.ErrSuperFlixNoServers):
+		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
+	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
+		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AllAnime)."}
+	case errors.Is(err, superflix.ErrSuperFlixRestricted):
+		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AllAnime)."}
+	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
+		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
+	default:
+		return err
+	}
+}
+
 // runWithSpinner runs the action with a spinner if stdout is a terminal,
 // otherwise runs the action directly. This ensures CI and non-interactive
 // environments work correctly since huh/v2 spinner may skip the Action
@@ -52,6 +127,14 @@ func runWithSpinner(title string, action func()) {
 		action()
 		return
 	}
+	// Background probes (e.g. per-source search diagnostics) log through
+	// util.Warn/Info while the spinner is animating. Those writes land on
+	// the same stderr the spinner redraws, interleaving with its frames and
+	// leaving garbled output behind once the spinner exits. Route console
+	// logs to the file only for the spinner's lifetime, same as the
+	// download progress bars do (internal/player/download.go).
+	restoreConsoleLogs := util.SuppressConsoleLogging()
+	defer restoreConsoleLogs()
 	awaitActionThroughRunner(action, func(wrapped func()) {
 		_ = tui.RunClean(func() error {
 			return spinner.New().
@@ -86,49 +169,89 @@ func awaitActionThroughRunner(action func(), runner func(wrapped func())) {
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
 
-// Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
-func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
-	scraperManager := scraper.NewScraperManager()
+// SearchFetchFunc fans out a free-text search across the given source kinds
+// (empty = all) and returns the aggregated, language-tagged results. It is a
+// seam so the api package can dispatch through the Model B registry
+// (providers.SearchAll) without importing providers (which would cycle). The
+// providers package wires it in its init(); if unset, the search falls back to
+// the ScraperManager engine.
+type SearchFetchFunc func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error)
 
-	var scraperType *scraper.ScraperType
-	isPTBR := false
+var searchFetchFn SearchFetchFunc
 
-	// If a specific source is requested, honor it
-	switch strings.ToLower(source) {
-	case "allanime":
-		t := scraper.AllAnimeType
-		scraperType = &t
-		util.Debug("Searching specific source", "source", "AllAnime")
-	case "animefire":
-		t := scraper.AnimefireType
-		scraperType = &t
-		util.Debug("Searching specific source", "source", "AnimeFire")
-	case "goyabu":
-		t := scraper.GoyabuType
-		scraperType = &t
-		util.Debug("Searching specific source", "source", "Goyabu")
-	case "superflix":
-		t := scraper.SuperFlixType
-		scraperType = &t
-		util.Debug("Searching specific source", "source", "SuperFlix")
-	case "ptbr", "pt-br":
-		isPTBR = true
-		util.Debug("Searching all PT-BR sources (AnimeFire + Goyabu + SuperFlix)")
-	default:
-		scraperType = nil
-		util.Debug("Searching all sources", "query", name)
+// SetSearchFetch installs the registry-backed search fan-out. Called from
+// providers.init().
+func SetSearchFetch(f SearchFetchFunc) { searchFetchFn = f }
+
+// EpisodesFetchFunc lists an anime's episodes through the Model B registry.
+// Like SearchFetchFunc, it is a seam so api can dispatch through
+// providers.FetchEpisodes without importing providers (which would cycle).
+type EpisodesFetchFunc func(anime *models.Anime) ([]models.Episode, error)
+
+var episodesFetchFn EpisodesFetchFunc
+
+// SetEpisodesFetch installs the registry-backed episode dispatch. Called from
+// providers.init().
+func SetEpisodesFetch(f EpisodesFetchFunc) { episodesFetchFn = f }
+
+// fetchEpisodesViaRegistry dispatches episode listing through the Model B
+// registry seam. It is the replacement for the deleted GetAnimeEpisodesEnhanced
+// per-source switch; every former caller routes here.
+func fetchEpisodesViaRegistry(anime *models.Anime) ([]models.Episode, error) {
+	if episodesFetchFn == nil {
+		return nil, fmt.Errorf("episode dispatch not wired: the providers package must be imported")
 	}
+	return episodesFetchFn(anime)
+}
 
-	// Perform the search
-	util.Debug("Searching for anime/media", "query", name)
+// StreamFetchFunc resolves a single episode's stream URL through the Model B
+// registry. Seam so api can dispatch through providers.FetchStreamURL without
+// importing providers (which would cycle).
+type StreamFetchFunc func(episode *models.Episode, anime *models.Anime, quality string) (string, error)
+
+var streamFetchFn StreamFetchFunc
+
+// SetStreamFetch installs the registry-backed stream dispatch. Called from
+// providers.init().
+func SetStreamFetch(f StreamFetchFunc) { streamFetchFn = f }
+
+// fetchStreamViaRegistry dispatches stream resolution through the Model B
+// registry seam — the replacement for the deleted GetEpisodeStreamURL switch.
+func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if streamFetchFn == nil {
+		return "", fmt.Errorf("stream dispatch not wired: the providers package must be imported")
+	}
+	return streamFetchFn(episode, anime, quality)
+}
+
+// Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
+func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
+	// Map the optional source selector to the registry kinds to search. Empty
+	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
+	var registryKinds []source.SourceKind
+	switch strings.ToLower(src) {
+	case "allanime":
+		registryKinds = []source.SourceKind{source.AllAnime}
+	case "animefire":
+		registryKinds = []source.SourceKind{source.AnimeFire}
+	case "goyabu":
+		registryKinds = []source.SourceKind{source.Goyabu}
+	case "superflix":
+		registryKinds = []source.SourceKind{source.SuperFlix}
+	case "ptbr", "pt-br":
+		registryKinds = []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}
+	}
+	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
+
 	var animes []*models.Anime
 	var searchErr error
 	runWithSpinner("Searching for anime...", func() {
-		if isPTBR {
-			animes, searchErr = scraperManager.SearchAnimePTBR(name)
-		} else {
-			animes, searchErr = scraperManager.SearchAnime(name, scraperType)
+		if searchFetchFn == nil {
+			searchErr = fmt.Errorf("search dispatch not wired: the providers package must be imported")
+			return
 		}
+		// Model B registry fan-out (providers.SearchAll).
+		animes, searchErr = searchFetchFn(context.Background(), name, registryKinds)
 	})
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)
@@ -151,7 +274,7 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 			case strings.Contains(anime.URL, "goyabu"):
 				anime.Source = "Goyabu"
 			}
-			}
+		}
 
 		// Language tags are already added by unified.go, don't duplicate them here
 	}
@@ -246,242 +369,21 @@ func SearchAnimeEnhanced(name string, source string) (*models.Anime, error) {
 	}
 	util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
 
-	// CRITICAL: Enrich with AniList data for images and metadata (like the original system)
+	// Enrich with AniList data for images and metadata. Best-effort: episodes and
+	// playback work without it, so a failure here is a warning, not an error
+	// (issue #184).
 	if err := enrichAnimeData(selectedAnime); err != nil {
-		util.Errorf("Error enriching anime data: %v", err)
+		util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
 	}
 
 	return selectedAnime, nil
-}
-
-// Enhanced episode fetching that works with different sources
-func GetAnimeEpisodesEnhanced(anime *models.Anime) ([]models.Episode, error) {
-	// Check if this is a SuperFlix source
-	if anime.Source == "SuperFlix" {
-		return GetSuperFlixEpisodes(anime)
-	}
-
-	// Determine source type from multiple indicators with enhanced logic
-	var sourceName string
-
-	// Priority 1: Check the Source field (most reliable). Use a case-insensitive
-	// match for AnimeFire because the scraper emits "Animefire.io" (lowercase 'f')
-	// while older code paths/tests sometimes use the camelcase spelling "AnimeFire".
-	switch {
-	case anime.Source == "AllAnime":
-		sourceName = "AllAnime"
-	case strings.Contains(strings.ToLower(anime.Source), "animefire"):
-		sourceName = "Animefire.io"
-	case anime.Source == "Goyabu":
-		sourceName = "Goyabu"
-	case strings.Contains(anime.Name, "[English]"):
-		// Priority 2: Check language tags
-		sourceName = "AllAnime"
-		anime.Source = "AllAnime" // Update source field
-	case strings.Contains(anime.Name, "[PT-BR]") || strings.Contains(anime.Name, "[Português]"):
-		// AnimeFire or Goyabu = Portuguese
-		// Check URL to determine which one
-		switch {
-		case strings.Contains(anime.URL, "goyabu"):
-			sourceName = "Goyabu"
-			anime.Source = "Goyabu"
-		default:
-			sourceName = "Animefire.io"
-			anime.Source = "Animefire.io"
-		}
-	case strings.Contains(anime.URL, "allanime") || (len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http")):
-		// Priority 3: URL analysis for AllAnime (short IDs or allanime URLs)
-		sourceName = "AllAnime"
-		anime.Source = "AllAnime" // Update source field
-	case strings.Contains(anime.URL, "animefire"):
-		// Priority 4: URL analysis for AnimeFire
-		sourceName = "Animefire.io"
-		anime.Source = "Animefire.io" // Update source field
-	default:
-		// Default to AllAnime for unknown sources
-		sourceName = "AllAnime (default)"
-		anime.Source = "AllAnime"
-	}
-
-	cleanName := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(anime.Name, "[English]", ""), "[PT-BR]", ""))
-
-	util.Debug("Getting episodes", "source", sourceName, "anime", cleanName)
-
-	scraperManager := scraper.NewScraperManager()
-	var episodes []models.Episode
-	var err error
-
-	// Use different approaches based on source
-	switch {
-	case strings.Contains(sourceName, "AllAnime"):
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.AllAnimeType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get AllAnime scraper: %w", scErr)
-		}
-
-		// Cast to AllAnime client to access enhanced features
-		if allAnimeClient, ok := scraperInstance.(*scraper.AllAnimeClient); ok && anime.MalID > 0 {
-			episodes, err = allAnimeClient.GetAnimeEpisodesWithAniSkip(anime.URL, anime.MalID, GetAndParseAniSkipData)
-			util.Debug("AniSkip integration enabled", "malID", anime.MalID)
-		} else {
-			episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-		}
-	case sourceName == "Animefire.io":
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.AnimefireType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get AnimeFire scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	case sourceName == "Goyabu":
-		scraperInstance, scErr := scraperManager.GetScraper(scraper.GoyabuType)
-		if scErr != nil {
-			return nil, fmt.Errorf("failed to get Goyabu scraper: %w", scErr)
-		}
-		episodes, err = scraperInstance.GetAnimeEpisodes(anime.URL)
-	default:
-		// For others, use the original API function
-		episodes, err = GetAnimeEpisodes(anime.URL)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get episodes from %s: %w", sourceName, err)
-	}
-
-	if len(episodes) > 0 {
-		util.Debug("Episodes found", "count", len(episodes), "source", sourceName)
-
-		// Provide additional info for user based on source (debug only)
-		switch {
-		case strings.Contains(sourceName, "AllAnime"):
-			util.Debug("Source info", "type", "AllAnime", "quality", "high")
-		default:
-			util.Debug("Source info", "type", "Animefire.io", "features", "dubbed/subtitled")
-		}
-	} else {
-		util.Warn("No episodes found", "source", sourceName)
-	}
-
-	return episodes, nil
-}
-
-// Enhanced episode URL fetching with improved source detection
-func GetEpisodeStreamURL(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	// Clear any previous subtitles
-	util.ClearGlobalSubtitles()
-
-	// Track anime source globally for subtitle selection and other source-specific behavior
-	if anime != nil && anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
-	}
-
-	// Check if this is SuperFlix content
-	if anime.Source == "SuperFlix" {
-		return GetSuperFlixStreamURL(anime, episode, quality)
-	}
-
-	scraperManager := scraper.NewScraperManager()
-
-	// Determine source type with enhanced logic
-	var scraperType scraper.ScraperType
-	var sourceName string
-
-	// Priority 1: Check the Source field (most reliable)
-	sourceLower := strings.ToLower(anime.Source)
-	switch {
-	case sourceLower == "allanime":
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	case strings.Contains(sourceLower, "animefire"):
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	case sourceLower == "goyabu":
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
-	case strings.Contains(anime.Name, "[English]"):
-		// Priority 2: Check language tags (AllAnime = English)
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	case strings.Contains(anime.Name, "[PT-BR]") || strings.Contains(anime.Name, "[Português]"):
-		// AnimeFire or Goyabu = Portuguese.
-		switch {
-		case strings.Contains(anime.URL, "goyabu"):
-			scraperType = scraper.GoyabuType
-			sourceName = "Goyabu"
-		default:
-			scraperType = scraper.AnimefireType
-			sourceName = "Animefire.io"
-		}
-	case len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http"):
-		// Priority 3: URL analysis for AllAnime (short IDs)
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	case strings.Contains(anime.URL, "animefire"):
-		scraperType = scraper.AnimefireType
-		sourceName = "Animefire.io"
-	case strings.Contains(anime.URL, "goyabu"):
-		scraperType = scraper.GoyabuType
-		sourceName = "Goyabu"
-	case strings.Contains(anime.URL, "allanime"):
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime"
-	default:
-		scraperType = scraper.AllAnimeType
-		sourceName = "AllAnime (default)"
-	}
-
-	util.Debug("Getting stream URL", "source", sourceName, "episode", episode.Number)
-
-	util.Debug("Source details",
-		"scraperType", scraperType,
-		"animeURL", anime.URL,
-		"episodeURL", episode.URL,
-		"episodeNumber", episode.Number,
-		"quality", quality)
-
-	scraperInstance, err := scraperManager.GetScraper(scraperType)
-	if err != nil {
-		return "", fmt.Errorf("failed to get scraper for %s: %w", sourceName, err)
-	}
-
-	if quality == "" {
-		quality = "best"
-	}
-
-	var streamURL string
-	var streamErr error
-
-	// Handle different scraper types with appropriate parameters
-	switch scraperType {
-	case scraper.AllAnimeType:
-		util.Debug("Processing through AllAnime")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(anime.URL, episode.Number, quality)
-	case scraper.GoyabuType:
-		util.Debug("Processing through Goyabu")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL)
-	default:
-		util.Debug("Processing through Animefire.io")
-		streamURL, _, streamErr = scraperInstance.GetStreamURL(episode.URL, quality)
-	}
-
-	if streamErr != nil {
-		return "", fmt.Errorf("failed to get stream URL from %s: %w", sourceName, streamErr)
-	}
-
-	if streamURL == "" {
-		return "", fmt.Errorf("empty stream URL returned from %s", sourceName)
-	}
-
-	util.Debug("Stream URL obtained", "source", sourceName)
-	util.Debug("Stream URL details", "url", streamURL)
-
-	return streamURL, nil
 }
 
 // Enhanced download support
 func DownloadEpisodeEnhanced(anime *models.Anime, episodeNum int, quality string) error {
 	util.Debugf("Fetching episodes for %s...", anime.Name)
 
-	episodes, err := GetAnimeEpisodesEnhanced(anime)
+	episodes, err := fetchEpisodesViaRegistry(anime)
 	if err != nil {
 		return fmt.Errorf("failed to get episodes: %w", err)
 	}
@@ -493,7 +395,7 @@ func DownloadEpisodeEnhanced(anime *models.Anime, episodeNum int, quality string
 	episode := episodes[episodeNum-1]
 
 	util.Debugf("Getting stream URL for episode %d...", episodeNum)
-	streamURL, err := GetEpisodeStreamURL(&episode, anime, quality)
+	streamURL, err := fetchStreamViaRegistry(&episode, anime, quality)
 	if err != nil {
 		return fmt.Errorf("failed to get stream URL: %w", err)
 	}
@@ -509,7 +411,7 @@ func DownloadEpisodeEnhanced(anime *models.Anime, episodeNum int, quality string
 func DownloadEpisodeRangeEnhanced(anime *models.Anime, startEp, endEp int, quality string) error {
 	util.Debugf("Fetching episodes for %s...", anime.Name)
 
-	episodes, err := GetAnimeEpisodesEnhanced(anime)
+	episodes, err := fetchEpisodesViaRegistry(anime)
 	if err != nil {
 		return fmt.Errorf("failed to get episodes: %w", err)
 	}
@@ -522,7 +424,7 @@ func DownloadEpisodeRangeEnhanced(anime *models.Anime, startEp, endEp int, quali
 		util.Infof("Downloading episode %d of %d...", i, endEp)
 
 		episode := episodes[i-1]
-		streamURL, err := GetEpisodeStreamURL(&episode, anime, quality)
+		streamURL, err := fetchStreamViaRegistry(&episode, anime, quality)
 		if err != nil {
 			util.Errorf("Failed to get stream URL for episode %d: %v", i, err)
 			continue
@@ -569,14 +471,105 @@ func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
 	return SearchAnimeEnhanced(name, source)
 }
 
-
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
-	return GetAnimeEpisodesEnhanced(anime)
+	return fetchEpisodesViaRegistry(anime)
+}
+
+// sortedSeasonNumbers returns the season keys in ascending numeric order.
+//
+// A plain string sort is wrong here: it orders "10" before "2", so a show with
+// ten or more seasons lists them scrambled. Non-numeric keys (TVmaze exposes
+// year-based "seasons" for some long-running anime) fall back to string order and
+// sort after the numeric ones, keeping the result deterministic.
+func sortedSeasonNumbers(allEpisodes map[string][]superflix.SuperFlixEpisode) []string {
+	seasons := make([]string, 0, len(allEpisodes))
+	for k := range allEpisodes {
+		seasons = append(seasons, k)
+	}
+	sort.Slice(seasons, func(i, j int) bool {
+		ni, erri := strconv.Atoi(seasons[i])
+		nj, errj := strconv.Atoi(seasons[j])
+		switch {
+		case erri == nil && errj == nil:
+			return ni < nj
+		case erri == nil:
+			return true // numeric seasons before non-numeric ones
+		case errj == nil:
+			return false
+		default:
+			return seasons[i] < seasons[j]
+		}
+	})
+	return seasons
+}
+
+// Episode-listing seams. Split out so the TVmaze-first ordering (the fix for the
+// "no seasons found" dead end in issue #184) is testable without a network or a
+// headed browser.
+var (
+	sfTVmazeEpisodesFn = func(ctx context.Context, imdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+		return superflix.GetEpisodesFromTVmaze(ctx, http.DefaultClient, imdbID)
+	}
+	sfBrowserEpisodesFn = func(ctx context.Context, c *superflix.SuperFlixClient, tmdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+		return c.GetEpisodes(ctx, tmdbID)
+	}
+)
+
+// fetchSuperFlixSeasons lists a series' seasons, preferring the browser-free
+// TVmaze listing and only falling back to the headed browser when TVmaze cannot
+// answer.
+//
+// The order matters. SuperFlix now frequently serves /serie/<tmdb> as an
+// embed-only shell with no episode list at all — and does so non-deterministically
+// — so scraping it is unreliable, while TVmaze (keyed on the IMDB id SuperFlix
+// returns in search) is deterministic and needs no browser. Putting TVmaze first
+// also keeps the "a browser window will open" warnings out of the common path:
+// they are emitted only if we actually reach the browser.
+func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.Anime, tmdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
+	var allEpisodes map[string][]superflix.SuperFlixEpisode
+
+	if media.IMDBID != "" {
+		runWithSpinner("Loading seasons...", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			eps, err := sfTVmazeEpisodesFn(ctx, media.IMDBID)
+			if err != nil {
+				util.Debug("TVmaze episode listing failed; falling back to the browser", "imdb", media.IMDBID, "err", err)
+				return
+			}
+			allEpisodes = eps
+		})
+	}
+
+	if len(allEpisodes) == 0 {
+		preflightSuperFlixBrowser()
+
+		var episodesErr error
+		runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
+			// Generous timeout: the player page may sit behind a Cloudflare Turnstile
+			// gate that NewSuperFlixClient solves with a headed Firefox (10–40s). Must
+			// exceed the client's solve budget or the solve gets cancelled mid-flight.
+			ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+			defer cancel()
+			allEpisodes, episodesErr = sfBrowserEpisodesFn(ctx, sfClient, tmdbID)
+		})
+		if episodesErr != nil {
+			return nil, fmt.Errorf("failed to get episodes: %w", describeSuperFlixErr(episodesErr))
+		}
+	}
+
+	if len(allEpisodes) == 0 {
+		return nil, &friendlyError{
+			cause: fmt.Errorf("superflix: no seasons for tmdb=%s (imdb=%q): TVmaze had no listing and the SuperFlix page exposed no episode list", tmdbID, media.IMDBID),
+			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AllAnime).",
+		}
+	}
+	return allEpisodes, nil
 }
 
 // GetSuperFlixEpisodes handles episodes/content for SuperFlix movies and TV shows
 func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
-	sfClient := scraper.NewSuperFlixClient()
+	sfClient := superflix.SharedSuperFlixClient()
 
 	// media.URL contains the TMDB ID for SuperFlix
 	tmdbID := media.URL
@@ -605,39 +598,15 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// For TV shows / series, get seasons and episodes
 	util.Debug("SuperFlix: Processing TV show/series, getting episodes")
 
-	var allEpisodes map[string][]scraper.SuperFlixEpisode
-	var episodesErr error
-	runWithSpinner("Loading seasons...", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		allEpisodes, episodesErr = sfClient.GetEpisodes(ctx, tmdbID)
-	})
-	if episodesErr != nil {
-		return nil, fmt.Errorf("failed to get episodes: %w", episodesErr)
+	allEpisodes, err := fetchSuperFlixSeasons(sfClient, media, tmdbID)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(allEpisodes) == 0 {
-		return nil, fmt.Errorf("no seasons found")
-	}
+	seasonNums := sortedSeasonNumbers(allEpisodes)
 
-	// Sort season numbers
-	var seasonNums []string
-	for k := range allEpisodes {
-		seasonNums = append(seasonNums, k)
-	}
-	sort.Strings(seasonNums)
-
-	// Build season labels for selection
-	var seasonLabels []string
-	for _, sn := range seasonNums {
-		epCount := len(allEpisodes[sn])
-		seasonLabels = append(seasonLabels, fmt.Sprintf("Season %s (%d episodes)", sn, epCount))
-	}
-
-	// Let user select a season
-	seasonIdx, err := tui.Find(seasonLabels, func(i int) string {
-		return seasonLabels[i]
-	}, fuzzyfinder.WithPromptString("Select season: "))
+	// Let user select a season (auto-selects when there is only one)
+	selectedSeason, err := selectSuperFlixSeason(media, seasonNums, allEpisodes)
 	if err != nil {
 		if errors.Is(err, fuzzyfinder.ErrAbort) {
 			return nil, ErrBackToSearch
@@ -645,7 +614,6 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		return nil, fmt.Errorf("season selection cancelled: %w", err)
 	}
 
-	selectedSeason := seasonNums[seasonIdx]
 	epList := allEpisodes[selectedSeason]
 	util.Debug("Selected season", "season", selectedSeason, "episodes", len(epList))
 
@@ -681,13 +649,140 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	return episodes, nil
 }
 
+// sfServerListBudget caps how long we spend fetching the server list.
+//
+// The list is an ENHANCEMENT: it buys the user a choice of source and names each
+// one dublado or legendado. Getting it needs the Cloudflare browser solve (the
+// tokened player page is gated), which is ~6s once the persistent profile is warm
+// — and it is warm after any prior SuperFlix play. This budget bounds the cold
+// case: a brand-new profile whose first-ever solve would run long is cut off here
+// and falls back to the embed sniff, which does its own solve for the stream. So
+// the worst the enhancement can add is this budget, once, on a cold profile.
+const sfServerListBudget = 60 * time.Second
+
+// sfCachedStreamBudget bounds the cache-replay fast path. It is pure HTTP (a
+// getVideo call + the player-extras GET), so a couple of round-trips — generous
+// enough to absorb a slow CDN, tight enough that a stale/rotated host fails fast
+// and we fall through to a full resolve.
+const sfCachedStreamBudget = 8 * time.Second
+
+// Stream seams. Split out so the "cache → servers → sniff" ordering is testable
+// without a network or a headed browser.
+var (
+	sfCachedStreamFn = func(c *superflix.SuperFlixClient, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), sfCachedStreamBudget)
+		defer cancel()
+		return c.TryCachedStream(ctx, mediaType, mediaID, season, episode)
+	}
+	sfGetServersFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) ([]superflix.SuperFlixServer, *superflix.SuperFlixTokens, error) {
+		return c.GetServers(ctx, mediaType, mediaID, season, episode)
+	}
+	sfStreamFromServerFn = func(c *superflix.SuperFlixClient, ctx context.Context, tokens *superflix.SuperFlixTokens, serverID, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
+		return c.StreamFromServer(ctx, tokens, serverID, mediaType, mediaID, season, episode)
+	}
+	sfSniffStreamFn = func(c *superflix.SuperFlixClient, ctx context.Context, mediaType, mediaID, season, episode string) (*superflix.SuperFlixStreamResult, error) {
+		return c.GetStreamURL(ctx, mediaType, mediaID, season, episode)
+	}
+	// sfReleaseBrowserFn closes the solver window after a resolve. A seam so tests
+	// can assert it fires on every path (cache hit, server list, sniff, error).
+	sfReleaseBrowserFn = superflix.ReleaseSharedBrowser
+)
+
+// superFlixStream resolves a SuperFlix stream, preferring the path that lets the
+// user actually choose.
+//
+// The server list (player page → /player/bootstrap) is the only place SuperFlix
+// exposes BOTH the available sources and whether each is dublado or legendado. So
+// we try that first and let the user pick. It can fail — the site serves a
+// token-less shell much of the time — and then we fall back to the embed sniff,
+// which always yields *a* stream but offers no choice at all. That fallback is why
+// playback used to silently take whatever the embed happened to play.
+//
+// The returned server is nil on the fallback path, telling the caller it must ask
+// about the audio itself.
+func superFlixStream(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season, epNum string) (*superflix.SuperFlixStreamResult, *superflix.SuperFlixServer, error) {
+	// Fast path: an episode played before replays straight from the cached
+	// (host, hash) over plain HTTP — no Cloudflare solve, no server-list fetch, no
+	// browser. This is the difference between a re-watch or a resume opening in ~1s
+	// versus paying the whole pipeline again. A nil server is returned because the
+	// choice was already made last time and is honored from the per-title memory.
+	if cached, ok := sfCachedStreamFn(sfClient, sfType, tmdbID, season, epNum); ok {
+		util.Debug("SuperFlix: served from stream cache (fast path)")
+		return cached, nil, nil
+	}
+
+	var (
+		servers []superflix.SuperFlixServer
+		tokens  *superflix.SuperFlixTokens
+		listErr error
+	)
+	runWithSpinner("Loading servers...", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), sfServerListBudget)
+		defer cancel()
+		servers, tokens, listErr = sfGetServersFn(sfClient, ctx, sfType, tmdbID, season, epNum)
+	})
+	if errors.Is(listErr, superflix.ErrSuperFlixRestricted) {
+		// The browser already tried the only viable recovery (reading the signed
+		// iframe as a cross-origin embed). Starting the separate sniff path would
+		// repeat the same restricted-page wait, so surface its actionable error now.
+		return nil, nil, listErr
+	}
+
+	if listErr == nil && len(servers) > 0 {
+		// The server list is in hand, which means the browser already did its one
+		// job — the Cloudflare solve. Everything left (the picker, then
+		// StreamFromServer's source/redirect/getVideo) is plain HTTP that reuses the
+		// warm cookie from the client's jar, so close the window NOW instead of at
+		// the end. That makes it disappear ~5s sooner — before the picker and the
+		// stream round-trips, not after. If the chosen server fails and we fall to
+		// the sniff below, that path re-launches the browser itself.
+		sfReleaseBrowserFn()
+
+		// Ask outside the spinner: a picker under a spinner is unreadable.
+		chosen, err := selectSuperFlixServer(tmdbID, servers)
+		if err == nil {
+			var result *superflix.SuperFlixStreamResult
+			var streamErr error
+			runWithSpinner("Loading stream...", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+				defer cancel()
+				result, streamErr = sfStreamFromServerFn(sfClient, ctx, tokens, chosen.IDString(), sfType, tmdbID, season, epNum)
+			})
+			if streamErr == nil {
+				util.Debug("SuperFlix stream from chosen server", "server", chosen.Name, "type", chosen.Type)
+				return result, &chosen, nil
+			}
+			// The chosen server refused: fall through to the sniff rather than
+			// dead-ending on a source the user cannot re-pick from here.
+			util.Warn("SuperFlix: the chosen server failed; falling back", "server", chosen.Name, "error", streamErr)
+		}
+	} else {
+		util.Debug("SuperFlix: server list unavailable; falling back to the embed sniff", "err", listErr)
+	}
+
+	var result *superflix.SuperFlixStreamResult
+	var streamErr error
+	runWithSpinner("Loading stream..."+sfBrowserSpinnerHint, func() {
+		// Generous timeout: the pipeline's first request may hit a Cloudflare
+		// Turnstile gate that the client solves with a headed Firefox (10–40s).
+		// Must exceed the client's solve budget or the solve gets cancelled.
+		ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+		defer cancel()
+		result, streamErr = sfSniffStreamFn(sfClient, ctx, sfType, tmdbID, season, epNum)
+	})
+	if streamErr != nil {
+		return nil, nil, streamErr
+	}
+	return result, nil, nil
+}
+
 // GetSuperFlixStreamURL gets the stream URL for SuperFlix content.
 //
 // Subtitle clearing and global-source tagging are handled by the only caller,
 // GetEpisodeStreamURL — duplicating them here produced two identical
 // "Stored anime source: SuperFlix" debug lines per playback.
 func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
-	sfClient := scraper.NewSuperFlixClient()
+	sfClient := superflix.SharedSuperFlixClient()
 
 	tmdbID := episode.URL
 	if tmdbID == "" {
@@ -705,15 +800,17 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 
 	util.Debug("Getting SuperFlix stream", "tmdbID", tmdbID, "type", sfType, "season", season, "episode", epNum)
 
-	var result *scraper.SuperFlixStreamResult
-	var streamErr error
-	runWithSpinner("Loading stream...", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		result, streamErr = sfClient.GetStreamURL(ctx, sfType, tmdbID, season, epNum)
-	})
-	if streamErr != nil {
-		return "", fmt.Errorf("failed to get SuperFlix stream: %w", streamErr)
+	preflightSuperFlixBrowser()
+
+	// Close the solver window once the URL is resolved (or failed), so it does not
+	// linger through playback. No-op on the cache fast path (no window was opened);
+	// the warm on-disk profile keeps the next episode's solve fast. Via a seam so
+	// tests can assert it fires on every resolve path.
+	defer sfReleaseBrowserFn()
+
+	result, chosen, err := superFlixStream(sfClient, tmdbID, sfType, season, epNum)
+	if err != nil {
+		return "", fmt.Errorf("failed to get SuperFlix stream: %w", describeSuperFlixErr(err))
 	}
 
 	// Store referer globally for mpv playback
@@ -727,7 +824,39 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 		util.Debug("SuperFlix cover set from stream thumbnail", "url", result.Thumb)
 	}
 
-	// Store subtitles globally for playback
+	// Pick the audio track.
+	//
+	// When the server list was reachable the user already answered "dublado or
+	// legendado" by picking a server, so asking again would be asking twice. Only on
+	// the fallback path (embed sniff, no server list) do we have to ask, and there
+	// the multi-audio HLS is the only lever we have.
+	var alang string
+	if chosen != nil {
+		alang = audioForServer(*chosen, result.DefaultAudio)
+		// Record the audio too, so a cached repeat of this title — which returns no
+		// server (chosen == nil) — replays the same audio without re-asking.
+		rememberServerAudioChoice(tmdbID, *chosen)
+		util.Debug("SuperFlix audio derived from the chosen server",
+			"server", chosen.Name, "type", chosen.Type, "alang", alang)
+	} else if opt, ok := selectSuperFlixAudio(tmdbID, result.DefaultAudio, len(result.Subtitles) > 0); ok {
+		alang = mpvAudioLanguage(opt)
+		util.Debug("SuperFlix audio chosen from the stream's tracks", "code", opt.Code, "alang", alang)
+	}
+	if alang != "" {
+		util.GlobalAudioLanguage = alang
+	}
+
+	// Load every subtitle track the stream ships, always.
+	//
+	// An earlier version withheld them whenever the dub was selected, reasoning that
+	// Portuguese subtitles over Portuguese audio merely echo the dialogue. That was
+	// a behavior change nobody asked for and it broke real viewing: subtitles that
+	// had always been there stopped appearing. Worse, the flag defaulted to "off",
+	// so a stream that exposed no audio-track list — or a user who had pinned
+	// --audio-lang — silently lost its subtitles too.
+	//
+	// Availability is not the same as display: mpv can turn a track off, but it
+	// cannot show one we never handed it. --no-subs remains the way to opt out.
 	if len(result.Subtitles) > 0 && !util.GlobalNoSubs {
 		var subInfos []util.SubtitleInfo
 		for _, sub := range result.Subtitles {

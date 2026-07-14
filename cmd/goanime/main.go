@@ -10,7 +10,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/handlers"
 	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"golang.org/x/term"
 )
@@ -20,39 +20,58 @@ func main() {
 	// Libraries like promptui (readline) and go-fuzzyfinder (tcell) put the
 	// terminal into raw mode; if the process is interrupted or exits abnormally
 	// the terminal can be left in a broken state.
+	//
+	// restoreTerminal must run as the LAST terminal write on every exit path. On
+	// Ctrl+C the huh spinner / Bubble Tea keeps rendering (re-hiding the cursor,
+	// re-setting modes) while RunCleanup tears down the browser, so resetting
+	// before that teardown lets the spinner re-corrupt the prompt. Running it after
+	// RunCleanup — immediately before os.Exit — guarantees ours is the final write.
+	restoreTerminal := func() {}
 	if fd := os.Stdin.Fd(); fd <= math.MaxInt && term.IsTerminal(int(fd)) {
 		intFd := int(fd)
 		if origState, err := term.GetState(intFd); err == nil {
-			util.RegisterCleanup(func() {
+			restoreTerminal = func() {
+				// Restore the saved raw-mode state, then emit a full set of
+				// ANSI/DEC resets so an abnormal exit can't leave the shell prompt
+				// broken — shifted by a leftover scroll region/margin, cursor
+				// hidden, raw mouse bytes, or garbled colors. See
+				// tui.TerminalResetSequence.
 				_ = term.Restore(intFd, origState)
-				// Ensure the terminal is in a clean state for the shell:
-				// - \033[0m  resets all ANSI attributes (bold, color, etc.)
-				// - \033[?25h re-shows the cursor (spinners may hide it)
-				// - \r\n moves cursor to column 0 on a fresh line
-				fmt.Fprint(os.Stdout, "\033[0m\033[?25h\r\n")
-			})
+				tui.RestoreTerminalStdout()
+				// Hand the shell a blank screen: leftover TUI frames (spinner,
+				// fuzzyfinder, progress bars) otherwise stay glued around the
+				// next prompt. Scrolls the old content into scrollback rather
+				// than erasing it, so final messages remain reachable.
+				tui.ClearViewportStdout()
+			}
 		}
 	}
 
-	// Catch panics and log them instead of crashing silently
+	// Catch panics and log them instead of crashing silently. Restore the terminal
+	// first so the crash message renders cleanly.
 	defer func() {
 		if r := recover(); r != nil {
+			restoreTerminal()
 			stack := debug.Stack()
 			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
 			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
 		}
 	}()
 
-	// Setup signal handling for graceful shutdown
+	// Setup signal handling for graceful shutdown. Restore the terminal LAST, after
+	// RunCleanup, so the spinner/browser teardown can't re-corrupt it afterward.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
 		util.RunCleanup()
-		os.Exit(0)
+		restoreTerminal()
+		os.Exit(130)
 	}()
 
-	// Ensure cleanup runs on normal exit
+	// On normal return: RunCleanup runs first (registered later → LIFO), then
+	// restoreTerminal runs last (registered earlier → LIFO).
+	defer restoreTerminal()
 	defer util.RunCleanup()
 
 	// Start total execution timer
@@ -65,11 +84,11 @@ func main() {
 	// Pre-warm mpv binary lookup so StartVideo doesn't block on filesystem search
 	player.PreWarmMPVPath()
 
-	// Pre-initialize HTTP clients and scraper manager in background so the
-	// first search doesn't pay the Chrome TLS + scraper setup cost
+	// Pre-initialize HTTP clients in background so the first search doesn't pay
+	// the Chrome TLS setup cost. The per-source scraper adapters are cheap, lazy
+	// structs the Model B providers build on first use — no pre-warm needed.
 	util.PreWarmClients()
 	util.PreWarmConnections()
-	scraper.PreWarmScraperManager()
 
 	animeName, err := util.FlagParser()
 	if err != nil {
@@ -90,9 +109,10 @@ func main() {
 		}
 		// Check if error is movie download request (FlixHQ/SFlix)
 		if err == util.ErrMovieDownloadRequested {
-			if movieDownloadErr := handlers.HandleMovieDownloadRequest(); movieDownloadErr != nil {
-				util.Errorf("%v", util.ErrorHandler(movieDownloadErr))
-			}
+			// Movie/TV download is currently a permanent stub that always
+			// returns an explanatory error (scrapers removed) — log it
+			// unconditionally.
+			util.Errorf("%v", util.ErrorHandler(handlers.HandleMovieDownloadRequest()))
 			return
 		}
 		// Check if error is upscale request

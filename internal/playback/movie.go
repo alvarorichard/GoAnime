@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -18,7 +19,10 @@ import (
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
-func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	// Prepare the mpv path while metadata/stream work is in progress.
+	player.PreWarmMPVPath()
+
 	for {
 		animeMutex := sync.Mutex{}
 		isPaused := false
@@ -41,7 +45,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 		// Use static log instead of spinner while fetching video URL
 		// to avoid terminal UI contention if a quality picker opens.
 		util.Infof("Loading video stream...")
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(&episodes[0], anime)
+		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(ctx, &episodes[0], anime)
 
 		if videoErr != nil {
 			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(videoErr))
@@ -108,7 +112,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				if seriesErr := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); seriesErr != nil {
+				if seriesErr := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); seriesErr != nil {
 					if errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
 						return seriesErr
 					}
@@ -150,7 +154,7 @@ func HandleMovie(anime *models.Anime, episodes []models.Episode, discordEnabled 
 			if series {
 				// If new anime is a series, switch to series handler
 				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
-				if err := HandleSeries(anime, episodes, totalEpisodes, discordEnabled); err != nil {
+				if err := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
 					}

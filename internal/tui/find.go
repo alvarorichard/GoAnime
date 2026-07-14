@@ -31,7 +31,14 @@ func ResetTerminal() {
 	//   \033[?1l  — reset DECCKM (normal cursor keys)
 	//   \033>     — numeric keypad mode
 	//   \033[?25h — show cursor
-	fmt.Fprint(os.Stdout, "\033[?1l\033>\033[?25h")
+	//
+	// The leading \r + \033[2K returns to column 0 and ERASES the current
+	// line. Whatever the prior TUI left mid-line (a stale spinner frame, a
+	// prompt fragment) is wiped so the next fmt.Print* starts on a clean
+	// column-0 line instead of glued to leftovers. Deliberately NOT "\r\n":
+	// ResetTerminal runs after every finder/spinner, and an unconditional
+	// newline stacks a blank line per call, riddling the session with gaps.
+	fmt.Fprint(os.Stdout, "\r\033[2K\033[?1l\033>\033[?25h")
 
 	// Drain any stale bytes from stdin (platform-specific implementation). A
 	// short raw/no-echo window also catches late terminal capability responses

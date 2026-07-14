@@ -22,15 +22,16 @@ import (
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
-	"golang.org/x/term"
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/lrstanley/go-ytdlp"
+	"golang.org/x/term"
 )
 
 // Pre-compiled regexes for download quality parsing
@@ -134,7 +135,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 				util.Logger.Warn("Error closing response body", "error", cErr)
 			}
 			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
-				return scraper.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
+				return netx.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
 			}
 			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
 			staleRetries++
@@ -255,8 +256,7 @@ func isBloggerProxyURL(u string) bool {
 // that serve HLS playlists without a .m3u8 extension.
 func LooksLikeHLS(u string) bool {
 	lower := strings.ToLower(u)
-	return strings.Contains(lower, ".m3u8") ||
-		strings.Contains(lower, "m3u8") ||
+	return strings.Contains(lower, "m3u8") ||
 		strings.Contains(lower, "/hls/")
 }
 
@@ -1065,7 +1065,7 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return scraper.NewDownloadExpiredError("Download", "http", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+			return netx.NewDownloadExpiredError("Download", "http", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
 		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
@@ -1227,7 +1227,7 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 		}
 
 		util.Debugf("getBestQualityURL: using source-aware resolver for %s (episode %s)", source, epNumber)
-		url, err := api.GetEpisodeStreamURL(ep, anime, util.GlobalQuality)
+		url, err := providers.FetchStreamURL(context.Background(), ep, anime, util.GlobalQuality)
 		if err != nil {
 			return "", fmt.Errorf("failed to get stream URL from %s for episode %s: %w", source, epNumber, err)
 		}
@@ -1281,16 +1281,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 				time.Sleep(delay)
 			}
 
-			if url, err := api.GetEpisodeStreamURLEnhanced(ep, allAnime, util.GlobalQuality); err == nil && url != "" {
+			if url, err := providers.FetchStreamURL(context.Background(), ep, allAnime, util.GlobalQuality); err == nil && url != "" {
 				return url, nil
 			} else if err != nil {
-				util.Debugf("GetEpisodeStreamURLEnhanced failed for episode %s (attempt %d): %v", epNumber, attempt+1, err)
-			}
-
-			if url, err := api.GetEpisodeStreamURL(ep, allAnime, util.GlobalQuality); err == nil && url != "" {
-				return url, nil
-			} else if err != nil {
-				util.Debugf("GetEpisodeStreamURL failed for episode %s (attempt %d): %v", epNumber, attempt+1, err)
+				util.Debugf("AllAnime stream resolve failed for episode %s (attempt %d): %v", epNumber, attempt+1, err)
 			}
 		}
 

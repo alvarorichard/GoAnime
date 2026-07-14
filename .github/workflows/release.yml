@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.26.2'
+  GO_VERSION: '1.26.5'
   BINARY_NAME: goanime
 
 jobs:
@@ -40,10 +40,9 @@ jobs:
           go mod download
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.11.4
-          args: --timeout=15m
+          version: latest
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./... || true

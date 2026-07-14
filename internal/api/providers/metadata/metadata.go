@@ -19,8 +19,22 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// setAniListHeaders applies the headers AniList expects from an API client.
+//
+// The User-Agent must NOT look like a browser: AniList answers browser UAs with
+// an HTTP 403 ("The AniList API has been temporarily disabled due to severe
+// stability issues") while serving plain API clients normally. This only holds if
+// the request also goes through Enricher.aniListClient — the shared surf client
+// would overwrite the UA with Chrome's. See issue #184.
+func setAniListHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", netx.APIUserAgent)
+}
 
 // allowedAPIHosts lists the hosts that metadata HTTP requests may target.
 // Any dynamically-built URL is validated against this set before a request
@@ -50,23 +64,30 @@ type HTTPClient interface {
 
 // Enricher populates anime metadata from external APIs.
 type Enricher struct {
-	client  HTTPClient
-	timeout time.Duration
+	client HTTPClient
+	// aniListClient is used ONLY for AniList. It must stay a plain client: the
+	// shared client impersonates Chrome and rewrites the User-Agent to a browser
+	// one, which AniList answers with a 403 (see setAniListHeaders, issue #184).
+	aniListClient HTTPClient
+	timeout       time.Duration
 }
 
 // NewEnricher creates a metadata Enricher with the default HTTP client.
 func NewEnricher() *Enricher {
 	return &Enricher{
-		client:  util.GetSharedClient(),
-		timeout: 10 * time.Second,
+		client:        util.GetSharedClient(),
+		aniListClient: &http.Client{Timeout: 20 * time.Second},
+		timeout:       10 * time.Second,
 	}
 }
 
 // NewEnricherWithClient creates an Enricher with a custom HTTP client (for testing).
+// The injected client serves AniList too, so tests keep full control of every call.
 func NewEnricherWithClient(client HTTPClient) *Enricher {
 	return &Enricher{
-		client:  client,
-		timeout: 10 * time.Second,
+		client:        client,
+		aniListClient: client,
+		timeout:       10 * time.Second,
 	}
 }
 
@@ -164,10 +185,9 @@ func (e *Enricher) EnrichFromAniList(ctx context.Context, animeName string) (*An
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	setAniListHeaders(req)
 
-	resp, err := e.client.Do(req)
+	resp, err := e.aniListClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("AniList request failed: %w", err)
 	}
@@ -242,10 +262,9 @@ func (e *Enricher) EnrichFromAniListByID(ctx context.Context, anilistID int) (*A
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	setAniListHeaders(req)
 
-	resp, err := e.client.Do(req)
+	resp, err := e.aniListClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("AniList request failed: %w", err)
 	}
@@ -703,10 +722,11 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 		return nil
 	}
 
-	// Step 1: Search SuperFlix. Use the canonical .best host directly: legacy
-	// hosts (.rest, .online) 301-redirect here and Go's http.Client downgrades
-	// POSTs to GETs across the redirect, which breaks the player API.
-	searchURL := "https://superflixapi.best/pesquisar?s=" + url.QueryEscape(cleanName)
+	// Step 1: Search SuperFlix. Use the canonical .pro host directly: legacy
+	// hosts (.rest, .online, .best, .fit, .cyou, .lifestyle) 301-redirect here
+	// and Go's http.Client downgrades POSTs to GETs across the redirect, which
+	// breaks the player API.
+	searchURL := "https://superflixapi.pro/pesquisar?s=" + url.QueryEscape(cleanName)
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
 		return nil
@@ -742,13 +762,13 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	// Step 2: Fetch episode data from player page
 	// Must include Referer and Sec-Fetch-* headers or SuperFlix returns
 	// "ACESSO RESTRITO" instead of the actual player page with ALL_EPISODES.
-	epURL := "https://superflixapi.best/serie/" + tmdbID
+	epURL := "https://superflixapi.pro/serie/" + tmdbID
 	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, nil)
 	if err != nil {
 		return nil
 	}
 	req2.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req2.Header.Set("Referer", "https://superflixapi.best/")
+	req2.Header.Set("Referer", "https://superflixapi.pro/")
 	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req2.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
 	req2.Header.Set("Sec-Fetch-Dest", "iframe")

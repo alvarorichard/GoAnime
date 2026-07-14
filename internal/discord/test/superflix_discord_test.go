@@ -150,7 +150,7 @@ func TestDiscordRPC_SuperFlixTV_WithCover(t *testing.T) {
 	animeMutex := &sync.Mutex{}
 	updateFreq := 5 * time.Second
 	episodeDuration := 54*time.Minute + 16*time.Second
-	socketPath := "/tmp/mpv_test"
+	socketPath := "mpv_test.sock"
 
 	updater := discord.NewRichPresenceUpdater(
 		anime, &isPaused, animeMutex, updateFreq,
@@ -195,7 +195,7 @@ func TestDiscordRPC_SuperFlixMovie_WithCover(t *testing.T) {
 	animeMutex := &sync.Mutex{}
 	updateFreq := 5 * time.Second
 	episodeDuration := 2*time.Hour + 28*time.Minute
-	socketPath := "/tmp/mpv_test"
+	socketPath := "mpv_test.sock"
 
 	updater := discord.NewRichPresenceUpdater(
 		anime, &isPaused, animeMutex, updateFreq,
@@ -235,7 +235,7 @@ func TestDiscordRPC_SuperFlixAnime_WithCover(t *testing.T) {
 
 	updater := discord.NewRichPresenceUpdater(
 		anime, &isPaused, animeMutex, 5*time.Second,
-		24*time.Minute, "/tmp/mpv_test", mockMPVFullState,
+		24*time.Minute, "mpv_test.sock", mockMPVFullState,
 	)
 
 	assert.NotNil(t, updater)
@@ -267,7 +267,7 @@ func TestDiscordRPC_SuperFlix_NoCover_EmptyFallback(t *testing.T) {
 
 	updater := discord.NewRichPresenceUpdater(
 		anime, &isPaused, animeMutex, 5*time.Second,
-		24*time.Minute, "/tmp/mpv_test", mockMPVFullState,
+		24*time.Minute, "mpv_test.sock", mockMPVFullState,
 	)
 
 	// With no image, the inline normalization should leave it empty

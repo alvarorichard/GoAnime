@@ -12,11 +12,11 @@ import (
 )
 
 func setProcessGroup(cmd *exec.Cmd) {
-	// mensage debug
-	if util.IsDebug {
-		fmt.Println("Setting process group for command:", cmd.String())
-	}
-
+	// Windows has no process-group equivalent to Setpgid; this only logs
+	// the resolved mpv command for troubleshooting. Route through the file
+	// logger (not stdout) so it doesn't spill the full command line —
+	// stream URL included — into the terminal during playback.
+	util.Debugf("Setting process group for command: %s", cmd.String())
 }
 
 // findMPVPath searches for mpv executable in PATH and common installation directories on Windows.

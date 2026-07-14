@@ -9,15 +9,13 @@ import (
 )
 
 func TestSourceHealthLive(t *testing.T) {
-	manager := NewScraperManager()
-
-	for _, source := range manager.AvailableSources() {
+	for _, source := range healthTargets() {
 		source := source
-		t.Run(manager.getScraperDisplayName(source), func(t *testing.T) {
+		t.Run(scraperDisplayName(source), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 
-			result := manager.CheckSourceHealth(ctx, source, DefaultHealthCheckQuery(source))
+			result := CheckSourceHealth(ctx, source, DefaultHealthCheckQuery(source))
 			switch result.Status {
 			case SourceHealthHealthy:
 				t.Logf("%s", result.Description)

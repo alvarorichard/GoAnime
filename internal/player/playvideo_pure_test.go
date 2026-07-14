@@ -643,4 +643,3 @@ func TestInitDiscordPresence_SymbolPinned(t *testing.T) {
 	t.Parallel()
 	assert.NotNil(t, initDiscordPresence)
 }
-

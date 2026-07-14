@@ -48,6 +48,13 @@ func TestLooksLikeHLS(t *testing.T) {
 			url:  "https://proxy.example.com/fetch?url=master.m3u8",
 			want: true,
 		},
+		{
+			// The old inline check in playVideo was case-sensitive and missed
+			// this; LooksLikeHLS lowercases, so playback now detects it as HLS.
+			name: "uppercase M3U8 extension",
+			url:  "https://cdn.example.com/video/MASTER.M3U8",
+			want: true,
+		},
 
 		// /hls/ path segment — the bug scenario
 		{

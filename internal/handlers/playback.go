@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -20,8 +23,24 @@ func HandlePlaybackMode(animeName string) {
 	timer := util.StartTimer("PlaybackMode:Total")
 	defer timer.Stop()
 
+	// Root context for the playback session. Today it is Background; once the
+	// dispatch path honors ctx end to end, this becomes the single place to
+	// hook signal-aware cancellation (signal.NotifyContext).
+	ctx := context.Background()
+
 	// Initialize the beautiful logger
 	util.InitLogger()
+
+	// Confirm the manual kill-switch (S1) visibly: if the user disabled any
+	// source via GOANIME_DISABLED_SOURCES, say so once at startup so a turned-
+	// off source is never a silent surprise (R5).
+	if disabled := source.DisabledSources(); len(disabled) > 0 {
+		names := make([]string, len(disabled))
+		for i, k := range disabled {
+			names[i] = string(k)
+		}
+		util.Warnf("Sources disabled by config (GOANIME_DISABLED_SOURCES): %s", strings.Join(names, ", "))
+	}
 
 	// Pre-warm connections are now started in main() so they run while the
 	// user is still typing the anime name. This call is a noop (sync.Once).
@@ -59,9 +78,11 @@ func HandlePlaybackMode(animeName string) {
 		var episodes []models.Episode
 		var epErr error
 
-		needsInteractiveEpisodes := anime.Source == "SFlix" ||
-			anime.MediaType == models.MediaTypeMovie ||
-			anime.MediaType == models.MediaTypeTV
+		// SuperFlix must be matched by source, not just media type: its catalog
+		// tags western animation as anime, which previously slipped into the
+		// parallel branch and ran the details spinner concurrently with the
+		// season-selection fuzzyfinder (spinner frames ate the prompt text).
+		needsInteractiveEpisodes := anime.HasInteractiveEpisodeFlow()
 
 		if needsInteractiveEpisodes {
 			// Sequential: details first (spinner), then episodes (may show fuzzyfinder)
@@ -132,9 +153,9 @@ func HandlePlaybackMode(animeName string) {
 
 		playbackTimer := util.StartTimer("Playback:Handle")
 		if series {
-			playbackErr = playback.HandleSeries(anime, episodes, totalEpisodes, discordManager.IsEnabled())
+			playbackErr = playback.HandleSeries(ctx, anime, episodes, totalEpisodes, discordManager.IsEnabled())
 		} else {
-			playbackErr = playback.HandleMovie(anime, episodes, discordManager.IsEnabled())
+			playbackErr = playback.HandleMovie(ctx, anime, episodes, discordManager.IsEnabled())
 		}
 		playbackTimer.Stop()
 

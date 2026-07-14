@@ -27,40 +27,26 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 	}
 }
 
-func TestAvailableSources_DeterministicOrder(t *testing.T) {
+func TestHealthTargets_DeterministicOrder(t *testing.T) {
 	t.Parallel()
-	sm := NewScraperManager()
-	sources := sm.AvailableSources()
-	require.NotEmpty(t, sources)
-	for i := 1; i < len(sources); i++ {
-		assert.LessOrEqual(t, sources[i-1], sources[i], "must be sorted asc")
+	targets := healthTargets()
+	require.NotEmpty(t, targets)
+	for i := 1; i < len(targets); i++ {
+		assert.LessOrEqual(t, targets[i-1], targets[i], "must be sorted asc")
 	}
 }
 
-func TestCheckSourceHealth_UnregisteredFails(t *testing.T) {
+func TestCheckSourceHealth_NilScraperFails(t *testing.T) {
 	t.Parallel()
-	sm := &ScraperManager{scrapers: map[ScraperType]UnifiedScraper{}}
-	res := sm.CheckSourceHealth(context.Background(), AllAnimeType, "naruto")
+	res := checkSourceHealthWith(context.Background(), AllAnimeType, nil, "naruto")
 	assert.Equal(t, SourceHealthFailed, res.Status)
 	assert.NotNil(t, res.Diagnostic)
 }
 
-func TestCheckSourceHealth_CircuitOpenSkips(t *testing.T) {
-	t.Parallel()
-	sm := &ScraperManager{scrapers: map[ScraperType]UnifiedScraper{AllAnimeType: nil}}
-	diag := &SourceDiagnostic{Kind: DiagnosticSourceUnavailable}
-	for i := 0; i < defaultSourceFailureThreshold; i++ {
-		sm.recordSourceFailure(AllAnimeType, diag)
-	}
-	res := sm.CheckSourceHealth(context.Background(), AllAnimeType, "naruto")
-	assert.Equal(t, SourceHealthSkipped, res.Status)
-}
-
 func TestCheckAllSourcesHealth_ReturnsOnePerSource(t *testing.T) {
 	t.Parallel()
-	sm := NewScraperManager()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	results := sm.CheckAllSourcesHealth(ctx)
-	assert.Equal(t, len(sm.AvailableSources()), len(results))
+	results := CheckAllSourcesHealth(ctx)
+	assert.Equal(t, len(healthTargets()), len(results))
 }

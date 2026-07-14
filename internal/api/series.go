@@ -27,7 +27,7 @@ func IsSeries(animeURL string) (bool, int, error) {
 // IsSeriesEnhanced checks if the given anime corresponds to a series using enhanced API
 func IsSeriesEnhanced(anime *models.Anime) (bool, int, error) {
 	// Use enhanced episode fetching
-	episodes, err := GetAnimeEpisodesEnhanced(anime)
+	episodes, err := fetchEpisodesViaRegistry(anime)
 	if err != nil {
 		return false, 0, err
 	}

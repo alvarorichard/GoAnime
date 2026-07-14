@@ -14,6 +14,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/pkg/errors"
@@ -21,6 +22,10 @@ import (
 
 // Common HTTP client instance - reuse the shared singleton for connection pooling
 var httpClient = util.GetSharedClient()
+
+// jikanBaseURL is the Jikan (MyAnimeList unofficial) API root. It is a var so
+// tests can point it at a local httptest server.
+var jikanBaseURL = "https://api.jikan.moe/v4"
 
 // GetEpisodeData fetches episode data using multiple providers with fallback support.
 // It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.
@@ -32,7 +37,7 @@ func GetEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
 // GetMovieData fetches movie/OVA data for a given anime ID from Jikan API
 func GetMovieData(animeID int, anime *models.Anime) error {
 
-	url := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+	url := fmt.Sprintf("%s/anime/%d", jikanBaseURL, animeID)
 
 	response, err := makeGetRequest(url, nil)
 	if err != nil {
@@ -91,8 +96,7 @@ func FetchAnimeDetails(anime *models.Anime) error {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			fmt.Printf("error get details")
-
+			util.Debugf("Failed to close response body: %v", err)
 		}
 	}(response.Body)
 
@@ -127,7 +131,10 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 		}
 		if selectedAnime != nil {
 			if err := enrichAnimeData(selectedAnime); err != nil {
-				util.Errorf("Error enriching anime data: %v", err)
+				// Best-effort only: enrichment adds cover art / MAL id. Playback,
+				// episode listing and download all work without it, so this must
+				// not read as a failure (issue #184).
+				util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
 			}
 			util.Debugf("[PERF] SearchAnime completed for %s in %v", animeName, time.Since(start))
 			return selectedAnime, nil
@@ -148,7 +155,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 
 // Unified function to fetch anime data from Jikan API
 func FetchAnimeData(animeID int, episodeNo int, anime *models.Anime) error {
-	endpoint := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", animeID)
+	endpoint := fmt.Sprintf("%s/anime/%d", jikanBaseURL, animeID)
 	if episodeNo > 0 {
 		endpoint = fmt.Sprintf("%s/episodes/%d", endpoint, episodeNo)
 	}
@@ -207,8 +214,12 @@ func getBoolValue(data map[string]any, field string) bool {
 
 // Enrich anime data from AniList
 func enrichAnimeData(anime *models.Anime) error {
-	// Use TMDB enrichment for FlixHQ movies/TV shows
-	if anime.Source == "SFlix" || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
+	// Use TMDB/OMDb enrichment for movie/TV catalogs. SuperFlix is included by
+	// SOURCE, not just media type: its catalog tags western animation (e.g.
+	// "Os Simpsons") as anime, which would otherwise fall through to AniList —
+	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
+	// challenge for nothing. Mirrors appflow.fetchAnimeDetailsCore.
+	if anime.HasInteractiveEpisodeFlow() {
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
 		return movie.EnrichMedia(anime)
 	}
@@ -328,27 +339,42 @@ func httpGetWithUA(url string) (*http.Response, error) {
 	return util.GetSharedClient().Do(req) // #nosec G704
 }
 
-func httpPost(url string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "GoAnime/1.0")
-	return util.GetSharedClient().Do(req) // #nosec G704
-}
+// NOTE: the old httpPost/httpPostFast helpers (backed by the shared surf clients)
+// were deleted. They only ever served AniList, and routing AniList through an
+// impersonating client is precisely the bug in issue #184 — surf rewrites the
+// User-Agent to Chrome's, and AniList 403s browser UAs. Use aniListPost instead.
 
-// httpPostFast uses the fast client for quick API requests
-func httpPostFast(url string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
+// aniListClient is a plain net/http client reserved for AniList.
+//
+// It deliberately bypasses util.GetSharedClient()/GetFastClient(): those are
+// backed by surf with Chrome impersonation, which REWRITES the User-Agent to
+// Chrome's on every request. That forced browser UA is exactly what AniList
+// rejects (see AniListUserAgent), so no header set by the caller can rescue the
+// shared clients — the transport itself has to be a plain one.
+var aniListClient = &http.Client{Timeout: 20 * time.Second}
+
+// aniListPost sends a GraphQL request to AniList through the plain client with a
+// non-browser User-Agent. The returned response body is already read and closed;
+// callers use the returned bytes and may still read StatusCode/Status.
+func aniListPost(endpoint string, jsonData []byte) (*http.Response, []byte, error) {
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(jsonData)))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "GoAnime/1.0")
-	return util.GetFastClient().Do(req) // #nosec G704
+	req.Header.Set("User-Agent", netx.APIUserAgent)
+
+	resp, err := aniListClient.Do(req) // #nosec G704
+	if err != nil {
+		return nil, nil, err
+	}
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	safeClose(resp.Body, "AniList response body")
+	if rerr != nil {
+		return resp, nil, rerr
+	}
+	return resp, body, nil
 }
 
 func makeGetRequest(url string, headers map[string]string) (map[string]any, error) {

@@ -14,9 +14,20 @@ import (
 // DiscordClientID is the Discord application client ID
 const DiscordClientID = "1302721937717334128"
 
+// rpcClient abstracts the discord RPC client used by this package so tests can
+// substitute a stub via newRPCClient.
+type rpcClient interface {
+	Login() error
+	Logout() error
+	SetActivity(client.Activity) error
+}
+
+// newRPCClient builds a Discord RPC client. Tests overwrite this var.
+var newRPCClient = func(id string) rpcClient { return client.NewClient(id) }
+
 // Global state for smart updates
 var (
-	discordClient       *client.Client
+	discordClient       rpcClient
 	isLoggedIn          bool
 	lastPausedState     bool
 	lastEpisodeNumber   string
@@ -75,7 +86,7 @@ func LoginClient() error {
 		return nil // Already logged in
 	}
 
-	discordClient = client.NewClient(DiscordClientID)
+	discordClient = newRPCClient(DiscordClientID)
 
 	// Direct login - the library has its own 2 second timeout
 	if err := discordClient.Login(); err != nil {

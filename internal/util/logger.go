@@ -153,8 +153,11 @@ func InitLogger() {
 		logFile = initFileLogger()
 		if logFile != nil {
 			RegisterCleanup(CloseLogFile)
-			showDebugBanner()
+			// Reset first so the banner starts on its own fresh line rather
+			// than risking a glue-on with whatever column the shell's
+			// prompt left the cursor at when this process started.
 			tui.ResetTerminal()
+			showDebugBanner()
 		} else {
 			Logger.Info("Debug mode enabled (file logging unavailable — logs will appear in console)")
 			// Fallback: if we can't write to a file, allow debug on console

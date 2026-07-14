@@ -1,5 +1,5 @@
 pkgname=goanime
-pkgver=1.8.5
+pkgver=1.8.6
 pkgrel=1
 pkgdesc="A command-line tool to browse, play, and download anime."
 arch=('x86_64')
