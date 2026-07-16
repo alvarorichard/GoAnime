@@ -3,6 +3,7 @@ package playback
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,13 +62,17 @@ func (nav *AllAnimeNavigator) GetNextEpisode(currentEpisode string) (string, err
 		return "", fmt.Errorf("invalid current episode number: %w", err)
 	}
 
+	// Validate against the actual episode list instead of assuming a
+	// contiguous 1..N numbering: lists starting at "0" (or with gaps) made
+	// the old len()-based check accept phantom episodes past the last one.
 	next := current + 1
-	if next > len(nav.episodes) {
+	target := strconv.Itoa(next)
+	if !slices.Contains(nav.episodes, target) {
 		return "", fmt.Errorf("no next episode available (current: %d, total: %d)", current, len(nav.episodes))
 	}
 
 	util.Debugf("Navigating to next episode from=%d to=%d", current, next)
-	return strconv.Itoa(next), nil
+	return target, nil
 }
 
 // GetPreviousEpisode returns the previous episode before the current one
@@ -77,13 +82,16 @@ func (nav *AllAnimeNavigator) GetPreviousEpisode(currentEpisode string) (string,
 		return "", fmt.Errorf("invalid current episode number: %w", err)
 	}
 
+	// Same list-membership check as GetNextEpisode: allows "0" when the
+	// source really has an episode 0 and rejects anything not in the list.
 	prev := current - 1
-	if prev < 1 {
+	target := strconv.Itoa(prev)
+	if !slices.Contains(nav.episodes, target) {
 		return "", fmt.Errorf("no previous episode available (current: %d)", current)
 	}
 
 	util.Debugf("Navigating to previous episode from=%d to=%d", current, prev)
-	return strconv.Itoa(prev), nil
+	return target, nil
 }
 
 // GetTotalEpisodes returns the total number of episodes
@@ -94,30 +102,51 @@ func (nav *AllAnimeNavigator) GetTotalEpisodes() int {
 // ListAllEpisodes returns all available episode numbers
 func (nav *AllAnimeNavigator) ListAllEpisodes() []string {
 	result := make([]string, len(nav.episodes))
-	for i := range nav.episodes {
-		result[i] = strconv.Itoa(i + 1)
-	}
+	copy(result, nav.episodes)
 	return result
 }
 
 // Helper function to check if anime is from AllAnime source
 func isAllAnimeSource(anime *models.Anime) bool {
-	if anime.Source == "AllAnime" {
-		return true
+	// An explicit source is authoritative. The length heuristic below used to
+	// run even when Source was set, misrouting SuperFlix/SFlix (short numeric
+	// TMDB IDs as URLs) into AllAnime navigation.
+	if anime.Source != "" {
+		return anime.Source == "AllAnime"
 	}
 
 	if strings.Contains(anime.URL, "allanime") {
 		return true
 	}
 
-	// Check if URL is a short ID (AllAnime typically uses short IDs)
-	if len(anime.URL) < 30 &&
-		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") &&
-		!strings.Contains(anime.URL, "http") {
-		return true
-	}
+	// AllAnime IDs are short opaque alphanumeric tokens containing at least
+	// one letter (purely numeric IDs belong to other sources).
+	return anime.URL != "" &&
+		len(anime.URL) < 30 &&
+		isAlphanumericID(anime.URL) &&
+		strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+}
 
-	return false
+// isAlphanumericID reports whether s is non-empty and contains only ASCII
+// letters and digits.
+func isAlphanumericID(s string) bool {
+	for _, r := range s {
+		isAlnum := ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9')
+		if !isAlnum {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// allAnimePathWords are URL path segments that precede the anime ID in full
+// AllAnime URLs and must never be mistaken for the ID itself.
+var allAnimePathWords = map[string]bool{
+	"anime":   true,
+	"bangumi": true,
+	"watch":   true,
+	"serie":   true,
+	"series":  true,
 }
 
 // Helper function to extract AllAnime ID from URL
@@ -127,12 +156,27 @@ func extractAllAnimeID(url string) string {
 		return url
 	}
 
-	// Extract ID from full AllAnime URLs if needed
+	// Extract the ID from full AllAnime URLs. The old scan returned the first
+	// "long alphanumeric" segment, which for any https URL was the scheme
+	// ("https:") — poisoning the navigator cache key and every episode fetch.
 	if strings.Contains(url, "allanime") {
-		parts := strings.SplitSeq(url, "/")
-		for part := range parts {
-			if len(part) > 5 && len(part) < 30 &&
-				strings.ContainsAny(part, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") {
+		parts := strings.Split(url, "/")
+
+		// Prefer the segment right after a known path word (/anime/<id>/...)
+		for i, part := range parts {
+			if allAnimePathWords[part] && i+1 < len(parts) &&
+				len(parts[i+1]) < 30 && isAlphanumericID(parts[i+1]) {
+				return parts[i+1]
+			}
+		}
+
+		// Fallback: first plausible ID segment, skipping scheme and domain
+		for _, part := range parts {
+			if part == "" || strings.HasSuffix(part, ":") ||
+				strings.Contains(part, ".") || allAnimePathWords[part] {
+				continue
+			}
+			if len(part) > 5 && len(part) < 30 && isAlphanumericID(part) {
 				return part
 			}
 		}

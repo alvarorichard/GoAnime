@@ -557,7 +557,9 @@ func TestPlayNextEpisode_LastEpisode_Noop(t *testing.T) {
 	episodes := []models.Episode{{Number: "1", Num: 1}}
 	stop := make(chan struct{})
 	err := playNextEpisode(1, episodes, 0, 0, nil, stop, "/tmp/missing.sock")
-	assert.NoError(t, err)
+	// Boundary must keep the player menu open, not return nil (which unwound
+	// the menu loop while mpv kept playing).
+	assert.ErrorIs(t, err, errStayInPlayerMenu)
 }
 
 func TestPlayPreviousEpisode_FirstEpisode_Noop(t *testing.T) {
@@ -565,7 +567,7 @@ func TestPlayPreviousEpisode_FirstEpisode_Noop(t *testing.T) {
 	episodes := []models.Episode{{Number: "1", Num: 1}}
 	stop := make(chan struct{})
 	err := playPreviousEpisode(-1, episodes, 0, 0, nil, stop, "/tmp/missing.sock")
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, errStayInPlayerMenu)
 }
 
 func TestSelectEpisode_FuzzyFinderUnavailable(t *testing.T) {

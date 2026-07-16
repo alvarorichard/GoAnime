@@ -73,14 +73,18 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 
 		// Check if user requested to go back to episode selection (from server selection)
 		if errors.Is(err, player.ErrBackToEpisodeSelection) {
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
-			if err != nil {
+			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
+			if selErr != nil {
 				// If user selected back at episode selection, go back to anime selection
-				if errors.Is(err, player.ErrBackRequested) {
+				if errors.Is(selErr, player.ErrBackRequested) {
 					return player.ErrBackToAnimeSelection
 				}
-				log.Printf("Error selecting episode: %v", err)
+				// Keep the previous selection: committing the zero values of a
+				// failed selection made the loop replay a fabricated empty episode.
+				log.Printf("Error selecting episode: %v", selErr)
+				continue
 			}
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 			continue
 		}
 
@@ -113,12 +117,15 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				break
 			}
 
-			// Select initial episode for the new anime
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
-			if err != nil {
-				log.Printf("Error selecting episode for new anime: %v", err)
-				continue
+			// Select initial episode for the new anime. On failure there is no
+			// valid selection to fall back to (the old one belongs to the previous
+			// anime), so bounce to anime selection instead of committing zeros.
+			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
+			if selErr != nil {
+				log.Printf("Error selecting episode for new anime: %v", selErr)
+				return player.ErrBackToAnimeSelection
 			}
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 
 			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
 			continue // Skip normal navigation and start playing the new anime
@@ -164,12 +171,15 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				break
 			}
 
-			// Select initial episode for the new anime
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
-			if err != nil {
-				log.Printf("Error selecting episode for new anime: %v", err)
-				continue
+			// Select initial episode for the new anime. On failure there is no
+			// valid selection to fall back to (the old one belongs to the previous
+			// anime), so bounce to anime selection instead of committing zeros.
+			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
+			if selErr != nil {
+				log.Printf("Error selecting episode for new anime: %v", selErr)
+				return player.ErrBackToAnimeSelection
 			}
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 
 			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
 			continue // Skip normal navigation and start playing the new anime
@@ -177,15 +187,16 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 
 		// Handle episode selection
 		if userInput == "e" {
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, err = SelectInitialEpisode(episodes)
-			if err != nil {
-				// If user selected back, just continue without changing episode
-				if errors.Is(err, player.ErrBackRequested) {
-					continue
+			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
+			if selErr != nil {
+				// Back or failure: keep the current (valid) selection instead
+				// of committing the zero values of a failed selection.
+				if !errors.Is(selErr, player.ErrBackRequested) {
+					log.Printf("Error selecting episode: %v", selErr)
 				}
-				log.Printf("Error selecting episode: %v", err)
 				continue
 			}
+			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 			continue
 		}
 

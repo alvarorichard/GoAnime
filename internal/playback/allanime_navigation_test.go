@@ -20,6 +20,13 @@ func TestIsAllAnimeSource(t *testing.T) {
 		{"short id", &models.Anime{URL: "hHjXnUTda"}, true},
 		{"http url unrelated", &models.Anime{URL: "https://animefire.io/x"}, false},
 		{"empty", &models.Anime{}, false},
+		// Regression: explicit non-AllAnime source must win even when the URL
+		// is a short ID — SuperFlix/SFlix use numeric TMDB IDs as URLs and
+		// were misrouted into AllAnime navigation.
+		{"superflix numeric id", &models.Anime{Source: "SuperFlix", URL: "1234"}, false},
+		{"sflix short id", &models.Anime{Source: "SFlix", URL: "abc123"}, false},
+		{"other source with allanime-like id", &models.Anime{Source: "AnimeFire", URL: "hHjXnUTda"}, false},
+		{"numeric-only id without source", &models.Anime{URL: "12345"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,7 +44,10 @@ func TestExtractAllAnimeID(t *testing.T) {
 		want string
 	}{
 		{"short id", "hHjXnUTda", "hHjXnUTda"},
-		{"allanime url returns first long alphanumeric segment", "https://allanime.to/anime/abc123XYZ/title", "https:"},
+		// Regression: the old scan returned "https:" (the scheme) for any full
+		// URL, poisoning the navigator cache key and every episode fetch.
+		{"allanime url extracts id segment", "https://allanime.to/anime/abc123XYZ/title", "abc123XYZ"},
+		{"allanime bangumi url extracts id segment", "https://allanime.to/bangumi/xyz789AB/some-title", "xyz789AB"},
 		{"non-allanime", "https://example.com/x", "https://example.com/x"},
 	}
 	for _, tt := range tests {
@@ -86,9 +96,38 @@ func TestAllAnimeNavigator_GetTotalEpisodes(t *testing.T) {
 
 func TestAllAnimeNavigator_ListAllEpisodes(t *testing.T) {
 	t.Parallel()
-	nav := &AllAnimeNavigator{episodes: []string{"a", "b", "c"}}
+	// Must return the real episode numbers from the source, not fabricated
+	// 1..N values that lie for lists starting at "0" or containing specials.
+	nav := &AllAnimeNavigator{episodes: []string{"0", "1", "5.5"}}
 	list := nav.ListAllEpisodes()
-	assert.Equal(t, []string{"1", "2", "3"}, list)
+	assert.Equal(t, []string{"0", "1", "5.5"}, list)
+}
+
+func TestAllAnimeNavigator_GetNextEpisode_ZeroBasedList(t *testing.T) {
+	t.Parallel()
+	// List starts at "0": 3 entries but last real episode is "2". The old
+	// len()-based check accepted phantom episode "3" (3 <= len(3)).
+	nav := &AllAnimeNavigator{animeID: "x", episodes: []string{"0", "1", "2"}}
+
+	next, err := nav.GetNextEpisode("1")
+	require.NoError(t, err)
+	assert.Equal(t, "2", next)
+
+	_, err = nav.GetNextEpisode("2")
+	assert.Error(t, err, "episode 3 does not exist in a 0-based list of 3 entries")
+}
+
+func TestAllAnimeNavigator_GetPreviousEpisode_ZeroBasedList(t *testing.T) {
+	t.Parallel()
+	nav := &AllAnimeNavigator{animeID: "x", episodes: []string{"0", "1", "2"}}
+
+	// Episode "0" exists in the list, so previous from "1" must reach it.
+	prev, err := nav.GetPreviousEpisode("1")
+	require.NoError(t, err)
+	assert.Equal(t, "0", prev)
+
+	_, err = nav.GetPreviousEpisode("0")
+	assert.Error(t, err)
 }
 
 func TestNewAllAnimeNavigator_RejectsNonAllAnime(t *testing.T) {

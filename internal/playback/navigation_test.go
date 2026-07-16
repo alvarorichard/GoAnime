@@ -126,6 +126,19 @@ func TestHandleUserNavigationEnhanced_AllAnime_UsesEnhancedHandler(t *testing.T)
 	assert.Equal(t, 2, n)
 }
 
+func TestHandleUserNavigationEnhanced_SuperFlixShortID_NotRoutedToAllAnime(t *testing.T) {
+	t.Parallel()
+	// Regression: SuperFlix/SFlix use short numeric TMDB IDs as URLs. The old
+	// isAllAnimeSource heuristic matched any short non-http URL, sending these
+	// sources into AllAnime navigation (wrong navigator + network fetch).
+	eps := []models.Episode{{URL: "u1", Number: "1", Num: 1}, {URL: "u2", Number: "2", Num: 2}}
+	anime := &models.Anime{Source: "SuperFlix", URL: "1234"}
+	url, num, n := handleUserNavigationEnhanced("n", eps, 1, 2, anime)
+	assert.Equal(t, "u2", url)
+	assert.Equal(t, "2", num)
+	assert.Equal(t, 2, n)
+}
+
 // --- handleAllAnimeNavigation ---
 
 func TestHandleAllAnimeNavigation_NoCurrentEpisode_Fallback(t *testing.T) {

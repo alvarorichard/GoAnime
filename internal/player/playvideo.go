@@ -34,6 +34,12 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 // ErrBackToDownloadOptions is returned when user wants to go back to download options
 var ErrBackToDownloadOptions = errors.New("back to download options")
 
+// errStayInPlayerMenu signals that a menu action was a no-op (playlist
+// boundary hit or back from the episode picker). The in-player menu loop must
+// keep running: returning nil here would unwind handleUserInput and surface
+// the post-playback menu while mpv is still playing the current episode.
+var errStayInPlayerMenu = errors.New("stay in player menu")
+
 // dubSubTagRe strips parenthesized dub/sub tags from anime names for display
 var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|Dubbed)\)\s*`)
 
@@ -1244,9 +1250,13 @@ func handleUserInput(
 			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		case "next":
-			return playNextEpisode(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath)
+			if err := playNextEpisode(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+				return err
+			}
 		case "previous":
-			return playPreviousEpisode(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath)
+			if err := playPreviousEpisode(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+				return err
+			}
 		case "quit":
 			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrUserQuit
@@ -1254,7 +1264,9 @@ func handleUserInput(
 			_, _ = mpvSendCommand(socketPath, []any{"quit"})
 			return ErrChangeAnime
 		case "select":
-			return selectEpisode(episodes, malID, anilistID, updater, stopTracking, socketPath)
+			if err := selectEpisode(episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+				return err
+			}
 		case "audio":
 			selectAudioTrack(socketPath)
 		case "subtitle":
@@ -1269,7 +1281,7 @@ func handleUserInput(
 func playNextEpisode(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
 	if newIndex >= len(episodes) {
 		fmt.Println("You are on the last episode")
-		return nil
+		return errStayInPlayerMenu
 	}
 	return switchEpisode(newIndex, episodes, malID, anilistID, updater, stopTracking, socketPath)
 }
@@ -1278,7 +1290,7 @@ func playNextEpisode(newIndex int, episodes []models.Episode, malID, anilistID i
 func playPreviousEpisode(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
 	if newIndex < 0 {
 		fmt.Println("You are on the first episode")
-		return nil
+		return errStayInPlayerMenu
 	}
 	return switchEpisode(newIndex, episodes, malID, anilistID, updater, stopTracking, socketPath)
 }
@@ -1287,20 +1299,41 @@ func playPreviousEpisode(newIndex int, episodes []models.Episode, malID, anilist
 func selectEpisode(episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error {
 	selectedURL, selectedNumStr, err := SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
-		// If user selected back, return nil to continue without action
+		// User selected back: keep the player menu open, mpv untouched
 		if errors.Is(err, ErrBackRequested) {
-			return nil
+			return errStayInPlayerMenu
 		}
 		return fmt.Errorf("failed to select episode: %w", err)
 	}
 
-	for i, ep := range episodes {
-		if ep.URL == selectedURL {
-			return switchEpisode(i, episodes, malID, anilistID, updater, stopTracking, socketPath)
-		}
+	if idx := findSelectedEpisodeIndex(episodes, selectedURL, selectedNumStr); idx >= 0 {
+		return switchEpisode(idx, episodes, malID, anilistID, updater, stopTracking, socketPath)
 	}
 
 	return fmt.Errorf("episode %s not found", selectedNumStr)
+}
+
+// findSelectedEpisodeIndex resolves a fuzzy-finder selection to a slice index.
+// The episode number is matched before the URL because sources like AllAnime
+// use the anime ID as the URL of every episode, so a URL-only match always
+// resolved to the first episode regardless of what the user picked.
+func findSelectedEpisodeIndex(episodes []models.Episode, url, numStr string) int {
+	for i := range episodes {
+		if episodes[i].Number == numStr && episodes[i].URL == url {
+			return i
+		}
+	}
+	for i := range episodes {
+		if episodes[i].Number == numStr {
+			return i
+		}
+	}
+	for i := range episodes {
+		if episodes[i].URL == url {
+			return i
+		}
+	}
+	return -1
 }
 
 // switchEpisode switches between episodes
