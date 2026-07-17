@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/downloader"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -18,6 +19,12 @@ import (
 // workflowSearchFn is the anime search function used by HandleDownloadRequest.
 // Tests may override it to avoid spawning a real TUI search.
 var workflowSearchFn = appflow.SearchAnimeWithRetry
+
+// workflowEnrichFn resolves the AniList season mapping for the found anime.
+// Tests may override it to avoid the real AniList request.
+var workflowEnrichFn = func(ctx context.Context, anime *models.Anime) ([]metadata.SeasonMapping, error) {
+	return metadata.NewEnricher().EnrichAnime(ctx, anime)
+}
 
 // HandleDownloadRequest processes a download request from command line
 func HandleDownloadRequest(request *util.DownloadRequest) error {
@@ -53,8 +60,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 		MalID:         anime.MalID,
 	})
 
-	enricher := metadata.NewEnricher()
-	seasonMap, _ := enricher.EnrichAnime(context.Background(), anime)
+	seasonMap, _ := workflowEnrichFn(context.Background(), anime)
 	player.SetSeasonMap(seasonMap)
 
 	player.SetMediaMeta(&util.MediaMeta{
