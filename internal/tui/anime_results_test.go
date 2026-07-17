@@ -284,7 +284,7 @@ func TestRenderAnimeDetails(t *testing.T) {
 	t.Parallel()
 
 	theme := NewTheme(true)
-	details := renderAnimeDetails(theme, "The Boys", "SuperFlix", "2019", "tv", "—")
+	details := renderAnimeDetails(&theme, "The Boys", "SuperFlix", "2019", "tv", "—")
 
 	assert.Contains(t, details, "Details")
 	assert.Contains(t, details, "The Boys")

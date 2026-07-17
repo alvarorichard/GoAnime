@@ -96,7 +96,7 @@ type animeResultsModel struct {
 // newAnimeResultsModel creates the styled, filterable anime result screen.
 func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
 	theme := NewTheme(true)
-	shell := NewShell(theme, "Search > Results")
+	shell := NewShell(&theme, "Search > Results")
 	items := make([]list.Item, 0, len(animes))
 	for _, anime := range animes {
 		if anime == nil {
@@ -222,7 +222,7 @@ func (m *animeResultsModel) View() tea.View {
 				quality = value
 			}
 		}
-		details := renderAnimeDetails(m.theme, name, source, year, mediaType, quality)
+		details := renderAnimeDetails(&m.theme, name, source, year, mediaType, quality)
 		frameWidth, frameHeight := m.theme.Panel.GetFrameSize()
 		panel := m.theme.Panel.
 			Width(max(panelWidth-frameWidth, 1)).
@@ -239,7 +239,7 @@ func (m *animeResultsModel) View() tea.View {
 }
 
 // renderAnimeDetails composes styled lines without JoinVertical's unstyled padding.
-func renderAnimeDetails(theme Theme, name, source, year, mediaType, quality string) string {
+func renderAnimeDetails(theme *Theme, name, source, year, mediaType, quality string) string {
 	return strings.Join([]string{
 		theme.Primary.Render("Details"),
 		"",

@@ -22,9 +22,9 @@ type Shell struct {
 }
 
 // NewShell creates a shell with safe dimensions before the first resize event.
-func NewShell(theme Theme, breadcrumb string) Shell {
+func NewShell(theme *Theme, breadcrumb string) Shell {
 	return Shell{
-		Theme:      theme,
+		Theme:      *theme,
 		Breadcrumb: breadcrumb,
 		Width:      defaultShellWidth,
 		Height:     defaultShellHeight,
@@ -38,7 +38,7 @@ func (s *Shell) Resize(width, height int) {
 }
 
 // ContentSize returns space left after header, separators, and footer.
-func (s Shell) ContentSize() (int, int) {
+func (s *Shell) ContentSize() (int, int) {
 	width := s.Width
 	if width <= 0 {
 		width = defaultShellWidth
@@ -51,7 +51,7 @@ func (s Shell) ContentSize() (int, int) {
 }
 
 // Render wraps body content in responsive navigation chrome.
-func (s Shell) Render(body, footer string) string {
+func (s *Shell) Render(body, footer string) string {
 	width, height := s.ContentSize()
 	header := s.Theme.Header.Render("GOANIME")
 	if width >= 34 && s.Breadcrumb != "" {

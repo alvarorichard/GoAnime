@@ -8,10 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// newTestShell builds a shell over an addressable test theme.
+func newTestShell(breadcrumb string) Shell {
+	theme := NewTheme(true)
+	return NewShell(&theme, breadcrumb)
+}
+
 func TestNewShell(t *testing.T) {
 	t.Parallel()
 
-	shell := NewShell(NewTheme(true), "Search > Results")
+	shell := newTestShell("Search > Results")
 
 	assert.Equal(t, defaultShellWidth, shell.Width)
 	assert.Equal(t, defaultShellHeight, shell.Height)
@@ -34,7 +40,7 @@ func TestShellResize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			shell := NewShell(NewTheme(true), "")
+			shell := newTestShell("")
 			shell.Resize(tt.width, tt.height)
 			assert.Equal(t, tt.wantWidth, shell.Width)
 			assert.Equal(t, tt.wantHeight, shell.Height)
@@ -121,7 +127,7 @@ func TestShellRender(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			shell := NewShell(NewTheme(true), "Search > Results")
+			shell := newTestShell("Search > Results")
 			shell.Resize(tt.width, 24)
 
 			got := shell.Render("BODY", "↑↓ navigate  / filter")
@@ -141,7 +147,7 @@ func TestShellRender(t *testing.T) {
 			width  int
 			height int
 		}{{1, 5}, {8, 5}, {20, 6}, {33, 8}, {80, 12}} {
-			shell := NewShell(NewTheme(true), strings.Repeat("long breadcrumb ", 20))
+			shell := newTestShell(strings.Repeat("long breadcrumb ", 20))
 			shell.Resize(size.width, size.height)
 			body := strings.Repeat("very long body ", 20) + "\n" + strings.Repeat("extra line\n", 20)
 
