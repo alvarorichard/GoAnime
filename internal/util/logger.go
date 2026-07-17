@@ -31,7 +31,12 @@ var LogFilePath string
 
 // PrintSavedLocation prints a colored message showing where a downloaded file
 // or directory was saved. The label is shown in purple and the path in light purple.
+// Falls back to plain text when the console cannot render ANSI safely.
 func PrintSavedLocation(label, path string) {
+	if !tui.SupportsANSI(os.Stdout) {
+		fmt.Printf("%s %s\n", label, path)
+		return
+	}
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6366F1")).
 		Bold(true)
@@ -40,8 +45,19 @@ func PrintSavedLocation(label, path string) {
 	fmt.Printf("%s %s\n", labelStyle.Render(label), pathStyle.Render(path))
 }
 
-// getColoredPrefix returns a styled prefix with colors
+// getColoredPrefix returns a styled logger prefix, or plain text when the
+// console cannot render ANSI (classic Windows cmd.exe without VT).
 func getColoredPrefix() string {
+	return prefixForProfile(tui.ConsoleColorProfile(os.Stderr))
+}
+
+// prefixForProfile builds the GoAnime logger prefix for the given profile.
+// Exported-to-tests via package scope so regressions cannot reintroduce
+// baked-in TrueColor ANSI on ASCII/NoTTY profiles.
+func prefixForProfile(p colorprofile.Profile) string {
+	if p <= colorprofile.ASCII {
+		return "GoAnime"
+	}
 	style := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#6366F1")).
@@ -137,16 +153,20 @@ func initFileLogger() *os.File {
 // The console logger always stays at InfoLevel to avoid corrupting
 // interactive TUI components (menus, prompts, etc.).
 func InitLogger() {
+	// Safe profile: enables VT on Windows when possible; falls back to ASCII
+	// when classic cmd.exe cannot process ANSI (avoids raw ←[38;2;...m garbage).
+	profile := tui.ConsoleColorProfile(os.Stderr)
+
 	Logger = log.NewWithOptions(os.Stderr, log.Options{
 		ReportTimestamp: IsDebug,
 		TimeFormat:      "15:04:05",
-		Prefix:          getColoredPrefix(),
+		Prefix:          prefixForProfile(profile),
 	})
 
 	// Console logger is always InfoLevel to keep the terminal clean for TUI.
 	// Debug-level messages are routed exclusively to the log file.
 	Logger.SetLevel(log.InfoLevel)
-	Logger.SetColorProfile(colorprofile.TrueColor)
+	Logger.SetColorProfile(profile)
 
 	if IsDebug {
 		// Initialize file logging — all debug output goes here
@@ -198,8 +218,23 @@ func SuppressConsoleLogging() func() {
 
 // showDebugBanner prints a styled notice so the user knows where to find
 // the debug log and how to follow it in real-time from another terminal.
-// The follow command adapts to the user's OS.
+// The follow command adapts to the user's OS. Plain text when ANSI unsafe.
 func showDebugBanner() {
+	// Pick the right "follow file" command for each OS
+	var followCmd string
+	switch runtime.GOOS {
+	case "windows":
+		followCmd = fmt.Sprintf("Get-Content -Wait -Tail 50 \"%s\"", LogFilePath)
+	default: // linux, darwin, etc.
+		followCmd = fmt.Sprintf("tail -f \"%s\"", LogFilePath)
+	}
+
+	if !tui.SupportsANSI(os.Stderr) {
+		fmt.Fprintf(os.Stderr, " DEBUG  Debug log → %s\n       %s (run in another terminal to follow live)\n",
+			LogFilePath, followCmd)
+		return
+	}
+
 	banner := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#6366F1")).
@@ -211,15 +246,6 @@ func showDebugBanner() {
 		Foreground(lipgloss.Color("#A78BFA")).
 		Italic(true).
 		Render(LogFilePath)
-
-	// Pick the right "follow file" command for each OS
-	var followCmd string
-	switch runtime.GOOS {
-	case "windows":
-		followCmd = fmt.Sprintf("Get-Content -Wait -Tail 50 \"%s\"", LogFilePath)
-	default: // linux, darwin, etc.
-		followCmd = fmt.Sprintf("tail -f \"%s\"", LogFilePath)
-	}
 
 	tailCmd := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FCD34D")).

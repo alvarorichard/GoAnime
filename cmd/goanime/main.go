@@ -16,6 +16,12 @@ import (
 )
 
 func main() {
+	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
+	// off). Must run before any colored log/TUI output or users see raw escape
+	// codes like ←[38;2;...m instead of colors. If enable fails, color paths
+	// fall back to ASCII via tui.ConsoleColorProfile / SupportsANSI.
+	_ = tui.EnableVirtualTerminal()
+
 	// Save terminal state so we can restore it on exit.
 	// Libraries like promptui (readline) and go-fuzzyfinder (tcell) put the
 	// terminal into raw mode; if the process is interrupted or exits abnormally

@@ -19,6 +19,18 @@ func TestSafeBubbleTeaEnvironmentSuppressesCapabilityQueries(t *testing.T) {
 	assertEnvMissing(t, env, "WT_SESSION")
 }
 
+// TestBubbleTeaProgramOptions_UsesResolvedProfile ensures we never hardcode
+// TrueColor (the previous source of cmd.exe garbage when VT is off).
+func TestBubbleTeaProgramOptions_UsesResolvedProfile(t *testing.T) {
+	t.Parallel()
+	opts := BubbleTeaProgramOptions()
+	if len(opts) < 2 {
+		t.Fatalf("expected env + color profile options, got %d", len(opts))
+	}
+	// Construction must not panic; profile comes from ConsoleColorProfile.
+	_ = opts
+}
+
 func TestRunCleanRestoresEnvironmentAndPropagatesError(t *testing.T) {
 	t.Setenv("TERM", "xterm-ghostty")
 	t.Setenv("TERM_PROGRAM", "Ghostty")

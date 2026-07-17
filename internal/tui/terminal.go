@@ -5,15 +5,16 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/colorprofile"
 )
 
 // BubbleTeaProgramOptions returns default Bubble Tea options that avoid
 // terminal capability probes known to leak raw responses in some terminals.
+// Color profile follows ConsoleColorProfile so classic Windows cmd.exe without
+// VT never receives TrueColor sequences it would print as raw garbage.
 func BubbleTeaProgramOptions(extra ...tea.ProgramOption) []tea.ProgramOption {
 	opts := []tea.ProgramOption{
 		tea.WithEnvironment(safeBubbleTeaEnvironment()),
-		tea.WithColorProfile(colorprofile.TrueColor),
+		tea.WithColorProfile(ConsoleColorProfile(os.Stdout)),
 	}
 	return append(opts, extra...)
 }

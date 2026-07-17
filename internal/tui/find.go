@@ -24,6 +24,9 @@ import (
 
 // ResetTerminal sends ANSI sequences to reset terminal state after tcell
 // and drains any stale bytes from stdin that tcell may have left behind.
+//
+// On Windows consoles without VT processing, ANSI is skipped (only a bare
+// carriage return) so classic cmd.exe never shows raw codes like ←[?25h.
 func ResetTerminal() {
 	// Reset DECCKM (normal cursor keys) + reset keypad numeric mode + show cursor
 	// These match the exact sequences tcell's ExitKeypad should send but
@@ -38,7 +41,11 @@ func ResetTerminal() {
 	// column-0 line instead of glued to leftovers. Deliberately NOT "\r\n":
 	// ResetTerminal runs after every finder/spinner, and an unconditional
 	// newline stacks a blank line per call, riddling the session with gaps.
-	fmt.Fprint(os.Stdout, "\r\033[2K\033[?1l\033>\033[?25h")
+	if SupportsANSI(os.Stdout) {
+		fmt.Fprint(os.Stdout, "\r\033[2K\033[?1l\033>\033[?25h")
+	} else {
+		fmt.Fprint(os.Stdout, "\r")
+	}
 
 	// Drain any stale bytes from stdin (platform-specific implementation). A
 	// short raw/no-echo window also catches late terminal capability responses

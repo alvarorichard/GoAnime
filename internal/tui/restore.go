@@ -48,7 +48,13 @@ const TerminalResetSequence = "" +
 // RestoreTerminalState writes TerminalResetSequence to w, returning sane
 // interactive terminal state on program exit. It is safe to call multiple times
 // and on any exit path.
+//
+// On Windows without VT, the sequence is skipped — emitting it to classic
+// cmd.exe prints raw escape garbage instead of restoring the console.
 func RestoreTerminalState(w io.Writer) {
+	if f, ok := w.(*os.File); ok && !SupportsANSI(f) {
+		return
+	}
 	_, _ = io.WriteString(w, TerminalResetSequence)
 }
 
