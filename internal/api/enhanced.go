@@ -226,10 +226,21 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
 func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
+	return searchAnimeEnhanced(name, src, searchFetchFn, tui.SelectAnime, enrichAnimeData)
+}
+
+func searchAnimeEnhanced(
+	name string,
+	src string,
+	search SearchFetchFunc,
+	selectAnime func([]*models.Anime) (*models.Anime, error),
+	enrich func(*models.Anime) error,
+) (*models.Anime, error) {
 	// Map the optional source selector to the registry kinds to search. Empty
 	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
 	var registryKinds []source.SourceKind
-	switch strings.ToLower(src) {
+	normalizedSource := strings.ToLower(strings.TrimSpace(src))
+	switch normalizedSource {
 	case "allanime":
 		registryKinds = []source.SourceKind{source.AllAnime}
 	case "animefire":
@@ -246,16 +257,23 @@ func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
 	var animes []*models.Anime
 	var searchErr error
 	runWithSpinner("Searching for anime...", func() {
-		if searchFetchFn == nil {
+		if search == nil {
 			searchErr = fmt.Errorf("search dispatch not wired: the providers package must be imported")
 			return
 		}
 		// Model B registry fan-out (providers.SearchAll).
-		animes, searchErr = searchFetchFn(context.Background(), name, registryKinds)
+		animes, searchErr = search(context.Background(), name, registryKinds)
 	})
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)
 	}
+	validAnimes := make([]*models.Anime, 0, len(animes))
+	for _, anime := range animes {
+		if anime != nil {
+			validAnimes = append(validAnimes, anime)
+		}
+	}
+	animes = validAnimes
 
 	if len(animes) == 0 {
 		return nil, fmt.Errorf("no results found for: %s", name)
@@ -265,14 +283,28 @@ func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
 	for _, anime := range animes {
 		// Ensure proper source identification (for internal use only)
 		if anime.Source == "" {
-			// Fallback source identification by URL analysis
-			switch {
-			case len(anime.URL) < 30 && strings.ContainsAny(anime.URL, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") && !strings.Contains(anime.URL, "http"):
+			switch normalizedSource {
+			case "allanime":
 				anime.Source = "AllAnime"
-			case strings.Contains(anime.URL, "animefire"):
+			case "animefire":
 				anime.Source = "Animefire.io"
-			case strings.Contains(anime.URL, "goyabu"):
+			case "goyabu":
 				anime.Source = "Goyabu"
+			case "superflix":
+				anime.Source = "SuperFlix"
+			}
+			if anime.Source == "" {
+				lowerURL := strings.ToLower(anime.URL)
+				switch {
+				case source.IsAllAnimeShortID(anime.URL), strings.Contains(lowerURL, "allanime"):
+					anime.Source = "AllAnime"
+				case strings.Contains(lowerURL, "animefire"):
+					anime.Source = "Animefire.io"
+				case strings.Contains(lowerURL, "goyabu"):
+					anime.Source = "Goyabu"
+				case strings.Contains(lowerURL, "superflix"), strings.Contains(lowerURL, "sflix"):
+					anime.Source = "SuperFlix"
+				}
 			}
 		}
 
@@ -294,86 +326,28 @@ func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
 		return languagePriority(animes[i].Name) < languagePriority(animes[j].Name)
 	})
 
-	// Create a special "back" option as the first item
-	backOption := &models.Anime{
-		Name:   "← Back",
-		URL:    "__back__",
-		Source: "__back__",
+	if selectAnime == nil {
+		return nil, fmt.Errorf("anime selection not configured")
 	}
-
-	// Prepend back option to the list
-	animesWithBack := make([]*models.Anime, 0, len(animes)+1)
-	animesWithBack = append(animesWithBack, backOption)
-	animesWithBack = append(animesWithBack, animes...)
-
-	// Use fuzzy finder to let user select
-	var idx int
-	var err error
-
-	if util.IsDebug {
-		// In debug mode, show preview window with technical details
-		idx, err = tui.Find(
-			animesWithBack,
-			func(i int) string {
-				a := animesWithBack[i]
-				name := a.Name
-				// Append release year if available and not already in the name
-				if a.Year != "" && !strings.Contains(name, "("+a.Year+")") {
-					name += " (" + a.Year + ")"
-				}
-				return name
-			},
-			fuzzyfinder.WithPromptString("Select the anime you want: "),
-			fuzzyfinder.WithPreviewWindow(func(i, w, h int) string {
-				if i >= 0 && i < len(animesWithBack) {
-					anime := animesWithBack[i]
-					if anime.Source == "__back__" {
-						return "Go back to perform a new search"
-					}
-					var preview string
-					preview = "Source: " + anime.Source + "\nURL: " + anime.URL
-					if anime.ImageURL != "" {
-						preview += "\nImage: " + anime.ImageURL
-					}
-					return preview
-				}
-				return ""
-			}),
-		)
-	} else {
-		// In normal mode, no preview window at all
-		idx, err = tui.Find(
-			animesWithBack,
-			func(i int) string {
-				a := animesWithBack[i]
-				name := a.Name
-				// Append release year if available and not already in the name
-				if a.Year != "" && !strings.Contains(name, "("+a.Year+")") {
-					name += " (" + a.Year + ")"
-				}
-				return name
-			},
-			fuzzyfinder.WithPromptString("Select the anime you want: "),
-		)
+	selectedAnime, err := selectAnime(animes)
+	if errors.Is(err, tui.ErrSelectionBack) {
+		return nil, ErrBackToSearch
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("anime selection cancelled: %w", err)
 	}
-
-	selectedAnime := animesWithBack[idx]
-
-	// Check if user selected the back option
-	if selectedAnime.Source == "__back__" {
-		return nil, ErrBackToSearch
+	if selectedAnime == nil {
+		return nil, fmt.Errorf("anime selection returned nil")
 	}
 	util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
 
 	// Enrich with AniList data for images and metadata. Best-effort: episodes and
 	// playback work without it, so a failure here is a warning, not an error
 	// (issue #184).
-	if err := enrichAnimeData(selectedAnime); err != nil {
-		util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
+	if enrich != nil {
+		if err := enrich(selectedAnime); err != nil {
+			util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
+		}
 	}
 
 	return selectedAnime, nil

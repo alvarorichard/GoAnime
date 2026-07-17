@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 )
 
 // TestSuperFlixGetVideoSniff_Live is a live recon harness: it drives the

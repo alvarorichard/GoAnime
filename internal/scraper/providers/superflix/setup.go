@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 )
 
 // ErrPlaywrightUnavailable is returned when the Playwright driver or its bundled
