@@ -424,7 +424,13 @@ func StartVideo(link string, args []string) (string, error) {
 	var socketPath string
 
 	if runtime.GOOS == "windows" {
-		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpvsocket_%s`, randomNumber)
+		// Keep pipe name short — Windows named-pipe path limit is generous, but
+		// shorter names avoid rare third-party filter issues on minimal VMs.
+		pipeID := randomNumber
+		if len(pipeID) > 16 {
+			pipeID = pipeID[:16]
+		}
+		socketPath = fmt.Sprintf(`\\.\pipe\goanime_mpv_%s`, pipeID)
 	} else {
 		// Use os.TempDir() for cross-platform compatibility
 		// macOS uses /var/folders/... accessed via $TMPDIR
@@ -434,7 +440,6 @@ func StartVideo(link string, args []string) (string, error) {
 
 	mpvArgs := []string{
 		"--no-terminal",
-		"--quiet",
 		"--force-window=yes",
 		fmt.Sprintf("--input-ipc-server=%s", socketPath),
 	}
@@ -454,7 +459,8 @@ func StartVideo(link string, args []string) (string, error) {
 	cmd := exec.Command(mpvPath, mpvArgs...)
 	setProcessGroup(cmd) // Handle OS-specific process groups
 
-	// Capture stderr for better error reporting
+	// Capture stderr so crash/GPU errors are visible when IPC never appears.
+	// Intentionally not using --quiet: silent exits on VMs hide the real cause.
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -463,17 +469,32 @@ func StartVideo(link string, args []string) (string, error) {
 		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
 	}
 
-	util.Debugf("mpv started, waiting for socket creation: %s", socketPath)
+	// Reap the process in the background so we can detect early exit (common on
+	// Windows VMs when --vo=gpu fails / bundled mpv is missing DLLs). Without
+	// this, StartVideo waits the full timeout then Process.Kill returns
+	// "Access is denied" because the process is already dead.
+	waitErrCh := make(chan error, 1)
+	go func() {
+		waitErrCh <- cmd.Wait()
+	}()
 
-	// Wait for socket creation with adaptive timeout and exponential backoff
-	// Total max wait time: ~8 seconds (accommodates slow network streams)
-	// Initial intervals are very short for fast local files, then back off for streams
-	maxWaitTime := 8 * time.Second
+	util.Debugf("mpv started (pid probe), waiting for socket creation: %s", socketPath)
+
+	// Wait for socket creation with adaptive timeout and exponential backoff.
+	// VMs / cold media opens can take longer than a local GPU host.
+	maxWaitTime := 12 * time.Second
 	initialInterval := 5 * time.Millisecond
 	maxInterval := 100 * time.Millisecond
 	currentInterval := initialInterval
 
 	for time.Since(startTime) < maxWaitTime {
+		// Detect early mpv death before wasting the full timeout.
+		select {
+		case waitErr := <-waitErrCh:
+			return "", formatMPVEarlyExitError(waitErr, stderr.String(), mpvPath)
+		default:
+		}
+
 		// Try to connect to the socket instead of checking file existence
 		// This works for both Unix sockets and Windows named pipes
 		conn, err := dialMPVSocket(socketPath)
@@ -483,7 +504,6 @@ func StartVideo(link string, args []string) (string, error) {
 			return socketPath, nil
 		}
 
-		// Check if MPV process is still running
 		if cmd.Process == nil {
 			return "", fmt.Errorf("mpv process not started properly: %s", stderr.String())
 		}
@@ -495,13 +515,42 @@ func StartVideo(link string, args []string) (string, error) {
 
 	elapsed := time.Since(startTime)
 	util.Debugf("Timeout after %.2fs waiting for mpv socket", elapsed.Seconds())
-
-	// Cleanup if timeout occurs
-	if killErr := cmd.Process.Kill(); killErr != nil {
-		util.Debugf("Failed to kill mpv process: %v", killErr)
+	if stderr.Len() > 0 {
+		util.Debugf("mpv stderr during timeout: %s", stderr.String())
 	}
 
-	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs. Possible issues:\n1. Slow network connection - video source may be unresponsive\n2. MPV installation corrupted\n3. Firewall blocking IPC\n4. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds())
+	// Best-effort cleanup. On Windows Kill returns "Access is denied" if the
+	// process already exited between the last probe and here — ignore that.
+	if cmd.Process != nil {
+		if killErr := cmd.Process.Kill(); killErr != nil {
+			util.Debugf("Failed to kill mpv process (often already exited): %v", killErr)
+		}
+	}
+	// Drain Wait so we don't leak the reaper goroutine's result unnoticed.
+	select {
+	case waitErr := <-waitErrCh:
+		if waitErr != nil {
+			util.Debugf("mpv wait after timeout: %v", waitErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	stderrHint := strings.TrimSpace(stderr.String())
+	if stderrHint != "" {
+		return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv stderr: %s\nmpv path: %s\nPossible issues:\n1. MPV crashed or GPU/video output failed (common on VMs — try updating GPU drivers or reinstall mpv)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds(), stderrHint, mpvPath)
+	}
+	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv path: %s\nPossible issues:\n1. MPV hung before creating IPC (GPU/driver issue on VMs)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nRun: \"%s\" --version\nCheck debug logs with -debug flag", elapsed.Seconds(), mpvPath, mpvPath)
+}
+
+// formatMPVEarlyExitError builds a clear error when mpv dies before the IPC
+// socket appears. This is the common failure mode on minimal Windows VMs.
+func formatMPVEarlyExitError(waitErr error, stderrOut, mpvPath string) error {
+	stderrOut = strings.TrimSpace(stderrOut)
+	util.Debugf("mpv exited before IPC socket was ready: %v stderr=%q path=%s", waitErr, stderrOut, mpvPath)
+	if stderrOut != "" {
+		return fmt.Errorf("mpv exited before IPC socket was ready: %v\nmpv stderr: %s\nmpv path: %s\nHint: on Windows VMs OpenGL often fails — GoAnime uses a VO fallback chain; if this persists, reinstall mpv or run mpv manually", waitErr, stderrOut, mpvPath)
+	}
+	return fmt.Errorf("mpv exited before IPC socket was ready: %v\nmpv path: %s (no stderr captured)\nHint: bundled mpv may be missing DLLs, or video output failed. Run: \"%s\" --version", waitErr, mpvPath, mpvPath)
 }
 
 // MpvSendCommand is a wrapper function to expose mpvSendCommand to other packages

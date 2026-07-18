@@ -24,7 +24,9 @@ func dialMPVSocket(socketPath string) (net.Conn, error) {
 		socketPath = `\\.\pipe\` + filepath.Base(socketPath)
 	}
 
-	// Use winio to connect to Windows named pipe
-	timeout := 5 * time.Second
+	// Short probe timeout: ERROR_FILE_NOT_FOUND returns immediately; the
+	// timeout only matters for ERROR_PIPE_BUSY. Keep it low so StartVideo can
+	// poll process-exit between dial attempts instead of blocking 5s.
+	timeout := 200 * time.Millisecond
 	return winio.DialPipe(socketPath, &timeout)
 }

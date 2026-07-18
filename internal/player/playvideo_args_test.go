@@ -183,6 +183,12 @@ func TestBuildPlaybackArgs(t *testing.T) {
 		assert.NotContains(t, args, "--no-config", "upscaling must not use the standard profile")
 	})
 
+	t.Run("default VO uses Windows fallback chain", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4"})
+		assert.Contains(t, args, defaultVideoOutputArg())
+		assert.Contains(t, args, "--hwdec=auto-safe")
+	})
+
 	t.Run("resume adds --start for non-HLS but not for HLS", func(t *testing.T) {
 		nonHLS := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4", ResumeTime: 30})
 		assert.Contains(t, nonHLS, "--start=+30")

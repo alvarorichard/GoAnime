@@ -105,6 +105,15 @@ type playbackArgsInput struct {
 	ResumeTime       int
 }
 
+// defaultVideoOutputArg picks an mpv --vo chain that survives minimal Windows
+// VMs (no OpenGL / only Basic Display Adapter). Non-Windows keeps plain gpu.
+func defaultVideoOutputArg() string {
+	if runtime.GOOS == "windows" {
+		return "--vo=gpu,direct3d,sdl"
+	}
+	return "--vo=gpu"
+}
+
 // buildPlaybackArgs assembles the full mpv argument list from resolved inputs.
 // It is pure (no I/O, no globals, no prompts) so the exact argument set — and in
 // particular that HLS streams carry BOTH the Referer header and the
@@ -127,7 +136,9 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs,
 			"--no-config",
 			"--hwdec=auto-safe",
-			"--vo=gpu",
+			// Windows VMs often lack working OpenGL; fall through to Direct3D/SDL
+			// so playback still starts instead of mpv exiting before IPC.
+			defaultVideoOutputArg(),
 			"--profile=fast",
 			"--video-latency-hacks=yes",
 		)
