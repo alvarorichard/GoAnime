@@ -60,10 +60,12 @@ func (s *Shell) Render(body, footer string) string {
 
 	if width < 50 {
 		switch {
-		case width >= 30:
-			footer = "/ filter  enter open  esc back"
-		case width >= 20:
-			footer = "enter open  esc back"
+		case width >= 36:
+			footer = "type fzf  ↑↓/jk  enter  esc"
+		case width >= 24:
+			footer = "type  ↑↓  enter  esc"
+		case width >= 12:
+			footer = "type  enter  esc"
 		case width >= 8:
 			footer = "esc back"
 		default:

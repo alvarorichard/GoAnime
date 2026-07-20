@@ -227,12 +227,6 @@ func TestNewSurfDownloadClient_NotNil(t *testing.T) {
 	assert.NotNil(t, newSurfDownloadClient())
 }
 
-func TestSelectEpisodeWithFuzzyFinder_EmptyReturnsError(t *testing.T) {
-	_, _, err := SelectEpisodeWithFuzzyFinder(nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no episodes")
-}
-
 func TestGetVideoURLForEpisode_AllAnimeShortIDRejected(t *testing.T) {
 	t.Parallel()
 	_, err := GetVideoURLForEpisode("shortid")

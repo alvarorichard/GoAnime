@@ -72,6 +72,12 @@ func (i animeResultItem) Description() string {
 	return strings.Join(parts, "  •  ")
 }
 
+// SingleLine strips terminal controls and collapses metadata to one line.
+// Exported so callers can sanitize titles before building breadcrumb trails.
+func SingleLine(value string) string {
+	return singleLine(value)
+}
+
 // singleLine strips terminal controls and collapses metadata to one line.
 func singleLine(value string) string {
 	value = ansi.Strip(value)

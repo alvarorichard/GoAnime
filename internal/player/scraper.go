@@ -216,57 +216,89 @@ var ErrBackToAnimeSelection = errors.New("back to anime selection")
 // ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
 var ErrBackToEpisodeSelection = errors.New("back to episode selection")
 
-// SelectEpisodeWithFuzzyFinder allows the user to select an episode using fuzzy finder
+// episodeDisplayTitle picks the best available episode title.
+func episodeDisplayTitle(ep models.Episode) string {
+	if ep.Title.Romaji != "" {
+		return ep.Title.Romaji
+	}
+	return ep.Title.English
+}
+
+// episodeLabel builds the picker row label: "Episode 12 — Title".
+func episodeLabel(ep models.Episode) string {
+	title := episodeDisplayTitle(ep)
+	if title == "" {
+		return ep.Number
+	}
+	return ep.Number + " — " + title
+}
+
+// episodeDetails builds the secondary row: air date and filler/recap badges.
+func episodeDetails(ep models.Episode) string {
+	parts := make([]string, 0, 3)
+	if aired := strings.TrimSpace(ep.Aired); aired != "" {
+		parts = append(parts, aired)
+	}
+	if ep.IsFiller {
+		parts = append(parts, "Filler")
+	}
+	if ep.IsRecap {
+		parts = append(parts, "Recap")
+	}
+	return strings.Join(parts, "  •  ")
+}
+
+// episodePickItems converts episodes to generic picker rows.
+func episodePickItems(episodes []models.Episode) []tui.PickItem {
+	items := make([]tui.PickItem, len(episodes))
+	for i, ep := range episodes {
+		items[i] = tui.PickItem{
+			Label:   episodeLabel(ep),
+			Details: episodeDetails(ep),
+		}
+	}
+	return items
+}
+
+// episodePickFunc matches tui.Pick so tests can inject a headless picker.
+type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
+
+// SelectEpisodeWithFuzzyFinder lets the user pick an episode on the styled
+// fuzzy picker. ESC (or quit) is reported as ErrBackRequested.
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
+	return selectEpisodeWithPicker(tui.Pick, episodes)
+}
+
+// selectEpisodeWithPicker isolates picker execution for deterministic tests.
+func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (string, string, error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
-
-	// Create a list with back option at the beginning
-	backOption := "← Back"
-	displayList := make([]string, len(episodes)+1)
-	displayList[0] = backOption
-	for i, ep := range episodes {
-		title := ep.Title.Romaji
-		if title == "" {
-			title = ep.Title.English
-		}
-		if title != "" {
-			displayList[i+1] = fmt.Sprintf("%s - %s", ep.Number, title)
-		} else {
-			displayList[i+1] = ep.Number
-		}
+	if pick == nil {
+		return "", "", errors.New("episode picker not configured")
 	}
 
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: calling fuzzyfinder.Find with %d items", len(displayList))
-	idx, err := tui.Find(
-		displayList,
-		func(i int) string {
-			return displayList[i]
-		},
-		fuzzyfinder.WithPromptString("Select the episode: "),
-	)
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: fuzzyfinder returned idx=%d, err=%v", idx, err)
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: opening picker with %d episodes", len(episodes))
+	idx, err := pick(episodePickItems(episodes), tui.PickOptions{
+		Breadcrumb:   "Search > Episodes",
+		WindowTitle:  "GoAnime - Episodes",
+		ItemSingular: "episode",
+		ItemPlural:   "episodes",
+	})
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, err=%v", idx, err)
 	if err != nil {
-		// Treat abort (no selection / Escape / no match) as back request
-		if errors.Is(err, fuzzyfinder.ErrAbort) {
+		// Treat back/quit as a back request so callers return to the
+		// previous screen instead of failing.
+		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
 			return "", "", ErrBackRequested
 		}
-		return "", "", fmt.Errorf("failed to select episode with go-fuzzyfinder: %w", err)
+		return "", "", fmt.Errorf("failed to select episode: %w", err)
 	}
 
-	if idx < 0 || idx >= len(displayList) {
-		return "", "", errors.New("invalid index returned by fuzzyfinder")
+	if idx < 0 || idx >= len(episodes) {
+		return "", "", errors.New("invalid index returned by episode picker")
 	}
-
-	// Check if back was selected
-	if idx == 0 {
-		return "", "", ErrBackRequested
-	}
-
-	// Adjust index for episodes (subtract 1 for the back option)
-	episodeIdx := idx - 1
-	return episodes[episodeIdx].URL, episodes[episodeIdx].Number, nil
+	return episodes[idx].URL, episodes[idx].Number, nil
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string

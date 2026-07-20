@@ -94,6 +94,8 @@ func TestSingleLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, singleLine(tt.value))
+			// Exported wrapper must stay identical to the internal helper.
+			assert.Equal(t, tt.want, SingleLine(tt.value))
 		})
 	}
 }

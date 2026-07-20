@@ -7,26 +7,26 @@ package api
 //              failed to fetch episodes: season selection cancelled: abort")
 // Fixed:       2026-04-27 — same-day fix in this commit.
 // Root cause:  internal/api/enhanced.go GetFlixHQEpisodes (FlixHQ) and
-//              GetSuperFlixEpisodes (SuperFlix) wrapped fuzzyfinder.ErrAbort
-//              as `fmt.Errorf("season selection cancelled: %w", err)` and
-//              returned it. Because that error chain was not ErrBackToSearch,
-//              the playback handler (internal/handlers/playback.go) bailed
-//              out via `return` instead of looping back to the search prompt.
+//              GetSuperFlixEpisodes (SuperFlix) wrapped the season-picker
+//              abort as `fmt.Errorf("season selection cancelled: %w", err)`
+//              and returned it. Because that error chain was not
+//              ErrBackToSearch, the playback handler
+//              (internal/handlers/playback.go) bailed out via `return`
+//              instead of looping back to the search prompt.
 //              Net effect: pressing ESC during season selection killed the
 //              session — the user had to relaunch the binary to try a
 //              different show.
-// Blast radius:user-facing — ESC during season selection (a routine action
-//              for "wrong show, let me search again") terminated the program
-//              with a fatal-looking log line. Especially likely to bite users
-//              of FlixHQ/SuperFlix because every TV show on those sources
-//              prompts for a season.
+//
+// 2026-07-17: season picker migrated from go-fuzzyfinder to tui.Pick. The
+// abort sentinels are now tui.ErrPickBack / tui.ErrPickCancelled; the
+// mapping contract below is unchanged for the playback handler.
 //
 // The tests below pin three invariants:
 //   1. The abort path returns the sentinel ErrBackToSearch (errors.Is true).
 //   2. The wrap performed by appflow.GetAnimeEpisodes
 //      (`failed to fetch episodes: %w`) preserves the chain so the handler
 //      can still recognize ErrBackToSearch via errors.Is.
-//   3. Non-abort fuzzyfinder errors are NOT swallowed as ErrBackToSearch —
+//   3. Non-abort picker errors are NOT swallowed as ErrBackToSearch —
 //      they must continue to surface as real failures.
 
 import (
@@ -34,37 +34,50 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/stretchr/testify/assert"
 )
 
 // mapSeasonSelectionErr mirrors the production predicate from
-// internal/api/enhanced.go (GetFlixHQEpisodes and GetSuperFlixEpisodes).
-// Keeping the predicate in one tiny helper means this test pins the exact
-// shape of the mapping rather than just observing some end-to-end behaviour.
+// internal/api/enhanced.go (GetSuperFlixEpisodes). Keeping the predicate
+// in one tiny helper means this test pins the exact shape of the mapping
+// rather than just observing some end-to-end behaviour.
 func mapSeasonSelectionErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, fuzzyfinder.ErrAbort) {
+	if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
 		return ErrBackToSearch
 	}
 	return fmt.Errorf("season selection cancelled: %w", err)
 }
 
 func TestSeasonSelection_AbortMapsToBackToSearch(t *testing.T) {
-	got := mapSeasonSelectionErr(fuzzyfinder.ErrAbort)
-	assert.ErrorIs(t, got, ErrBackToSearch,
-		"fuzzyfinder.ErrAbort during season selection MUST surface as ErrBackToSearch "+
-			"so the playback handler can re-prompt the user instead of returning")
+	t.Parallel()
+	for _, name := range []struct {
+		label string
+		err   error
+	}{
+		{"back", tui.ErrPickBack},
+		{"cancelled", tui.ErrPickCancelled},
+	} {
+		t.Run(name.label, func(t *testing.T) {
+			t.Parallel()
+			got := mapSeasonSelectionErr(name.err)
+			assert.ErrorIs(t, got, ErrBackToSearch,
+				"picker abort during season selection MUST surface as ErrBackToSearch "+
+					"so the playback handler can re-prompt the user instead of returning")
+		})
+	}
 }
 
 func TestSeasonSelection_AbortSurvivesAppflowWrap(t *testing.T) {
+	t.Parallel()
 	// appflow.GetAnimeEpisodes wraps the API error as
 	// `failed to fetch episodes: %w`. The handler must still recognise the
 	// sentinel through that wrap; otherwise our fix only works at the API
 	// boundary and the handler keeps killing the session.
-	apiErr := mapSeasonSelectionErr(fuzzyfinder.ErrAbort)
+	apiErr := mapSeasonSelectionErr(tui.ErrPickBack)
 	wrapped := fmt.Errorf("failed to fetch episodes: %w", apiErr)
 
 	assert.ErrorIs(t, wrapped, ErrBackToSearch,
@@ -73,13 +86,14 @@ func TestSeasonSelection_AbortSurvivesAppflowWrap(t *testing.T) {
 }
 
 func TestSeasonSelection_NonAbortErrorsStillFail(t *testing.T) {
+	t.Parallel()
 	// Make sure we did not over-correct: a real failure (e.g. terminal
 	// closed, IO error) must NOT be silently mapped to ErrBackToSearch.
-	realErr := errors.New("some other fuzzyfinder failure")
+	realErr := errors.New("some other picker failure")
 	got := mapSeasonSelectionErr(realErr)
 
 	assert.NotErrorIs(t, got, ErrBackToSearch,
-		"only fuzzyfinder.ErrAbort should map to ErrBackToSearch — other errors "+
+		"only picker back/cancel sentinels should map to ErrBackToSearch — other errors "+
 			"must keep their normal failure semantics")
 	assert.ErrorContains(t, got, "season selection cancelled",
 		"non-abort errors should still produce the descriptive wrap so logs are useful")
@@ -88,6 +102,7 @@ func TestSeasonSelection_NonAbortErrorsStillFail(t *testing.T) {
 }
 
 func TestSeasonSelection_NilErrorPassesThrough(t *testing.T) {
+	t.Parallel()
 	assert.NoError(t, mapSeasonSelectionErr(nil),
 		"happy path must remain a no-op — no spurious ErrBackToSearch on success")
 }

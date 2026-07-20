@@ -2,29 +2,25 @@ package api
 
 // Season selection UI for SuperFlix/FlixHQ-style seasoned titles.
 //
-// The picker stays on go-fuzzyfinder (a prior huh.Select migration caused a
-// rendering regression — see internal/player/download.go), but fixes the
-// ergonomics around it:
+// The picker uses the shared Bubble Tea screen from internal/tui (tui.Pick):
 //
 //   - single-season titles skip the full-screen picker entirely;
-//   - fuzzyfinder draws its list bottom-up (first item next to the prompt),
-//     so the seasons are fed in DESCENDING order to make the list read
-//     ascending top-down, with the cursor starting at the top;
+//   - seasons are listed ascending top-down with instant fuzzy filtering;
 //   - the previously watched season (media.CurrentSeason) is preselected
 //     when the user re-enters the picker;
-//   - each row carries the episode count and air-year range, and a preview
-//     pane lists the highlighted season's episodes.
+//   - each row carries the episode count and air-year range in the details line.
+//
+// tui.ErrPickBack / tui.ErrPickCancelled are returned unwrapped so the
+// caller can map them to ErrBackToSearch.
 
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // seasonDisplayName renders a season key for humans: "0" is the TVDB/TMDB
@@ -89,107 +85,82 @@ func seasonYearRange(eps []superflix.SuperFlixEpisode) string {
 	}
 }
 
-// seasonLabel builds the picker row: "Season 2  ·  12 episodes  ·  2019".
-func seasonLabel(sn string, eps []superflix.SuperFlixEpisode) string {
-	label := seasonDisplayName(sn) + "  ·  " + episodeCountLabel(len(eps))
-	if yr := seasonYearRange(eps); yr != "" {
-		label += "  ·  " + yr
-	}
-	return label
-}
-
-// formatEpisodeLine renders one episode for the preview pane:
-// "E01  Pilot  (2019-04-01)". Missing title/date segments are dropped.
-func formatEpisodeLine(ep superflix.SuperFlixEpisode) string {
-	num := ep.EpiNum.String()
-	if len(num) == 1 {
-		num = "0" + num
-	}
-	line := "E" + num
-	if t := strings.TrimSpace(ep.Title); t != "" {
-		line += "  " + t
-	}
-	if d := strings.TrimSpace(ep.AirDate); d != "" {
-		line += "  (" + d + ")"
-	}
-	return line
-}
-
-// seasonPreviewText builds the preview pane content for one season, trimmed
-// to the pane height with a "... and N more" tail when the list is cut.
-func seasonPreviewText(sn string, eps []superflix.SuperFlixEpisode, height int) string {
-	var b strings.Builder
-	b.WriteString(seasonDisplayName(sn))
-	if yr := seasonYearRange(eps); yr != "" {
-		b.WriteString(" (")
-		b.WriteString(yr)
-		b.WriteString(")")
-	}
-	b.WriteString(" — ")
-	b.WriteString(episodeCountLabel(len(eps)))
-	b.WriteString("\n\n")
-
-	// Header + blank line + borders eat ~4 rows of the pane.
-	maxLines := max(height-4, 1)
-	for i, ep := range eps {
-		if i >= maxLines {
-			fmt.Fprintf(&b, "  ... and %d more\n", len(eps)-i)
-			break
-		}
-		b.WriteString("  ")
-		b.WriteString(formatEpisodeLine(ep))
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-// seasonDisplayOrder reverses the ascending season keys. fuzzyfinder renders
-// its list bottom-up (index 0 sits next to the prompt at the bottom), so a
-// descending feed is what makes the visible list read Season 1 → N top-down.
-func seasonDisplayOrder(seasonNums []string) []string {
-	display := make([]string, len(seasonNums))
+// seasonPickItems maps ascending season keys to picker rows.
+func seasonPickItems(seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) []tui.PickItem {
+	items := make([]tui.PickItem, len(seasonNums))
 	for i, sn := range seasonNums {
-		display[len(seasonNums)-1-i] = sn
+		details := episodeCountLabel(len(allEpisodes[sn]))
+		if yr := seasonYearRange(allEpisodes[sn]); yr != "" {
+			details += "  •  " + yr
+		}
+		items[i] = tui.PickItem{
+			Label:   seasonDisplayName(sn),
+			Details: details,
+		}
 	}
-	return display
+	return items
 }
+
+// currentSeasonIndex locates media.CurrentSeason in the season keys, falling
+// back to the first season when unset or absent.
+func currentSeasonIndex(media *models.Anime, seasonNums []string) int {
+	if media == nil || media.CurrentSeason <= 0 {
+		return 0
+	}
+	current := strconv.Itoa(media.CurrentSeason)
+	for i, sn := range seasonNums {
+		if sn == current {
+			return i
+		}
+	}
+	return 0
+}
+
+// seasonPickFunc matches tui.Pick so tests can inject a headless picker.
+type seasonPickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
 
 // selectSuperFlixSeason asks the user to pick a season and returns its key.
 // Single-season titles are selected automatically without opening the picker.
-// A fuzzyfinder.ErrAbort (ESC) is returned unwrapped so the caller can map it
-// to ErrBackToSearch.
+// tui.ErrPickBack / tui.ErrPickCancelled are returned unwrapped so the caller
+// can map them to ErrBackToSearch.
 func selectSuperFlixSeason(media *models.Anime, seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) (string, error) {
+	return selectSuperFlixSeasonWith(tui.Pick, media, seasonNums, allEpisodes)
+}
+
+// selectSuperFlixSeasonWith isolates picker execution for deterministic tests.
+func selectSuperFlixSeasonWith(pick seasonPickFunc, media *models.Anime, seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) (string, error) {
 	if len(seasonNums) == 1 {
 		only := seasonNums[0]
 		util.Infof("Only one season available — %s selected automatically.", seasonDisplayName(only))
 		return only, nil
 	}
 
-	display := seasonDisplayOrder(seasonNums)
-	labels := make([]string, len(display))
-	for i, sn := range display {
-		labels[i] = seasonLabel(sn, allEpisodes[sn])
+	if pick == nil {
+		return "", fmt.Errorf("season picker not configured")
+	}
+	if len(seasonNums) == 0 {
+		return "", fmt.Errorf("no seasons to select")
 	}
 
-	header := fmt.Sprintf("%s — %d seasons  ·  ↑/↓ move · Enter select · ESC back", media.Name, len(seasonNums))
-	current := strconv.Itoa(media.CurrentSeason)
-
-	idx, err := tui.Find(labels, func(i int) string { return labels[i] },
-		fuzzyfinder.WithPromptString("Select season: "),
-		fuzzyfinder.WithHeader(header),
-		fuzzyfinder.WithCursorPosition(fuzzyfinder.CursorPositionTop),
-		fuzzyfinder.WithPreselected(func(i int) bool {
-			return media.CurrentSeason > 0 && display[i] == current
-		}),
-		fuzzyfinder.WithPreviewWindow(func(i, _, h int) string {
-			if i < 0 || i >= len(display) {
-				return ""
-			}
-			return seasonPreviewText(display[i], allEpisodes[display[i]], h)
-		}),
-	)
+	name := ""
+	if media != nil {
+		name = tui.SingleLine(media.Name)
+	}
+	if name == "" {
+		name = "Title"
+	}
+	idx, err := pick(seasonPickItems(seasonNums, allEpisodes), tui.PickOptions{
+		Breadcrumb:   fmt.Sprintf("Search > %s > Seasons", name),
+		WindowTitle:  "GoAnime - Seasons",
+		ItemSingular: "season",
+		ItemPlural:   "seasons",
+		InitialIndex: currentSeasonIndex(media, seasonNums),
+	})
 	if err != nil {
 		return "", err
 	}
-	return display[idx], nil
+	if idx < 0 || idx >= len(seasonNums) {
+		return "", fmt.Errorf("season picker returned invalid index %d", idx)
+	}
+	return seasonNums[idx], nil
 }

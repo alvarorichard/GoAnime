@@ -20,7 +20,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 	"golang.org/x/term"
 )
 
@@ -582,7 +581,7 @@ func GetSuperFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	// Let user select a season (auto-selects when there is only one)
 	selectedSeason, err := selectSuperFlixSeason(media, seasonNums, allEpisodes)
 	if err != nil {
-		if errors.Is(err, fuzzyfinder.ErrAbort) {
+		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
 			return nil, ErrBackToSearch
 		}
 		return nil, fmt.Errorf("season selection cancelled: %w", err)

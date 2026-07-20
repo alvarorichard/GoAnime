@@ -121,16 +121,17 @@ func TestShellRender(t *testing.T) {
 		wantFooter     string
 	}{
 		{name: "wide", width: 100, wantBreadcrumb: true, wantFooter: "filter"},
-		{name: "compact", width: 40, wantBreadcrumb: true, wantFooter: "enter open"},
-		{name: "tiny", width: 20, wantBreadcrumb: false, wantFooter: "enter open"},
+		{name: "compact", width: 40, wantBreadcrumb: true, wantFooter: "type fzf"},
+		{name: "tiny", width: 20, wantBreadcrumb: false, wantFooter: "enter"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			shell := newTestShell("Search > Results")
+			theme := NewTheme(true)
+			shell := NewShell(&theme, "Search > Results")
 			shell.Resize(tt.width, 24)
 
-			got := shell.Render("BODY", "↑↓ navigate  / filter")
+			got := shell.Render("BODY", "↑↓/jk move  type filter")
 
 			assert.Contains(t, got, "GOANIME")
 			assert.Contains(t, got, "BODY")
