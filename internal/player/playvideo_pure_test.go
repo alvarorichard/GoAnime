@@ -3,6 +3,7 @@
 package player
 
 import (
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -541,8 +542,19 @@ func TestShowPlayerMenu_ReturnsErrorOutsideTerminal(t *testing.T) {
 }
 
 func TestShowResumeDialog_ReturnsErrorOutsideTerminal(t *testing.T) {
-	_, err := showResumeDialog(1, 95)
+	_, err := showResumeDialog(1, 95, false)
 	assert.Error(t, err)
+	_, err = showResumeDialog(1, 95, true)
+	assert.Error(t, err)
+}
+
+func TestIsMPVConnectionDead(t *testing.T) {
+	t.Parallel()
+	assert.False(t, isMPVConnectionDead(nil))
+	assert.True(t, isMPVConnectionDead(errors.New("dial unix /tmp/x: connect: connection refused")))
+	assert.True(t, isMPVConnectionDead(errors.New("no such file or directory")))
+	assert.True(t, isMPVConnectionDead(errors.New("write: broken pipe")))
+	assert.False(t, isMPVConnectionDead(errors.New("property unavailable")))
 }
 
 func TestHandleUserInput_QuitsWhenSocketDead(t *testing.T) {

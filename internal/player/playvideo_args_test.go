@@ -136,6 +136,24 @@ func TestBuildPlaybackArgs(t *testing.T) {
 		assert.NotContains(t, args, "--script-opts=ytdl_hook-try_ytdl_first=yes")
 	})
 
+	t.Run("SuperFlix master txt forces the HLS demuxer", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL: "https://cdn.test/cdn/hls/hash/master.txt",
+			IsHLS:    true,
+		})
+		assert.Contains(t, args, hlsAllowAllExtensionsArg)
+		assert.Contains(t, args, hlsForceLavfFormatArg)
+	})
+
+	t.Run("ordinary m3u8 does not need a forced demuxer", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL: "https://cdn.test/video/master.m3u8",
+			IsHLS:    true,
+		})
+		assert.Contains(t, args, hlsAllowAllExtensionsArg)
+		assert.NotContains(t, args, hlsForceLavfFormatArg)
+	})
+
 	t.Run("local non-HLS file carries neither referer nor allowed_extensions", func(t *testing.T) {
 		args := buildPlaybackArgs(playbackArgsInput{
 			VideoURL: "/tmp/episode.mp4",

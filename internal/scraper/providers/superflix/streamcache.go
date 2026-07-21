@@ -79,6 +79,23 @@ func (sc *streamCache) put(key string, e streamCacheEntry) {
 	}
 }
 
+// del removes a cache entry and persists the change. Used when a cached
+// (host, hash) still signs URLs but the CDN rejects them (host rotated out),
+// so the next play re-resolves through the browser instead of replaying a dead
+// link.
+func (sc *streamCache) del(key string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.ensureLoaded()
+	if _, ok := sc.entries[key]; !ok {
+		return
+	}
+	delete(sc.entries, key)
+	if data, err := json.MarshalIndent(sc.entries, "", "  "); err == nil {
+		_ = os.WriteFile(sc.file(), data, 0o600)
+	}
+}
+
 // streamCacheKey identifies one playable unit (movie, or a specific episode).
 func streamCacheKey(mediaType, mediaID, season, episode string) string {
 	if mediaType == "serie" {

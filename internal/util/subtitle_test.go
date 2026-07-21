@@ -1,7 +1,6 @@
 package util
 
 import (
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -153,23 +152,44 @@ func TestGetSubtitleArgs_MultipleSubtitles(t *testing.T) {
 	})
 
 	args := GetSubtitleArgs()
-	if len(args) != 1 {
-		t.Fatalf("Expected 1 arg (--sub-files=...), got %d", len(args))
+	// Must be one --sub-file= per URL. Joining with ":" breaks https:// URLs.
+	want := []string{
+		"--sub-file=https://cdn.example.com/en.vtt",
+		"--sub-file=https://cdn.example.com/pt.vtt",
+		"--sub-file=https://cdn.example.com/es.vtt",
 	}
-
-	separator := ":"
-	if runtime.GOOS == "windows" {
-		separator = ";"
+	if len(args) != len(want) {
+		t.Fatalf("Expected %d args, got %d: %v", len(want), len(args), args)
 	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("GetSubtitleArgs()[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--sub-files=") {
+		t.Errorf("must not use --sub-files= (colon separator breaks https URLs): %v", args)
+	}
+}
 
-	expected := "--sub-files=" + strings.Join([]string{
-		"https://cdn.example.com/en.vtt",
-		"https://cdn.example.com/pt.vtt",
-		"https://cdn.example.com/es.vtt",
-	}, separator)
-
-	if args[0] != expected {
-		t.Errorf("GetSubtitleArgs()[0] = %q, want %q", args[0], expected)
+func TestGetSubtitleArgs_HTTPSURLsNotSplitByColon(t *testing.T) {
+	t.Cleanup(resetSubtitleState)
+	// SuperFlix-style WEBVTT served behind .html paths.
+	SetGlobalSubtitles([]SubtitleInfo{
+		{URL: "https://corda.sbs/q/abc.html", Language: "por", Label: "Portuguese"},
+		{URL: "https://corda.sbs/q/def.html", Language: "eng", Label: "English"},
+	})
+	args := GetSubtitleArgs()
+	if len(args) != 2 {
+		t.Fatalf("got %d args, want 2: %v", len(args), args)
+	}
+	for _, a := range args {
+		if !strings.HasPrefix(a, "--sub-file=https://") {
+			t.Errorf("arg must keep full https URL intact, got %q", a)
+		}
+		if strings.Count(a, "https://") != 1 {
+			t.Errorf("arg was corrupted by colon-join: %q", a)
+		}
 	}
 }
 
@@ -313,18 +333,21 @@ func TestFullFlow_9Anime_SubtitlesStoredAndRetrieved(t *testing.T) {
 		t.Fatalf("Expected 4 subtitle tracks stored, got %d", len(GlobalSubtitles))
 	}
 
-	// Step 4: Verify GetSubtitleArgs returns correct mpv args (before user selection)
+	// Step 4: Verify GetSubtitleArgs returns one --sub-file= per track
+	// (colon-joined --sub-files= breaks https:// URLs on Unix).
 	args := GetSubtitleArgs()
-	if len(args) != 1 {
-		t.Fatalf("Expected 1 arg (--sub-files), got %d", len(args))
+	if len(args) != 4 {
+		t.Fatalf("Expected 4 args (--sub-file= each), got %d: %v", len(args), args)
 	}
-	if !strings.HasPrefix(args[0], "--sub-files=") {
-		t.Errorf("Expected --sub-files= prefix, got %q", args[0])
-	}
-	// All 4 URLs should be present
+	joined := strings.Join(args, " ")
 	for _, url := range []string{"abc123.vtt", "def456.vtt", "ghi789.vtt", "jkl012.vtt"} {
-		if !strings.Contains(args[0], url) {
-			t.Errorf("Expected args to contain %q, got %q", url, args[0])
+		if !strings.Contains(joined, url) {
+			t.Errorf("Expected args to contain %q, got %v", url, args)
+		}
+	}
+	for _, a := range args {
+		if !strings.HasPrefix(a, "--sub-file=") {
+			t.Errorf("Expected --sub-file= prefix, got %q", a)
 		}
 	}
 }
@@ -595,22 +618,16 @@ func TestSubtitleArgs_AllSubtitlesPassedToMpv(t *testing.T) {
 	// User selects "All" — GlobalSubtitles remains unchanged
 	subArgs := GetSubtitleArgs()
 
-	if len(subArgs) != 1 {
-		t.Fatalf("Expected 1 arg, got %d", len(subArgs))
+	want := []string{
+		"--sub-file=https://cc.2cdns.com/en.vtt",
+		"--sub-file=https://cc.2cdns.com/pt.vtt",
 	}
-
-	separator := ":"
-	if runtime.GOOS == "windows" {
-		separator = ";"
+	if len(subArgs) != len(want) {
+		t.Fatalf("Expected %d args, got %d: %v", len(want), len(subArgs), subArgs)
 	}
-
-	if !strings.HasPrefix(subArgs[0], "--sub-files=") {
-		t.Errorf("Expected --sub-files= prefix, got %q", subArgs[0])
-	}
-
-	// Both URLs present, separated correctly
-	expectedSuffix := "https://cc.2cdns.com/en.vtt" + separator + "https://cc.2cdns.com/pt.vtt"
-	if !strings.HasSuffix(subArgs[0], expectedSuffix) {
-		t.Errorf("Expected suffix %q, got %q", expectedSuffix, subArgs[0])
+	for i := range want {
+		if subArgs[i] != want[i] {
+			t.Errorf("subArgs[%d] = %q, want %q", i, subArgs[i], want[i])
+		}
 	}
 }

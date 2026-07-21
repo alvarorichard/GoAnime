@@ -31,7 +31,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // Pre-compiled regexes for player scraper (avoid per-call compilation)
@@ -1208,20 +1207,21 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 				}
 			}
 
-			// Prompt user for quality selection. The picker stays on
-			// go-fuzzyfinder; a prior huh.Select migration regressed
-			// rendering ("piorou") in the user's terminal. Logic fixes
-			// (descending sort, mirror-N disambiguation, friendly fallback
-			// labels, ErrAbort routing, index-based selection) live in
+			// Prompt user for quality selection via fancy list (type-to-filter).
+			// Logic fixes (descending sort, mirror-N disambiguation, friendly
+			// fallback labels, abort routing, index-based selection) live in
 			// buildAnimeFireQualityItems and are pinned by
 			// animefire_quality_menu_test.go.
 			sortedData, qualityLabels := buildAnimeFireQualityItems(videoResponse.Data)
 
-			qIdx, err := tui.Find(qualityLabels, func(i int) string {
-				return qualityLabels[i]
-			}, fuzzyfinder.WithPromptString("Select Video Quality: "))
+			qIdx, err := tui.PickLabels(qualityLabels, tui.PickOptions{
+				Breadcrumb:   "Playback > Quality",
+				WindowTitle:  "GoAnime - Quality",
+				ItemSingular: "quality",
+				ItemPlural:   "qualities",
+			})
 			if err != nil {
-				if errors.Is(err, fuzzyfinder.ErrAbort) {
+				if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
 					return "", ErrBackRequested
 				}
 				return "", fmt.Errorf("failed to select quality: %w", err)

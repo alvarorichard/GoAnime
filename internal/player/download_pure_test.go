@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -73,6 +74,96 @@ func TestFileExists(t *testing.T) {
 		require.NoError(t, os.WriteFile(p, []byte("y"), 0o600))
 		assert.True(t, fileExists(p))
 	})
+}
+
+func TestIsSuperFlixTextHLS(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"SuperFlix master txt", "https://cdn.test/cdn/hls/hash/master.txt", true},
+		{"case insensitive", "https://cdn.test/CDN/HLS/hash/MASTER.TXT?x=1", true},
+		{"ordinary m3u8", "https://cdn.test/cdn/hls/hash/master.m3u8", false},
+		{"unrelated text file", "https://cdn.test/files/master.txt", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isSuperFlixTextHLS(tt.url))
+		})
+	}
+}
+
+func TestFFmpegHLSDownloadArgs_SuperFlixContract(t *testing.T) {
+	t.Parallel()
+	args := ffmpegHLSDownloadArgs(
+		"https://cdn.test/cdn/hls/hash/master.txt",
+		"/tmp/movie.part.mp4",
+		"https://player.test/",
+	)
+	joined := strings.Join(args, " ")
+	assert.Contains(t, joined, "-f hls")
+	assert.Contains(t, joined, "-extension_picky 0")
+	assert.Contains(t, joined, "-progress pipe:1")
+	assert.Contains(t, joined, "Referer: https://player.test/")
+	assert.Contains(t, joined, "-map 0:v:0")
+	assert.Contains(t, joined, "-map 0:a?")
+	assert.Equal(t, "/tmp/movie.part.mp4", args[len(args)-1])
+}
+
+func TestFFmpegProgressTime(t *testing.T) {
+	t.Parallel()
+	d, ok := ffmpegProgressTime("out_time_us=128500000")
+	require.True(t, ok)
+	assert.Equal(t, 2*time.Minute+8500*time.Millisecond, d)
+
+	_, ok = ffmpegProgressTime("total_size=1234")
+	assert.False(t, ok)
+	_, ok = ffmpegProgressTime("out_time_us=invalid")
+	assert.False(t, ok)
+}
+
+func TestUpdateTimedDownloadProgress(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single HLS uses media duration as total", func(t *testing.T) {
+		m := &model{}
+		updateTimedDownloadProgress(m, 25*time.Second, 100*time.Second)
+		assert.Equal(t, (100 * time.Second).Microseconds(), m.progressTotal())
+		assert.Equal(t, (25 * time.Second).Microseconds(), m.received)
+		assert.InDelta(t, 0.25, m.peakPct, 1e-9)
+	})
+
+	t.Run("batch preserves byte estimate", func(t *testing.T) {
+		m := &model{totalBytes: 800 * 1024 * 1024}
+		updateTimedDownloadProgress(m, 50*time.Second, 100*time.Second)
+		assert.Equal(t, int64(800*1024*1024), m.progressTotal())
+		assert.Equal(t, int64(400*1024*1024), m.received)
+		assert.InDelta(t, 0.5, m.peakPct, 1e-9)
+	})
+}
+
+func TestValidateDownloadedVideoRejectsSecurityError(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	require.NoError(t, os.WriteFile(path, []byte("security error"), 0o600))
+
+	err := validateDownloadedVideo(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "14 bytes")
+}
+
+func TestValidateDownloadedVideoAcceptsCompleteMedia(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "movie.mp4")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(minDownloadedVideoSize))
+	require.NoError(t, f.Close())
+
+	require.NoError(t, validateDownloadedVideo(path))
 }
 
 func TestSafePartPath(t *testing.T) {

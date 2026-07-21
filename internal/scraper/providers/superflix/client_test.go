@@ -983,6 +983,47 @@ func TestGetSourceURL_InvalidJSON(t *testing.T) {
 // HTTP Mock Tests: GetVideoAPI
 // =============================================================================
 
+func TestPreferredGetVideoURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response getVideoResponse
+		want     string
+	}{
+		{
+			name: "both fields prefer working video source",
+			response: getVideoResponse{
+				VideoSource: "https://working.example/cdn/hls/hash/master.txt",
+				SecuredLink: "https://dead.example/master.m3u8?expires=1",
+			},
+			want: "https://working.example/cdn/hls/hash/master.txt",
+		},
+		{
+			name:     "video source only",
+			response: getVideoResponse{VideoSource: "https://working.example/master.txt"},
+			want:     "https://working.example/master.txt",
+		},
+		{
+			name:     "secured link remains compatibility fallback",
+			response: getVideoResponse{SecuredLink: "https://legacy.example/master.m3u8"},
+			want:     "https://legacy.example/master.m3u8",
+		},
+		{
+			name:     "empty response",
+			response: getVideoResponse{},
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, preferredGetVideoURL(tt.response))
+		})
+	}
+}
+
 func TestGetVideoAPI_SecuredLink(t *testing.T) {
 	t.Parallel()
 
@@ -1006,7 +1047,7 @@ func TestGetVideoAPI_SecuredLink(t *testing.T) {
 	assert.Equal(t, "https://img.example.com/thumb.jpg", thumbURL)
 }
 
-func TestGetVideoAPI_FallbackToVideoSource(t *testing.T) {
+func TestGetVideoAPI_VideoSourceOnly(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1020,6 +1061,24 @@ func TestGetVideoAPI_FallbackToVideoSource(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "https://fallback.example.com/video.mp4", streamURL)
+}
+
+// Regression: SuperFlix may return both fields while the signed securedLink
+// answers 403. The unsigned videoSource master.txt is the playable URL.
+func TestGetVideoAPI_PrefersVideoSourceOverSecuredLink(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"securedLink":"https://dead.example.com/master.m3u8?expires=1","videoSource":"https://working.example.com/cdn/hls/hash/master.txt"}`)
+	}))
+	defer srv.Close()
+
+	client := newTestSuperFlixClient(srv.URL)
+	streamURL, _, err := client.GetVideoAPI(context.Background(), srv.URL, "hash", srv.URL+"/")
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://working.example.com/cdn/hls/hash/master.txt", streamURL)
 }
 
 func TestGetVideoAPI_NoStreamURL(t *testing.T) {
@@ -1552,7 +1611,7 @@ func TestGetVideoAPI_AcceptsJSONBodyWithHTMLContentType_2026_04_30(t *testing.T)
 	streamURL, thumb, err := client.GetVideoAPI(context.Background(), srv.URL, "hash", srv.URL+"/")
 
 	require.NoError(t, err)
-	assert.Equal(t, "https://example.com/master.m3u8", streamURL)
+	assert.Equal(t, "https://example.com/master.txt", streamURL)
 	assert.Equal(t, "https://example.com/thumb.jpg", thumb)
 }
 

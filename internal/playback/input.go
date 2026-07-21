@@ -1,9 +1,10 @@
 package playback
 
 import (
+	"errors"
+
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // menuItem maps a display label to the short code returned by GetUserInput.
@@ -12,10 +13,19 @@ type menuItem struct {
 	Value string
 }
 
-// findMenuFunc is a package-level indirection over tui.Find so tests can
-// drive GetUserInput without opening a TUI.
-var findMenuFunc = func(items []menuItem, itemFunc func(i int) string, opts ...fuzzyfinder.Option) (int, error) {
-	return tui.Find(items, itemFunc, opts...)
+// findMenuFunc is a package-level indirection over the fancy picker so tests
+// can drive GetUserInput without opening a TTY.
+var findMenuFunc = func(items []menuItem) (int, error) {
+	labels := make([]string, len(items))
+	for i, it := range items {
+		labels[i] = it.Label
+	}
+	return tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   "Playback > Next",
+		WindowTitle:  "GoAnime - Menu",
+		ItemSingular: "option",
+		ItemPlural:   "options",
+	})
 }
 
 // GetUserInput shows post-playback menu. Pass isMovie=true for movies to show
@@ -44,16 +54,19 @@ func GetUserInput(isMovie ...bool) string {
 		}
 	}
 
-	idx, err := findMenuFunc(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("What would you like to do next? "))
+	idx, err := findMenuFunc(items)
 	if err != nil {
-		// A broken or aborted menu must not auto-advance: returning "n" here
-		// made HandleSeries/HandleMovie auto-play forever on non-TTY
-		// terminals and turned Esc into "next episode".
+		// Esc/back from the fancy picker is an intentional exit path.
+		if errors.Is(err, tui.ErrPickBack) {
+			return "back"
+		}
+		// A broken menu must not auto-advance: returning "n" here made
+		// HandleSeries/HandleMovie auto-play forever on non-TTY terminals.
 		util.Errorf("Error showing menu: %v", err)
 		return "q"
 	}
-
+	if idx < 0 || idx >= len(items) {
+		return "q"
+	}
 	return items[idx].Value
 }

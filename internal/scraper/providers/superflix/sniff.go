@@ -161,7 +161,6 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
-	defer func() { _ = page.Close() }()
 
 	var mu sync.Mutex
 	var hitURL, hitRef, hitUA string
@@ -243,6 +242,16 @@ type getVideoResponse struct {
 	VideoImage  string `json:"videoImage"`
 }
 
+// preferredGetVideoURL keeps every extraction path on the same upstream
+// contract. videoSource is the working unsigned HLS playlist; securedLink is
+// retained only as a compatibility fallback for responses that omit it.
+func preferredGetVideoURL(response getVideoResponse) string {
+	if response.VideoSource != "" {
+		return response.VideoSource
+	}
+	return response.SecuredLink
+}
+
 // sfGetVideoRe matches the player's getVideo XHR whose JSON body carries the
 // real (signed) HLS URL.
 var sfGetVideoRe = regexp.MustCompile(`(?i)/player/index\.php\?.*do=getVideo`)
@@ -285,13 +294,13 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
+	defer func() { _ = page.Close() }()
 	// Onscreen during the solve — Turnstile only auto-passes when the page truly
 	// renders (headless & offscreen both stall it). Close only this tab afterwards:
 	// keeping the persistent context alive retains Chromium's process, connection
 	// pools and first-party challenge state for the next episode. Re-launching the
 	// whole context here was the largest avoidable delay between plays.
 	moveWindow(page, 60, 60)
-	defer func() { _ = page.Close() }()
 
 	// Close ad popunders the embed spawns via window.open so they don't steal the
 	// context. Close in a goroutine — Close() is a protocol round-trip and must
@@ -345,10 +354,10 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 			if json.Unmarshal(body, &gv) != nil {
 				return
 			}
-			link := gv.SecuredLink
-			if link == "" {
-				link = gv.VideoSource
-			}
+			// securedLink currently points at a dead signed master.m3u8 (nginx
+			// 403), while videoSource is the working unsigned master.txt HLS.
+			// Prefer the source the upstream player itself exposes as fallback.
+			link := preferredGetVideoURL(gv)
 			if link == "" {
 				return
 			}

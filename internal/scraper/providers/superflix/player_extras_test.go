@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,4 +113,44 @@ func TestFetchPlayerExtras_SkipsWhenNoPlayerHost(t *testing.T) {
 	assert.Empty(t, audio)
 	assert.Empty(t, subs)
 	assert.True(t, strings.HasPrefix(srv.URL, "http"), "server was started but must go untouched")
+}
+
+type extrasBrowserTrap struct {
+	t      *testing.T
+	called bool
+}
+
+func (s *extrasBrowserTrap) Solve(context.Context, string, time.Duration) (*CFSolveResult, error) {
+	s.called = true
+	s.t.Error("optional player extras must never escalate to the headed browser")
+	return nil, fmt.Errorf("unexpected browser solve")
+}
+
+// A retired player route currently returns a 200 HTML shell that resembles the
+// provider's verification page.  The shared transport normally opens Chromium
+// for that response; extras are optional, so this request must opt out and let
+// playback proceed with the stream that was already captured.
+func TestFetchPlayerExtras_DoesNotOpenBrowserForDeadPlayerPage(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<html><title>Verificação</title><div class="cf-turnstile"></div></html>`)
+	}))
+	t.Cleanup(srv.Close)
+
+	trap := &extrasBrowserTrap{t: t}
+	transport := &cfFallbackTransport{
+		base:    http.DefaultTransport,
+		solver:  trap,
+		timeout: time.Second,
+	}
+	c := newExtrasTestClient(srv.URL)
+	c.client = &http.Client{Transport: transport}
+
+	audio, subs := c.fetchPlayerExtras(context.Background(), srv.URL, "retired-hash")
+
+	assert.False(t, trap.called)
+	assert.Empty(t, audio)
+	assert.Empty(t, subs)
 }

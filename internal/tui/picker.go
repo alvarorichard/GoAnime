@@ -316,6 +316,23 @@ func Pick(items []PickItem, opts PickOptions) (int, error) {
 	})
 }
 
+// PickLabels is a convenience for simple one-line menus (download options,
+// yes/no, quality labels, post-playback actions). Same fancy list + fzf typing
+// as Pick, without requiring callers to build PickItem values.
+func PickLabels(labels []string, opts PickOptions) (int, error) {
+	items := make([]PickItem, len(labels))
+	for i, label := range labels {
+		items[i] = PickItem{Label: label}
+	}
+	if opts.ItemSingular == "" {
+		opts.ItemSingular = "option"
+	}
+	if opts.ItemPlural == "" {
+		opts.ItemPlural = "options"
+	}
+	return Pick(items, opts)
+}
+
 // pickWithRunner isolates terminal execution for deterministic tests.
 func pickWithRunner(items []PickItem, opts PickOptions, run pickRunner) (int, error) {
 	if len(items) == 0 {

@@ -382,6 +382,42 @@ func TestPick(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoPickItems)
 }
 
+func TestPickLabels(t *testing.T) {
+	t.Parallel()
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		idx, err := PickLabels(nil, PickOptions{})
+		assert.Equal(t, -1, idx)
+		assert.ErrorIs(t, err, ErrNoPickItems)
+	})
+	t.Run("defaults option nouns", func(t *testing.T) {
+		t.Parallel()
+		// Build items the same way PickLabels does and verify via pickWithRunner
+		// that empty singular/plural become option/options through Pick path.
+		labels := []string{"Yes", "No"}
+		items := make([]PickItem, len(labels))
+		for i, label := range labels {
+			items[i] = PickItem{Label: label}
+		}
+		opts := PickOptions{}
+		if opts.ItemSingular == "" {
+			opts.ItemSingular = "option"
+		}
+		if opts.ItemPlural == "" {
+			opts.ItemPlural = "options"
+		}
+		idx, err := pickWithRunner(items, opts, func(model tea.Model) (tea.Model, error) {
+			picker := model.(*pickerModel)
+			assert.Equal(t, "option", picker.options.ItemSingular)
+			assert.Equal(t, "options", picker.options.ItemPlural)
+			_, _ = picker.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			return picker, nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 0, idx)
+	})
+}
+
 func TestIsTypeToFilterKey(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

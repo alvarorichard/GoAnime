@@ -22,7 +22,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application
@@ -73,6 +72,7 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 // allowed_extensions=ALL lets the audio rendition load too. It only widens a
 // check, never restricts, so it is safe for well-behaved HLS sources as well.
 const hlsAllowAllExtensionsArg = "--demuxer-lavf-o=allowed_extensions=ALL"
+const hlsForceLavfFormatArg = "--demuxer-lavf-format=hls"
 
 // appendHLSDemuxerArgs adds HLS-specific demuxer options to mpvArgs when the
 // stream is HLS, and returns mpvArgs unchanged otherwise.
@@ -153,6 +153,9 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	// with disguised segment extensions load (fixes video-plays-but-no-audio on
 	// SuperFlix/FirePlayer streams).
 	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
+	if in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt") {
+		mpvArgs = append(mpvArgs, hlsForceLavfFormatArg)
+	}
 
 	// For 9Anime (Cloudflare-protected CDNs), route playback through yt-dlp with
 	// Chrome TLS impersonation so ffmpeg's TLS fingerprint is not rejected.
@@ -200,7 +203,7 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 }
 
 // waitForVideoReady waits for the HLS video to be ready for playback
-// Returns true if video is ready, false if timeout
+// Returns true if video is ready, false if timeout or mpv already exited.
 func waitForVideoReady(socketPath string) bool {
 	util.Debugf("Waiting for HLS video to be ready...")
 
@@ -208,15 +211,21 @@ func waitForVideoReady(socketPath string) bool {
 	pollInterval := 50 * time.Millisecond
 	maxPollInterval := 200 * time.Millisecond
 	startTime := time.Now()
+	refusedStreak := 0
 
 	// Alternate between two reliable properties each iteration
 	// to reduce IPC overhead while covering both cases
 	check := 0
 	for time.Since(startTime) < maxWait {
+		var (
+			resp any
+			err  error
+		)
 		switch check % 2 {
 		case 0:
 			// Check duration (most reliable for HLS)
-			if resp, err := mpvSendCommand(socketPath, []any{"get_property", "duration"}); err == nil {
+			resp, err = mpvSendCommand(socketPath, []any{"get_property", "duration"})
+			if err == nil {
 				if d, ok := resp.(float64); ok && d > 0 {
 					util.Debugf("HLS video ready (duration: %.0fs) after %.1fs", d, time.Since(startTime).Seconds())
 					return true
@@ -224,12 +233,23 @@ func waitForVideoReady(socketPath string) bool {
 			}
 		case 1:
 			// Check time-pos (video is actually playing)
-			if resp, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"}); err == nil {
+			resp, err = mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
+			if err == nil {
 				if pos, ok := resp.(float64); ok && pos >= 0 {
 					util.Debugf("HLS video playing (pos: %.1fs) after %.1fs", pos, time.Since(startTime).Seconds())
 					return true
 				}
 			}
+		}
+		if err != nil && isMPVConnectionDead(err) {
+			refusedStreak++
+			// A few refused dials mean mpv already exited (bad args / bad stream).
+			if refusedStreak >= 5 {
+				util.Debugf("HLS wait aborted: mpv socket dead after %.1fs (%v)", time.Since(startTime).Seconds(), err)
+				return false
+			}
+		} else {
+			refusedStreak = 0
 		}
 		check++
 
@@ -241,6 +261,18 @@ func waitForVideoReady(socketPath string) bool {
 	}
 	util.Debugf("Timeout waiting for HLS video (%.1fs)", time.Since(startTime).Seconds())
 	return false
+}
+
+// isMPVConnectionDead reports IPC failures that mean the player process is gone.
+func isMPVConnectionDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such file") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset")
 }
 
 // seekToResumePosition seeks to the saved resume position for HLS streams
@@ -323,8 +355,9 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 	}
 }
 
-// showResumeDialog displays a compact dialog asking if user wants to resume playback
-func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
+// showResumeDialog displays a compact dialog asking if user wants to resume playback.
+// For movies (single-title playback) the wording avoids "episode N".
+func showResumeDialog(episodeNum int, timeSeconds int, isMovie bool) (bool, error) {
 	var resume bool
 
 	// Convert seconds to minutes and seconds for better readability
@@ -338,8 +371,13 @@ func showResumeDialog(episodeNum int, timeSeconds int) (bool, error) {
 		timeStr = fmt.Sprintf("%ds", seconds)
 	}
 
+	title := fmt.Sprintf("Resume episode %d from %s?", episodeNum, timeStr)
+	if isMovie {
+		title = fmt.Sprintf("Resume movie from %s?", timeStr)
+	}
+
 	confirm := huh.NewConfirm().
-		Title(fmt.Sprintf("Resume episode %d from %s?", episodeNum, timeStr)).
+		Title(title).
 		Description("You can continue watching from where you left off.").
 		Affirmative("Yes, resume").
 		Negative("No, start from beginning").
@@ -567,7 +605,6 @@ func playVideo(
 
 	// Initialize tracking and check for resume time (may show a resume dialog).
 	tracker, resumeTime := initTracking(anilistID, currentEpisode, currentEpisodeNum)
-
 	mpvArgs := buildPlaybackArgs(playbackArgsInput{
 		VideoURL:         videoURL,
 		IsHLS:            isHLSStream,
@@ -836,7 +873,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*trac
 
 	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
 
-	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime); ok {
+	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime, IsCurrentMediaMovie()); ok {
 		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
 		return tracker, progress.PlaybackTime
 	}
@@ -1207,12 +1244,24 @@ func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
 		}
 	}
 
-	_ = title // title is informational for the prompt string
-	idx, err := tui.Find(menuItems, func(i int) string {
-		return menuItems[i].Label
-	}, fuzzyfinder.WithPromptString(title+": "))
+	labels := make([]string, len(menuItems))
+	for i, it := range menuItems {
+		labels[i] = it.Label
+	}
+	idx, err := tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   tui.SingleLine(title),
+		WindowTitle:  "GoAnime - Player",
+		ItemSingular: "option",
+		ItemPlural:   "options",
+	})
 
 	if err != nil {
+		if errors.Is(err, tui.ErrPickBack) {
+			return "download_options", nil
+		}
+		if errors.Is(err, tui.ErrPickCancelled) {
+			return "quit", nil
+		}
 		return "", fmt.Errorf("error showing menu: %w", err)
 	}
 
@@ -1495,9 +1544,16 @@ func selectAudioTrack(socketPath string) {
 		trackItems = append(trackItems, trackOption{Label: label, ID: id})
 	}
 
-	idx, err := tui.Find(trackItems, func(i int) string {
-		return trackItems[i].Label
-	}, fuzzyfinder.WithPromptString("Select Audio Track: "))
+	labels := make([]string, len(trackItems))
+	for i, it := range trackItems {
+		labels[i] = it.Label
+	}
+	idx, err := tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   "Player > Audio",
+		WindowTitle:  "GoAnime - Audio Track",
+		ItemSingular: "track",
+		ItemPlural:   "tracks",
+	})
 	if err != nil {
 		return
 	}
@@ -1567,9 +1623,16 @@ func selectSubtitleTrack(socketPath string) {
 		trackItems = append(trackItems, trackOption{Label: label, ID: id})
 	}
 
-	idx, err := tui.Find(trackItems, func(i int) string {
-		return trackItems[i].Label
-	}, fuzzyfinder.WithPromptString("Select Subtitle Track: "))
+	labels := make([]string, len(trackItems))
+	for i, it := range trackItems {
+		labels[i] = it.Label
+	}
+	idx, err := tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   "Player > Subtitles",
+		WindowTitle:  "GoAnime - Subtitle Track",
+		ItemSingular: "track",
+		ItemPlural:   "tracks",
+	})
 	if err != nil {
 		return
 	}

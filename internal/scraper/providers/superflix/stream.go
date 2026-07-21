@@ -252,7 +252,6 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video from API: %w", err)
 	}
-
 	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)
 	// Server resolution already loaded the player HTML, so retain the audio and
 	// subtitle metadata with the stream key.  A replay can then start with the
@@ -319,6 +318,16 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 		util.Debug("SuperFlix cached stream stale, will re-resolve", "key", key, "err", streamErr)
 		return nil, false
 	}
+	// getVideo still signs URLs on the cached host even after that host rotates
+	// out of the CDN — the signed link then answers 403/404 and mpv dies a few
+	// seconds after launch. Probe the freshly signed URL and, if the CDN
+	// definitively rejects it, drop the entry so the caller re-resolves through
+	// the browser instead of handing a dead link to the player.
+	if c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, ent.Host+"/") {
+		util.Debug("SuperFlix cached host rotated (CDN rejected signed URL), re-resolving", "key", key, "host", ent.Host)
+		defaultStreamCache.del(key)
+		return nil, false
+	}
 	if !ent.ExtrasCached {
 		defaultStreamCache.put(key, streamCacheEntry{
 			Host:         ent.Host,
@@ -336,6 +345,35 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 		DefaultAudio: audio,
 		Subtitles:    subs,
 	}, true
+}
+
+// streamURLDead reports whether the CDN definitively rejects a freshly signed
+// HLS URL. It issues a tiny ranged GET with the same Referer mpv will use, so
+// a rotated-out cache host is caught here (403/404/410) instead of by a dying
+// mpv. Ambiguous outcomes (network blip, timeout, other statuses) return false
+// so a transient failure never nukes an otherwise good cache entry.
+func (c *SuperFlixClient) streamURLDead(ctx context.Context, streamURL, referer string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)
+	if err != nil {
+		return false
+	}
+	c.decorateRequest(req)
+	req.Header.Set("Referer", referer)
+	req.Header.Set("Range", "bytes=0-1")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	switch resp.StatusCode {
+	case http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens) ([]SuperFlixServer, error) {
@@ -536,6 +574,13 @@ func (c *SuperFlixClient) fetchPlayerExtras(ctx context.Context, host, hash stri
 	if host == "" || hash == "" {
 		return nil, nil
 	}
+	// Extras are optional and some rotating player hosts retire /video/<hash>
+	// immediately after issuing the signed HLS URL.  Their tombstone page can
+	// look like a Cloudflare/restricted shell to cfFallbackTransport; allowing
+	// the normal escalation here opens that dead URL in the headed browser even
+	// though the stream was already resolved successfully.  Keep this best-effort
+	// enrichment HTTP-only and simply continue without tracks when it is gone.
+	ctx = WithoutBrowserSolve(ctx)
 	pageURL := host + "/video/" + hash
 
 	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
@@ -617,21 +662,13 @@ func (c *SuperFlixClient) GetVideoAPI(ctx context.Context, playerBaseURL, videoH
 		return "", "", err
 	}
 
-	var result struct {
-		SecuredLink string `json:"securedLink"`
-		VideoSource string `json:"videoSource"`
-		VideoImage  string `json:"videoImage"`
-	}
+	var result getVideoResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", "", fmt.Errorf("failed to decode video API response: %w", err)
 	}
 
-	switch {
-	case result.SecuredLink != "":
-		streamURL = result.SecuredLink
-	case result.VideoSource != "":
-		streamURL = result.VideoSource
-	default:
+	streamURL = preferredGetVideoURL(result)
+	if streamURL == "" {
 		return "", "", fmt.Errorf("no stream URL in video API response")
 	}
 

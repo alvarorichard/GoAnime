@@ -30,7 +30,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pkg/errors"
 	"golang.org/x/term"
 )
@@ -574,18 +573,19 @@ func filterMPVArgs(args []string) []string {
 		"--video-latency-hacks=",
 		"--audio-display=",
 		"--start=",
-		"--alang=",              // Audio language preference
-		"--slang=",              // Subtitle language preference
-		"--aid=",                // Audio track ID
-		"--sid=",                // Subtitle track ID
-		"--sub-file=",           // External subtitle file (single)
-		"--sub-files=",          // External subtitle files (multiple, colon-separated)
-		"--audio-file=",         // External audio file
-		"--http-header-fields=", // HTTP headers for HLS streams
-		"--stream-lavf-o=",      // FFmpeg/lavf options for streaming protocols
-		"--demuxer-lavf-o=",     // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
-		"--referrer=",           // HTTP referrer for streaming
-		"--user-agent=",         // HTTP user agent for streaming
+		"--alang=",               // Audio language preference
+		"--slang=",               // Subtitle language preference
+		"--aid=",                 // Audio track ID
+		"--sid=",                 // Subtitle track ID
+		"--sub-file=",            // External subtitle file (one flag per track; never colon-join https URLs)
+		"--sub-files=",           // legacy mpv multi-file form (unused — colon breaks https://)
+		"--audio-file=",          // External audio file
+		"--http-header-fields=",  // HTTP headers for HLS streams
+		"--stream-lavf-o=",       // FFmpeg/lavf options for streaming protocols
+		"--demuxer-lavf-o=",      // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
+		"--demuxer-lavf-format=", // Force HLS for SuperFlix's valid master.txt fallback
+		"--referrer=",            // HTTP referrer for streaming
+		"--user-agent=",          // HTTP user agent for streaming
 		// Anime4K real-time upscaling shaders
 		"--glsl-shader=",          // GLSL shader for video processing
 		"--glsl-shaders=",         // Multiple GLSL shaders (colon-separated)
@@ -1133,7 +1133,9 @@ func downloadAndPlayEpisode(
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
+				if isSuperFlixTextHLS(videoURL) {
+					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, m)
+				} else if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
 						// Separate audio tracks need yt-dlp for proper audio/video merging
@@ -1162,6 +1164,12 @@ func downloadAndPlayEpisode(
 					}
 				} else {
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
+				}
+				if dlErr == nil {
+					dlErr = validateDownloadedVideo(episodePath)
+					if dlErr != nil {
+						_ = os.Remove(episodePath)
+					}
 				}
 				if dlErr != nil {
 					m.mu.Lock()
@@ -1198,13 +1206,6 @@ func downloadAndPlayEpisode(
 			// Verify the file is a reasonable size for a video episode.
 			// HLS episodes are typically at least 20 MB; anything below 10 MB
 			// almost certainly indicates a truncated or failed download.
-			const minEpisodeSize int64 = 10 * 1024 * 1024 // 10 MB
-			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < minEpisodeSize {
-				_ = os.Remove(episodePath) // remove partial file so retry won't skip it
-				return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
-					stat.Size(), float64(stat.Size())/(1024*1024), float64(minEpisodeSize)/(1024*1024))
-			}
-
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 			printDownloadLocation(episodePath)
 
@@ -1319,10 +1320,20 @@ func askForDownload() int {
 		{"No download (play online)", "play_online"},
 	}
 
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("Download Options: "))
+	labels := make([]string, len(items))
+	for i, it := range items {
+		labels[i] = it.Label
+	}
+	idx, err := tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   "Playback > Download",
+		WindowTitle:  "GoAnime - Download",
+		ItemSingular: "option",
+		ItemPlural:   "options",
+	})
 	if err != nil {
+		if errors.Is(err, tui.ErrPickBack) {
+			return 0
+		}
 		util.Errorf("Error showing download menu: %v", err)
 		return 4 // Default to play online on error
 	}
@@ -1348,10 +1359,12 @@ func askForPlayOffline() bool {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return false // no TTY: default to no
 	}
-	items := []string{"Yes", "No"}
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i]
-	}, fuzzyfinder.WithPromptString("Play downloaded version offline? "))
+	idx, err := tui.PickLabels([]string{"Yes", "No"}, tui.PickOptions{
+		Breadcrumb:   "Playback > Offline",
+		WindowTitle:  "GoAnime - Play Offline",
+		ItemSingular: "option",
+		ItemPlural:   "options",
+	})
 	if err != nil {
 		util.Errorf("Error showing offline playback menu: %v", err)
 		return false // Default to no on error
@@ -1573,10 +1586,20 @@ func handleUpscaleFromMenu() error {
 
 	items = append(items, menuOption{"Setup shaders (download)", "setup"})
 
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString(prompt))
+	labels := make([]string, len(items))
+	for i, it := range items {
+		labels[i] = it.Label
+	}
+	idx, err := tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   tui.SingleLine(strings.TrimSuffix(prompt, ": ")),
+		WindowTitle:  "GoAnime - Upscale",
+		ItemSingular: "mode",
+		ItemPlural:   "modes",
+	})
 	if err != nil {
+		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+			return nil
+		}
 		return fmt.Errorf("cancelled: %w", err)
 	}
 

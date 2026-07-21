@@ -790,7 +790,6 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	if result.Referer != "" {
 		util.SetGlobalReferer(result.Referer)
 	}
-
 	// Update cover image from stream thumbnail if not already set
 	if media.ImageURL == "" && result.Thumb != "" {
 		media.ImageURL = result.Thumb

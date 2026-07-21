@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -274,40 +273,28 @@ func PromptSubtitleLanguage() {
 	}
 }
 
-// GetSubtitleArgs returns mpv arguments for subtitles
-// Based on lobster.sh implementation:
-// - Single subtitle: --sub-file='URL'
-// - Multiple subtitles: --sub-files='URL1:URL2:...'
+// GetSubtitleArgs returns mpv arguments for subtitles.
+//
+// Always emits one --sub-file=URL per track. Never use --sub-files=URL1:URL2:
+// on Unix the separator is ":", which collides with "https://" and silently
+// corrupts every remote subtitle URL (SuperFlix ships WEBVTT behind .html
+// paths). That made mpv fail to load movie streams with multiple tracks.
 func GetSubtitleArgs() []string {
 	if GlobalNoSubs || len(GlobalSubtitles) == 0 {
 		return nil
 	}
 
-	// Collect all subtitle URLs
-	var urls []string
+	args := make([]string, 0, len(GlobalSubtitles))
 	for _, sub := range GlobalSubtitles {
-		if sub.URL != "" {
-			urls = append(urls, sub.URL)
+		if sub.URL == "" {
+			continue
 		}
+		args = append(args, "--sub-file="+sub.URL)
 	}
-
-	if len(urls) == 0 {
+	if len(args) == 0 {
 		return nil
 	}
-
-	if len(urls) == 1 {
-		// Single subtitle file
-		return []string{fmt.Sprintf("--sub-file=%s", urls[0])}
-	}
-
-	// Multiple subtitle files - join with appropriate separator
-	// Unix uses : as separator, Windows uses ; (following lobster.sh implementation)
-	separator := ":"
-	if runtime.GOOS == "windows" {
-		separator = ";"
-	}
-	joined := strings.Join(urls, separator)
-	return []string{fmt.Sprintf("--sub-files=%s", joined)}
+	return args
 }
 
 // Cleanup function to be called on program exit

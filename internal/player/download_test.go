@@ -73,6 +73,11 @@ func TestLooksLikeHLS(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "SuperFlix unsigned master.txt playlist",
+			url:  "https://cdn.example.com/cdn/hls/abc123/master.txt",
+			want: true,
+		},
+		{
 			name: "uppercase /HLS/ path",
 			url:  "https://cdn.example.com/HLS/stream",
 			want: true,

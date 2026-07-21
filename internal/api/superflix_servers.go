@@ -8,7 +8,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // SuperFlix offers, per episode, a list of servers, and each server is tagged
@@ -26,8 +25,12 @@ import (
 // sfPickFn is the single selection seam for every SuperFlix prompt. A package var
 // so tests drive the whole flow without a TTY.
 var sfPickFn = func(prompt string, labels []string) (int, error) {
-	return tui.Find(labels, func(i int) string { return labels[i] },
-		fuzzyfinder.WithPromptString(prompt))
+	return tui.PickLabels(labels, tui.PickOptions{
+		Breadcrumb:   "SuperFlix > " + prompt,
+		WindowTitle:  "GoAnime - SuperFlix",
+		ItemSingular: "option",
+		ItemPlural:   "options",
+	})
 }
 
 // audioKindName is the site's own word for an audio type.
