@@ -67,7 +67,9 @@ func (sc *streamCache) get(key string) (streamCacheEntry, bool) {
 }
 
 func (sc *streamCache) put(key string, e streamCacheEntry) {
-	if e.Host == "" || e.Hash == "" {
+	// A native-player host can never replay (its getVideo answers 405), so a
+	// central refusal here keeps every put site from poisoning the cache.
+	if e.Host == "" || e.Hash == "" || isNativePlayerHost(e.Host) {
 		return
 	}
 	sc.mu.Lock()
@@ -94,6 +96,14 @@ func (sc *streamCache) del(key string) {
 	if data, err := json.MarshalIndent(sc.entries, "", "  "); err == nil {
 		_ = os.WriteFile(sc.file(), data, 0o600)
 	}
+}
+
+// HasCachedStream reports whether a browser-free replay entry exists for the
+// given content. Pure cache lookup — no network I/O — so callers (e.g. the
+// next-episode prefetch) can decide cheaply whether a warm-up is needed.
+func HasCachedStream(mediaType, mediaID, season, episode string) bool {
+	_, ok := defaultStreamCache.get(streamCacheKey(mediaType, mediaID, season, episode))
+	return ok
 }
 
 // streamCacheKey identifies one playable unit (movie, or a specific episode).

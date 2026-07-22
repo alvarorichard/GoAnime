@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,6 +89,74 @@ func TestTryCachedStream(t *testing.T) {
 	assert.NotEmpty(t, res.DefaultAudio)
 	require.Len(t, res.Subtitles, 1)
 	assert.Equal(t, "Portuguese", res.Subtitles[0].Lang)
+}
+
+// A server that resolves to SuperFlix's NATIVE player (…/player/native/media/…)
+// must fail fast — no getVideo attempt (it answers 405) — and must NOT cache the
+// pair, which can never replay. Regression for the 2026-07-22 rollout that
+// poisoned user caches and cost a wasted solve on every play.
+func TestStreamFromServer_NativePlayerFailsFastAndIsNotCached(t *testing.T) {
+	withFreshStreamCache(t)
+
+	var getVideoHit atomic.Bool
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	mux.HandleFunc("/player/source", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":{"video_url":"%s/player/native/media/185176?embed=1&mt=tok"}}`, srv.URL)
+	})
+	mux.HandleFunc("/player/native/media/185176", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "<html>native player shell</html>")
+	})
+	mux.HandleFunc("/player/native/media/player/index.php", func(w http.ResponseWriter, _ *http.Request) {
+		getVideoHit.Store(true)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
+	c := NewClientForTest(srv.URL)
+	tokens := &SuperFlixTokens{ContentID: "1", PageToken: "tok"}
+
+	_, err := c.StreamFromServer(context.Background(), tokens, "159462", "filme", "10214", "", "")
+	require.Error(t, err, "the native player has no getVideo API; the caller must fall back to the sniff")
+	assert.False(t, getVideoHit.Load(), "must not fire the doomed getVideo round-trip")
+
+	_, ok := defaultStreamCache.get(streamCacheKey("filme", "10214", "", ""))
+	assert.False(t, ok, "a native-player (host, hash) can never replay and must not be cached")
+}
+
+// A poisoned cache entry pointing at the native player (written before the
+// rollout was recognized) must self-heal: reported as a miss, deleted, and no
+// network round-trip attempted.
+func TestTryCachedStream_NativePlayerEntrySelfHeals(t *testing.T) {
+	withFreshStreamCache(t)
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	t.Cleanup(srv.Close)
+
+	key := streamCacheKey("filme", "10214", "", "")
+	defaultStreamCache.put(key, streamCacheEntry{Host: srv.URL + "/player/native/media", Hash: "185176"})
+	require.False(t, HasCachedStream("filme", "10214", "", ""),
+		"put must already refuse a native-player host")
+
+	// Simulate an entry that predates the put guard (written by an old build).
+	defaultStreamCache.mu.Lock()
+	defaultStreamCache.ensureLoaded()
+	defaultStreamCache.entries[key] = streamCacheEntry{Host: srv.URL + "/player/native/media", Hash: "185176"}
+	defaultStreamCache.mu.Unlock()
+
+	c := NewClientForTest(srv.URL)
+	_, ok := c.TryCachedStream(context.Background(), "filme", "10214", "", "")
+	assert.False(t, ok, "a native-player entry must be a miss")
+	assert.Zero(t, requests.Load(), "no round-trip may be wasted on a never-replayable entry")
+
+	_, stillThere := defaultStreamCache.get(key)
+	assert.False(t, stillThere, "the poisoned entry must be deleted (self-heal)")
 }
 
 // A cached host that has rotated out (getVideo fails) must be reported as a miss

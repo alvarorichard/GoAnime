@@ -659,7 +659,85 @@ var (
 	// sfReleaseBrowserFn closes the solver window after a resolve. A seam so tests
 	// can assert it fires on every path (cache hit, server list, sniff, error).
 	sfReleaseBrowserFn = superflix.ReleaseSharedBrowser
+
+	// sfPrefetchNextFn warms the next episode's stream cache after a successful
+	// resolve. A seam so tests can stub it out or drive it directly.
+	sfPrefetchNextFn = maybePrefetchNextSuperFlixEpisode
 )
+
+// sfPrefetchBudget bounds the background next-episode warm-up. The chain is
+// plain HTTP (browser solve forbidden), but the player-page fetch retries past
+// token-less shells and the transport may honor a Retry-After, so give it room;
+// nothing user-visible waits on this.
+const sfPrefetchBudget = 45 * time.Second
+
+var (
+	// sfPrefetchInFlight dedupes concurrent warm-ups of the same episode.
+	sfPrefetchInFlight sync.Map
+	// sfPrefetchWG tracks warm-up goroutines so tests can wait for them.
+	sfPrefetchWG sync.WaitGroup
+)
+
+// maybePrefetchNextSuperFlixEpisode warms the NEXT episode's (host, hash) cache
+// entry in the background, so a binge's "next episode" opens through the ~1s
+// cache fast path instead of paying the server-list wait again.
+//
+// Strictly best-effort and invisible: the whole chain runs with the browser
+// solve FORBIDDEN (WithoutBrowserSolve), so it can never pop a window — with the
+// Cloudflare clearance warm from the play that just happened, the tokened player
+// page is reachable over plain HTTP. Any failure (gate re-armed, no next
+// episode, rate limit) only means the next play resolves normally. The server is
+// picked silently from the user's remembered preference and the pick is NOT
+// re-persisted, so prefetch never influences a later prompt.
+//
+// GOANIME_SF_NO_PREFETCH disables it (escape hatch for metered connections or
+// if SuperFlix ever turns hostile to the extra requests).
+func maybePrefetchNextSuperFlixEpisode(sfClient *superflix.SuperFlixClient, tmdbID, sfType, season, epNum string) {
+	if sfType != "serie" || os.Getenv("GOANIME_SF_NO_PREFETCH") != "" {
+		return
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(epNum))
+	if err != nil || n < 1 {
+		return
+	}
+	next := strconv.Itoa(n + 1)
+	if superflix.HasCachedStream(sfType, tmdbID, season, next) {
+		return
+	}
+	key := sfType + ":" + tmdbID + ":" + season + ":" + next
+	if _, running := sfPrefetchInFlight.LoadOrStore(key, struct{}{}); running {
+		return
+	}
+	// Capture the seams synchronously: the goroutine may outlive a test that
+	// restores them, and reading the package vars there would be a data race.
+	getServers, streamFromServer := sfGetServersFn, sfStreamFromServerFn
+	sfPrefetchWG.Add(1)
+	go func() {
+		defer sfPrefetchWG.Done()
+		defer sfPrefetchInFlight.Delete(key)
+
+		ctx, cancel := context.WithTimeout(superflix.WithoutBrowserSolve(context.Background()), sfPrefetchBudget)
+		defer cancel()
+
+		servers, tokens, err := getServers(sfClient, ctx, sfType, tmdbID, season, next)
+		if err != nil || len(servers) == 0 {
+			util.Debug("SuperFlix prefetch: server list unavailable; next episode will resolve normally", "key", key, "err", err)
+			return
+		}
+		candidates := orderedServers(servers)
+		if pref, ok := recallSuperFlixServer(tmdbID); ok {
+			candidates = narrowByMemory(candidates, pref)
+		}
+		// StreamFromServer caches the (host, hash) — the browser-gated fact —
+		// as a side effect; the stream URL itself is discarded (signed links
+		// expire, and the cache replay signs a fresh one at play time).
+		if _, err := streamFromServer(sfClient, ctx, tokens, candidates[0].IDString(), sfType, tmdbID, season, next); err != nil {
+			util.Debug("SuperFlix prefetch failed; next episode will resolve normally", "key", key, "err", err)
+			return
+		}
+		util.Debug("SuperFlix prefetch: next episode cached for instant start", "key", key)
+	}()
+}
 
 // superFlixStream resolves a SuperFlix stream, preferring the path that lets the
 // user actually choose.
@@ -785,6 +863,10 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	if err != nil {
 		return "", fmt.Errorf("failed to get SuperFlix stream: %w", describeSuperFlixErr(err))
 	}
+
+	// Warm the NEXT episode in the background (best-effort, plain HTTP, no
+	// browser window) so a binge's next play starts from the cache fast path.
+	sfPrefetchNextFn(sfClient, tmdbID, sfType, season, epNum)
 
 	// Store referer globally for mpv playback
 	if result.Referer != "" {

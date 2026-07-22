@@ -76,7 +76,9 @@ func TestGetServers_AllowsBrowserSolve(t *testing.T) {
 // gate if it has to. Locking the enhancement's no-solve rule must not accidentally
 // gag the stream path.
 func TestStreamFromServer_DoesNotForbidBrowserSolve(t *testing.T) {
-	t.Parallel()
+	// Not parallel: swaps the global stream cache. Without the swap this test
+	// wrote its httptest (host, hash) into the USER'S real on-disk cache.
+	withFreshStreamCache(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

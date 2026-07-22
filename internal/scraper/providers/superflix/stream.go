@@ -20,6 +20,22 @@ import (
 // (the upstream JS shows a "not yet released" screen in the same case), not
 // a system or scraping error — callers should surface it to the user as
 
+// isNativePlayerHost reports whether a resolved player "host" is SuperFlix's own
+// native player (…/player/native/media/<id>) rather than an external warezcdn
+// host. Observed live 2026-07-22: /player/source for some titles now redirects to
+// this native player instead of an external host. It does NOT implement the
+// /player/index.php?do=getVideo contract (answers 405 HTML), so its (host, hash)
+// pair must never be cached or replayed — doing so poisoned the stream cache and
+// cost a wasted browser solve plus a doomed getVideo round-trip on every play.
+func isNativePlayerHost(host string) bool {
+	return strings.Contains(host, "/player/native")
+}
+
+// errSuperFlixNativePlayer signals that the chosen server resolved to the native
+// player, which the HTTP pipeline cannot extract from — the caller falls back to
+// the embed sniff, which handles it.
+var errSuperFlixNativePlayer = errors.New("superflix: server resolved to the native player (no getVideo API); use the embed sniff")
+
 // GetPlayerPage loads the player page for a given content
 func (c *SuperFlixClient) GetPlayerPage(ctx context.Context, mediaType, mediaID, season, episode string) (string, error) {
 	path := fmt.Sprintf("/%s/%s", mediaType, mediaID)
@@ -241,6 +257,13 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
 	}
 
+	// The native player answers getVideo with 405 HTML — bail out NOW so the
+	// caller falls back to the embed sniff without the doomed round-trip, and
+	// without caching a (host, hash) pair that can never replay.
+	if isNativePlayerHost(playerBaseURL) {
+		return nil, fmt.Errorf("%w (%s)", errSuperFlixNativePlayer, playerBaseURL)
+	}
+
 	// Cache the (host, hash) so the NEXT play of this exact episode replays over
 	// plain HTTP with no browser and no server-list fetch (see TryCachedStream).
 	// This is what turns a re-watch or a resume from an ~8s open into a ~1s one.
@@ -294,6 +317,14 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	if !ok {
 		return nil, false
 	}
+	// Self-heal entries written before the native player was recognized: they
+	// point at SuperFlix's own /player/native/… URL, whose getVideo always 405s.
+	// Replaying one wastes round-trips (and a browser solve) on every play.
+	if isNativePlayerHost(ent.Host) {
+		util.Debug("SuperFlix cache entry points at the native player (never replayable); dropping it", "key", key, "host", ent.Host)
+		defaultStreamCache.del(key)
+		return nil, false
+	}
 	referer := ent.Host + "/video/" + ent.Hash
 
 	// The fresh signed HLS URL and the player metadata are independent HTTP
@@ -303,11 +334,22 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	var (
 		streamURL, thumb string
 		streamErr        error
+		dead             bool
 		audio            = ent.DefaultAudio
 		subs             = ent.Subtitles
 	)
 	util.ParallelExecute(2,
-		func() { streamURL, thumb, streamErr = c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer) },
+		func() {
+			streamURL, thumb, streamErr = c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer)
+			// getVideo still signs URLs on the cached host even after that host
+			// rotates out of the CDN — the signed link then answers 403/404 and mpv
+			// dies a few seconds after launch. Probe the freshly signed URL right
+			// here, inside the parallel branch, so the CDN check overlaps the
+			// extras fetch instead of adding a third serial round-trip.
+			if streamErr == nil && streamURL != "" {
+				dead = c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, ent.Host+"/")
+			}
+		},
 		func() {
 			if !ent.ExtrasCached {
 				audio, subs = c.fetchPlayerExtras(ctx, ent.Host, ent.Hash)
@@ -318,12 +360,10 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 		util.Debug("SuperFlix cached stream stale, will re-resolve", "key", key, "err", streamErr)
 		return nil, false
 	}
-	// getVideo still signs URLs on the cached host even after that host rotates
-	// out of the CDN — the signed link then answers 403/404 and mpv dies a few
-	// seconds after launch. Probe the freshly signed URL and, if the CDN
-	// definitively rejects it, drop the entry so the caller re-resolves through
-	// the browser instead of handing a dead link to the player.
-	if c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, ent.Host+"/") {
+	// The CDN definitively rejected the freshly signed URL: drop the entry so
+	// the caller re-resolves through the browser instead of handing a dead link
+	// to the player.
+	if dead {
 		util.Debug("SuperFlix cached host rotated (CDN rejected signed URL), re-resolving", "key", key, "host", ent.Host)
 		defaultStreamCache.del(key)
 		return nil, false
@@ -571,7 +611,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 // Failure is non-fatal: extras enrich playback (subtitle tracks, dub-vs-original
 // audio) but the stream plays without them, so callers ignore the error.
 func (c *SuperFlixClient) fetchPlayerExtras(ctx context.Context, host, hash string) (defaultAudio []string, subtitles []SuperFlixSubtitle) {
-	if host == "" || hash == "" {
+	if host == "" || hash == "" || isNativePlayerHost(host) {
 		return nil, nil
 	}
 	// Extras are optional and some rotating player hosts retire /video/<hash>
