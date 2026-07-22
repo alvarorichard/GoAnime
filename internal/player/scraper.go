@@ -43,6 +43,7 @@ var (
 	bhRe                = regexp.MustCompile(`"cfb2h"\s*:\s*"([^"]+)"`)
 	atRe                = regexp.MustCompile(`"SNlM0e"\s*:\s*"([^"]+)"`)
 	extractResolutionRe = regexp.MustCompile(`(\d+)p?`)
+	googleVideoRe       = regexp.MustCompile(`https://[^"\\]+\.googlevideo\.com/[^"\\]+`)
 	episodePatternREs   = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)epis[oó]dio\s+(\d+)`),
 		regexp.MustCompile(`(?i)episode\s+(\d+)`),
@@ -891,7 +892,6 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 
 	// Regex fallback: scan the raw body for any *.googlevideo.com URL.
 	if videoURL == "" {
-		googleVideoRe := regexp.MustCompile(`https://[^"\\]+\.googlevideo\.com/[^"\\]+`)
 		if match := googleVideoRe.FindString(string(body)); match != "" {
 			util.Debugf("Blogger batchexecute: found googlevideo URL via regex fallback")
 			videoURL = match

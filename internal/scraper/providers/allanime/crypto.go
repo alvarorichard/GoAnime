@@ -174,12 +174,10 @@ func decodeToBeParsed(blob string) ([]sourceInfo, error) {
 
 	// Fallback: try to extract using regex (like the bash sed pattern).
 	// The plaintext might not be perfectly structured JSON.
-	re := regexp.MustCompile(`"sourceUrl"\s*:\s*"--([^"]*)"[^}]*"sourceName"\s*:\s*"([^"]*)"`)
-	matches := re.FindAllSubmatch(plaintext, -1)
+	matches := sourceURLNameRe.FindAllSubmatch(plaintext, -1)
 	if len(matches) == 0 {
 		// Also try reverse order (sourceName before sourceUrl)
-		re2 := regexp.MustCompile(`"sourceName"\s*:\s*"([^"]*)"[^}]*"sourceUrl"\s*:\s*"--([^"]*)"`)
-		matches = re2.FindAllSubmatch(plaintext, -1)
+		matches = sourceNameURLRe.FindAllSubmatch(plaintext, -1)
 		if len(matches) == 0 {
 			return nil, fmt.Errorf("no source URLs found in decrypted tobeparsed data")
 		}
@@ -203,10 +201,16 @@ func decodeToBeParsed(blob string) ([]sourceInfo, error) {
 	return sources, nil
 }
 
+// Pre-compiled patterns for decrypted source extraction.
+var (
+	sourceURLNameRe = regexp.MustCompile(`"sourceUrl"\s*:\s*"--([^"]*)"[^}]*"sourceName"\s*:\s*"([^"]*)"`)
+	sourceNameURLRe = regexp.MustCompile(`"sourceName"\s*:\s*"([^"]*)"[^}]*"sourceUrl"\s*:\s*"--([^"]*)"`)
+	toBeParsedRe    = regexp.MustCompile(`"tobeparsed"\s*:\s*"([^"]*)"`)
+)
+
 // extractToBeParsedBlob extracts the base64 "tobeparsed" value from the API response JSON.
 func extractToBeParsedBlob(response string) string {
-	re := regexp.MustCompile(`"tobeparsed"\s*:\s*"([^"]*)"`)
-	match := re.FindStringSubmatch(response)
+	match := toBeParsedRe.FindStringSubmatch(response)
 	if len(match) >= 2 {
 		return match[1]
 	}

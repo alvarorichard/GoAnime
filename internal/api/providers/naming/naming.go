@@ -54,12 +54,14 @@ type MediaInfo struct {
 // sanitize removes characters not allowed in filenames across OS.
 var unsafeChars = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
 
+// spaceRun collapses runs of whitespace left by sanitization.
+var spaceRun = regexp.MustCompile(`\s{2,}`)
+
 // SanitizeFilename removes characters unsafe for filenames on all platforms.
 func SanitizeFilename(name string) string {
 	clean := unsafeChars.ReplaceAllString(name, "")
 	clean = strings.TrimSpace(clean)
 	// Collapse multiple spaces
-	spaceRun := regexp.MustCompile(`\s{2,}`)
 	clean = spaceRun.ReplaceAllString(clean, " ")
 	// Remove trailing dots (Windows)
 	clean = strings.TrimRight(clean, ".")
@@ -69,9 +71,11 @@ func SanitizeFilename(name string) string {
 	return clean
 }
 
+// tagPattern matches source/language tags stripped by CleanTitle.
+var tagPattern = regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|AnimeFire|AnimeDrive|Goyabu|SuperFlix|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
+
 // CleanTitle removes source tags like [English], [PT-BR], [AllAnime] etc. from a title.
 func CleanTitle(title string) string {
-	tagPattern := regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|AnimeFire|AnimeDrive|Goyabu|SuperFlix|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
 	clean := tagPattern.ReplaceAllString(title, "")
 	clean = strings.TrimSpace(clean)
 	if clean == "" {

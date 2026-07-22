@@ -178,7 +178,7 @@ func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 		return nil, err
 	}
 
-	var episodeModels []models.Episode
+	episodeModels := make([]models.Episode, 0, len(episodes))
 	for i, ep := range episodes {
 		episodeModels = append(episodeModels, models.Episode{
 			Number: ep,

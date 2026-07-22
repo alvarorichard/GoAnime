@@ -466,13 +466,11 @@ func generateSearchVariations(cleanedName string) []string {
 	}
 
 	// Variation: Remove trailing roman numerals (seasons like II, III, IV)
-	reRoman := regexp.MustCompile(`\s+(?:II|III|IV|V|VI|VII|VIII|IX|X)\s*$`)
 	if match := reRoman.FindString(cleanedName); match != "" {
 		addVariation(strings.TrimSpace(reRoman.ReplaceAllString(cleanedName, "")))
 	}
 
 	// Variation: Remove trailing numbers that might be season indicators (2, 3, 4, etc.)
-	reTrailingNum := regexp.MustCompile(`\s+\d+\s*$`)
 	if match := reTrailingNum.FindString(cleanedName); match != "" {
 		addVariation(strings.TrimSpace(reTrailingNum.ReplaceAllString(cleanedName, "")))
 	}
@@ -491,7 +489,6 @@ func generateSearchVariations(cleanedName string) []string {
 
 	// Variation: Remove common PT-BR descriptive suffixes (Clássico, Classic, etc.)
 	// These are used by Brazilian sites to distinguish series (e.g. "Naruto Clássico" vs "Naruto Shippuden")
-	rePtBRSuffix := regexp.MustCompile(`(?i)\s+(?:cl[aá]ssico|classic|shippuuden|next\s+generations?)\s*$`)
 	if rePtBRSuffix.MatchString(cleanedName) {
 		addVariation(strings.TrimSpace(rePtBRSuffix.ReplaceAllString(cleanedName, "")))
 	}
@@ -515,32 +512,25 @@ func generateSearchVariations(cleanedName string) []string {
 	return variations
 }
 
-func CleanTitle(title string) string {
-	cleaned := title
+// Compiled once at init: CleanTitle and generateSearchVariations run per search
+// result, so recompiling these on every call dominated the search hot path.
+var (
+	// generateSearchVariations patterns
+	reRoman       = regexp.MustCompile(`\s+(?:II|III|IV|V|VI|VII|VIII|IX|X)\s*$`)
+	reTrailingNum = regexp.MustCompile(`\s+\d+\s*$`)
+	rePtBRSuffix  = regexp.MustCompile(`(?i)\s+(?:cl[aá]ssico|classic|shippuuden|next\s+generations?)\s*$`)
 
-	// Remove media type tags like [Movies/TV], [Anime], [Series], [Movie] at the start
-	reMediaTags := regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
-	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
-
-	// Remove language tags like [English], [PT-BR], [Portuguese], [Português], [Multilanguage] at the start
-	reLangTags := regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
-	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
-
-	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], [AnimeDrive], or [9Anime]
-	re1 := regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive|9anime)\]\s*`)
-	cleaned = strings.TrimSpace(re1.ReplaceAllString(cleaned, ""))
-
-	// Remove everything after em-dash or en-dash (typically subtitles like "– Todos os Episódios").
-	// Em/en dashes are almost always used as noise separators in PT-BR scrapers.
-	reEmDash := regexp.MustCompile(`\s*[–—]\s+.*$`)
-	cleaned = strings.TrimSpace(reEmDash.ReplaceAllString(cleaned, ""))
-
+	// CleanTitle patterns, applied in order
+	reMediaTags = regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
+	reLangTags  = regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
+	reSourceTag = regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive|9anime)\]\s*`)
+	reEmDash    = regexp.MustCompile(`\s*[–—]\s+.*$`)
 	// For the regular hyphen ( - ) we cannot strip blindly — it appears inside legitimate
 	// titles such as "Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen" / "- Kouhen" (前編/後編,
 	// Part 1 / Part 2 on AniList). Only strip when the suffix matches known PT-BR noise
 	// or season/episode markers; otherwise keep the dash and what follows so AniList
 	// resolves the correct entry.
-	reSpaceDashNoise := regexp.MustCompile(`(?i)\s+-\s+(?:` +
+	reSpaceDashNoise = regexp.MustCompile(`(?i)\s+-\s+(?:` +
 		`dublado|legendado|dual\s*[aá]udio|dub|sub|completo|` +
 		`todos\s+os\s+epis[oó]dios?|` +
 		`epis[oó]dios?\s*\d+|ep\s*\d+|` +
@@ -549,62 +539,83 @@ func CleanTitle(title string) string {
 		`parte\s*\d+|part\s*\d+|` +
 		`allanime|animefire|animedrive|9anime|goyabu|superflix|flixhq|sflix` +
 		`).*$`)
+	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
+	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)
+	reTodosEps      = regexp.MustCompile(`(?i)[-–—]?\s*todos\s+os\s+epis[oó]dios`)
+	reCompleto      = regexp.MustCompile(`(?i)\s+(?:completo|episodio\s*\d+|ep\s*\d+)\s*$`)
+	reSeasonPt      = regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:\d+[ªº]?\s*temporada|temporada\s*\d+|season\s*\d+|\d+(?:st|nd|rd|th)\s*season)\s*$`)
+	rePart          = regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:parte\s*\d+|part\s*\d+)\s*$`)
+	reSeasonEpTag   = regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
+	reDecimalSuffix = regexp.MustCompile(`\s+\d+\.\d+\s*$`)
+	reEpCount       = regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?|epis[oó]dios?)\)`)
+	re9AnimeEpInfo  = regexp.MustCompile(`(?i)\s*\((?:HD\s+)?(?:(?:SUB|DUB)\s+)*Ep\s+\d+/\d+\)`)
+	reSpecialTitles = regexp.MustCompile(`(?i):\s*(?:Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)
+	reNASuffix      = regexp.MustCompile(`(?i)\s+N/A\s*$`)
+	reEmptyParens   = regexp.MustCompile(`\s*\(\s*\)`)
+	reHyphenLetters = regexp.MustCompile(`([a-zA-Z])-([a-zA-Z])`)
+	reWhitespaceRun = regexp.MustCompile(`\s+`)
+)
+
+func CleanTitle(title string) string {
+	cleaned := title
+
+	// Remove media type tags like [Movies/TV], [Anime], [Series], [Movie] at the start
+	cleaned = strings.TrimSpace(reMediaTags.ReplaceAllString(cleaned, ""))
+
+	// Remove language tags like [English], [PT-BR], [Portuguese], [Português], [Multilanguage] at the start
+	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
+
+	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], [AnimeDrive], or [9Anime]
+	cleaned = strings.TrimSpace(reSourceTag.ReplaceAllString(cleaned, ""))
+
+	// Remove everything after em-dash or en-dash (typically subtitles like "– Todos os Episódios").
+	// Em/en dashes are almost always used as noise separators in PT-BR scrapers.
+	cleaned = strings.TrimSpace(reEmDash.ReplaceAllString(cleaned, ""))
+
+	// Strip " - <noise>" suffixes (see reSpaceDashNoise for why plain hyphens
+	// can't be stripped blindly).
 	cleaned = strings.TrimSpace(reSpaceDashNoise.ReplaceAllString(cleaned, ""))
 
 	// Remove content in parentheses if it contains language info (do this BEFORE removing standalone language indicators)
-	re6 := regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
-	cleaned = strings.TrimSpace(re6.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reLangParens.ReplaceAllString(cleaned, ""))
 
 	// Remove standalone language indicators (not in parentheses) - more comprehensive for Brazilian sources
-	re2 := regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)
-	cleaned = strings.TrimSpace(re2.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reLangSuffix.ReplaceAllString(cleaned, ""))
 
 	// Remove "Todos os Episodios" and similar Brazilian phrases (in case em-dash removal didn't catch it)
-	re3 := regexp.MustCompile(`(?i)[-–—]?\s*todos\s+os\s+epis[oó]dios`)
-	cleaned = strings.TrimSpace(re3.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reTodosEps.ReplaceAllString(cleaned, ""))
 
 	// Remove "Completo" or "Episodio X" suffixes common in Brazilian sources
-	reCompleto := regexp.MustCompile(`(?i)\s+(?:completo|episodio\s*\d+|ep\s*\d+)\s*$`)
 	cleaned = strings.TrimSpace(reCompleto.ReplaceAllString(cleaned, ""))
 
 	// Remove season indicators like "X Temporada", "Season X", "Temporada X", "Xª Temporada"
-	reSeasonPt := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:\d+[ªº]?\s*temporada|temporada\s*\d+|season\s*\d+|\d+(?:st|nd|rd|th)\s*season)\s*$`)
 	cleaned = strings.TrimSpace(reSeasonPt.ReplaceAllString(cleaned, ""))
 
 	// Remove "Parte X" (Part X) common in Brazilian titles
-	rePart := regexp.MustCompile(`(?i)\s*[-–—]?\s*(?:parte\s*\d+|part\s*\d+)\s*$`)
 	cleaned = strings.TrimSpace(rePart.ReplaceAllString(cleaned, ""))
 
 	// Remove season/episode indicators like "2.0 A2" at the end (but NOT plain season numbers)
-	re4 := regexp.MustCompile(`\s+\d+(\.\d+)?\s+A\d+\s*$`)
-	cleaned = strings.TrimSpace(re4.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reSeasonEpTag.ReplaceAllString(cleaned, ""))
 
 	// Remove decimal version numbers at the end like "3.5" (but NOT "Season 2")
-	re5 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
-	cleaned = strings.TrimSpace(re5.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reDecimalSuffix.ReplaceAllString(cleaned, ""))
 
 	// Remove episode count like "(171 episodes)" or "(1 eps)" or Portuguese equivalents
-	re7 := regexp.MustCompile(`(?i)\s*\(\d+\s+(?:episodes?|eps?|epis[oó]dios?)\)`)
-	cleaned = strings.TrimSpace(re7.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reEpCount.ReplaceAllString(cleaned, ""))
 
 	// Remove 9Anime-style episode info like "(HD SUB DUB Ep 170/170)" or "(SUB Ep 12/12)"
-	re9anime := regexp.MustCompile(`(?i)\s*\((?:HD\s+)?(?:(?:SUB|DUB)\s+)*Ep\s+\d+/\d+\)`)
-	cleaned = strings.TrimSpace(re9anime.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(re9AnimeEpInfo.ReplaceAllString(cleaned, ""))
 
 	// Remove special titles and additions after colon
-	re8 := regexp.MustCompile(`(?i):\s*(?:Jump Festa \d+|The All Magic Knights|Sword of the Wizard King|Mahou Tei no Ken).*$`)
-	cleaned = strings.TrimSpace(re8.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reSpecialTitles.ReplaceAllString(cleaned, ""))
 
 	// Remove N/A ratings and similar suffixes
-	re9 := regexp.MustCompile(`(?i)\s+N/A\s*$`)
-	cleaned = strings.TrimSpace(re9.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reNASuffix.ReplaceAllString(cleaned, ""))
 
 	// Remove rating scores like "7.12" or "8.5" at the end (only decimal numbers)
-	re10 := regexp.MustCompile(`\s+\d+\.\d+\s*$`)
-	cleaned = strings.TrimSpace(re10.ReplaceAllString(cleaned, ""))
+	cleaned = strings.TrimSpace(reDecimalSuffix.ReplaceAllString(cleaned, ""))
 
 	// Remove empty parentheses that may be left after other cleanups
-	reEmptyParens := regexp.MustCompile(`\s*\(\s*\)`)
 	cleaned = strings.TrimSpace(reEmptyParens.ReplaceAllString(cleaned, ""))
 
 	// Remove trailing colons that may be left after removing season/part info
@@ -618,13 +629,13 @@ func CleanTitle(title string) string {
 
 	// Replace hyphens with spaces (for URL-style names like "black-clover")
 	// But only if surrounded by letters (not em-dashes already handled above)
-	cleaned = regexp.MustCompile(`([a-zA-Z])-([a-zA-Z])`).ReplaceAllString(cleaned, "$1 $2")
+	cleaned = reHyphenLetters.ReplaceAllString(cleaned, "$1 $2")
 
 	// Replace underscores with spaces
 	cleaned = strings.ReplaceAll(cleaned, "_", " ")
 
 	// Normalize whitespace
-	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+	cleaned = reWhitespaceRun.ReplaceAllString(cleaned, " ")
 	cleaned = strings.TrimSpace(cleaned)
 
 	util.Debugf("CleanTitle: '%s' -> '%s'", title, cleaned)

@@ -465,17 +465,19 @@ func inferSeasonNumber(titles ...string) int {
 	return 0
 }
 
+// seasonNumberPatterns match "Season N" / "Nth Season" markers in titles.
+var seasonNumberPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bseason\s+(\d+)\b`),
+	regexp.MustCompile(`(?i)\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b`),
+}
+
 func inferSeasonNumberFromTitle(title string) int {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return 0
 	}
 
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\bseason\s+(\d+)\b`),
-		regexp.MustCompile(`(?i)\b(\d+)\s*(?:st|nd|rd|th)?\s+season\b`),
-	}
-	for _, pattern := range patterns {
+	for _, pattern := range seasonNumberPatterns {
 		matches := pattern.FindStringSubmatch(title)
 		if len(matches) < 2 {
 			continue

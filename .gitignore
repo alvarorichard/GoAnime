@@ -29,3 +29,6 @@ build/goanime-local
 #claude
 claude
 .claude
+
+# folder .tokensave
+.tokensave/

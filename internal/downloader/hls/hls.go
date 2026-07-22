@@ -194,6 +194,9 @@ func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[
 	return d.parseMediaPlaylistLines(masterPlaylistLines, url)
 }
 
+// bandwidthRe extracts the BANDWIDTH attribute from #EXT-X-STREAM-INF tags.
+var bandwidthRe = regexp.MustCompile(`BANDWIDTH=(\d+)`)
+
 // selectBestStream finds the highest quality stream from a master playlist
 func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 	type StreamInfo struct {
@@ -207,7 +210,7 @@ func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
 			// Parse bandwidth from the tag
 			bandwidth := 0
-			if bwMatch := regexp.MustCompile(`BANDWIDTH=(\d+)`).FindStringSubmatch(line); len(bwMatch) > 1 {
+			if bwMatch := bandwidthRe.FindStringSubmatch(line); len(bwMatch) > 1 {
 				if bw, err := strconv.Atoi(bwMatch[1]); err == nil {
 					bandwidth = bw
 				}

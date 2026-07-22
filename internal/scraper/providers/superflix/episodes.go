@@ -101,12 +101,11 @@ func parseFrontendSeasons(html string) []string {
 	}
 	seen := make(map[string]bool)
 	var seasons []string
-	re := regexp.MustCompile(`/serie/[a-z0-9-]+/(\d+)$`)
 	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
 		href, _ := a.Attr("href")
 		href = strings.SplitN(href, "?", 2)[0]
 		href = strings.SplitN(href, "#", 2)[0]
-		if mm := re.FindStringSubmatch(href); len(mm) > 1 {
+		if mm := serieSeasonLinkRe.FindStringSubmatch(href); len(mm) > 1 {
 			if !seen[mm[1]] {
 				seen[mm[1]] = true
 				seasons = append(seasons, mm[1])
@@ -240,6 +239,9 @@ func pageTitle(html string) string {
 	return strings.TrimSpace(m[1])
 }
 
+// serieSeasonLinkRe matches "/serie/<slug>/<n>" season links on frontend pages.
+var serieSeasonLinkRe = regexp.MustCompile(`/serie/[a-z0-9-]+/(\d+)$`)
+
 // resolveFrontendSeasonURLs maps season number -> absolute URL for every
 // /serie/<slug>/<n> link on a frontend serie page, resolved against the page's
 // final (post-redirect) URL so they hit the correct rotating domain.
@@ -252,13 +254,12 @@ func resolveFrontendSeasonURLs(html, finalURL string) map[string]string {
 	if finalURL != "" {
 		basePtr, _ = url.Parse(finalURL)
 	}
-	re := regexp.MustCompile(`/serie/[a-z0-9-]+/(\d+)$`)
 	out := make(map[string]string)
 	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
 		href, _ := a.Attr("href")
 		clean := strings.SplitN(href, "?", 2)[0]
 		clean = strings.SplitN(clean, "#", 2)[0]
-		m := re.FindStringSubmatch(clean)
+		m := serieSeasonLinkRe.FindStringSubmatch(clean)
 		if m == nil {
 			return
 		}
