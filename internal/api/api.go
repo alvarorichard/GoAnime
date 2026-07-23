@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"sync"
 	"time"
 
@@ -167,7 +167,7 @@ func SafeGet(url string) (*http.Response, error) {
 // guard HTTP clients (e.g. surf/Chrome-impersonation) whose transport cannot be
 // replaced with SafeTransport.
 func ValidateExternalURL(rawURL string) error {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := neturl.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}

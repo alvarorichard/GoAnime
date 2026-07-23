@@ -173,7 +173,7 @@ func InstallShaders() error {
 	shaderDir := GetShaderDir()
 
 	// Create shader directory
-	if err := os.MkdirAll(shaderDir, 0750); err != nil {
+	if err := os.MkdirAll(shaderDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create shader directory: %w", err)
 	}
 
@@ -230,7 +230,7 @@ func InstallGANShaders() error {
 	shaderDir := GetShaderDir()
 
 	// Create shader directory
-	if err := os.MkdirAll(shaderDir, 0750); err != nil {
+	if err := os.MkdirAll(shaderDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create shader directory: %w", err)
 	}
 
@@ -507,7 +507,7 @@ func GetMPVShaderArgs(mode ShaderMode) []string {
 
 	// Create shader cache directory
 	cacheDir := filepath.Join(shaderDir, "cache")
-	if err := os.MkdirAll(cacheDir, 0750); err == nil {
+	if err := os.MkdirAll(cacheDir, 0o750); err == nil {
 		args = append(args, "--gpu-shader-cache-dir="+cacheDir)
 	}
 

@@ -255,7 +255,7 @@ func TestGetLogFileWriter_ReturnsFileWhenActive(t *testing.T) {
 
 // installCapturingLoggers swaps Logger/fileLogger for in-memory buffers so the
 // Debug/Info/Warn/Error helpers can be asserted on. Returns the two buffers.
-func installCapturingLoggers(t *testing.T) (*bytes.Buffer, *bytes.Buffer) {
+func installCapturingLoggers(t *testing.T) (console, file *bytes.Buffer) {
 	t.Helper()
 	snapshotLogger(t)
 	var consoleBuf, fileBuf bytes.Buffer

@@ -19,7 +19,6 @@
 package allanime
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -173,7 +172,7 @@ func buildFilemoonResponse(t *testing.T, plaintext string) string {
 
 	payload := make([]byte, 0, len(ct)+16)
 	payload = append(payload, ct...)
-	payload = append(payload, bytes.Repeat([]byte{0x00}, 16)...)
+	payload = append(payload, make([]byte, 16)...)
 
 	wrapper := map[string]any{
 		"iv":        b64urlNoPad(iv),

@@ -57,21 +57,21 @@ func findMPVPath() (string, error) {
 		// Add user-specific Homebrew path
 		if homeDir != "" {
 			commonPaths = append([]string{
-				filepath.Join(homeDir, ".linuxbrew/bin/mpv"), // Homebrew per-user install
+				filepath.Join(homeDir, ".linuxbrew", "bin", "mpv"), // Homebrew per-user install
 			}, commonPaths...)
 		}
 	}
 
 	// Add user-specific Flatpak path for both platforms
 	if homeDir != "" {
-		commonPaths = append(commonPaths, filepath.Join(homeDir, ".local/share/flatpak/exports/bin/io.mpv.Mpv"))
+		commonPaths = append(commonPaths, filepath.Join(homeDir, ".local", "share", "flatpak", "exports", "bin", "io.mpv.Mpv"))
 	}
 
 	// Check each path
 	for _, path := range commonPaths {
 		if _, err := os.Stat(path); err == nil {
 			// Verify it's executable
-			if info, err := os.Stat(path); err == nil && info.Mode()&0111 != 0 {
+			if info, err := os.Stat(path); err == nil && info.Mode()&0o111 != 0 {
 				return path, nil
 			}
 		}

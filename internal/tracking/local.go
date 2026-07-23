@@ -122,7 +122,7 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		fmt.Printf("Error creating data directory: %v\n", err)
 		return nil
 	}
@@ -339,7 +339,7 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		return nil, fmt.Errorf("all preparation failed: %w", err)
 	}
 
-	delete, err := db.Prepare(`DELETE FROM media_progress 
+	deleteStmt, err := db.Prepare(`DELETE FROM media_progress
 		WHERE allanime_id = ?`)
 
 	if err != nil {
@@ -350,7 +350,7 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		upsert: upsert,
 		get:    get,
 		all:    all,
-		delete: delete,
+		delete: deleteStmt,
 	}, nil
 }
 

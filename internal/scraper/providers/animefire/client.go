@@ -61,7 +61,7 @@ func (c *AnimefireClient) SearchAnime(query string) ([]*models.Anime, error) {
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", searchURL, nil)
+		req, err := http.NewRequest("GET", searchURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -204,7 +204,7 @@ func (c *AnimefireClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", animeURL, nil)
+		req, err := http.NewRequest("GET", animeURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -301,7 +301,7 @@ func (c *AnimefireClient) GetEpisodeStreamURL(episodeURL string) (string, error)
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", episodeURL, nil)
+		req, err := http.NewRequest("GET", episodeURL, http.NoBody)
 		if err != nil {
 			return "", fmt.Errorf("failed to create request: %w", err)
 		}

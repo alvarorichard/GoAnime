@@ -170,7 +170,7 @@ func PlayEpisode(
 	return playErr
 }
 
-func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, error) {
+func SelectEpisodeWithFuzzy(episodes []models.Episode) (episodeURL, episodeNumber string, episodeIndex int, err error) {
 	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
 	if err != nil {
 		// If user selected back, return empty values to signal back request
@@ -186,7 +186,7 @@ func SelectEpisodeWithFuzzy(episodes []models.Episode) (string, string, int, err
 	return url, numStr, epNum, nil
 }
 
-func FindEpisodeByNumber(episodes []models.Episode, num int) (string, string, int, error) {
+func FindEpisodeByNumber(episodes []models.Episode, num int) (episodeURL, episodeNumber string, episodeIndex int, err error) {
 	for _, ep := range episodes {
 		if epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(ep.Number)); err == nil && epNum == num {
 			return ep.URL, ep.Number, num, nil

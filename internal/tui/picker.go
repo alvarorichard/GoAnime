@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -279,7 +280,7 @@ func isTypeToFilterKey(msg tea.KeyPressMsg) bool {
 	}
 	// Printable runes: digits, letters, punctuation (e.g. "1000", "one piece").
 	if msg.Text != "" {
-		r := []rune(msg.Text)[0]
+		r, _ := utf8.DecodeRuneInString(msg.Text)
 		return r >= 32 && r != 127
 	}
 	if msg.Code >= 32 && msg.Code < 127 {

@@ -43,7 +43,7 @@ func DownloadAllAnimeSmartRange(anime *models.Anime, startEp, endEp int, quality
 	if err != nil {
 		return err
 	}
-	if mkErr := os.MkdirAll(outDir, 0700); mkErr != nil {
+	if mkErr := os.MkdirAll(outDir, 0o700); mkErr != nil {
 		return fmt.Errorf("failed to create output directory: %w", mkErr)
 	}
 
@@ -85,7 +85,7 @@ func smartDownload(url, dest string) error {
 		return err
 	}
 	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(safeDest), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(safeDest), 0o700); err != nil {
 		return err
 	}
 
@@ -185,7 +185,7 @@ func writeAniSkipSidecar(videoPath string, ep *models.Episode) error {
 	b, _ := json.MarshalIndent(payload, "", "  ")
 	sidecar := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".skips.json"
 	// Restrictive permissions: owner read/write only
-	return os.WriteFile(sidecar, b, 0600)
+	return os.WriteFile(sidecar, b, 0o600)
 }
 
 // WriteAniSkipSidecar is an exported wrapper to write AniSkip sidecar files.

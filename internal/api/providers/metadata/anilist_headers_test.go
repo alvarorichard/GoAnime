@@ -18,7 +18,7 @@ import (
 func TestSetAniListHeaders_UsesNonBrowserUserAgent(t *testing.T) {
 	t.Parallel()
 
-	req, err := http.NewRequest("POST", "https://graphql.anilist.co", nil)
+	req, err := http.NewRequest("POST", "https://graphql.anilist.co", http.NoBody)
 	require.NoError(t, err)
 
 	setAniListHeaders(req)

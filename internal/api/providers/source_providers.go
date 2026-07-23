@@ -28,12 +28,16 @@ var (
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
 // cached. This is how each Model B provider owns its scraper directly, without
 // the ScraperManager.
-func lazyGetAdapter(once *sync.Once, cache *scraper.UnifiedScraper, st scraper.ScraperType) (scraper.UnifiedScraper, error) {
-	once.Do(func() { *cache, _ = scraper.NewAdapter(st) })
-	if *cache == nil {
+type adapterSlot struct {
+	scraper.UnifiedScraper
+}
+
+func lazyGetAdapter(once *sync.Once, cache *adapterSlot, st scraper.ScraperType) (scraper.UnifiedScraper, error) {
+	once.Do(func() { cache.UnifiedScraper, _ = scraper.NewAdapter(st) })
+	if cache.UnifiedScraper == nil {
 		return nil, fmt.Errorf("no adapter for scraper type %v", st)
 	}
-	return *cache, nil
+	return cache.UnifiedScraper, nil
 }
 
 // EpisodeNumber extracts the episode number string from an Episode model.
@@ -55,7 +59,7 @@ func EpisodeNumber(ep *models.Episode) string {
 
 type allAnimeProvider struct {
 	once    sync.Once
-	adapter scraper.UnifiedScraper
+	adapter adapterSlot
 }
 
 func init() {
@@ -143,7 +147,7 @@ func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.E
 
 type animeFireProvider struct {
 	once    sync.Once
-	adapter scraper.UnifiedScraper
+	adapter adapterSlot
 }
 
 func init() {
@@ -222,7 +226,7 @@ func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.
 
 type goyabuProvider struct {
 	once    sync.Once
-	adapter scraper.UnifiedScraper
+	adapter adapterSlot
 }
 
 func init() {
@@ -298,7 +302,7 @@ func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 
 type superFlixProvider struct {
 	once    sync.Once
-	adapter scraper.UnifiedScraper
+	adapter adapterSlot
 }
 
 func init() {

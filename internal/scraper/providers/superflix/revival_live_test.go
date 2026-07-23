@@ -53,7 +53,7 @@ func TestSuperFlixStreamRevival_Live(t *testing.T) {
 	assert.True(t, strings.Contains(strings.ToLower(result.StreamURL), "/hls/"), "expected an HLS master URL")
 
 	// Fetch the playlist and confirm it parses as HLS (the live proof).
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, result.StreamURL, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, result.StreamURL, http.NoBody)
 	req.Header.Set("User-Agent", SuperFlixUserAgent)
 	if result.Referer != "" {
 		req.Header.Set("Referer", result.Referer)

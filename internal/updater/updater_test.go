@@ -288,11 +288,11 @@ func TestCopyFile(t *testing.T) {
 	// Create source file
 	srcFile := filepath.Join(tempDir, "source.txt")
 	content := "This is test content for file copying"
-	err := os.WriteFile(srcFile, []byte(content), 0644)
+	err := os.WriteFile(srcFile, []byte(content), 0o644)
 	require.NoError(t, err)
 
 	// Set specific permissions on source file
-	err = os.Chmod(srcFile, 0755)
+	err = os.Chmod(srcFile, 0o755)
 	require.NoError(t, err)
 
 	// Copy file
@@ -317,7 +317,7 @@ func TestCopyFile(t *testing.T) {
 	} else {
 		// On Windows os.Chmod only toggles the read-only attribute; both files
 		// should still be readable/writable (non-read-only), which is sufficient.
-		assert.False(t, dstInfo.Mode()&0200 == 0, "destination file should not be read-only")
+		assert.False(t, dstInfo.Mode()&0o200 == 0, "destination file should not be read-only")
 	}
 }
 
@@ -335,7 +335,7 @@ func TestCopyFile_InvalidDestination(t *testing.T) {
 
 	// Create source file
 	srcFile := filepath.Join(tempDir, "source.txt")
-	err := os.WriteFile(srcFile, []byte("test"), 0644)
+	err := os.WriteFile(srcFile, []byte("test"), 0o644)
 	require.NoError(t, err)
 
 	// Try to copy to invalid destination (directory that doesn't exist)
@@ -725,13 +725,13 @@ func TestReplaceExecutable(t *testing.T) {
 	// Create current executable
 	currentExe := filepath.Join(tempDir, "current")
 	currentContent := "current executable content"
-	err := os.WriteFile(currentExe, []byte(currentContent), 0755)
+	err := os.WriteFile(currentExe, []byte(currentContent), 0o755)
 	require.NoError(t, err)
 
 	// Create new executable
 	newExe := filepath.Join(tempDir, "new")
 	newContent := "new executable content"
-	err = os.WriteFile(newExe, []byte(newContent), 0644)
+	err = os.WriteFile(newExe, []byte(newContent), 0o644)
 	require.NoError(t, err)
 
 	// Replace executable
@@ -747,7 +747,7 @@ func TestReplaceExecutable(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(currentExe)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0755), info.Mode())
+		assert.Equal(t, os.FileMode(0o755), info.Mode())
 	}
 }
 
@@ -761,13 +761,13 @@ func TestReplaceExecutable_WindowsLogic(t *testing.T) {
 	// Create current executable
 	currentExe := filepath.Join(tempDir, "current.exe")
 	currentContent := "current executable content"
-	err := os.WriteFile(currentExe, []byte(currentContent), 0755)
+	err := os.WriteFile(currentExe, []byte(currentContent), 0o755)
 	require.NoError(t, err)
 
 	// Create new executable
 	newExe := filepath.Join(tempDir, "new.exe")
 	newContent := "new executable content"
-	err = os.WriteFile(newExe, []byte(newContent), 0644)
+	err = os.WriteFile(newExe, []byte(newContent), 0o644)
 	require.NoError(t, err)
 
 	// Replace executable
@@ -850,7 +850,7 @@ func TestCopyFile_Permissions(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Test various permission combinations
-	permissions := []os.FileMode{0644, 0755, 0600, 0777}
+	permissions := []os.FileMode{0o644, 0o755, 0o600, 0o777}
 
 	for _, perm := range permissions {
 		t.Run(perm.String(), func(t *testing.T) {
@@ -881,7 +881,7 @@ func TestCopyFile_Concurrent(t *testing.T) {
 	srcFile := filepath.Join(tempDir, "source.txt")
 	content := "concurrent test content"
 
-	err := os.WriteFile(srcFile, []byte(content), 0644)
+	err := os.WriteFile(srcFile, []byte(content), 0o644)
 	require.NoError(t, err)
 
 	// Test multiple concurrent copies
@@ -911,9 +911,9 @@ func TestReplaceExecutable_EdgeCases(t *testing.T) {
 		newExe := filepath.Join(tempDir, "new_empty")
 
 		// Create empty files
-		err := os.WriteFile(currentExe, []byte{}, 0755)
+		err := os.WriteFile(currentExe, []byte{}, 0o755)
 		require.NoError(t, err)
-		err = os.WriteFile(newExe, []byte{}, 0644)
+		err = os.WriteFile(newExe, []byte{}, 0o644)
 		require.NoError(t, err)
 
 		err = replaceExecutable(currentExe, newExe)
@@ -930,11 +930,11 @@ func TestReplaceExecutable_EdgeCases(t *testing.T) {
 
 		// Create files with binary content
 		binaryContent := []byte{0x7f, 0x45, 0x4c, 0x46} // ELF magic bytes
-		err := os.WriteFile(currentExe, binaryContent, 0755)
+		err := os.WriteFile(currentExe, binaryContent, 0o755)
 		require.NoError(t, err)
 
 		newBinaryContent := []byte{0x7f, 0x45, 0x4c, 0x47} // Modified ELF
-		err = os.WriteFile(newExe, newBinaryContent, 0644)
+		err = os.WriteFile(newExe, newBinaryContent, 0o644)
 		require.NoError(t, err)
 
 		err = replaceExecutable(currentExe, newExe)
@@ -947,7 +947,7 @@ func TestReplaceExecutable_EdgeCases(t *testing.T) {
 
 		info, err := os.Stat(currentExe)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0755), info.Mode())
+		assert.Equal(t, os.FileMode(0o755), info.Mode())
 	})
 }
 
@@ -1042,7 +1042,7 @@ func TestUpdateWorkflow_MockScenario(t *testing.T) {
 	// Step 5: Simulate executable replacement
 	tempDir := t.TempDir()
 	currentExe := filepath.Join(tempDir, "goanime-current")
-	err = os.WriteFile(currentExe, []byte("old version"), 0755)
+	err = os.WriteFile(currentExe, []byte("old version"), 0o755)
 	require.NoError(t, err)
 
 	err = replaceExecutable(currentExe, tempFile)
@@ -1056,7 +1056,7 @@ func TestUpdateWorkflow_MockScenario(t *testing.T) {
 	// Verify permissions
 	info, err := os.Stat(currentExe)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0755), info.Mode())
+	assert.Equal(t, os.FileMode(0o755), info.Mode())
 }
 
 // Test for edge cases in version comparison
@@ -1268,7 +1268,7 @@ func BenchmarkCopyFile(b *testing.B) {
 	srcFile := filepath.Join(tempDir, "source.txt")
 	content := strings.Repeat("benchmark test content\n", 1000) // ~23KB
 
-	err := os.WriteFile(srcFile, []byte(content), 0644)
+	err := os.WriteFile(srcFile, []byte(content), 0o644)
 	require.NoError(b, err)
 
 	b.ResetTimer()

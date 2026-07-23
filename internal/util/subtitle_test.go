@@ -594,7 +594,7 @@ func TestSubtitleArgs_AppliedAfterUserSelection(t *testing.T) {
 	// Build mpv args — this is exactly what playVideo does
 	subArgs := GetSubtitleArgs()
 
-	// Simulate: mpvArgs = append(mpvArgs, subArgs...)
+	// Assemble the final mpv command with the selected subtitle arguments.
 	mpvArgs := []string{"--cache=yes", "--demuxer-max-bytes=300M"}
 	mpvArgs = append(mpvArgs, subArgs...)
 

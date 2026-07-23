@@ -153,7 +153,7 @@ func (v *VideoUpscaler) UpscaleVideo(ctx context.Context) error {
 	// Step 2: Extract frames
 	util.Info("Extracting frames...")
 	framesDir := filepath.Join(tempDir, "frames")
-	if err := os.MkdirAll(framesDir, 0750); err != nil {
+	if err := os.MkdirAll(framesDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create frames directory: %w", err)
 	}
 	if err := v.extractFrames(ctx, framesDir); err != nil {
@@ -163,7 +163,7 @@ func (v *VideoUpscaler) UpscaleVideo(ctx context.Context) error {
 	// Step 3: Upscale frames with progress
 	util.Info("Upscaling frames with Anime4K...")
 	upscaledDir := filepath.Join(tempDir, "upscaled")
-	if err := os.MkdirAll(upscaledDir, 0750); err != nil {
+	if err := os.MkdirAll(upscaledDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create upscaled directory: %w", err)
 	}
 	if err := v.upscaleFrames(ctx, framesDir, upscaledDir); err != nil {

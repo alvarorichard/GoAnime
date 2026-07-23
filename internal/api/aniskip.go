@@ -13,7 +13,7 @@ import (
 )
 
 // GetAniSkipData fetches skip times data for a given anime ID and episode
-func GetAniSkipData(animeMalId int, episode int) (string, error) {
+func GetAniSkipData(animeMalId, episode int) (string, error) {
 	baseURL := "https://api.aniskip.com/v1/skip-times"
 
 	url := fmt.Sprintf("%s/%d/%d?types=op&types=ed", baseURL, animeMalId, episode)
@@ -26,12 +26,12 @@ func GetAniSkipData(animeMalId int, episode int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error fetching data from AniSkip API: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := resp.Body.Close()
 		if err != nil {
 			fmt.Println("Error closing response body:", err)
 		}
-	}(resp.Body)
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("AniSkip API request failed with status %d", resp.StatusCode)
@@ -89,7 +89,7 @@ func ParseAniSkipResponse(responseText string, episode *models.Episode, timePrec
 }
 
 // GetAndParseAniSkipData fetches and parses skip times for a given anime ID and episode
-func GetAndParseAniSkipData(animeMalId int, episodeNum int, episode *models.Episode) error {
+func GetAndParseAniSkipData(animeMalId, episodeNum int, episode *models.Episode) error {
 	responseText, err := GetAniSkipData(animeMalId, episodeNum)
 	if err != nil {
 		return err

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -635,7 +635,7 @@ func sanitizeMediaTarget(link string) (string, error) {
 	// Treat as URL only if it contains "://". This avoids misclassifying Windows
 	// paths like "C:\\..." as having scheme "c".
 	if strings.Contains(l, "://") {
-		u, err := url.Parse(l)
+		u, err := neturl.Parse(l)
 		if err != nil {
 			return "", fmt.Errorf("invalid URL: %w", err)
 		}
@@ -1010,7 +1010,7 @@ func downloadAndPlayEpisode(
 	}
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(downloadPath, 0700); err != nil {
+		if err := os.MkdirAll(downloadPath, 0o700); err != nil {
 			return fmt.Errorf("failed to create download directory: %w", err)
 		}
 	}
@@ -1133,9 +1133,10 @@ func downloadAndPlayEpisode(
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
-				if isSuperFlixTextHLS(videoURL) {
+				switch {
+				case isSuperFlixTextHLS(videoURL):
 					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, m)
-				} else if LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL) {
+				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
 						// Separate audio tracks need yt-dlp for proper audio/video merging
@@ -1162,7 +1163,7 @@ func downloadAndPlayEpisode(
 							dlErr = downloadDirectHTTP(videoURL, episodePath, m)
 						}
 					}
-				} else {
+				default:
 					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
 				}
 				if dlErr == nil {
@@ -1744,7 +1745,7 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 
 		// Download to a temp file
 		tmpPath := filepath.Join(dir, fmt.Sprintf(".tmp_sub_%s.%s", lang, ext))
-		req, reqErr := http.NewRequest("GET", sub.URL, nil)
+		req, reqErr := http.NewRequest("GET", sub.URL, http.NoBody)
 		if reqErr != nil {
 			util.Warnf("Failed to create subtitle request (%s): %v", sub.Label, reqErr)
 			continue
@@ -1802,8 +1803,10 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 		}
 		a = append(a, "-c:v", "copy", "-c:a", "copy", "-c:s", subCodec)
 		for i, e := range entries {
-			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode))
-			a = append(a, fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label))
+			a = append(a,
+				fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode),
+				fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label),
+			)
 		}
 		a = append(a, filepath.Clean(outPath))
 		return a

@@ -44,7 +44,7 @@ func (f *fakeMediaSource) SearchAll(q string) ([]*models.Anime, error) {
 	return f.allResults, f.searchErr
 }
 
-func (f *fakeMediaSource) GetAnimeStreamURL(_ *models.Anime, ep, _, _ string) (string, map[string]string, error) {
+func (f *fakeMediaSource) GetAnimeStreamURL(_ *models.Anime, ep, _, _ string) (streamURL string, metadata map[string]string, err error) {
 	f.episodeArg = ep
 	return f.streamURL, f.streamMeta, f.streamErr
 }

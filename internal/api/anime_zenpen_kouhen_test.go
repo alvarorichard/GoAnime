@@ -75,7 +75,7 @@ var jujutsuMockDataset = map[string]aniListMockEntry{
 // startMockAniListServer spins up an httptest.Server speaking AniList's
 // GraphQL contract for the dataset above. Returns the server and a teardown
 // helper that restores the original endpoint URL.
-func startMockAniListServer(t *testing.T) (*httptest.Server, func()) {
+func startMockAniListServer(t *testing.T) (server *httptest.Server, cleanup func()) {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

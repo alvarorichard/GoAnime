@@ -437,6 +437,6 @@ func UpscaleImageFile(inputPath, outputPath string, opts Anime4KOptions) error {
 
 // GetUpscaledDimensions returns the dimensions after upscaling
 // Anime4K always upscales by 2x
-func GetUpscaledDimensions(width, height int) (int, int) {
+func GetUpscaledDimensions(width, height int) (upscaledWidth, upscaledHeight int) {
 	return width * 2, height * 2
 }

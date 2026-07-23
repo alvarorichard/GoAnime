@@ -405,7 +405,7 @@ func ProbeOriginStatus(parent context.Context, probeURL string, budget time.Dura
 	ctx, cancel := context.WithTimeout(parent, budget)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, probeURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, probeURL, http.NoBody)
 	if err != nil {
 		return 0
 	}

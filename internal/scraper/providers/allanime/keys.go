@@ -42,7 +42,7 @@ const aaKeysTTL = 3 * time.Minute
 
 // Pre-compiled scrapers for the key-derivation flow.
 var (
-	aaEpochRe = regexp.MustCompile(`"epoch":([0-9]+)`)
+	aaEpochRe = regexp.MustCompile(`"epoch":(\d+)`)
 	aaPartBRe = regexp.MustCompile(`"partB":"([^"]*)"`)
 	// aaAppRe matches the entry bundle URL host-agnostically. Deriving the CDN
 	// root from this match (rather than pinning allAnimeCDN) keeps derivation
@@ -140,7 +140,7 @@ func (c *AllAnimeClient) fetchAAKeys() (*aaKeys, error) {
 // getText fetches a URL and returns its body as a string, capped at 8 MiB. Used
 // for the referer page and CDN JS bundles during key derivation.
 func (c *AllAnimeClient) getText(rawURL string) (string, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+	req, err := http.NewRequest("GET", rawURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}

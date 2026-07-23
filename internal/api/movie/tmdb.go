@@ -246,7 +246,7 @@ func (c *TMDBClient) FindByIMDBID(imdbID string) (*models.TMDBMedia, error) {
 }
 
 // GetTrending gets trending movies and TV shows
-func (c *TMDBClient) GetTrending(mediaType string, timeWindow string) (*models.TMDBSearchResult, error) {
+func (c *TMDBClient) GetTrending(mediaType, timeWindow string) (*models.TMDBSearchResult, error) {
 	if mediaType == "" {
 		mediaType = "all"
 	}
@@ -300,7 +300,7 @@ func (c *TMDBClient) makeRequest(endpoint string) ([]byte, error) {
 	}
 	endpointWithKey := endpoint + separator + "api_key=" + c.apiKey
 
-	req, err := http.NewRequest("GET", endpointWithKey, nil)
+	req, err := http.NewRequest("GET", endpointWithKey, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (c *TMDBClient) makeRequest(endpoint string) ([]byte, error) {
 }
 
 // GetImageURL returns the full URL for a TMDB image
-func (c *TMDBClient) GetImageURL(path string, size string) string {
+func (c *TMDBClient) GetImageURL(path, size string) string {
 	if path == "" {
 		return ""
 	}

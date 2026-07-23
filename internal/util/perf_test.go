@@ -78,8 +78,8 @@ func TestPerfTracker_IncrementAndGetCounter(t *testing.T) {
 func TestPerfTracker_GetMetrics_ReturnsCopies(t *testing.T) {
 	pt := &PerfTracker{metrics: make(map[string]*PerfMetric), counters: make(map[string]*int64)}
 	pt.Record("op", time.Millisecond)
-	copy := pt.GetMetrics()
-	copy["op"].Count = 999
+	metricsCopy := pt.GetMetrics()
+	metricsCopy["op"].Count = 999
 	require.NotEqual(t, int64(999), pt.GetMetrics()["op"].Count)
 }
 

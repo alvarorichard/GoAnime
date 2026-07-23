@@ -176,14 +176,14 @@ func TestAlreadyDownloaded(t *testing.T) {
 	t.Run("small file ignored", func(t *testing.T) {
 		t.Parallel()
 		small := filepath.Join(dir, "small.mp4")
-		require.NoError(t, os.WriteFile(small, []byte("tiny"), 0600))
+		require.NoError(t, os.WriteFile(small, []byte("tiny"), 0o600))
 		assert.False(t, alreadyDownloaded(small))
 	})
 
 	t.Run("valid large file", func(t *testing.T) {
 		t.Parallel()
 		big := filepath.Join(dir, "big.mp4")
-		require.NoError(t, os.WriteFile(big, make([]byte, 2048), 0600))
+		require.NoError(t, os.WriteFile(big, make([]byte, 2048), 0o600))
 		assert.True(t, alreadyDownloaded(big))
 	})
 }

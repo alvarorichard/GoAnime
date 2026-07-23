@@ -36,7 +36,7 @@ func (m *MockScraper) GetAnimeEpisodes(animeURL string) ([]models.Episode, error
 	return nil, nil
 }
 
-func (m *MockScraper) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (m *MockScraper) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	if m.streamURLFunc != nil {
 		return m.streamURLFunc(episodeURL)
 	}

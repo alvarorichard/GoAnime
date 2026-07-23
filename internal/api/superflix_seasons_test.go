@@ -98,9 +98,11 @@ func TestFetchSuperFlixSeasons_FallsBackToBrowser(t *testing.T) {
 		wantTV int
 	}{
 		{
-			name:   "TVmaze errors",
-			imdb:   "tt0000001",
-			tvmaze: func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) { return nil, errors.New("tvmaze down") },
+			name: "TVmaze errors",
+			imdb: "tt0000001",
+			tvmaze: func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) {
+				return nil, errors.New("tvmaze down")
+			},
 			wantTV: 1,
 		},
 		{
@@ -111,9 +113,11 @@ func TestFetchSuperFlixSeasons_FallsBackToBrowser(t *testing.T) {
 		},
 		{
 			// Without an IMDB id there is nothing to look TVmaze up by.
-			name:   "no IMDB id skips TVmaze entirely",
-			imdb:   "",
-			tvmaze: func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) { return sfEpisodes(9), nil },
+			name: "no IMDB id skips TVmaze entirely",
+			imdb: "",
+			tvmaze: func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) {
+				return sfEpisodes(9), nil
+			},
 			wantTV: 0,
 		},
 	}

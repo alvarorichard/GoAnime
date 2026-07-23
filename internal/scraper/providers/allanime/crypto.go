@@ -40,7 +40,7 @@ const aaReqWindowMillis = 300000 // 5 minutes
 func buildAAReqAt(qh string, key []byte, epoch string, nowMillis int64) (string, error) {
 	ts := (nowMillis / aaReqWindowMillis) * aaReqWindowMillis
 
-	payload := fmt.Sprintf(`{"v":1,"ts":%d,"epoch":%s,"qh":"%s"}`, ts, epoch, qh)
+	payload := fmt.Sprintf(`{"v":1,"ts":%d,"epoch":%s,"qh":%q}`, ts, epoch, qh)
 
 	ivSeed := fmt.Sprintf("%s:%s:%d", epoch, qh, ts)
 	ivHash := sha256.Sum256([]byte(ivSeed))

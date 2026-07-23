@@ -85,14 +85,14 @@ func TestValidateShaderSourceURL_RejectsAttackerHosts(t *testing.T) {
 		"https://evil.example.com/payload.zip",
 		"https://attacker-controlled.io/shader",
 		"https://example.com.github.com.attacker.io/x",
-		"http://github.com/bloc97/Anime4K",        // http on non-loopback rejected
+		"http://github.com/bloc97/Anime4K",         // http on non-loopback rejected
 		"file:///etc/passwd",                       // wrong scheme
 		"ftp://github.com/x",                       // wrong scheme
 		"https://192.168.1.1/internal",             // private IP not in allowlist
 		"https://10.0.0.5/internal",                // private IP
 		"https://169.254.169.254/latest/meta-data", // AWS IMDS
-		"",                                          // empty
-		"not-a-url",                                // garbage
+		"",          // empty
+		"not-a-url", // garbage
 	} {
 		assert.Error(t, validateShaderSourceURL(u), u)
 	}
@@ -116,11 +116,11 @@ func TestInstallGANShaders_RejectsAttackerURL(t *testing.T) {
 
 func TestInstallShaders_Success(t *testing.T) {
 	zipBytes := buildGLSLZip(t, map[string]string{
-		"shaders/Anime4K_Clamp_Highlights.glsl":  "clamp",
-		"shaders/Anime4K_Restore_CNN_M.glsl":     "restore",
-		"shaders/Anime4K_Upscale_CNN_x2_M.glsl":  "upscale",
-		"shaders/Anime4K_Other_File.glsl":        "other",
-		"README.md":                              "ignored",
+		"shaders/Anime4K_Clamp_Highlights.glsl": "clamp",
+		"shaders/Anime4K_Restore_CNN_M.glsl":    "restore",
+		"shaders/Anime4K_Upscale_CNN_x2_M.glsl": "upscale",
+		"shaders/Anime4K_Other_File.glsl":       "other",
+		"README.md":                             "ignored",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(zipBytes)
@@ -588,9 +588,9 @@ func TestSSRFRegression_InstallGANShaders_AttackerServerNeverContacted(t *testin
 func TestSSRFRegression_InternalNetworkProbeBlocked(t *testing.T) {
 	t.Parallel()
 	dangerous := []string{
-		"https://169.254.169.254/latest/meta-data/iam/security-credentials/",   // AWS IMDS
+		"https://169.254.169.254/latest/meta-data/iam/security-credentials/",                          // AWS IMDS
 		"https://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", // GCP
-		"http://169.254.169.254/metadata/instance?api-version=2021-02-01",      // Azure IMDS
+		"http://169.254.169.254/metadata/instance?api-version=2021-02-01",                             // Azure IMDS
 		"https://10.0.0.1/admin",
 		"https://172.16.0.1/admin",
 		"https://192.168.1.1/router",

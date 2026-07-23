@@ -339,7 +339,7 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 
 		beforeRead := current
 
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", url, http.NoBody)
 		if err != nil {
 			return err
 		}
@@ -859,7 +859,7 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 		// Fresh download client per attempt — follows redirects and has a long timeout
 		client := newSurfDownloadClient().Std()
 
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", url, http.NoBody)
 		if err != nil {
 			return err
 		}
@@ -1269,7 +1269,7 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 			Transport: api.SafeTransport(10 * time.Minute),
 		}
 	}
-	req, err := http.NewRequest("GET", safeURL, nil)
+	req, err := http.NewRequest("GET", safeURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1483,7 +1483,7 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 
 	// AllAnime path: animeURL is AllAnime ID/URL, episode.Number is episode string
 	isAllAnime := func(u string) bool {
-		return strings.Contains(u, "allanime") || (len(u) < 30 && !strings.Contains(u, "http") && len(u) > 0)
+		return strings.Contains(u, "allanime") || (len(u) < 30 && !strings.Contains(u, "http") && u != "")
 	}
 	if source == "AllAnime" || isAllAnime(animeURL) {
 		allAnime := &models.Anime{URL: animeURL, Source: "AllAnime", Name: "AllAnime"}
@@ -1527,10 +1527,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 func buildQualityMenu(sources []struct {
 	Quality int
 	URL     string
-}) ([]struct {
+}) (sortedSources []struct {
 	Quality int
 	URL     string
-}, []string) {
+}, labels []string) {
 	sorted := make([]struct {
 		Quality int
 		URL     string
@@ -2287,7 +2287,7 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 			fullPath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
 		}
 		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return "", err
 		}
 		return fullPath, nil
@@ -2306,7 +2306,7 @@ func createEpisodePath(animeURL string, epNum int) (string, error) {
 		fallbackBase = filepath.Join(userHome, ".local", "goanime", "downloads", "anime")
 	}
 	downloadDir := filepath.Join(fallbackBase, safeAnimeName)
-	if err := os.MkdirAll(downloadDir, 0700); err != nil {
+	if err := os.MkdirAll(downloadDir, 0o700); err != nil {
 		return "", err
 	}
 	return filepath.Join(downloadDir, fmt.Sprintf("%d.mp4", epNum)), nil

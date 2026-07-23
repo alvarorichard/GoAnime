@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"charm.land/huh/v2/spinner"
-	"github.com/alvarorichard/Goanime/internal/api/source"
+	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -174,7 +174,7 @@ var ErrBackToSearch = errors.New("back to search requested")
 // (providers.SearchAll) without importing providers (which would cycle). The
 // providers package wires it in its init(); if unset, the search falls back to
 // the ScraperManager engine.
-type SearchFetchFunc func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error)
+type SearchFetchFunc func(ctx context.Context, query string, kinds []apisource.SourceKind) ([]*models.Anime, error)
 
 var searchFetchFn SearchFetchFunc
 
@@ -224,7 +224,7 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 }
 
 // Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
-func SearchAnimeEnhanced(name string, src string) (*models.Anime, error) {
+func SearchAnimeEnhanced(name, src string) (*models.Anime, error) {
 	return searchAnimeEnhanced(name, src, searchFetchFn, tui.SelectAnime, enrichAnimeData)
 }
 
@@ -237,19 +237,19 @@ func searchAnimeEnhanced(
 ) (*models.Anime, error) {
 	// Map the optional source selector to the registry kinds to search. Empty
 	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
-	var registryKinds []source.SourceKind
+	var registryKinds []apisource.SourceKind
 	normalizedSource := strings.ToLower(strings.TrimSpace(src))
 	switch normalizedSource {
 	case "allanime":
-		registryKinds = []source.SourceKind{source.AllAnime}
+		registryKinds = []apisource.SourceKind{apisource.AllAnime}
 	case "animefire":
-		registryKinds = []source.SourceKind{source.AnimeFire}
+		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
-		registryKinds = []source.SourceKind{source.Goyabu}
+		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "superflix":
-		registryKinds = []source.SourceKind{source.SuperFlix}
+		registryKinds = []apisource.SourceKind{apisource.SuperFlix}
 	case "ptbr", "pt-br":
-		registryKinds = []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}
+		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix}
 	}
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
@@ -295,7 +295,7 @@ func searchAnimeEnhanced(
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
 				switch {
-				case source.IsAllAnimeShortID(anime.URL), strings.Contains(lowerURL, "allanime"):
+				case apisource.IsAllAnimeShortID(anime.URL), strings.Contains(lowerURL, "allanime"):
 					anime.Source = "AllAnime"
 				case strings.Contains(lowerURL, "animefire"):
 					anime.Source = "Animefire.io"
@@ -433,15 +433,15 @@ func sanitizeFilename(name string) string {
 }
 
 // Basic download function (placeholder - integrate with your existing downloader)
-func downloadFromURL(_ string, _ string) error {
+func downloadFromURL(_, _ string) error {
 	// This is a placeholder that should fail to trigger fallback to the proper downloader
 	util.Debugf("Enhanced API downloadFromURL is a placeholder - returning error to trigger fallback")
 	return fmt.Errorf("enhanced download not implemented - use legacy downloader")
 }
 
 // Legacy wrapper functions to maintain compatibility
-func SearchAnimeWithSource(name string, source string) (*models.Anime, error) {
-	return SearchAnimeEnhanced(name, source)
+func SearchAnimeWithSource(name, sourceName string) (*models.Anime, error) {
+	return SearchAnimeEnhanced(name, sourceName)
 }
 
 func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {

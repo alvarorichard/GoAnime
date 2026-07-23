@@ -244,11 +244,11 @@ func TestHandleDownloadAndPlay_AnimeFireURLHitsExtractionBranch(t *testing.T) {
 
 	anime := &models.Anime{URL: "https://example.com/x", Source: "AllAnime"}
 	err := HandleDownloadAndPlay(
-		"https://animefire.io/video/x", // needsVideoExtraction = true
+		"https://animefire.io/video/x", // forces the extraction branch
 		nil, 1, "https://example.com/x", "1", 0, 0, nil, "HDP_AnimeFireTest", 1, anime,
 	)
-	// extractActualVideoURL goes through SafeGet → loopback rejected →
-	// resolved stays empty → final branch returns "no valid video URL".
+	// The extraction goes through SafeGet; loopback rejection leaves the
+	// resolved URL empty and exercises the final validation branch.
 	require.Error(t, err)
 }
 

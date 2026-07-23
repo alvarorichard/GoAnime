@@ -28,7 +28,7 @@ func TestCFFallbackTransport_WithoutBrowserSolveSkipsSolver(t *testing.T) {
 	tr := &cfFallbackTransport{base: http.DefaultTransport, solver: solver, timeout: time.Second}
 	client := &http.Client{Transport: tr}
 
-	req, err := http.NewRequestWithContext(WithoutBrowserSolve(t.Context()), "GET", srv.URL, nil)
+	req, err := http.NewRequestWithContext(WithoutBrowserSolve(t.Context()), "GET", srv.URL, http.NoBody)
 	require.NoError(t, err)
 	resp, err := client.Do(req)
 	require.NoError(t, err)

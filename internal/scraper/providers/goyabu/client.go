@@ -114,7 +114,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 	searchURL := fmt.Sprintf("%s/wp-json/animeonline/search/?keyword=%s&nonce=%s",
 		c.baseURL, url.QueryEscape(query), nonce)
 
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequest("GET", searchURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -181,7 +181,7 @@ func (c *GoyabuClient) SearchAnime(query string) ([]*models.Anime, error) {
 
 // fetchNonce gets the CSRF nonce from the homepage
 func (c *GoyabuClient) fetchNonce() (string, error) {
-	req, err := http.NewRequest("GET", c.baseURL, nil)
+	req, err := http.NewRequest("GET", c.baseURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -227,7 +227,7 @@ func (c *GoyabuClient) searchAnimeHTML(query string) ([]*models.Anime, error) {
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", searchURL, nil)
+		req, err := http.NewRequest("GET", searchURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -353,7 +353,7 @@ func (c *GoyabuClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, erro
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", animeURL, nil)
+		req, err := http.NewRequest("GET", animeURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -506,7 +506,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	util.Debug("Goyabu stream URL", "url", episodeURL)
 
 	// Step 1: Fetch the episode page to get the blogger token
-	req, err := http.NewRequest("GET", episodeURL, nil)
+	req, err := http.NewRequest("GET", episodeURL, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -637,7 +637,7 @@ func (c *GoyabuClient) dumpEpisodePageDiagnostic(episodeURL string, body []byte,
 	hash := sha256.Sum256([]byte(episodeURL))
 	dumpName := fmt.Sprintf("goanime_goyabu_%s_%d.html", hex.EncodeToString(hash[:6]), time.Now().Unix())
 	dumpPath := filepath.Join(os.TempDir(), dumpName)
-	if err := os.WriteFile(dumpPath, body, 0600); err != nil {
+	if err := os.WriteFile(dumpPath, body, 0o600); err != nil {
 		util.Debug("Goyabu diagnostic dump failed", "error", err)
 		return
 	}

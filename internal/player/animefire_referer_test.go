@@ -60,7 +60,7 @@ func TestApplyDownloadAuthHeaders_UsesGlobalRefererWhenSet(t *testing.T) {
 	defer restore()
 	util.SetGlobalReferer("https://animefire.io")
 
-	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", nil)
+	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", http.NoBody)
 	require.NoError(t, err)
 
 	applyDownloadAuthHeaders(req, req.URL.String())
@@ -76,7 +76,7 @@ func TestApplyDownloadAuthHeaders_GlobalRefererBeatsUrlPatternFallback(t *testin
 	defer restore()
 	util.SetGlobalReferer("https://allmanga.to")
 
-	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", nil)
+	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", http.NoBody)
 	require.NoError(t, err)
 
 	applyDownloadAuthHeaders(req, req.URL.String())
@@ -90,7 +90,7 @@ func TestApplyDownloadAuthHeaders_FallsBackToAnimeFireForLightspeedst(t *testing
 	defer restore()
 	util.ClearGlobalReferer()
 
-	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", nil)
+	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", http.NoBody)
 	require.NoError(t, err)
 
 	applyDownloadAuthHeaders(req, req.URL.String())
@@ -104,7 +104,7 @@ func TestApplyDownloadAuthHeaders_FallsBackToAllAnimeForAllAnimeHosts(t *testing
 	defer restore()
 	util.ClearGlobalReferer()
 
-	req, err := http.NewRequest(http.MethodHead, "https://allanime.day/video/episode.mp4", nil)
+	req, err := http.NewRequest(http.MethodHead, "https://allanime.day/video/episode.mp4", http.NoBody)
 	require.NoError(t, err)
 
 	applyDownloadAuthHeaders(req, req.URL.String())
@@ -117,7 +117,7 @@ func TestApplyDownloadAuthHeaders_PreservesExistingUserAgent(t *testing.T) {
 	defer restore()
 	util.SetGlobalReferer("https://animefire.io")
 
-	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", nil)
+	req, err := http.NewRequest(http.MethodHead, "https://lightspeedst.net/path/video.mp4", http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("User-Agent", "custom-ua/1.0")
 

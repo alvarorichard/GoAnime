@@ -1,0 +1,46 @@
+name: Source Health
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-health
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.26.5'
+  GOFLAGS: -mod=readonly
+  GOTOOLCHAIN: local
+
+jobs:
+  live-diagnostics:
+    name: Live source diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download and verify dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Run live diagnostics
+        run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
+
+      - name: Run public SDK integration tests
+        run: go test -run Integration -count=1 -v ./pkg/goanime

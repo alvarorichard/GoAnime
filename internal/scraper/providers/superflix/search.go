@@ -73,7 +73,7 @@ func (c *SuperFlixClient) SearchMediaWithContext(ctx context.Context, query stri
 	searchURL := fmt.Sprintf("%s/pesquisar?s=%s", c.baseURL, url.QueryEscape(normalized))
 	util.Debug("SuperFlix search", "query", query, "normalized", normalized, "url", searchURL)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

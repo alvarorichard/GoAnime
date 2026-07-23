@@ -167,7 +167,7 @@ func TestExtractEpisodes(t *testing.T) {
 		},
 		{
 			name:         "filters missing, null, and future air_dates",
-			html:         fmt.Sprintf(`var ALL_EPISODES = {"1":[{"epi_num":"1","title":"Valid","air_date":"2020-01-15"},{"epi_num":"2","title":"Missing","air_date":""},{"epi_num":"3","title":"Null","air_date":"null"},{"epi_num":"4","title":"Future","air_date":"%s"}]};`, time.Now().Add(48*time.Hour).Format("2006-01-02")),
+			html:         fmt.Sprintf(`var ALL_EPISODES = {"1":[{"epi_num":"1","title":"Valid","air_date":"2020-01-15"},{"epi_num":"2","title":"Missing","air_date":""},{"epi_num":"3","title":"Null","air_date":"null"},{"epi_num":"4","title":"Future","air_date":%q}]};`, time.Now().Add(48*time.Hour).Format("2006-01-02")),
 			expectKeys:   []string{"1"},
 			expectCounts: map[string]int{"1": 1},
 		},

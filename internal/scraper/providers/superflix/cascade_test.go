@@ -54,7 +54,7 @@ func (s *scriptedSolver) SniffEmbedStream(_ context.Context, u string, _ time.Du
 	return s.sniff, nil
 }
 
-func (s *scriptedSolver) calls() ([]string, []string) {
+func (s *scriptedSolver) calls() (solveCalls, sniffCalls []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.solveCalls...), append([]string(nil), s.sniffCalls...)

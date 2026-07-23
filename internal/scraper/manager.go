@@ -193,7 +193,7 @@ func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, e
 	return episodeModels, nil
 }
 
-func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	// For AllAnime, episodeURL contains the anime ID
 	animeID := episodeURL
 
@@ -239,9 +239,9 @@ func (a *AnimefireAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, 
 	return a.client.GetAnimeEpisodes(animeURL)
 }
 
-func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	url, err := a.client.GetEpisodeStreamURL(episodeURL)
-	metadata := make(map[string]string)
+	metadata = make(map[string]string)
 	metadata["source"] = "animefire"
 	return url, metadata, err
 }
@@ -263,9 +263,9 @@ func (a *GoyabuAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, err
 	return a.client.GetAnimeEpisodes(animeURL)
 }
 
-func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	url, err := a.client.GetEpisodeStreamURL(episodeURL)
-	metadata := make(map[string]string)
+	metadata = make(map[string]string)
 	metadata["source"] = "goyabu"
 	return url, metadata, err
 }
@@ -297,7 +297,7 @@ func (a *SuperFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, 
 	return nil, fmt.Errorf("for SuperFlix, use GetSuperFlixEpisodes in enhanced.go")
 }
 
-func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	// episodeURL = TMDB ID
 	// options[0] = media type ("filme" or "serie")
 	// options[1] = season (optional)
@@ -333,7 +333,7 @@ func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (stri
 		return "", nil, err
 	}
 
-	metadata := make(map[string]string)
+	metadata = make(map[string]string)
 	metadata["source"] = "superflix"
 	metadata["referer"] = result.Referer
 	metadata["title"] = result.Title

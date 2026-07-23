@@ -44,7 +44,7 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
-func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) ([]string, string) {
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
 		return mpvArgs, ""
@@ -357,7 +357,7 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 
 // showResumeDialog displays a compact dialog asking if user wants to resume playback.
 // For movies (single-title playback) the wording avoids "episode N".
-func showResumeDialog(episodeNum int, timeSeconds int, isMovie bool) (bool, error) {
+func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 	var resume bool
 
 	// Convert seconds to minutes and seconds for better readability
@@ -811,7 +811,7 @@ func trackingKey(episodeURL string, episodeNum int) string {
 }
 
 // initTracking inicializa o sistema de rastreamento
-func initTracking(anilistID int, episode *models.Episode, episodeNum int) (*tracking.LocalTracker, int) {
+func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resultTracker *tracking.LocalTracker, resumePosition int) {
 	if !tracking.IsCgoEnabled {
 		if util.IsDebug {
 			util.Debug("Tracking disabled: CGO not available")

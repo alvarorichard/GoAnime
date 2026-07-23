@@ -88,7 +88,7 @@ func GetEpisodesFromTVmaze(ctx context.Context, httpClient *http.Client, imdbID 
 }
 
 func tvmazeGetJSON(ctx context.Context, httpClient *http.Client, u string, dst any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, http.NoBody)
 	if err != nil {
 		return err
 	}

@@ -71,7 +71,7 @@ func searchAnimeWithBaseURL(animeName, baseURL string) (string, error) {
 	}
 }
 
-func searchAnimeOnPage(currentPageURL, baseURL string) (string, string, error) {
+func searchAnimeOnPage(currentPageURL, baseURL string) (resultURL, animeName string, err error) {
 	resp, err := http.Get(currentPageURL)
 	if err != nil {
 		return "", "", err

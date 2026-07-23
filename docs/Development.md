@@ -176,9 +176,10 @@ Pull requests that do not pass these checks will NOT be accepted.**
 | Tool | Purpose | Install |
 |------|---------|---------|
 | `go vet` | Built-in static analysis for common mistakes | Included with Go |
-| `staticcheck` | Advanced static analysis for Go code | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
-| `gosec` | Security-focused linter (OWASP-style checks) | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
-| `govulncheck` | Detects known vulnerabilities in dependencies | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| `golangci-lint` | Aggregated correctness and resource-safety analysis | See the [official installation guide](https://golangci-lint.run/docs/welcome/install/) |
+| `go-critic` | Bug, performance, style, experimental, and opinionated checks | `go install github.com/go-critic/go-critic/cmd/gocritic@v0.14.4` |
+| `gosec` | Security-focused source scanner | `go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0` |
+| `govulncheck` | Detects reachable known vulnerabilities | `go install golang.org/x/vuln/cmd/govulncheck@v1.6.0` |
 
 Run **all** of them before submitting any contribution:
 
@@ -186,8 +187,14 @@ Run **all** of them before submitting any contribution:
 # Static analysis (built-in)
 go vet ./...
 
-# Advanced static analysis
-staticcheck ./...
+# Aggregated static analysis (includes staticcheck)
+golangci-lint run ./...
+
+# Every go-critic checker, using the same thresholds as CI
+gocritic check -enableAll \
+  -@hugeParam.sizeThreshold=256 \
+  -@rangeValCopy.sizeThreshold=512 \
+  -@unnamedResult.checkExported=true ./...
 
 # Security scanner — flags insecure code patterns
 gosec ./...
@@ -219,11 +226,12 @@ are unnecessary.
 We use automated quality verification bots and tools:
 
 1. **Go Linting**: `golangci-lint` for comprehensive code analysis
-2. **Static Analysis**: `go vet` and `staticcheck` for correctness checks
+2. **Static Analysis**: `go vet`, `staticcheck`, and every `go-critic` checker
 3. **Security Scanning**: `gosec` for insecure code patterns and `govulncheck`
    for known dependency vulnerabilities
 4. **Code Coverage**: Maintain minimum test coverage
-5. **Dependency Updates**: Automated dependency security updates
+5. **Supply-chain Security**: Dependency review and automated Dependabot updates
+6. **Semantic Security Analysis**: CodeQL extended security and quality queries
 
 ### Pre-commit Checks
 
@@ -236,20 +244,21 @@ go fmt ./...
 # Built-in static analysis
 go vet ./...
 
-# Advanced static analysis
-staticcheck ./...
+# Full configured linter suite
+golangci-lint run ./...
 
-# Security scanner
-gosec ./...
+# Every go-critic checker
+gocritic check -enableAll \
+  -@hugeParam.sizeThreshold=256 \
+  -@rangeValCopy.sizeThreshold=512 \
+  -@unnamedResult.checkExported=true ./...
 
-# Vulnerability check
+# Security scanners
+gosec -exclude-generated ./...
 govulncheck ./...
 
-# Run linter
-golangci-lint run
-
-# Run tests
-go test ./...
+# Deterministic test gate used by CI
+go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 ```
 
 ### CI/CD Pipeline
@@ -257,12 +266,14 @@ go test ./...
 Our continuous integration pipeline automatically:
 
 - Runs `go fmt` checks
-- Runs `go vet` and `staticcheck` analysis
+- Runs `go vet`, `golangci-lint`, and all `go-critic` checks
 - Runs `gosec` security scanning
 - Runs `govulncheck` dependency vulnerability checks
-- Executes linting with `golangci-lint`
-- Runs the full test suite
-- Checks code coverage
+- Runs CodeQL extended security and quality analysis
+- Reviews dependency changes in pull requests
+- Runs race-enabled tests on Linux, macOS, and Windows
+- Enforces a 66% coverage floor and uploads the coverage artifact
+- Runs network-dependent source diagnostics in a separate scheduled workflow
 - Builds for multiple platforms
 
 ## Testing

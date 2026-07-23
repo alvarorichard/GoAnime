@@ -29,7 +29,7 @@ func (p *JikanProvider) Name() string {
 	return "Jikan (MyAnimeList)"
 }
 
-func (p *JikanProvider) FetchEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
+func (p *JikanProvider) FetchEpisodeData(animeID, episodeNo int, anime *models.Anime) error {
 	if animeID <= 0 {
 		return fmt.Errorf("invalid anime ID: %d", animeID)
 	}
@@ -57,7 +57,7 @@ func (p *AniListProvider) Name() string {
 	return "AniList"
 }
 
-func (p *AniListProvider) FetchEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
+func (p *AniListProvider) FetchEpisodeData(animeID, episodeNo int, anime *models.Anime) error {
 	// AniList uses its own ID system, so we need to use the AnilistID from the anime
 	anilistID := anime.AnilistID
 	if anilistID <= 0 {
@@ -100,7 +100,7 @@ func (p *AniListProvider) FetchEpisodeData(animeID int, episodeNo int, anime *mo
 		return fmt.Errorf("JSON marshal failed: %w", err)
 	}
 
-	resp, body, err := aniListPost("https://graphql.anilist.co", jsonData)
+	resp, body, err := aniListPost("https://graphql.anilist.co", jsonData) //nolint:bodyclose // aniListPost reads and closes the body before returning.
 	if err != nil {
 		return fmt.Errorf("AniList request failed: %w", err)
 	}
@@ -167,7 +167,7 @@ func (p *KitsuProvider) Name() string {
 	return "Kitsu"
 }
 
-func (p *KitsuProvider) FetchEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
+func (p *KitsuProvider) FetchEpisodeData(animeID, episodeNo int, anime *models.Anime) error {
 	if animeID <= 0 {
 		// Try to search by anime name if no MAL ID
 		return p.fetchByAnimeName(anime, episodeNo)
@@ -190,7 +190,7 @@ func (p *KitsuProvider) fetchByAnimeName(anime *models.Anime, episodeNo int) err
 	searchURL := fmt.Sprintf("%s/api/edge/anime?filter[text]=%s&page[limit]=1",
 		kitsuBaseURL, strings.ReplaceAll(searchName, " ", "%20"))
 
-	req, err := http.NewRequest("GET", searchURL, nil)
+	req, err := http.NewRequest("GET", searchURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create search request: %w", err)
 	}
@@ -260,7 +260,7 @@ func (p *KitsuProvider) fetchEpisodeByKitsuID(kitsuAnimeID string, episodeNo int
 	// Fetch episodes for this anime
 	url := fmt.Sprintf("%s/api/edge/anime/%s/episodes?filter[number]=%d", kitsuBaseURL, kitsuAnimeID, episodeNo)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -341,7 +341,7 @@ func getAniListIDFromMAL(malID int) (int, error) {
 		return 0, err
 	}
 
-	_, body, err := aniListPost("https://graphql.anilist.co", jsonData)
+	_, body, err := aniListPost("https://graphql.anilist.co", jsonData) //nolint:bodyclose // aniListPost reads and closes the body before returning.
 	if err != nil {
 		return 0, err
 	}
@@ -369,7 +369,7 @@ func getAniListIDFromMAL(malID int) (int, error) {
 func getKitsuAnimeID(malID int) (string, error) {
 	url := fmt.Sprintf("%s/api/edge/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=%d", kitsuBaseURL, malID)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -440,7 +440,7 @@ func defaultProviders() []EpisodeDataProvider {
 
 // GetEpisodeDataWithFallback fetches episode data trying multiple providers concurrently.
 // All providers are launched in parallel and the first successful result is used.
-func GetEpisodeDataWithFallback(animeID int, episodeNo int, anime *models.Anime) error {
+func GetEpisodeDataWithFallback(animeID, episodeNo int, anime *models.Anime) error {
 	providers := defaultProviders()
 
 	type providerResult struct {

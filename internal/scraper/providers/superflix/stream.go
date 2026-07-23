@@ -49,7 +49,9 @@ func (c *SuperFlixClient) GetPlayerPage(ctx context.Context, mediaType, mediaID,
 	pageURL := c.baseURL + path
 	util.Debug("SuperFlix player page", "url", pageURL)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	// #nosec G704 -- pageURL is built from the client's configured SuperFlix
+	// base URL and path segments; tests may replace the base with loopback.
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -59,7 +61,7 @@ func (c *SuperFlixClient) GetPlayerPage(ctx context.Context, mediaType, mediaID,
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) // #nosec G704 -- request URL is constrained as described above.
 	if err != nil {
 		return "", fmt.Errorf("failed to make request: %w", err)
 	}
@@ -395,7 +397,7 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 func (c *SuperFlixClient) streamURLDead(ctx context.Context, streamURL, referer string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, http.NoBody)
 	if err != nil {
 		return false
 	}
@@ -536,7 +538,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", redirectURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", redirectURL, http.NoBody)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -558,7 +560,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 	}
 
 	// Follow to the final page
-	req2, err := http.NewRequestWithContext(ctx, "GET", location, nil)
+	req2, err := http.NewRequestWithContext(ctx, "GET", location, http.NoBody)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to create follow request: %w", err)
 	}
@@ -631,7 +633,7 @@ func (c *SuperFlixClient) fetchPlayerExtras(ctx context.Context, host, hash stri
 	ctx = WithoutBrowserSolve(ctx)
 	pageURL := host + "/video/" + hash
 
-	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, http.NoBody)
 	if err != nil {
 		util.Debug("SuperFlix: player extras request failed", "url", pageURL, "err", err)
 		return nil, nil

@@ -1,25 +1,136 @@
-name: GoAnime CI
+name: CI
 
 on:
   push:
-    branches: [ main, dev]
+    branches: [main, dev]
   pull_request:
-    branches: [ main, dev ]
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.26.5'
+  GOFLAGS: -mod=readonly
+  GOTOOLCHAIN: local
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.5'
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify module integrity
+        shell: bash
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following files are not gofmt formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=20m
+
+      - name: Install go-critic
+        run: go install github.com/go-critic/go-critic/cmd/gocritic@v0.14.4
+
+      - name: Run every go-critic check
+        run: >
+          gocritic check -enableAll
+          -@hugeParam.sizeThreshold=256
+          -@rangeValCopy.sizeThreshold=512
+          -@unnamedResult.checkExported=true
+          ./...
+
+  security:
+    name: Security gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Review dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+
+      - name: Install security scanners
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+
+      - name: Scan source for insecure patterns
+        run: gosec -exclude-generated ./...
+
+      - name: Scan reachable dependencies for vulnerabilities
+        run: govulncheck ./...
+
+  test:
+    name: Tests (${{ matrix.os }})
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download and verify dependencies
+        run: |
+          go mod download
+          go mod verify
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -63,42 +174,41 @@ jobs:
       - name: Run macOS Socket Tests (macOS only)
         if: runner.os == 'macOS'
         run: |
-          echo "=== Testing macOS-specific socket path handling ==="
-          echo "TMPDIR=$TMPDIR"
           go test -race -v ./internal/player/test/... -run "Socket|MacOS" -count=1
 
-      - name: Get dependencies
-        run: go mod download
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-
-      - name: Install Gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run Gosec Security Scanner
-        run: gosec ./...
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Scan for vulnerabilities
-        run: govulncheck ./...
-
-      - name: Run tests
+      - name: Run tests with race detector and coverage
         shell: bash
-        run: go test -race -v -coverprofile=coverage.out ./...
+        run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
-      - name: Run source health diagnostics
+      - name: Enforce minimum coverage
         if: runner.os == 'Linux'
         shell: bash
-        run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
+        run: |
+          go tool cover -func=coverage.out
+          go tool cover -func=coverage.out | awk '
+            /^total:/ {
+              coverage = $3
+              sub(/%$/, "", coverage)
+              if (coverage + 0 < 66.0) {
+                printf "coverage %.1f%% is below the required 66.0%%\n", coverage
+                exit 1
+              }
+            }'
+
+      - name: Upload coverage artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
+          retention-days: 14
 
   build-binaries:
-    needs: test
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: [quality, security, test]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       matrix:
         include:
@@ -186,8 +296,10 @@ jobs:
 
   # Windows Installer Job - Creates an offline installer with bundled mpv
   build-windows-installer:
-    needs: test
+    name: Build Windows installer
+    needs: [quality, security, test]
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5

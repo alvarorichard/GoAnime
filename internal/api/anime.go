@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,7 +30,7 @@ var jikanBaseURL = "https://api.jikan.moe/v4"
 // GetEpisodeData fetches episode data using multiple providers with fallback support.
 // It tries Jikan (MyAnimeList) first, then falls back to AniList and Kitsu if needed.
 // This provides robust episode data retrieval even when primary APIs are unavailable.
-func GetEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
+func GetEpisodeData(animeID, episodeNo int, anime *models.Anime) error {
 	return GetEpisodeDataWithFallback(animeID, episodeNo, anime)
 }
 
@@ -93,12 +93,12 @@ func FetchAnimeDetails(anime *models.Anime) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to get anime details page")
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := response.Body.Close()
 		if err != nil {
 			util.Debugf("Failed to close response body: %v", err)
 		}
-	}(response.Body)
+	}()
 
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to get anime details page: %s", response.Status)
@@ -121,7 +121,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 	start := time.Now()
 	util.Debugf("[PERF] SearchAnime started for %s", animeName)
 
-	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, url.PathEscape(animeName))
+	currentPageURL := fmt.Sprintf("%s/pesquisar/%s", models.AnimeFireURL, neturl.PathEscape(animeName))
 
 	for {
 		selectedAnime, nextPageURL, err := searchAnimeOnPage(currentPageURL)
@@ -145,7 +145,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 			return nil, errors.New("no anime found with the given name")
 		}
 		// Validate scraped next-page URL to prevent open redirects
-		parsedNext, err := url.Parse(nextPageURL)
+		parsedNext, err := neturl.Parse(nextPageURL)
 		if err != nil || (parsedNext.Host != "" && !strings.Contains(parsedNext.Host, "animefire")) {
 			return nil, fmt.Errorf("suspicious next page URL rejected: %s", nextPageURL)
 		}
@@ -154,7 +154,7 @@ func SearchAnime(animeName string) (*models.Anime, error) {
 }
 
 // Unified function to fetch anime data from Jikan API
-func FetchAnimeData(animeID int, episodeNo int, anime *models.Anime) error {
+func FetchAnimeData(animeID, episodeNo int, anime *models.Anime) error {
 	endpoint := fmt.Sprintf("%s/anime/%d", jikanBaseURL, animeID)
 	if episodeNo > 0 {
 		endpoint = fmt.Sprintf("%s/episodes/%d", endpoint, episodeNo)
@@ -247,7 +247,7 @@ func enrichAnimeData(anime *models.Anime) error {
 	return nil
 }
 
-func searchAnimeOnPage(pageURL string) (*models.Anime, string, error) {
+func searchAnimeOnPage(pageURL string) (anime *models.Anime, matchedTitle string, err error) {
 	resp, err := httpGetWithUA(pageURL)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "HTTP request failed")
@@ -331,7 +331,7 @@ func selectAnimeWithGoFuzzyFinder(animes []models.Anime) (*models.Anime, error) 
 
 // HTTP helper functions
 func httpGetWithUA(url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func aniListPost(endpoint string, jsonData []byte) (*http.Response, []byte, erro
 }
 
 func makeGetRequest(url string, headers map[string]string) (map[string]any, error) {
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GET request: %w", err)
 	}
@@ -410,8 +410,8 @@ func makeGetRequest(url string, headers map[string]string) (map[string]any, erro
 
 // Utility functions
 func resolveURL(base, ref string) string {
-	baseURL, _ := url.Parse(base)
-	refURL, _ := url.Parse(ref)
+	baseURL, _ := neturl.Parse(base)
+	refURL, _ := neturl.Parse(ref)
 	return baseURL.ResolveReference(refURL).String()
 }
 
@@ -453,7 +453,7 @@ func generateSearchVariations(cleanedName string) []string {
 	if strings.ToLower(cleanedName) == cleanedName {
 		words := strings.Fields(cleanedName)
 		for i, w := range words {
-			if len(w) > 0 {
+			if w != "" {
 				words[i] = strings.ToUpper(string(w[0])) + w[1:]
 			}
 		}

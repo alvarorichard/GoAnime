@@ -103,7 +103,7 @@ func TestNormalizeSuperFlixImageURL_OriginalBug(t *testing.T) {
 				"normalized URL must not contain CloudFront domain")
 
 			// Must start with direct TMDB URL
-			assert.True(t, len(normalized) > 0 && normalized[:len("https://image.tmdb.org")] == "https://image.tmdb.org",
+			assert.True(t, normalized != "" && normalized[:len("https://image.tmdb.org")] == "https://image.tmdb.org",
 				"normalized URL must be a direct TMDB URL, got: %s", normalized)
 
 			// Must use w500 for Discord display quality
@@ -549,7 +549,7 @@ func TestSuperFlix_RealSearch_ImageURLIsAccessible(t *testing.T) {
 	}
 
 	// The normalized URL should be directly accessible (HTTP 200)
-	resp, err := http.Head(imageURL) //nolint:gosec // test URL from trusted TMDB CDN
+	resp, err := http.Head(imageURL)
 	if err != nil {
 		t.Skipf("Network error accessing image: %v", err)
 	}

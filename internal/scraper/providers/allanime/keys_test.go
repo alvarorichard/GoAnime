@@ -38,7 +38,7 @@ import (
 // referer page (epoch/partB + entry bundle URL), the entry bundle (imports a
 // chunk), and the chunk (embeds the 64-hex mask). Returns the server plus a
 // live request counter so tests can assert the network is (not) touched.
-func mockKeyBundleServer(t *testing.T, epoch string, partB, mask []byte) (*httptest.Server, *int32) {
+func mockKeyBundleServer(t *testing.T, epoch string, partB, mask []byte) (server *httptest.Server, hitCount *int32) {
 	t.Helper()
 	var hits int32
 	var srv *httptest.Server

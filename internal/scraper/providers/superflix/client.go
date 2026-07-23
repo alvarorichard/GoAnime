@@ -197,7 +197,7 @@ func (c *SuperFlixClient) SetTestConfig(baseURL string, httpClient *http.Client)
 // responses.
 func ensureJSONResponse(label string, resp *http.Response, body []byte) error {
 	trimmed := strings.TrimLeft(string(body), " \t\r\n\ufeff")
-	looksHTML := len(trimmed) > 0 && trimmed[0] == '<'
+	looksHTML := trimmed != "" && trimmed[0] == '<'
 
 	if looksHTML {
 		finalURL := ""

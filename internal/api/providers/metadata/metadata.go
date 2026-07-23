@@ -312,7 +312,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 	findURL := fmt.Sprintf("https://api.themoviedb.org/3/find/mal-%d?api_key=%s&external_source=myanimelist",
 		malID, url.QueryEscape(tmdbAPIKey))
 
-	req, err := http.NewRequestWithContext(ctx, "GET", findURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", findURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -345,7 +345,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 	detailsURL := fmt.Sprintf("https://api.themoviedb.org/3/tv/%d/external_ids?api_key=%s",
 		tvID, url.QueryEscape(tmdbAPIKey))
 
-	req2, err := http.NewRequestWithContext(ctx, "GET", detailsURL, nil)
+	req2, err := http.NewRequestWithContext(ctx, "GET", detailsURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -729,7 +729,7 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	// and Go's http.Client downgrades POSTs to GETs across the redirect, which
 	// breaks the player API.
 	searchURL := "https://superflixapi.pro/pesquisar?s=" + url.QueryEscape(cleanName)
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, http.NoBody)
 	if err != nil {
 		return nil
 	}
@@ -765,7 +765,7 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	// Must include Referer and Sec-Fetch-* headers or SuperFlix returns
 	// "ACESSO RESTRITO" instead of the actual player page with ALL_EPISODES.
 	epURL := "https://superflixapi.pro/serie/" + tmdbID
-	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, nil)
+	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, http.NoBody)
 	if err != nil {
 		return nil
 	}
@@ -852,7 +852,7 @@ var reSFCardTitle = regexp.MustCompile(`(?i)(?:alt="([^"]+)"|<h3[^>]*>([^<]+)<)`
 // findSerieTMDBID extracts the TMDB ID from SuperFlix HTML that best matches
 // the given search name. It considers only results that link to /serie/ (TV shows)
 // and picks the one whose title is the closest match.
-func findSerieTMDBID(html string, searchName string) string {
+func findSerieTMDBID(html, searchName string) string {
 	type candidate struct {
 		tmdbID string
 		title  string

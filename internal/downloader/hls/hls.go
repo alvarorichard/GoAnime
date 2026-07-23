@@ -113,7 +113,7 @@ func (d *Downloader) Download(ctx context.Context, url, output string, headers m
 
 // parsePlaylist downloads and parses the M3U8 playlist
 func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[string]string) (*M3U8Playlist, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 
 // parseMediaPlaylist fetches and parses a media playlist (not master)
 func (d *Downloader) parseMediaPlaylist(ctx context.Context, url string, headers map[string]string) (*M3U8Playlist, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 func (d *Downloader) downloadSegment(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
 	maxRetries := 5
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 		if err != nil {
 			return nil, err
 		}
@@ -450,12 +450,12 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	output = sanitizedOutput
 
 	// Create output directory if it doesn't exist
-	if err = os.MkdirAll(filepath.Dir(output), 0750); err != nil { // #nosec G301 - directory needs to be accessible
+	if err = os.MkdirAll(filepath.Dir(output), 0o750); err != nil { // #nosec G301 - directory needs to be accessible
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	// Open the output file for writing with buffered I/O for better throughput
-	outFile, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600) // #nosec G304 - path sanitized above
+	outFile, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // #nosec G304 - path sanitized above
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}

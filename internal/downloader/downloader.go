@@ -56,8 +56,8 @@ type progressSender interface {
 // the corresponding helper method falls back to a production default when the
 // field is nil. Tests set these via SetTestHooks (test-only constructor).
 type downloaderOptions struct {
-	httpClient *http.Client                 // override SafeTransport client
-	sleep      func(time.Duration)          // override time.Sleep (skip waits)
+	httpClient *http.Client                   // override SafeTransport client
+	sleep      func(time.Duration)            // override time.Sleep (skip waits)
 	newSender  func(tea.Model) progressSender // override tui.NewProgram
 }
 
@@ -192,7 +192,7 @@ func (d *EpisodeDownloader) DownloadSingleEpisode(episodeNum int) error {
 
 	// Create output directory
 	outDir := d.episodeDir(episodeNum)
-	if err := os.MkdirAll(outDir, 0700); err != nil {
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -671,7 +671,7 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 		Timeout:   10 * time.Second,
 	}
 
-	req, err := http.NewRequest("HEAD", url, nil)
+	req, err := http.NewRequest("HEAD", url, http.NoBody)
 	if err != nil {
 		if isAllAnimeURL {
 			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
@@ -721,7 +721,7 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 	}
 
 	// For other AllAnime URLs, try to get partial content to estimate size
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -762,7 +762,7 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 // delegates the actual pipeline to runDownloadWithProgress which is fully
 // testable with an injected mock sender.
 func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, episodeNum int) error {
-	if err := os.MkdirAll(filepath.Dir(episodePath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(episodePath), 0o700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 	m := &progressModel{progress: progress.New(progress.WithDefaultBlend())}
@@ -984,7 +984,7 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 	program.Send(statusMsg("Starting yt-dlp download (using go-ytdlp library)..."))
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -1075,7 +1075,7 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 
 func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -1121,7 +1121,7 @@ func (d *EpisodeDownloader) promptPlayExisting(episodeNum int, episodePath strin
 		return nil
 	}
 
-	if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+	if strings.EqualFold(response, "y") || strings.EqualFold(response, "yes") {
 		return d.playEpisode(episodePath, episodeNum)
 	}
 	return nil
@@ -1135,7 +1135,7 @@ func (d *EpisodeDownloader) promptPlayDownloaded(episodeNum int, episodePath str
 		return nil
 	}
 
-	if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+	if strings.EqualFold(response, "y") || strings.EqualFold(response, "yes") {
 		return d.playEpisode(episodePath, episodeNum)
 	}
 	return nil

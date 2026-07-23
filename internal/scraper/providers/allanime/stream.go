@@ -8,7 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -32,7 +32,7 @@ var LinkPriorities = []string{
 //     This is the only path AllAnime serves `tobeparsed` blobs on.
 //  2. Fall back to the legacy POST when the GET response lacks usable source data
 //     (older mirrors and edge nodes still serve the legacy shape over POST).
-func (c *AllAnimeClient) GetEpisodeURL(animeID, episodeNo, mode, quality string) (string, map[string]string, error) {
+func (c *AllAnimeClient) GetEpisodeURL(animeID, episodeNo, mode, quality string) (streamURL string, metadata map[string]string, err error) {
 	if mode == "" {
 		mode = "sub"
 	}
@@ -103,10 +103,10 @@ func (c *AllAnimeClient) tryPersistedQueryGET(varsBytes []byte) ([]byte, error) 
 		return nil, fmt.Errorf("failed to marshal persisted query extensions: %w", err)
 	}
 
-	getURL := c.apiBase + "?variables=" + url.QueryEscape(string(varsBytes)) +
-		"&extensions=" + url.QueryEscape(string(extBytes))
+	getURL := c.apiBase + "?variables=" + neturl.QueryEscape(string(varsBytes)) +
+		"&extensions=" + neturl.QueryEscape(string(extBytes))
 
-	req, err := http.NewRequest("GET", getURL, nil)
+	req, err := http.NewRequest("GET", getURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GET request: %w", err)
 	}
@@ -187,7 +187,7 @@ func (c *AllAnimeClient) legacyPOST(varsBytes []byte) ([]byte, error) {
 }
 
 // processSourceURLsConcurrent processes source URLs with concurrent requests and priority-based selection
-func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality, animeID, episodeNo string) (string, map[string]string, error) {
+func (c *AllAnimeClient) processSourceURLsConcurrent(sourceURLs []string, quality, animeID, episodeNo string) (streamURL string, metadata map[string]string, err error) {
 	type result struct {
 		index     int
 		links     map[string]string
@@ -448,7 +448,7 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 
 // getLinks extracts video links from the source URL with proper headers
 func (c *AllAnimeClient) getLinks(sourceURL string) (map[string]string, error) {
-	req, err := http.NewRequest("GET", sourceURL, nil)
+	req, err := http.NewRequest("GET", sourceURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -536,26 +536,28 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 	matches := allAnimeVideoLinkRe.FindAllStringSubmatch(response, -1)
 
 	for _, match := range matches {
-		if len(match) >= 3 {
-			quality := match[2]
-			link := match[1]
-			// Clean up the link
-			link = strings.ReplaceAll(link, "\\", "")
-			links[quality] = link
-			util.Debugf("Regex found link - Quality: %s, URL: %s", quality, link)
+		if len(match) < 3 {
+			continue
 		}
+		quality := match[2]
+		link := match[1]
+		// Clean up the link
+		link = strings.ReplaceAll(link, "\\", "")
+		links[quality] = link
+		util.Debugf("Regex found link - Quality: %s, URL: %s", quality, link)
 	}
 
 	// Extract m3u8 links
 	m3u8Matches := allAnimeM3U8Re.FindAllStringSubmatch(response, -1)
 
 	for _, match := range m3u8Matches {
-		if len(match) >= 2 {
-			link := match[1]
-			link = strings.ReplaceAll(link, "\\", "")
-			links["hls"] = link
-			util.Debugf("Found HLS link: %s", link)
+		if len(match) < 2 {
+			continue
 		}
+		link := match[1]
+		link = strings.ReplaceAll(link, "\\", "")
+		links["hls"] = link
+		util.Debugf("Found HLS link: %s", link)
 	}
 
 	util.Debugf("Total links found: %d", len(links))
@@ -563,8 +565,8 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 }
 
 // selectQuality selects the appropriate quality from available links with priority consideration
-func (c *AllAnimeClient) selectQuality(links map[string]string, requestedQuality string) (string, map[string]string) {
-	metadata := make(map[string]string)
+func (c *AllAnimeClient) selectQuality(links map[string]string, requestedQuality string) (streamURL string, metadata map[string]string) {
+	metadata = make(map[string]string)
 
 	// First, try to find priority links matching requested quality
 	switch requestedQuality {
@@ -656,7 +658,7 @@ func (c *AllAnimeClient) selectQuality(links map[string]string, requestedQuality
 }
 
 // GetStreamURL implements the UnifiedScraper interface
-func (c *AllAnimeClient) GetStreamURL(episodeURL string, options ...any) (string, map[string]string, error) {
+func (c *AllAnimeClient) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	// For AllAnime, episodeURL contains episode ID, we need anime ID and episode number
 	// This is a simplified implementation - in practice you'd need to parse more context
 	return "", map[string]string{}, fmt.Errorf("GetStreamURL not fully implemented for AllAnime - use GetEpisodeURL instead")
@@ -689,7 +691,7 @@ type filemoonSources struct {
 // AllAnime added this layer 2026-04-25; without it every Fm-mp4 source returns
 // nothing through the generic JSON link parser.
 func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, error) {
-	req, err := http.NewRequest("GET", sourceURL, nil)
+	req, err := http.NewRequest("GET", sourceURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("filemoon: failed to create request: %w", err)
 	}
@@ -749,7 +751,7 @@ func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, 
 // dispatch. "Fm-mp4" entries route to getFilemoonLinks; everything else uses
 // the generic getLinks path. Otherwise behaves identically to
 // processSourceURLsConcurrent (priority short-circuit + 6s collection window).
-func (c *AllAnimeClient) processSourceEntriesConcurrent(entries []sourceEntry, quality, animeID, episodeNo string) (string, map[string]string, error) {
+func (c *AllAnimeClient) processSourceEntriesConcurrent(entries []sourceEntry, quality, animeID, episodeNo string) (streamURL string, metadata map[string]string, err error) {
 	type result struct {
 		index     int
 		links     map[string]string

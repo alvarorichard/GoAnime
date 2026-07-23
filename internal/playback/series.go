@@ -235,7 +235,7 @@ var (
 
 // SelectInitialEpisode runs the fuzzy-finder selector then parses the result.
 // The TUI call goes through selectEpisodeFunc, so tests inject a mock.
-func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error) {
+func SelectInitialEpisode(episodes []models.Episode) (episodeURL, episodeNumber string, episodeIndex int, err error) {
 	util.Debugf("[TRACE] SelectInitialEpisode: calling selector with %d episodes", len(episodes))
 	url, numStr, err := selectEpisodeFunc(episodes)
 	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", url, numStr, err)
@@ -245,7 +245,7 @@ func SelectInitialEpisode(episodes []models.Episode) (string, string, int, error
 // parseEpisodeSelection is the pure post-processing of a fuzzy-finder result.
 // All branches (back, generic error, atoi success, atoi failure) are exposed
 // here so they can be table-tested without TUI involvement.
-func parseEpisodeSelection(url, numStr string, fuzzyErr error) (string, string, int, error) {
+func parseEpisodeSelection(url, numStr string, fuzzyErr error) (episodeURL, episodeNumber string, episodeIndex int, err error) {
 	if fuzzyErr != nil {
 		if errors.Is(fuzzyErr, player.ErrBackRequested) {
 			return "", "", -1, player.ErrBackRequested
@@ -259,7 +259,7 @@ func parseEpisodeSelection(url, numStr string, fuzzyErr error) (string, string, 
 	return url, numStr, epNum, nil
 }
 
-func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (string, string, int) {
+func handleUserNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int) (episodeURL, episodeNumber string, episodeIndex int) {
 	var url, numStr string
 	var epNum int
 	var err error
@@ -282,7 +282,7 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 }
 
 // Enhanced navigation handler that supports AllAnime-specific navigation
-func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
+func handleUserNavigationEnhanced(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (episodeURL, episodeNumber string, episodeIndex int) {
 	// Check if this is an AllAnime source and use enhanced navigation
 	if isAllAnimeSource(anime) {
 		return handleAllAnimeNavigation(input, episodes, currentNum, totalEpisodes, anime)
@@ -293,7 +293,7 @@ func handleUserNavigationEnhanced(input string, episodes []models.Episode, curre
 }
 
 // AllAnime-specific navigation handler
-func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (string, string, int) {
+func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNum, totalEpisodes int, anime *models.Anime) (episodeURL, episodeNumber string, episodeIndex int) {
 	// Find current episode string
 	currentEpisodeStr := ""
 	for _, ep := range episodes {
@@ -337,7 +337,7 @@ func handleAllAnimeNavigation(input string, episodes []models.Episode, currentNu
 	}
 }
 
-func CheckIfSeries(url string) (bool, int) {
+func CheckIfSeries(url string) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeries(url)
 	if err != nil {
 		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
@@ -348,7 +348,7 @@ func CheckIfSeries(url string) (bool, int) {
 }
 
 // CheckIfSeriesEnhanced checks if anime is a series using enhanced API
-func CheckIfSeriesEnhanced(anime *models.Anime) (bool, int) {
+func CheckIfSeriesEnhanced(anime *models.Anime) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
 	if err != nil {
 		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))

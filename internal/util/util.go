@@ -588,7 +588,7 @@ func TreatingAnimeName(animeName string) string {
 }
 
 // handleDownloadModeWithSmart processes download args with AllAnime Smart option
-func handleDownloadModeWithSmart(args []string, isRange bool, isAll bool, source, quality string, allanimeSmart bool) (string, error) {
+func handleDownloadModeWithSmart(args []string, isRange, isAll bool, source, quality string, allanimeSmart bool) (string, error) {
 
 	if len(args) == 0 {
 		return "", fmt.Errorf("download mode requires anime name and episode number/range")
@@ -845,7 +845,7 @@ func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes 
 }
 
 // handleMovieDownloadMode processes movie/TV download arguments for FlixHQ/SFlix
-func handleMovieDownloadMode(args []string, isRange bool, isAll bool, quality, subsLanguage, mediaType string) (string, error) {
+func handleMovieDownloadMode(args []string, isRange, isAll bool, quality, subsLanguage, mediaType string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)\n       goanime -dm -a \"TV Show\" (download all seasons and episodes)")
 	}
@@ -1188,7 +1188,7 @@ func DefaultMovieDownloadDir() string {
 // FormatPlexMoviePath builds a Plex/Jellyfin-compatible file path for a movie.
 // Format: <baseDir>/<MovieName (Year) {ids}>/<MovieName (Year)>.mp4
 // The folder includes external IDs; the filename includes only name and year.
-func FormatPlexMoviePath(baseDir, movieName string, year string, meta ...*MediaMeta) string {
+func FormatPlexMoviePath(baseDir, movieName, year string, meta ...*MediaMeta) string {
 	var m *MediaMeta
 	if len(meta) > 0 {
 		m = meta[0]

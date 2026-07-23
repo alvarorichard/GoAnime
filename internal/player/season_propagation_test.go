@@ -18,7 +18,7 @@ func TestSeasonDefaultedToOne_Bug(t *testing.T) {
 	t.Run("before fix: season was always 1 regardless of selection", func(t *testing.T) {
 		// Simulate the old code path: season was hardcoded to 1
 		// because HandleDownloadAndPlay did not receive the season number.
-		oldSeason := 1 // was: season := 1
+		oldSeason := 1
 		SetAnimeName("Dexter", oldSeason)
 
 		snap := snapshotMedia()

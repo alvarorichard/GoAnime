@@ -9,7 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -99,7 +99,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "repackager.wixmp.com")
 
 	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
-	req, err := http.NewRequest("HEAD", url, nil)
+	req, err := http.NewRequest("HEAD", url, http.NoBody)
 	if err != nil {
 		// Returns 0 and the error if the request creation fails.
 		return 0, err
@@ -109,6 +109,11 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	// Sends the HEAD request to the server.
 	resp, err := client.Do(req) // #nosec G704
 	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
+		if resp != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				util.Debugf("Failed to close HEAD response body: %v", closeErr)
+			}
+		}
 		// If the HEAD request fails or is not supported, fall back to a GET request.
 		req.Method = "GET"
 		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
@@ -120,13 +125,13 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	}
 
 	// Ensures that the response body is closed after it is used to avoid resource leaks.
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := resp.Body.Close()
 		if err != nil {
 			// Logs a warning if closing the response body fails.
 			util.Debugf("Failed to close response body: %v", err)
 		}
-	}(resp.Body)
+	}()
 
 	// Checks if the server responded with a 200 OK or 206 Partial Content status.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -171,7 +176,7 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 	}
 
 	// For other AllAnime URLs, try to get partial content to estimate size
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return 0, err
 	}
@@ -265,12 +270,12 @@ type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
 
 // SelectEpisodeWithFuzzyFinder lets the user pick an episode on the styled
 // fuzzy picker. ESC (or quit) is reported as ErrBackRequested.
-func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (string, string, error) {
+func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
 	return selectEpisodeWithPicker(tui.Pick, episodes)
 }
 
 // selectEpisodeWithPicker isolates picker execution for deterministic tests.
-func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (string, string, error) {
+func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -511,12 +516,12 @@ func extractVideoURL(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %+v", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := response.Body.Close()
 		if err != nil {
 			util.Debugf("Failed to close response body: %v\n", err)
 		}
-	}(response.Body)
+	}()
 
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
@@ -606,12 +611,12 @@ func fetchContent(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := resp.Body.Close()
 		if err != nil {
 			util.Debugf("Failed to close response body: %v\n", err)
 		}
-	}(resp.Body)
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -743,16 +748,16 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal freq data: %w", err)
 	}
-	postData := "f.req=" + url.QueryEscape(string(freq))
+	postData := "f.req=" + neturl.QueryEscape(string(freq))
 	if at != "" {
-		postData += "&at=" + url.QueryEscape(at)
+		postData += "&at=" + neturl.QueryEscape(at)
 	}
 
 	util.Debugf("Blogger batchexecute postBody: %s", postData)
 
 	batchURL := fmt.Sprintf(
 		"https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute?rpcids=WcwnYd&source-path=%%2Fvideo.g&f.sid=%s&bl=%s&hl=en-US&_reqid=100001&rt=c",
-		url.QueryEscape(sid), url.QueryEscape(bh),
+		neturl.QueryEscape(sid), neturl.QueryEscape(bh),
 	)
 
 	util.Debugf("Blogger batchexecute URL: %s", batchURL)
@@ -1044,7 +1049,7 @@ func startBloggerProxyServer(videoURL string, proxyClient *http.Client) (string,
 	mux.HandleFunc("/blogger_proxy", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodHead:
-			upReq, err := http.NewRequest(http.MethodHead, videoURL, nil)
+			upReq, err := http.NewRequest(http.MethodHead, videoURL, http.NoBody)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
@@ -1065,7 +1070,7 @@ func startBloggerProxyServer(videoURL string, proxyClient *http.Client) (string,
 			util.Debugf("BloggerProxy HEAD -> %d", upResp.StatusCode)
 
 		case http.MethodGet:
-			upReq, err := http.NewRequest(http.MethodGet, videoURL, nil)
+			upReq, err := http.NewRequest(http.MethodGet, videoURL, http.NoBody)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
@@ -1339,7 +1344,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 //     menu never shows an empty or raw URL string.
 //   - duplicate labels get a "(mirror N)" suffix so the fuzzyfinder index
 //     aligns 1:1 with the returned slice and the user's pick is unambiguous.
-func buildAnimeFireQualityItems(videoData []VideoData) ([]VideoData, []string) {
+func buildAnimeFireQualityItems(videoData []VideoData) (sortedSources []VideoData, qualityLabels []string) {
 	sorted := append([]VideoData(nil), videoData...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return extractResolution(sorted[i].Label) > extractResolution(sorted[j].Label)

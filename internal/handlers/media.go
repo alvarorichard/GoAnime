@@ -43,7 +43,7 @@ func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error
 	return providers.SearchAll(context.Background(), query, source.AllAnime, source.AnimeFire)
 }
 
-func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (string, map[string]string, error) {
+func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (streamURL string, metadata map[string]string, err error) {
 	src, resolved := source.Resolve(anime)
 	if src == nil {
 		return "", nil, fmt.Errorf("unrecognized source for %q (%s)", anime.Name, resolved.Reason)
@@ -145,7 +145,7 @@ func (mh *MediaHandler) SelectMedia(results []*models.Anime) (*models.Anime, err
 }
 
 // GetAnimeStreamURL gets stream URL for anime content
-func (mh *MediaHandler) GetAnimeStreamURL(anime *models.Anime, episodeNum string, mode string) (string, map[string]string, error) {
+func (mh *MediaHandler) GetAnimeStreamURL(anime *models.Anime, episodeNum, mode string) (streamURL string, metadata map[string]string, err error) {
 	return mh.mediaManager.GetAnimeStreamURL(anime, episodeNum, mh.quality, mode)
 }
 
@@ -199,7 +199,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 		Title("Episode number").
 		Value(&episodeNum).
 		Validate(func(v string) error {
-			if len(v) == 0 {
+			if v == "" {
 				return fmt.Errorf("episode number is required")
 			}
 			return nil

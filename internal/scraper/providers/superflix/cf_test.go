@@ -20,7 +20,7 @@ import (
 )
 
 // helper: make a *http.Response with a body and given status for marker tests.
-func makeResp(t *testing.T, status int, body string, headers map[string]string) (*http.Response, []byte) {
+func makeResp(t *testing.T, status int, body string, headers map[string]string) (response *http.Response, responseBody []byte) {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	for k, v := range headers {

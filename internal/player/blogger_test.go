@@ -278,7 +278,7 @@ func TestBloggerTLSIssue_GoHTTP_Gets403(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
 
-	resp, err := http.Get(cdn.URL) //nolint:gosec // test URL
+	resp, err := http.Get(cdn.URL)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 
@@ -293,7 +293,7 @@ func TestBloggerTLSIssue_WithImpersonation_Gets200(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
 
-	req, err := http.NewRequest("GET", cdn.URL, nil)
+	req, err := http.NewRequest("GET", cdn.URL, http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("X-Chrome-TLS", "1")
 
@@ -315,7 +315,7 @@ func TestBloggerTLSIssue_RangeRequest(t *testing.T) {
 	cdn := newFakeCDN(t)
 	defer cdn.Close()
 
-	req, err := http.NewRequest("GET", cdn.URL, nil)
+	req, err := http.NewRequest("GET", cdn.URL, http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("X-Chrome-TLS", "1")
 	req.Header.Set("Range", "bytes=0-7")
@@ -338,7 +338,7 @@ func TestBloggerTLSIssue_RangeRequest(t *testing.T) {
 func TestNewSurfClient_CreatesSuccessfully(t *testing.T) {
 	client := newSurfClient()
 	assert.NotNil(t, client, "Surf client should be created successfully")
-	defer func() { _ = client.Close() }()
+	_ = client.Close()
 }
 
 // ===========================================================================
@@ -458,7 +458,7 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 	defer cdn.Close()
 
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req, err := http.NewRequest(r.Method, cdn.URL, nil)
+		req, err := http.NewRequest(r.Method, cdn.URL, http.NoBody)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -487,14 +487,14 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 	defer proxy.Close()
 
 	t.Run("BUG: direct access gets 403", func(t *testing.T) {
-		resp, err := http.Get(cdn.URL) //nolint:gosec // test URL
+		resp, err := http.Get(cdn.URL)
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 	})
 
 	t.Run("FIX: access via proxy gets 200 with video", func(t *testing.T) {
-		resp, err := http.Get(proxy.URL) //nolint:gosec // test URL
+		resp, err := http.Get(proxy.URL)
 		require.NoError(t, err)
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -506,7 +506,7 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 	})
 
 	t.Run("FIX: range request via proxy gets 206", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", proxy.URL, nil)
+		req, _ := http.NewRequest("GET", proxy.URL, http.NoBody)
 		req.Header.Set("Range", "bytes=0-7")
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
@@ -515,7 +515,7 @@ func TestBloggerProxy_EndToEnd_FakeCDN(t *testing.T) {
 	})
 
 	t.Run("FIX: HEAD via proxy gets 200", func(t *testing.T) {
-		resp, err := http.Head(proxy.URL) //nolint:gosec // test URL
+		resp, err := http.Head(proxy.URL)
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)

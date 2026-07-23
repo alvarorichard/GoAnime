@@ -224,9 +224,9 @@ func showDebugBanner() {
 	var followCmd string
 	switch runtime.GOOS {
 	case "windows":
-		followCmd = fmt.Sprintf("Get-Content -Wait -Tail 50 \"%s\"", LogFilePath)
+		followCmd = fmt.Sprintf("Get-Content -Wait -Tail 50 %q", LogFilePath)
 	default: // linux, darwin, etc.
-		followCmd = fmt.Sprintf("tail -f \"%s\"", LogFilePath)
+		followCmd = fmt.Sprintf("tail -f %q", LogFilePath)
 	}
 
 	if !tui.SupportsANSI(os.Stderr) {

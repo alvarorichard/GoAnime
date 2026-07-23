@@ -193,7 +193,7 @@ Meta: **≥ 70.0%** · **≤ 26 funções a 0%** (apenas TUI/IPC/main/hardware n
 
 ---
 
-## STATUS ATUAL (2026-05-24) — META ATINGIDA
+## HISTÓRICO DE COBERTURA (2026-05-24) — META ATINGIDA
 
 - ✅ FASES 1–18: **TODAS COMPLETAS** → **75.7% cobertura total** (full suite com -race) · **2 funções non-main a 0%**
 - 2 restantes = `tui.Find` (TTY fuzzyfinder) + `upscaler.Close` (cover-tool quirk) — ambas intratáveis sem TTY/hardware
@@ -207,6 +207,11 @@ Meta: **≥ 70.0%** · **≤ 26 funções a 0%** (apenas TUI/IPC/main/hardware n
 | **TOTAL** | | **193** | **+2958** | ✅ |
 
 **Resultado final FASE 18 (2026-05-24):** 62.9% → **75.7%** · non-main 0%: 26 → **2** · Meta ≥70% SUPERADA.
+
+**Baseline atual do CI (2026-07-23):** **66.8%** com
+`go test -short -race -count=1 -covermode=atomic ./...`. O gate começa em
+**66.0%** para impedir regressões imediatas; a meta de projeto continua sendo
+**≥70.0%** e o piso deve subir junto com novos testes.
 
 **Mapeamento funcional completo:** ver `TEST_PLAN_FUNCTIONS.md` (193 funções listadas por arquivo:linha:nome, agrupadas por fase).
 

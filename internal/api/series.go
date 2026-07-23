@@ -12,7 +12,7 @@ import "github.com/alvarorichard/Goanime/internal/models"
 // - bool: true if the anime has more than one episode (i.e., is a series), false otherwise.
 // - int: the total number of episodes found.
 // - error: an error if the process of retrieving episodes fails.
-func IsSeries(animeURL string) (bool, int, error) {
+func IsSeries(animeURL string) (isSeries bool, episodeCount int, err error) {
 	// Retrieve the list of episodes for the given anime URL.
 	episodes, err := GetAnimeEpisodes(animeURL)
 	if err != nil {
@@ -25,7 +25,7 @@ func IsSeries(animeURL string) (bool, int, error) {
 }
 
 // IsSeriesEnhanced checks if the given anime corresponds to a series using enhanced API
-func IsSeriesEnhanced(anime *models.Anime) (bool, int, error) {
+func IsSeriesEnhanced(anime *models.Anime) (isSeries bool, episodeCount int, err error) {
 	// Use enhanced episode fetching
 	episodes, err := fetchEpisodesViaRegistry(anime)
 	if err != nil {

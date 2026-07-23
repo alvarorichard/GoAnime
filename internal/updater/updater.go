@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,7 +171,7 @@ func PerformUpdate(release *GitHubRelease) error {
 	return nil
 }
 
-func extractExecutableFromZipAsset(zipPath string) (string, func(), error) {
+func extractExecutableFromZipAsset(zipPath string) (executablePath string, cleanup func(), err error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to open zip file: %w", err)
@@ -234,7 +234,7 @@ func extractExecutableFromZipAsset(zipPath string) (string, func(), error) {
 		return "", nil, fmt.Errorf("failed to create extraction directory: %w", err)
 	}
 
-	cleanup := func() {
+	cleanup = func() {
 		if removeErr := os.RemoveAll(tempDir); removeErr != nil {
 			util.Debug("Failed to remove extraction directory:", removeErr)
 		}
@@ -420,11 +420,11 @@ func GetCurrentPlatform() PlatformInfo {
 	}
 }
 
-func findAssetForPlatform(release *GitHubRelease) (string, string, error) {
+func findAssetForPlatform(release *GitHubRelease) (downloadURL, filename string, err error) {
 	return findAssetForPlatformWithInfo(release, GetCurrentPlatform())
 }
 
-func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo) (string, string, error) {
+func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo) (downloadURL, filename string, err error) {
 	// Log available assets for debugging
 	util.Debug("Looking for assets for platform:", platform.OS+"/"+platform.Arch)
 	util.Debug("Available assets in release:")
@@ -477,7 +477,7 @@ func findAssetForPlatformWithInfo(release *GitHubRelease, platform PlatformInfo)
 
 // validateGitHubURLWithTestFlag validates URLs with optional test mode support
 func validateGitHubURLWithTestFlag(urlStr string, allowTestMode bool) error {
-	parsedURL, err := url.Parse(urlStr)
+	parsedURL, err := neturl.Parse(urlStr)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
@@ -683,8 +683,8 @@ func replaceExecutable(currentExe, newExe string) error {
 		}
 
 		// Make sure the new executable has proper permissions
-		// #nosec G302 - 0755 is appropriate for executable files
-		if err := os.Chmod(currentExe, 0755); err != nil {
+		// #nosec G302 - 0o755 is appropriate for executable files
+		if err := os.Chmod(currentExe, 0o755); err != nil {
 			util.Debug("Failed to set executable permissions:", err)
 			// Don't fail the update for permission issues
 		}
@@ -763,7 +763,7 @@ del "%%~f0"
 `, os.Getpid(), os.Getpid(), newExe, currentExe, newExe, newExe)
 
 	// Write the script to file
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0600); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o600); err != nil {
 		return fmt.Errorf("failed to create update script: %w", err)
 	}
 

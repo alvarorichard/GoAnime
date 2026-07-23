@@ -91,7 +91,7 @@ func (c *OMDbClient) IsConfigured() bool {
 }
 
 // SearchByTitle searches for movies/series by title
-func (c *OMDbClient) SearchByTitle(title string, mediaType string) (*OMDbSearchResult, error) {
+func (c *OMDbClient) SearchByTitle(title, mediaType string) (*OMDbSearchResult, error) {
 	params := url.Values{}
 	params.Set("apikey", c.apiKey)
 	params.Set("s", title)
@@ -147,7 +147,7 @@ func (c *OMDbClient) GetByIMDBID(imdbID string) (*OMDbMedia, error) {
 }
 
 // GetByTitle gets detailed information by exact title
-func (c *OMDbClient) GetByTitle(title string, year string) (*OMDbMedia, error) {
+func (c *OMDbClient) GetByTitle(title, year string) (*OMDbMedia, error) {
 	params := url.Values{}
 	params.Set("apikey", c.apiKey)
 	params.Set("t", title)
@@ -178,7 +178,7 @@ func (c *OMDbClient) GetByTitle(title string, year string) (*OMDbMedia, error) {
 
 // makeRequest performs an HTTP request to OMDb API
 func (c *OMDbClient) makeRequest(endpoint string) ([]byte, error) {
-	req, err := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequest("GET", endpoint, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

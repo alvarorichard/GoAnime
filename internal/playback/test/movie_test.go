@@ -44,7 +44,6 @@ func TestHandleMovie(t *testing.T) {
 	assert.NotNil(t, anime)
 	assert.NotEmpty(t, episodes)
 
-	// playback.HandleMovie(anime, episodes, false)
 }
 
 // TestMovieDurationCalculation tests movie duration calculation

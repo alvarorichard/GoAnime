@@ -26,7 +26,7 @@ func (m *MockProvider) Name() string {
 	return m.name
 }
 
-func (m *MockProvider) FetchEpisodeData(animeID int, episodeNo int, anime *models.Anime) error {
+func (m *MockProvider) FetchEpisodeData(animeID, episodeNo int, anime *models.Anime) error {
 	m.mu.Lock()
 	m.callCount++
 	m.mu.Unlock()

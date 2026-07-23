@@ -5,7 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
+	encodinghex "encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +36,7 @@ import (
 const allAnimeKeyHex = "22196fa6afca95309fdabe9a3534b87cd2454e50efeabfcbdbdfd3de678b3982"
 
 var allAnimeKey = func() []byte {
-	k, err := hex.DecodeString(allAnimeKeyHex)
+	k, err := encodinghex.DecodeString(allAnimeKeyHex)
 	if err != nil || len(k) != 32 {
 		panic("allanime test: bad fixture key")
 	}
@@ -108,7 +108,7 @@ func buildSourceURLsJSON(sources ...struct{ url, name string }) string {
 
 // buildToBeParsedResponse wraps encrypted blob in an API response.
 func buildToBeParsedResponse(blob string) string {
-	return fmt.Sprintf(`{"data":{"episode":{"tobeparsed":"%s"}}}`, blob)
+	return fmt.Sprintf(`{"data":{"episode":{"tobeparsed":%q}}}`, blob)
 }
 
 // hexEncodeSourceURL encodes a URL using the hex substitution table (inverse mapping).
@@ -284,7 +284,7 @@ func TestAllAnimeKeyMatchesOpenSSL(t *testing.T) {
 	t.Parallel()
 	// The production key is now derived per epoch (fetchAAKeys); this pins the
 	// offline test fixture key as a valid 32-byte AES-256 key.
-	assert.Equal(t, allAnimeKeyHex, hex.EncodeToString(allAnimeKey))
+	assert.Equal(t, allAnimeKeyHex, encodinghex.EncodeToString(allAnimeKey))
 }
 
 func TestAllAnimeKeyLength(t *testing.T) {
@@ -556,7 +556,7 @@ func TestDecodeToBeParsedRegexFallbackReversedFieldOrder(t *testing.T) {
 func TestDecodeToBeParsedDeterministicWithFixedNonce(t *testing.T) {
 	t.Parallel()
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--08","sourceName":"Det"}]}}}`
-	nonce, _ := hex.DecodeString("000000000000000000000000")
+	nonce, _ := encodinghex.DecodeString("000000000000000000000000")
 
 	blob1 := encryptToBeParsedWithNonce(t, plaintext, nonce)
 	blob2 := encryptToBeParsedWithNonce(t, plaintext, nonce)
@@ -1874,7 +1874,7 @@ func TestDecodeToBeParsedCrossValidateWithOpenSSL(t *testing.T) {
 	// Updated 2026-07-08: key rotated to the literal hex key (ani-cli PR #1772).
 	t.Parallel()
 
-	nonce, _ := hex.DecodeString("aabbccddeeff00112233aabb")
+	nonce, _ := encodinghex.DecodeString("aabbccddeeff00112233aabb")
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--504c4c484b021717","sourceName":"TestProvider"}]}}}`
 
 	block, err := aes.NewCipher(allAnimeKey)

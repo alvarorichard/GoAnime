@@ -19,7 +19,7 @@ func DrainTerminalResponses(wait time.Duration) {
 	if rawFd > math.MaxInt {
 		return
 	}
-	fd := int(rawFd) //nolint:gosec // overflow guarded above
+	fd := int(rawFd)
 
 	if !term.IsTerminal(fd) {
 		return

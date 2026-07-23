@@ -40,7 +40,7 @@ type aaReqPayload struct {
 // split [0x01 | iv(12) | ct+tag], GCM-Open with the shared key, and return the
 // recovered payload plus the IV that was on the wire. It fails the test if any
 // structural or crypto invariant is violated.
-func decryptAAReqAsServer(t *testing.T, token string) (aaReqPayload, []byte) {
+func decryptAAReqAsServer(t *testing.T, token string) (payload aaReqPayload, initializationVector []byte) {
 	t.Helper()
 
 	raw, err := base64.StdEncoding.DecodeString(token)

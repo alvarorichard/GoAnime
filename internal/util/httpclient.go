@@ -315,7 +315,7 @@ func PreWarmConnections() {
 				defer preWarmWG.Done()
 				// GET request with short timeout — triggers full TCP+TLS handshake
 				// to populate the connection pool. HEAD may not establish full TLS.
-				req, err := http.NewRequest("GET", "https://"+host, nil)
+				req, err := http.NewRequest("GET", "https://"+host, http.NoBody)
 				if err != nil {
 					return
 				}

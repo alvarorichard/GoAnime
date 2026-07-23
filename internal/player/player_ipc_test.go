@@ -29,7 +29,7 @@ var mpvSockCounter atomic.Uint64
 func startMockMPVSocket(t *testing.T, handler func(req map[string]any) []byte) string {
 	t.Helper()
 	n := mpvSockCounter.Add(1)
-	sock := filepath.Join("/tmp", fmt.Sprintf("goanime_mpv_%d_%d.sock", os.Getpid(), n))
+	sock := filepath.Join(string(filepath.Separator), "tmp", fmt.Sprintf("goanime_mpv_%d_%d.sock", os.Getpid(), n))
 	require.LessOrEqual(t, len(sock), 100, "socket path too long for unix-socket limit")
 
 	ln, err := net.Listen("unix", sock)

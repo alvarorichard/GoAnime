@@ -38,12 +38,12 @@ func (s *Shell) Resize(width, height int) {
 }
 
 // ContentSize returns space left after header, separators, and footer.
-func (s *Shell) ContentSize() (int, int) {
-	width := s.Width
+func (s *Shell) ContentSize() (width, height int) {
+	width = s.Width
 	if width <= 0 {
 		width = defaultShellWidth
 	}
-	height := s.Height
+	height = s.Height
 	if height <= 0 {
 		height = defaultShellHeight
 	}

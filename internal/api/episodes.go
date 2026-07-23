@@ -1,7 +1,6 @@
 package api
 
 import (
-	"io"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,12 +30,12 @@ func GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 		return nil, errors.Wrap(err, "failed to get anime details")
 	}
 	// Ensure the response body is closed after the function finishes, and log an error if closing fails.
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
+	defer func() {
+		err := resp.Body.Close()
 		if err != nil {
 			util.Debugf("Failed to close response body: %v", err)
 		}
-	}(resp.Body)
+	}()
 
 	// Parse the HTML response using goquery.
 	doc, err := goquery.NewDocumentFromReader(resp.Body)

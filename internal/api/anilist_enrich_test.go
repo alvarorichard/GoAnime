@@ -21,7 +21,7 @@ func withAniList(t *testing.T, u string) {
 	t.Cleanup(func() { aniListEndpoint = prev })
 }
 
-func aniListSuccessBody(id int, malID int, romaji string) []byte {
+func aniListSuccessBody(id, malID int, romaji string) []byte {
 	resp := map[string]any{
 		"data": map[string]any{
 			"Media": map[string]any{

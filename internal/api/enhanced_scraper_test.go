@@ -27,7 +27,7 @@ func (m *mockEpiScraper) GetAnimeEpisodes(_ string) ([]models.Episode, error) {
 	return m.episodes, m.epsErr
 }
 
-func (m *mockEpiScraper) GetStreamURL(_ string, _ ...any) (string, map[string]string, error) {
+func (m *mockEpiScraper) GetStreamURL(_ string, _ ...any) (streamURL string, metadata map[string]string, err error) {
 	return m.stURL, nil, m.stErr
 }
 

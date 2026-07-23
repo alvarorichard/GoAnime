@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/api/source"
+	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/pkg/goanime/types"
@@ -54,16 +54,16 @@ func (registryManager) GetScraper(scraperType scraper.ScraperType) (scraper.Unif
 }
 
 // scraperKind maps an internal ScraperType to its Model B SourceKind.
-func scraperKind(st scraper.ScraperType) (source.SourceKind, bool) {
+func scraperKind(st scraper.ScraperType) (apisource.SourceKind, bool) {
 	switch st {
 	case scraper.AllAnimeType:
-		return source.AllAnime, true
+		return apisource.AllAnime, true
 	case scraper.AnimefireType:
-		return source.AnimeFire, true
+		return apisource.AnimeFire, true
 	case scraper.GoyabuType:
-		return source.Goyabu, true
+		return apisource.Goyabu, true
 	case scraper.SuperFlixType:
-		return source.SuperFlix, true
+		return apisource.SuperFlix, true
 	default:
 		return "", false
 	}
@@ -115,7 +115,7 @@ func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*type
 // The episodeURL should be obtained from GetAnimeEpisodes.
 //
 // Deprecated: Use GetEpisodeStreamURL instead for better control over quality and mode.
-func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...any) (string, map[string]string, error) {
+func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...any) (streamURL string, metadata map[string]string, err error) {
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return "", nil, err
@@ -152,7 +152,7 @@ func DefaultStreamOptions() StreamOptions {
 //   - streamURL: Direct URL for video playback
 //   - metadata: Additional info like quality, source, etc.
 //   - error: Any error that occurred
-func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (string, map[string]string, error) {
+func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (streamURL string, metadata map[string]string, err error) {
 	source, err := types.ParseSource(anime.Source)
 	if err != nil {
 		return "", nil, err

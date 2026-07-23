@@ -73,7 +73,7 @@ func generateSearchVariationsWithURL(cleanedName, animeURL string) []string {
 	variations := generateSearchVariations(cleanedName)
 
 	romaji := extractRomajiFromURL(animeURL)
-	if romaji == "" || romaji == strings.ToLower(cleanedName) {
+	if romaji == "" || strings.EqualFold(romaji, cleanedName) {
 		return variations
 	}
 
@@ -86,8 +86,7 @@ func generateSearchVariationsWithURL(cleanedName, animeURL string) []string {
 
 	// Prepend romaji right after the original name
 	result := make([]string, 0, len(variations)+2)
-	result = append(result, variations[0]) // original cleaned name first
-	result = append(result, romaji)        // romaji from URL second
+	result = append(result, variations[0], romaji) // original name first, URL romaji second
 
 	// Also add title-cased version
 	titleCased := toTitleCase(romaji)
@@ -103,7 +102,7 @@ func generateSearchVariationsWithURL(cleanedName, animeURL string) []string {
 func toTitleCase(s string) string {
 	words := strings.Fields(s)
 	for i, w := range words {
-		if len(w) > 0 {
+		if w != "" {
 			words[i] = strings.ToUpper(string(w[0])) + w[1:]
 		}
 	}
@@ -155,7 +154,7 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 			continue
 		}
 
-		resp, body, err := aniListPost(aniListEndpoint, jsonData)
+		resp, body, err := aniListPost(aniListEndpoint, jsonData) //nolint:bodyclose // aniListPost reads and closes the body before returning.
 		if err != nil {
 			lastErr = fmt.Errorf("AniList request failed: %w", err)
 			continue

@@ -129,7 +129,7 @@ func TestHonorRetryAfter429_ContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, http.NoBody)
 
 	_, err := client.Do(req)
 	require.Error(t, err, "context cancellation during the wait must abort")

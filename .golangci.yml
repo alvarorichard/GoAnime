@@ -3,9 +3,35 @@ version: "2"
 run:
   timeout: 20m
   modules-download-mode: readonly
+  relative-path-mode: gomod
 
 linters:
   default: standard
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - gocheckcompilerdirectives
+    - gocritic
+    - gosec
+    - nilerr
+    - nilnesserr
+    - nolintlint
+    - rowserrcheck
+    - sqlclosecheck
+  settings:
+    gocritic:
+      enable-all: true
+      settings:
+        hugeParam:
+          sizeThreshold: 256
+        rangeValCopy:
+          sizeThreshold: 512
+        unnamedResult:
+          checkExported: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
   exclusions:
     generated: lax
     presets:
@@ -15,10 +41,11 @@ linters:
     rules:
       - path: _test\.go
         linters:
+          - bodyclose
           - errcheck
           - gosec
           - dupl
 
 issues:
-  max-issues-per-linter: 50
-  max-same-issues: 3
+  max-issues-per-linter: 0
+  max-same-issues: 0
