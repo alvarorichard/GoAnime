@@ -582,6 +582,14 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 
 	finalURL := resp2.Request.URL.String()
 
+	// A rotated-out player host answers /video/<hash> with a 404 page. Without
+	// this guard we would still parse the hash out of the final URL and hand a
+	// dead (host, hash) to the cache and getVideo, surfacing the upstream 404 to
+	// the player instead of failing over to the next source.
+	if resp2.StatusCode >= 400 {
+		return "", "", "", fmt.Errorf("player page dead (%d): %s", resp2.StatusCode, finalURL)
+	}
+
 	if strings.Contains(finalURL, "/video/") {
 		parts := strings.SplitN(finalURL, "/video/", 2)
 		baseURL = parts[0]
@@ -910,6 +918,16 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	referer := res.Referer
 	if referer == "" {
 		referer = "https://" + SuperFlixEmbedHost + "/"
+	}
+
+	// The browser can capture a signed URL for a player host that has already
+	// rotated out of the CDN — getVideo still signs on a dead host, so mpv would
+	// launch and then 404 a few seconds in. The cache path already probes for
+	// exactly this (see streamFromCache); the fresh path used to skip it. Probe
+	// here so a dead capture fails over to the next source instead of surfacing
+	// the 404 to the player, and so we never cache a doomed (host, hash).
+	if res.StreamURL != "" && c.streamURLDead(WithoutBrowserSolve(ctx), res.StreamURL, referer) {
+		return nil, fmt.Errorf("superflix sniffed a dead stream host (%s)", res.PlayerHost)
 	}
 
 	// The sniff only yields the media URL; the subtitle tracks and the HLS audio

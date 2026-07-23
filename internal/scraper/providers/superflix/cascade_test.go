@@ -273,3 +273,39 @@ func TestGetStreamViaBrowser_StaleCacheReSolves(t *testing.T) {
 	assert.Equal(t, "https://fresh.host", got.Host)
 	assert.Equal(t, "freshhash", got.Hash)
 }
+
+// TestGetStreamViaBrowser_DeadSniffedStream guards the fresh-path liveness probe:
+// the browser can capture a signed URL for a player host that has already rotated
+// out of the CDN. That link 404s a few seconds into playback, so the sniff must be
+// rejected — with an error the caller can fail over on — and the dead (host, hash)
+// must never enter the cache.
+func TestGetStreamViaBrowser_DeadSniffedStream(t *testing.T) {
+	// Rotated-out CDN: the freshly signed URL answers 404.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(dead.Close)
+
+	saved := defaultStreamCache
+	t.Cleanup(func() { defaultStreamCache = saved })
+	defaultStreamCache = &streamCache{path: filepath.Join(t.TempDir(), "c.json")}
+
+	solver := &scriptedSolver{
+		sniff: &CFStreamResult{
+			StreamURL:  dead.URL + "/signed/master.m3u8",
+			PlayerHost: "https://rotated.host",
+			VideoHash:  "deadhash",
+		},
+	}
+	c := NewSuperFlixClient()
+	c.client = dead.Client() // reach the loopback dead host (bypass anti-SSRF)
+	c.browserSolver = solver
+
+	_, err := c.GetStreamURL(context.Background(), "filme", "777", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dead stream host")
+
+	// The doomed (host, hash) must not have been cached.
+	_, ok := defaultStreamCache.get(streamCacheKey("filme", "777", "", ""))
+	assert.False(t, ok, "a dead sniff must not poison the cache")
+}

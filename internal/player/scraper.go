@@ -975,6 +975,14 @@ func StopBloggerProxy() {
 	}
 }
 
+// bloggerReadinessTimeout / bloggerReadinessInterval bound the post-start probe
+// that confirms the upstream CDN actually serves the video before we hand the
+// proxy URL to mpv. Package vars (not consts) so tests can shorten them.
+var (
+	bloggerReadinessTimeout  = 3 * time.Second
+	bloggerReadinessInterval = 30 * time.Millisecond
+)
+
 // startBloggerProxy starts a local Go HTTP proxy that extracts the video URL
 // from a Blogger page via batchexecute and streams it with Chrome browser
 // impersonation using enetx/surf. No Python required.
@@ -988,6 +996,38 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 		return "", fmt.Errorf("failed to extract video URL: %w", err)
 	}
 
+	// Create a shared surf client for the proxy (reused across requests).
+	// surf defaults to a 30s timeout which maps to http.Client.Timeout —
+	// a full-request deadline that kills streaming for large files.
+	// Zero it out after converting to *http.Client so the Chrome TLS
+	// transport is preserved but there's no request-level deadline.
+	proxyClient := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Build().
+		Unwrap().
+		Std()
+	proxyClient.Timeout = 0
+	// Follow redirects with net/http's default policy (up to 10). googlevideo
+	// signs a URL that 302-redirects to the actual CDN node; the previous
+	// .NotFollowRedirects() made surf surface that redirect as a
+	// "net/http: use last response" error, which the handler turned into a 502 —
+	// mpv then failed to open the stream and exited status 2 (looking like a
+	// missing-mpv/DLL fault). Following the redirect yields the real 200/206
+	// video response. Setting CheckRedirect here is deterministic regardless of
+	// surf's builder default; net/http preserves the Range header across the
+	// same-host CDN redirect, so streaming/seek still works.
+	proxyClient.CheckRedirect = nil
+
+	return startBloggerProxyServer(videoURL, proxyClient)
+}
+
+// startBloggerProxyServer binds the local proxy that streams videoURL through
+// proxyClient and blocks until a readiness probe confirms the upstream serves a
+// 2xx status, or bloggerReadinessTimeout elapses. Split from startBloggerProxy
+// so the request forwarding + readiness gating are testable without the live
+// Blogger batchexecute extract (which needs network).
+func startBloggerProxyServer(videoURL string, proxyClient *http.Client) (string, error) {
 	// Store the direct URL for download bypass
 	bloggerProxy.mu.Lock()
 	bloggerProxy.videoURL = videoURL
@@ -999,20 +1039,6 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 		return "", fmt.Errorf("failed to listen on a free port: %w", err)
 	}
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
-
-	// Create a shared surf client for the proxy (reused across requests).
-	// surf defaults to a 30s timeout which maps to http.Client.Timeout —
-	// a full-request deadline that kills streaming for large files.
-	// Zero it out after converting to *http.Client so the Chrome TLS
-	// transport is preserved but there's no request-level deadline.
-	proxyClient := surf.NewClient().
-		Builder().
-		Impersonate().Chrome().
-		NotFollowRedirects().
-		Build().
-		Unwrap().
-		Std()
-	proxyClient.Timeout = 0
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/blogger_proxy", func(w http.ResponseWriter, r *http.Request) {
@@ -1085,23 +1111,42 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%s/blogger_proxy", port)
 	util.Debugf("Blogger proxy started on port %s", port)
 
-	// Readiness check with fast polling — exit as soon as proxy responds
+	// Readiness check with fast polling. A transport-level success is not enough:
+	// the proxy forwards HEAD to the googlevideo CDN, and a bad CDN node answers
+	// 5xx (seen: 502 when the signed URL redirects to a dead node) with
+	// headErr==nil. Launching mpv against that produces a bare "exit status 2"
+	// that masquerades as a missing-mpv/DLL problem. Treat any non-2xx upstream
+	// status as not-ready so extractBloggerVideoURL's retry loop re-resolves a
+	// fresh CDN host instead of handing mpv a dead stream.
 	httpClient := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.After(3 * time.Second)
-	interval := 30 * time.Millisecond
+	deadline := time.After(bloggerReadinessTimeout)
+	interval := bloggerReadinessInterval
+	lastStatus := 0
 	for {
 		select {
 		case <-deadline:
-			util.Debugf("Proxy readiness check timed out")
-			return proxyURL, nil // proceed anyway — mpv will retry
+			if lastStatus != 0 {
+				util.Debugf("Proxy readiness check: upstream kept returning HTTP %d — re-resolving", lastStatus)
+				return "", fmt.Errorf("blogger CDN not serving video (HTTP %d)", lastStatus)
+			}
+			util.Debugf("Proxy readiness check timed out with no upstream response")
+			return proxyURL, nil // never answered — let mpv try
 		default:
 			headResp, headErr := httpClient.Head(proxyURL)
-			if headErr == nil {
-				util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s",
-					headResp.StatusCode, headResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Length"))
-				_ = headResp.Body.Close()
+			if headErr != nil {
+				time.Sleep(interval)
+				continue
+			}
+			status := headResp.StatusCode
+			ctype := headResp.Header.Get("Content-Type")
+			clen := headResp.Header.Get("Content-Length")
+			_ = headResp.Body.Close()
+			if status >= 200 && status < 300 {
+				util.Debugf("Proxy readiness check: status=%d content-type=%s content-length=%s", status, ctype, clen)
 				return proxyURL, nil
 			}
+			lastStatus = status
+			util.Debugf("Proxy readiness check: upstream not ready (status=%d), retrying", status)
 			time.Sleep(interval)
 		}
 	}

@@ -1158,6 +1158,44 @@ func TestResolveRedirect_NoRedirect(t *testing.T) {
 	assert.Contains(t, html, "direct page")
 }
 
+// TestResolveRedirect_DeadPlayerPage covers a rotated-out player host: the final
+// /video/<hash> page answers a 4xx/5xx. Without the status guard we would still
+// parse the hash out of the URL and hand a dead (host, hash) forward; every
+// error status must instead fail the resolve so the caller fails over to the
+// next source, and neither baseURL nor hash may leak out.
+func TestResolveRedirect_DeadPlayerPage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"not found", http.StatusNotFound},
+		{"forbidden", http.StatusForbidden},
+		{"gone", http.StatusGone},
+		{"server error", http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				fmt.Fprint(w, `<html><title>Not Found</title>The requested URL was not found</html>`)
+			}))
+			defer srv.Close()
+
+			client := newTestSuperFlixClient(srv.URL)
+			baseURL, videoHash, _, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/deadhash")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), fmt.Sprintf("player page dead (%d)", tt.status))
+			assert.Empty(t, baseURL)
+			assert.Empty(t, videoHash)
+		})
+	}
+}
+
 // =============================================================================
 // HTTP Mock Tests: Full GetStreamURL pipeline
 // =============================================================================

@@ -159,6 +159,43 @@ func TestTryCachedStream_NativePlayerEntrySelfHeals(t *testing.T) {
 	assert.False(t, stillThere, "the poisoned entry must be deleted (self-heal)")
 }
 
+// A rotated-out player host answers /video/<hash> with a 404 page. StreamFromServer
+// must surface the error (so the caller fails over to the sniff) and must NOT fire
+// the doomed getVideo round-trip, nor cache the dead (host, hash). Regression for
+// the katakana-domain 404 screen users saw on some SuperFlix titles.
+func TestStreamFromServer_DeadPlayerPageFailsAndIsNotCached(t *testing.T) {
+	withFreshStreamCache(t)
+
+	var getVideoHit atomic.Bool
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	mux.HandleFunc("/player/source", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":{"video_url":"%s/video/hash123"}}`, srv.URL)
+	})
+	mux.HandleFunc("/video/hash123", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprint(w, `<html><title>Not Found</title>The requested URL was not found</html>`)
+	})
+	mux.HandleFunc("/player/index.php", func(w http.ResponseWriter, _ *http.Request) {
+		getVideoHit.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"securedLink":"https://cdn.example/master.m3u8"}`)
+	})
+
+	c := NewClientForTest(srv.URL)
+	tokens := &SuperFlixTokens{ContentID: "1", PageToken: "tok"}
+
+	_, err := c.StreamFromServer(context.Background(), tokens, "159462", "serie", "42821", "1", "3")
+	require.Error(t, err, "a dead player page must fail the resolve so the caller falls back")
+	assert.False(t, getVideoHit.Load(), "must not fire getVideo against a dead player host")
+
+	_, ok := defaultStreamCache.get(streamCacheKey("serie", "42821", "1", "3"))
+	assert.False(t, ok, "a dead (host, hash) must never enter the cache")
+}
+
 // A cached host that has rotated out (getVideo fails) must be reported as a miss
 // so the caller re-resolves, rather than returning a dead stream.
 func TestTryCachedStream_StaleHostIsMiss(t *testing.T) {

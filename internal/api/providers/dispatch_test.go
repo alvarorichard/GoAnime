@@ -2,12 +2,16 @@ package providers
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -161,6 +165,48 @@ func TestSearchAll_AllFailReturnsError(t *testing.T) {
 	_, err := SearchAll(context.Background(), "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "all sources failed")
+}
+
+// hangingSearchSource models the real adapters: its Search ignores ctx and
+// blocks until released, so the only thing that ends the wait is the
+// per-source deadline enforced by searchOneWithTimeout.
+type hangingSearchSource struct {
+	epStubSource
+	release chan struct{}
+}
+
+func (s *hangingSearchSource) Search(context.Context, string) ([]*models.Anime, error) {
+	<-s.release
+	return nil, nil
+}
+
+func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
+	// Mutates the package-level perSourceSearchTimeout — not parallel.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(522) // Cloudflare origin down
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := perSourceSearchTimeout
+	perSourceSearchTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { perSourceSearchTimeout = prev })
+
+	stub := &hangingSearchSource{
+		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.Goyabu, Priority: 1}},
+		release:      make(chan struct{}),
+	}
+	t.Cleanup(func() { close(stub.release) }) // let the abandoned goroutine exit
+
+	got := searchOneWithTimeout(context.Background(), activeSearcher{
+		sr:       stub,
+		kind:     source.Goyabu,
+		probeURL: srv.URL,
+	}, "naruto")
+
+	require.Error(t, got.err)
+	var diag *netx.SourceDiagnostic
+	require.True(t, errors.As(got.err, &diag), "timeout must be enriched into a *netx.SourceDiagnostic")
+	assert.Equal(t, 522, diag.StatusCode)
 }
 
 func TestSearchAll_NoSearchableSource(t *testing.T) {

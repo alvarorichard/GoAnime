@@ -23,18 +23,37 @@ var searchBreaker = netx.NewCircuitBreaker()
 // Aggregate search timing. searchAllTimeout is the hard ceiling for the whole
 // fan-out; stragglerGrace bounds how long we keep waiting for the remaining
 // sources once the first results are in — so a fast source isn't held hostage
-// by a slow one. Mirrors the ScraperManager engine's budgets. Per-source
-// breaker/timeout/tagging is handled inside each Source.Search (searchViaManager).
+// by a slow one. Mirrors the ScraperManager engine's budgets.
 const (
 	searchAllTimeout = 15 * time.Second
 	stragglerGrace   = 5 * time.Second
+	// originProbeBudget bounds the disambiguation HEAD issued after a per-source
+	// search deadline (see searchOneWithTimeout / netx.EnrichTimeoutWithProbe).
+	originProbeBudget = 3 * time.Second
 )
+
+// perSourceSearchTimeout caps a single source's search so a wedged adapter
+// (the underlying clients still issue non-cancelable http.NewRequest calls)
+// cannot hold the fan-out open until searchAllTimeout and, more importantly,
+// trips that source's circuit breaker with an accurate, probe-enriched
+// diagnostic instead of a generic aggregate timeout. A var, not a const, so
+// tests can shorten it.
+var perSourceSearchTimeout = 12 * time.Second
 
 // searchOne is a single source's search outcome in the fan-out.
 type searchOne struct {
 	kind    source.SourceKind
 	results []*models.Anime
 	err     error
+}
+
+// activeSearcher is a source selected for the fan-out: its Searchable behavior,
+// its kind (for breaker keying and display), and its optional homepage probe
+// URL (empty for opaque/browser-gated sources).
+type activeSearcher struct {
+	sr       source.Searchable
+	kind     source.SourceKind
+	probeURL string
 }
 
 // init wires SearchAll into the api package's search seam so
@@ -68,14 +87,14 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		want[k] = true
 	}
 
-	var searchers []source.Searchable
-	var names []source.SourceKind
+	var searchers []activeSearcher
 	for _, s := range source.ActiveSources() {
 		sr, ok := s.(source.Searchable)
 		if !ok {
 			continue
 		}
-		kind := s.Describe().Kind
+		desc := s.Describe()
+		kind := desc.Kind
 		if len(want) > 0 && !want[kind] {
 			continue
 		}
@@ -85,8 +104,7 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			util.Warn("search source skipped (circuit open)", "source", kind, "retry_after", retry.Round(time.Second), "diagnostic", diag.UserMessage())
 			continue
 		}
-		searchers = append(searchers, sr)
-		names = append(names, kind)
+		searchers = append(searchers, activeSearcher{sr: sr, kind: kind, probeURL: desc.ProbeURL})
 	}
 	if len(searchers) == 0 {
 		return nil, fmt.Errorf("no searchable source available for query %q", query)
@@ -97,13 +115,12 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 
 	resultChan := make(chan searchOne, len(searchers))
 	var wg sync.WaitGroup
-	for i, sr := range searchers {
+	for _, a := range searchers {
 		wg.Add(1)
-		go func(sr source.Searchable, kind source.SourceKind) {
+		go func(a activeSearcher) {
 			defer wg.Done()
-			res, err := sr.Search(ctx, query)
-			resultChan <- searchOne{kind: kind, results: res, err: err}
-		}(sr, names[i])
+			resultChan <- searchOneWithTimeout(ctx, a, query)
+		}(a)
 	}
 	go func() { wg.Wait(); close(resultChan) }()
 
@@ -143,6 +160,40 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			util.Debug("search timeout reached; returning collected results")
 			return finishSearch(query, all, errs)
 		}
+	}
+}
+
+// searchOneWithTimeout runs a single source's Search under its own deadline,
+// derived from the fan-out context so the aggregate ceiling still applies.
+//
+// The underlying adapter clients still issue non-cancelable http.NewRequest
+// calls, so a wedged source's goroutine may outlive this call — we abandon it
+// (the buffered result channel absorbs a late send) rather than block. On
+// timeout we synthesize a per-source error and, when the source exposes a
+// homepage ProbeURL, upgrade it via netx.EnrichTimeoutWithProbe: a quick HEAD
+// distinguishes "the site's origin is down (5xx / Cloudflare)" from an opaque
+// hang, so the breaker opens with an actionable diagnostic.
+func searchOneWithTimeout(parent context.Context, a activeSearcher, query string) searchOne {
+	sctx, cancel := context.WithTimeout(parent, perSourceSearchTimeout)
+	defer cancel()
+
+	type outcome struct {
+		results []*models.Anime
+		err     error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := a.sr.Search(sctx, query)
+		done <- outcome{results: res, err: err}
+	}()
+
+	select {
+	case o := <-done:
+		return searchOne{kind: a.kind, results: o.results, err: o.err}
+	case <-sctx.Done():
+		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), perSourceSearchTimeout)
+		err := netx.EnrichTimeoutWithProbe(parent, sourceDisplayName(a.kind), "search", a.probeURL, base, originProbeBudget)
+		return searchOne{kind: a.kind, err: err}
 	}
 }
 
