@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestResponseCache_DoesNotLeakMutableBuffers(t *testing.T) {
+	c := NewResponseCache(time.Minute, 5)
+	input := []byte("original")
+	c.Set("k", input)
+
+	input[0] = 'X'
+	got, ok := c.Get("k")
+	if !ok || !bytes.Equal(got, []byte("original")) {
+		t.Fatalf("Set retained caller buffer: got %q, ok=%v", got, ok)
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 1000 {
+				value, exists := c.Get("k")
+				if exists && len(value) > 0 {
+					value[0]++
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	got, ok = c.Get("k")
+	if !ok || !bytes.Equal(got, []byte("original")) {
+		t.Fatalf("Get exposed cache buffer: got %q, ok=%v", got, ok)
+	}
+}
 
 func TestNewResponseCache(t *testing.T) {
 	t.Parallel()

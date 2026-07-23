@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -217,6 +218,36 @@ func TestRichPresenceUpdater_EpisodeDurationSetter(t *testing.T) {
 	rpu := mkRPU(&models.Anime{})
 	rpu.SetEpisodeDuration(42 * time.Second)
 	assert.Equal(t, 42*time.Second, rpu.GetEpisodeDuration())
+}
+
+func TestRichPresenceUpdater_ConcurrentStateAndStop(t *testing.T) {
+	rpu := NewRichPresenceUpdater(
+		&models.Anime{},
+		ptrBool(false),
+		&sync.Mutex{},
+		time.Hour,
+		0,
+		"/initial",
+		func(string, []any) (any, error) { return 1.0, nil },
+	)
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			for j := range 1000 {
+				rpu.SetSocketPath(fmt.Sprintf("/sock-%d-%d", i, j))
+				_ = rpu.GetSocketPath()
+				rpu.SetEpisodeDuration(time.Duration(j) * time.Second)
+				_ = rpu.GetEpisodeDuration()
+				rpu.SetEpisodeStarted(j%2 == 0)
+				_ = rpu.IsEpisodeStarted()
+			}
+		})
+	}
+	for range 8 {
+		wg.Go(rpu.Stop)
+	}
+	wg.Wait()
 }
 
 func TestIsClientLoggedIn_DefaultFalse(t *testing.T) {

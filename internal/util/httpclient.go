@@ -2,6 +2,7 @@
 package util
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"sync"
@@ -120,7 +121,9 @@ func (c *ResponseCache) Get(key string) ([]byte, bool) {
 		return nil, false
 	}
 
-	return entry.data, true
+	// Do not expose the cache-owned backing array: callers commonly reuse or
+	// mutate response buffers after a cache operation.
+	return bytes.Clone(entry.data), true
 }
 
 // Set stores a response in the cache
@@ -146,7 +149,7 @@ func (c *ResponseCache) Set(key string, data []byte) {
 	}
 
 	c.entries[key] = &cacheEntry{
-		data:      data,
+		data:      bytes.Clone(data),
 		timestamp: time.Now(),
 	}
 }

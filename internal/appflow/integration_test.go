@@ -231,7 +231,7 @@ func TestFetchAnimeDetailsCore_NeedsAniListOnly_NoCoverDoesNotOverwrite(t *testi
 	assert.Equal(t, "existing.jpg", anime.ImageURL, "empty cover must not overwrite existing")
 }
 
-func TestFetchAnimeDetailsCore_BothNeeded_ParallelEnrichment(t *testing.T) {
+func TestFetchAnimeDetailsCore_BothNeeded_DeterministicEnrichment(t *testing.T) {
 	anime := &models.Anime{
 		Name:   "AllAnimeShow",
 		Source: "AllAnime",

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -116,8 +117,17 @@ const (
 	ShaderModeAdvancedCA
 )
 
-// CurrentShaderMode holds the current real-time upscaling mode
-var CurrentShaderMode = ShaderModeOff
+var (
+	shaderModeMu      sync.RWMutex
+	currentShaderMode = ShaderModeOff
+)
+
+// GetShaderMode returns the current real-time upscaling mode.
+func GetShaderMode() ShaderMode {
+	shaderModeMu.RLock()
+	defer shaderModeMu.RUnlock()
+	return currentShaderMode
+}
 
 // GetShaderDir returns the path to the shader directory
 func GetShaderDir() string {
@@ -603,11 +613,15 @@ func GetAdvancedShaderModes() []ShaderMode {
 
 // CycleShaderMode cycles through shader modes
 func CycleShaderMode() ShaderMode {
-	CurrentShaderMode = (CurrentShaderMode + 1) % 10
-	return CurrentShaderMode
+	shaderModeMu.Lock()
+	defer shaderModeMu.Unlock()
+	currentShaderMode = (currentShaderMode + 1) % 10
+	return currentShaderMode
 }
 
 // SetShaderMode sets the shader mode
 func SetShaderMode(mode ShaderMode) {
-	CurrentShaderMode = mode
+	shaderModeMu.Lock()
+	defer shaderModeMu.Unlock()
+	currentShaderMode = mode
 }

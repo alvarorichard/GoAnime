@@ -1,6 +1,7 @@
 package upscaler
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,4 +68,19 @@ func TestSetAndCycleShaderMode(t *testing.T) {
 	SetShaderMode(all[0])
 	next := CycleShaderMode()
 	assert.NotEqual(t, all[0], next)
+}
+
+func TestShaderModeConcurrentAccess(t *testing.T) {
+	var wg sync.WaitGroup
+	modeCount := len(GetAllShaderModes())
+	for i := range 8 {
+		wg.Go(func() {
+			for j := range 1000 {
+				SetShaderMode(ShaderMode((i + j) % modeCount))
+				_ = GetShaderMode()
+				_ = CycleShaderMode()
+			}
+		})
+	}
+	wg.Wait()
 }

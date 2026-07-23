@@ -897,7 +897,7 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 		util.Debug("SuperFlix audio chosen from the stream's tracks", "code", opt.Code, "alang", alang)
 	}
 	if alang != "" {
-		util.GlobalAudioLanguage = alang
+		util.SetGlobalAudioLanguage(alang)
 	}
 
 	// Load every subtitle track the stream ships, always.

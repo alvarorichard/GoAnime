@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
@@ -67,64 +66,24 @@ func HandlePlaybackMode(animeName string) {
 			return
 		}
 
-		// Fetch details and episodes.
-		// For FlixHQ/movie/TV content, GetAnimeEpisodes may show interactive
-		// UI (season selection fuzzyfinder), so we CANNOT run it concurrently
-		// with FetchAnimeDetails (which runs a Bubble Tea spinner).  Two
-		// programs fighting over the terminal at the same time corrupts
-		// terminal state and causes arrow-key escape sequences to be printed
-		// as raw text.  For regular anime the episodes fetch is non-interactive,
-		// so parallelism is safe there.
+		// Fetch details before episodes. Both operations access the same mutable
+		// Media, and some episode flows also open an interactive picker, so
+		// concurrent execution would race in memory and contend for the terminal.
 		var episodes []models.Episode
 		var epErr error
 
-		// SuperFlix must be matched by source, not just media type: its catalog
-		// tags western animation as anime, which previously slipped into the
-		// parallel branch and ran the details spinner concurrently with the
-		// season-selection fuzzyfinder (spinner frames ate the prompt text).
-		needsInteractiveEpisodes := anime.HasInteractiveEpisodeFlow()
+		fetchTimer := util.StartTimer("FetchDetails+Episodes:Sequential")
+		detailsTimer := util.StartTimer("FetchAnimeDetails")
+		appflow.FetchAnimeDetails(anime)
+		detailsTimer.Stop()
 
-		if needsInteractiveEpisodes {
-			// Sequential: details first (spinner), then episodes (may show fuzzyfinder)
-			parallelTimer := util.StartTimer("FetchDetails+Episodes:Sequential")
-
-			detailsTimer := util.StartTimer("FetchAnimeDetails")
-			appflow.FetchAnimeDetails(anime)
-			detailsTimer.Stop()
-
-			episodesTimer := util.StartTimer("GetAnimeEpisodes")
-			episodes, epErr = appflow.GetAnimeEpisodes(anime)
-			if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
-				util.Errorf("Failed to get episodes: %v", epErr)
-			}
-			episodesTimer.Stop()
-
-			parallelTimer.Stop()
-		} else {
-			// Parallel: safe because GetAnimeEpisodes only uses a spinner (no fuzzyfinder)
-			var wg sync.WaitGroup
-			parallelTimer := util.StartTimer("FetchDetails+Episodes:Parallel")
-
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
-				detailsTimer := util.StartTimer("FetchAnimeDetails")
-				appflow.FetchAnimeDetails(anime)
-				detailsTimer.Stop()
-			}()
-			go func() {
-				defer wg.Done()
-				episodesTimer := util.StartTimer("GetAnimeEpisodes")
-				episodes, epErr = appflow.GetAnimeEpisodes(anime)
-				if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
-					util.Errorf("Failed to get episodes: %v", epErr)
-				}
-				episodesTimer.Stop()
-			}()
-
-			wg.Wait()
-			parallelTimer.Stop()
+		episodesTimer := util.StartTimer("GetAnimeEpisodes")
+		episodes, epErr = appflow.GetAnimeEpisodes(anime)
+		if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
+			util.Errorf("Failed to get episodes: %v", epErr)
 		}
+		episodesTimer.Stop()
+		fetchTimer.Stop()
 
 		// User aborted season selection (FlixHQ/SuperFlix ESC) — go back to a
 		// fresh search prompt instead of killing the session.

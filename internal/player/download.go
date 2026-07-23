@@ -1719,7 +1719,7 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 	// to embed subtitles directly into the video file.
 	if util.Is9AnimeSource() {
 		util.PromptSubtitleLanguage()
-	} else if len(util.GlobalSubtitles) > 0 {
+	} else if len(util.GetGlobalSubtitles()) > 0 {
 		util.SelectSubtitles()
 	}
 
@@ -2015,7 +2015,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 	// to embed subtitles directly into the video file.
 	if util.Is9AnimeSource() {
 		util.PromptSubtitleLanguage()
-	} else if len(util.GlobalSubtitles) > 0 {
+	} else if len(util.GetGlobalSubtitles()) > 0 {
 		util.SelectSubtitles()
 	}
 

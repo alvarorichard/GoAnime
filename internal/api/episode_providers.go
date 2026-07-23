@@ -438,6 +438,12 @@ func defaultProviders() []EpisodeDataProvider {
 	}
 }
 
+func cloneAnimeForEpisodeProvider(anime *models.Anime) models.Anime {
+	cloned := *anime
+	cloned.Episodes = append([]models.Episode(nil), anime.Episodes...)
+	return cloned
+}
+
 // GetEpisodeDataWithFallback fetches episode data trying multiple providers concurrently.
 // All providers are launched in parallel and the first successful result is used.
 func GetEpisodeDataWithFallback(animeID, episodeNo int, anime *models.Anime) error {
@@ -454,8 +460,10 @@ func GetEpisodeDataWithFallback(animeID, episodeNo int, anime *models.Anime) err
 	for _, provider := range providers {
 		go func(p EpisodeDataProvider) {
 			util.Debugf("Trying episode data provider: %s", p.Name())
-			// Work on a copy so concurrent writes don't conflict
-			animeCopy := *anime
+			// Clone the slice as well as the struct. A shallow struct copy keeps
+			// the Episodes backing array shared, so providers updating episode
+			// fields would still race with each other.
+			animeCopy := cloneAnimeForEpisodeProvider(anime)
 			err := p.FetchEpisodeData(animeID, episodeNo, &animeCopy)
 			resultCh <- providerResult{name: p.Name(), err: err, data: animeCopy}
 		}(provider)

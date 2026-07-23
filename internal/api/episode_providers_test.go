@@ -22,6 +22,18 @@ type MockProvider struct {
 	mu        sync.Mutex
 }
 
+func TestCloneAnimeForEpisodeProvider_IsolatesEpisodes(t *testing.T) {
+	original := &models.Anime{
+		Name:     "original",
+		Episodes: []models.Episode{{Number: "1", Title: models.TitleDetails{English: "original"}}},
+	}
+	cloned := cloneAnimeForEpisodeProvider(original)
+	cloned.Episodes[0].Title.English = "mutated"
+
+	assert.Equal(t, "original", original.Episodes[0].Title.English)
+	assert.Equal(t, "mutated", cloned.Episodes[0].Title.English)
+}
+
 func (m *MockProvider) Name() string {
 	return m.name
 }

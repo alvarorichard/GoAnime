@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -190,19 +189,14 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 
 	switch {
 	case needsAniList && needsSourceDetails:
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			enrichFromAniList(anime)
-		}()
-		go func() {
-			defer wg.Done()
-			if err := sourceDetailsFetchFn(anime); err != nil {
-				util.Debugf("Failed to fetch anime details from source: %v", err)
-			}
-		}()
-		wg.Wait()
+		// Both enrichers mutate the same Media value. Running them concurrently
+		// made field precedence nondeterministic and raced on IDs, cover art and
+		// slices. AniList establishes the base metadata; source-specific details
+		// then deterministically refine it.
+		enrichFromAniList(anime)
+		if err := sourceDetailsFetchFn(anime); err != nil {
+			util.Debugf("Failed to fetch anime details from source: %v", err)
+		}
 	case needsAniList:
 		enrichFromAniList(anime)
 	default:

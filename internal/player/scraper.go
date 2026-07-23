@@ -917,10 +917,8 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 	return videoURL, nil
 }
 
-// extractBloggerVideoURL uses tls-client with Chrome TLS impersonation to
-// extract the googlevideo URL via Blogger's batchexecute API and starts a
-// local Go proxy that streams the video with the same TLS fingerprint.
-// The entire chain uses Chrome TLS so Google's CDN does not reject requests.
+// extractBloggerVideoURL uses Chrome TLS impersonation for Blogger's
+// batchexecute API and for the resolved googlevideo CDN URL.
 // Retries up to 3 times since the first batchexecute call often fails before
 // the session cookies are fully established.
 func extractBloggerVideoURL(bloggerURL string) (string, error) {
@@ -988,9 +986,26 @@ var (
 	bloggerReadinessInterval = 30 * time.Millisecond
 )
 
+// newBloggerProxyClient creates the long-lived client used between the local
+// proxy and googlevideo. Chrome TLS impersonation is required because the CDN
+// rejects Go's native TLS fingerprint. Force HTTP/1.1 because some googlevideo
+// edges omit ALPN; surf's HTTP/2 path rejects those connections before sending
+// the request ("negotiated ALPN \"\", expected h2").
+func newBloggerProxyClient() *http.Client {
+	client := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		ForceHTTP1().
+		Build().
+		Unwrap().
+		Std()
+	client.Timeout = 0 // streaming requests must not have a whole-request timeout
+	return client
+}
+
 // startBloggerProxy starts a local Go HTTP proxy that extracts the video URL
 // from a Blogger page via batchexecute and streams it with Chrome browser
-// impersonation using enetx/surf. No Python required.
+// impersonation. No Python required.
 func startBloggerProxy(bloggerURL string) (string, error) {
 	// Stop any existing proxy
 	StopBloggerProxy()
@@ -1001,18 +1016,7 @@ func startBloggerProxy(bloggerURL string) (string, error) {
 		return "", fmt.Errorf("failed to extract video URL: %w", err)
 	}
 
-	// Create a shared surf client for the proxy (reused across requests).
-	// surf defaults to a 30s timeout which maps to http.Client.Timeout —
-	// a full-request deadline that kills streaming for large files.
-	// Zero it out after converting to *http.Client so the Chrome TLS
-	// transport is preserved but there's no request-level deadline.
-	proxyClient := surf.NewClient().
-		Builder().
-		Impersonate().Chrome().
-		Build().
-		Unwrap().
-		Std()
-	proxyClient.Timeout = 0
+	proxyClient := newBloggerProxyClient()
 	// Follow redirects with net/http's default policy (up to 10). googlevideo
 	// signs a URL that 302-redirects to the actual CDN node; the previous
 	// .NotFollowRedirects() made surf surface that redirect as a

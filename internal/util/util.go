@@ -25,6 +25,7 @@ type SubtitleInfo struct {
 }
 
 var (
+	playbackStateMu     sync.RWMutex
 	IsDebug             bool
 	minNameLength       = 4
 	ErrHelpRequested    = errors.New("help requested") // Custom error for help
@@ -51,7 +52,9 @@ func StrictSourceResolution() bool {
 
 // SetGlobalSubtitles stores subtitles for the current playback session
 func SetGlobalSubtitles(subs []SubtitleInfo) {
-	GlobalSubtitles = subs
+	playbackStateMu.Lock()
+	GlobalSubtitles = append([]SubtitleInfo(nil), subs...)
+	playbackStateMu.Unlock()
 	if len(subs) > 0 {
 		Debugf("Stored %d subtitle track(s) for playback", len(subs))
 		for i, sub := range subs {
@@ -60,14 +63,25 @@ func SetGlobalSubtitles(subs []SubtitleInfo) {
 	}
 }
 
+// GetGlobalSubtitles returns an isolated snapshot of the current subtitle list.
+func GetGlobalSubtitles() []SubtitleInfo {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+	return append([]SubtitleInfo(nil), GlobalSubtitles...)
+}
+
 // ClearGlobalSubtitles clears stored subtitles
 func ClearGlobalSubtitles() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
 	GlobalSubtitles = nil
 }
 
 // SetGlobalReferer stores the referer for stream requests
 func SetGlobalReferer(referer string) {
+	playbackStateMu.Lock()
 	GlobalReferer = referer
+	playbackStateMu.Unlock()
 	if referer != "" {
 		Debugf("Stored referer for stream requests: %s", referer)
 	}
@@ -75,17 +89,23 @@ func SetGlobalReferer(referer string) {
 
 // GetGlobalReferer returns the stored referer
 func GetGlobalReferer() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalReferer
 }
 
 // ClearGlobalReferer clears the stored referer
 func ClearGlobalReferer() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
 	GlobalReferer = ""
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "9Anime", "AllAnime")
 func SetGlobalAnimeSource(source string) {
+	playbackStateMu.Lock()
 	GlobalAnimeSource = source
+	playbackStateMu.Unlock()
 	if source != "" {
 		Debugf("Stored anime source: %s", source)
 	}
@@ -93,12 +113,14 @@ func SetGlobalAnimeSource(source string) {
 
 // GetGlobalAnimeSource returns the stored anime source
 func GetGlobalAnimeSource() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
 	return GlobalAnimeSource
 }
 
 // Is9AnimeSource returns true if the current stream is from 9Anime
 func Is9AnimeSource() bool {
-	return GlobalAnimeSource == "9Anime"
+	return GetGlobalAnimeSource() == "9Anime"
 }
 
 // IsSuperFlixSource returns true if the current stream is from SuperFlix.
@@ -109,7 +131,21 @@ func Is9AnimeSource() bool {
 // same tracks, and gating those preferences on IsMovieOrTV silently dropped both
 // the chosen audio track and the subtitles for them.
 func IsSuperFlixSource() bool {
-	return GlobalAnimeSource == "SuperFlix"
+	return GetGlobalAnimeSource() == "SuperFlix"
+}
+
+// SetGlobalAudioLanguage stores the current playback audio preference.
+func SetGlobalAudioLanguage(language string) {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+	GlobalAudioLanguage = language
+}
+
+// GetGlobalAudioLanguage returns the current playback audio preference.
+func GetGlobalAudioLanguage() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+	return GlobalAudioLanguage
 }
 
 // subtitleOption maps a display label to a sentinel value for subtitle selection.
@@ -123,6 +159,9 @@ type subtitleOption struct {
 // subsequent call to GetSubtitleArgs only includes the selected tracks.
 // If there are 0 or 1 subtitles available, no menu is shown.
 func SelectSubtitles() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+
 	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
 		return
 	}
@@ -175,6 +214,9 @@ func SelectSubtitles() {
 // It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
 // the correct arguments for mpv.
 func PromptSubtitleLanguage() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+
 	if GlobalNoSubs {
 		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
 		GlobalSubtitles = nil
@@ -280,6 +322,9 @@ func PromptSubtitleLanguage() {
 // corrupts every remote subtitle URL (SuperFlix ships WEBVTT behind .html
 // paths). That made mpv fail to load movie streams with multiple tracks.
 func GetSubtitleArgs() []string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+
 	if GlobalNoSubs || len(GlobalSubtitles) == 0 {
 		return nil
 	}

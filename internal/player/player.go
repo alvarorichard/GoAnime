@@ -146,9 +146,17 @@ func snapshotMedia() mediaSnapshot {
 		IsMovieOrTV: gMedia.isMovieOrTV,
 		MediaType:   gMedia.mediaType,
 		AnimeURL:    gMedia.animeURL,
-		SeasonMap:   gMedia.seasonMap,
-		Meta:        gMedia.meta,
+		SeasonMap:   append([]metadata.SeasonMapping(nil), gMedia.seasonMap...),
+		Meta:        cloneMediaMeta(gMedia.meta),
 	}
+}
+
+func cloneMediaMeta(meta *util.MediaMeta) *util.MediaMeta {
+	if meta == nil {
+		return nil
+	}
+	cloned := *meta
+	return &cloned
 }
 
 // SetSeasonMap stores the AniList-derived season mapping for per-episode
@@ -156,7 +164,7 @@ func snapshotMedia() mediaSnapshot {
 func SetSeasonMap(sm []metadata.SeasonMapping) {
 	gMedia.mu.Lock()
 	defer gMedia.mu.Unlock()
-	gMedia.seasonMap = sm
+	gMedia.seasonMap = append([]metadata.SeasonMapping(nil), sm...)
 }
 
 // SetMediaMeta stores external IDs (TMDB, IMDB, AniList, MAL) and year for
@@ -164,14 +172,14 @@ func SetSeasonMap(sm []metadata.SeasonMapping) {
 func SetMediaMeta(meta *util.MediaMeta) {
 	gMedia.mu.Lock()
 	defer gMedia.mu.Unlock()
-	gMedia.meta = meta
+	gMedia.meta = cloneMediaMeta(meta)
 }
 
 // GetMediaMeta returns the current media metadata (external IDs and year).
 func GetMediaMeta() *util.MediaMeta {
 	gMedia.mu.RLock()
 	defer gMedia.mu.RUnlock()
-	return gMedia.meta
+	return cloneMediaMeta(gMedia.meta)
 }
 
 // resolveSeasonForEpisode returns the correct (season, episode) pair for an
@@ -1020,7 +1028,7 @@ func downloadAndPlayEpisode(
 	// For 9Anime, ALWAYS use the mandatory language prompt regardless of track count.
 	if util.Is9AnimeSource() {
 		util.PromptSubtitleLanguage()
-	} else if len(util.GlobalSubtitles) > 0 {
+	} else if len(util.GetGlobalSubtitles()) > 0 {
 		util.SelectSubtitles()
 	}
 
@@ -1305,7 +1313,7 @@ func askForDownload() int {
 		return 4 // no TTY: default to play online
 	}
 	// Build the upscale option label with current status
-	upscaleStatus := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+	upscaleStatus := upscaler.GetShaderModeName(upscaler.GetShaderMode())
 	upscaleLabel := fmt.Sprintf("Real-time Upscale [%s]", upscaleStatus)
 
 	type menuOption struct {
@@ -1543,7 +1551,7 @@ func handleUpscaleFromMenu() error {
 	}
 	// Check if shaders are installed
 	shadersInstalled := upscaler.ShadersInstalled()
-	currentMode := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+	currentMode := upscaler.GetShaderModeName(upscaler.GetShaderMode())
 
 	prompt := fmt.Sprintf("Upscaling [%s]: ", currentMode)
 	if !shadersInstalled {
@@ -1679,7 +1687,7 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 		}
 	}
 
-	subs := util.GlobalSubtitles
+	subs := util.GetGlobalSubtitles()
 	if len(subs) == 0 {
 		return
 	}

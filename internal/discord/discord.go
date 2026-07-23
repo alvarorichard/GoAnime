@@ -40,6 +40,10 @@ var (
 
 // RichPresenceUpdater manages Discord Rich Presence updates
 type RichPresenceUpdater struct {
+	stateMutex      sync.RWMutex
+	lifecycleMutex  sync.Mutex
+	started         bool
+	stopped         bool
 	anime           *models.Anime
 	isPaused        *bool
 	animeMutex      *sync.Mutex
@@ -123,7 +127,7 @@ func IsClientLoggedIn() bool {
 
 // GetCurrentPlaybackPosition gets the current playback position from MPV
 func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, error) {
-	position, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "time-pos"})
+	position, err := rpu.mpvSendCommand(rpu.GetSocketPath(), []any{"get_property", "time-pos"})
 	if err != nil {
 		return 0, err
 	}
@@ -138,31 +142,43 @@ func (rpu *RichPresenceUpdater) GetCurrentPlaybackPosition() (time.Duration, err
 
 // SetSocketPath sets the MPV socket path
 func (rpu *RichPresenceUpdater) SetSocketPath(socketPath string) {
+	rpu.stateMutex.Lock()
+	defer rpu.stateMutex.Unlock()
 	rpu.socketPath = socketPath
 }
 
 // GetSocketPath returns the MPV socket path
 func (rpu *RichPresenceUpdater) GetSocketPath() string {
+	rpu.stateMutex.RLock()
+	defer rpu.stateMutex.RUnlock()
 	return rpu.socketPath
 }
 
 // SetEpisodeStarted sets whether the episode has started
 func (rpu *RichPresenceUpdater) SetEpisodeStarted(started bool) {
+	rpu.stateMutex.Lock()
+	defer rpu.stateMutex.Unlock()
 	rpu.episodeStarted = started
 }
 
 // IsEpisodeStarted returns whether the episode has started
 func (rpu *RichPresenceUpdater) IsEpisodeStarted() bool {
+	rpu.stateMutex.RLock()
+	defer rpu.stateMutex.RUnlock()
 	return rpu.episodeStarted
 }
 
 // SetEpisodeDuration sets the episode duration
 func (rpu *RichPresenceUpdater) SetEpisodeDuration(duration time.Duration) {
+	rpu.stateMutex.Lock()
+	defer rpu.stateMutex.Unlock()
 	rpu.episodeDuration = duration
 }
 
 // GetEpisodeDuration returns the episode duration
 func (rpu *RichPresenceUpdater) GetEpisodeDuration() time.Duration {
+	rpu.stateMutex.RLock()
+	defer rpu.stateMutex.RUnlock()
 	return rpu.episodeDuration
 }
 
@@ -194,6 +210,12 @@ func (rpu *RichPresenceUpdater) Start() {
 		return
 	}
 
+	rpu.lifecycleMutex.Lock()
+	if rpu.started || rpu.stopped {
+		rpu.lifecycleMutex.Unlock()
+		return
+	}
+	rpu.started = true
 	rpu.wg.Go(func() {
 		ticker := time.NewTicker(rpu.updateFreq)
 		defer ticker.Stop()
@@ -211,21 +233,27 @@ func (rpu *RichPresenceUpdater) Start() {
 			}
 		}
 	})
+	rpu.lifecycleMutex.Unlock()
 	util.Debug("Rich Presence updater started")
 }
 
 // Stop signals the updater to stop and waits for the goroutine to finish
 func (rpu *RichPresenceUpdater) Stop() {
-	if rpu != nil {
-		select {
-		case <-rpu.done:
-			// Channel already closed
-		default:
+	if rpu == nil {
+		return
+	}
+
+	rpu.lifecycleMutex.Lock()
+	if !rpu.stopped {
+		rpu.stopped = true
+		if rpu.done != nil {
 			close(rpu.done)
 		}
-		rpu.wg.Wait()
-		util.Debug("Rich Presence updater stopped")
 	}
+	rpu.lifecycleMutex.Unlock()
+
+	rpu.wg.Wait()
+	util.Debug("Rich Presence updater stopped")
 }
 
 // updateDiscordPresence updates the Discord Rich Presence status with precise timing
@@ -258,6 +286,11 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	now := time.Now()
 	shouldUpdate := false
 
+	// The smart-update history is global across updater instances. Protect the
+	// entire decision and reservation so two concurrent updaters cannot race
+	// on the timestamps or both decide from stale state.
+	clientMutex.Lock()
+
 	// Force update every 2 minutes to keep presence alive
 	if lastForceUpdateTime.IsZero() || time.Since(lastForceUpdateTime) >= 2*time.Minute {
 		shouldUpdate = true
@@ -276,8 +309,16 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	}
 
 	if !shouldUpdate {
+		clientMutex.Unlock()
 		return
 	}
+
+	lastPausedState = playbackState.isPaused
+	lastEpisodeNumber = episodeNumber
+	lastTitle = title
+	lastPositionSec = playbackState.positionSec
+	lastUpdateTime = now
+	clientMutex.Unlock()
 
 	// Get image URL — normalize CloudFront proxy URLs to direct TMDB URLs
 	// since Discord can proxy TMDB images but not CloudFront double-URLs
@@ -335,12 +376,6 @@ func (rpu *RichPresenceUpdater) updateDiscordPresence(forceUpdate bool) {
 	}
 	clientMutex.Unlock()
 
-	// Update last state
-	lastPausedState = playbackState.isPaused
-	lastEpisodeNumber = episodeNumber
-	lastTitle = title
-	lastPositionSec = playbackState.positionSec
-	lastUpdateTime = now
 }
 
 // playbackState holds precise playback information
@@ -353,8 +388,10 @@ type playbackState struct {
 
 // getPrecisePlaybackState gets the exact playback state from MPV
 func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
+	socketPath := rpu.GetSocketPath()
+
 	// Get position with high precision
-	posResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "time-pos"})
+	posResponse, err := rpu.mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
 	if err != nil || posResponse == nil {
 		return nil
 	}
@@ -366,21 +403,22 @@ func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 
 	// Get duration
 	var durationSec int
-	if rpu.episodeDuration > 0 {
-		durationSec = int(rpu.episodeDuration.Seconds())
+	episodeDuration := rpu.GetEpisodeDuration()
+	if episodeDuration > 0 {
+		durationSec = int(episodeDuration.Seconds())
 	} else {
-		durResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "duration"})
+		durResponse, err := rpu.mpvSendCommand(socketPath, []any{"get_property", "duration"})
 		if err == nil && durResponse != nil {
 			if dur, ok := durResponse.(float64); ok && dur > 0 {
 				durationSec = int(dur)
-				rpu.episodeDuration = time.Duration(dur) * time.Second
+				rpu.SetEpisodeDuration(time.Duration(dur) * time.Second)
 			}
 		}
 	}
 
 	// Get pause state
 	isPaused := false
-	pauseResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "pause"})
+	pauseResponse, err := rpu.mpvSendCommand(socketPath, []any{"get_property", "pause"})
 	if err == nil && pauseResponse != nil {
 		if pause, ok := pauseResponse.(bool); ok {
 			isPaused = pause
@@ -389,7 +427,7 @@ func (rpu *RichPresenceUpdater) getPrecisePlaybackState() *playbackState {
 
 	// Get playback speed (for precise timing)
 	speed := 1.0
-	speedResponse, err := rpu.mpvSendCommand(rpu.socketPath, []any{"get_property", "speed"})
+	speedResponse, err := rpu.mpvSendCommand(socketPath, []any{"get_property", "speed"})
 	if err == nil && speedResponse != nil {
 		if s, ok := speedResponse.(float64); ok && s > 0 {
 			speed = s
@@ -522,7 +560,7 @@ func (rpu *RichPresenceUpdater) buildButtons(isMovieOrTV bool) []*client.Button 
 func (rpu *RichPresenceUpdater) FetchDuration(socketPath string, f func(durSec int)) {
 	path := socketPath
 	if path == "" {
-		path = rpu.socketPath
+		path = rpu.GetSocketPath()
 	}
 
 	durationResponse, err := rpu.mpvSendCommand(path, []any{"get_property", "duration"})

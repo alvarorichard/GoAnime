@@ -42,5 +42,12 @@ jobs:
       - name: Run live diagnostics
         run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
 
+      - name: Run Goyabu Blogger playback diagnostic
+        run: >
+          go test -tags live
+          -run '^TestGoyabuBlackCloverEpisode3Live$'
+          -count=1 -v -timeout=90s
+          ./internal/player
+
       - name: Run public SDK integration tests
         run: go test -run Integration -count=1 -v ./pkg/goanime

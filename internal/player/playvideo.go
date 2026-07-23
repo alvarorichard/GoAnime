@@ -501,7 +501,7 @@ func playVideo(
 	}
 
 	// Check if real-time upscaling is enabled
-	shaderArgs := upscaler.GetMPVShaderArgs(upscaler.CurrentShaderMode)
+	shaderArgs := upscaler.GetMPVShaderArgs(upscaler.GetShaderMode())
 	upscalingEnabled := len(shaderArgs) > 0
 
 	// --- Gather every decision that drives the mpv argument list ------------
@@ -560,7 +560,7 @@ func playVideo(
 
 	audioLang, subsLang := "", ""
 	if wantsLangPrefs {
-		audioLang = util.GlobalAudioLanguage
+		audioLang = util.GetGlobalAudioLanguage()
 		if audioLang == "" {
 			// Default: prefer Portuguese (Brazil), Portuguese, Spanish, English.
 			audioLang = "pt-BR,pt,por,pb,ptbr,portuguese,spa,es,spanish,eng,en,english"
@@ -578,7 +578,7 @@ func playVideo(
 	if wantsLangPrefs || is9Anime {
 		if is9Anime {
 			util.PromptSubtitleLanguage()
-		} else if len(util.GlobalSubtitles) > 1 {
+		} else if len(util.GetGlobalSubtitles()) > 1 {
 			util.SelectSubtitles()
 		}
 		subArgs = util.GetSubtitleArgs()
@@ -596,7 +596,7 @@ func playVideo(
 
 	wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""
 	if upscalingEnabled {
-		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.CurrentShaderMode))
+		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.GetShaderMode()))
 		util.Debugf("Shader args: %v", shaderArgs)
 	}
 	if wayland {
@@ -921,7 +921,7 @@ func showShaderOSD(socketPath string) {
 		// Give mpv a moment to initialize its OSD subsystem
 		time.Sleep(300 * time.Millisecond)
 
-		modeName := upscaler.GetShaderModeName(upscaler.CurrentShaderMode)
+		modeName := upscaler.GetShaderModeName(upscaler.GetShaderMode())
 		message := fmt.Sprintf("Anime4K Upscaling: %s\\nPress Shift+I twice for stats", modeName)
 
 		// Show OSD message for 4 seconds

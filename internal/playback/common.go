@@ -83,15 +83,21 @@ func PlayEpisode(
 
 	var videoURL string
 	var videoErr error
+	var episodeDataErr error
 	currentEpisodeCopy := currentEpisode
+	episodeDataAnime := *anime
+	episodeDataAnime.Episodes = append([]models.Episode(nil), anime.Episodes...)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		if err := api.GetEpisodeData(anime.MalID, episodeNum, anime); err != nil {
-			util.Debugf("Error fetching episode data: %v", err)
+		// Metadata providers mutate Episodes. Keep that mutation isolated from
+		// stream resolution, which concurrently reads and may enrich anime.
+		episodeDataErr = api.GetEpisodeData(anime.MalID, episodeNum, &episodeDataAnime)
+		if episodeDataErr != nil {
+			util.Debugf("Error fetching episode data: %v", episodeDataErr)
 		}
 	}()
 
@@ -101,6 +107,11 @@ func PlayEpisode(
 	}()
 
 	wg.Wait()
+	if episodeDataErr == nil {
+		animeMutex.Lock()
+		anime.Episodes = append([]models.Episode(nil), episodeDataAnime.Episodes...)
+		animeMutex.Unlock()
+	}
 
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.

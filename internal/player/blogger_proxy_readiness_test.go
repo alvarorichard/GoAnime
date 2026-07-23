@@ -1,12 +1,16 @@
 // ===========================================================================
-// blogger_proxy_readiness_test.go — Regression tests for two Blogger-proxy bugs
+// blogger_proxy_readiness_test.go — Blogger-proxy regression tests
 //
-// Issue observed: 2026-07-23 (Goyabu / Naruto Shippuden, debug log)
+// Issues observed: 2026-07-23 (Goyabu debug logs)
 //   The FIRST play of an episode failed with:
 //     "mpv exited before IPC socket was ready: exit status 2 ... (no stderr)"
 //     Hint: bundled mpv may be missing DLLs
 //   The second attempt (next episode) played fine. mpv was healthy — the hint
 //   was misleading.
+//   Black Clover episode 3 later failed with:
+//     "no valid video URL found"
+//   after surf rejected a googlevideo edge that omitted ALPN:
+//     "HTTP/2 failed ... negotiated ALPN \"\", expected h2"
 //
 // Root causes (player/scraper.go):
 //   1. Redirect handling. The proxy's upstream client was built with
@@ -16,12 +20,16 @@
 //   2. Readiness masking. The readiness probe treated ANY transport-level
 //      success as ready — a 502 (headErr==nil) counted as ready — so mpv was
 //      launched against a proxy serving 502 and exited 2.
+//   3. Protocol mismatch. Chrome impersonation selected surf's HTTP/2 path,
+//      but some googlevideo edges only serve HTTP/1.1 and omit ALPN.
 //
 // Fixes:
 //   1. proxyClient.CheckRedirect = nil (follow redirects, net/http default).
 //   2. Readiness rejects non-2xx upstream status; on the deadline it returns an
 //      error so extractBloggerVideoURL's retry loop re-resolves a fresh CDN host
 //      instead of handing mpv a dead stream.
+//   3. The googlevideo client preserves Chrome TLS impersonation while forcing
+//      HTTP/1.1.
 //
 // Function tested: startBloggerProxyServer (the network-free seam split out of
 // startBloggerProxy so the forwarding + readiness gating are testable).
@@ -30,6 +38,7 @@
 package player
 
 import (
+	"crypto/tls"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -149,4 +158,64 @@ func TestStartBloggerProxyServer(t *testing.T) {
 		_, err := startBloggerProxyServer(up.URL, &http.Client{})
 		require.NoError(t, err, "206 is a valid streaming status and must count as ready")
 	})
+
+	t.Run("forwards byte ranges and partial-content metadata", func(t *testing.T) {
+		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Accept-Ranges", "bytes")
+			if r.Method == http.MethodHead {
+				w.Header().Set("Content-Length", "4096")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			assert.Equal(t, "bytes=1024-2047", r.Header.Get("Range"))
+			w.Header().Set("Content-Range", "bytes 1024-2047/4096")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = io.WriteString(w, videoBody)
+		}))
+		t.Cleanup(up.Close)
+		t.Cleanup(StopBloggerProxy)
+
+		proxyURL, err := startBloggerProxyServer(up.URL, &http.Client{})
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+		require.NoError(t, err)
+		req.Header.Set("Range", "bytes=1024-2047")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusPartialContent, resp.StatusCode)
+		assert.Equal(t, "video/mp4", resp.Header.Get("Content-Type"))
+		assert.Equal(t, "bytes", resp.Header.Get("Accept-Ranges"))
+		assert.Equal(t, "bytes 1024-2047/4096", resp.Header.Get("Content-Range"))
+		assert.Equal(t, videoBody, string(body))
+	})
+}
+
+func TestBloggerProxyClientSupportsHTTP11TLS(t *testing.T) {
+	// This models the googlevideo edge from the production log: TLS succeeds,
+	// but the server negotiates HTTP/1.1 rather than the h2 ALPN expected by
+	// surf's Chrome impersonation transport.
+	up := httptest.NewUnstartedServer(okVideoHandler("video"))
+	up.EnableHTTP2 = false
+	up.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{}, // non-nil: make httptest omit ALPN like the affected CDN edge
+	}
+	up.StartTLS()
+	t.Cleanup(up.Close)
+
+	client := newBloggerProxyClient()
+	req, err := http.NewRequest(http.MethodHead, up.URL, http.NoBody)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err, "Chrome TLS transport must support an HTTP/1.1-only edge")
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 1, resp.ProtoMajor)
 }

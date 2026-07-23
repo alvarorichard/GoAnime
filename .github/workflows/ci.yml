@@ -176,6 +176,12 @@ jobs:
         run: |
           go test -race -v ./internal/player/test/... -run "Socket|MacOS" -count=1
 
+      - name: Run Blogger proxy regression tests
+        shell: bash
+        run: >
+          go test -short -count=10 ./internal/player
+          -run '^(TestStartBloggerProxyServer|TestBloggerProxyClientSupportsHTTP11TLS)$'
+
       - name: Run tests with race detector and coverage
         shell: bash
         run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...

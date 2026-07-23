@@ -170,7 +170,7 @@ var (
 )
 
 func userPinnedAudioLang() string {
-	audioPinOnce.Do(func() { audioPinned = util.GlobalAudioLanguage })
+	audioPinOnce.Do(func() { audioPinned = util.GetGlobalAudioLanguage() })
 	return audioPinned
 }
 
