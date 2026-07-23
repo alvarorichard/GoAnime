@@ -127,15 +127,22 @@ func (m *model) View() tea.View {
 	// Returns the UI layout: status message, progress bar, and quit instruction
 	// When done successfully, render exactly 100% using ViewAs to bypass spring animation.
 	// On error, show the bar at whatever position it was at.
+	//
+	// The download goroutine (downloadAndPlayEpisode) mutates m.done, m.err and
+	// m.status under m.mu while this render runs on the Bubble Tea loop goroutine,
+	// so we must read them under the same lock — otherwise it's a data race.
+	m.mu.Lock()
 	var bar string
 	if m.done && m.err == nil {
 		bar = m.progress.ViewAs(1.0)
 	} else {
 		bar = m.progress.View()
 	}
+	status := m.status
+	m.mu.Unlock()
 
 	return tea.NewView("\n" +
-		pad + statusStyle.Render(m.status) + "\n\n" + // Render the styled status message
+		pad + statusStyle.Render(status) + "\n\n" + // Render the styled status message
 		pad + bar + "\n\n" + // Render the progress bar
 		pad + "Press Ctrl+C to quit") // Show quit instruction
 }
