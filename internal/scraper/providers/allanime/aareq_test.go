@@ -30,11 +30,10 @@ import (
 // aaReqPayload mirrors the JSON the token wraps, so the test can assert each
 // field the server checks.
 type aaReqPayload struct {
-	V       int    `json:"v"`
-	TS      int64  `json:"ts"`
-	Epoch   int    `json:"epoch"`
-	BuildID string `json:"buildId"`
-	QH      string `json:"qh"`
+	V     int    `json:"v"`
+	TS    int64  `json:"ts"`
+	Epoch int    `json:"epoch"`
+	QH    string `json:"qh"`
 }
 
 // decryptAAReqAsServer performs the exact validation an AllAnime edge does:
@@ -70,26 +69,25 @@ func TestBuildAAReq_ServerCanValidateEntireContract(t *testing.T) {
 	const qh = allAnimePersistedQueryHash
 	const now = int64(1751990400000) // fixed wall clock (ms)
 
-	token, err := buildAAReqAt(qh, now)
+	token, err := buildAAReqAt(qh, allAnimeKey, testAAEpoch, now)
 	require.NoError(t, err)
 
 	payload, iv := decryptAAReqAsServer(t, token)
 
 	// Payload fields the server checks.
 	assert.Equal(t, 1, payload.V, "protocol version field")
-	assert.Equal(t, 4128, payload.Epoch, "epoch must be the fixed 4128 constant")
-	assert.Equal(t, "9", payload.BuildID, "buildId must be the fixed \"9\" constant")
+	assert.Equal(t, 4128, payload.Epoch, "epoch must be the per-epoch value bound into the token")
 	assert.Equal(t, qh, payload.QH, "qh must be the persisted-query hash")
 
 	// Timestamp must be floored to the 5-minute window.
 	wantTS := (now / aaReqWindowMillis) * aaReqWindowMillis
 	assert.Equal(t, wantTS, payload.TS, "ts must be floored to the 5-minute bucket")
 
-	// The IV on the wire must equal SHA-256("4128:9:<qh>:<ts>")[:12] — the
+	// The IV on the wire must equal SHA-256("<epoch>:<qh>:<ts>")[:12] — the
 	// server re-derives it from the decrypted payload and compares.
-	seed := fmt.Sprintf("4128:9:%s:%d", qh, payload.TS)
+	seed := fmt.Sprintf("%s:%s:%d", testAAEpoch, qh, payload.TS)
 	sum := sha256.Sum256([]byte(seed))
-	assert.Equal(t, sum[:12], iv, "IV must be the first 12 bytes of SHA-256 over the fixed seed")
+	assert.Equal(t, sum[:12], iv, "IV must be the first 12 bytes of SHA-256 over the epoch:qh:ts seed")
 }
 
 func TestBuildAAReq_DeterministicWithinWindow(t *testing.T) {
@@ -100,9 +98,9 @@ func TestBuildAAReq_DeterministicWithinWindow(t *testing.T) {
 	// Two calls in the same 5-minute bucket must produce byte-identical tokens
 	// (GCM with a fixed key+iv+plaintext is deterministic). This is what lets
 	// the server cache/verify without clock skew within the window.
-	a, err := buildAAReqAt(qh, base+1000)
+	a, err := buildAAReqAt(qh, allAnimeKey, testAAEpoch, base+1000)
 	require.NoError(t, err)
-	b, err := buildAAReqAt(qh, base+aaReqWindowMillis-1)
+	b, err := buildAAReqAt(qh, allAnimeKey, testAAEpoch, base+aaReqWindowMillis-1)
 	require.NoError(t, err)
 	assert.Equal(t, a, b, "same 5-minute window ⇒ identical token")
 }
@@ -115,9 +113,9 @@ func TestBuildAAReq_ChangesAcrossWindows(t *testing.T) {
 	// Crossing into the next window changes ts, which changes both the payload
 	// and the derived IV, so the token must differ — a stale token would be
 	// rejected by the server.
-	a, err := buildAAReqAt(qh, base)
+	a, err := buildAAReqAt(qh, allAnimeKey, testAAEpoch, base)
 	require.NoError(t, err)
-	b, err := buildAAReqAt(qh, base+aaReqWindowMillis)
+	b, err := buildAAReqAt(qh, allAnimeKey, testAAEpoch, base+aaReqWindowMillis)
 	require.NoError(t, err)
 	assert.NotEqual(t, a, b, "next 5-minute window ⇒ different token")
 }
@@ -129,9 +127,9 @@ func TestBuildAAReq_BoundToQueryHash(t *testing.T) {
 	// The qh is bound into both the payload and the IV seed, so two different
 	// hashes must yield different tokens — the token cannot be replayed for a
 	// different query.
-	a, err := buildAAReqAt("d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec", now)
+	a, err := buildAAReqAt("d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec", allAnimeKey, testAAEpoch, now)
 	require.NoError(t, err)
-	b, err := buildAAReqAt("0000000000000000000000000000000000000000000000000000000000000000", now)
+	b, err := buildAAReqAt("0000000000000000000000000000000000000000000000000000000000000000", allAnimeKey, testAAEpoch, now)
 	require.NoError(t, err)
 	assert.NotEqual(t, a, b, "token must be bound to the query hash")
 }
@@ -141,7 +139,7 @@ func TestBuildAAReq_ProductionUsesLiveClock(t *testing.T) {
 	// The exported wrapper must produce a currently-valid token (non-empty,
 	// server-decryptable) using the real clock — guards against the wrapper
 	// being accidentally short-circuited.
-	token, err := buildAAReq(allAnimePersistedQueryHash)
+	token, err := buildAAReq(allAnimePersistedQueryHash, &aaKeys{key: allAnimeKey, epoch: testAAEpoch})
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	payload, _ := decryptAAReqAsServer(t, token)

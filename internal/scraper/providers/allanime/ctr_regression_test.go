@@ -42,12 +42,12 @@ import (
 
 // TestGetEpisodeURL_UsesPersistedQueryGETFirst pins the modern transport: the
 // AllAnime endpoint returns `sourceUrls` only on the persisted-query GET path
-// carrying the aaReq token and Origin: https://youtu-chan.com. POST is the
+// carrying the aaReq token and Origin: https://mkissa.to. POST is the
 // legacy fallback and must not be issued when GET succeeds.
 func TestGetEpisodeURL_UsesPersistedQueryGETFirst(t *testing.T) {
 	t.Parallel()
 
-	const expectedHash = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
+	const expectedHash = "f4662f4b7510b26795dd53ef824a0bf1740fbbc5d1273fab18222ac831bca8d0"
 
 	linkServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -69,8 +69,8 @@ func TestGetEpisodeURL_UsesPersistedQueryGETFirst(t *testing.T) {
 			assert.Contains(t, vars, `"episodeString":"5"`, "GET must carry episodeString")
 			assert.Contains(t, ext, expectedHash, "GET must carry persistedQuery sha256Hash")
 			assert.Contains(t, ext, `"aaReq"`, "GET must carry the aaReq crypto token")
-			assert.Equal(t, "https://youtu-chan.com", r.Header.Get("Origin"),
-				"GET must send Origin: https://youtu-chan.com (else AllAnime strips response)")
+			assert.Equal(t, "https://mkissa.to", r.Header.Get("Origin"),
+				"GET must send Origin: https://mkissa.to (else AllAnime strips response)")
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprint(w, buildSourceURLsJSON(
 				struct{ url, name string }{linkServer.URL, "Default"},

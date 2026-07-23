@@ -29,13 +29,33 @@ import (
 // Test helpers
 // ---------------------------------------------------------------------------
 
-// newTestClient builds an AllAnimeClient pointed at the given httptest server.
+// allAnimeKey / allAnimeKeyHex are a FIXED fixture key for the offline crypto
+// round-trip tests. Production derives the real key dynamically per epoch (see
+// fetchAAKeys); these only need to be a valid 32-byte AES-256 key shared by the
+// encrypt and decrypt sides of the tests.
+const allAnimeKeyHex = "22196fa6afca95309fdabe9a3534b87cd2454e50efeabfcbdbdfd3de678b3982"
+
+var allAnimeKey = func() []byte {
+	k, err := hex.DecodeString(allAnimeKeyHex)
+	if err != nil || len(k) != 32 {
+		panic("allanime test: bad fixture key")
+	}
+	return k
+}()
+
+// testAAEpoch is the fixture epoch the injected key is paired with.
+const testAAEpoch = "4128"
+
+// newTestClient builds an AllAnimeClient pointed at the given httptest server,
+// with the fixture key injected so getAAKeys never scrapes the live bundle.
 func newTestClient(serverURL string) *AllAnimeClient {
 	return &AllAnimeClient{
 		client:    util.GetFastClient(),
 		referer:   AllAnimeReferer,
 		apiBase:   serverURL,
 		userAgent: netx.UserAgent,
+		keys:      &aaKeys{key: allAnimeKey, epoch: testAAEpoch},
+		keysExp:   time.Now().Add(time.Hour),
 	}
 }
 
@@ -262,8 +282,8 @@ func TestAllAnimeGetLinksClassifiesHTMLBodyAsSourceUnavailable(t *testing.T) {
 
 func TestAllAnimeKeyMatchesOpenSSL(t *testing.T) {
 	t.Parallel()
-	// Literal 32-byte hex key, rotated 2026-07-08 (ani-cli PR #1772). It is no
-	// longer derived from a passphrase; it must equal the constant verbatim.
+	// The production key is now derived per epoch (fetchAAKeys); this pins the
+	// offline test fixture key as a valid 32-byte AES-256 key.
 	assert.Equal(t, allAnimeKeyHex, hex.EncodeToString(allAnimeKey))
 }
 
@@ -393,7 +413,7 @@ func TestDecodeToBeParsedRoundTrip(t *testing.T) {
 	plaintext := `{"data":{"episode":{"sourceUrls":[{"sourceUrl":"--504c4c484b021717","sourceName":"TestProvider"}]}}}`
 	blob := encryptToBeParsed(t, plaintext)
 
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "TestProvider", sources[0].sourceName)
@@ -409,7 +429,7 @@ func TestDecodeToBeParsedMultipleSources(t *testing.T) {
 	]}}}`
 	blob := encryptToBeParsed(t, plaintext)
 
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 3)
 	assert.Equal(t, "Provider1", sources[0].sourceName)
@@ -421,14 +441,14 @@ func TestDecodeToBeParsedMultipleSources(t *testing.T) {
 func TestDecodeToBeParsedTooShort(t *testing.T) {
 	t.Parallel()
 	blob := base64.StdEncoding.EncodeToString([]byte("short"))
-	_, err := decodeToBeParsed(blob)
+	_, err := decodeToBeParsed(blob, allAnimeKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
 
 func TestDecodeToBeParsedBadBase64(t *testing.T) {
 	t.Parallel()
-	_, err := decodeToBeParsed("!!!not-base64!!!")
+	_, err := decodeToBeParsed("!!!not-base64!!!", allAnimeKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "base64")
 }
@@ -437,7 +457,7 @@ func TestDecodeToBeParsedExactly12BytesNoCiphertext(t *testing.T) {
 	t.Parallel()
 	// 12 bytes < 29 (GCM minimum: 1 version + 12 nonce + 16 tag) → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 12))
-	_, err := decodeToBeParsed(blob)
+	_, err := decodeToBeParsed(blob, allAnimeKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
@@ -446,7 +466,7 @@ func TestDecodeToBeParsedExactly13BytesMinimal(t *testing.T) {
 	t.Parallel()
 	// 13 bytes < 29 → too short
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 13))
-	_, err := decodeToBeParsed(blob)
+	_, err := decodeToBeParsed(blob, allAnimeKey)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
@@ -456,7 +476,7 @@ func TestDecodeToBeParsedExactly28BytesTooShort(t *testing.T) {
 	// GCM minimum is 29 bytes (1 version + 12 nonce + 16 tag + 0 plaintext).
 	// 28 bytes trips the length guard before any crypto runs.
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 28))
-	_, err := decodeToBeParsed(blob)
+	_, err := decodeToBeParsed(blob, allAnimeKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too short")
 }
@@ -466,7 +486,7 @@ func TestDecodeToBeParsedAllZeroBytesFailsAuth(t *testing.T) {
 	// A 29-byte all-zero blob passes the length guard but is not a valid GCM
 	// message (the zero tag won't authenticate), so Open rejects it.
 	blob := base64.StdEncoding.EncodeToString(make([]byte, 29))
-	_, err := decodeToBeParsed(blob)
+	_, err := decodeToBeParsed(blob, allAnimeKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "GCM decrypt failed")
 }
@@ -487,7 +507,7 @@ func TestDecodeToBeParsedCorruptedCiphertext(t *testing.T) {
 	}
 	corruptBlob := base64.StdEncoding.EncodeToString(raw)
 
-	_, err = decodeToBeParsed(corruptBlob)
+	_, err = decodeToBeParsed(corruptBlob, allAnimeKey)
 	require.Error(t, err, "tampered ciphertext must not produce a usable result")
 	assert.Contains(t, err.Error(), "GCM decrypt failed",
 		"GCM authenticates — tampering must be rejected at the cipher layer")
@@ -503,7 +523,7 @@ func TestDecodeToBeParsedTruncatedCiphertext(t *testing.T) {
 	// 16 bytes < 29 minimum → "too short" before GCM is even attempted
 	truncated := base64.StdEncoding.EncodeToString(raw[:16])
 
-	_, err = decodeToBeParsed(truncated)
+	_, err = decodeToBeParsed(truncated, allAnimeKey)
 	assert.Error(t, err, "truncated blob should fail")
 }
 
@@ -513,7 +533,7 @@ func TestDecodeToBeParsedRegexFallbackSourceUrlBeforeSourceName(t *testing.T) {
 	plaintext := `[{"sourceUrl":"--5959","sourceName":"Fallback1"}]`
 	blob := encryptToBeParsed(t, plaintext)
 
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "Fallback1", sources[0].sourceName)
@@ -526,7 +546,7 @@ func TestDecodeToBeParsedRegexFallbackReversedFieldOrder(t *testing.T) {
 	plaintext := `[{"sourceName":"Reversed","sourceUrl":"--0a0b"}]`
 	blob := encryptToBeParsed(t, plaintext)
 
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "Reversed", sources[0].sourceName)
@@ -542,7 +562,7 @@ func TestDecodeToBeParsedDeterministicWithFixedNonce(t *testing.T) {
 	blob2 := encryptToBeParsedWithNonce(t, plaintext, nonce)
 	assert.Equal(t, blob1, blob2, "same nonce + plaintext must produce same blob")
 
-	sources, err := decodeToBeParsed(blob1)
+	sources, err := decodeToBeParsed(blob1, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "Det", sources[0].sourceName)
@@ -558,7 +578,7 @@ func TestDecodeToBeParsedLargePayload(t *testing.T) {
 	plaintext := `{"data":{"episode":{"sourceUrls":[` + strings.Join(entries, ",") + `]}}}`
 	blob := encryptToBeParsed(t, plaintext)
 
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	assert.Len(t, sources, 100)
 }
@@ -573,7 +593,7 @@ func TestExtractSourceURLsHandlesToBeParsed(t *testing.T) {
 	blob := encryptToBeParsed(t, plaintext)
 	response := buildToBeParsedResponse(blob)
 
-	urls := NewAllAnimeClient().extractSourceURLs(response)
+	urls := newTestClient("").extractSourceURLs(response)
 	require.Len(t, urls, 1)
 	assert.Equal(t, "https://allanime.day/clock.json", urls[0])
 }
@@ -614,7 +634,7 @@ func TestExtractSourceURLsToBeParsedFallsBackToStandard(t *testing.T) {
 	// Response has "tobeparsed" but with garbage blob; should fall back to sourceUrls
 	response := `{"data":{"episode":{"tobeparsed":"not-valid-base64","sourceUrls":[{"sourceUrl":"--0809","sourceName":"Fallback"}]}}}`
 
-	urls := NewAllAnimeClient().extractSourceURLs(response)
+	urls := newTestClient("").extractSourceURLs(response)
 	require.Len(t, urls, 1)
 	assert.Equal(t, "01", urls[0])
 }
@@ -1868,7 +1888,7 @@ func TestDecodeToBeParsedCrossValidateWithOpenSSL(t *testing.T) {
 	blob := base64.StdEncoding.EncodeToString(payload)
 
 	// Decrypt using production code
-	sources, err := decodeToBeParsed(blob)
+	sources, err := decodeToBeParsed(blob, allAnimeKey)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 	assert.Equal(t, "TestProvider", sources[0].sourceName)
@@ -1970,7 +1990,7 @@ func TestDecodeToBeParsedNoPanicOnMalformed(t *testing.T) {
 		t.Run(fmt.Sprintf("input_%d", i), func(t *testing.T) {
 			t.Parallel()
 			// Must not panic
-			_, _ = decodeToBeParsed(input)
+			_, _ = decodeToBeParsed(input, allAnimeKey)
 		})
 	}
 }

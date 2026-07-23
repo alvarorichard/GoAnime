@@ -1,6 +1,7 @@
 package superflix
 
 import (
+	"os"
 	"regexp"
 	"sync"
 	"testing"
@@ -13,7 +14,17 @@ import (
 // SuperFlix embed through Turnstile and logs the first getVideo request (and any
 // server-chooser UI it finds). Diagnostic only — no assertions. Requires a real
 // browser + network.
+//
+// Env-gated behind GOANIME_RECON=1 (like TestSolverRebuildsAfterClose): the
+// playwright OnResponse/OnPopup callbacks race the test goroutine under -race,
+// and a plain `go test ./...` on a dev box (no -short, not CI) would otherwise
+// launch a browser and flake. Run explicitly:
+//
+//	GOANIME_RECON=1 go test ./internal/scraper/providers/superflix/ -run TestSuperFlixGetVideoSniff_Live -v -count=1 -timeout 120s
 func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
+	if os.Getenv("GOANIME_RECON") == "" {
+		t.Skip("set GOANIME_RECON=1 (launches a real browser + hits the live site)")
+	}
 	skipInCI(t) // launches a real browser + hits the live site; recon-only, never in CI
 	if testing.Short() {
 		t.Skip("skipping live browser recon in -short")

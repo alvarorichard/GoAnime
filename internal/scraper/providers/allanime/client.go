@@ -2,9 +2,11 @@
 package allanime
 
 import (
+	"bytes"
 	"net/http"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -12,31 +14,24 @@ import (
 
 const (
 	// AllAnimeReferer is the Referer/Origin AllAnime binds its API to. Rotated
-	// 2026-07-08 to youtu-chan.com (ani-cli PR #1772); requests carrying the old
-	// allmanga.to referer now receive a stripped response.
-	AllAnimeReferer = "https://youtu-chan.com"
-	AllAnimeBase    = "allanime.day"
-	AllAnimeAPI     = "https://api.allanime.day/api"
-
-	// allAnimeKeyHex is the AES-256 key (32 bytes, hex) used for BOTH the
-	// aaReq request-signing token and the `tobeparsed` response decryption.
-	// Rotated 2026-07-08 (ani-cli PR #1772); the old SHA-256("Xot36i3lK3:v1")
-	// derivation no longer matches, so the key is now carried literally.
-	allAnimeKeyHex = "22196fa6afca95309fdabe9a3534b87cd2454e50efeabfcbdbdfd3de678b3982"
+	// 2026-07-22 to mkissa.to (ani-cli PR #1779); requests carrying the old
+	// youtu-chan.com referer now receive a stripped response.
+	AllAnimeReferer = "https://mkissa.to"
+	// AllAnimeBase is the host that internal ("--"-encoded) source URLs resolve
+	// to (e.g. the /clock.json embeds). Unchanged by the mkissa migration.
+	AllAnimeBase = "allanime.day"
+	// AllAnimeAPI is the GraphQL endpoint. Moved off api.allanime.day to the
+	// mkissa mirror 2026-07-22 (ani-cli PR #1779).
+	AllAnimeAPI = "https://api.mkissa.net/api"
 
 	// allAnimePersistedQueryHash is the Apollo persistedQuery sha256 for the
 	// `episode { sourceUrls / tobeparsed }` query, and doubles as the `qh`
-	// field bound into the aaReq token.
-	allAnimePersistedQueryHash = "d405d0edd690624b66baba3068e0edc3ac90f1597d898a1ec8db4e5c43c00fec"
+	// field bound into the aaReq token. Rotated 2026-07-22 (ani-cli PR #1779).
+	allAnimePersistedQueryHash = "f4662f4b7510b26795dd53ef824a0bf1740fbbc5d1273fab18222ac831bca8d0"
 
 	// allAnimePersistedQueryOrigin is the Origin the GET path must send.
 	// AllAnime returns a stripped (no `tobeparsed`) response for any other Origin.
-	allAnimePersistedQueryOrigin = "https://youtu-chan.com"
-
-	// allAnimeAAReqEpoch and allAnimeAAReqBuildID are fixed protocol constants
-	// bound into the aaReq token's payload and IV derivation (ani-cli PR #1772).
-	allAnimeAAReqEpoch   = "4128"
-	allAnimeAAReqBuildID = "9"
+	allAnimePersistedQueryOrigin = "https://mkissa.to"
 )
 
 // Pre-compiled regexes for AllAnime scraper (avoid per-call compilation)
@@ -52,6 +47,12 @@ type AllAnimeClient struct {
 	referer   string
 	apiBase   string
 	userAgent string
+
+	// keyMu guards the cached per-epoch AES material (keys/keysExp). The key is
+	// scraped from the mkissa CDN bundle (fetchAAKeys) and reused until keysExp.
+	keyMu   sync.Mutex
+	keys    *aaKeys
+	keysExp time.Time
 }
 
 // allAnimeClientInstance is a singleton for connection reuse
@@ -74,12 +75,15 @@ func NewAllAnimeClient() *AllAnimeClient {
 }
 
 // NewClientForTest returns a client whose API base points at a test server.
-// Only for tests.
+// Only for tests. A fixed fixture key is injected so the client never scrapes
+// the live mkissa key bundle over the network during tests.
 func NewClientForTest(serverURL string) *AllAnimeClient {
 	return &AllAnimeClient{
 		client:    util.GetFastClient(),
 		referer:   AllAnimeReferer,
 		apiBase:   serverURL,
 		userAgent: netx.UserAgent,
+		keys:      &aaKeys{key: bytes.Repeat([]byte{0x2a}, 32), epoch: "0"},
+		keysExp:   time.Now().Add(time.Hour),
 	}
 }

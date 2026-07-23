@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -16,48 +15,38 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// allAnimeKey is the AES-256 key (hex-decoded from allAnimeKeyHex). Panics at
-// init if the constant is malformed — that is a build-time programmer error,
-// never a runtime condition.
-var allAnimeKey = func() []byte {
-	k, err := hex.DecodeString(allAnimeKeyHex)
-	if err != nil || len(k) != 32 {
-		panic(fmt.Sprintf("allanime: invalid allAnimeKeyHex (len=%d, err=%v)", len(k), err))
-	}
-	return k
-}()
-
-// buildAAReq builds the "aaReq" proof token AllAnime now requires on the
+// buildAAReq builds the "aaReq" proof token AllAnime requires on the
 // episode-sources query — its absence yields an AA_CRYPTO_MISSING error
-// (ani-cli PR #1772). The token is:
+// (ani-cli PR #1772/#1779). The token is:
 //
 //	base64( 0x01 || iv(12) || AES-256-GCM(key, iv, payload) )
 //
 // where payload is a small JSON blob pinned to the current 5-minute time
-// window and iv is the first 12 bytes of SHA-256 over a fixed seed + that
-// window. The server recomputes and validates it, so byte-exactness of both
-// the payload and the seed matters.
-func buildAAReq(qh string) (string, error) {
-	return buildAAReqAt(qh, time.Now().UnixMilli())
+// window and iv is the first 12 bytes of SHA-256 over the epoch + qh + window.
+// The server recomputes and validates it, so byte-exactness of both the payload
+// and the seed matters. Key and epoch come from the per-epoch derived material
+// (see fetchAAKeys).
+func buildAAReq(qh string, keys *aaKeys) (string, error) {
+	return buildAAReqAt(qh, keys.key, keys.epoch, time.Now().UnixMilli())
 }
 
 // aaReqWindowMillis is the clock-bucket width the token's timestamp is rounded
 // to; it must match the server's window or the token is rejected.
 const aaReqWindowMillis = 300000 // 5 minutes
 
-// buildAAReqAt is buildAAReq with an injectable wall-clock (milliseconds since
-// epoch) so the token is deterministic in tests. Production passes time.Now.
-func buildAAReqAt(qh string, nowMillis int64) (string, error) {
+// buildAAReqAt is buildAAReq with the key/epoch and an injectable wall-clock
+// (milliseconds since epoch) passed explicitly, so the token is deterministic
+// in tests. Production derives key/epoch from fetchAAKeys and passes time.Now.
+func buildAAReqAt(qh string, key []byte, epoch string, nowMillis int64) (string, error) {
 	ts := (nowMillis / aaReqWindowMillis) * aaReqWindowMillis
 
-	payload := fmt.Sprintf(`{"v":1,"ts":%d,"epoch":%s,"buildId":"%s","qh":"%s"}`,
-		ts, allAnimeAAReqEpoch, allAnimeAAReqBuildID, qh)
+	payload := fmt.Sprintf(`{"v":1,"ts":%d,"epoch":%s,"qh":"%s"}`, ts, epoch, qh)
 
-	ivSeed := fmt.Sprintf("%s:%s:%s:%d", allAnimeAAReqEpoch, allAnimeAAReqBuildID, qh, ts)
+	ivSeed := fmt.Sprintf("%s:%s:%d", epoch, qh, ts)
 	ivHash := sha256.Sum256([]byte(ivSeed))
 	iv := ivHash[:12]
 
-	block, err := aes.NewCipher(allAnimeKey)
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("aaReq cipher: %w", err)
 	}
@@ -99,7 +88,7 @@ type sourceEntry struct {
 // The trailing 16 bytes are a valid GCM auth tag again (they were a discarded
 // dead slot during the 2026-04 CTR interlude), so Open both decrypts and
 // authenticates in one step. Minimum valid size: 1 + 12 + 0 + 16 = 29 bytes.
-func decodeToBeParsed(blob string) ([]sourceInfo, error) {
+func decodeToBeParsed(blob string, key []byte) ([]sourceInfo, error) {
 	util.Debugf("AllAnime tobeparsed raw blob (first 60 chars): %q", blob[:min(60, len(blob))])
 
 	// Try standard base64 first, then URL-safe (AllAnime may use either)
@@ -127,7 +116,7 @@ func decodeToBeParsed(blob string) ([]sourceInfo, error) {
 	sealed := data[13:]
 	util.Debugf("AllAnime tobeparsed nonce: %x", nonce)
 
-	block, err := aes.NewCipher(allAnimeKey)
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
 	}

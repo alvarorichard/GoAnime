@@ -27,9 +27,9 @@ var LinkPriorities = []string{
 
 // GetEpisodeURL gets the streaming URL for a specific episode using priority-based selection.
 //
-// Transport (updated 2026-04-29 per ani-cli commit 1ccbf71f):
-//  1. Try the persisted-query GET path with `Origin: https://youtu-chan.com`.
-//     This is the only path AllAnime serves `tobeparsed` blobs on as of 2026-04-22.
+// Transport (updated 2026-07-22 per ani-cli PR #1779):
+//  1. Try the persisted-query GET path with `Origin: https://mkissa.to`.
+//     This is the only path AllAnime serves `tobeparsed` blobs on.
 //  2. Fall back to the legacy POST when the GET response lacks usable source data
 //     (older mirrors and edge nodes still serve the legacy shape over POST).
 func (c *AllAnimeClient) GetEpisodeURL(animeID, episodeNo, mode, quality string) (string, map[string]string, error) {
@@ -81,10 +81,14 @@ func (c *AllAnimeClient) fetchEpisodeEntries(varsBytes []byte) ([]sourceEntry, e
 }
 
 // tryPersistedQueryGET issues the Apollo persistedQuery GET request. AllAnime
-// only serves the encrypted `tobeparsed` blob on this path with the youtu-chan
-// Origin header.
+// only serves the encrypted `tobeparsed` blob on this path with the mkissa.to
+// Origin header and a valid aaReq token.
 func (c *AllAnimeClient) tryPersistedQueryGET(varsBytes []byte) ([]byte, error) {
-	aaReq, err := buildAAReq(allAnimePersistedQueryHash)
+	keys, err := c.getAAKeys()
+	if err != nil {
+		return nil, fmt.Errorf("aaReq keys: %w", err)
+	}
+	aaReq, err := buildAAReq(allAnimePersistedQueryHash, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +139,11 @@ func (c *AllAnimeClient) tryPersistedQueryGET(varsBytes []byte) ([]byte, error) 
 func (c *AllAnimeClient) legacyPOST(varsBytes []byte) ([]byte, error) {
 	episodeEmbedGQL := `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { episodeString sourceUrls }}`
 
-	aaReq, err := buildAAReq(allAnimePersistedQueryHash)
+	keys, err := c.getAAKeys()
+	if err != nil {
+		return nil, fmt.Errorf("aaReq keys: %w", err)
+	}
+	aaReq, err := buildAAReq(allAnimePersistedQueryHash, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -322,19 +330,23 @@ func (c *AllAnimeClient) extractSourceEntries(response string) []sourceEntry {
 	if strings.Contains(response, `"tobeparsed"`) {
 		blob := extractToBeParsedBlob(response)
 		if blob != "" {
-			sources, err := decodeToBeParsed(blob)
-			if err == nil && len(sources) > 0 {
-				util.Debugf("Decoded %d sources from tobeparsed blob", len(sources))
-				entries := make([]sourceEntry, 0, len(sources))
-				for _, src := range sources {
-					entries = append(entries, sourceEntry{
-						URL:  c.decodeSourceURL(src.sourceURL),
-						Name: src.sourceName,
-					})
+			if keys, kerr := c.getAAKeys(); kerr != nil {
+				util.Debugf("AllAnime aaKeys unavailable for tobeparsed decode: %v", kerr)
+			} else {
+				sources, err := decodeToBeParsed(blob, keys.key)
+				if err == nil && len(sources) > 0 {
+					util.Debugf("Decoded %d sources from tobeparsed blob", len(sources))
+					entries := make([]sourceEntry, 0, len(sources))
+					for _, src := range sources {
+						entries = append(entries, sourceEntry{
+							URL:  c.decodeSourceURL(src.sourceURL),
+							Name: src.sourceName,
+						})
+					}
+					return entries
 				}
-				return entries
+				util.Debugf("Failed to decode tobeparsed blob: %v", err)
 			}
-			util.Debugf("Failed to decode tobeparsed blob: %v", err)
 		}
 	}
 
@@ -382,17 +394,21 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 		if strings.Contains(response, `"tobeparsed"`) {
 			blob := extractToBeParsedBlob(response)
 			if blob != "" {
-				sources, err := decodeToBeParsed(blob)
-				if err == nil && len(sources) > 0 {
-					util.Debugf("Decoded %d sources from tobeparsed blob", len(sources))
-					var urls []string
-					for _, src := range sources {
-						decoded := c.decodeSourceURL(src.sourceURL)
-						urls = append(urls, decoded)
+				if keys, kerr := c.getAAKeys(); kerr != nil {
+					util.Debugf("AllAnime aaKeys unavailable for tobeparsed decode: %v", kerr)
+				} else {
+					sources, err := decodeToBeParsed(blob, keys.key)
+					if err == nil && len(sources) > 0 {
+						util.Debugf("Decoded %d sources from tobeparsed blob", len(sources))
+						var urls []string
+						for _, src := range sources {
+							decoded := c.decodeSourceURL(src.sourceURL)
+							urls = append(urls, decoded)
+						}
+						return urls
 					}
-					return urls
+					util.Debugf("Failed to decode tobeparsed blob: %v", err)
 				}
-				util.Debugf("Failed to decode tobeparsed blob: %v", err)
 			}
 		}
 	}
