@@ -11,6 +11,7 @@ project.
 - [Code Standards](#code-standards)
 - [Quality Assurance](#quality-assurance)
 - [Testing](#testing)
+- [Adding or Removing a Source](#adding-or-removing-a-source)
 - [Build Process](#build-process)
 - [Contributing Guidelines](#contributing-guidelines)
 
@@ -338,6 +339,59 @@ func TestPlayer_Play(t *testing.T) {
     }
 }
 ```
+
+## Adding or Removing a Source
+
+Streaming sources follow the **self-registering source registry** described in
+[`ARCHITECTURE.md`](ARCHITECTURE.md) (Model B, with Model C capability
+interfaces). A source describes itself as data via `Describe() source.Descriptor`
+and registers itself in `init()`. Resolution, search fan-out, the circuit
+breaker and the kill-switch all read that data — **there is no central `switch`
+to update in the dispatch path**.
+
+**Procedure, touchpoint table and checklists:
+[`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md).** Read `Goyabu` as the reference
+implementation — it is the simplest complete source in the tree.
+
+### The layers
+
+```
+internal/scraper/providers/<name>/          → leaf HTTP/scraping client
+internal/scraper/manager.go                 → UnifiedScraper adapter
+internal/api/providers/source_providers.go  → the source.Source (registered in init)
+internal/api/source/                        → registry: Register / Resolve / ActiveSources
+```
+
+### Adding
+
+Adding a source currently costs **12 files, ~20 edit sites**. Three of them are
+the architecture — the leaf package, `source/kind.go`, and the provider block in
+`source_providers.go`. The rest (the `UnifiedScraper` adapter, `tagging.go`,
+`naming.go`'s `tagPattern`, `enhanced.go`'s five hand-maintained switches,
+`source_health.go`, the `--source` help text) is migration debt that has not been
+eliminated yet. `ADDING_A_SOURCE.md` lists every site with file and line; use it
+as a checklist rather than working from memory — omitting `naming.go` or
+`source_health.go` fails silently, not at compile time.
+
+Capabilities are discovered by type assertion, not by a flag: `HasSeasons() bool`
+(`source.Seasoned`), `WarmUp(ctx) error` (`source.BrowserGated`), and
+`Search(ctx, query)` (`source.Searchable` — a source without it is silently
+excluded from the search fan-out).
+
+### Removing — pick the weakest level that works
+
+1. **Runtime, no rebuild:** `GOANIME_DISABLED_SOURCES="Goyabu"` — the correct
+   first response to a source that broke overnight.
+2. **Ship disabled:** `DefaultDisabled: true` in the descriptor; users opt in
+   with `GOANIME_ENABLED_SOURCES`. Code and tests stay.
+3. **Permanent delete:** follow the ordered 13-step checklist in
+   [`ADDING_A_SOURCE.md`](ADDING_A_SOURCE.md#removing) — it removes references
+   before the things they reference, so the build stays green at every step.
+   Mind the `ScraperType` `iota`: append or delete at the end, never insert or
+   remove in the middle.
+
+After either operation, run the mandatory gate from
+[Quality Assurance](#quality-assurance) and confirm coverage stays **≥ 66.0%**.
 
 ## Build Process
 
