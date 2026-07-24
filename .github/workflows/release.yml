@@ -210,7 +210,57 @@ jobs:
           retention-days: 1
 
   # =============================================================================
-  # Job 3: Build Windows Installer using Inno Setup
+  # Job 3: Merge macOS binaries into a single universal (x86_64 + arm64) binary
+  # =============================================================================
+  macos-universal:
+    name: Build macOS Universal Binary
+    runs-on: macos-latest
+    needs: build
+    steps:
+      - name: Download macOS amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-darwin-amd64
+          path: staging/amd64
+
+      - name: Download macOS arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-darwin-arm64
+          path: staging/arm64
+
+      - name: Create universal binary with lipo
+        run: |
+          mkdir -p dist
+
+          OUTPUT_NAME="${{ env.BINARY_NAME }}-darwin-universal"
+
+          lipo -create \
+            "staging/amd64/${{ env.BINARY_NAME }}-darwin-amd64" \
+            "staging/arm64/${{ env.BINARY_NAME }}-darwin-arm64" \
+            -output "dist/${OUTPUT_NAME}"
+
+          chmod +x "dist/${OUTPUT_NAME}"
+
+          # Verify both architectures are present
+          lipo -info "dist/${OUTPUT_NAME}"
+          lipo -info "dist/${OUTPUT_NAME}" | grep -q "x86_64" || { echo "x86_64 slice missing"; exit 1; }
+          lipo -info "dist/${OUTPUT_NAME}" | grep -q "arm64" || { echo "arm64 slice missing"; exit 1; }
+
+          # Sanity check: the native slice must actually run
+          "dist/${OUTPUT_NAME}" --version || true
+
+          echo "Built ${OUTPUT_NAME} (x86_64 + arm64) with SQLite support"
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-darwin-universal
+          path: dist/${{ env.BINARY_NAME }}-darwin-universal
+          retention-days: 1
+
+  # =============================================================================
+  # Job 4: Build Windows Installer using Inno Setup
   # =============================================================================
   windows-installer:
     name: Build Windows Installer
@@ -354,12 +404,12 @@ jobs:
           retention-days: 1
 
   # =============================================================================
-  # Job 4: Create release with all artifacts
+  # Job 5: Create release with all artifacts
   # =============================================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build, windows-installer]
+    needs: [build, macos-universal, windows-installer]
     permissions:
       contents: write
     steps:
@@ -398,7 +448,11 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          
+
+          # Only the universal macOS binary is published; drop the per-arch
+          # darwin builds that only exist as lipo inputs
+          rm -rf artifacts/${{ env.BINARY_NAME }}-darwin-amd64 artifacts/${{ env.BINARY_NAME }}-darwin-arm64
+
           # Move all binaries to release folder and create archives
           for dir in artifacts/*/; do
             if [ -d "$dir" ]; then
@@ -517,8 +571,7 @@ jobs:
           echo "|---|---|---|" >> RELEASE_NOTES.md
           echo "| Linux | x86_64 | \`goanime-linux-amd64\` |" >> RELEASE_NOTES.md
           echo "| Linux | ARM64 | \`goanime-linux-arm64\` |" >> RELEASE_NOTES.md
-          echo "| macOS | x86_64 (Intel) | \`goanime-darwin-amd64\` |" >> RELEASE_NOTES.md
-          echo "| macOS | ARM64 (Apple Silicon) | \`goanime-darwin-arm64\` |" >> RELEASE_NOTES.md
+          echo "| macOS | Universal (Intel x86_64 + Apple Silicon ARM64) | \`goanime-darwin-universal\` |" >> RELEASE_NOTES.md
           echo "| Windows | Installer | \`GoAnime-Installer-\${VERSION#v}.exe\` (Recommended) |" >> RELEASE_NOTES.md
           echo "| Windows | x86_64 | \`goanime-windows-amd64.exe\` |" >> RELEASE_NOTES.md
           echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> RELEASE_NOTES.md
@@ -537,12 +590,10 @@ jobs:
           files: |
             release/goanime-linux-amd64
             release/goanime-linux-arm64
-            release/goanime-darwin-amd64
-            release/goanime-darwin-arm64
+            release/goanime-darwin-universal
             release/goanime-linux-amd64.tar.gz
             release/goanime-linux-arm64.tar.gz
-            release/goanime-darwin-amd64.tar.gz
-            release/goanime-darwin-arm64.tar.gz
+            release/goanime-darwin-universal.tar.gz
             release/goanime-windows-amd64.zip
             release/GoAnime-Installer-*.exe
             release/checksums-sha256.txt
@@ -566,7 +617,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # =============================================================================
-  # Job 5: Publish to AUR (Arch User Repository)
+  # Job 6: Publish to AUR (Arch User Repository)
   # =============================================================================
   aur-publish:
     name: Publish to AUR

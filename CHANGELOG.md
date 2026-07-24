@@ -115,6 +115,10 @@ Release date: 2026-07-24
 - New daily `source-health.yml` workflow runs live source diagnostics, the Goyabu Blogger playback diagnostic, and the public SDK integration tests.
 - Test files renamed to intent-revealing names (`ci_skip_test.go` → `skip_in_ci_test.go`, `source_diagnostic_extras_test.go` → `source_diagnostic_errors_test.go`).
 
+### Packaging
+
+- macOS releases now ship a single universal binary (`goanime-darwin-universal`) that runs natively on both Intel (x86_64) and Apple Silicon (arm64). The per-architecture `goanime-darwin-amd64` / `goanime-darwin-arm64` assets are no longer published — they are built only as `lipo` inputs. The updater already falls back to the universal asset, so existing installs keep updating.
+
 ### Documentation & Repo Hygiene
 
 - Add `docs/ARCHITECTURE.md` and `docs/architecture/ARCH_STAGES.md` documenting the Model B → Model C source-registry migration.
