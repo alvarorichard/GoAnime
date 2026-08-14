@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -924,4 +925,36 @@ func TestDownloadToFile_DefaultClient(t *testing.T) {
 
 	err := DownloadToFile(context.Background(), srv.URL+"/normal.m3u8", out, nil, nil)
 	require.Error(t, err, "default client must refuse loopback (SSRF guard)")
+}
+
+// ---------------------------------------------------------------------------
+// Regression: issue #193 — http.NoBody requests must set GetBody
+// ---------------------------------------------------------------------------
+
+// TestNewNoBodyRequest_SetsGetBody guards the surf HTTP/2->HTTP/1.1 fallback
+// fix. Requests built with plain http.NewRequest(..., http.NoBody) have nil
+// GetBody (NoBody hits the default branch of NewRequest, which sets no
+// GetBody), and surf refuses to fall back from a failed h2 dial to HTTP/1.1
+// with "cannot retry because req.GetBody is nil". newNoBodyRequest must
+// always set a repeatable GetBody that reproduces the empty body.
+func TestNewNoBodyRequest_SetsGetBody(t *testing.T) {
+	t.Parallel()
+	req, err := newNoBodyRequest(t.Context(), "https://cdn.example.com/master.m3u8")
+	require.NoError(t, err)
+	require.NotNil(t, req.GetBody, "GetBody must be set so surf's h2->h1.1 fallback can retry (issue #193)")
+
+	body, err := req.GetBody()
+	require.NoError(t, err)
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+	assert.Empty(t, data, "GetBody must reproduce the empty request body")
+	require.NoError(t, body.Close())
+
+	// GetBody must be repeatable for retries and redirects.
+	body2, err := req.GetBody()
+	require.NoError(t, err)
+	data2, err := io.ReadAll(body2)
+	require.NoError(t, err)
+	assert.Empty(t, data2, "GetBody must be repeatable")
+	require.NoError(t, body2.Close())
 }

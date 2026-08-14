@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/Microsoft/go-winio v0.6.2

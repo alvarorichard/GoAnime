@@ -55,6 +55,72 @@ func isSuperFlixTextHLS(u string) bool {
 	return strings.Contains(lower, "/cdn/hls/") && strings.Contains(lower, "master.txt")
 }
 
+// Bundled media-tool installers used when ffmpeg/ffprobe are missing from
+// PATH. They download static builds via the go-ytdlp cache (the same
+// mechanism that fetches yt-dlp). Package-level so tests can stub them
+// without hitting the network.
+var (
+	installFFmpegFunc = func(ctx context.Context) (string, error) {
+		resolved, err := ytdlp.InstallFFmpeg(ctx, nil)
+		if err != nil {
+			return "", err
+		}
+		return resolved.Executable, nil
+	}
+	installFFprobeFunc = func(ctx context.Context) (string, error) {
+		resolved, err := ytdlp.InstallFFprobe(ctx, nil)
+		if err != nil {
+			return "", err
+		}
+		return resolved.Executable, nil
+	}
+)
+
+// resolveFFmpeg returns an absolute, symlink-resolved path to an ffmpeg
+// executable, installing a bundled static build when ffmpeg is not on PATH.
+//
+// The native HLS downloader cannot substitute for ffmpeg on SuperFlix:
+// segments are video-only with a separate audio group, and yt-dlp treats the
+// .txt master playlist as a plain file, so ffmpeg (or the bundled build) is
+// the only reliable way to mux the final file.
+func resolveFFmpeg(installFFmpeg func(ctx context.Context) (string, error)) (string, error) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		// ffmpeg is not on PATH. Install the bundled static build so
+		// SuperFlix HLS downloads work without the user installing ffmpeg.
+		util.Debug("ffmpeg not found on PATH, installing bundled ffmpeg", "error", err)
+		installCtx, installCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		var installErr error
+		ffmpegPath, installErr = installFFmpeg(installCtx)
+		installCancel()
+		if installErr != nil {
+			return "", fmt.Errorf("ffmpeg is required for SuperFlix HLS downloads and the bundled install failed: %w", installErr)
+		}
+	}
+	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
+	if err != nil || !filepath.IsAbs(ffmpegPath) {
+		return "", fmt.Errorf("invalid ffmpeg executable path")
+	}
+	return ffmpegPath, nil
+}
+
+// resolveFFprobe is resolveFFmpeg's sibling for ffprobe (shipped in the same
+// bundled archive). It never fails the download: a missing or broken ffprobe
+// only disables duration-based progress.
+func resolveFFprobe(installFFprobe func(ctx context.Context) (string, error)) string {
+	if ffprobePath, err := exec.LookPath("ffprobe"); err == nil {
+		if resolved, evalErr := filepath.EvalSymlinks(ffprobePath); evalErr == nil && filepath.IsAbs(resolved) {
+			return resolved
+		}
+	}
+	installCtx, installCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer installCancel()
+	if resolved, err := installFFprobe(installCtx); err == nil {
+		return resolved
+	}
+	return ""
+}
+
 func ffmpegHLSDownloadArgs(streamURL, outputPath, referer string) []string {
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
@@ -94,12 +160,15 @@ func ffprobeHLSDurationArgs(streamURL, referer string) []string {
 	)
 }
 
-func probeHLSDuration(ctx context.Context, streamURL, referer string) (time.Duration, error) {
-	ffprobePath, err := exec.LookPath("ffprobe")
-	if err != nil {
-		return 0, err
+func probeHLSDuration(ctx context.Context, streamURL, referer, ffprobePath string) (time.Duration, error) {
+	if ffprobePath == "" {
+		var err error
+		ffprobePath, err = exec.LookPath("ffprobe")
+		if err != nil {
+			return 0, err
+		}
 	}
-	ffprobePath, err = filepath.EvalSymlinks(ffprobePath)
+	ffprobePath, err := filepath.EvalSymlinks(ffprobePath)
 	if err != nil || !filepath.IsAbs(ffprobePath) {
 		return 0, fmt.Errorf("invalid ffprobe executable path")
 	}
@@ -170,9 +239,15 @@ func validateDownloadedVideo(path string) error {
 	return nil
 }
 
-// downloadWithFFmpegHLS handles SuperFlix's master.txt playlist. Plain Go HTTP
-// and yt-dlp currently receive a 14-byte anti-bot response, while ffmpeg can
-// fetch the stream when HLS is forced and extension checks are relaxed.
+// downloadWithFFmpegHLS handles SuperFlix's master.txt playlist. The playlist
+// and its disguised .js/.css MPEG-TS segments are fetchable over plain HTTP
+// with the right User-Agent/Referer, but the segments are video-only with a
+// separate audio group — ffmpeg is the only supported downloader that follows
+// the master playlist's alternate audio and muxes the final file. yt-dlp
+// treats the .txt master as a generic file, and the native HLS downloader
+// rejects the separate audio group. If ffmpeg is not installed, a bundled
+// static build is installed via the go-ytdlp cache (same mechanism as
+// yt-dlp).
 func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
 	safeURL, err := sanitizeMediaTarget(streamURL)
 	if err != nil {
@@ -186,14 +261,11 @@ func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	ffmpegPath, err := exec.LookPath("ffmpeg")
+	ffmpegPath, err := resolveFFmpeg(installFFmpegFunc)
 	if err != nil {
-		return fmt.Errorf("ffmpeg is required for SuperFlix HLS downloads: %w", err)
+		return err
 	}
-	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
-	if err != nil || !filepath.IsAbs(ffmpegPath) {
-		return fmt.Errorf("invalid ffmpeg executable path")
-	}
+	ffprobePath := resolveFFprobe(installFFprobeFunc)
 
 	partPath := partialMediaPath(safePath)
 	_ = os.Remove(partPath)
@@ -207,7 +279,7 @@ func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
 	}
 	args := ffmpegHLSDownloadArgs(safeURL, partPath, referer)
 	util.Debug("Starting ffmpeg HLS download", "streamURL", safeURL, "referer", referer)
-	duration, probeErr := probeHLSDuration(ctx, safeURL, referer)
+	duration, probeErr := probeHLSDuration(ctx, safeURL, referer, ffprobePath)
 	if probeErr != nil {
 		util.Debug("Could not probe HLS duration; progress will use downloaded bytes", "error", probeErr)
 	} else {

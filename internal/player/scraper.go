@@ -673,10 +673,18 @@ func newSurfClient() *surf.Client {
 // newSurfDownloadClient creates a surf client for downloading large files.
 // Unlike newSurfClient, it follows redirects (googlevideo CDN uses 302s)
 // and has a 10-minute timeout to handle large video chunks.
+//
+// Force HTTP/1.1 for the same reason as newBloggerProxyClient: some
+// googlevideo edges omit ALPN, so surf's HTTP/2 dial fails before any request
+// is sent ("negotiated ALPN \"\", expected h2"). Requests built with
+// http.NoBody then trip surf's h2->h1.1 fallback guard ("cannot retry because
+// req.GetBody is nil"), failing the download with "failed to get content
+// length". HTTP/1.1 handles both the HEAD length probe and chunked Range GETs.
 func newSurfDownloadClient() *surf.Client {
 	return surf.NewClient().
 		Builder().
 		Impersonate().Chrome().
+		ForceHTTP1().
 		Timeout(10 * time.Minute).
 		Build().
 		Unwrap()

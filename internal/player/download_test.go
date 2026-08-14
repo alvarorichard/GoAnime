@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
+	"github.com/enetx/surf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -372,6 +374,65 @@ func TestDownloadWithNativeHLS_NormalSegments(t *testing.T) {
 	)
 
 	require.NoError(t, err)
+}
+
+// TestSurfClient_NoBodyHTTP2Fallback verifies that HLS downloads driven
+// through the surf-backed client succeed against TLS endpoints that only
+// negotiate HTTP/1.1.
+//
+// Regression for issue #193: HLS requests were built with http.NoBody, which
+// leaves GetBody nil. The surf-backed client (Chrome TLS fingerprint, HTTP/2
+// enabled) first tries its HTTP/2 transport; when the server negotiates
+// HTTP/1.1 (googlevideo edges omit ALPN), surf cannot fall back to HTTP/1.1
+// and fails with "cannot retry because req GetBody is nil: negotiated ALPN
+// expected h2". newNoBodyRequest now sets GetBody so the HTTP/1.1 fallback
+// succeeds, matching the behavior of the Blogger proxy client.
+func TestSurfClient_NoBodyHTTP2Fallback(t *testing.T) {
+	t.Parallel()
+
+	srv := newHTTP11OnlyTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/normal.m3u8":
+			fmt.Fprint(w, `#EXTM3U
+#EXT-X-TARGETDURATION:5
+#EXTINF:5.0,
+seg.ts
+#EXT-X-ENDLIST
+`)
+		default:
+			// All segment requests return fake MPEG-TS data
+			w.Write(make([]byte, 2048))
+		}
+	}))
+
+	// Chrome-impersonating surf client like util.GetDownloadClient().
+	// Deliberately not ForceHTTP1: the HLS downloader must keep HTTP/2 for
+	// CDNs that support it and still work when they do not.
+	surfClient := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Timeout(20 * time.Second).
+		Build().
+		Unwrap().
+		Std()
+
+	tmpDir := t.TempDir()
+	outFile := filepath.Join(tmpDir, "h1only.ts")
+
+	err := hls.DownloadToFileWithClient(
+		t.Context(),
+		surfClient,
+		srv.URL+"/normal.m3u8",
+		outFile,
+		nil,
+		nil,
+	)
+
+	require.NoError(t, err, "download must succeed when the server only negotiates HTTP/1.1")
+
+	info, err := os.Stat(outFile)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2048), info.Size(), "output file must contain the segment data")
 }
 
 // =====================================================================

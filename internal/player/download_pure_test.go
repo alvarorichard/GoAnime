@@ -115,14 +115,26 @@ func TestFFmpegHLSDownloadArgs_SuperFlixContract(t *testing.T) {
 
 func TestFFmpegProgressTime(t *testing.T) {
 	t.Parallel()
-	d, ok := ffmpegProgressTime("out_time_us=128500000")
-	require.True(t, ok)
-	assert.Equal(t, 2*time.Minute+8500*time.Millisecond, d)
-
-	_, ok = ffmpegProgressTime("total_size=1234")
-	assert.False(t, ok)
-	_, ok = ffmpegProgressTime("out_time_us=invalid")
-	assert.False(t, ok)
+	tests := []struct {
+		line string
+		want time.Duration
+		ok   bool
+	}{
+		{"out_time_us=128500000", 2*time.Minute + 8500*time.Millisecond, true},
+		{"out_time_us=1000000", time.Second, true},
+		{"out_time_us=0", 0, true},
+		{"  out_time_us=2500000  ", 2500 * time.Millisecond, true},
+		{"total_size=1234", 0, false},
+		{"progress=continue", 0, false},
+		{"out_time_us=invalid", 0, false},
+		{"out_time_us=-5", 0, false},
+		{"", 0, false},
+	}
+	for _, tc := range tests {
+		got, ok := ffmpegProgressTime(tc.line)
+		assert.Equal(t, tc.ok, ok, "line %q", tc.line)
+		assert.Equal(t, tc.want, got, "line %q", tc.line)
+	}
 }
 
 func TestUpdateTimedDownloadProgress(t *testing.T) {

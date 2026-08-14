@@ -28,6 +28,21 @@ import (
 // merges separate video and audio tracks.
 var ErrSeparateAudioTracks = errors.New("master playlist has separate audio tracks; use yt-dlp for proper audio/video merging")
 
+// newNoBodyRequest creates a body-less GET request whose GetBody returns
+// http.NoBody. Surf's HTTP/2->HTTP/1.1 fallback (and Go's HTTP/2 transport
+// auto-retry) refuses to retry requests with a non-nil Body but a nil GetBody,
+// failing with "cannot retry because req.GetBody is nil" whenever a CDN does
+// not negotiate h2 (e.g. some googlevideo edges). A GetBody that reproduces
+// the empty body lets those retries succeed.
+func newNoBodyRequest(ctx context.Context, url string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+	return req, nil
+}
+
 // Segment represents a single HLS segment
 type Segment struct {
 	URL      string
@@ -113,7 +128,7 @@ func (d *Downloader) Download(ctx context.Context, url, output string, headers m
 
 // parsePlaylist downloads and parses the M3U8 playlist
 func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[string]string) (*M3U8Playlist, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := newNoBodyRequest(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +265,7 @@ func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 
 // parseMediaPlaylist fetches and parses a media playlist (not master)
 func (d *Downloader) parseMediaPlaylist(ctx context.Context, url string, headers map[string]string) (*M3U8Playlist, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+	req, err := newNoBodyRequest(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +391,7 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 func (d *Downloader) downloadSegment(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
 	maxRetries := 5
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
+		req, err := newNoBodyRequest(ctx, url)
 		if err != nil {
 			return nil, err
 		}
