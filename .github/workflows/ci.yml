@@ -58,7 +58,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.1
           args: --timeout=20m
 
       - name: Install go-critic
