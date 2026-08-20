@@ -23,8 +23,11 @@ package player
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,11 +50,66 @@ printf '123.5\n'
 
 const fakeSuperFlixMasterURL = "https://cdn.example.com/cdn/hls/token/master.txt"
 
+// TestMain doubles as the Windows stub for the fake ffmpeg/ffprobe binaries:
+// writeFakeExecutable copies the test binary itself, so on Windows (where
+// shell scripts are not executable) invoking the fake re-runs this process,
+// which detects its own argv[0] basename and behaves like the real tool.
+// On Unix the script-based fakes are used instead.
+func TestMain(m *testing.M) {
+	switch {
+	case strings.HasPrefix(filepath.Base(os.Args[0]), "ffprobe"):
+		if out := os.Getenv("GOANIME_FAKE_STDOUT"); out != "" {
+			fmt.Print(out)
+		} else {
+			fmt.Println("123.5")
+		}
+		os.Exit(0)
+	case strings.HasPrefix(filepath.Base(os.Args[0]), "ffmpeg"):
+		_ = os.WriteFile(os.Args[len(os.Args)-1], []byte("FAKE-MP4-DATA-0123456789"), 0o644)
+		fmt.Println("out_time_us=1000000")
+		fmt.Println("progress=continue")
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
 func writeFakeExecutable(t *testing.T, dir, name, content string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(os.Args[0])
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o755))
+		if strings.HasPrefix(name, "ffprobe") {
+			stdout := content
+			if start := strings.Index(stdout, "'"); start >= 0 {
+				if end := strings.LastIndex(stdout, "'"); end > start {
+					stdout = stdout[start+1 : end]
+				}
+			}
+			t.Setenv("GOANIME_FAKE_STDOUT", stdout)
+		}
+		return path
+	}
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o755))
 	return path
+}
+
+// assertRefersToSameFile compares by file identity (os.SameFile) instead of
+// path strings. Path equality is unreliable across platforms: macOS firmlinks
+// (/var -> /private/var), Windows 8.3 short names (RUNNER~1 vs runneradmin)
+// and case folding all break string comparisons while resolving to the same
+// file. Production normalizes with filepath.EvalSymlinks, which handles some
+// of these but not all.
+func assertRefersToSameFile(t *testing.T, want, got string) {
+	t.Helper()
+	wantStat, err := os.Stat(want)
+	require.NoError(t, err, "expected path %q does not exist", want)
+	gotStat, err := os.Stat(got)
+	require.NoError(t, err, "resolved path %q does not exist", got)
+	assert.True(t, os.SameFile(wantStat, gotStat), "paths %q and %q must refer to the same file", want, got)
 }
 
 // fakeFFmpegHLSOutputDir returns a directory inside the user home, which
@@ -81,7 +139,7 @@ func TestResolveFFmpeg_OnPath_SkipsInstaller(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.False(t, installed)
-	assert.Equal(t, fake, path)
+	assertRefersToSameFile(t, fake, path)
 }
 
 // TestResolveFFmpeg_NotOnPath_Installs: a missing ffmpeg triggers the
@@ -98,7 +156,7 @@ func TestResolveFFmpeg_NotOnPath_Installs(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, installerCalled, "missing ffmpeg must trigger the bundled install")
-	assert.Equal(t, fake, path)
+	assertRefersToSameFile(t, fake, path)
 }
 
 // TestResolveFFmpeg_InstallerFailure_ReturnsClearError: if the bundled
@@ -142,7 +200,7 @@ func TestResolveFFprobe_OnPath(t *testing.T) {
 	})
 
 	assert.False(t, installed)
-	assert.Equal(t, fake, got)
+	assertRefersToSameFile(t, fake, got)
 }
 
 // TestResolveFFprobe_NotOnPath_Installs: missing ffprobe triggers the
@@ -155,7 +213,7 @@ func TestResolveFFprobe_NotOnPath_Installs(t *testing.T) {
 		return fake, nil
 	})
 
-	assert.Equal(t, fake, got)
+	assertRefersToSameFile(t, fake, got)
 }
 
 // TestResolveFFprobe_Nowhere_ReturnsEmpty: when neither PATH nor the
