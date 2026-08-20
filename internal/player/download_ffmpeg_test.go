@@ -88,6 +88,7 @@ func writeFakeExecutable(t *testing.T, dir, name, content string) string {
 					stdout = stdout[start+1 : end]
 				}
 			}
+			stdout = strings.ReplaceAll(stdout, `\n`, "\n")
 			t.Setenv("GOANIME_FAKE_STDOUT", stdout)
 		}
 		return path
