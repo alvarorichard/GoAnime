@@ -61,17 +61,6 @@ jobs:
           version: v2.13.1
           args: --timeout=20m
 
-      - name: Install go-critic
-        run: go install github.com/go-critic/go-critic/cmd/gocritic@v0.14.4
-
-      - name: Run every go-critic check
-        run: >
-          gocritic check -enableAll
-          -@hugeParam.sizeThreshold=256
-          -@rangeValCopy.sizeThreshold=512
-          -@unnamedResult.checkExported=true
-          ./...
-
   security:
     name: Security gates
     runs-on: ubuntu-latest

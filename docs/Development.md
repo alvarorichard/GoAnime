@@ -178,7 +178,7 @@ Pull requests that do not pass these checks will NOT be accepted.**
 |------|---------|---------|
 | `go vet` | Built-in static analysis for common mistakes | Included with Go |
 | `golangci-lint` | Aggregated correctness and resource-safety analysis | See the [official installation guide](https://golangci-lint.run/docs/welcome/install/) |
-| `go-critic` | Bug, performance, style, experimental, and opinionated checks | `go install github.com/go-critic/go-critic/cmd/gocritic@v0.14.4` |
+| `go-critic` | Bug, performance, style, experimental, and opinionated checks | Run via `golangci-lint` (configured in `.golangci.yml`) |
 | `gosec` | Security-focused source scanner | `go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0` |
 | `govulncheck` | Detects reachable known vulnerabilities | `go install golang.org/x/vuln/cmd/govulncheck@v1.6.0` |
 
@@ -188,14 +188,9 @@ Run **all** of them before submitting any contribution:
 # Static analysis (built-in)
 go vet ./...
 
-# Aggregated static analysis (includes staticcheck)
+# Aggregated static analysis (includes staticcheck and every go-critic
+# checker, with thresholds matching go-critic's recommendations)
 golangci-lint run ./...
-
-# Every go-critic checker, using the same thresholds as CI
-gocritic check -enableAll \
-  -@hugeParam.sizeThreshold=256 \
-  -@rangeValCopy.sizeThreshold=512 \
-  -@unnamedResult.checkExported=true ./...
 
 # Security scanner — flags insecure code patterns
 gosec ./...
@@ -245,14 +240,8 @@ go fmt ./...
 # Built-in static analysis
 go vet ./...
 
-# Full configured linter suite
+# Full configured linter suite (includes every go-critic checker)
 golangci-lint run ./...
-
-# Every go-critic checker
-gocritic check -enableAll \
-  -@hugeParam.sizeThreshold=256 \
-  -@rangeValCopy.sizeThreshold=512 \
-  -@unnamedResult.checkExported=true ./...
 
 # Security scanners
 gosec -exclude-generated ./...
