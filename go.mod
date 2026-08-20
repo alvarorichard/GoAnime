@@ -43,16 +43,13 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/enetx/http v1.0.29 // indirect
 	github.com/enetx/http2 v1.0.26 // indirect
 	github.com/enetx/http3 v1.0.9 // indirect
-	github.com/enetx/iter v0.0.0-20260703211843-75f7a9fffd6d // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.10 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
@@ -63,7 +60,6 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nsf/termbox-go v1.1.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.61.0 // indirect
 	github.com/refraction-networking/utls v1.8.3-0.20260623165621-880e27d8b0e5 // indirect
