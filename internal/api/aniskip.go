@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // GetAniSkipData fetches skip times data for a given anime ID and episode
@@ -58,7 +58,7 @@ func ParseAniSkipResponse(responseText string, episode *models.Episode, timePrec
 	}
 
 	var data models.SkipTimesResponse
-	err := json.Unmarshal([]byte(responseText), &data)
+	err := jsonx.Unmarshal([]byte(responseText), &data)
 	if err != nil {
 		return fmt.Errorf("error unmarshalling response: %w", err)
 	}

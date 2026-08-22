@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // tvmazeBaseURL is the keyless TVmaze API. Overridable in tests.
@@ -105,9 +106,7 @@ func tvmazeGetJSON(ctx context.Context, httpClient *http.Client, u string, dst a
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(body, dst)
+	// Streamed straight off the wire: the bytes are only ever decoded, so there
+	// is no reason to materialise the whole payload first.
+	return jsonx.Decode(resp.Body, 4*1024*1024, dst)
 }

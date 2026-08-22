@@ -84,13 +84,13 @@ func TestCountSourceBreakdown_AnimeFireCaseInsensitive(t *testing.T) {
 // reported (the original breakdown silently dropped it).
 func TestCountSourceBreakdown_RealisticPayload(t *testing.T) {
 	var animes []*models.Anime
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		animes = append(animes, &models.Anime{Source: "Animefire.io"})
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		animes = append(animes, &models.Anime{Source: "AllAnime"})
 	}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		animes = append(animes, &models.Anime{Source: "Goyabu"})
 	}
 

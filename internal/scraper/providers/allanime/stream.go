@@ -14,6 +14,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // LinkPriorities defines the order of priority for link domains (from Curd project)
@@ -351,7 +352,7 @@ func (c *AllAnimeClient) extractSourceEntries(response string) []sourceEntry {
 	}
 
 	var episodeResp EpisodeResponse
-	if err := json.Unmarshal([]byte(response), &episodeResp); err == nil {
+	if err := jsonx.Unmarshal([]byte(response), &episodeResp); err == nil {
 		entries := make([]sourceEntry, 0, len(episodeResp.Data.Episode.SourceUrls))
 		for _, sourceUrl := range episodeResp.Data.Episode.SourceUrls {
 			if after, ok := strings.CutPrefix(sourceUrl.SourceUrl, "--"); ok {
@@ -389,7 +390,7 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 	// Check if the response contains a "tobeparsed" blob (AES-encrypted source URLs).
 	// This matches the bash script: if printf "%s" "$api_resp" | grep -q '"tobeparsed"'; then ...
 	var rawResp map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(response), &rawResp); err == nil {
+	if err := jsonx.Unmarshal([]byte(response), &rawResp); err == nil {
 		// Look for "tobeparsed" at any level of the response
 		if strings.Contains(response, `"tobeparsed"`) {
 			blob := extractToBeParsedBlob(response)
@@ -415,7 +416,7 @@ func (c *AllAnimeClient) extractSourceURLs(response string) []string {
 
 	// Standard path: parse the JSON response to extract sourceUrls
 	var episodeResp EpisodeResponse
-	if err := json.Unmarshal([]byte(response), &episodeResp); err == nil {
+	if err := jsonx.Unmarshal([]byte(response), &episodeResp); err == nil {
 		var urls []string
 		for _, sourceUrl := range episodeResp.Data.Episode.SourceUrls {
 			if after, ok := strings.CutPrefix(sourceUrl.SourceUrl, "--"); ok {
@@ -510,7 +511,7 @@ func (c *AllAnimeClient) extractVideoLinks(response string) map[string]string {
 
 	// Parse JSON response
 	var jsonData map[string]any
-	if err := json.Unmarshal([]byte(response), &jsonData); err == nil {
+	if err := jsonx.Unmarshal([]byte(response), &jsonData); err == nil {
 		// Extract links from JSON structure
 		if linksInterface, ok := jsonData["links"].([]any); ok {
 			for _, linkInterface := range linksInterface {
@@ -717,7 +718,7 @@ func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, 
 	}
 
 	var wrapper filemoonResponse
-	if err := json.Unmarshal(body, &wrapper); err != nil {
+	if err := jsonx.Unmarshal(body, &wrapper); err != nil {
 		return nil, fmt.Errorf("filemoon: malformed JSON wrapper: %w", err)
 	}
 	if len(wrapper.KeyParts) < 2 {
@@ -730,7 +731,7 @@ func (c *AllAnimeClient) getFilemoonLinks(sourceURL string) (map[string]string, 
 	}
 
 	var parsed filemoonSources
-	if err := json.Unmarshal(plaintext, &parsed); err != nil {
+	if err := jsonx.Unmarshal(plaintext, &parsed); err != nil {
 		return nil, fmt.Errorf("filemoon: decrypted payload is not valid JSON: %w", err)
 	}
 

@@ -190,10 +190,8 @@ func (g *gatedStubSource) WarmUp(_ context.Context) error {
 func TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &gatedStubSource{
-		stubSource: stubSource{
-			desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
-			url:  "https://cdn.example/should-not-be-reached.m3u8",
-		},
+		desc:      source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+		url:       "https://cdn.example/should-not-be-reached.m3u8",
 		warmUpErr: assert.AnError,
 	}
 	restore := source.SwapRegistryForTesting(stub)
@@ -213,10 +211,8 @@ func TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch(t *testing
 func TestGetVideoURLForEpisodeEnhanced_WarmUpSuccessProceedsToFetch(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &gatedStubSource{
-		stubSource: stubSource{
-			desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
-			url:  "https://cdn.example/sf.m3u8",
-		},
+		desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+		url:  "https://cdn.example/sf.m3u8",
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)

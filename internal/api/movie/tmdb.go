@@ -2,7 +2,6 @@
 package movie
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 const (
@@ -66,7 +66,7 @@ func (c *TMDBClient) SearchMulti(query string) (*models.TMDBSearchResult, error)
 	}
 
 	var result models.TMDBSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse TMDB response: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func (c *TMDBClient) SearchMovies(query string) (*models.TMDBSearchResult, error
 	}
 
 	var result models.TMDBSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse TMDB response: %w", err)
 	}
 
@@ -116,7 +116,7 @@ func (c *TMDBClient) SearchTV(query string) (*models.TMDBSearchResult, error) {
 	}
 
 	var result models.TMDBSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse TMDB response: %w", err)
 	}
 
@@ -138,7 +138,7 @@ func (c *TMDBClient) GetMovieDetails(movieID int) (*models.TMDBDetails, error) {
 	}
 
 	var details models.TMDBDetails
-	if err := json.Unmarshal(body, &details); err != nil {
+	if err := jsonx.Unmarshal(body, &details); err != nil {
 		return nil, fmt.Errorf("failed to parse movie details: %w", err)
 	}
 
@@ -155,7 +155,7 @@ func (c *TMDBClient) GetTVDetails(tvID int) (*models.TMDBDetails, error) {
 	}
 
 	var details models.TMDBDetails
-	if err := json.Unmarshal(body, &details); err != nil {
+	if err := jsonx.Unmarshal(body, &details); err != nil {
 		return nil, fmt.Errorf("failed to parse TV details: %w", err)
 	}
 
@@ -173,7 +173,7 @@ func (c *TMDBClient) GetTVSeasons(tvID int) ([]models.TMDBSeason, error) {
 	var result struct {
 		Seasons []models.TMDBSeason `json:"seasons"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse seasons: %w", err)
 	}
 
@@ -192,7 +192,7 @@ func (c *TMDBClient) GetSeasonEpisodes(tvID, seasonNumber int) ([]models.TMDBEpi
 	var result struct {
 		Episodes []models.TMDBEpisode `json:"episodes"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse episodes: %w", err)
 	}
 
@@ -209,7 +209,7 @@ func (c *TMDBClient) GetCredits(mediaType string, mediaID int) (*models.TMDBCred
 	}
 
 	var credits models.TMDBCredits
-	if err := json.Unmarshal(body, &credits); err != nil {
+	if err := jsonx.Unmarshal(body, &credits); err != nil {
 		return nil, fmt.Errorf("failed to parse credits: %w", err)
 	}
 
@@ -229,7 +229,7 @@ func (c *TMDBClient) FindByIMDBID(imdbID string) (*models.TMDBMedia, error) {
 		MovieResults []models.TMDBMedia `json:"movie_results"`
 		TVResults    []models.TMDBMedia `json:"tv_results"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse find response: %w", err)
 	}
 
@@ -262,7 +262,7 @@ func (c *TMDBClient) GetTrending(mediaType, timeWindow string) (*models.TMDBSear
 	}
 
 	var result models.TMDBSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse trending response: %w", err)
 	}
 
@@ -279,7 +279,7 @@ func (c *TMDBClient) GetPopular(mediaType string) (*models.TMDBSearchResult, err
 	}
 
 	var result models.TMDBSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse popular response: %w", err)
 	}
 

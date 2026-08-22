@@ -11,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/pkg/errors"
 )
 
@@ -120,7 +121,7 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 	cacheKey := "anilist:" + strings.ToLower(cleanedName)
 	if cached, found := cache.Get(cacheKey); found {
 		var result models.AniListResponse
-		if err := json.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
+		if err := jsonx.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
 			util.Debugf("AniList cache hit for: '%s'", cleanedName)
 			return &result, nil
 		}
@@ -173,7 +174,7 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 
 		var result models.AniListResponse
-		if err := json.Unmarshal(body, &result); err != nil {
+		if err := jsonx.Unmarshal(body, &result); err != nil {
 			lastErr = fmt.Errorf("JSON decode failed: %w", err)
 			continue
 		}

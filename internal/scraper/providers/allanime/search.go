@@ -11,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // SearchAnime searches for anime using AllAnime API (based on Curd implementation)
@@ -98,7 +99,7 @@ func (c *AllAnimeClient) SearchAnime(query string, options ...any) ([]*models.An
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := jsonx.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

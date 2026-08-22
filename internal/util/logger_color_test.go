@@ -28,7 +28,6 @@ func TestPrefixForProfile_ASCII_NoEscapeCodes(t *testing.T) {
 		colorprofile.NoTTY,
 		colorprofile.ASCII,
 	} {
-		p := p
 		t.Run(p.String(), func(t *testing.T) {
 			t.Parallel()
 			got := prefixForProfile(p)

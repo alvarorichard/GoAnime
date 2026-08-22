@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +31,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/lrstanley/go-ytdlp"
 	"golang.org/x/term"
 )
@@ -619,7 +619,7 @@ func selectAnimeFireDownloadSource(body []byte, quality string) (string, error) 
 
 func selectAnimeFireDownloadCandidates(body []byte, quality string) ([]string, error) {
 	var videoResponse VideoResponse
-	if err := json.Unmarshal(body, &videoResponse); err != nil {
+	if err := jsonx.Unmarshal(body, &videoResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse AnimeFire video API: %w", err)
 	}
 	if len(videoResponse.Data) > 0 {
@@ -1432,17 +1432,14 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 				util.Logger.Warn("Error closing response body", "error", err)
 			}
 		}()
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
-		if err != nil {
-			return nil, err
-		}
 		var videoResponse struct {
 			Data []struct {
 				Src   string `json:"src"`
 				Label string `json:"label"`
 			}
 		}
-		if err := json.Unmarshal(body, &videoResponse); err == nil && len(videoResponse.Data) > 0 {
+		// Streamed: the response bytes are only used for this decode.
+		if err := jsonx.Decode(resp.Body, 5*1024*1024, &videoResponse); err == nil && len(videoResponse.Data) > 0 {
 			var sources []struct {
 				Quality int
 				URL     string
@@ -1467,7 +1464,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 			Label string `json:"label"`
 		}
 	}
-	if err := json.Unmarshal([]byte(videoSrc), &respStruct); err == nil && len(respStruct.Data) > 0 {
+	if err := jsonx.Unmarshal([]byte(videoSrc), &respStruct); err == nil && len(respStruct.Data) > 0 {
 		var sources []struct {
 			Quality int
 			URL     string

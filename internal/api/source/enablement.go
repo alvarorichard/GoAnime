@@ -1,7 +1,7 @@
 package source
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -66,6 +66,6 @@ func DisabledSources() []SourceKind {
 	}
 	registryMu.RUnlock()
 
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }

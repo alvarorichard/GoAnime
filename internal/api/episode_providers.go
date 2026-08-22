@@ -10,6 +10,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // kitsuBaseURL is the Kitsu API root. It is a var so tests can point it at a
@@ -130,7 +131,7 @@ func (p *AniListProvider) FetchEpisodeData(animeID, episodeNo int, anime *models
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("JSON decode failed: %w", err)
 	}
 
@@ -224,7 +225,7 @@ func (p *KitsuProvider) fetchByAnimeName(anime *models.Anime, episodeNo int) err
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &searchResult); err != nil {
 		return fmt.Errorf("kitsu search decode failed: %w", err)
 	}
 
@@ -295,7 +296,7 @@ func (p *KitsuProvider) fetchEpisodeByKitsuID(kitsuAnimeID string, episodeNo int
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &result); err != nil {
 		return fmt.Errorf("JSON decode failed: %w", err)
 	}
 
@@ -354,7 +355,7 @@ func getAniListIDFromMAL(malID int) (int, error) {
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return 0, err
 	}
 
@@ -401,7 +402,7 @@ func getKitsuAnimeID(malID int) (string, error) {
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&mappingResult); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &mappingResult); err != nil {
 		return "", err
 	}
 

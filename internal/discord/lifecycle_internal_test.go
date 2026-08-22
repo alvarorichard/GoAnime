@@ -155,7 +155,7 @@ func TestStart_FailsLogin_NoTickerStarted(t *testing.T) {
 	withStubClient(t, stub)
 
 	a := &models.Anime{Name: "x", Episodes: []models.Episode{{Number: "1"}}}
-	rpu := NewRichPresenceUpdater(a, ptrBool(false), &sync.Mutex{}, 10*time.Millisecond, time.Second,
+	rpu := NewRichPresenceUpdater(a, new(false), &sync.Mutex{}, 10*time.Millisecond, time.Second,
 		"/sock", func(string, []any) (any, error) { return 0.0, nil })
 	rpu.Start()
 	// no goroutine started: closing done would normally race with goroutine,
@@ -189,7 +189,7 @@ func TestStartAndStop_PerformsUpdates(t *testing.T) {
 		Episodes: []models.Episode{{Number: "3"}},
 		Details:  models.AniListDetails{Title: models.Title{Romaji: "Foo"}},
 	}
-	rpu := NewRichPresenceUpdater(a, ptrBool(false), &sync.Mutex{}, 10*time.Millisecond, 1200*time.Second, "/sock", mpv)
+	rpu := NewRichPresenceUpdater(a, new(false), &sync.Mutex{}, 10*time.Millisecond, 1200*time.Second, "/sock", mpv)
 
 	// reset global timing state so updater is allowed to fire
 	clientMutex.Lock()
@@ -238,7 +238,7 @@ func TestUpdateDiscordPresence_SkipsWhenMutexBusy(t *testing.T) {
 	a := &models.Anime{}
 	rpu := &RichPresenceUpdater{
 		anime:      a,
-		isPaused:   ptrBool(false),
+		isPaused:   new(false),
 		animeMutex: mu,
 		mpvSendCommand: func(string, []any) (any, error) {
 			t.Fatalf("must not call MPV when mutex is busy")
@@ -273,7 +273,7 @@ func TestUpdateDiscordPresence_PublishesActivity(t *testing.T) {
 	}
 	rpu := &RichPresenceUpdater{
 		anime:      a,
-		isPaused:   ptrBool(false),
+		isPaused:   new(false),
 		animeMutex: &sync.Mutex{},
 		mpvSendCommand: func(_ string, args []any) (any, error) {
 			switch args[1].(string) {
@@ -496,4 +496,4 @@ func TestInitialize_BackgroundLoginSucceeds(t *testing.T) {
 	assert.True(t, m.IsInitialized())
 }
 
-func ptrBool(b bool) *bool { return &b }
+//go:fix inline

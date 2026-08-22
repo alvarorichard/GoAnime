@@ -13,6 +13,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // ErrSuperFlixNoServers is returned when /player/bootstrap responds with an
@@ -460,7 +461,7 @@ func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens
 			Options []SuperFlixServer `json:"options"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode bootstrap response: %w", err)
 	}
 
@@ -510,7 +511,7 @@ func (c *SuperFlixClient) GetSourceURL(ctx context.Context, videoID string, toke
 			VideoURL string `json:"video_url"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("failed to decode source response: %w", err)
 	}
 
@@ -592,20 +593,27 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 		return "", "", "", fmt.Errorf("player page dead (%d): %s", resp2.StatusCode, finalURL)
 	}
 
-	if strings.Contains(finalURL, "/video/") {
-		parts := strings.SplitN(finalURL, "/video/", 2)
-		baseURL = parts[0]
-		videoHash = strings.SplitN(parts[1], "?", 2)[0]
-		videoHash = strings.SplitN(videoHash, "#", 2)[0]
-	} else {
-		idx := strings.LastIndex(finalURL, "/")
-		if idx > 0 {
-			baseURL = finalURL[:idx]
-			videoHash = strings.SplitN(finalURL[idx+1:], "?", 2)[0]
-		}
-	}
+	baseURL, videoHash = splitPlayerURL(finalURL)
 
 	return baseURL, videoHash, string(body), nil
+}
+
+// splitPlayerURL splits a resolved player URL into its host prefix and the video
+// hash. The canonical shape is "<base>/video/<hash>[?query][#frag]"; hosts that
+// drop the "/video/" segment fall back to the last path element. Query strings
+// and fragments are never part of the hash.
+func splitPlayerURL(finalURL string) (baseURL, videoHash string) {
+	if base, rest, ok := strings.Cut(finalURL, "/video/"); ok {
+		baseURL = base
+		videoHash, _, _ = strings.Cut(rest, "?")
+		videoHash, _, _ = strings.Cut(videoHash, "#")
+		return baseURL, videoHash
+	}
+	if base, rest, ok := strings.CutLast(finalURL, "/"); ok && base != "" {
+		baseURL = base
+		videoHash, _, _ = strings.Cut(rest, "?")
+	}
+	return baseURL, videoHash
 }
 
 // fetchPlayerExtras loads the external player page for (host, hash) and pulls out
@@ -662,7 +670,7 @@ func (c *SuperFlixClient) fetchPlayerExtras(ctx context.Context, host, hash stri
 // ExtractPlayerExtras extracts defaultAudio and subtitles from the external player HTML
 func (c *SuperFlixClient) ExtractPlayerExtras(html string) (defaultAudio []string, subtitles []SuperFlixSubtitle) {
 	if m := sfDefaultAudioRe.FindStringSubmatch(html); len(m) > 1 {
-		_ = json.Unmarshal([]byte(m[1]), &defaultAudio)
+		_ = jsonx.Unmarshal([]byte(m[1]), &defaultAudio)
 	}
 
 	if m := sfSubtitleRe.FindStringSubmatch(html); len(m) > 1 {
@@ -713,7 +721,7 @@ func (c *SuperFlixClient) GetVideoAPI(ctx context.Context, playerBaseURL, videoH
 	}
 
 	var result getVideoResponse
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return "", "", fmt.Errorf("failed to decode video API response: %w", err)
 	}
 
@@ -818,7 +826,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	var videoIDStr string
 	for _, s := range servers {
 		var raw string
-		if err := json.Unmarshal(s.ID, &raw); err == nil {
+		if err := jsonx.Unmarshal(s.ID, &raw); err == nil {
 			if !strings.HasPrefix(raw, "fallback") {
 				videoIDStr = raw
 				break
@@ -826,7 +834,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		}
 		// Try as number
 		var num json.Number
-		if err := json.Unmarshal(s.ID, &num); err == nil {
+		if err := jsonx.Unmarshal(s.ID, &num); err == nil {
 			videoIDStr = num.String()
 			break
 		}
@@ -834,11 +842,11 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	if videoIDStr == "" {
 		// Fallback: use first server
 		var raw string
-		if err := json.Unmarshal(servers[0].ID, &raw); err == nil {
+		if err := jsonx.Unmarshal(servers[0].ID, &raw); err == nil {
 			videoIDStr = raw
 		} else {
 			var num json.Number
-			if err := json.Unmarshal(servers[0].ID, &num); err == nil {
+			if err := jsonx.Unmarshal(servers[0].ID, &num); err == nil {
 				videoIDStr = num.String()
 			} else {
 				return nil, fmt.Errorf("failed to parse server ID")

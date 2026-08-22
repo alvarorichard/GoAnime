@@ -7,6 +7,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // ErrSuperFlixNoServers is returned when /player/bootstrap responds with an
@@ -58,11 +59,11 @@ const (
 // form SuperFlix mixes in the same list.
 func (s SuperFlixServer) IDString() string {
 	var str string
-	if err := json.Unmarshal(s.ID, &str); err == nil {
+	if err := jsonx.Unmarshal(s.ID, &str); err == nil {
 		return str
 	}
 	var num json.Number
-	if err := json.Unmarshal(s.ID, &num); err == nil {
+	if err := jsonx.Unmarshal(s.ID, &num); err == nil {
 		return num.String()
 	}
 	return ""

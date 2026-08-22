@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // streamCacheEntry is the browser-gated facts for one piece of content: the
@@ -55,7 +57,7 @@ func (sc *streamCache) ensureLoaded() {
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, &sc.entries)
+	_ = jsonx.Unmarshal(data, &sc.entries)
 }
 
 func (sc *streamCache) get(key string) (streamCacheEntry, bool) {

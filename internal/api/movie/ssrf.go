@@ -52,9 +52,27 @@ func safeDialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Co
 }
 
 // safeMovieTransport returns an *http.Transport with SSRF-safe dial hooks.
+// safeTLSConfig returns the TLS settings used for every SSRF-guarded dial.
+//
+// NextProtos is what enables HTTP/2. A transport that sets DialTLSContext takes
+// over the TLS handshake, so net/http can no longer inject the ALPN protocol
+// list for us: without this, every connection negotiates http/1.1 and the burst
+// of requests these clients make is serialised over separate connections
+// instead of multiplexed on one. It pairs with ForceAttemptHTTP2 on the
+// transport — both are required, neither is enough alone.
+func safeTLSConfig() *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+}
+
 func safeMovieTransport(timeout time.Duration) *http.Transport {
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	tlsConfig := safeTLSConfig()
 	return &http.Transport{
+		// Required alongside NextProtos: net/http only upgrades a transport with
+		// custom dial hooks to HTTP/2 when this is set.
+		ForceAttemptHTTP2: true,
 		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
 			return safeDialFunc(network, addr, timeout, nil)
 		},

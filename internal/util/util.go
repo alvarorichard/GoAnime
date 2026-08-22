@@ -1091,14 +1091,10 @@ func SanitizeForDisplayTitle(name string) string {
 // like metadata (contains keywords like SUB, DUB, HD, Multilanguage, or episode numbers),
 // preserving legitimate subtitle parentheses like "(Shippuuden)" or "(Dublado)".
 func strip9AnimeParenMeta(name string) string {
-	idx := strings.LastIndex(name, " (")
-	if idx <= 0 {
-		return name
-	}
-	suffix := name[idx:]
-	// Only strip if the closing paren is at the very end of the string
-	closeIdx := strings.LastIndex(suffix, ")")
-	if closeIdx < 0 || closeIdx != len(suffix)-1 {
+	head, suffix, ok := strings.CutLast(name, " (")
+	// Only strip when the " (" exists, isn't at the very start, and the closing
+	// paren is the last character of the string.
+	if !ok || head == "" || !strings.HasSuffix(suffix, ")") {
 		return name
 	}
 	candidate := strings.ToUpper(suffix)
@@ -1109,7 +1105,7 @@ func strip9AnimeParenMeta(name string) string {
 		strings.Contains(candidate, "MULTI") ||
 		strings.Contains(candidate, "EP ")
 	if isMetadata {
-		return strings.TrimSpace(name[:idx])
+		return strings.TrimSpace(head)
 	}
 	return name
 }

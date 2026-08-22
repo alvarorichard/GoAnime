@@ -223,9 +223,9 @@ func TestHttpGetWithUA_InvalidURLErrors(t *testing.T) {
 func TestRunWithSpinner_NonTerminalRunsActionDirectly(t *testing.T) {
 	// stdout is not a TTY under `go test` — runWithSpinner takes the direct
 	// path and just calls the action. We capture the call to confirm.
-	var called int32
-	runWithSpinner("title", func() { atomic.AddInt32(&called, 1) })
-	assert.Equal(t, int32(1), atomic.LoadInt32(&called))
+	var called atomic.Int32
+	runWithSpinner("title", func() { called.Add(1) })
+	assert.Equal(t, int32(1), called.Load())
 }
 
 func TestSearchAnimeEnhanced_NoResultsReturnsError(t *testing.T) {

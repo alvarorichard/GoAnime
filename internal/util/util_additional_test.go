@@ -65,8 +65,8 @@ func TestRegisterCleanup_AppendsFunction(t *testing.T) {
 	cleanupFuncs = nil
 	cleanupMu.Unlock()
 
-	var called int32
-	RegisterCleanup(func() { atomic.AddInt32(&called, 1) })
+	var called atomic.Int32
+	RegisterCleanup(func() { called.Add(1) })
 
 	cleanupMu.Lock()
 	got := len(cleanupFuncs)
@@ -81,12 +81,10 @@ func TestRegisterCleanup_ConcurrentSafe(t *testing.T) {
 	cleanupMu.Unlock()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			RegisterCleanup(func() {})
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -105,15 +103,15 @@ func TestRunCleanup_InvokesAllRegisteredAndDisablesPerfPrint(t *testing.T) {
 	cleanupFuncs = nil
 	cleanupMu.Unlock()
 
-	var n int32
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
+	var n atomic.Int32
+	RegisterCleanup(func() { n.Add(1) })
+	RegisterCleanup(func() { n.Add(1) })
+	RegisterCleanup(func() { n.Add(1) })
 
 	PerfEnabled = false // avoid printing the perf report
 
 	RunCleanup()
-	assert.Equal(t, int32(3), atomic.LoadInt32(&n))
+	assert.Equal(t, int32(3), n.Load())
 }
 
 func TestRunCleanup_EmptyListIsNoOp(t *testing.T) {

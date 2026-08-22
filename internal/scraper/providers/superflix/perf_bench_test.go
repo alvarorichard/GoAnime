@@ -13,7 +13,7 @@ import (
 func benchSearchHTML(n int) string {
 	var b strings.Builder
 	b.WriteString(`<html><body><div id="results">`)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fmt.Fprintf(&b, `
 <div class="group/card">
   <img alt="Título de Teste %d" src="https://d1muf25xaso8hp.cloudfront.net/https://image.tmdb.org/t/p/w342/poster%d.jpg">
@@ -32,8 +32,7 @@ func BenchmarkParseCards(b *testing.B) {
 	html := benchSearchHTML(48) // a full search results page
 	c := &SuperFlixClient{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 		if err != nil {
 			b.Fatal(err)
@@ -70,8 +69,7 @@ func BenchmarkExtractEpisodes(b *testing.B) {
 	html := benchEpisodesHTML(10, 24) // long-running dorama/anime scale
 	c := &SuperFlixClient{}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		out, err := c.ExtractEpisodes(html)
 		if err != nil {
 			b.Fatal(err)

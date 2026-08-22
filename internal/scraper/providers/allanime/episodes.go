@@ -12,6 +12,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // EpisodeResponse represents the API response for episode details
@@ -87,7 +88,7 @@ func (c *AllAnimeClient) GetEpisodesList(animeID, mode string) ([]string, error)
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := jsonx.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 

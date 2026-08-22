@@ -18,6 +18,7 @@
 package player
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,13 +68,7 @@ func TestBuildAnimeFireQualityItems_RendersFriendlyLabelForNonNumeric(t *testing
 	}
 
 	// Empty label specifically must collapse to "Auto", not the URL.
-	foundAuto := false
-	for _, l := range labels {
-		if l == "Auto" {
-			foundAuto = true
-			break
-		}
-	}
+	foundAuto := slices.Contains(labels, "Auto")
 	if !foundAuto {
 		t.Fatalf("expected one entry to render as 'Auto' for the empty label; got %v", labels)
 	}

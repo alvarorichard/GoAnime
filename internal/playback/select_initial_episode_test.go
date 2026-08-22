@@ -163,10 +163,10 @@ func TestParseEpisodeSelection(t *testing.T) {
 
 func TestSelectInitialEpisode_Success(t *testing.T) {
 	eps := sampleEpisodes(3)
-	var callCount int32
+	var callCount atomic.Int32
 	withSelector(t,
 		func(got []models.Episode) (string, string, error) {
-			atomic.AddInt32(&callCount, 1)
+			callCount.Add(1)
 			assert.Equal(t, eps, got, "selector must receive the episode list verbatim")
 			return "https://x/ep2", "Episode 2", nil
 		},
@@ -181,7 +181,7 @@ func TestSelectInitialEpisode_Success(t *testing.T) {
 	assert.Equal(t, "https://x/ep2", url)
 	assert.Equal(t, "Episode 2", numStr)
 	assert.Equal(t, 2, epNum)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&callCount), "selector must be called exactly once")
+	assert.Equal(t, int32(1), callCount.Load(), "selector must be called exactly once")
 }
 
 func TestSelectInitialEpisode_BackRequested(t *testing.T) {

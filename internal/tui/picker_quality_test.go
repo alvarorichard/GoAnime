@@ -183,7 +183,7 @@ func TestPickWithRunner_ParallelIsolation(t *testing.T) {
 	const workers = 32
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(want int) {
 			defer wg.Done()

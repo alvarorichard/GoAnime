@@ -383,7 +383,7 @@ func TestDownloadVideo_AnimeFireCDN_EndToEnd(t *testing.T) {
 	const numThreads = 4
 	chunkSize := contentLength / int64(numThreads)
 	destPath := filepath.Join(t.TempDir(), "episode.mp4")
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		from := int64(i) * chunkSize
 		to := from + chunkSize - 1
 		if i == numThreads-1 {

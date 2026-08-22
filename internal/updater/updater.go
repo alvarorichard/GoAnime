@@ -2,7 +2,6 @@ package updater
 
 import (
 	"archive/zip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,8 +18,15 @@ import (
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/alvarorichard/Goanime/internal/version"
 )
+
+// maxJSONResponseBytes caps how much of an HTTP response jsonx.Decode will read
+// before failing with jsonx.ErrTooLarge. The decoders this replaced
+// (json.NewDecoder(resp.Body)) had no bound at all, so a hostile or broken
+// upstream could stream until the process ran out of memory.
+const maxJSONResponseBytes = 10 << 20 // 10 MiB
 
 const (
 	GitHubOwner = "alvarorichard"
@@ -75,8 +81,7 @@ func checkForUpdatesFromURL(apiURL, currentVer string) (*GitHubRelease, bool, er
 	}
 
 	var release GitHubRelease
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(&release); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &release); err != nil {
 		return nil, false, fmt.Errorf("failed to decode release data: %w", err)
 	}
 

@@ -91,11 +91,11 @@ type searchStubSource struct {
 	results []*models.Anime
 	sErr    error
 	delay   time.Duration
-	calls   int32
+	calls   atomic.Int32
 }
 
 func (s *searchStubSource) Search(ctx context.Context, _ string) ([]*models.Anime, error) {
-	atomic.AddInt32(&s.calls, 1)
+	s.calls.Add(1)
 	if s.delay > 0 {
 		select {
 		case <-time.After(s.delay):
@@ -108,9 +108,9 @@ func (s *searchStubSource) Search(ctx context.Context, _ string) ([]*models.Anim
 
 func newSearchStub(kind source.SourceKind, results []*models.Anime, err error) *searchStubSource {
 	return &searchStubSource{
-		epStubSource: epStubSource{desc: source.Descriptor{Kind: kind, Priority: 1}},
-		results:      results,
-		sErr:         err,
+		desc:    source.Descriptor{Kind: kind, Priority: 1},
+		results: results,
+		sErr:    err,
 	}
 }
 
@@ -124,8 +124,8 @@ func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 	got, err := SearchAll(context.Background(), "naruto")
 	require.NoError(t, err)
 	assert.Len(t, got, 2, "results from all searchable sources must be aggregated")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&a.calls))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+	assert.Equal(t, int32(1), a.calls.Load())
+	assert.Equal(t, int32(1), g.calls.Load())
 }
 
 func TestSearchAll_SpecificKindFilter(t *testing.T) {
@@ -139,8 +139,8 @@ func TestSearchAll_SpecificKindFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "GY", got[0].Name)
-	assert.Equal(t, int32(0), atomic.LoadInt32(&a.calls), "non-selected source must not be searched")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+	assert.Equal(t, int32(0), a.calls.Load(), "non-selected source must not be searched")
+	assert.Equal(t, int32(1), g.calls.Load())
 }
 
 func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
@@ -192,8 +192,8 @@ func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
 	t.Cleanup(func() { perSourceSearchTimeout = prev })
 
 	stub := &hangingSearchSource{
-		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.Goyabu, Priority: 1}},
-		release:      make(chan struct{}),
+		desc:    source.Descriptor{Kind: source.Goyabu, Priority: 1},
+		release: make(chan struct{}),
 	}
 	t.Cleanup(func() { close(stub.release) }) // let the abandoned goroutine exit
 

@@ -123,11 +123,28 @@ func dialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Config
 //
 // Returns:
 // - *http.Transport: a pointer to an http.Transport configured with custom dial functions and security settings.
+// safeTLSConfig returns the TLS settings used for every SSRF-guarded dial.
+//
+// NextProtos is what enables HTTP/2. A transport that sets DialTLSContext takes
+// over the TLS handshake, so net/http can no longer inject the ALPN protocol
+// list for us: without this, every connection negotiates http/1.1 and the burst
+// of requests these clients make is serialised over separate connections
+// instead of multiplexed on one. It pairs with ForceAttemptHTTP2 on the
+// transport — both are required, neither is enough alone.
+func safeTLSConfig() *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+}
+
 func SafeTransport(timeout time.Duration) *http.Transport {
-	// Configure TLS settings, requiring at least TLS version 1.2.
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	tlsConfig := safeTLSConfig()
 
 	return &http.Transport{
+		// Required alongside NextProtos: net/http only upgrades a transport with
+		// custom dial hooks to HTTP/2 when this is set.
+		ForceAttemptHTTP2: true,
 		// Custom dial function for regular (non-TLS) connections.
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialFunc(network, addr, timeout, nil)

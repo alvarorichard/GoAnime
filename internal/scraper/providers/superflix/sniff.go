@@ -2,7 +2,6 @@ package superflix
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	neturl "net/url"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/mxschmitt/playwright-go"
 )
 
@@ -73,7 +73,7 @@ func readEmbeddedPlayer(ctx context.Context, page playwright.Page, embedURL stri
 	}
 	if err := page.SetContent(wrapper, playwright.PageSetContentOptions{
 		WaitUntil: playwright.WaitUntilStateLoad,
-		Timeout:   playwright.Float(float64(loadBudget.Milliseconds())),
+		Timeout:   new(float64(loadBudget.Milliseconds())),
 	}); err != nil {
 		return "", fmt.Errorf("set iframe wrapper: %w", err)
 	}
@@ -351,7 +351,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 				return
 			}
 			var gv getVideoResponse
-			if json.Unmarshal(body, &gv) != nil {
+			if jsonx.Unmarshal(body, &gv) != nil {
 				return
 			}
 			// securedLink currently points at a dead signed master.m3u8 (nginx
@@ -393,10 +393,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// a failed warm-up fail within the advertised sniff budget instead of adding
 	// another 45 seconds before that budget even begins.
 	deadline := time.Now().Add(timeout)
-	warmBudget := timeout / 3
-	if warmBudget > 20*time.Second {
-		warmBudget = 20 * time.Second
-	}
+	warmBudget := min(timeout/3, 20*time.Second)
 	warmGateTopLevel(page, embedURL, warmBudget)
 
 	// Phase 1 — SAME-ORIGIN (fast path). Navigate the parent to warezcdn's own

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -536,9 +537,15 @@ chunk.ts
 // retry on transient HTTP errors (5xx) and eventually succeed.
 func TestDownloadSegment_RetryOnTransientError(t *testing.T) {
 	t.Parallel()
+	// The two retries cost 1s + 2s of real backoff; the fake clock skips them.
+	synctest.Test(t, func(t *testing.T) {
+		testDownloadSegmentRetryOnTransientError(t)
+	})
+}
 
+func testDownloadSegmentRetryOnTransientError(t *testing.T) {
 	var attempts atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
 			fmt.Fprint(w, `#EXTM3U
 #EXT-X-TARGETDURATION:2
@@ -557,12 +564,12 @@ retry_seg.ts
 		// 3rd attempt: succeed
 		w.Write(fakeSegmentData(512))
 	}))
-	defer srv.Close()
+	client := srv.Client()
 
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "retry_test.ts")
 
-	dl := NewDownloaderWithClient(srv.Client())
+	dl := NewDownloaderWithClient(client)
 	err := dl.Download(context.Background(), srv.URL+"/retry.m3u8", outFile, nil)
 	require.NoError(t, err)
 
@@ -617,7 +624,15 @@ seg2.ts
 // segments (<5%) does not cause the entire download to fail.
 func TestDownload_PartialSegmentFailure(t *testing.T) {
 	t.Parallel()
+	// synctest bubble + in-memory test server: the failing segment burns
+	// 1+2+3+4+5 = 15 seconds of retry backoff, which the fake clock skips
+	// instantly while still exercising every retry.
+	synctest.Test(t, func(t *testing.T) {
+		testDownloadPartialSegmentFailure(t)
+	})
+}
 
+func testDownloadPartialSegmentFailure(t *testing.T) {
 	// Build a playlist with 25 segments, 1 will always fail (4%)
 	var playlistBuilder strings.Builder
 	playlistBuilder.WriteString("#EXTM3U\n#EXT-X-TARGETDURATION:5\n")
@@ -627,7 +642,7 @@ func TestDownload_PartialSegmentFailure(t *testing.T) {
 	playlistBuilder.WriteString("#EXT-X-ENDLIST\n")
 	playlist := playlistBuilder.String()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
 			fmt.Fprint(w, playlist)
 			return
@@ -639,12 +654,12 @@ func TestDownload_PartialSegmentFailure(t *testing.T) {
 		}
 		w.Write(fakeSegmentData(256))
 	}))
-	defer srv.Close()
+	client := srv.Client()
 
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "partial_fail.ts")
 
-	dl := NewDownloaderWithClient(srv.Client())
+	dl := NewDownloaderWithClient(client)
 	err := dl.Download(context.Background(), srv.URL+"/partial.m3u8", outFile, nil)
 	require.NoError(t, err, "4% failure rate should be tolerated (threshold is 5%)")
 }
@@ -653,7 +668,12 @@ func TestDownload_PartialSegmentFailure(t *testing.T) {
 // cause the download to fail.
 func TestDownload_TooManySegmentsFail(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		testDownloadTooManySegmentsFail(t)
+	})
+}
 
+func testDownloadTooManySegmentsFail(t *testing.T) {
 	// Build a playlist with 10 segments, 2 will always fail (20%)
 	var playlistBuilder strings.Builder
 	playlistBuilder.WriteString("#EXTM3U\n#EXT-X-TARGETDURATION:5\n")
@@ -663,7 +683,7 @@ func TestDownload_TooManySegmentsFail(t *testing.T) {
 	playlistBuilder.WriteString("#EXT-X-ENDLIST\n")
 	playlist := playlistBuilder.String()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, ".m3u8") {
 			fmt.Fprint(w, playlist)
 			return
@@ -675,12 +695,12 @@ func TestDownload_TooManySegmentsFail(t *testing.T) {
 		}
 		w.Write(fakeSegmentData(256))
 	}))
-	defer srv.Close()
+	client := srv.Client()
 
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "too_many_fail.ts")
 
-	dl := NewDownloaderWithClient(srv.Client())
+	dl := NewDownloaderWithClient(client)
 	err := dl.Download(context.Background(), srv.URL+"/fail.m3u8", outFile, nil)
 	require.Error(t, err, "20% failure rate should cause download to fail")
 	assert.Contains(t, err.Error(), "download incomplete")
@@ -957,4 +977,99 @@ func TestNewNoBodyRequest_SetsGetBody(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, data2, "GetBody must be repeatable")
 	require.NoError(t, body2.Close())
+}
+
+// ---------------------------------------------------------------------------
+// Tests: retry backoff honours cancellation
+// ---------------------------------------------------------------------------
+
+// TestSegmentBackoffIsProgressive pins the retry schedule the tests above rely
+// on.
+func TestSegmentBackoffIsProgressive(t *testing.T) {
+	t.Parallel()
+	for attempt, want := range []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second} {
+		if got := segmentBackoff(attempt); got != want {
+			t.Errorf("segmentBackoff(%d) = %v, want %v", attempt, got, want)
+		}
+	}
+}
+
+// TestWaitBackoffReturnsImmediatelyOnCancel covers the fix behind the retry
+// path: the backoff used to be a plain time.Sleep, so cancelling a download left
+// every in-flight segment sleeping for up to another five seconds before the UI
+// came back.
+func TestWaitBackoffReturnsImmediatelyOnCancel(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		errCh := make(chan error, 1)
+		go func() { errCh <- waitBackoff(ctx, 5*time.Second) }()
+
+		synctest.Wait()
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("waitBackoff returned %v, want context.Canceled", err)
+			}
+		case <-time.After(time.Millisecond):
+			t.Fatal("waitBackoff did not return promptly after cancellation")
+		}
+	})
+}
+
+// TestWaitBackoffWaitsTheFullDelay is the counterpart: without cancellation the
+// caller really does wait.
+func TestWaitBackoffWaitsTheFullDelay(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		if err := waitBackoff(context.Background(), 3*time.Second); err != nil {
+			t.Fatalf("waitBackoff: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed != 3*time.Second {
+			t.Fatalf("waited %v, want exactly 3s on the fake clock", elapsed)
+		}
+	})
+}
+
+// TestCancelledDownloadDoesNotBurnBackoff exercises the same fix through the
+// real download path: a cancelled download must not sit through its retry
+// schedule.
+func TestCancelledDownloadDoesNotBurnBackoff(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, ".m3u8") {
+				fmt.Fprint(w, "#EXTM3U\n#EXT-X-TARGETDURATION:5\n#EXTINF:5.0,\nseg1.ts\n#EXT-X-ENDLIST\n")
+				return
+			}
+			// Always fail so the segment enters the backoff loop.
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		client := srv.Client()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		outFile := filepath.Join(t.TempDir(), "cancelled.ts")
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- NewDownloaderWithClient(client).Download(ctx, srv.URL+"/x.m3u8", outFile, nil)
+		}()
+
+		// Let the first attempt fail and the goroutine settle into its backoff.
+		synctest.Wait()
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if err == nil {
+				t.Fatal("expected the cancelled download to fail")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("download kept sleeping through its backoff after cancellation")
+		}
+	})
 }

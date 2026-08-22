@@ -48,7 +48,7 @@ func embedHostParentURL(embedURL string) string {
 func warmGateTopLevel(page playwright.Page, embedURL string, budget time.Duration) {
 	if _, err := page.Goto(embedURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		Timeout:   playwright.Float(float64(budget.Milliseconds())),
+		Timeout:   new(float64(budget.Milliseconds())),
 	}); err != nil {
 		return
 	}

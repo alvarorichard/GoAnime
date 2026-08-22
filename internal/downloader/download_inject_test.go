@@ -32,7 +32,7 @@ type mockProgressSender struct {
 	quitOnce sync.Once
 	runErr   error
 	runDelay time.Duration
-	runCount int32
+	runCount atomic.Int32
 }
 
 func newMockSender() *mockProgressSender {
@@ -50,7 +50,7 @@ func (m *mockProgressSender) Quit() {
 }
 
 func (m *mockProgressSender) Run() (tea.Model, error) {
-	atomic.AddInt32(&m.runCount, 1)
+	m.runCount.Add(1)
 	if m.runDelay > 0 {
 		time.Sleep(m.runDelay)
 	}
@@ -176,10 +176,10 @@ func TestEpisodeDownloader_Helpers_DefaultsAndInjected(t *testing.T) {
 
 	t.Run("sleepFn_injected_called", func(t *testing.T) {
 		t.Parallel()
-		var called int32
-		d := &EpisodeDownloader{opts: downloaderOptions{sleep: func(time.Duration) { atomic.AddInt32(&called, 1) }}}
+		var called atomic.Int32
+		d := &EpisodeDownloader{opts: downloaderOptions{sleep: func(time.Duration) { called.Add(1) }}}
 		d.sleepFn(time.Second)
-		assert.Equal(t, int32(1), atomic.LoadInt32(&called))
+		assert.Equal(t, int32(1), called.Load())
 	})
 
 	t.Run("newSender_default_is_tui_program", func(t *testing.T) {

@@ -68,8 +68,8 @@ func makeTestPNG(t *testing.T) string {
 	require.NoError(t, err)
 	defer f.Close()
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
-	for y := 0; y < 4; y++ {
-		for x := 0; x < 4; x++ {
+	for y := range 4 {
+		for x := range 4 {
 			img.Set(x, y, color.RGBA{uint8(x * 60), uint8(y * 60), 200, 255})
 		}
 	}

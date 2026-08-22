@@ -36,13 +36,13 @@ func TestGetSocketPath_PerOS(t *testing.T) {
 
 func TestCreateUpdater_DisabledReturnsNil(t *testing.T) {
 	t.Parallel()
-	got := createUpdater(&models.Anime{}, ptr(false), &sync.Mutex{}, time.Second, false)
+	got := createUpdater(&models.Anime{}, new(false), &sync.Mutex{}, time.Second, false)
 	assert.Nil(t, got)
 }
 
 func TestCreateUpdater_EnabledReturnsRPU(t *testing.T) {
 	t.Parallel()
-	got := createUpdater(&models.Anime{Name: "x"}, ptr(false), &sync.Mutex{}, 2*time.Second, true)
+	got := createUpdater(&models.Anime{Name: "x"}, new(false), &sync.Mutex{}, 2*time.Second, true)
 	require.NotNil(t, got)
 	assert.Equal(t, 3*time.Second, got.GetUpdateFreq())
 	assert.Equal(t, 2*time.Second, got.GetEpisodeDuration())
@@ -281,4 +281,5 @@ func TestChangeAnimeLocal_SymbolPin(t *testing.T) {
 }
 
 // helpers
-func ptr[T any](v T) *T { return &v }
+//
+//go:fix inline

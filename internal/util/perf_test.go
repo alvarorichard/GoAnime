@@ -183,9 +183,8 @@ func TestPerfCount(t *testing.T) {
 func TestPerfTracker_ConcurrentCounters(t *testing.T) {
 	pt := &PerfTracker{metrics: make(map[string]*PerfMetric), counters: make(map[string]*int64)}
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); pt.IncrementCounter("hits") }()
+	for range 100 {
+		wg.Go(func() { pt.IncrementCounter("hits") })
 	}
 	wg.Wait()
 	assert.Equal(t, int64(100), pt.GetCounter("hits"))

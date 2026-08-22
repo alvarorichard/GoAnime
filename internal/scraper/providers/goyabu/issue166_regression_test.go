@@ -187,7 +187,6 @@ func TestIssue166_AllRealChallengeSignalsStillTrigger(t *testing.T) {
 	}
 
 	for _, sig := range signals {
-		sig := sig
 		t.Run(sig, func(t *testing.T) {
 			t.Parallel()
 
@@ -261,7 +260,6 @@ func TestIssue166_NoFalsePositiveForCommonContentMentions(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 

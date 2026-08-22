@@ -469,7 +469,11 @@ func TestIntegration_SuperFlix_VideoAPIError(t *testing.T) {
 func TestIntegration_SuperFlix_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	// Server that hangs on bootstrap
+	// Server that hangs on bootstrap. The handler parks until either the client
+	// gives up or the test ends: GetStreamURL retries bootstrap on a context of
+	// its own, so waiting only on the request context would leave a handler
+	// blocked forever and srv.Close() would hang with it.
+	stop := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/pesquisar" {
 			fmt.Fprint(w, defaultSearchHTML("test"))
@@ -480,12 +484,16 @@ func TestIntegration_SuperFlix_ContextCancellation(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/player/bootstrap" {
-			// Hang to trigger context timeout
-			time.Sleep(10 * time.Second)
+			select {
+			case <-r.Context().Done():
+			case <-stop:
+			}
 			return
 		}
 	}))
-	defer srv.Close()
+	// LIFO cleanup: release the parked handlers first, then close the server.
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(stop) })
 
 	client := superflix.NewSuperFlixClient()
 	setTestClientURL(client, srv.URL)

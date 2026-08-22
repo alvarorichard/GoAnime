@@ -3,7 +3,6 @@
 package movie
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 const (
@@ -109,7 +110,7 @@ func (c *OMDbClient) SearchByTitle(title, mediaType string) (*OMDbSearchResult, 
 	}
 
 	var result OMDbSearchResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := jsonx.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse OMDb response: %w", err)
 	}
 
@@ -135,7 +136,7 @@ func (c *OMDbClient) GetByIMDBID(imdbID string) (*OMDbMedia, error) {
 	}
 
 	var media OMDbMedia
-	if err := json.Unmarshal(body, &media); err != nil {
+	if err := jsonx.Unmarshal(body, &media); err != nil {
 		return nil, fmt.Errorf("failed to parse OMDb response: %w", err)
 	}
 
@@ -165,7 +166,7 @@ func (c *OMDbClient) GetByTitle(title, year string) (*OMDbMedia, error) {
 	}
 
 	var media OMDbMedia
-	if err := json.Unmarshal(body, &media); err != nil {
+	if err := jsonx.Unmarshal(body, &media); err != nil {
 		return nil, fmt.Errorf("failed to parse OMDb response: %w", err)
 	}
 

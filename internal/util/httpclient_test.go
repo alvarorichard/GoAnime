@@ -164,12 +164,12 @@ func TestNewWorkerPool(t *testing.T) {
 func TestWorkerPool_SubmitAndWait(t *testing.T) {
 	t.Parallel()
 	wp := NewWorkerPool(2)
-	var n int32
-	for i := 0; i < 5; i++ {
-		wp.Submit(func() { atomic.AddInt32(&n, 1) })
+	var n atomic.Int32
+	for range 5 {
+		wp.Submit(func() { n.Add(1) })
 	}
 	wp.Wait()
-	assert.Equal(t, int32(5), atomic.LoadInt32(&n))
+	assert.Equal(t, int32(5), n.Load())
 }
 
 func TestGetScraperPool_Singleton(t *testing.T) {
@@ -196,16 +196,16 @@ func TestParallelExecute(t *testing.T) {
 
 	t.Run("runs all", func(t *testing.T) {
 		t.Parallel()
-		var n int32
+		var n atomic.Int32
 		var wg sync.WaitGroup
 		wg.Add(3)
 		tasks := []func(){
-			func() { defer wg.Done(); atomic.AddInt32(&n, 1) },
-			func() { defer wg.Done(); atomic.AddInt32(&n, 1) },
-			func() { defer wg.Done(); atomic.AddInt32(&n, 1) },
+			func() { defer wg.Done(); n.Add(1) },
+			func() { defer wg.Done(); n.Add(1) },
+			func() { defer wg.Done(); n.Add(1) },
 		}
 		ParallelExecute(2, tasks...)
 		wg.Wait()
-		assert.Equal(t, int32(3), atomic.LoadInt32(&n))
+		assert.Equal(t, int32(3), n.Load())
 	})
 }

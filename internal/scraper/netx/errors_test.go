@@ -54,7 +54,6 @@ func TestCheckChallengeDocument_DoesNotFalsePositiveOnCloudflareMention(t *testi
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -82,7 +81,6 @@ func TestCheckChallengeDocument_EveryAllowlistedPhraseTriggers(t *testing.T) {
 	}
 
 	for _, phrase := range challengeBodyPhrases {
-		phrase := phrase
 		t.Run(phrase, func(t *testing.T) {
 			t.Parallel()
 
@@ -110,7 +108,6 @@ func TestCheckChallengeDocument_PhraseMatchIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
 	for _, phrase := range challengeBodyPhrases {
-		phrase := phrase
 		t.Run(phrase, func(t *testing.T) {
 			t.Parallel()
 
@@ -162,7 +159,6 @@ func TestCheckChallengeDocument_PhraseInAttributeDoesNotTrigger(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -194,7 +190,6 @@ func TestCheckChallengeDocument_EmptyAndMinimalDocs(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -294,7 +289,6 @@ func TestCheckChallengeDocument_DetectsRealChallenges(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
