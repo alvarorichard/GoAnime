@@ -812,6 +812,104 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 // fail fast and let the next-source fallback take over.
 var errBloggerVideoUnavailable = errors.New("blogger video unavailable upstream")
 
+// bloggerRPCError reports a batchexecute call that answered HTTP 200 with a
+// status code in place of a payload:
+//
+//	["wrb.fr","WcwnYd",null,null,null,[5],"generic"]
+//
+// The number in that slot is a canonical gRPC status code. Terminal codes wrap
+// errBloggerVideoUnavailable so callers fast-fail; transient ones do not, so
+// the existing retry loop still gets a chance.
+//
+// Reported in issue #195: 20 of 24 episodes of one AnimeFire title answered
+// with code 5 (NOT_FOUND) because the Blogger videos had been deleted upstream,
+// and every one of them surfaced as the opaque "no video URL found in
+// batchexecute response" — indistinguishable from a parser bug.
+type bloggerRPCError struct {
+	Code int
+}
+
+func (e bloggerRPCError) Error() string {
+	name, terminal := bloggerRPCStatusName(e.Code)
+	if terminal {
+		return fmt.Sprintf("blogger video unavailable upstream: RPC status %d (%s) — the video was removed or is not accessible", e.Code, name)
+	}
+	return fmt.Sprintf("blogger batchexecute returned RPC status %d (%s)", e.Code, name)
+}
+
+func (e bloggerRPCError) Unwrap() error {
+	if _, terminal := bloggerRPCStatusName(e.Code); terminal {
+		return errBloggerVideoUnavailable
+	}
+	return nil
+}
+
+// bloggerRPCStatusName maps a canonical gRPC status code to its name and says
+// whether retrying the same token could ever help.
+func bloggerRPCStatusName(code int) (name string, terminal bool) {
+	switch code {
+	case 3:
+		return "INVALID_ARGUMENT", true
+	case 5:
+		return "NOT_FOUND", true
+	case 7:
+		return "PERMISSION_DENIED", true
+	case 9:
+		return "FAILED_PRECONDITION", true
+	case 16:
+		return "UNAUTHENTICATED", true
+	case 2:
+		return "UNKNOWN", false
+	case 4:
+		return "DEADLINE_EXCEEDED", false
+	case 8:
+		return "RESOURCE_EXHAUSTED", false
+	case 13:
+		return "INTERNAL", false
+	case 14:
+		return "UNAVAILABLE", false
+	default:
+		return "unrecognised status", false
+	}
+}
+
+// batchexecuteRPCStatus returns the status code carried by a WcwnYd envelope
+// whose payload slot is null, e.g. ["wrb.fr","WcwnYd",null,null,null,[5],...].
+func batchexecuteRPCStatus(body []byte) (int, bool) {
+	for line := range strings.SplitSeq(string(body), "\n") {
+		if !strings.Contains(line, "wrb.fr") {
+			continue
+		}
+		var outer []any
+		if err := jsonx.Unmarshal([]byte(line), &outer); err != nil {
+			continue
+		}
+		for _, entry := range outer {
+			arr, ok := entry.([]any)
+			if !ok || len(arr) < 6 {
+				continue
+			}
+			if fmt.Sprint(arr[0]) != "wrb.fr" || fmt.Sprint(arr[1]) != "WcwnYd" {
+				continue
+			}
+			if arr[2] != nil {
+				continue // a payload is present; this is not an error envelope
+			}
+			status, ok := arr[5].([]any)
+			if !ok || len(status) == 0 {
+				continue
+			}
+			switch v := status[0].(type) {
+			case float64:
+				return int(v), true
+			case int:
+				return v, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // parseBatchexecuteResponse extracts the best MP4 video URL from a Google
 // batchexecute API response body (WcwnYd RPC).
 //
@@ -919,6 +1017,11 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 		if len(stripped) == 0 {
 			util.Debugf("Blogger batchexecute returned empty body (%d bytes total) — token unavailable upstream", len(body))
 			return "", errBloggerVideoUnavailable
+		}
+		if code, ok := batchexecuteRPCStatus(body); ok {
+			err := bloggerRPCError{Code: code}
+			util.Debugf("Blogger batchexecute returned no payload: %v", err)
+			return "", err
 		}
 		util.Debugf("Blogger batchexecute response body (%d bytes, first 500): %s", len(body), string(body[:min(500, len(body))]))
 		return "", errors.New("no video URL found in batchexecute response")
