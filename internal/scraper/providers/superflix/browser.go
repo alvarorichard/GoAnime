@@ -132,7 +132,7 @@ func brandSolverPage(page playwright.Page) {
 // "chrome"); empty uses Playwright's bundled Chromium.
 func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, headless bool) (playwright.BrowserContext, error) {
 	opts := playwright.BrowserTypeLaunchPersistentContextOptions{
-		Headless: playwright.Bool(headless),
+		Headless: new(headless),
 		// Strip the "Chrome is being controlled by automated test software"
 		// switch — its presence is a Turnstile tell.
 		IgnoreDefaultArgs: []string{"--enable-automation"},
@@ -157,7 +157,7 @@ func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, 
 		},
 	}
 	if channel != "" {
-		opts.Channel = playwright.String(channel)
+		opts.Channel = new(channel)
 	}
 	return pw.Chromium.LaunchPersistentContext(profileDir, opts)
 }
@@ -237,7 +237,7 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 	// Kept behind GOANIME_SF_MASK as an opt-in escape hatch for hosts/future
 	// Turnstile builds where the bare fingerprint is rejected instead.
 	if cfg.Mask {
-		_ = pctx.AddInitScript(playwright.Script{Content: playwright.String(webdriverMaskScript)})
+		_ = pctx.AddInitScript(playwright.Script{Content: new(webdriverMaskScript)})
 	}
 
 	// Auto-close ad pop-unders. The warezcdn/fireplayer player spawns ad tabs
@@ -325,7 +325,7 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 	brandSolverPage(page)
 
 	if _, err := page.Goto(targetURL, playwright.PageGotoOptions{
-		Timeout:   playwright.Float(float64(timeout.Milliseconds())),
+		Timeout:   new(float64(timeout.Milliseconds())),
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
 		return nil, fmt.Errorf("navigate: %w", err)

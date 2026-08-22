@@ -29,6 +29,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
 )
@@ -835,7 +836,7 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 			continue
 		}
 		var outer []any
-		if err := json.Unmarshal([]byte(line), &outer); err != nil {
+		if err := jsonx.Unmarshal([]byte(line), &outer); err != nil {
 			continue
 		}
 		for _, entry := range outer {
@@ -847,7 +848,7 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 				continue
 			}
 			var data []any
-			if err := json.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
+			if err := jsonx.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
 				continue
 			}
 			// Search all indices for a streams array (resilient to Google index changes).
@@ -1241,7 +1242,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 
 		// Try to parse as JSON
 		var videoResponse VideoResponse
-		err = json.Unmarshal(body, &videoResponse)
+		err = jsonx.Unmarshal(body, &videoResponse)
 		if err == nil && len(videoResponse.Data) > 0 {
 			if util.IsDebug {
 				util.Debugf("Found video data with %d qualities", len(videoResponse.Data))

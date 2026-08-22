@@ -11,6 +11,7 @@ project.
 - [Code Standards](#code-standards)
 - [Quality Assurance](#quality-assurance)
 - [Testing](#testing)
+- [Go 1.27 Conventions](#go-127-conventions)
 - [Adding or Removing a Source](#adding-or-removing-a-source)
 - [Build Process](#build-process)
 - [Contributing Guidelines](#contributing-guidelines)
@@ -532,6 +533,97 @@ Create `.vscode/settings.json`:
     }
 }
 ```
+
+## Go 1.27 Conventions
+
+The project targets Go 1.27 and relies on a few of its features in ways that are
+easy to undo by accident. These are the rules that keep them working.
+
+### Decoding JSON: use `internal/util/jsonx`, not `encoding/json`
+
+Every provider/API response is decoded through `internal/util/jsonx`, which
+wraps `encoding/json/v2`:
+
+```go
+// Bytes are needed afterwards (HTML guard, regex fallback, diagnostics):
+body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+...
+if err := jsonx.Unmarshal(body, &result); err != nil { ... }
+
+// Bytes are only decoded: stream, and bound the read:
+if err := jsonx.Decode(resp.Body, 5<<20, &result); err != nil { ... }
+```
+
+- `jsonx.Unmarshal` is ~17% faster than `json.Unmarshal` on a realistic payload.
+- `jsonx.Decode` is ~24% faster than `io.ReadAll` + `json.Unmarshal` and
+  allocates ~57% fewer bytes, because the body is never buffered.
+- **Never call `json.NewDecoder(resp.Body).Decode(...)`.** It reads without any
+  size bound, and it silently ignores anything after the first JSON value.
+  `jsonx.Decode` takes an explicit limit and fails with `jsonx.ErrTooLarge`.
+
+The option set is `DefaultOptionsV1` minus `ReportErrorsWithLegacySemantics`
+(the only v1 option that costs real time), so decoding semantics match
+`encoding/json` exactly — only the error *values* differ. Differential tests and
+two fuzz targets in `internal/util/jsonx` enforce that, and CI runs the fuzzers
+on every push. If you change the option set, run them.
+
+Reproduce the numbers with:
+
+```bash
+go test ./internal/util/jsonx/ -bench JSONXVsV1 -benchmem -run XXX
+```
+
+### Goroutine leaks are a CI gate
+
+`internal/util/leakcheck` exposes Go 1.27's `goroutineleak` profile as an
+assertion. Add a guard to any test that drives concurrent work:
+
+```go
+baseline := leakcheck.Count(t)
+// ... run the flow ...
+leakcheck.AssertNoNewLeaks(t, baseline)
+```
+
+Detection only runs when the profile is *written*, which `leakcheck` handles;
+`pprof.Lookup("goroutineleak").Count()` on its own returns a stale number. The
+end-to-end gate lives in `test/leak`, and `leakcheck`'s own test deliberately
+leaks a goroutine to prove the gate can still fail.
+
+### Slow tests: `testing/synctest` + `httptest.NewTestServer`
+
+Tests that wait on retry backoff or timeouts belong in a synctest bubble, where
+the clock is virtual and the wait is instant:
+
+```go
+func TestSomethingWithBackoff(t *testing.T) {
+    t.Parallel()
+    synctest.Test(t, func(t *testing.T) {
+        srv := httptest.NewTestServer(t, handler) // in-memory, no TCP port
+        client := srv.Client()                    // starts it and fills srv.URL
+        ...
+    })
+}
+```
+
+`httptest.NewTestServer` is required inside a bubble: a real loopback connection
+is not "durably blocked", so the fake clock would never advance. Note that
+`srv.URL` is only populated after the first `srv.Client()` call.
+
+This turned `internal/downloader/hls` from 15.1s into 0.02s and
+`internal/scraper/providers/superflix` from 10.1s into 0.8s.
+
+A test server whose handler parks (to simulate a slow upstream) must be released
+before `srv.Close()` runs, otherwise `Close` waits for it forever. Prefer
+`<-r.Context().Done()`, and when the client may retry on a fresh context, also
+select on a stop channel closed in a `t.Cleanup` registered *after*
+`t.Cleanup(srv.Close)` (cleanups run LIFO).
+
+### Modernizers
+
+`go fix ./...` applies the standard modernizers (`wg.Go`, `new(expr)`,
+`errors.AsType`, `slices`/`maps` helpers, `strings.CutLast`, …). Review the diff
+before committing — it is occasionally wrong about statement lists inside
+one-line closures.
 
 ## Getting Help
 

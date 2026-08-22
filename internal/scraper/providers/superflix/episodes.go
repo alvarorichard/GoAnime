@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"sort"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // ErrSuperFlixNoServers is returned when /player/bootstrap responds with an
@@ -32,7 +34,7 @@ import (
 func (c *SuperFlixClient) ExtractEpisodes(html string) (map[string][]SuperFlixEpisode, error) {
 	if m := sfAllEpisodesRe.FindStringSubmatch(html); len(m) >= 2 {
 		var result map[string][]SuperFlixEpisode
-		if err := json.Unmarshal([]byte(m[1]), &result); err != nil {
+		if err := jsonx.Unmarshal([]byte(m[1]), &result); err != nil {
 			return nil, fmt.Errorf("failed to parse ALL_EPISODES: %w", err)
 		}
 		return filterEpisodesByAirDate(result, time.Now()), nil
@@ -60,7 +62,7 @@ func parseWindowAllEpisodes(html string) map[string][]SuperFlixEpisode {
 		return nil
 	}
 	var result map[string][]SuperFlixEpisode
-	if err := json.Unmarshal([]byte(m[1]), &result); err != nil {
+	if err := jsonx.Unmarshal([]byte(m[1]), &result); err != nil {
 		util.Debug("SuperFlix: failed to parse window.allEpisodes", "err", err)
 		return nil
 	}
@@ -195,9 +197,7 @@ func (c *SuperFlixClient) getEpisodesViaBrowser(ctx context.Context, tmdbID stri
 		return blob, nil
 	}
 
-	for s, eps := range parseFrontendEpisodes(res.HTML) {
-		episodes[s] = eps
-	}
+	maps.Copy(episodes, parseFrontendEpisodes(res.HTML))
 
 	// Resolve the other seasons' URLs against the solved frontend domain and
 	// fetch each that we don't already have.
@@ -257,7 +257,7 @@ func resolveFrontendSeasonURLs(html, finalURL string) map[string]string {
 	out := make(map[string]string)
 	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
 		href, _ := a.Attr("href")
-		clean := strings.SplitN(href, "?", 2)[0]
+		clean, _, _ := strings.Cut(href, "?")
 		clean = strings.SplitN(clean, "#", 2)[0]
 		m := serieSeasonLinkRe.FindStringSubmatch(clean)
 		if m == nil {

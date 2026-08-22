@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +16,15 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/pkg/errors"
 )
+
+// maxJSONResponseBytes caps how much of an HTTP response jsonx.Decode will read
+// before failing with jsonx.ErrTooLarge. The decoders this replaced
+// (json.NewDecoder(resp.Body)) had no bound at all, so a hostile or broken
+// upstream could stream until the process ran out of memory.
+const maxJSONResponseBytes = 10 << 20 // 10 MiB
 
 // Common HTTP client instance - reuse the shared singleton for connection pooling
 var httpClient = util.GetSharedClient()
@@ -402,7 +408,7 @@ func makeGetRequest(url string, headers map[string]string) (map[string]any, erro
 	}
 
 	var responseData map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &responseData); err != nil {
 		return nil, fmt.Errorf("JSON decode failed: %w", err)
 	}
 	return responseData, nil

@@ -118,8 +118,7 @@ func ExtractAllAnimeID(s string) string {
 	if IsAllAnimeShortID(s) {
 		return s
 	}
-	if idx := strings.LastIndex(s, "/"); idx >= 0 && idx < len(s)-1 {
-		candidate := s[idx+1:]
+	if _, candidate, ok := strings.CutLast(s, "/"); ok && candidate != "" {
 		if IsAllAnimeShortID(candidate) {
 			return candidate
 		}

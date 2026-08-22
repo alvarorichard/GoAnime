@@ -953,21 +953,21 @@ func TestReplaceExecutable_EdgeCases(t *testing.T) {
 
 // Benchmark tests for performance-critical functions
 func BenchmarkIsVersionNewer(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = isVersionNewer("2.0.0", "1.0.0")
 	}
 }
 
 func BenchmarkTruncateText(b *testing.B) {
 	text := "This is a very long text that needs to be truncated for display purposes"
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = truncateText(text, 50)
 	}
 }
 
 func BenchmarkFindAssetForPlatform(b *testing.B) {
 	platform := PlatformInfo{OS: "linux", Arch: "amd64"}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, _ = findAssetForPlatformWithInfo(&mockRelease, platform)
 	}
 }
@@ -1271,9 +1271,12 @@ func BenchmarkCopyFile(b *testing.B) {
 	err := os.WriteFile(srcFile, []byte(content), 0o644)
 	require.NoError(b, err)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	// b.Loop() has no index, and this benchmark needs one to vary the
+	// destination filename across iterations.
+	i := 0
+	for b.Loop() {
 		dstFile := filepath.Join(tempDir, "dest_"+string(rune(i%26+'A'))+".txt")
+		i++
 		_ = copyFile(srcFile, dstFile)
 		if err := os.Remove(dstFile); err != nil {
 			b.Logf("Failed to remove temp file: %v", err)

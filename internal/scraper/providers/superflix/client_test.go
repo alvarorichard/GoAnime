@@ -642,8 +642,10 @@ func TestSearchMedia_CacheCaseInsensitive(t *testing.T) {
 func TestSearchMediaWithContext_Cancelled(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second) // slow server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Slow server: block until the client gives up rather than sleeping a
+		// fixed 5s, so srv.Close() does not hold the suite open afterwards.
+		<-r.Context().Done()
 		fmt.Fprint(w, `<html><body></body></html>`)
 	}))
 	defer srv.Close()
@@ -830,8 +832,8 @@ func TestGetPlayerPage_SeriesWithSeasonAndEpisode(t *testing.T) {
 func TestGetPlayerPage_Cancelled(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
 	}))
 	defer srv.Close()
 

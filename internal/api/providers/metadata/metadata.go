@@ -21,7 +21,14 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
+
+// maxJSONResponseBytes caps how much of an HTTP response jsonx.Decode will read
+// before failing with jsonx.ErrTooLarge. The decoders this replaced
+// (json.NewDecoder(resp.Body)) had no bound at all, so a hostile or broken
+// upstream could stream until the process ran out of memory.
+const maxJSONResponseBytes = 10 << 20 // 10 MiB
 
 // setAniListHeaders applies the headers AniList expects from an API client.
 //
@@ -198,7 +205,7 @@ func (e *Enricher) EnrichFromAniList(ctx context.Context, animeName string) (*An
 	}
 
 	var result aniListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &result); err != nil {
 		return nil, fmt.Errorf("decode AniList response: %w", err)
 	}
 
@@ -275,7 +282,7 @@ func (e *Enricher) EnrichFromAniListByID(ctx context.Context, anilistID int) (*A
 	}
 
 	var result aniListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &result); err != nil {
 		return nil, err
 	}
 
@@ -332,7 +339,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 			ID int `json:"id"`
 		} `json:"tv_results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&findResult); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &findResult); err != nil {
 		return "", nil
 	}
 
@@ -359,7 +366,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 	var extIDs struct {
 		IMDBID string `json:"imdb_id"`
 	}
-	if err := json.NewDecoder(resp2.Body).Decode(&extIDs); err != nil {
+	if err := jsonx.Decode(resp2.Body, maxJSONResponseBytes, &extIDs); err != nil {
 		return "", nil
 	}
 
@@ -562,7 +569,7 @@ func (e *Enricher) buildSeasonMapFromTMDB(ctx context.Context, malID int, tmdbAP
 			ID int `json:"id"`
 		} `json:"tv_results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&findResult); err != nil || len(findResult.TVResults) == 0 {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &findResult); err != nil || len(findResult.TVResults) == 0 {
 		return nil
 	}
 
@@ -593,7 +600,7 @@ func (e *Enricher) buildSeasonMapFromTMDB(ctx context.Context, malID int, tmdbAP
 			EpisodeCount int `json:"episode_count"`
 		} `json:"seasons"`
 	}
-	if err := json.NewDecoder(resp2.Body).Decode(&tvDetails); err != nil {
+	if err := jsonx.Decode(resp2.Body, maxJSONResponseBytes, &tvDetails); err != nil {
 		return nil
 	}
 
@@ -801,7 +808,7 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	}
 
 	var allEpisodes map[string][]json.RawMessage
-	if err := json.Unmarshal(m[1], &allEpisodes); err != nil {
+	if err := jsonx.Unmarshal(m[1], &allEpisodes); err != nil {
 		return nil
 	}
 

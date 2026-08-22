@@ -30,6 +30,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/pkg/errors"
 	"golang.org/x/term"
 )
@@ -722,7 +723,7 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 			continue
 		}
 		var response map[string]any
-		err = json.Unmarshal(resp, &response)
+		err = jsonx.Unmarshal(resp, &response)
 		if err != nil {
 			util.Debugf("Error when unmarshaling: %v", err)
 			continue

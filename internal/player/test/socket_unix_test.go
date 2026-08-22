@@ -283,7 +283,7 @@ func TestMacOSSpecificTempDir(t *testing.T) {
 
 // BenchmarkSocketPathConstruction benchmarks socket path construction
 func BenchmarkSocketPathConstruction(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		tmpDir := os.TempDir()
 		tmpDir = strings.TrimSuffix(tmpDir, "/")
 		randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())

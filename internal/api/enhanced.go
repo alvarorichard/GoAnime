@@ -711,9 +711,7 @@ func maybePrefetchNextSuperFlixEpisode(sfClient *superflix.SuperFlixClient, tmdb
 	// Capture the seams synchronously: the goroutine may outlive a test that
 	// restores them, and reading the package vars there would be a data race.
 	getServers, streamFromServer := sfGetServersFn, sfStreamFromServerFn
-	sfPrefetchWG.Add(1)
-	go func() {
-		defer sfPrefetchWG.Done()
+	sfPrefetchWG.Go(func() {
 		defer sfPrefetchInFlight.Delete(key)
 
 		ctx, cancel := context.WithTimeout(superflix.WithoutBrowserSolve(context.Background()), sfPrefetchBudget)
@@ -736,7 +734,7 @@ func maybePrefetchNextSuperFlixEpisode(sfClient *superflix.SuperFlixClient, tmdb
 			return
 		}
 		util.Debug("SuperFlix prefetch: next episode cached for instant start", "key", key)
-	}()
+	})
 }
 
 // superFlixStream resolves a SuperFlix stream, preferring the path that lets the

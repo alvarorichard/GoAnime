@@ -57,7 +57,7 @@ func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
 
 	// wait past turnstile, dump chooser, then auto-click
 	dumped := false
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		mu.Lock()
 		got := hit
 		mu.Unlock()
@@ -70,7 +70,7 @@ func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
 			for _, fr := range page.Frames() {
 				v, e := fr.Evaluate(`()=>{const o=[];document.querySelectorAll('button,a,div,li').forEach(el=>{const t=(el.textContent||'').trim();if(/servidor|dublado|legendado|principal|player/i.test(t)&&t.length<50)o.push(el.tagName+':"'+t+'" cls='+(''+el.className).slice(0,40))});return [...new Set(o)].slice(0,15)}`)
 				if e == nil {
-					if a, ok := v.([]interface{}); ok && len(a) > 0 {
+					if a, ok := v.([]any); ok && len(a) > 0 {
 						t.Logf("FRAME %s", fr.URL())
 						for _, x := range a {
 							t.Logf("   %v", x)

@@ -6,13 +6,13 @@ import (
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // buildAAReq builds the "aaReq" proof token AllAnime requires on the
@@ -148,7 +148,7 @@ func decodeToBeParsed(blob string, key []byte) ([]sourceInfo, error) {
 
 	// The plaintext may contain the full GraphQL response or just the sourceUrls array.
 	// Try parsing as the full response first.
-	if err := json.Unmarshal(plaintext, &result); err == nil && len(result.Data.Episode.SourceUrls) > 0 {
+	if err := jsonx.Unmarshal(plaintext, &result); err == nil && len(result.Data.Episode.SourceUrls) > 0 {
 		var sources []sourceInfo
 		for _, su := range result.Data.Episode.SourceUrls {
 			url := su.SourceURL

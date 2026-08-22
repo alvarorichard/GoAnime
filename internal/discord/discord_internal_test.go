@@ -223,7 +223,7 @@ func TestRichPresenceUpdater_EpisodeDurationSetter(t *testing.T) {
 func TestRichPresenceUpdater_ConcurrentStateAndStop(t *testing.T) {
 	rpu := NewRichPresenceUpdater(
 		&models.Anime{},
-		ptrBool(false),
+		new(false),
 		&sync.Mutex{},
 		time.Hour,
 		0,
