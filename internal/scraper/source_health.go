@@ -46,7 +46,7 @@ func DefaultHealthCheckQuery(source ScraperType) string {
 
 // healthTargets returns the source types to probe, in deterministic order.
 func healthTargets() []ScraperType {
-	return []ScraperType{AllAnimeType, AnimefireType, GoyabuType, SuperFlixType}
+	return []ScraperType{AllAnimeType, AnimefireType, GoyabuType, SuperFlixType, AniDBType}
 }
 
 // checkSourceHealthWith probes a single scraper (which may be nil) and classifies

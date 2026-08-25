@@ -144,7 +144,7 @@ func TestSuperFlixProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.AllAnime, source.AnimeFire, source.Goyabu, source.SuperFlix} {
+	for _, kind := range []source.SourceKind{source.AllAnime, source.AnimeFire, source.Goyabu, source.SuperFlix, source.AniDB} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
