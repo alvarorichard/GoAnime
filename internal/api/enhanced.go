@@ -248,6 +248,8 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "superflix":
 		registryKinds = []apisource.SourceKind{apisource.SuperFlix}
+	case "anidb":
+		registryKinds = []apisource.SourceKind{apisource.AniDB}
 	case "ptbr", "pt-br":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix}
 	}
@@ -291,6 +293,8 @@ func searchAnimeEnhanced(
 				anime.Source = "Goyabu"
 			case "superflix":
 				anime.Source = "SuperFlix"
+			case "anidb":
+				anime.Source = "AniDB"
 			}
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
@@ -303,6 +307,8 @@ func searchAnimeEnhanced(
 					anime.Source = "Goyabu"
 				case strings.Contains(lowerURL, "superflix"), strings.Contains(lowerURL, "sflix"):
 					anime.Source = "SuperFlix"
+				case strings.Contains(lowerURL, "anidb.app"):
+					anime.Source = "AniDB"
 				}
 			}
 		}
@@ -318,6 +324,7 @@ func searchAnimeEnhanced(
 		"AllAnime", breakdown.AllAnime,
 		"SuperFlix", breakdown.SuperFlix,
 		"Goyabu", breakdown.Goyabu,
+		"AniDB", breakdown.AniDB,
 	)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
@@ -935,6 +942,7 @@ type sourceBreakdown struct {
 	AllAnime  int
 	SuperFlix int
 	Goyabu    int
+	AniDB     int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -956,6 +964,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.SuperFlix++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
+		case anime.Source == "AniDB":
+			b.AniDB++
 		}
 	}
 	return b
