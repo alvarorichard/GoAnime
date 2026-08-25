@@ -30,12 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -73,7 +73,7 @@ jobs:
           echo "Build verification passed"
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage
           path: coverage.out
@@ -133,12 +133,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -203,7 +203,7 @@ jobs:
           Write-Host "Built $OUTPUT_NAME with SQLite support"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
@@ -218,13 +218,13 @@ jobs:
     needs: build
     steps:
       - name: Download macOS amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ env.BINARY_NAME }}-darwin-amd64
           path: staging/amd64
 
       - name: Download macOS arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ env.BINARY_NAME }}-darwin-arm64
           path: staging/arm64
@@ -253,7 +253,7 @@ jobs:
           echo "Built ${OUTPUT_NAME} (x86_64 + arm64) with SQLite support"
 
       - name: Upload universal artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.BINARY_NAME }}-darwin-universal
           path: dist/${{ env.BINARY_NAME }}-darwin-universal
@@ -268,7 +268,7 @@ jobs:
     needs: build
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -282,7 +282,7 @@ jobs:
           echo "VERSION_NUMBER=${VERSION_NUMBER}" >> $GITHUB_OUTPUT
 
       - name: Download Windows amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ env.BINARY_NAME }}-windows-amd64
           path: build/staging
@@ -397,7 +397,7 @@ jobs:
           }
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: windows-installer
           path: dist/GoAnime-Installer-*.exe
@@ -414,7 +414,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -433,14 +433,14 @@ jobs:
           fi
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
           pattern: ${{ env.BINARY_NAME }}-*
           merge-multiple: false
 
       - name: Download Windows installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: windows-installer
           path: artifacts/windows-installer
@@ -581,7 +581,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: GoAnime ${{ steps.version.outputs.VERSION }}
           body_path: RELEASE_NOTES.md
@@ -637,7 +637,7 @@ jobs:
 
       - name: Checkout code
         if: steps.check-secrets.outputs.has_secrets == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get version from tag
         if: steps.check-secrets.outputs.has_secrets == 'true'
