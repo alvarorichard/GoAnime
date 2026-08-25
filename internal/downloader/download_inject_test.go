@@ -114,11 +114,9 @@ func TestSelectDownloadMethod(t *testing.T) {
 		{"plain_mp4", "https://cdn.example.com/file.mp4", methodHTTP, false},
 		{"hls_m3u8", "https://cdn.example.com/index.m3u8", methodYtDlp, false},
 		{"hls_master", "https://cdn.example.com/master.m3u8", methodYtDlp, false},
-		{"wixmp", "https://allanime.wixmp.com/foo", methodYtDlp, false},
 		{"wixmp_repackager", "https://repackager.wixmp.com/v.mpd", methodYtDlp, false},
 		{"blogger", "https://blogger.com/v.g?id=1", methodYtDlp, false},
 		{"sharepoint_fallback", "https://x.sharepoint.com/v.mp4", methodHTTP, true},
-		{"allanime", "https://allanime.to/v.mp4", methodYtDlp, false},
 		{"allmanga", "https://allmanga.to/v.mp4", methodYtDlp, false},
 		{"empty_string", "", methodHTTP, false},
 	}

@@ -54,24 +54,25 @@ func TestGetVideoURLForEpisodeEnhanced_DispatchesThroughSourceRegistry(t *testin
 	assert.Same(t, anime, stub.gotAnime)
 }
 
-// TestGetVideoURLForEpisodeEnhanced_AllAnimeErrorNotSilentlyFallenBack pins the
-// legacy policy: a resolved-AllAnime failure surfaces as an error, never the
-// silent legacy extraction.
-func TestGetVideoURLForEpisodeEnhanced_AllAnimeErrorNotSilentlyFallenBack(t *testing.T) {
+// TestGetVideoURLForEpisodeEnhanced_RegistrySourceErrorNotSilentlyFallenBack
+// pins the policy: a failure from a registry-backed source surfaces as an
+// error, never the silent legacy extraction. The guard used to name AllAnime;
+// AniDB inherited that position when AllAnime was removed.
+func TestGetVideoURLForEpisodeEnhanced_RegistrySourceErrorNotSilentlyFallenBack(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AllAnime, Priority: 1, Explicit: []string{"AllAnime"}, ShortID: true},
+		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AniDB"}},
 		err:  assert.AnError,
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)
 
-	anime := &models.Anime{Source: "AllAnime", URL: "hHjXnUTda"}
-	ep := &models.Episode{Number: "1", URL: "hHjXnUTda"}
+	anime := &models.Anime{Source: "AniDB", URL: "https://anidb.app/anime/x-1"}
+	ep := &models.Episode{Number: "1", URL: "https://anidb.app/episode/1"}
 
 	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get AllAnime stream URL")
+	assert.Contains(t, err.Error(), "failed to get AniDB stream URL")
 }
 
 // TestGetVideoURLForEpisodeEnhanced_MovieTVErrorKeepsSourceLabel pins the
@@ -93,30 +94,6 @@ func TestGetVideoURLForEpisodeEnhanced_MovieTVErrorKeepsSourceLabel(t *testing.T
 	assert.Contains(t, err.Error(), "failed to get SuperFlix stream URL")
 }
 
-// TestGetVideoURLForEpisodeEnhanced_NilAnimeShortIDRoutesThroughRegistry pins
-// Phase 2.1: URL-only resolution goes through source.ResolveURL and the
-// minimal anime context comes from the resolution — no fake-AllAnime synthesis.
-func TestGetVideoURLForEpisodeEnhanced_NilAnimeShortIDRoutesThroughRegistry(t *testing.T) {
-	// Swaps the global source registry — not parallel.
-	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AllAnime, Priority: 1, ShortID: true},
-		url:  "https://cdn.example/from-id.mp4",
-	}
-	restore := source.SwapRegistryForTesting(stub)
-	t.Cleanup(restore)
-
-	ep := &models.Episode{Num: 2, URL: "hHjXnUTda"}
-	url, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, nil)
-	require.NoError(t, err)
-	assert.Equal(t, "https://cdn.example/from-id.mp4", url)
-	require.NotNil(t, stub.gotAnime)
-	assert.Equal(t, "AllAnime", stub.gotAnime.Source, "context must come from the resolution, not a hardcoded guess")
-	assert.Equal(t, "hHjXnUTda", stub.gotAnime.URL)
-	assert.Equal(t, "2", stub.gotEpisode.Number, "episode number must be derived from Num")
-}
-
-// TestGetVideoURLForEpisodeEnhanced_NilAnimeUnmatchedIDErrors pins Phase 2.1:
-// a bare value no registered source claims is surfaced as an error, not guessed.
 func TestGetVideoURLForEpisodeEnhanced_NilAnimeUnmatchedIDErrors(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	restore := source.SwapRegistryForTesting() // empty registry: nothing matches
@@ -134,7 +111,7 @@ func TestGetVideoURLForEpisodeEnhanced_NilAnimeUnmatchedIDErrors(t *testing.T) {
 func TestGetVideoURLForEpisodeEnhanced_StrictSourceDisablesBestEffort(t *testing.T) {
 	// Swaps the global source registry and env — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AllAnime, Priority: 1, Explicit: []string{"AllAnime"}},
+		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AllAnime"}},
 		url:  "https://cdn.example/never.mp4",
 	}
 	restore := source.SwapRegistryForTesting(stub)
@@ -150,13 +127,14 @@ func TestGetVideoURLForEpisodeEnhanced_StrictSourceDisablesBestEffort(t *testing
 	assert.Nil(t, stub.gotAnime, "no source must be reached in strict mode")
 }
 
-// TestGetVideoURLForEpisodeEnhanced_UnknownFallsBackToRegisteredAllAnime pins
-// the default best-effort policy: an unrecognized anime dispatches to the
-// registered AllAnime source (with a loud warning; disabled by GOANIME_STRICT_SOURCE).
-func TestGetVideoURLForEpisodeEnhanced_UnknownFallsBackToRegisteredAllAnime(t *testing.T) {
+// TestGetVideoURLForEpisodeEnhanced_UnknownIsReportedNotGuessed pins the policy
+// after AllAnime's removal: an unrecognized anime has no plausible source to be
+// dispatched to, so it fails with a reason instead of being handed to whichever
+// source happens to be registered.
+func TestGetVideoURLForEpisodeEnhanced_UnknownIsReportedNotGuessed(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AllAnime, Priority: 1, Explicit: []string{"AllAnime"}},
+		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AllAnime"}},
 		url:  "https://cdn.example/best-effort.mp4",
 	}
 	restore := source.SwapRegistryForTesting(stub)
@@ -165,10 +143,9 @@ func TestGetVideoURLForEpisodeEnhanced_UnknownFallsBackToRegisteredAllAnime(t *t
 	anime := &models.Anime{Name: "Mystery", URL: "https://unknown.example/x"}
 	ep := &models.Episode{Number: "1", URL: "https://unknown.example/x/1"}
 
-	url, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
-	require.NoError(t, err)
-	assert.Equal(t, "https://cdn.example/best-effort.mp4", url)
-	assert.Same(t, anime, stub.gotAnime, "best-effort dispatch must reach the AllAnime source")
+	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
+	require.Error(t, err, "an unrecognized source must not be guessed at")
+	assert.Nil(t, stub.gotAnime, "no source must be reached for an Unknown resolution")
 }
 
 // gatedStubSource is a stubSource that also implements source.BrowserGated so

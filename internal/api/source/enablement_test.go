@@ -18,12 +18,12 @@ func TestIsEnabled(t *testing.T) {
 	// Uses t.Setenv — not parallel.
 	t.Run("plain source enabled by default", func(t *testing.T) {
 		t.Setenv(disabledSourcesEnvForTest, "")
-		assert.True(t, IsEnabled(Descriptor{Kind: AllAnime}))
+		assert.True(t, IsEnabled(Descriptor{Kind: AniDB}))
 	})
 
 	t.Run("disabled via config", func(t *testing.T) {
-		t.Setenv(disabledSourcesEnvForTest, "AllAnime")
-		assert.False(t, IsEnabled(Descriptor{Kind: AllAnime}))
+		t.Setenv(disabledSourcesEnvForTest, "AniDB")
+		assert.False(t, IsEnabled(Descriptor{Kind: AniDB}))
 		assert.True(t, IsEnabled(Descriptor{Kind: Goyabu}), "only the listed source is off")
 	})
 
@@ -46,19 +46,19 @@ func TestIsEnabled(t *testing.T) {
 
 func TestEnabled(t *testing.T) {
 	// Swaps registry + env — not parallel.
-	restore := SwapRegistryForTesting(newFake(AllAnime, 1), newFake(Goyabu, 2))
+	restore := SwapRegistryForTesting(newFake(AniDB, 1), newFake(Goyabu, 2))
 	t.Cleanup(restore)
 
 	t.Run("enabled source is returned", func(t *testing.T) {
 		t.Setenv(disabledSourcesEnvForTest, "")
-		s, ok := Enabled(AllAnime)
+		s, ok := Enabled(AniDB)
 		require.True(t, ok)
-		assert.Equal(t, AllAnime, s.Describe().Kind)
+		assert.Equal(t, AniDB, s.Describe().Kind)
 	})
 
 	t.Run("disabled source is not returned", func(t *testing.T) {
-		t.Setenv(disabledSourcesEnvForTest, "AllAnime")
-		_, ok := Enabled(AllAnime)
+		t.Setenv(disabledSourcesEnvForTest, "AniDB")
+		_, ok := Enabled(AniDB)
 		assert.False(t, ok, "a disabled source must not be selectable via Enabled")
 		_, ok = Enabled(Goyabu)
 		assert.True(t, ok, "other sources stay enabled")
@@ -92,7 +92,7 @@ func TestResolve_SkipsDisabledSource(t *testing.T) {
 
 func TestDisabledSources(t *testing.T) {
 	// Swaps registry + env — not parallel.
-	restore := SwapRegistryForTesting(newFake(AllAnime, 1), newFake(Goyabu, 2), newFake(SuperFlix, 3))
+	restore := SwapRegistryForTesting(newFake(AniDB, 1), newFake(Goyabu, 2), newFake(SuperFlix, 3))
 	t.Cleanup(restore)
 
 	t.Setenv(disabledSourcesEnvForTest, "Goyabu,SuperFlix")

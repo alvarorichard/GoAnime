@@ -93,7 +93,6 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 		Tags:        []string{"[superflix]"},
 		URLMatchers: []string{"superflix"},
 		MediaTypes:  []models.MediaType{models.MediaTypeMovie},
-		ShortID:     true,
 	}
 	tests := []struct {
 		name       string
@@ -104,7 +103,6 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 		{"media type", &models.Anime{MediaType: models.MediaTypeMovie}, true, "MediaType=movie"},
 		{"name tag", &models.Anime{Name: "Filme [SuperFlix]"}, true, "tag [superflix]"},
 		{"url matcher", &models.Anime{URL: "https://superflix.to/x"}, true, "URL contains superflix"},
-		{"short ID", &models.Anime{URL: "hHjXnUTda"}, true, "short ID"},
 		{"no match", &models.Anime{Name: "X", URL: "https://example.com/1"}, false, ""},
 		{"empty anime", &models.Anime{}, false, ""},
 	}
@@ -121,17 +119,15 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 func TestDescriptorMatchURL(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
-		Kind:        AllAnime,
-		URLMatchers: []string{"allanime"},
-		ShortID:     true,
+		Kind:        AniDB,
+		URLMatchers: []string{"stubhost"},
 	}
 	tests := []struct {
 		name   string
 		url    string
 		wantOK bool
 	}{
-		{"url matcher", "https://allanime.to/anime/x", true},
-		{"short ID", "hHjXnUTda", true},
+		{"url matcher", "https://stubhost.example/anime/x", true},
 		{"empty", "", false},
 		{"no match", "https://example.com/v", false},
 	}
@@ -155,11 +151,10 @@ func TestResolve(t *testing.T) {
 		d.Tags = []string{"[goyabu]"}
 		d.URLMatchers = []string{"goyabu"}
 	})
-	allAnime := newFake(AllAnime, 40, func(d *Descriptor) {
-		d.Explicit = []string{"AllAnime"}
+	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
+		d.Explicit = []string{"AniDB"}
 		d.Tags = []string{"[english]"}
-		d.URLMatchers = []string{"allanime"}
-		d.ShortID = true
+		d.URLMatchers = []string{"stubhost"}
 	})
 	restore := SwapRegistryForTesting(animeFire, goyabu, allAnime)
 	t.Cleanup(restore)
@@ -174,9 +169,8 @@ func TestResolve(t *testing.T) {
 		{"empty anime", &models.Anime{}, Unknown, nil},
 		{"explicit Source field", &models.Anime{Source: "Goyabu"}, Goyabu, goyabu},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, Goyabu, goyabu},
-		{"name tag", &models.Anime{Name: "Naruto [English]"}, AllAnime, allAnime},
+		{"name tag", &models.Anime{Name: "Naruto [English]"}, AniDB, allAnime},
 		{"URL pattern", &models.Anime{URL: "https://animefire.plus/naruto"}, AnimeFire, animeFire},
-		{"short ID", &models.Anime{URL: "hHjXnUTda"}, AllAnime, allAnime},
 		{"PT-BR fallback to AnimeFire", &models.Anime{Name: "Naruto [PT-BR]"}, AnimeFire, animeFire},
 		{"no match is Unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, Unknown, nil},
 	}
@@ -216,9 +210,8 @@ func TestResolve(t *testing.T) {
 
 func TestResolveURL(t *testing.T) {
 	animeFire := newFake(AnimeFire, 10, func(d *Descriptor) { d.URLMatchers = []string{"animefire"} })
-	allAnime := newFake(AllAnime, 40, func(d *Descriptor) {
-		d.URLMatchers = []string{"allanime"}
-		d.ShortID = true
+	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
+		d.URLMatchers = []string{"stubhost"}
 	})
 	restore := SwapRegistryForTesting(animeFire, allAnime)
 	t.Cleanup(restore)
@@ -231,8 +224,7 @@ func TestResolveURL(t *testing.T) {
 	}{
 		{"empty URL", "", Unknown, true},
 		{"animefire URL", "https://animefire.plus/ep/naruto-1", AnimeFire, false},
-		{"allanime URL", "https://allanime.to/anime/hHjXnUTda", AllAnime, false},
-		{"short ID", "hHjXnUTda", AllAnime, false},
+		{"removed allanime host resolves to nothing", "https://allanime.to/anime/hHjXnUTda", Unknown, true},
 		{"unknown domain", "https://example.com/video", Unknown, true},
 	}
 	for _, tt := range tests {

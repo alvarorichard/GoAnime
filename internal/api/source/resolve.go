@@ -63,7 +63,7 @@ func Resolve(anime *models.Anime) (Source, ResolvedSource) {
 	}
 
 	util.Warn("source resolution fell through to Unknown", "anime", anime.Name, "url", anime.URL)
-	return nil, ResolvedSource{Kind: Unknown, Reason: "no match, best-effort AllAnime"}
+	return nil, ResolvedSource{Kind: Unknown, Reason: "no match"}
 }
 
 // ResolveURL resolves a source from a raw URL string only, scanning the
@@ -85,43 +85,12 @@ func ResolveURL(rawURL string) (Source, ResolvedSource) {
 }
 
 // BestEffortKind returns the effective SourceKind for dispatch.
-// Unknown is treated as AllAnime for backward compatibility.
+//
+// It used to answer AllAnime for Unknown — the silent guess this architecture
+// explicitly forbids ("an unrecognized source is logged and visible, never
+// silently parsed as AllAnime"). With AllAnime deleted there is no plausible
+// source to guess at, so Unknown is returned unchanged and the caller fails
+// with a readable reason instead of scraping the wrong site.
 func (r ResolvedSource) BestEffortKind() SourceKind {
-	if r.Kind == Unknown {
-		return AllAnime
-	}
 	return r.Kind
-}
-
-// IsAllAnimeShortID returns true if s looks like an AllAnime short ID:
-// alphanumeric, <30 chars, not a URL, not purely numeric.
-func IsAllAnimeShortID(s string) bool {
-	if s == "" || len(s) > 30 || strings.Contains(s, "http") || strings.Contains(s, "/") {
-		return false
-	}
-	hasLetter := false
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
-			hasLetter = true
-		case r >= '0' && r <= '9':
-			// ok
-		default:
-			return false // non-alphanumeric
-		}
-	}
-	return hasLetter
-}
-
-// ExtractAllAnimeID extracts the AllAnime ID from a URL or bare string.
-func ExtractAllAnimeID(s string) string {
-	if IsAllAnimeShortID(s) {
-		return s
-	}
-	if _, candidate, ok := strings.CutLast(s, "/"); ok && candidate != "" {
-		if IsAllAnimeShortID(candidate) {
-			return candidate
-		}
-	}
-	return s
 }

@@ -116,7 +116,7 @@ func TestIsPlayableVideoURL(t *testing.T) {
 func TestEstimateContentLengthForAllAnime_HLSReturnsFixed500MB(t *testing.T) {
 	t.Parallel()
 	// HLS URLs short-circuit: client is never touched.
-	got, err := estimateContentLengthForAllAnime("https://cdn.example/x.m3u8", nil)
+	got, err := estimateStreamContentLength("https://cdn.example/x.m3u8", nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(500*1024*1024), got)
 }
@@ -130,7 +130,7 @@ func TestEstimateContentLengthForAllAnime_ParsesContentRange(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	got, err := estimateContentLengthForAllAnime(srv.URL+"/video.mp4", srv.Client())
+	got, err := estimateStreamContentLength(srv.URL+"/video.mp4", srv.Client())
 	require.NoError(t, err)
 	assert.Equal(t, int64(123456789), got)
 }
@@ -144,7 +144,7 @@ func TestEstimateContentLengthForAllAnime_StarSizeFallsBackToDefault(t *testing.
 	}))
 	t.Cleanup(srv.Close)
 
-	got, err := estimateContentLengthForAllAnime(srv.URL+"/x.mp4", srv.Client())
+	got, err := estimateStreamContentLength(srv.URL+"/x.mp4", srv.Client())
 	require.NoError(t, err)
 	assert.Equal(t, int64(300*1024*1024), got)
 }
@@ -157,14 +157,14 @@ func TestEstimateContentLengthForAllAnime_NoContentRangeFallsBack(t *testing.T) 
 	}))
 	t.Cleanup(srv.Close)
 
-	got, err := estimateContentLengthForAllAnime(srv.URL+"/y.mp4", srv.Client())
+	got, err := estimateStreamContentLength(srv.URL+"/y.mp4", srv.Client())
 	require.NoError(t, err)
 	assert.Equal(t, int64(300*1024*1024), got)
 }
 
 func TestEstimateContentLengthForAllAnime_InvalidURLReturnsError(t *testing.T) {
 	t.Parallel()
-	_, err := estimateContentLengthForAllAnime("http://[::1\n", &http.Client{})
+	_, err := estimateStreamContentLength("http://[::1\n", &http.Client{})
 	require.Error(t, err)
 }
 
@@ -227,11 +227,11 @@ func TestNewSurfDownloadClient_NotNil(t *testing.T) {
 	assert.NotNil(t, newSurfDownloadClient())
 }
 
-func TestGetVideoURLForEpisode_AllAnimeShortIDRejected(t *testing.T) {
+func TestGetVideoURLForEpisode_BareIDRejected(t *testing.T) {
 	t.Parallel()
 	_, err := GetVideoURLForEpisode("shortid")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "use enhanced API")
+	assert.Contains(t, err.Error(), "use the registry path")
 }
 
 func TestGetVideoURLForEpisodeEnhanced_CancelledContextReturnsImmediately(t *testing.T) {

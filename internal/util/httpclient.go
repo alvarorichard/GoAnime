@@ -298,7 +298,6 @@ func ParallelExecute(maxWorkers int, tasks ...func()) {
 var knownHosts = []string{
 	"graphql.anilist.co:443",
 	"api.jikan.moe:443",
-	"allanime.day:443",
 	"animefire.io:443",
 	"kitsu.io:443",
 }

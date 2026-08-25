@@ -19,7 +19,6 @@ type Descriptor struct {
 	Tags        []string           // Lowercase tags in anime.Name, e.g. "[animefire]"
 	URLMatchers []string           // Lowercase substrings to match in anime.URL
 	MediaTypes  []models.MediaType // MediaType values that map to this source
-	ShortID     bool               // If true, accepts AllAnime-style short alphanumeric IDs
 
 	// DefaultDisabled marks a source that is OFF unless the user opts in via
 	// GOANIME_ENABLED_SOURCES (ARCHITECTURE.md §7 S1). Use it for experimental
@@ -31,7 +30,7 @@ type Descriptor struct {
 	// search timeout: after a per-source deadline the dispatcher issues a quick
 	// HEAD against it (netx.EnrichTimeoutWithProbe) so a 5xx / Cloudflare-origin
 	// failure is reported as "site down" instead of a generic timeout. Leave
-	// empty for opaque APIs (AllAnime GraphQL) or browser-gated sources
+	// empty for opaque APIs or browser-gated sources
 	// (SuperFlix) where a homepage probe is not meaningful.
 	ProbeURL string
 }
@@ -69,11 +68,6 @@ func (d Descriptor) matchNonExplicit(anime *models.Anime) (string, bool) {
 		}
 	}
 
-	// Priority 5: Short ID (AllAnime-style)
-	if d.ShortID && IsAllAnimeShortID(anime.URL) {
-		return "short ID", true
-	}
-
 	return "", false
 }
 
@@ -87,9 +81,6 @@ func (d Descriptor) matchURL(url string) (string, bool) {
 		if strings.Contains(lower, pat) {
 			return "URL contains " + pat, true
 		}
-	}
-	if d.ShortID && IsAllAnimeShortID(url) {
-		return "short ID", true
 	}
 	return "", false
 }

@@ -40,7 +40,9 @@ func (registryMediaSource) SearchAll(query string) ([]*models.Anime, error) {
 }
 
 func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error) {
-	return providers.SearchAll(context.Background(), query, source.AllAnime, source.AnimeFire)
+	// AniDB took AllAnime's place as the subbed/dubbed anime source when
+	// AllAnime was removed; AnimeFire stays as the PT-BR anime source.
+	return providers.SearchAll(context.Background(), query, source.AniDB, source.AnimeFire)
 }
 
 func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (streamURL string, metadata map[string]string, err error) {

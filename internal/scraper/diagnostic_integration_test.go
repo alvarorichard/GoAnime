@@ -19,7 +19,7 @@ func TestCheckSourceHealthFailsOnParserBreakButSkipsOffline(t *testing.T) {
 	t.Parallel()
 
 	offlineMock := &MockScraper{
-		scraperType: AllAnimeType,
+		scraperType: AniDBType,
 		searchFunc: func(_ string) ([]*models.Anime, error) {
 			return nil, netx.NewHTTPStatusError("AllAnime", "search", 521)
 		},
@@ -31,7 +31,7 @@ func TestCheckSourceHealthFailsOnParserBreakButSkipsOffline(t *testing.T) {
 		},
 	}
 
-	offline := checkSourceHealthWith(context.Background(), AllAnimeType, offlineMock, "naruto")
+	offline := checkSourceHealthWith(context.Background(), AniDBType, offlineMock, "naruto")
 	assert.Equal(t, SourceHealthSkipped, offline.Status)
 	require.NotNil(t, offline.Diagnostic)
 	assert.Equal(t, netx.DiagnosticSourceUnavailable, offline.Diagnostic.Kind)

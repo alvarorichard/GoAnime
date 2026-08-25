@@ -649,14 +649,13 @@ func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error)
 }
 
 func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
-	// Check if this is an AllAnime URL that might not have Content-Length header
+	// Some CDNs answer without a Content-Length header; those need an estimate.
 	// Based on ani-cli patterns
-	isAllAnimeURL := strings.Contains(url, "sharepoint.com") ||
+	isOpaqueStreamURL := strings.Contains(url, "sharepoint.com") ||
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "repackager.wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
 		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "allanime.pro") ||
 		strings.Contains(url, "blogger.com")
 
 	// For streaming URLs that we know won't have Content-Length, return estimate immediately
@@ -673,23 +672,23 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	req, err := http.NewRequest("HEAD", url, http.NoBody)
 	if err != nil {
-		if isAllAnimeURL {
-			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
-			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		if isOpaqueStreamURL {
+			fmt.Printf("HEAD request failed for opaque stream URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil // 300MB default for opaque streams
 		}
 		return 0, err
 	}
 
-	// Add referer for AllAnime URLs (like ani-cli does)
-	if isAllAnimeURL {
+	// Add a referer for hosts that require one.
+	if isOpaqueStreamURL {
 		req.Header.Set("Referer", "https://allmanga.to")
 	}
 
 	resp, err := httpClient.Do(req) // #nosec G704
 	if err != nil {
-		if isAllAnimeURL {
-			fmt.Printf("HEAD request failed for AllAnime URL, using estimate: %v\n", err)
-			return 300 * 1024 * 1024, nil // 300MB default for AllAnime
+		if isOpaqueStreamURL {
+			fmt.Printf("HEAD request failed for opaque stream URL, using estimate: %v\n", err)
+			return 300 * 1024 * 1024, nil // 300MB default for opaque streams
 		}
 		return 0, err
 	}
@@ -701,18 +700,19 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 
 	contentLength := resp.Header.Get("Content-Length")
 	if contentLength == "" {
-		// For AllAnime URLs that might not have Content-Length, use fallback
-		if isAllAnimeURL {
-			fmt.Println("Content-Length header missing for AllAnime URL, using fallback estimate")
-			return d.estimateContentLengthForAllAnime(url, httpClient)
+		// No Content-Length: fall back to an estimate.
+		if isOpaqueStreamURL {
+			fmt.Println("Content-Length header missing, using fallback estimate")
+			return d.estimateStreamContentLength(url, httpClient)
 		}
 		return 0, fmt.Errorf("content-length header missing")
 	}
 	return strconv.ParseInt(contentLength, 10, 64)
 }
 
-// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
-func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+// estimateStreamContentLength estimates the size of a stream whose server
+// omits Content-Length.
+func (d *EpisodeDownloader) estimateStreamContentLength(url string, client *http.Client) (int64, error) {
 	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
 	if strings.Contains(url, ".m3u8") {
 		util.Debugf("HLS stream detected, using estimated size for download")
@@ -720,7 +720,7 @@ func (d *EpisodeDownloader) estimateContentLengthForAllAnime(url string, client 
 		return 500 * 1024 * 1024, nil
 	}
 
-	// For other AllAnime URLs, try to get partial content to estimate size
+	// Otherwise ask for a byte range and read the size off the response.
 	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return 0, err
@@ -845,7 +845,7 @@ func selectDownloadMethod(videoURL string) (primary, fallback downloadMethod, ha
 		return methodYtDlp, methodHTTP, false
 	case strings.Contains(videoURL, "sharepoint.com"):
 		return methodHTTP, methodYtDlp, true
-	case strings.Contains(videoURL, "allanime") || strings.Contains(videoURL, "allmanga"):
+	case strings.Contains(videoURL, "allmanga"):
 		return methodYtDlp, methodHTTP, false
 	default:
 		return methodHTTP, methodYtDlp, false

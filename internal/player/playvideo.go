@@ -17,7 +17,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -803,7 +802,7 @@ func getTrackerDBPath() string {
 }
 
 // trackingKey builds an episode-specific tracking key so that each episode
-// gets its own row in the database. Without this, sources like AllAnime
+// gets its own row in the database. Without this, sources that
 // (where episode.URL is the anime ID, not the episode ID) would share a
 // single tracking row across all episodes, causing stale resume times.
 func trackingKey(episodeURL string, episodeNum int) string {
@@ -864,7 +863,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 
 	// Safety check: verify the saved progress belongs to the current episode.
 	// This prevents offering a resume from episode 3's position when the user
-	// has switched to episode 4 (e.g., AllAnime shares the same URL across episodes).
+	// has switched to episode 4 (some sources share one URL across episodes).
 	if progress.EpisodeNumber != episodeNum {
 		util.Debugf("Tracking: saved progress is for episode %d, current is %d - skipping resume",
 			progress.EpisodeNumber, episodeNum)
@@ -941,15 +940,10 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 		select {
 		case err := <-ch:
 			if err == nil {
+				// Skip times are applied for every source. The extra
+				// chapter-marker pass that used to run here was AllAnime-only
+				// (gated on an AllAnime URL shape) and went with that source.
 				applySkipTimes(socketPath, episode)
-
-				// For AllAnime episodes, also try to set chapter markers (like Curd does)
-				if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
-					allAnimeClient := allanime.NewAllAnimeClient()
-					if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
-						util.Debugf("Failed to set chapter markers: %v", chapterErr)
-					}
-				}
 			} else {
 				util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 			}
@@ -1106,7 +1100,7 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 		return
 	}
 
-	// Skip preloading for AllAnime episodes (they use IDs, not HTTP URLs)
+	// Skip preloading for sources addressed by bare ids rather than URLs.
 	nextEpisodeURL := episodes[currentIndex+1].URL
 	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
 		return
@@ -1374,7 +1368,7 @@ func selectEpisode(episodes []models.Episode, malID, anilistID int, updater *dis
 }
 
 // findSelectedEpisodeIndex resolves a fuzzy-finder selection to a slice index.
-// The episode number is matched before the URL because sources like AllAnime
+// The episode number is matched before the URL because some sources
 // use the anime ID as the URL of every episode, so a URL-only match always
 // resolved to the first episode regardless of what the user picked.
 func findSelectedEpisodeIndex(episodes []models.Episode, url, numStr string) int {
@@ -1419,8 +1413,6 @@ func switchEpisode(newIndex int, episodes []models.Episode, malID, anilistID int
 		} else if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
 			// Check global referer to detect 9Anime (uses rapid-cloud referer)
 			guessedSource = "9Anime"
-		} else if (len(storedURL) < 30 && !strings.Contains(storedURL, "http")) || strings.Contains(storedURL, "allanime") {
-			guessedSource = "AllAnime"
 		}
 		anime = &models.Anime{URL: storedURL, Source: guessedSource}
 	}

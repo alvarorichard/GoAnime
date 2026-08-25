@@ -72,7 +72,7 @@ func injectScraper(t *testing.T, _ scraper.ScraperType, mock scraper.UnifiedScra
 // episodes and stream URL/error.
 func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.UnifiedScraper) {
 	t.Helper()
-	if m, ok := mocks[scraper.AllAnimeType].(*mockEpiScraper); ok {
+	if m, ok := mocks[scraper.AniDBType].(*mockEpiScraper); ok {
 		wireEpisodesSeam(t, m.episodes, m.epsErr)
 		wireStreamSeam(t, m.stURL, m.stErr)
 	}
@@ -114,8 +114,8 @@ func TestGetSuperFlixEpisodes_MovieType(t *testing.T) {
 // --- DownloadEpisodeEnhanced ---
 
 func TestDownloadEpisodeEnhanced_EpisodesError(t *testing.T) {
-	mock := &mockEpiScraper{epsErr: errors.New("upstream failed"), tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	mock := &mockEpiScraper{epsErr: errors.New("upstream failed"), tp: scraper.AniDBType}
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeEnhanced(anime, 1, "best")
@@ -126,9 +126,9 @@ func TestDownloadEpisodeEnhanced_EpisodesError(t *testing.T) {
 func TestDownloadEpisodeEnhanced_EpisodeNumTooLow(t *testing.T) {
 	mock := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeEnhanced(anime, 0, "best") // 0 < 1
@@ -139,9 +139,9 @@ func TestDownloadEpisodeEnhanced_EpisodeNumTooLow(t *testing.T) {
 func TestDownloadEpisodeEnhanced_EpisodeNumTooHigh(t *testing.T) {
 	mock := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeEnhanced(anime, 5, "best") // only 1 episode available
@@ -155,10 +155,10 @@ func TestDownloadEpisodeEnhanced_ReachesDownloadFromURL(t *testing.T) {
 	combined := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1, URL: "ep1-url"}},
 		stURL:    "http://stream.test/ep1.m3u8",
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
 	injectMultiScraper(t, map[scraper.ScraperType]scraper.UnifiedScraper{
-		scraper.AllAnimeType: combined,
+		scraper.AniDBType: combined,
 	})
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
@@ -172,10 +172,10 @@ func TestDownloadEpisodeEnhanced_StreamURLError(t *testing.T) {
 	combined := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1, URL: "ep1-url"}},
 		stErr:    errors.New("no stream"),
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
 	injectMultiScraper(t, map[scraper.ScraperType]scraper.UnifiedScraper{
-		scraper.AllAnimeType: combined,
+		scraper.AniDBType: combined,
 	})
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
@@ -187,8 +187,8 @@ func TestDownloadEpisodeEnhanced_StreamURLError(t *testing.T) {
 // --- DownloadEpisodeRangeEnhanced ---
 
 func TestDownloadEpisodeRangeEnhanced_EpisodesError(t *testing.T) {
-	mock := &mockEpiScraper{epsErr: errors.New("upstream failed"), tp: scraper.AllAnimeType}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	mock := &mockEpiScraper{epsErr: errors.New("upstream failed"), tp: scraper.AniDBType}
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeRangeEnhanced(anime, 1, 2, "best")
@@ -199,9 +199,9 @@ func TestDownloadEpisodeRangeEnhanced_EpisodesError(t *testing.T) {
 func TestDownloadEpisodeRangeEnhanced_InvalidRange(t *testing.T) {
 	mock := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1}},
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeRangeEnhanced(anime, 2, 3, "best") // only 1 ep; 2 > 1
@@ -212,9 +212,9 @@ func TestDownloadEpisodeRangeEnhanced_InvalidRange(t *testing.T) {
 func TestDownloadEpisodeRangeEnhanced_StartGreaterThanEnd(t *testing.T) {
 	mock := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1}, {Number: "2", Num: 2}},
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
-	injectScraper(t, scraper.AllAnimeType, mock)
+	injectScraper(t, scraper.AniDBType, mock)
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto"}
 	err := DownloadEpisodeRangeEnhanced(anime, 3, 1, "best") // startEp > endEp
@@ -231,10 +231,10 @@ func TestDownloadEpisodeRangeEnhanced_LoopIgnoresDownloadError(t *testing.T) {
 			{Number: "2", Num: 2, URL: "ep2-url"},
 		},
 		stURL: "http://stream.test/ep.m3u8",
-		tp:    scraper.AllAnimeType,
+		tp:    scraper.AniDBType,
 	}
 	injectMultiScraper(t, map[scraper.ScraperType]scraper.UnifiedScraper{
-		scraper.AllAnimeType: combined,
+		scraper.AniDBType: combined,
 	})
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}
@@ -247,10 +247,10 @@ func TestDownloadEpisodeRangeEnhanced_StreamURLErrorContinues(t *testing.T) {
 	combined := &mockEpiScraper{
 		episodes: []models.Episode{{Number: "1", Num: 1, URL: "ep1-url"}},
 		stErr:    errors.New("no stream"),
-		tp:       scraper.AllAnimeType,
+		tp:       scraper.AniDBType,
 	}
 	injectMultiScraper(t, map[scraper.ScraperType]scraper.UnifiedScraper{
-		scraper.AllAnimeType: combined,
+		scraper.AniDBType: combined,
 	})
 
 	anime := &models.Anime{Source: "AllAnime", Name: "Naruto", URL: "naruto-id"}

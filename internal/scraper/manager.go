@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/anidb"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
@@ -28,13 +27,10 @@ import (
 type ScraperType int
 
 const (
-	AllAnimeType ScraperType = iota
-	AnimefireType
-	GoyabuType    // PT-BR anime source
-	SuperFlixType // SuperFlix PT-BR movies/series/animes/doramas
-	// AniDBType is appended last on purpose: ScraperType is an iota and
-	// inserting would renumber every persisted value.
-	AniDBType // anidb.app — subbed/dubbed HLS, replaces the dead AllAnime path
+	AnimefireType ScraperType = iota
+	GoyabuType                // PT-BR anime source
+	SuperFlixType             // SuperFlix PT-BR movies/series/animes/doramas
+	AniDBType                 // anidb.app — subbed/dubbed HLS
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -67,8 +63,6 @@ type UnifiedScraper interface {
 // does no network I/O.
 func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 	switch t {
-	case AllAnimeType:
-		return &AllAnimeAdapter{client: allanime.NewAllAnimeClient()}, nil
 	case AnimefireType:
 		return &AnimefireAdapter{client: animefire.NewAnimefireClient()}, nil
 	case GoyabuType:
@@ -86,8 +80,6 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 // the canonical Source spelling used by result tagging and diagnostics.
 func scraperDisplayName(scraperType ScraperType) string {
 	switch scraperType {
-	case AllAnimeType:
-		return "AllAnime"
 	case AnimefireType:
 		return "Animefire.io"
 	case GoyabuType:
@@ -104,8 +96,6 @@ func scraperDisplayName(scraperType ScraperType) string {
 // scraperLanguageTag returns the language tag prefix for a source.
 func scraperLanguageTag(scraperType ScraperType) string {
 	switch scraperType {
-	case AllAnimeType:
-		return "[English]"
 	case AnimefireType:
 		return "[PT-BR]"
 	case GoyabuType:
@@ -180,76 +170,6 @@ func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
 		}
 	}
 	return ambiguous
-}
-
-// AllAnimeAdapter adapts allanime.AllAnimeClient to UnifiedScraper interface
-type AllAnimeAdapter struct {
-	client *allanime.AllAnimeClient
-}
-
-// Client returns the underlying allanime.AllAnimeClient for direct access to enhanced features.
-func (a *AllAnimeAdapter) Client() *allanime.AllAnimeClient {
-	return a.client
-}
-
-func (a *AllAnimeAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
-	// mode is now hardcoded in the new implementation
-	return a.client.SearchAnime(query)
-}
-
-func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	// For AllAnime, animeURL is actually the anime ID
-	episodes, err := a.client.GetEpisodesList(animeURL, "sub")
-	if err != nil {
-		return nil, err
-	}
-
-	episodeModels := make([]models.Episode, 0, len(episodes))
-	for i, ep := range episodes {
-		episodeModels = append(episodeModels, models.Episode{
-			Number: ep,
-			Num:    i + 1,
-			URL:    animeURL, // Store the anime ID in URL field
-			Title: models.TitleDetails{
-				Romaji: fmt.Sprintf("Episode %s", ep),
-			},
-		})
-	}
-
-	return episodeModels, nil
-}
-
-func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
-	// For AllAnime, episodeURL contains the anime ID
-	animeID := episodeURL
-
-	// Parse options to get episode number
-	episodeNo := "1"
-	if len(options) > 0 {
-		if ep, ok := options[0].(string); ok {
-			episodeNo = ep
-		}
-	}
-
-	quality := "best"
-	if len(options) > 1 {
-		if q, ok := options[1].(string); ok {
-			quality = q
-		}
-	}
-
-	mode := "sub"
-	if len(options) > 2 {
-		if m, ok := options[2].(string); ok {
-			mode = m
-		}
-	}
-
-	return a.client.GetEpisodeURL(animeID, episodeNo, mode, quality)
-}
-
-func (a *AllAnimeAdapter) GetType() ScraperType {
-	return AllAnimeType
 }
 
 // AnimefireAdapter adapts animefire.AnimefireClient to UnifiedScraper interface

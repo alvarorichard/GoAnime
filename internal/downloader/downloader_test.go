@@ -369,11 +369,12 @@ func TestEpisodeDownloader_GetContentLength(t *testing.T) {
 		assert.Equal(t, int64(400*1024*1024), n)
 	})
 
-	t.Run("allanime_url_fallback", func(t *testing.T) {
+	t.Run("opaque_url_fallback", func(t *testing.T) {
 		t.Parallel()
-		// AllAnime branch: HEAD will fail (unresolvable host) → 300MB fallback.
-		// Hostname has invalid TLD to guarantee DNS failure regardless of env.
-		n, err := d.getContentLength("https://allanime.pro.invalid.test/video/foo.mp4")
+		// Opaque-stream branch: HEAD will fail (unresolvable host) → 300MB
+		// fallback. Hostname has an invalid TLD to guarantee DNS failure
+		// regardless of env.
+		n, err := d.getContentLength("https://sharepoint.com.invalid.test/video/foo.mp4")
 		require.NoError(t, err)
 		assert.Equal(t, int64(300*1024*1024), n)
 	})
@@ -397,14 +398,14 @@ func TestEpisodeDownloader_EstimateContentLengthForAllAnime(t *testing.T) {
 
 	t.Run("m3u8_estimate", func(t *testing.T) {
 		t.Parallel()
-		n, err := d.estimateContentLengthForAllAnime("https://x/y.m3u8", client)
+		n, err := d.estimateStreamContentLength("https://x/y.m3u8", client)
 		require.NoError(t, err)
 		assert.Equal(t, int64(500*1024*1024), n)
 	})
 
 	t.Run("range_request_failure_fallback", func(t *testing.T) {
 		t.Parallel()
-		n, err := d.estimateContentLengthForAllAnime("https://invalid.invalid.test/foo.mp4", client)
+		n, err := d.estimateStreamContentLength("https://invalid.invalid.test/foo.mp4", client)
 		require.NoError(t, err)
 		assert.Equal(t, int64(300*1024*1024), n)
 	})

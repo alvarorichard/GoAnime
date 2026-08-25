@@ -66,7 +66,7 @@ func TestScraperDisplayName(t *testing.T) {
 		st   ScraperType
 		want string
 	}{
-		{AllAnimeType, "AllAnime"},
+		{AniDBType, "AniDB"},
 		{AnimefireType, "Animefire.io"},
 		{GoyabuType, "Goyabu"},
 		{SuperFlixType, "SuperFlix"},
@@ -83,7 +83,7 @@ func TestScraperLanguageTag(t *testing.T) {
 		st   ScraperType
 		want string
 	}{
-		{AllAnimeType, "[English]"},
+		{AniDBType, "[English]"},
 		{AnimefireType, "[PT-BR]"},
 		{GoyabuType, "[PT-BR]"},
 		{SuperFlixType, "[PT-BR]"},

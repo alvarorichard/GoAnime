@@ -56,8 +56,6 @@ func (registryManager) GetScraper(scraperType scraper.ScraperType) (scraper.Unif
 // scraperKind maps an internal ScraperType to its Model B SourceKind.
 func scraperKind(st scraper.ScraperType) (apisource.SourceKind, bool) {
 	switch st {
-	case scraper.AllAnimeType:
-		return apisource.AllAnime, true
 	case scraper.AnimefireType:
 		return apisource.AnimeFire, true
 	case scraper.GoyabuType:
@@ -99,13 +97,6 @@ func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*type
 	episodes, err := scr.GetAnimeEpisodes(animeURL)
 	if err != nil {
 		return nil, err
-	}
-
-	// For AllAnime, we need to store the anime ID in episodes for later stream URL retrieval
-	if source == types.SourceAllAnime {
-		for i := range episodes {
-			episodes[i].URL = animeURL // Store anime ID in URL field
-		}
 	}
 
 	return types.FromInternalEpisodeList(episodes), nil
@@ -174,12 +165,8 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 		}
 	}
 
-	// For AllAnime, we need to pass: animeID (URL), episodeNumber, quality, mode
-	if source == types.SourceAllAnime {
-		return scr.GetStreamURL(anime.URL, episode.Number, opts.Quality, opts.Mode)
-	}
-
-	// For AnimeFire, the episode URL is the direct episode page
+	// The episode URL is the direct episode page. (The AllAnime branch that
+	// passed an anime ID + episode number instead went with that source.)
 	return scr.GetStreamURL(episode.URL)
 }
 
@@ -191,7 +178,6 @@ func NewClientForTest(manager Manager) *Client {
 // GetAvailableSources returns a list of all available scraper sources.
 func (c *Client) GetAvailableSources() []types.Source {
 	return []types.Source{
-		types.SourceAllAnime,
 		types.SourceAnimeFire,
 	}
 }

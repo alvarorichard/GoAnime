@@ -105,12 +105,11 @@ func TestHandleDownloadRequest_SmartRange_RequiresAllAnimeSource(t *testing.T) {
 	stubWorkflow(t, offlineAnime())
 
 	req := &util.DownloadRequest{
-		AnimeName:     "test",
-		IsRange:       true,
-		StartEpisode:  2,
-		EndEpisode:    4,
-		AllAnimeSmart: true,
-		Source:        "animefire",
+		AnimeName:    "test",
+		IsRange:      true,
+		StartEpisode: 2,
+		EndEpisode:   4,
+		Source:       "animefire",
 	}
 	err := HandleDownloadRequest(req)
 

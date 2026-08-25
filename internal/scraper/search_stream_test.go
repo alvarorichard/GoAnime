@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/stretchr/testify/assert"
@@ -15,42 +14,6 @@ import (
 
 // ---------------------------------------------------------------------------
 // AllAnimeAdapter.GetAnimeEpisodes
-// ---------------------------------------------------------------------------
-
-func TestAllAnimeAdapter_GetAnimeEpisodes_ServerError(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := allanime.NewClientForTest(srv.URL)
-	adapter := &AllAnimeAdapter{client: client}
-
-	_, err := adapter.GetAnimeEpisodes("test-anime-id")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// AllAnimeAdapter.GetStreamURL
-// ---------------------------------------------------------------------------
-
-func TestAllAnimeAdapter_GetStreamURL_ServerError(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := allanime.NewClientForTest(srv.URL)
-	adapter := &AllAnimeAdapter{client: client}
-
-	_, _, err := adapter.GetStreamURL("test-anime-id", "1", "best", "sub")
-	require.Error(t, err)
-}
-
-// ---------------------------------------------------------------------------
-// AnimefireAdapter.GetAnimeEpisodes
 // ---------------------------------------------------------------------------
 
 func TestAnimefireAdapter_GetAnimeEpisodes_Success(t *testing.T) {

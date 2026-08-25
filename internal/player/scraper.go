@@ -92,8 +92,6 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
 		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "allanime.pro") ||
-		strings.Contains(url, "allanime.day") ||
 		strings.Contains(url, "animefire") ||
 		strings.Contains(url, "blogger.com") ||
 		strings.Contains(url, "animesfire") ||
@@ -149,7 +147,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		// For known streaming URLs that might not have Content-Length, return a default size
 		if isKnownStreamURL {
 			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
-			return estimateContentLengthForAllAnime(url, client)
+			return estimateStreamContentLength(url, client)
 		}
 		// For any other URL without Content-Length, use a reasonable default instead of failing
 		util.Debugf("Content-Length header missing, using default estimate")
@@ -167,8 +165,9 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	return contentLength, nil
 }
 
-// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
-func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+// estimateStreamContentLength estimates the size of a stream whose server
+// omits Content-Length.
+func estimateStreamContentLength(url string, client *http.Client) (int64, error) {
 	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
 	if strings.Contains(url, ".m3u8") {
 		util.Debugf("HLS stream detected, using estimated size for download")
@@ -176,7 +175,7 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 		return 500 * 1024 * 1024, nil
 	}
 
-	// For other AllAnime URLs, try to get partial content to estimate size
+	// Otherwise ask for a byte range and read the size off the response.
 	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return 0, err
@@ -352,9 +351,9 @@ func ExtractEpisodeNumber(episodeStr string) string {
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
-	// Check if this looks like an AllAnime ID instead of URL
+	// A bare identifier is not something this legacy extractor can fetch.
 	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
-		return "", fmt.Errorf("GetVideoURLForEpisode called with AllAnime ID '%s' instead of HTTP URL - use enhanced API", episodeURL)
+		return "", fmt.Errorf("GetVideoURLForEpisode called with bare id %q instead of an HTTP URL — use the registry path", episodeURL)
 	}
 
 	videoURL, err := extractVideoURL(episodeURL)
@@ -364,7 +363,7 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support.
+// GetVideoURLForEpisodeEnhanced gets the video URL through the source registry.
 // ctx is honored at entry today; full downstream propagation lands when this
 // becomes a thin wrapper over source.Resolve → FetchStreamURL(ctx, …).
 func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode, anime *models.Anime) (string, error) {
@@ -387,7 +386,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		}
 
 		// URL-only resolution goes through the source registry — no more
-		// hardcoded fake-AllAnime guess (R3). The minimal anime context is
+		// hardcoded fake-source guess (R3). The minimal anime context is
 		// derived from what the registry itself matched, never assumed.
 		src, resolved := source.ResolveURL(episode.URL)
 		if src == nil {
@@ -415,19 +414,11 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 	// Phase 3 deletes them together with the api-level branching.
 	src, resolved := source.Resolve(anime)
 	if src == nil {
-		// Unknown source at the dispatch boundary — never silent (R4/R5):
-		// warn loudly, and only fall back to best-effort AllAnime when the
-		// user hasn't opted into strict resolution.
-		if util.StrictSourceResolution() {
-			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort fallback disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
-		}
-		util.Warn("unrecognized source; dispatching best-effort AllAnime (set GOANIME_STRICT_SOURCE=1 to fail instead)",
-			"anime", anime.Name, "url", anime.URL, "reason", resolved.Reason)
-		bestEffort, ok := source.Enabled(resolved.BestEffortKind())
-		if !ok {
-			return "", fmt.Errorf("no enabled source for %q (%s); it may be turned off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
-		}
-		src = bestEffort
+		// Unknown source at the dispatch boundary — never silent (R4/R5).
+		// There used to be a best-effort fallback to AllAnime here; that guess
+		// died with the source, so an unrecognized anime is now always an
+		// error rather than a request sent to an unrelated site.
+		return "", fmt.Errorf("unrecognized source for %q (%s)", anime.Name, resolved.Reason)
 	}
 	util.Debug("Source resolved", "kind", src.Describe().Kind,
 		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
@@ -451,9 +442,11 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
 			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		if resolved.Kind == source.AllAnime {
-			// For AllAnime, return the error instead of trying legacy method
-			return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		if resolved.Kind == source.AniDB {
+			// Registry-backed source: surface the real error instead of falling
+			// back to the legacy scraper, which knows nothing about it. (This
+			// guard used to name AllAnime, which held the same position.)
+			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
 		}
 		// Legacy silent fallback for the remaining sources — removed in Phase 2.
 		return GetVideoURLForEpisode(episode.URL)

@@ -20,8 +20,8 @@ func main() {
 	}
 	fmt.Println()
 
-	// Search only in AllAnime
-	source := types.SourceAllAnime
+	// Search only in AnimeFire
+	source := types.SourceAnimeFire
 	fmt.Printf("Searching for 'Attack on Titan' in %s...\n\n", source.String())
 
 	results, err := client.SearchAnime("Attack on Titan", &source)
