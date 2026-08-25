@@ -5,14 +5,14 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 ##  New Features
 
 ### Multi-Source Support
-- **AllAnime.day**: High-quality streams with multiple resolution options
+- **anidb.app**: Subbed and dubbed HLS streams with multiple resolutions
 - **Animefire.io**: Brazilian anime streaming site with Portuguese content
 - **Automatic Fallback**: If one source fails, automatically tries others
 
 ### Enhanced CLI Options
 ```bash
 # New command-line flags
---source <source>     # Specify anime source (allanime, animefire)
+--source <source>     # Specify source (anidb, animefire, goyabu, superflix)
 --quality <quality>   # Specify video quality (best, worst, 720p, 1080p, etc.)
 ```
 
@@ -30,7 +30,7 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 goanime "naruto"
 
 # Download with specific source
-goanime -d --source allanime "one piece" 1
+goanime -d --source anidb "one piece" 1
 
 # Download with quality preference
 goanime -d --quality 720p "attack on titan" 5
@@ -41,8 +41,8 @@ goanime -d -r --source animefire --quality best "demon slayer" 1-12
 
 ### Advanced Usage
 ```bash
-# Use AllAnime for high-quality content
-goanime -d --source allanime --quality 1080p "jujutsu kaisen" 10
+# Use AniDB for subbed/dubbed content
+goanime -d --source anidb --quality 1080p "jujutsu kaisen" 10
 
 # Use AnimeFire for Portuguese content
 goanime -d --source animefire "naruto" 25
@@ -57,7 +57,7 @@ goanime -d --quality best "bleach" 100
 ```
 internal/
 ├── scraper/
-│   ├── allanime.go     # AllAnime.day scraper
+│   ├── anidb/          # anidb.app scraper
 │   ├── animefire.go    # Animefire.io scraper
 │   └── unified.go      # Unified scraper interface
 ├── api/
@@ -77,19 +77,19 @@ type UnifiedScraper interface {
 ```
 
 ### Features Implemented
-1. **GraphQL API Integration** (AllAnime)
+1. **GraphQL API Integration** (AniDB)
 2. **HTML Parsing** (AnimeFire)
 3. **Video Link Extraction**
 4. **Quality Selection Logic**
 5. **Error Handling with Fallbacks**
 6. **Metadata Extraction**
 
-### AllAnime Provider Notes
+### AniDB Provider Notes
 
-The AllAnime implementation follows the current `ani-cli` provider behavior for
+The AniDB implementation follows the current `ani-cli` provider behavior for
 source resolution:
 
-- GraphQL requests use `https://api.allanime.day/api`.
+- GraphQL requests use `https://api.anidb.app/api`.
 - Provider and playback requests use `https://allmanga.to` as the referer.
 - Encoded `/clock` source URLs are decoded with the ani-cli hex substitution
   table and normalized to `/clock.json`.
@@ -128,7 +128,7 @@ goanime -d --quality 720p "anime name" 1
 export GOANIME_DEFAULT_QUALITY=720p
 
 # Set default source
-export GOANIME_DEFAULT_SOURCE=allanime
+export GOANIME_DEFAULT_SOURCE=AniDB
 
 # Set download directory
 export GOANIME_DOWNLOAD_DIR=/path/to/downloads
@@ -136,7 +136,7 @@ export GOANIME_DOWNLOAD_DIR=/path/to/downloads
 
 ### Source Priority
 When no source is specified, the system tries sources in this order:
-1. AllAnime (generally higher quality)
+1. AniDB (generally higher quality)
 2. AnimeFire (fallback option)
 
 ## 🐛 Troubleshooting
@@ -164,7 +164,7 @@ goanime --debug -d "your anime" 1
 ### Debug Mode
 Enable verbose logging to troubleshoot issues:
 ```bash
-goanime --debug -d --source allanime "your anime" 1
+goanime --debug -d --source AniDB "your anime" 1
 ```
 
 ##  Future Enhancements

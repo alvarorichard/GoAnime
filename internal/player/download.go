@@ -344,7 +344,7 @@ func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
 }
 
 // applyDownloadAuthHeaders sets the Referer / User-Agent headers required by
-// origin-protected CDNs (AnimeFire's lightspeedst.net, AllAnime, etc.) onto a
+// origin-protected CDNs (AnimeFire's lightspeedst.net, etc.) onto a
 // download request. It prefers the per-source referer stored in
 // util.GetGlobalReferer (set by the scraper / api layer) and falls back to
 // hardcoded values for known hosts so legacy paths keep working even when the
@@ -370,8 +370,6 @@ func applyDownloadAuthHeaders(req *http.Request, url string) {
 	}
 
 	switch {
-	case strings.Contains(url, "allanime.day"), strings.Contains(url, "allanime.pro"):
-		req.Header.Set("Referer", "https://allanime.to")
 	case strings.Contains(url, "lightspeedst.net"), strings.Contains(url, "animefire"):
 		req.Header.Set("Referer", "https://animefire.io")
 		req.Header.Set("Origin", "https://animefire.io")
@@ -558,7 +556,7 @@ func LooksLikeHLS(u string) bool {
 }
 
 // hasUnsafeExtension returns true if the URL has a file extension that yt-dlp
-// will reject as unusual (e.g. .aspx from SharePoint/AllAnime CDNs).
+// will reject as unusual (e.g. .aspx from SharePoint CDNs).
 func hasUnsafeExtension(u string) bool {
 	// Extract path from URL, ignore query string
 	path := u
@@ -1499,14 +1497,12 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 // getBestQualityURL returns the best available quality for an episode.
 // It uses the anime context to route to the correct source-specific stream resolver.
 func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, error) {
-	animeURL := anime.URL
-
 	// Source-aware routing: use anime.Source to determine the correct resolver.
 	// Sources like SuperFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
 	// source-specific identifiers or HTTP pages that need scraper-specific
 	// resolution instead of the legacy generic page extractor.
 	source := anime.Source
-	if source != "" && source != "AllAnime" {
+	if source != "" {
 		// Use episode.Number; fall back to Num if Number is empty
 		epNumber := episode.Number
 		if epNumber == "" && episode.Num > 0 {
@@ -1548,41 +1544,6 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 			}
 		}
 		return best.URL, nil
-	}
-
-	// AllAnime path: animeURL is AllAnime ID/URL, episode.Number is episode string
-	isAllAnime := func(u string) bool {
-		return strings.Contains(u, "allanime") || (len(u) < 30 && !strings.Contains(u, "http") && u != "")
-	}
-	if source == "AllAnime" || isAllAnime(animeURL) {
-		allAnime := &models.Anime{URL: animeURL, Source: "AllAnime", Name: "AllAnime"}
-
-		// Use episode.Number; fall back to Num if Number is empty
-		epNumber := episode.Number
-		if epNumber == "" && episode.Num > 0 {
-			epNumber = strconv.Itoa(episode.Num)
-		}
-
-		// Build minimal episode with proper number and AllAnime context URL
-		ep := &models.Episode{Number: epNumber, URL: animeURL}
-
-		// Retry with backoff — AllAnime rate-limits rapid sequential requests
-		const maxRetries = 3
-		for attempt := range maxRetries {
-			if attempt > 0 {
-				delay := time.Duration(attempt) * 800 * time.Millisecond
-				util.Debugf("AllAnime retry %d/%d for episode %s (waiting %v)", attempt+1, maxRetries, epNumber, delay)
-				time.Sleep(delay)
-			}
-
-			if url, err := providers.FetchStreamURL(context.Background(), ep, allAnime, util.GlobalQuality); err == nil && url != "" {
-				return url, nil
-			} else if err != nil {
-				util.Debugf("AllAnime stream resolve failed for episode %s (attempt %d): %v", epNumber, attempt+1, err)
-			}
-		}
-
-		return "", fmt.Errorf("failed to resolve AllAnime stream URL for episode %s after %d attempts", epNumber, maxRetries)
 	}
 
 	return "", fmt.Errorf("unsupported episode identifier: %s", episode.URL)
@@ -2222,13 +2183,11 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 					}
 				})
 
-				// Optional: write AniSkip sidecar when AllAnime Smart is enabled
-				if util.GlobalDownloadRequest != nil && util.GlobalDownloadRequest.AllAnimeSmart {
-					// Basic heuristic for AllAnime
-					if anime.Source == "AllAnime" || strings.Contains(strings.ToLower(animeURL), "allanime") {
-						_ = api.WriteAniSkipSidecar(episodePath, &episode)
-					}
-				}
+				// Write the AniSkip sidecar whenever skip times are known. This
+				// used to be gated behind the AllAnime-only "smart range" flag;
+				// nothing about the sidecar is source-specific, and
+				// WriteAniSkipSidecar is a no-op when there are no skip windows.
+				_ = api.WriteAniSkipSidecar(episodePath, &episode)
 			}(epNum)
 		}
 		wg.Wait()

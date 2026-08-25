@@ -20,7 +20,7 @@ func TestModelC_OnlySuperFlixIsBrowserGated(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, source.IsBrowserGated(sf), "SuperFlix must be browser-gated")
 
-	for _, kind := range []source.SourceKind{source.AllAnime, source.AnimeFire, source.Goyabu, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.AniDB, source.AnimeFire, source.Goyabu, source.AniDB} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.False(t, source.IsBrowserGated(s), "%s is pure-HTTP and must not be browser-gated", kind)
@@ -36,7 +36,7 @@ func TestModelC_OnlySuperFlixIsSeasoned(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, source.IsSeasoned(sf), "SuperFlix organizes content into seasons")
 
-	for _, kind := range []source.SourceKind{source.AllAnime, source.AnimeFire, source.Goyabu, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.AniDB, source.AnimeFire, source.Goyabu, source.AniDB} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok)
 		assert.False(t, source.IsSeasoned(s), "%s is a flat anime catalog, not seasoned", kind)

@@ -10,19 +10,26 @@ import (
 type Source int
 
 const (
-	// SourceAllAnime represents the AllAnime source
-	SourceAllAnime Source = iota
-	// SourceAnimeFire represents the AnimeFire source
-	SourceAnimeFire
+	// SourceAnimeFire represents the AnimeFire source.
+	//
+	// NOTE: this enum predates the registry and still lists only one source.
+	// Goyabu, SuperFlix and AniDB are reachable through the CLI and the
+	// registry but were never added here; SourceAllAnime was removed when the
+	// AllAnime source was deleted. Extending this enum is a separate, breaking
+	// SDK change.
+	SourceAnimeFire Source = iota
 )
 
 // String returns the string representation of the source
 func (s Source) String() string {
 	switch s {
-	case SourceAllAnime:
-		return "AllAnime"
 	case SourceAnimeFire:
-		return "AnimeFire"
+		// "Animefire.io" is the canonical spelling the registry stamps onto
+		// models.Anime.Source. String() used to answer "AnimeFire", which meant
+		// results from SearchAnime(&SourceAnimeFire) never matched
+		// source.String() — a mismatch masked while AllAnime (whose label and
+		// stamp agreed) was the example source.
+		return "Animefire.io"
 	default:
 		return "Unknown"
 	}
@@ -31,23 +38,19 @@ func (s Source) String() string {
 // ToScraperType converts the public Source type to internal ScraperType
 func (s Source) ToScraperType() scraper.ScraperType {
 	switch s {
-	case SourceAllAnime:
-		return scraper.AllAnimeType
 	case SourceAnimeFire:
 		return scraper.AnimefireType
 	default:
-		return scraper.AllAnimeType
+		return scraper.AnimefireType
 	}
 }
 
 // ParseSource parses a string into a Source type
 func ParseSource(s string) (Source, error) {
 	switch s {
-	case "AllAnime", "allanime", "all":
-		return SourceAllAnime, nil
-	case "AnimeFire", "animefire", "fire":
+	case "AnimeFire", "animefire", "fire", "Animefire.io", "animefire.io":
 		return SourceAnimeFire, nil
 	default:
-		return SourceAllAnime, fmt.Errorf("unknown source: %s", s)
+		return SourceAnimeFire, fmt.Errorf("unknown source: %s", s)
 	}
 }

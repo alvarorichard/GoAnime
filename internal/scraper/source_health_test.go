@@ -16,7 +16,7 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		want   string
 	}{
 		{"superflix", SuperFlixType, "dexter"},
-		{"allanime default", AllAnimeType, "naruto"},
+		{"allanime default", AniDBType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
 	}
 	for _, tt := range tests {
@@ -38,7 +38,7 @@ func TestHealthTargets_DeterministicOrder(t *testing.T) {
 
 func TestCheckSourceHealth_NilScraperFails(t *testing.T) {
 	t.Parallel()
-	res := checkSourceHealthWith(context.Background(), AllAnimeType, nil, "naruto")
+	res := checkSourceHealthWith(context.Background(), AniDBType, nil, "naruto")
 	assert.Equal(t, SourceHealthFailed, res.Status)
 	assert.NotNil(t, res.Diagnostic)
 }

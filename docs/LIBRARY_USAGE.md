@@ -68,8 +68,8 @@ import "github.com/alvarorichard/Goanime/pkg/goanime/types"
 
 client := goanime.NewClient()
 
-// Buscar apenas no AllAnime
-source := types.SourceAllAnime
+// Buscar apenas no AnimeFire
+source := types.SourceAnimeFire
 results, err := client.SearchAnime("One Piece", &source)
 ```
 
@@ -132,7 +132,6 @@ for key, value := range headers {
 
 #### `types.Source`
 
-- `SourceAllAnime` - Fonte AllAnime
 - `SourceAnimeFire` - Fonte AnimeFire
 
 ## 🧪 Testes

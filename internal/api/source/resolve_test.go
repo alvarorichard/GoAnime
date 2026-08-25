@@ -1,6 +1,7 @@
 package source
 
 import (
+	"github.com/alvarorichard/Goanime/internal/scraper"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/models"
@@ -31,11 +32,10 @@ func registerProductionLikeSources(t *testing.T) {
 			d.Tags = []string{"[superflix]"}
 			d.URLMatchers = []string{"superflix"}
 		}),
-		newFake(AllAnime, 40, func(d *Descriptor) {
-			d.Explicit = []string{"AllAnime"}
+		newFake(AniDB, 40, func(d *Descriptor) {
+			d.Explicit = []string{"AniDB"}
 			d.Tags = []string{"[english]"}
-			d.URLMatchers = []string{"allanime"}
-			d.ShortID = true
+			d.URLMatchers = []string{"stubhost"}
 		}),
 	)
 	t.Cleanup(restore)
@@ -49,7 +49,7 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		source   string
 		wantKind SourceKind
 	}{
-		{"AllAnime", "AllAnime", AllAnime},
+		{"AniDB", "AniDB", AniDB},
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
@@ -82,7 +82,7 @@ func TestResolve_NameTags(t *testing.T) {
 		animName string
 		wantKind SourceKind
 	}{
-		{"english tag", "Naruto [English]", AllAnime},
+		{"english tag", "Naruto [English]", AniDB},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
 		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
@@ -104,7 +104,7 @@ func TestResolve_URLPatterns(t *testing.T) {
 	}{
 		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
 		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
-		{"allanime URL", "https://allanime.to/anime/abc", AllAnime},
+		{"removed allanime host resolves to nothing", "https://allanime.to/anime/abc", Unknown},
 		{"superflix URL", "https://superflix.to/naruto", SuperFlix},
 	}
 	for _, tt := range tests {
@@ -112,32 +112,6 @@ func TestResolve_URLPatterns(t *testing.T) {
 			_, got := Resolve(&models.Anime{URL: tt.url})
 			assert.Equal(t, tt.wantKind, got.Kind, "reason: %s", got.Reason)
 		})
-	}
-}
-
-func TestResolve_ShortID(t *testing.T) {
-	registerProductionLikeSources(t)
-	tests := []struct {
-		name     string
-		url      string
-		wantKind SourceKind
-	}{
-		{"alphanumeric short ID", "hHjXnUTda", AllAnime},
-		{"mixed short ID", "abc123XYZ", AllAnime},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, got := Resolve(&models.Anime{URL: tt.url})
-			assert.Equal(t, tt.wantKind, got.Kind)
-		})
-	}
-}
-
-func TestResolve_NumericOnlyIsNotShortID(t *testing.T) {
-	registerProductionLikeSources(t)
-	_, got := Resolve(&models.Anime{URL: "8143"})
-	if got.Kind == AllAnime && got.Reason == "short ID" {
-		t.Error("purely numeric '8143' should not match as AllAnime short ID")
 	}
 }
 
@@ -166,7 +140,8 @@ func TestResolve_EmptyAnime(t *testing.T) {
 func TestResolve_BestEffortKind(t *testing.T) {
 	t.Parallel()
 	r := ResolvedSource{Kind: Unknown, Reason: "test"}
-	assert.Equal(t, AllAnime, r.BestEffortKind(), "BestEffortKind for Unknown should be AllAnime")
+	assert.Equal(t, Unknown, r.BestEffortKind(),
+		"Unknown must stay Unknown: the AllAnime best-effort guess was removed with the source")
 
 	r2 := ResolvedSource{Kind: Goyabu, Reason: "test"}
 	assert.Equal(t, Goyabu, r2.BestEffortKind())
@@ -181,8 +156,7 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 	}{
 		{"animefire", "https://animefire.plus/ep/naruto-1", AnimeFire},
 		{"goyabu", "https://goyabu.to/ep/naruto-1", Goyabu},
-		{"allanime", "https://allanime.to/anime/hHjXnUTda", AllAnime},
-		{"short ID", "hHjXnUTda", AllAnime},
+		{"removed allanime host is now unknown", "https://allanime.to/anime/hHjXnUTda", Unknown},
 		{"empty", "", Unknown},
 		{"unknown domain", "https://example.com/video", Unknown},
 	}
@@ -195,53 +169,16 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 	}
 }
 
-func TestIsAllAnimeShortID(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"hHjXnUTda", true},
-		{"abc123XYZ", true},
-		{"a", true},
-		{"8143", false},
-		{"", false},
-		{"https://example.com", false},
-		{"a/b", false},
-		{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false},
-		{"abc def", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, IsAllAnimeShortID(tt.input))
-		})
-	}
-}
-
-func TestExtractAllAnimeID(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"hHjXnUTda", "hHjXnUTda"},
-		{"https://allanime.to/anime/hHjXnUTda", "hHjXnUTda"},
-		{"https://example.com/8143", "https://example.com/8143"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, ExtractAllAnimeID(tt.input))
-		})
-	}
-}
-
 func TestScraperTypeFor(t *testing.T) {
 	t.Parallel()
-	st, ok := ScraperTypeFor(AllAnime)
-	require.True(t, ok, "ScraperTypeFor(AllAnime) should return true")
-	assert.Equal(t, 0, int(st))
+	st, ok := ScraperTypeFor(AniDB)
+	require.True(t, ok, "ScraperTypeFor(AniDB) should return true")
+	assert.Equal(t, scraper.AniDBType, st)
+
+	st, ok = ScraperTypeFor(AnimeFire)
+	require.True(t, ok)
+	assert.Equal(t, scraper.AnimefireType, st,
+		"AnimefireType became the iota zero value when AllAnimeType was removed")
 
 	_, ok = ScraperTypeFor(Unknown)
 	assert.False(t, ok, "ScraperTypeFor(Unknown) should return false")

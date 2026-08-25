@@ -102,7 +102,7 @@ func SearchAnime(name string) (*models.Anime, error) {
 	return anime, nil
 }
 
-// SearchAnimeEnhanced - busca em ambas as fontes (AllAnime e AnimeFire) simultaneamente
+// SearchAnimeEnhanced - busca em todas as fontes registradas simultaneamente
 func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	searchStart := time.Now()
 
@@ -124,7 +124,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		searchStart := time.Now()
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
-		// Respect user's --source flag (e.g. --source allanime) via GlobalSource
+		// Respect user's --source flag (e.g. --source anidb) via GlobalSource
 		source := util.GlobalSource
 		if source != "" {
 			util.Debugf("Searching for: %s (source: %s)", currentName, source)
@@ -184,29 +184,15 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 		return
 	}
 
-	needsAniList := anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == ""
-	needsSourceDetails := anime.Source == "AllAnime" && len(anime.URL) > 20 && strings.Contains(anime.URL, "allanime.to")
-
-	switch {
-	case needsAniList && needsSourceDetails:
-		// Both enrichers mutate the same Media value. Running them concurrently
-		// made field precedence nondeterministic and raced on IDs, cover art and
-		// slices. AniList establishes the base metadata; source-specific details
-		// then deterministically refine it.
+	// The second enricher (sourceDetailsFetchFn, an og:image scrape of the
+	// anime page) was only ever reached for AllAnime titles. That source is
+	// gone, so AniList is the single enrichment path for anime; movies/TV still
+	// take the TMDB branch above.
+	if anime.AnilistID <= 0 || anime.MalID <= 0 || anime.ImageURL == "" {
 		enrichFromAniList(anime)
-		if err := sourceDetailsFetchFn(anime); err != nil {
-			util.Debugf("Failed to fetch anime details from source: %v", err)
-		}
-	case needsAniList:
-		enrichFromAniList(anime)
-	default:
-		util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
-		if needsSourceDetails {
-			if err := sourceDetailsFetchFn(anime); err != nil {
-				util.Debugf("Failed to fetch anime details from source: %v", err)
-			}
-		}
+		return
 	}
+	util.Debugf("AniList data already present (ID: %d, MAL: %d), skipping redundant fetch", anime.AnilistID, anime.MalID)
 }
 
 // enrichFromAniList fetches AniList metadata via aniListFetchFn and applies

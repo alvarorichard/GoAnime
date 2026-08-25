@@ -213,9 +213,9 @@ func finishSearch(query string, all []*models.Anime, errs []error) ([]*models.An
 // fallback), normalizes anime.Source, then delegates to the resolved Source's
 // FetchEpisodes.
 //
-// Behavior is equivalent to the legacy switch: AllAnime/AnimeFire/Goyabu list
+// Behavior is equivalent to the legacy switch: AniDB/AnimeFire/Goyabu list
 // via their adapters; SuperFlix runs its season picker; an unrecognized source
-// falls back to best-effort AllAnime (unless GOANIME_STRICT_SOURCE disables it).
+// reports Unknown rather than guessing at a source.
 func FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if anime == nil {
 		return nil, fmt.Errorf("cannot fetch episodes for a nil anime")

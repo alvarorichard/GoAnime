@@ -101,11 +101,10 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 | `Tags` | lowercase substrings of `anime.Name` | results carry no tag |
 | `URLMatchers` | lowercase substrings of `anime.URL` | source uses opaque IDs |
 | `MediaTypes` | `models.MediaType` values routed here | anime-only source |
-| `ShortID` | accepts bare alphanumeric IDs | always — AllAnime-specific |
 | `DefaultDisabled` | ships off unless `GOANIME_ENABLED_SOURCES` names it | shipping live |
 | `ProbeURL` | homepage; HEAD-probed on search timeout to tell "site down" from "opaque hang" | GraphQL/opaque APIs, browser-gated sources |
 
-Priorities in use: AnimeFire `10` · Goyabu `20` · SuperFlix `30` · AllAnime `40`.
+Priorities in use: AnimeFire `10` · Goyabu `20` · SuperFlix `30` · AniDB `50`.
 Leave gaps of 10. Priority is ignored when `anime.Source` matches an `Explicit`
 entry.
 

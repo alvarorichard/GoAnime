@@ -28,7 +28,7 @@ func TestGetAvailableSources(t *testing.T) {
 	hasAnimeFire := false
 
 	for _, source := range sources {
-		if source == types.SourceAllAnime {
+		if source == types.SourceAnimeFire {
 			hasAllAnime = true
 		}
 		if source == types.SourceAnimeFire {
@@ -49,8 +49,7 @@ func TestSourceString(t *testing.T) {
 		source   types.Source
 		expected string
 	}{
-		{types.SourceAllAnime, "AllAnime"},
-		{types.SourceAnimeFire, "AnimeFire"},
+		{types.SourceAnimeFire, "Animefire.io"},
 	}
 
 	for _, tt := range tests {
@@ -66,13 +65,10 @@ func TestParseSource(t *testing.T) {
 		expected types.Source
 		hasError bool
 	}{
-		{"AllAnime", types.SourceAllAnime, false},
-		{"allanime", types.SourceAllAnime, false},
-		{"all", types.SourceAllAnime, false},
 		{"AnimeFire", types.SourceAnimeFire, false},
 		{"animefire", types.SourceAnimeFire, false},
 		{"fire", types.SourceAnimeFire, false},
-		{"invalid", types.SourceAllAnime, true},
+		{"invalid", types.SourceAnimeFire, true},
 	}
 
 	for _, tt := range tests {
@@ -133,7 +129,7 @@ func TestSearchAnimeSpecificSource_Integration(t *testing.T) {
 	}
 
 	client := goanime.NewClient()
-	source := types.SourceAllAnime
+	source := types.SourceAnimeFire
 
 	results, err := client.SearchAnime("One Piece", &source)
 	if err != nil {

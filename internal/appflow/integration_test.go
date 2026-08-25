@@ -231,18 +231,18 @@ func TestFetchAnimeDetailsCore_NeedsAniListOnly_NoCoverDoesNotOverwrite(t *testi
 	assert.Equal(t, "existing.jpg", anime.ImageURL, "empty cover must not overwrite existing")
 }
 
-func TestFetchAnimeDetailsCore_BothNeeded_DeterministicEnrichment(t *testing.T) {
-	anime := &models.Anime{
-		Name:   "AllAnimeShow",
-		Source: "AllAnime",
-		URL:    "https://allanime.to/anime/abcdefghij1234567890",
-	}
-	resp := makeAniListResp(7, 99, "https://cover")
-
+// TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher pins the shape after the
+// AllAnime removal: the source-details (og:image) enricher was only ever
+// reached for AllAnime titles, so AniList is now the single anime enrichment
+// path and sourceDetails must never be called.
+func TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher(t *testing.T) {
+	anime := &models.Anime{Name: "Show", URL: "https://anidb.app/anime/show-1"}
 	var aniHit, srcHit int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {
 			atomic.AddInt32(&aniHit, 1)
+			resp := &models.AniListResponse{}
+			resp.Data.Media.ID = 7
 			return resp, nil
 		},
 		sourceDetails: func(*models.Anime) error {
@@ -252,11 +252,11 @@ func TestFetchAnimeDetailsCore_BothNeeded_DeterministicEnrichment(t *testing.T) 
 	})
 
 	fetchAnimeDetailsCore(anime)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&aniHit))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcHit))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&aniHit), "AniList must run")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&srcHit),
+		"the source-details enricher went with AllAnime and must not be called")
 	assert.Equal(t, 7, anime.AnilistID)
 }
-
 func TestFetchAnimeDetailsCore_BothNeeded_BothErrorNoCrash(t *testing.T) {
 	anime := &models.Anime{
 		Name:   "AllAnimeShow",
@@ -299,32 +299,6 @@ func TestFetchAnimeDetailsCore_DefaultBranch_AlreadyEnriched(t *testing.T) {
 	fetchAnimeDetailsCore(anime)
 	assert.Equal(t, int32(0), atomic.LoadInt32(&aniHit), "already enriched → no AniList call")
 	assert.Equal(t, int32(0), atomic.LoadInt32(&srcHit), "not AllAnime → no source call")
-}
-
-func TestFetchAnimeDetailsCore_DefaultBranch_AlreadyEnriched_AllAnimeStillFetchesSource(t *testing.T) {
-	anime := &models.Anime{
-		Name:      "Done",
-		Source:    "AllAnime",
-		URL:       "https://allanime.to/anime/abcdefghij1234567890",
-		AnilistID: 1,
-		MalID:     2,
-		ImageURL:  "x.jpg",
-	}
-	var aniHit, srcHit int32
-	withOverrides(t, appflowOverrides{
-		aniList: func(string) (*models.AniListResponse, error) {
-			atomic.AddInt32(&aniHit, 1)
-			return nil, nil
-		},
-		sourceDetails: func(*models.Anime) error {
-			atomic.AddInt32(&srcHit, 1)
-			return nil
-		},
-	})
-
-	fetchAnimeDetailsCore(anime)
-	assert.Equal(t, int32(0), atomic.LoadInt32(&aniHit), "already enriched → no AniList call")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcHit), "AllAnime URL must trigger source details")
 }
 
 func TestFetchAnimeDetailsCore_DefaultBranch_SourceDetailsError(t *testing.T) {

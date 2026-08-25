@@ -27,7 +27,6 @@ func TestAniDB_RegisteredWithExpectedDescriptor(t *testing.T) {
 	assert.Contains(t, d.URLMatchers, "anidb.app")
 	assert.Contains(t, d.Tags, "[anidb]")
 	assert.False(t, d.DefaultDisabled, "AniDB ships live")
-	assert.False(t, d.ShortID, "short IDs belong to AllAnime alone")
 
 	assert.Greater(t, d.Priority, 40,
 		"AniDB is the newest source and must sort after the established ones")
@@ -83,8 +82,7 @@ func TestAniDB_DoesNotStealOtherSources(t *testing.T) {
 	}{
 		{&models.Anime{URL: "https://animefire.io/animes/naruto"}, source.AnimeFire},
 		{&models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
-		{&models.Anime{Source: "AllAnime"}, source.AllAnime},
-		{&models.Anime{URL: "hHjXnUTda"}, source.AllAnime},
+		{&models.Anime{Source: "AniDB"}, source.AniDB},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.want), func(t *testing.T) {

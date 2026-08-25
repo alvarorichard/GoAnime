@@ -99,19 +99,6 @@ func TestApplyDownloadAuthHeaders_FallsBackToAnimeFireForLightspeedst(t *testing
 	assert.Equal(t, "https://animefire.io", req.Header.Get("Origin"))
 }
 
-func TestApplyDownloadAuthHeaders_FallsBackToAllAnimeForAllAnimeHosts(t *testing.T) {
-	restore := snapshotGlobalReferer()
-	defer restore()
-	util.ClearGlobalReferer()
-
-	req, err := http.NewRequest(http.MethodHead, "https://allanime.day/video/episode.mp4", http.NoBody)
-	require.NoError(t, err)
-
-	applyDownloadAuthHeaders(req, req.URL.String())
-
-	assert.Equal(t, "https://allanime.to", req.Header.Get("Referer"))
-}
-
 func TestApplyDownloadAuthHeaders_PreservesExistingUserAgent(t *testing.T) {
 	restore := snapshotGlobalReferer()
 	defer restore()

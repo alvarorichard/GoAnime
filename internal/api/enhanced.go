@@ -99,9 +99,9 @@ func describeSuperFlixErr(err error) error {
 	case errors.Is(err, superflix.ErrSuperFlixNoServers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
 	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
-		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AllAnime)."}
+		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AniDB)."}
 	case errors.Is(err, superflix.ErrSuperFlixRestricted):
-		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AllAnime)."}
+		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AniDB)."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
 	default:
@@ -223,7 +223,7 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 	return streamFetchFn(episode, anime, quality)
 }
 
-// Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
+// Enhanced search that supports multiple sources - fans out across every registered source
 func SearchAnimeEnhanced(name, src string) (*models.Anime, error) {
 	return searchAnimeEnhanced(name, src, searchFetchFn, tui.SelectAnime, enrichAnimeData)
 }
@@ -240,8 +240,6 @@ func searchAnimeEnhanced(
 	var registryKinds []apisource.SourceKind
 	normalizedSource := strings.ToLower(strings.TrimSpace(src))
 	switch normalizedSource {
-	case "allanime":
-		registryKinds = []apisource.SourceKind{apisource.AllAnime}
 	case "animefire":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
@@ -285,8 +283,6 @@ func searchAnimeEnhanced(
 		// Ensure proper source identification (for internal use only)
 		if anime.Source == "" {
 			switch normalizedSource {
-			case "allanime":
-				anime.Source = "AllAnime"
 			case "animefire":
 				anime.Source = "Animefire.io"
 			case "goyabu":
@@ -299,8 +295,6 @@ func searchAnimeEnhanced(
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
 				switch {
-				case apisource.IsAllAnimeShortID(anime.URL), strings.Contains(lowerURL, "allanime"):
-					anime.Source = "AllAnime"
 				case strings.Contains(lowerURL, "animefire"):
 					anime.Source = "Animefire.io"
 				case strings.Contains(lowerURL, "goyabu"):
@@ -321,7 +315,6 @@ func searchAnimeEnhanced(
 	breakdown := countSourceBreakdown(animes)
 	util.Debug("Source breakdown",
 		"AnimeFire", breakdown.AnimeFire,
-		"AllAnime", breakdown.AllAnime,
 		"SuperFlix", breakdown.SuperFlix,
 		"Goyabu", breakdown.Goyabu,
 		"AniDB", breakdown.AniDB,
@@ -541,7 +534,7 @@ func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.An
 	if len(allEpisodes) == 0 {
 		return nil, &friendlyError{
 			cause: fmt.Errorf("superflix: no seasons for tmdb=%s (imdb=%q): TVmaze had no listing and the SuperFlix page exposed no episode list", tmdbID, media.IMDBID),
-			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AllAnime).",
+			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AniDB).",
 		}
 	}
 	return allEpisodes, nil
@@ -939,7 +932,6 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 // testable in isolation.
 type sourceBreakdown struct {
 	AnimeFire int
-	AllAnime  int
 	SuperFlix int
 	Goyabu    int
 	AniDB     int
@@ -958,8 +950,6 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 		switch {
 		case strings.Contains(strings.ToLower(anime.Source), "animefire"):
 			b.AnimeFire++
-		case anime.Source == "AllAnime":
-			b.AllAnime++
 		case anime.Source == "SuperFlix":
 			b.SuperFlix++
 		case anime.Source == "Goyabu":
