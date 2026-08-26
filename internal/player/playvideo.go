@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -43,7 +44,7 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
-func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, needsCORSOrigin bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
 		return mpvArgs, ""
@@ -57,7 +58,21 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 		return mpvArgs, ""
 	}
 
-	return append(mpvArgs, fmt.Sprintf("--http-header-fields=Referer: %s", referer)), referer
+	fields := "Referer: " + referer
+	if origin := corsOriginOf(referer); needsCORSOrigin && origin != "" {
+		fields += ",Origin: " + origin
+	}
+	return append(mpvArgs, "--http-header-fields="+fields), referer
+}
+
+// corsOriginOf reduces a Referer to its bare scheme://host, the value a browser
+// puts in Origin.
+func corsOriginOf(referer string) string {
+	u, err := neturl.Parse(referer)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
@@ -89,9 +104,16 @@ func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
 // makes SuperFlix audio play — is deterministic and unit-testable without
 // launching mpv.
 type playbackArgsInput struct {
-	VideoURL         string
-	IsHLS            bool
-	Is9Anime         bool
+	VideoURL string
+	IsHLS    bool
+	Is9Anime bool
+	// IsSuperFlix adds the Origin header to the mpv request. SuperFlix's CDN
+	// serves the HLS segments from rotating third-party hosts and validates the
+	// CORS origin on them: hls.js fetches segments as a cross-origin XHR, so a
+	// real browser attaches Origin, and without it every segment comes back 403
+	// while the playlist itself loads fine. Verified live 2026-08-26 — the same
+	// stream goes from 121 failed segments to 0.
+	IsSuperFlix      bool
 	UpscalingEnabled bool
 	ShaderArgs       []string
 	Wayland          bool
@@ -147,7 +169,7 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
 	}
 
-	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS)
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS, in.IsSuperFlix)
 	// Relax the HLS segment-extension allowlist so alternative-audio renditions
 	// with disguised segment extensions load (fixes video-plays-but-no-audio on
 	// SuperFlix/FirePlayer streams).
@@ -608,6 +630,7 @@ func playVideo(
 		VideoURL:         videoURL,
 		IsHLS:            isHLSStream,
 		Is9Anime:         is9Anime,
+		IsSuperFlix:      util.IsSuperFlixSource(),
 		UpscalingEnabled: upscalingEnabled,
 		ShaderArgs:       shaderArgs,
 		Wayland:          wayland,

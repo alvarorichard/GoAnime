@@ -129,6 +129,39 @@ type CFStreamResult struct {
 	VideoHash  string // 32-hex warezcdn content id
 }
 
+// playerRefererFor builds the Referer the CDN requires for a signed stream URL:
+// the player's own /video/<hash> page, NOT the player host's root.
+//
+// The distinction is not cosmetic — it decides whether anything plays at all.
+// Verified live 2026-08-26 against a freshly signed master.txt, two requests:
+//
+//	Referer: https://<player>/                 -> 403 Forbidden
+//	Referer: https://<player>/video/<hash>     -> 200 OK
+//
+// The browser sends the full path because the player document IS
+// /video/<hash> and the request is same-origin; under the default
+// strict-origin-when-cross-origin policy only the CROSS-origin segment
+// fetches fall back to the bare origin. Sending the bare origin for the
+// same-origin playlist fetch is a request no real player ever makes, and the
+// CDN rejects it.
+//
+// With the root Referer the damage landed before mpv ever started:
+// streamURLDead probes the signed URL with this exact value and maps 403 to
+// "host rotated out", so a perfectly good solve was discarded as a dead host.
+//
+// hash is empty only on the raw-media fallback capture (no getVideo URL to
+// read it from); there the origin is the best available guess.
+func playerRefererFor(playerHost, hash string) string {
+	playerHost = strings.TrimSuffix(playerHost, "/")
+	if playerHost == "" {
+		return ""
+	}
+	if hash == "" {
+		return playerHost + "/"
+	}
+	return playerHost + "/video/" + hash
+}
+
 // sfMediaRe matches the network requests that carry the actual video (HLS
 // playlist, MP4, or the players' getVideo/securedLink endpoints).
 var sfMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/getVideo|videoSource|securedLink|/hls/|master\.txt`)
@@ -262,7 +295,7 @@ var sfGetVideoRe = regexp.MustCompile(`(?i)/player/index\.php\?.*do=getVideo`)
 // it feeds SniffEmbedStream's last-resort capture below.
 var sfDirectMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/hls/|master\.txt`)
 
-// SniffEmbedStream loads a SuperFlix embed URL (e.g. https://superflixapi.pro/
+// SniffEmbedStream loads a SuperFlix embed URL (e.g. https://superflixapi.sbs/
 // filme/1048794 or /serie/76479/1/1) inside a genuine cross-origin iframe so it
 // runs in iframe Sec-Fetch context (how the embed is meant to be served), lets
 // the persistent profile auto-clear Turnstile, then captures the player's
@@ -354,9 +387,11 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 			if jsonx.Unmarshal(body, &gv) != nil {
 				return
 			}
-			// securedLink currently points at a dead signed master.m3u8 (nginx
-			// 403), while videoSource is the working unsigned master.txt HLS.
-			// Prefer the source the upstream player itself exposes as fallback.
+			// As of 2026-08-26 the player returns the SAME master.txt URL in
+			// both fields, so the choice no longer matters in practice — but it
+			// did (securedLink was a dead signed master.m3u8 while videoSource
+			// worked), and the fields can diverge again on the next rotation.
+			// Keep preferring videoSource: it is what the player itself plays.
 			link := preferredGetVideoURL(gv)
 			if link == "" {
 				return
@@ -369,8 +404,8 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 				// only browser-gated facts — cache them for browser-free replays.
 				if pu, pErr := neturl.Parse(u); pErr == nil {
 					playerHost = pu.Scheme + "://" + pu.Host
-					referer = playerHost + "/"
 					videoHash = pu.Query().Get("data")
+					referer = playerRefererFor(playerHost, videoHash)
 				}
 				select {
 				case found <- struct{}{}:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -54,14 +55,26 @@ var (
 
 // defaultRunSpinner is the production spinner wrapper. It is replaced by
 // tests with a synchronous passthrough so the action runs inline.
+//
+// The spinner is decoration; the action is the work. When there is no terminal
+// (tui.ErrNoTTY) or the spinner itself fails, the action has not run, so it is
+// run directly here — a non-interactive environment must still make progress.
+// sync.Once makes the two paths mutually exclusive, so an action that already
+// ran inside the spinner is never repeated.
 func defaultRunSpinner(title string, action func()) {
+	var once sync.Once
+	wrapped := func() { once.Do(action) }
+
 	_ = tui.RunClean(func() error {
 		return spinner.New().
 			Title(title).
 			Type(spinner.Dots).
-			Action(action).
+			Action(wrapped).
 			Run()
 	})
+
+	// No-op when the spinner already ran it; runs it now when it did not.
+	wrapped()
 }
 
 // defaultPromptForName is the production prompt. Returns the user's input

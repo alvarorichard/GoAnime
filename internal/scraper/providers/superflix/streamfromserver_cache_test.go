@@ -84,7 +84,9 @@ func TestTryCachedStream(t *testing.T) {
 	res, ok := c.TryCachedStream(context.Background(), "serie", "42821", "1", "3")
 	require.True(t, ok, "a seen episode must replay from cache")
 	assert.Contains(t, res.StreamURL, "master.m3u8")
-	assert.Equal(t, base+"/", res.Referer)
+	// Must be the player's /video/<hash> page, not the bare origin — the CDN
+	// 403s the signed playlist for anything else. See playerRefererFor.
+	assert.Equal(t, base+"/video/hash123", res.Referer)
 	// The extras (audio tracks + subtitles) must come along on the fast path too.
 	assert.NotEmpty(t, res.DefaultAudio)
 	require.Len(t, res.Subtitles, 1)

@@ -23,7 +23,7 @@ func moveWindow(page playwright.Page, x, y int) {
 }
 
 // embedHostParentURL is the ungated homepage of the embed host
-// (superflixapi.pro) — the same-origin parent the player iframe is injected
+// (superflixapi.sbs) — the same-origin parent the player iframe is injected
 // under.
 func embedHostParentURL(embedURL string) string {
 	parentURL := "https://" + SuperFlixEmbedHost + "/"

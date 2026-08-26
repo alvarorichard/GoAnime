@@ -552,7 +552,13 @@ func isBloggerProxyURL(u string) bool {
 func LooksLikeHLS(u string) bool {
 	lower := strings.ToLower(u)
 	return strings.Contains(lower, "m3u8") ||
-		strings.Contains(lower, "/hls/")
+		strings.Contains(lower, "/hls/") ||
+		// SuperFlix's FirePlayer serves its multivariant HLS master as
+		// "master.txt" with a text/plain content type. Missing it here silently
+		// disabled every HLS-only decision downstream — the forced lavf hls
+		// demuxer and allowed_extensions=ALL were both gated on IsHLS, so mpv
+		// received a text file with no hint it was a playlist.
+		strings.Contains(lower, "master.txt")
 }
 
 // hasUnsafeExtension returns true if the URL has a file extension that yt-dlp

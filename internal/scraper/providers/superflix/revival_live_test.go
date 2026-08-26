@@ -50,7 +50,15 @@ func TestSuperFlixStreamRevival_Live(t *testing.T) {
 	require.NotNil(t, result)
 	t.Logf("stream=%s referer=%s", result.StreamURL, result.Referer)
 
-	assert.True(t, strings.Contains(strings.ToLower(result.StreamURL), "/hls/"), "expected an HLS master URL")
+	// The upstream no longer serves /hls/ paths. Since 2026-08 the player answers
+	// getVideo with an unsigned multivariant playlist at
+	// /<token>/<hash>/<expires>/master.txt — a real HLS master behind a
+	// non-standard extension and a text/plain content type. Accept either shape
+	// so this asserts "playable master", not one host generation's URL layout.
+	lower := strings.ToLower(result.StreamURL)
+	assert.True(t,
+		strings.Contains(lower, "/hls/") || strings.Contains(lower, "master.txt") || strings.Contains(lower, ".m3u8"),
+		"expected an HLS master URL, got %s", result.StreamURL)
 
 	// Fetch the playlist and confirm it parses as HLS (the live proof).
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, result.StreamURL, http.NoBody)

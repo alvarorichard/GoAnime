@@ -1558,7 +1558,7 @@ func TestRegexPatterns(t *testing.T) {
 // than the cryptic JSON decode error.
 // =============================================================================
 
-func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
+func TestSuperFlixBase_PointsToLiveHost_2026_08_25(t *testing.T) {
 	t.Parallel()
 	// Pinning the canonical host. If this needs to change in the future,
 	// also update internal/api/providers/metadata/metadata.go.
@@ -1569,7 +1569,12 @@ func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
 	// 2026-06-18: .fit went dead (NXDOMAIN) and rotated to .cyou.
 	// 2026-07-04: .cyou→.lifestyle→.pro; .lifestyle 301-redirects to .pro, so
 	// we pin the real canonical host .pro (confirmed via the embed cfv token).
-	assert.Equal(t, "https://superflixapi.pro", SuperFlixBase)
+	// 2026-08-25: .pro now 301-redirects to .sbs — same POST→GET downgrade,
+	// which is why SuperFlix stopped playing. The served page references only
+	// superflixapi.sbs, so that is the new canonical host.
+	assert.Equal(t, "https://superflixapi.sbs", SuperFlixBase)
+	assert.Equal(t, "superflixapi.sbs", SuperFlixEmbedHost,
+		"the embed host must track the canonical host")
 }
 
 func TestBootstrap_HTMLResponseSurfacesActionableError_2026_04_30(t *testing.T) {
