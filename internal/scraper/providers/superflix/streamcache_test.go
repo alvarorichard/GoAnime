@@ -121,7 +121,11 @@ func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Contains(t, res.StreamURL, "master.m3u8")
-	assert.Equal(t, srv.URL+"/", res.Referer)
+	// The CDN 403s the signed playlist for anything but the player's own
+	// /video/<hash> page, so the cached replay must rebuild that exact URL —
+	// this used to pin the bare origin and shipped the defect. See
+	// playerRefererFor.
+	assert.Equal(t, srv.URL+"/video/data123", res.Referer)
 
 	// The cache path used to return a bare stream — no subtitles, no audio info —
 	// so a replayed episode silently lost both. It must carry them now.

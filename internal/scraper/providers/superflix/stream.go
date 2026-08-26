@@ -273,7 +273,7 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 	cacheKey := streamCacheKey(mediaType, mediaID, season, episode)
 	defaultStreamCache.put(cacheKey, streamCacheEntry{Host: playerBaseURL, Hash: videoHash})
 
-	referer := fmt.Sprintf("%s/video/%s", playerBaseURL, videoHash)
+	referer := playerRefererFor(playerBaseURL, videoHash)
 	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video from API: %w", err)
@@ -292,9 +292,13 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		})
 	}
 	return &SuperFlixStreamResult{
-		StreamURL:    streamURL,
-		Title:        tokens.Title,
-		Referer:      playerBaseURL + "/",
+		StreamURL: streamURL,
+		Title:     tokens.Title,
+		// The SAME Referer this function already used to call getVideo. Handing
+		// mpv the bare origin instead was the live defect: the CDN 403s the
+		// signed playlist for anything but the player's /video/<hash> page, so
+		// playback died while the API call right above it succeeded.
+		Referer:      referer,
 		Thumb:        NormalizeSuperFlixImageURL(thumbURL),
 		DefaultAudio: defaultAudio,
 		Subtitles:    subtitles,
@@ -383,7 +387,7 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	util.Debug("SuperFlix stream from cache (no browser, no server list)", "key", key, "host", ent.Host)
 	return &SuperFlixStreamResult{
 		StreamURL:    streamURL,
-		Referer:      ent.Host + "/",
+		Referer:      playerRefererFor(ent.Host, ent.Hash),
 		Thumb:        NormalizeSuperFlixImageURL(thumb),
 		DefaultAudio: audio,
 		Subtitles:    subs,
@@ -864,7 +868,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
 	}
 
-	referer := fmt.Sprintf("%s/video/%s", playerBaseURL, videoHash)
+	referer := playerRefererFor(playerBaseURL, videoHash)
 	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video from API: %w", err)
@@ -873,8 +877,10 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	result := &SuperFlixStreamResult{
 		StreamURL: streamURL,
 		Title:     tokens.Title,
-		Referer:   playerBaseURL + "/",
-		Thumb:     NormalizeSuperFlixImageURL(thumbURL),
+		// The SAME Referer used for getVideo just above. See playerRefererFor:
+		// the bare origin gets the signed playlist 403'd.
+		Referer: referer,
+		Thumb:   NormalizeSuperFlixImageURL(thumbURL),
 	}
 
 	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)

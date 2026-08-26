@@ -43,22 +43,22 @@ var ErrSuperFlixNoEpisodeList = errors.New("superflix: page exposed no episode l
 const (
 	// SuperFlixBase is the canonical SuperFlix host. Previous hosts
 	// (`superflixapi.rest`, `superflixapi.online`, `superflixapi.best`,
-	// `superflixapi.fit`, `superflixapi.cyou`, `superflixapi.lifestyle`)
-	// 301-redirect to whichever alias is live; Go's http.Client follows the
-	// redirect but downgrades the POST to a GET (dropping the body), which makes
-	// /player/bootstrap return HTML 404 and break JSON decoding — so we target
-	// the live host directly. `.lifestyle` redirects to `.pro` (the current
-	// canonical host, confirmed 2026-07-04 via the embed's `cfv` session token,
-	// which carries `"host":"superflixapi.pro"`).
-	SuperFlixBase = "https://superflixapi.pro"
+	// `superflixapi.fit`, `superflixapi.cyou`, `superflixapi.lifestyle`,
+	// `superflixapi.pro`) 301-redirect to whichever alias is live; Go's
+	// http.Client follows the redirect but downgrades the POST to a GET
+	// (dropping the body), which makes /player/bootstrap return HTML 404 and
+	// break JSON decoding — so we target the live host directly. `.pro` now
+	// 301-redirects to `.sbs` (confirmed 2026-08-25: the served page references
+	// only superflixapi.sbs).
+	SuperFlixBase = "https://superflixapi.sbs"
 	// SuperFlixEmbedHost is the host that serves the Turnstile-gated player
 	// embed. The frontend no longer funnels through warezcdn.lat (which now
 	// gates behind Google reCAPTCHA + a QR-scan we can't solve); instead the API
-	// host itself serves https://superflixapi.pro/{filme|serie}/<tmdb>, which
+	// host itself serves https://superflixapi.sbs/{filme|serie}/<tmdb>, which
 	// clears Cloudflare Turnstile (handled by the cfBrowserSolver) and then the
 	// player's getVideo endpoint returns the signed HLS master. Confirmed live
-	// 2026-07-04 for both /filme and /serie.
-	SuperFlixEmbedHost = "superflixapi.pro"
+	// 2026-08-25 for both /filme and /serie.
+	SuperFlixEmbedHost = "superflixapi.sbs"
 	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
 	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
 	// the User-Agent that solved the challenge; if the HTTP client then sends a

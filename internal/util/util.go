@@ -621,6 +621,14 @@ func getUserInput(label string) (string, error) {
 	if err := tui.RunClean(form.Run); err != nil {
 		return "", err
 	}
+	// Without a terminal huh's Run returns nil immediately, WITHOUT displaying
+	// the form or running the Validate above, so animeName stays empty and the
+	// caller would search for "". The form cannot legitimately complete with an
+	// empty value (Validate enforces a minimum length), so an empty result here
+	// always means "the user was never asked".
+	if strings.TrimSpace(animeName) == "" {
+		return "", errors.New("no anime name entered (no interactive terminal available?)")
+	}
 	return animeName, nil
 }
 
