@@ -185,6 +185,38 @@ func playerIdentityFromReferer(referer string) (playerHost, videoHash string) {
 	return m[1], m[2]
 }
 
+// fallbackGraceFor reports how long to keep waiting for a getVideo capture
+// before settling for the raw media URL sniffed off the player's own traffic.
+//
+// getVideo is preferred only because it names the player host and content hash
+// that the raw capture used to lack. Once the capture's Referer is a
+// /video/<hash> page those are already known (playerIdentityFromReferer), so
+// there is nothing left to wait for.
+func fallbackGraceFor(fallbackReferer string) time.Duration {
+	if host, hash := playerIdentityFromReferer(fallbackReferer); host != "" && hash != "" {
+		return 0
+	}
+	return 8 * time.Second
+}
+
+// bloggerFrameURL returns the URL of a Blogger video page loaded in any of the
+// page's frames, or "" when none is.
+//
+// A Blogger-hosted title is invisible to the media sniffer: its player fetches
+// the stream through a batchexecute RPC and never issues a request matching
+// sfDirectMediaRe, so the sniff would run out its full budget (90s, retried
+// once) and fail on a title that plays fine. The player document itself is the
+// stream reference — the player layer resolves it — so finding the frame IS
+// finding the stream.
+func bloggerFrameURL(page playwright.Page) string {
+	for _, fr := range page.Frames() {
+		if isBloggerPlayerURL(fr.URL()) {
+			return fr.URL()
+		}
+	}
+	return ""
+}
+
 // sfMediaRe matches the network requests that carry the actual video (HLS
 // playlist, MP4, or the players' getVideo/securedLink endpoints).
 var sfMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/getVideo|videoSource|securedLink|/hls/|master\.txt`)
@@ -384,15 +416,34 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 			return
 		}
 		mu.Lock()
-		if fbURL == "" {
+		claimed := fbURL == ""
+		if claimed {
 			fbURL = u
 			fbAt = time.Now()
-			if h, hErr := r.AllHeaders(); hErr == nil {
-				fbRef = h["referer"]
-				fbUA = h["user-agent"]
-			}
 		}
 		mu.Unlock()
+		if !claimed {
+			return
+		}
+		// AllHeaders() is a protocol round-trip, and this handler runs on
+		// Playwright's dispatch goroutine — the one that reads every message
+		// off the driver pipe. Calling it inline blocks the driver waiting on
+		// itself: observed hanging the whole sniff until the test timeout
+		// (280s) rather than failing. Same rule the OnPopup and OnResponse
+		// handlers above already follow.
+		go func() {
+			h, hErr := r.AllHeaders()
+			if hErr != nil {
+				return
+			}
+			mu.Lock()
+			fbRef, fbUA = h["referer"], h["user-agent"]
+			mu.Unlock()
+			select {
+			case found <- struct{}{}:
+			default:
+			}
+		}()
 	})
 
 	page.OnResponse(func(resp playwright.Response) {
@@ -485,10 +536,17 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := streamURL
-		// Adopt the raw media URL only after getVideo has had a grace period
-		// to deliver the preferred signed link — the media request fires right
+		// Adopt the raw media URL once getVideo has had its grace period to
+		// deliver the preferred signed link — the media request fires right
 		// after getVideo answers, so if getVideo capture works it always wins.
-		if got == "" && fbURL != "" && time.Since(fbAt) > 8*time.Second {
+		//
+		// The grace collapses to nothing as soon as the captured Referer is a
+		// player /video/<hash> page, because then the fallback already carries
+		// everything getVideo would have added (player host, content hash, the
+		// exact Referer). Waiting the full 8s in that case buys nothing and
+		// costs 8s on EVERY play — which is what the current player does, since
+		// its getVideo endpoint is gone and the grace could only ever expire.
+		if got == "" && fbURL != "" && time.Since(fbAt) > fallbackGraceFor(fbRef) {
 			streamURL = fbURL
 			referer = fbRef
 			playerHost, videoHash = playerIdentityFromReferer(fbRef)
@@ -501,6 +559,16 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		}
 		mu.Unlock()
 		if got != "" {
+			break
+		}
+
+		// A Blogger-hosted title emits no media request at all, so the capture
+		// above can never fire. Its player document is the stream reference.
+		if bu := bloggerFrameURL(page); bu != "" {
+			mu.Lock()
+			streamURL, referer, playerHost, videoHash = bu, "", "", ""
+			mu.Unlock()
+			util.Debug("SuperFlix sniff: Blogger player detected; using its video page as the stream", "url", bu)
 			break
 		}
 

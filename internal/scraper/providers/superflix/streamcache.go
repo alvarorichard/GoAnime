@@ -69,9 +69,12 @@ func (sc *streamCache) get(key string) (streamCacheEntry, bool) {
 }
 
 func (sc *streamCache) put(key string, e streamCacheEntry) {
-	// A native-player host can never replay (its getVideo answers 405), so a
-	// central refusal here keeps every put site from poisoning the cache.
-	if e.Host == "" || e.Hash == "" || isNativePlayerHost(e.Host) {
+	// A host that does not implement the getVideo contract can never replay, so
+	// a central refusal here keeps every put site from poisoning the cache.
+	// Blogger is the case that got through: its player URL split into
+	// host="https://www.blogger.com", hash="video.g", which looked like a valid
+	// pair and was cached, then failed the same way on every later play.
+	if e.Host == "" || e.Hash == "" || !isReplayablePlayerHost(e.Host) {
 		return
 	}
 	sc.mu.Lock()
