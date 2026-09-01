@@ -64,6 +64,10 @@ func TestSuperFlixPlaysInMPV_Live(t *testing.T) {
 	restore := snapshotGlobalReferer()
 	t.Cleanup(restore)
 	util.SetGlobalReferer(res.Referer)
+	// The CDN binds the signed URL to the UA that obtained it, so playback needs
+	// the same handoff enhanced.go does — mpv's own libmpv UA is rejected.
+	util.SetGlobalUserAgent(res.UserAgent)
+	t.Cleanup(util.ClearGlobalUserAgent)
 	prevSource := util.GetGlobalAnimeSource()
 	util.SetGlobalAnimeSource("SuperFlix")
 	t.Cleanup(func() { util.SetGlobalAnimeSource(prevSource) })
@@ -78,6 +82,10 @@ func TestSuperFlixPlaysInMPV_Live(t *testing.T) {
 	require.Contains(t, joined, hlsForceLavfFormatArg, "master.txt must be forced through the lavf hls demuxer")
 	require.Contains(t, joined, hlsAllowAllExtensionsArg, "disguised segment extensions must be allowed")
 	require.Contains(t, joined, "Origin: ", "segments need the CORS Origin header")
+	require.Contains(t, joined, "--user-agent="+res.UserAgent,
+		"the CDN only serves the signed URL to the UA that obtained it")
+	require.Contains(t, joined, "Accept-Language: en-US,en;q=0.9",
+		"the CDN matches Chromium's Accept-Language byte for byte")
 
 	out := filepath.Join(t.TempDir(), "out.mkv")
 	// buildPlaybackArgs returns the flags only; StartVideo appends the URL last.

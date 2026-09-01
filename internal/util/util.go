@@ -37,6 +37,7 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
+	GlobalUserAgent     string                         // Global variable to store the User-Agent the stream URL was signed for
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 )
@@ -99,6 +100,37 @@ func ClearGlobalReferer() {
 	playbackStateMu.Lock()
 	defer playbackStateMu.Unlock()
 	GlobalReferer = ""
+}
+
+// SetGlobalUserAgent stores the User-Agent that the current stream URL was
+// signed for.
+//
+// SuperFlix's player CDN binds a signed URL to the exact User-Agent that
+// obtained it — the same URL answers 200 for that UA and 403 for any other,
+// including a different version of the same browser. mpv therefore cannot use
+// its own default; it has to replay the one recorded here.
+func SetGlobalUserAgent(userAgent string) {
+	playbackStateMu.Lock()
+	GlobalUserAgent = userAgent
+	playbackStateMu.Unlock()
+	if userAgent != "" {
+		Debugf("Stored user agent for stream requests: %s", userAgent)
+	}
+}
+
+// GetGlobalUserAgent returns the stored playback User-Agent, empty when the
+// current source does not pin one.
+func GetGlobalUserAgent() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+	return GlobalUserAgent
+}
+
+// ClearGlobalUserAgent clears the stored playback User-Agent.
+func ClearGlobalUserAgent() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+	GlobalUserAgent = ""
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "AniDB", "Goyabu")

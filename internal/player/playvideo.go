@@ -18,6 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -58,11 +59,33 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, n
 		return mpvArgs, ""
 	}
 
-	fields := "Referer: " + referer
-	if origin := corsOriginOf(referer); needsCORSOrigin && origin != "" {
-		fields += ",Origin: " + origin
+	if !needsCORSOrigin {
+		return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
 	}
-	return append(mpvArgs, "--http-header-fields="+fields), referer
+
+	// SuperFlix's player CDN serves a signed URL only to a request that repeats
+	// the browser's own fingerprint — Referer alone gets a 403 on a URL the
+	// browser plays fine. superflix.CDNPlaybackHeaderFields owns the exact
+	// contract (and leads with the Referer); Origin is added on top because the
+	// segment hosts validate it separately.
+	//
+	// Each header goes in its own --http-header-fields-append: the contract's
+	// Accept-Language value contains a comma, and the comma-joined
+	// --http-header-fields form would split it into two malformed fields.
+	fields := superflix.CDNPlaybackHeaderFields(referer, util.GetGlobalUserAgent())
+	if origin := corsOriginOf(referer); origin != "" {
+		fields = append(fields, "Origin: "+origin)
+	}
+	for _, f := range fields {
+		mpvArgs = append(mpvArgs, "--http-header-fields-append="+f)
+	}
+	// mpv's own default UA (libmpv) is one of the values the CDN rejects, and
+	// --http-header-fields cannot override it — mpv sends both. --user-agent is
+	// the only option that replaces it.
+	if ua := util.GetGlobalUserAgent(); ua != "" {
+		mpvArgs = append(mpvArgs, "--user-agent="+ua)
+	}
+	return mpvArgs, referer
 }
 
 // corsOriginOf reduces a Referer to its bare scheme://host, the value a browser

@@ -178,7 +178,7 @@ func (c *SuperFlixClient) GetEpisodes(ctx context.Context, tmdbID string) (map[s
 // solves each remaining season's frontend URL and merges. Per-season solves
 // reuse the warm CF profile, so they don't re-trigger the challenge.
 func (c *SuperFlixClient) getEpisodesViaBrowser(ctx context.Context, tmdbID string) (map[string][]SuperFlixEpisode, error) {
-	base := strings.TrimSuffix(c.baseURL, "/")
+	base := strings.TrimSuffix(c.base(), "/")
 	res, err := c.browserSolver.Solve(ctx, base+"/serie/"+tmdbID, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load serie page: %w", err)

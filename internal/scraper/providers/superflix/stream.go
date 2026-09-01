@@ -47,7 +47,7 @@ func (c *SuperFlixClient) GetPlayerPage(ctx context.Context, mediaType, mediaID,
 		path += "/" + episode
 	}
 
-	pageURL := c.baseURL + path
+	pageURL := c.base() + path
 	util.Debug("SuperFlix player page", "url", pageURL)
 
 	// #nosec G704 -- pageURL is built from the client's configured SuperFlix
@@ -57,7 +57,7 @@ func (c *SuperFlixClient) GetPlayerPage(ctx context.Context, mediaType, mediaID,
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	c.decorateRequest(req)
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 	req.Header.Set("Sec-Fetch-Dest", "iframe")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")
@@ -298,7 +298,10 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		// mpv the bare origin instead was the live defect: the CDN 403s the
 		// signed playlist for anything but the player's /video/<hash> page, so
 		// playback died while the API call right above it succeeded.
-		Referer:      referer,
+		Referer: referer,
+		// This URL was signed for THIS client's UA, so that is the only UA the
+		// CDN will serve it to.
+		UserAgent:    c.userAgent,
 		Thumb:        NormalizeSuperFlixImageURL(thumbURL),
 		DefaultAudio: defaultAudio,
 		Subtitles:    subtitles,
@@ -354,7 +357,12 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 			// here, inside the parallel branch, so the CDN check overlaps the
 			// extras fetch instead of adding a third serial round-trip.
 			if streamErr == nil && streamURL != "" {
-				dead = c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, ent.Host+"/")
+				// referer, not ent.Host+"/": the CDN answers 403 to the bare
+				// player origin and 200 only to the /video/<hash> page (see
+				// playerRefererFor), so probing with the origin condemned every
+				// replay as a dead host. This path signs over plain HTTP, so
+				// the UA that obtained the URL is the client's own.
+				dead = c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, referer, c.userAgent)
 			}
 		},
 		func() {
@@ -388,6 +396,7 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	return &SuperFlixStreamResult{
 		StreamURL:    streamURL,
 		Referer:      playerRefererFor(ent.Host, ent.Hash),
+		UserAgent:    c.userAgent,
 		Thumb:        NormalizeSuperFlixImageURL(thumb),
 		DefaultAudio: audio,
 		Subtitles:    subs,
@@ -399,15 +408,21 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 // a rotated-out cache host is caught here (403/404/410) instead of by a dying
 // mpv. Ambiguous outcomes (network blip, timeout, other statuses) return false
 // so a transient failure never nukes an otherwise good cache entry.
-func (c *SuperFlixClient) streamURLDead(ctx context.Context, streamURL, referer string) bool {
+//
+// userAgent MUST be the one that obtained streamURL: the CDN binds the signed
+// URL to it, so probing with any other UA reports a 403 for a stream that plays
+// perfectly well.
+func (c *SuperFlixClient) streamURLDead(ctx context.Context, streamURL, referer, userAgent string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, http.NoBody)
 	if err != nil {
 		return false
 	}
-	c.decorateRequest(req)
-	req.Header.Set("Referer", referer)
+	// The CDN's hotlink rule needs more than Referer + UA — see cdn.go. With
+	// only those two it 403s a URL the browser plays fine, and this probe would
+	// then condemn every working stream as a dead host.
+	applyCDNPlaybackHeaders(req, referer, userAgent)
 	req.Header.Set("Range", "bytes=0-1")
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -424,7 +439,7 @@ func (c *SuperFlixClient) streamURLDead(ctx context.Context, streamURL, referer 
 }
 
 func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens) ([]SuperFlixServer, error) {
-	bootstrapURL := c.baseURL + "/player/bootstrap"
+	bootstrapURL := c.base() + "/player/bootstrap"
 
 	form := url.Values{
 		"contentid":  {tokens.ContentID},
@@ -440,10 +455,10 @@ func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens
 	}
 	c.decorateRequest(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 	req.Header.Set("X-Page-Token", tokens.PageToken)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Origin", c.base())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -474,7 +489,7 @@ func (c *SuperFlixClient) Bootstrap(ctx context.Context, tokens *SuperFlixTokens
 
 // GetSourceURL calls /player/source to get the redirect URL for a video
 func (c *SuperFlixClient) GetSourceURL(ctx context.Context, videoID string, tokens *SuperFlixTokens) (string, error) {
-	sourceURL := c.baseURL + "/player/source"
+	sourceURL := c.base() + "/player/source"
 
 	form := url.Values{
 		"video_id":   {videoID},
@@ -490,10 +505,10 @@ func (c *SuperFlixClient) GetSourceURL(ctx context.Context, videoID string, toke
 	}
 	c.decorateRequest(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 	req.Header.Set("X-Page-Token", tokens.PageToken)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Origin", c.baseURL)
+	req.Header.Set("Origin", c.base())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -548,7 +563,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 		return "", "", "", fmt.Errorf("failed to create request: %w", err)
 	}
 	c.decorateRequest(req)
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 
 	resp, err := noRedirectClient.Do(req)
 	if err != nil {
@@ -570,7 +585,7 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 		return "", "", "", fmt.Errorf("failed to create follow request: %w", err)
 	}
 	c.decorateRequest(req2)
-	req2.Header.Set("Referer", c.baseURL+"/")
+	req2.Header.Set("Referer", c.base()+"/")
 
 	followClient := &http.Client{
 		Timeout:   30 * time.Second,
@@ -697,7 +712,7 @@ func (c *SuperFlixClient) GetVideoAPI(ctx context.Context, playerBaseURL, videoH
 
 	form := url.Values{
 		"hash": {videoHash},
-		"r":    {c.baseURL + "/"},
+		"r":    {c.base() + "/"},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(form.Encode()))
@@ -823,7 +838,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 			playerPath += "/" + episode
 		}
 		return nil, fmt.Errorf("%w (url=%s%s, contentid=%s) — try another episode or source",
-			ErrSuperFlixNoServers, c.baseURL, playerPath, tokens.ContentID)
+			ErrSuperFlixNoServers, c.base(), playerPath, tokens.ContentID)
 	}
 
 	// Pick first non-fallback server
@@ -879,8 +894,9 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		Title:     tokens.Title,
 		// The SAME Referer used for getVideo just above. See playerRefererFor:
 		// the bare origin gets the signed playlist 403'd.
-		Referer: referer,
-		Thumb:   NormalizeSuperFlixImageURL(thumbURL),
+		Referer:   referer,
+		UserAgent: c.userAgent,
+		Thumb:     NormalizeSuperFlixImageURL(thumbURL),
 	}
 
 	defaultAudio, subtitles := c.ExtractPlayerExtras(playerHTML)
@@ -918,9 +934,9 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		if e == "" {
 			e = "1"
 		}
-		embedURL = fmt.Sprintf("https://%s/serie/%s/%s/%s", SuperFlixEmbedHost, mediaID, s, e)
+		embedURL = fmt.Sprintf("%s/serie/%s/%s/%s", c.base(), mediaID, s, e)
 	} else {
-		embedURL = fmt.Sprintf("https://%s/filme/%s", SuperFlixEmbedHost, mediaID)
+		embedURL = fmt.Sprintf("%s/filme/%s", c.base(), mediaID)
 	}
 
 	res, err := sniffEmbedStreamWithRetry(ctx, solver, embedURL)
@@ -933,7 +949,7 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// GetVideoAPI round-trip before every future re-solve.
 	referer := res.Referer
 	if referer == "" {
-		referer = "https://" + SuperFlixEmbedHost + "/"
+		referer = c.base() + "/"
 	}
 
 	// The browser can capture a signed URL for a player host that has already
@@ -942,7 +958,7 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// exactly this (see streamFromCache); the fresh path used to skip it. Probe
 	// here so a dead capture fails over to the next source instead of surfacing
 	// the 404 to the player, and so we never cache a doomed (host, hash).
-	if res.StreamURL != "" && c.streamURLDead(WithoutBrowserSolve(ctx), res.StreamURL, referer) {
+	if res.StreamURL != "" && c.streamURLDead(WithoutBrowserSolve(ctx), res.StreamURL, referer, res.UserAgent) {
 		return nil, fmt.Errorf("superflix sniffed a dead stream host (%s)", res.PlayerHost)
 	}
 
@@ -966,8 +982,11 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	}
 
 	return &SuperFlixStreamResult{
-		StreamURL:    res.StreamURL,
-		Referer:      referer,
+		StreamURL: res.StreamURL,
+		Referer:   referer,
+		// The browser signed this URL, so the CDN will only serve it to the
+		// browser's UA — not to the HTTP client's.
+		UserAgent:    res.UserAgent,
 		DefaultAudio: audio,
 		Subtitles:    subs,
 	}, nil

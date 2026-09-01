@@ -83,9 +83,16 @@ type SuperFlixSubtitle struct {
 
 // SuperFlixStreamResult holds the final stream extraction result
 type SuperFlixStreamResult struct {
-	StreamURL    string
-	Title        string
-	Referer      string
+	StreamURL string
+	Title     string
+	Referer   string
+	// UserAgent is the User-Agent that OBTAINED this signed URL, and the only
+	// one the player CDN will serve it to — confirmed live 2026-08-31: the same
+	// URL answers 200 for the solving browser's UA and 403 for every other UA,
+	// including a different Chrome version. Whoever fetches the media (mpv, the
+	// liveness probe, ffmpeg) has to send this exact value, so it travels with
+	// the URL instead of being re-derived from a constant.
+	UserAgent    string
 	Subtitles    []SuperFlixSubtitle
 	DefaultAudio []string
 	Thumb        string
