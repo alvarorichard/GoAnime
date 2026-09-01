@@ -16,7 +16,7 @@ import (
 // the version uses a `v%s` format, so without normalization CI builds log
 // `vv1.8.4`. Strip the prefix at init so both injected and fallback values
 // are stored without it.
-var Version = "1.8.6"
+var Version = "1.8.7"
 
 func init() {
 	Version = strings.TrimPrefix(Version, "v")
