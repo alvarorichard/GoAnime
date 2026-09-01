@@ -118,3 +118,42 @@ func TestStreamURLDead_SendsTheCDNContract(t *testing.T) {
 	assert.Equal(t, "bytes=0-1", got.Get("Range"), "the probe stays a ranged GET")
 	assert.False(t, dead, "a 206 from a rule-abiding CDN must not read as dead")
 }
+
+// TestFallbackGraceFor pins the wait that dominated every play's latency.
+//
+// The sniff prefers a getVideo capture and used to wait a flat 8s for one. The
+// current player has no getVideo endpoint at all, so that wait could only ever
+// expire — 8 seconds added to every single play. Once the raw capture's Referer
+// identifies the player page it already carries everything getVideo would have
+// added, so there is nothing left to wait for.
+func TestFallbackGraceFor(t *testing.T) {
+	t.Parallel()
+
+	assert.Zero(t, fallbackGraceFor("https://player.best/video/6f1896bb1bfc3d0bcd2cba28ad968dd4"),
+		"a player /video/<hash> Referer already carries host+hash — do not wait")
+
+	for _, ref := range []string{
+		"",
+		"https://player.best/",
+		"https://superflixapi.beer/filme/603",
+		"not a url",
+	} {
+		assert.Positivef(t, fallbackGraceFor(ref),
+			"%q does not identify the player, so getVideo still deserves its grace", ref)
+	}
+}
+
+// TestPlayerIdentityFromReferer covers the parse the grace decision rests on.
+func TestPlayerIdentityFromReferer(t *testing.T) {
+	t.Parallel()
+
+	host, hash := playerIdentityFromReferer("https://xn--tckasiu6cvova0eb5fua2449g98vg.best/video/6f1896bb1bfc3d0bcd2cba28ad968dd4")
+	assert.Equal(t, "https://xn--tckasiu6cvova0eb5fua2449g98vg.best", host)
+	assert.Equal(t, "6f1896bb1bfc3d0bcd2cba28ad968dd4", hash)
+
+	for _, bad := range []string{"", "https://player.best/", "https://player.best/video/", "player.best/video/abc"} {
+		h, x := playerIdentityFromReferer(bad)
+		assert.Emptyf(t, h, "%q must not yield a host", bad)
+		assert.Emptyf(t, x, "%q must not yield a hash", bad)
+	}
+}

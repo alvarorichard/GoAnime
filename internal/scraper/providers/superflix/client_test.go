@@ -1137,7 +1137,7 @@ func TestResolveRedirect_FollowsRedirect(t *testing.T) {
 	defer redirectSrv.Close()
 
 	client := newTestSuperFlixClient(redirectSrv.URL)
-	baseURL, videoHash, playerHTML, err := client.ResolveRedirect(context.Background(), redirectSrv.URL+"/redirect")
+	_, baseURL, videoHash, playerHTML, err := client.ResolveRedirect(context.Background(), redirectSrv.URL+"/redirect")
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, baseURL)
@@ -1154,7 +1154,7 @@ func TestResolveRedirect_NoRedirect(t *testing.T) {
 	defer srv.Close()
 
 	client := newTestSuperFlixClient(srv.URL)
-	_, _, html, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/directhash")
+	_, _, _, html, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/directhash")
 
 	require.NoError(t, err)
 	assert.Contains(t, html, "direct page")
@@ -1188,7 +1188,7 @@ func TestResolveRedirect_DeadPlayerPage(t *testing.T) {
 			defer srv.Close()
 
 			client := newTestSuperFlixClient(srv.URL)
-			baseURL, videoHash, _, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/deadhash")
+			_, baseURL, videoHash, _, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/deadhash")
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), fmt.Sprintf("player page dead (%d)", tt.status))

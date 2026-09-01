@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,39 @@ import (
 // empty options list. This is a content-availability signal from SuperFlix
 // (the upstream JS shows a "not yet released" screen in the same case), not
 // a system or scraping error — callers should surface it to the user as
+
+// sfBloggerPlayerRe matches a resolved player URL that is really a Blogger
+// video page. SuperFlix hosts part of its catalogue on Blogger, so a chosen
+// server can resolve to https://www.blogger.com/video.g?token=<token> instead
+// of a FirePlayer host.
+//
+// That URL is a TERMINAL media reference, not a player host: there is no
+// /video/<hash> to split and no getVideo endpoint behind it. Splitting it
+// anyway yielded host="https://www.blogger.com", hash="video.g" (the token,
+// the only part that identifies the video, was dropped with the query), and
+// the pipeline then POSTed to
+// https://www.blogger.com/player/index.php?data=video.g&do=getVideo — the
+// 404 the user saw. The bogus pair was also cached, so every later play of
+// that episode replayed the same doomed request before falling through to a
+// 90s embed sniff that can never match (Blogger's player emits no .m3u8/.mp4
+// request at all — it fetches through a batchexecute RPC).
+var sfBloggerPlayerRe = regexp.MustCompile(`^https?://(?:www\.)?blogger\.com/video\.g\?token=`)
+
+// isBloggerPlayerURL reports whether a resolved player URL is a Blogger video
+// page, which the player layer already knows how to resolve and stream
+// (extractBloggerVideoURL + its local session proxy).
+func isBloggerPlayerURL(playerURL string) bool {
+	return sfBloggerPlayerRe.MatchString(playerURL)
+}
+
+// isReplayablePlayerHost reports whether a resolved player host implements the
+// /player/index.php?do=getVideo contract, i.e. whether its (host, hash) pair is
+// worth caching for a browser-free replay. Hosts that do not must never enter
+// the stream cache: replaying them costs a doomed round-trip on every play and
+// masks the real failure.
+func isReplayablePlayerHost(host string) bool {
+	return !isNativePlayerHost(host) && !isBloggerPlayerURL(host) && !strings.Contains(host, "blogger.com")
+}
 
 // isNativePlayerHost reports whether a resolved player "host" is SuperFlix's own
 // native player (…/player/native/media/<id>) rather than an external warezcdn
@@ -255,9 +289,19 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		return nil, fmt.Errorf("failed to get source URL: %w", err)
 	}
 
-	playerBaseURL, videoHash, playerHTML, err := c.ResolveRedirect(ctx, redirectURL)
+	playerURL, playerBaseURL, videoHash, playerHTML, err := c.ResolveRedirect(ctx, redirectURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
+	}
+
+	// A Blogger-hosted title is already at its media page — hand the URL over
+	// and let the player layer's Blogger path resolve and stream it. Running
+	// the getVideo contract against blogger.com instead produced the 404 that
+	// looked like "the chosen server failed", and the embed sniff it fell back
+	// to could never succeed either: Blogger's player fetches through a
+	// batchexecute RPC and emits no media URL for the sniffer to match.
+	if isBloggerPlayerURL(playerURL) {
+		return c.bloggerStreamResult(playerURL, tokens, playerHTML), nil
 	}
 
 	// The native player answers getVideo with 405 HTML — bail out NOW so the
@@ -327,11 +371,13 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	if !ok {
 		return nil, false
 	}
-	// Self-heal entries written before the native player was recognized: they
-	// point at SuperFlix's own /player/native/… URL, whose getVideo always 405s.
-	// Replaying one wastes round-trips (and a browser solve) on every play.
-	if isNativePlayerHost(ent.Host) {
-		util.Debug("SuperFlix cache entry points at the native player (never replayable); dropping it", "key", key, "host", ent.Host)
+	// Self-heal entries written before the host was recognized as unreplayable:
+	// SuperFlix's own /player/native/… (getVideo answers 405) and Blogger
+	// (host="https://www.blogger.com", hash="video.g" — getVideo answers 404).
+	// Replaying one wastes round-trips (and a browser solve) on every play, and
+	// the entries already on disk outlive the fix that stopped writing them.
+	if !isReplayablePlayerHost(ent.Host) {
+		util.Debug("SuperFlix cache entry is not replayable; dropping it", "key", key, "host", ent.Host)
 		defaultStreamCache.del(key)
 		return nil, false
 	}
@@ -541,8 +587,13 @@ func (c *SuperFlixClient) GetSourceURL(ctx context.Context, videoID string, toke
 	return result.Data.VideoURL, nil
 }
 
-// ResolveRedirect follows the SuperFlix redirect to get the external player URL
-func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL string) (baseURL, videoHash, playerHTML string, err error) {
+// ResolveRedirect follows the SuperFlix redirect to get the external player URL.
+//
+// finalURL is the URL actually landed on, returned alongside the (baseURL,
+// videoHash) split because not every player is a host+hash pair: a Blogger
+// video page carries its identity in the query string, which the split throws
+// away. Callers must therefore classify finalURL before trusting the split.
+func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL string) (finalURL, baseURL, videoHash, playerHTML string, err error) {
 	// Use the client's transport if available, otherwise fall back to safe transport
 	transport := c.client.Transport
 	if transport == nil {
@@ -560,14 +611,14 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 
 	req, err := http.NewRequestWithContext(ctx, "GET", redirectURL, http.NoBody)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to create request: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to create request: %w", err)
 	}
 	c.decorateRequest(req)
 	req.Header.Set("Referer", c.base()+"/")
 
 	resp, err := noRedirectClient.Do(req)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to make request: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to make request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -575,14 +626,14 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		location = resp.Header.Get("Location")
 		if location == "" {
-			return "", "", "", fmt.Errorf("redirect with no Location header")
+			return "", "", "", "", fmt.Errorf("redirect with no Location header")
 		}
 	}
 
 	// Follow to the final page
 	req2, err := http.NewRequestWithContext(ctx, "GET", location, http.NoBody)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to create follow request: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to create follow request: %w", err)
 	}
 	c.decorateRequest(req2)
 	req2.Header.Set("Referer", c.base()+"/")
@@ -593,28 +644,28 @@ func (c *SuperFlixClient) ResolveRedirect(ctx context.Context, redirectURL strin
 	}
 	resp2, err := followClient.Do(req2)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to follow redirect: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to follow redirect: %w", err)
 	}
 	defer func() { _ = resp2.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp2.Body, 5*1024*1024))
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to read player page: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to read player page: %w", err)
 	}
 
-	finalURL := resp2.Request.URL.String()
+	finalURL = resp2.Request.URL.String()
 
 	// A rotated-out player host answers /video/<hash> with a 404 page. Without
 	// this guard we would still parse the hash out of the final URL and hand a
 	// dead (host, hash) to the cache and getVideo, surfacing the upstream 404 to
 	// the player instead of failing over to the next source.
 	if resp2.StatusCode >= 400 {
-		return "", "", "", fmt.Errorf("player page dead (%d): %s", resp2.StatusCode, finalURL)
+		return "", "", "", "", fmt.Errorf("player page dead (%d): %s", resp2.StatusCode, finalURL)
 	}
 
 	baseURL, videoHash = splitPlayerURL(finalURL)
 
-	return baseURL, videoHash, string(body), nil
+	return finalURL, baseURL, videoHash, string(body), nil
 }
 
 // splitPlayerURL splits a resolved player URL into its host prefix and the video
@@ -878,9 +929,12 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		return nil, fmt.Errorf("failed to get source URL: %w", err)
 	}
 
-	playerBaseURL, videoHash, playerHTML, err := c.ResolveRedirect(ctx, redirectURL)
+	playerURL, playerBaseURL, videoHash, playerHTML, err := c.ResolveRedirect(ctx, redirectURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve redirect: %w", err)
+	}
+	if isBloggerPlayerURL(playerURL) {
+		return c.bloggerStreamResult(playerURL, tokens, playerHTML), nil
 	}
 
 	referer := playerRefererFor(playerBaseURL, videoHash)
@@ -904,6 +958,27 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	result.Subtitles = subtitles
 
 	return result, nil
+}
+
+// bloggerStreamResult wraps a Blogger video page as a stream result.
+//
+// The URL is returned as-is: resolving it needs Blogger's batchexecute session,
+// and the player layer already owns that (extractBloggerVideoURL and the local
+// proxy that replays the googlevideo URL with the session — without it the
+// signed CDN URL answers 403). No Referer or User-Agent is pinned, because none
+// of the FirePlayer CDN's rules apply here.
+//
+// Nothing is cached: the token is the video's only identity and it expires, so
+// there is no durable (host, hash) pair to replay.
+func (c *SuperFlixClient) bloggerStreamResult(playerURL string, tokens *SuperFlixTokens, playerHTML string) *SuperFlixStreamResult {
+	util.Debug("SuperFlix: server resolved to a Blogger video page; handing it to the player's Blogger path",
+		"url", playerURL)
+	res := &SuperFlixStreamResult{StreamURL: playerURL}
+	if tokens != nil {
+		res.Title = tokens.Title
+	}
+	res.DefaultAudio, res.Subtitles = c.ExtractPlayerExtras(playerHTML)
+	return res
 }
 
 // getStreamViaBrowser resolves the stream, preferring a browser-free path.
@@ -958,6 +1033,12 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// exactly this (see streamFromCache); the fresh path used to skip it. Probe
 	// here so a dead capture fails over to the next source instead of surfacing
 	// the 404 to the player, and so we never cache a doomed (host, hash).
+	// The dead-host probe is a FirePlayer-CDN concept (signed URL + its header
+	// contract). A Blogger video page is neither, so probing it proves nothing.
+	if isBloggerPlayerURL(res.StreamURL) {
+		return c.bloggerStreamResult(res.StreamURL, nil, ""), nil
+	}
+
 	if res.StreamURL != "" && c.streamURLDead(WithoutBrowserSolve(ctx), res.StreamURL, referer, res.UserAgent) {
 		return nil, fmt.Errorf("superflix sniffed a dead stream host (%s)", res.PlayerHost)
 	}
