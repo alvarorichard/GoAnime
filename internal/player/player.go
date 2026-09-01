@@ -582,19 +582,20 @@ func filterMPVArgs(args []string) []string {
 		"--video-latency-hacks=",
 		"--audio-display=",
 		"--start=",
-		"--alang=",               // Audio language preference
-		"--slang=",               // Subtitle language preference
-		"--aid=",                 // Audio track ID
-		"--sid=",                 // Subtitle track ID
-		"--sub-file=",            // External subtitle file (one flag per track; never colon-join https URLs)
-		"--sub-files=",           // legacy mpv multi-file form (unused — colon breaks https://)
-		"--audio-file=",          // External audio file
-		"--http-header-fields=",  // HTTP headers for HLS streams
-		"--stream-lavf-o=",       // FFmpeg/lavf options for streaming protocols
-		"--demuxer-lavf-o=",      // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
-		"--demuxer-lavf-format=", // Force HLS for SuperFlix's valid master.txt fallback
-		"--referrer=",            // HTTP referrer for streaming
-		"--user-agent=",          // HTTP user agent for streaming
+		"--alang=",                     // Audio language preference
+		"--slang=",                     // Subtitle language preference
+		"--aid=",                       // Audio track ID
+		"--sid=",                       // Subtitle track ID
+		"--sub-file=",                  // External subtitle file (one flag per track; never colon-join https URLs)
+		"--sub-files=",                 // legacy mpv multi-file form (unused — colon breaks https://)
+		"--audio-file=",                // External audio file
+		"--http-header-fields=",        // HTTP headers for HLS streams
+		"--http-header-fields-append=", // one header per option; required for values containing a comma (SuperFlix's Accept-Language)
+		"--stream-lavf-o=",             // FFmpeg/lavf options for streaming protocols
+		"--demuxer-lavf-o=",            // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
+		"--demuxer-lavf-format=",       // Force HLS for SuperFlix's valid master.txt fallback
+		"--referrer=",                  // HTTP referrer for streaming
+		"--user-agent=",                // HTTP user agent for streaming
 		// Anime4K real-time upscaling shaders
 		"--glsl-shader=",          // GLSL shader for video processing
 		"--glsl-shaders=",         // Multiple GLSL shaders (colon-separated)

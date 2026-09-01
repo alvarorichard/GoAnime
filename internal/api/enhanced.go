@@ -60,10 +60,10 @@ func preflightSuperFlixBrowser() {
 	// should see this before the (one-time) setup notice or the spinner.
 	// Plain language only — no "$DISPLAY"/"Cloudflare"/"headless" jargon.
 	if sfHeadlessEnvFn() {
-		sfWarnFn("⚠️  SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
+		sfWarnFn("SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
 	}
 	if sfSetupPendingFn() {
-		sfInfoFn("⏳ First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
+		sfInfoFn("First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
 	}
 }
 
@@ -866,10 +866,12 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	// browser window) so a binge's next play starts from the cache fast path.
 	sfPrefetchNextFn(sfClient, tmdbID, sfType, season, epNum)
 
-	// Store referer globally for mpv playback
+	// Store referer + User-Agent globally for mpv playback. The CDN binds the
+	// signed URL to BOTH, so handing mpv only the referer gets every fetch 403'd.
 	if result.Referer != "" {
 		util.SetGlobalReferer(result.Referer)
 	}
+	util.SetGlobalUserAgent(result.UserAgent)
 	// Update cover image from stream thumbnail if not already set
 	if media.ImageURL == "" && result.Thumb != "" {
 		media.ImageURL = result.Thumb

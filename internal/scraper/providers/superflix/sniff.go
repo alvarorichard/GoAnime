@@ -162,6 +162,29 @@ func playerRefererFor(playerHost, hash string) string {
 	return playerHost + "/video/" + hash
 }
 
+// sfPlayerVideoPageRe matches a player's own document URL,
+// https://<player-host>/video/<hash>, and captures the two halves.
+var sfPlayerVideoPageRe = regexp.MustCompile(`^(https?://[^/]+)/video/([0-9a-zA-Z]+)`)
+
+// playerIdentityFromReferer recovers the (playerHost, videoHash) pair from the
+// Referer a media request carried.
+//
+// The pair is normally read off the getVideo XHR
+// (…/player/index.php?data=<hash>&do=getVideo), but as of 2026-08-31 the
+// current player no longer calls getVideo at all — its /video/<hash> document
+// fetches master.txt directly. The raw-media fallback still captures that
+// request, and its Referer IS the player document, so the same two facts are
+// recoverable from it. Without this the pair stayed empty, which cost the
+// stream cache (every play re-solved through the browser) and left
+// getStreamViaBrowser reporting a blank player host.
+func playerIdentityFromReferer(referer string) (playerHost, videoHash string) {
+	m := sfPlayerVideoPageRe.FindStringSubmatch(referer)
+	if m == nil {
+		return "", ""
+	}
+	return m[1], m[2]
+}
+
 // sfMediaRe matches the network requests that carry the actual video (HLS
 // playlist, MP4, or the players' getVideo/securedLink endpoints).
 var sfMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/getVideo|videoSource|securedLink|/hls/|master\.txt`)
@@ -468,11 +491,13 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		if got == "" && fbURL != "" && time.Since(fbAt) > 8*time.Second {
 			streamURL = fbURL
 			referer = fbRef
+			playerHost, videoHash = playerIdentityFromReferer(fbRef)
 			if ua == "" {
 				ua = fbUA
 			}
 			got = streamURL
-			util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic", "url", fbURL)
+			util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic",
+				"url", fbURL, "host", playerHost, "hash", videoHash)
 		}
 		mu.Unlock()
 		if got != "" {
@@ -540,10 +565,12 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		// nothing better is coming, so take what it played.
 		streamURL = fbURL
 		referer = fbRef
+		playerHost, videoHash = playerIdentityFromReferer(fbRef)
 		if ua == "" {
 			ua = fbUA
 		}
-		util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic", "url", fbURL)
+		util.Debug("SuperFlix getVideo capture missed; adopting raw media URL sniffed from player traffic",
+			"url", fbURL, "host", playerHost, "hash", videoHash)
 	}
 	if streamURL == "" {
 		return nil, fmt.Errorf("no getVideo stream captured within %s", timeout)

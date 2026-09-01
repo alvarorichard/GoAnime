@@ -31,9 +31,27 @@ func TestLiveSuperFlixAfterHostRotation(t *testing.T) {
 		return true
 	}
 
-	// 1. the canonical host must answer directly, without a redirect: a 301
-	//    downgrades the player POSTs to GETs and breaks bootstrap.
-	stage("canonical host answers 200 (no 301)", func() error {
+	// 1. runtime discovery must land on a host that answers without
+	//    redirecting. This is the stage that actually keeps playback working
+	//    across a rotation, so it is checked before the constant.
+	stage("discovery finds the live host", func() error {
+		host, err := probeLiveHost(context.Background())
+		if err != nil {
+			return err
+		}
+		fmt.Printf("      discovered %s (seed %s)\n", host, SuperFlixEmbedHost)
+		if host == "" {
+			return fmt.Errorf("discovery returned an empty host")
+		}
+		return nil
+	})
+
+	// 2. the compiled default should still answer directly, without a redirect:
+	//    a 301 downgrades the player POSTs to GETs and breaks bootstrap.
+	//    Discovery now absorbs a rotation, so this failing is a nudge to
+	//    refresh the seed rather than an outage — but a seed more than one hop
+	//    stale eventually exhausts the hop budget.
+	stage("compiled default answers 200 (no 301)", func() error {
 		c := NewSuperFlixClient()
 		resp, err := c.client.Get(SuperFlixBase + "/")
 		if err != nil {
@@ -41,12 +59,13 @@ func TestLiveSuperFlixAfterHostRotation(t *testing.T) {
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.Request.URL.Host != SuperFlixEmbedHost {
-			return fmt.Errorf("redirected to %s — SuperFlixBase is stale, rotate it", resp.Request.URL.Host)
+			return fmt.Errorf("redirected to %s — SuperFlixBase is stale, rotate the seed to it",
+				resp.Request.URL.Host)
 		}
 		return nil
 	})
 
-	// 2. search must return parseable cards.
+	// 3. search must return parseable cards.
 	var tmdbID string
 	stage("search returns cards", func() error {
 		results, err := NewSuperFlixClient().SearchMediaWithContext(context.Background(), "jojo")
@@ -69,7 +88,7 @@ func TestLiveSuperFlixAfterHostRotation(t *testing.T) {
 		return nil
 	})
 
-	// 3. the embed URL must be built on the live host.
+	// 4. the embed URL must be built on the live host.
 	stage("embed URL targets the live host", func() error {
 		if tmdbID == "" {
 			return fmt.Errorf("no tmdb id from search")

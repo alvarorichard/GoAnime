@@ -26,7 +26,7 @@ func moveWindow(page playwright.Page, x, y int) {
 // (superflixapi.sbs) — the same-origin parent the player iframe is injected
 // under.
 func embedHostParentURL(embedURL string) string {
-	parentURL := "https://" + SuperFlixEmbedHost + "/"
+	parentURL := liveBase() + "/"
 	if pu, err := neturl.Parse(embedURL); err == nil && pu.Host != "" {
 		parentURL = pu.Scheme + "://" + pu.Host + "/"
 	}
@@ -269,22 +269,43 @@ func triggerPlay(page playwright.Page) {
 	    });
 	  };
 	  try {
-	    // warezcdn embed source chooser: auto-pick the primary server ONCE so the
-	    // player loads without the user clicking "Servidor Principal". Match the
-	    // MOST SPECIFIC element (shortest text) — find() would return an ancestor
-	    // (card/body) whose click does nothing. Mark it so we don't click again
-	    // (re-clicking the player area spawns ad pop-unders).
+	    // SuperFlix embed source chooser: auto-pick the primary server ONCE so the
+	    // player loads without the user clicking "Servidor Principal". Mark it so
+	    // we don't click again (re-clicking the player area spawns ad pop-unders).
+	    //
+	    // The card carries the click handler, so it is what has to be clicked.
+	    // Confirmed live 2026-08-31, the current markup is
+	    //   <div class="server-card player_select_item" data-id="470964">
+	    //     <div class="server-info">Servidor Principal</div>
+	    //   </div>
+	    // Text matching alone used to land on .server-info (the shortest match)
+	    // and then walk up with closest() over a tag/attribute list that a
+	    // class-only <div> card does not appear in — so the click never reached
+	    // a handler, no player iframe loaded, and the sniff fell back to
+	    // whatever ad media happened to fire. Select the card by its own
+	    // selector first, and let closest() recognise it on the walk up.
 	    if (!window.__sfServerPicked) {
-	      const all = Array.from(document.querySelectorAll('button,a,div,li,span,[role="button"],[data-server],[data-api]'));
-	      let cands = all.filter(el => /servidor\s*principal/i.test((el.textContent||'')));
-	      if (!cands.length) cands = all.filter(el => /\bservidor\b/i.test((el.textContent||'')));
-	      cands.sort((a,b) => (a.textContent||'').length - (b.textContent||'').length);
-	      const target = cands[0] || document.querySelector('[data-server],[data-api]');
+	      const CARD = '.player_select_item,.server-card,[data-server],[data-api]';
+	      const pick = () => {
+	        // 1. The card element itself, preferring the primary server.
+	        const cards = Array.from(document.querySelectorAll(CARD));
+	        const primary = cards.find(el => /servidor\s*principal/i.test(el.textContent||''));
+	        if (primary) return primary;
+	        if (cards.length) return cards[0];
+	        // 2. No known card markup — fall back to text matching, then walk up
+	        //    to whatever ancestor looks clickable.
+	        const all = Array.from(document.querySelectorAll('button,a,div,li,span,[role="button"]'));
+	        let cands = all.filter(el => /servidor\s*principal/i.test(el.textContent||''));
+	        if (!cands.length) cands = all.filter(el => /\bservidor\b/i.test(el.textContent||''));
+	        cands.sort((a,b) => (a.textContent||'').length - (b.textContent||'').length);
+	        return cands[0] || null;
+	      };
+	      const target = pick();
 	      if (target) {
 	        window.__sfServerPicked = true;
-	        fire(target);
-	        const clickable = target.closest('button,a,[role="button"],[data-server],[data-api],li');
-	        if (clickable && clickable !== target) fire(clickable);
+	        const clickable = target.closest(CARD + ',button,a,[role="button"],li') || target;
+	        fire(clickable);
+	        if (clickable !== target) fire(target);
 	      }
 	    }
 	    // Muted autoplay only — do NOT click play overlays / the player area:

@@ -1558,7 +1558,7 @@ func TestRegexPatterns(t *testing.T) {
 // than the cryptic JSON decode error.
 // =============================================================================
 
-func TestSuperFlixBase_PointsToLiveHost_2026_08_25(t *testing.T) {
+func TestSuperFlixBase_PointsToLiveHost_2026_08_31(t *testing.T) {
 	t.Parallel()
 	// Pinning the canonical host. If this needs to change in the future,
 	// also update internal/api/providers/metadata/metadata.go.
@@ -1572,9 +1572,16 @@ func TestSuperFlixBase_PointsToLiveHost_2026_08_25(t *testing.T) {
 	// 2026-08-25: .pro now 301-redirects to .sbs — same POST→GET downgrade,
 	// which is why SuperFlix stopped playing. The served page references only
 	// superflixapi.sbs, so that is the new canonical host.
-	assert.Equal(t, "https://superflixapi.sbs", SuperFlixBase)
-	assert.Equal(t, "superflixapi.sbs", SuperFlixEmbedHost,
+	// 2026-08-31: .sbs now 301-redirects to .beer, same downgrade, same
+	// breakage. Runtime host discovery (host.go) now follows that chain on its
+	// own; these constants are the seed the walk starts from and the fallback
+	// when it fails, so they still have to name a host that redirects onto the
+	// live one.
+	assert.Equal(t, "https://superflixapi.beer", SuperFlixBase)
+	assert.Equal(t, "superflixapi.beer", SuperFlixEmbedHost,
 		"the embed host must track the canonical host")
+	assert.Equal(t, SuperFlixBase, "https://"+SuperFlixEmbedHost,
+		"SuperFlixBase must be SuperFlixEmbedHost as an origin")
 }
 
 func TestBootstrap_HTMLResponseSurfacesActionableError_2026_04_30(t *testing.T) {

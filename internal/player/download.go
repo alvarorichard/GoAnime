@@ -29,6 +29,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
@@ -132,17 +133,52 @@ func ffmpegHLSDownloadArgs(streamURL, outputPath, referer string) []string {
 		"-user_agent", downloadUserAgent,
 		"-progress", "pipe:1", "-nostats",
 	}
+	if ua, headers := pinnedCDNHeaders(referer); headers != "" {
+		return append(append(args, "-user_agent", ua, "-headers", headers),
+			ffmpegHLSOutputArgs(streamURL, outputPath)...)
+	}
 	if referer != "" {
 		args = append(args, "-headers", "Referer: "+referer+"\r\n")
 	}
-	return append(args,
+	return append(args, ffmpegHLSOutputArgs(streamURL, outputPath)...)
+}
+
+// ffmpegHLSOutputArgs is the input/mapping/output tail every HLS download
+// shares, split out so the header-carrying branches above build the same
+// command.
+func ffmpegHLSOutputArgs(streamURL, outputPath string) []string {
+	return []string{
 		"-i", streamURL,
 		"-map", "0:v:0",
 		"-map", "0:a?",
 		"-c", "copy",
 		"-movflags", "+faststart",
 		outputPath,
-	)
+	}
+}
+
+// pinnedCDNHeaders returns the User-Agent and CRLF-joined header block a
+// source has pinned for the current stream, or ("", "") when none has.
+//
+// SuperFlix's player CDN serves a signed URL only to a request that repeats the
+// browser's fingerprint — the right Referer, the browser's exact
+// Accept-Language, the Sec-CH-UA-* client hints, and the exact User-Agent that
+// obtained the URL. Downloading with ffmpeg's own UA and a lone Referer gets
+// every segment 403'd, the same way playback did.
+//
+// The pinned User-Agent (util.SetGlobalUserAgent, set beside the referer when
+// the stream is resolved) is what marks such a source; other sources keep the
+// plain Referer-only behaviour.
+func pinnedCDNHeaders(referer string) (userAgent, headerBlock string) {
+	ua := util.GetGlobalUserAgent()
+	if ua == "" || referer == "" || !util.IsSuperFlixSource() {
+		return "", ""
+	}
+	fields := superflix.CDNPlaybackHeaderFields(referer, ua)
+	if origin := corsOriginOf(referer); origin != "" {
+		fields = append(fields, "Origin: "+origin)
+	}
+	return ua, strings.Join(fields, "\r\n") + "\r\n"
 }
 
 func ffprobeHLSDurationArgs(streamURL, referer string) []string {
@@ -150,7 +186,9 @@ func ffprobeHLSDurationArgs(streamURL, referer string) []string {
 		"-v", "error", "-f", "hls", "-extension_picky", "0",
 		"-user_agent", downloadUserAgent,
 	}
-	if referer != "" {
+	if ua, headers := pinnedCDNHeaders(referer); headers != "" {
+		args = append(args, "-user_agent", ua, "-headers", headers)
+	} else if referer != "" {
 		args = append(args, "-headers", "Referer: "+referer+"\r\n")
 	}
 	return append(args,
@@ -355,6 +393,15 @@ func applyDownloadAuthHeaders(req *http.Request, url string) {
 	}
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", downloadUserAgent)
+	}
+
+	// A source that pinned a User-Agent did so because its CDN only serves the
+	// signed URL to that exact UA (see pinnedCDNHeaders); the generic default
+	// above would be rejected.
+	if ua, _ := pinnedCDNHeaders(util.GetGlobalReferer()); ua != "" {
+		for name, values := range superflix.CDNPlaybackHeaders(util.GetGlobalReferer(), ua) {
+			req.Header.Set(name, values[0])
+		}
 	}
 
 	if ref := util.GetGlobalReferer(); ref != "" {

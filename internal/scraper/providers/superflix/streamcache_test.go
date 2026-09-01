@@ -224,7 +224,7 @@ func TestStreamURLDead(t *testing.T) {
 			t.Cleanup(srv.Close)
 			c := NewSuperFlixClient()
 			c.client = srv.Client()
-			got := c.streamURLDead(context.Background(), srv.URL+"/cdn/hls/x/master.m3u8", srv.URL+"/")
+			got := c.streamURLDead(context.Background(), srv.URL+"/cdn/hls/x/master.m3u8", srv.URL+"/", SuperFlixUserAgent)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -237,7 +237,7 @@ func TestStreamURLDead(t *testing.T) {
 		srv.Close() // connection refused — ambiguous, must not evict.
 		c := NewSuperFlixClient()
 		c.client = client
-		assert.False(t, c.streamURLDead(context.Background(), deadURL, "http://x/"))
+		assert.False(t, c.streamURLDead(context.Background(), deadURL, "http://x/", SuperFlixUserAgent))
 	})
 }
 

@@ -27,16 +27,57 @@ func TestSuperFlixPlaybackSendsCORSOrigin(t *testing.T) {
 
 	args, got := appendPlaybackRefererArgs(nil, "https://cdn.example/master.txt", true, true)
 	require.Equal(t, referer, got)
-	require.Len(t, args, 1)
+	joined := strings.Join(args, " ")
 
-	assert.Contains(t, args[0], "Referer: "+referer)
-	assert.Contains(t, args[0], "Origin: "+origin,
+	assert.Contains(t, joined, "Referer: "+referer)
+	assert.Contains(t, joined, "Origin: "+origin,
 		"without Origin the CDN 403s every segment")
 	// Origin is the bare scheme://host — never the /video/<hash> path.
-	assert.NotContains(t, args[0], "Origin: "+referer)
+	assert.NotContains(t, joined, "Origin: "+referer)
 }
 
-// Other sources must not start receiving an Origin header they never had.
+// TestSuperFlixPlaybackSendsFullCDNContract_2026_08_31 guards the second half
+// of the same defect: the CDN also demands the browser's Accept-Language and
+// Sec-CH-UA-* client hints, and rejects mpv's own libmpv User-Agent. With only
+// Referer and Origin the signed playlist 403s before a single segment is read.
+func TestSuperFlixPlaybackSendsFullCDNContract_2026_08_31(t *testing.T) {
+	const referer = "https://player.best/video/6bc24fc1ab650b25b4114e93a98f1eba"
+	const ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+
+	restore := snapshotGlobalReferer()
+	t.Cleanup(restore)
+	util.SetGlobalReferer(referer)
+	util.SetGlobalUserAgent(ua)
+	t.Cleanup(util.ClearGlobalUserAgent)
+
+	args, _ := appendPlaybackRefererArgs(nil, "https://cdn.example/master.txt", true, true)
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"Referer: " + referer,
+		"User-Agent: " + ua,
+		"Accept-Language: en-US,en;q=0.9",
+		"Sec-CH-UA-Mobile: ?0",
+		"Sec-CH-UA-Platform: ",
+	} {
+		assert.Containsf(t, joined, want, "%s missing from the mpv header args", want)
+	}
+
+	// The UA the URL was signed for must also replace mpv's own default, which
+	// --http-header-fields cannot do: mpv would send libmpv alongside.
+	assert.Contains(t, args, "--user-agent="+ua)
+
+	// Every header must ride its own -append. The comma-joined form would split
+	// Accept-Language's value into two malformed fields.
+	for _, a := range args {
+		if strings.HasPrefix(a, "--http-header-fields=") {
+			t.Errorf("comma-joined header arg would split Accept-Language: %q", a)
+		}
+	}
+}
+
+// Other sources must not start receiving an Origin header they never had, nor
+// the SuperFlix client hints.
 func TestNonSuperFlixPlaybackOmitsOrigin(t *testing.T) {
 	restore := snapshotGlobalReferer()
 	t.Cleanup(restore)
@@ -46,6 +87,7 @@ func TestNonSuperFlixPlaybackOmitsOrigin(t *testing.T) {
 	require.Len(t, args, 1)
 	assert.Contains(t, args[0], "Referer: https://animefire.io")
 	assert.NotContains(t, args[0], "Origin:")
+	assert.NotContains(t, args[0], "Sec-CH-UA")
 }
 
 func TestCORSOriginOf(t *testing.T) {

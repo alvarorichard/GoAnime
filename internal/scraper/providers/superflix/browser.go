@@ -395,7 +395,7 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 	// rejects with "Browser context management is not supported"; passing a URL
 	// routes through Network.getCookies instead. Non-fatal: we can still return
 	// the player HTML even if the cookie snapshot fails.
-	rawCookies, err := bctx.Cookies(targetURL, SuperFlixBase)
+	rawCookies, err := bctx.Cookies(targetURL, liveBase())
 	if err != nil {
 		util.Debug("SuperFlix CF solve: cookie read failed (continuing)", "err", err)
 		rawCookies = nil
