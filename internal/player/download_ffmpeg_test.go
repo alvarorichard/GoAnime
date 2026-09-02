@@ -343,3 +343,60 @@ func TestDownloadWithFFmpegHLS_InstallFailure(t *testing.T) {
 	_, statErr := os.Stat(outFile)
 	assert.True(t, os.IsNotExist(statErr), "no output file must be produced when ffmpeg cannot be resolved")
 }
+
+// fakeFFmpegChattyScript writes the output file and then floods stdout with
+// progress lines, so the scanner is still reading when the process exits. That
+// is the window in which cmd.Wait() used to close the pipe out from under it.
+const fakeFFmpegChattyScript = `#!/bin/sh
+out=""
+for arg in "$@"; do
+    out="$arg"
+done
+printf 'FAKE-MP4-DATA-0123456789' > "$out"
+# Enough output that the reader is still draining the pipe when the process
+# exits, which is the window the old ordering lost.
+i=0
+while [ $i -lt 60000 ]; do
+    printf 'out_time_us=%d\nprogress=continue\n' "$i"
+    i=$((i + 1))
+done
+printf 'progress=end\n'
+`
+
+// TestDownloadWithFFmpegHLS_DrainsProgressBeforeWait guards the ordering fix for
+// a CI failure where a completed download was reported as an error:
+//
+//	failed to read ffmpeg download progress: read |0: file already closed
+//
+// os/exec closes the StdoutPipe inside Wait, and calling Wait before every read
+// has finished is documented as incorrect. The progress scanner and Wait ran
+// concurrently, so on a loaded machine Wait won, the scanner saw a closed pipe,
+// and a media file that was complete on disk was thrown away.
+//
+// HONESTY NOTE: this does not deterministically reproduce that timing. The race
+// window is scheduler-dependent and would not lose on this developer machine
+// even with the pre-fix ordering restored and 60k progress lines. What it does
+// pin is the observable contract — a chatty ffmpeg that is still being drained
+// at exit must yield a successful download, never a progress-read error — so a
+// future rewrite that reintroduces a concurrent Wait has a chance of tripping
+// it, and CI (where the original failure appeared) exercises it under real load.
+func TestDownloadWithFFmpegHLS_DrainsProgressBeforeWait(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the chatty shell fake is unix-only; the race is the same on both")
+	}
+	binDir := t.TempDir()
+	writeFakeExecutable(t, binDir, "ffmpeg", fakeFFmpegChattyScript)
+	writeFakeExecutable(t, binDir, "ffprobe", fakeFFprobeScript)
+	t.Setenv("PATH", binDir)
+
+	for i := range 8 {
+		outFile := filepath.Join(fakeFFmpegHLSOutputDir(t), fmt.Sprintf("episode-%d.mp4", i))
+
+		err := downloadWithFFmpegHLS(fakeSuperFlixMasterURL, outFile, nil)
+		require.NoErrorf(t, err, "attempt %d: a completed download must not be reported as failed", i)
+
+		data, readErr := os.ReadFile(outFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, "FAKE-MP4-DATA-0123456789", string(data))
+	}
+}
