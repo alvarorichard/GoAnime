@@ -1,7 +1,11 @@
 package superflix
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,4 +124,105 @@ func TestBloggerStreamResult_NilTokens(t *testing.T) {
 	res := c.bloggerStreamResult("https://www.blogger.com/video.g?token=x", nil, "")
 	require.NotNil(t, res)
 	assert.Empty(t, res.Title)
+}
+
+// TestFreshSignedURL pins the cached-signed-URL fast path, the thing that turns
+// a repeat play from a ~7s browser solve into a single probe.
+//
+// The (host, hash) pair beside it can only be replayed through the player's
+// getVideo endpoint, and the current player answers 404 there — so before this,
+// every "cached" play fell straight through to a full solve.
+func TestFreshSignedURL(t *testing.T) {
+	t.Parallel()
+
+	const (
+		u   = "https://player.best/tok/hash/1788240906/master.txt"
+		ref = "https://player.best/video/deadbeef"
+		ua  = "Chrome/151-test"
+	)
+
+	fresh := streamCacheEntry{
+		Host: "https://player.best", Hash: "deadbeef",
+		StreamURL: u, StreamRef: ref, StreamUA: ua,
+		SignedAt: time.Now().Add(-2 * time.Minute).Unix(),
+	}
+	gotURL, gotRef, gotUA, ok := fresh.freshSignedURL()
+	assert.True(t, ok, "a two-minute-old URL is worth probing")
+	assert.Equal(t, u, gotURL)
+	assert.Equal(t, ref, gotRef)
+	assert.Equal(t, ua, gotUA, "the CDN binds the URL to this exact UA")
+
+	stale := fresh
+	stale.SignedAt = time.Now().Add(-signedURLTTL - time.Minute).Unix()
+	_, _, _, ok = stale.freshSignedURL()
+	assert.False(t, ok, "past the TTL a re-solve is the better bet")
+
+	var none streamCacheEntry
+	_, _, _, ok = none.freshSignedURL()
+	assert.False(t, ok, "an entry from before this field existed has no URL")
+
+	noTime := fresh
+	noTime.SignedAt = 0
+	_, _, _, ok = noTime.freshSignedURL()
+	assert.False(t, ok, "without a timestamp freshness is unknowable")
+}
+
+// TestStreamFromCache_ReplaysFreshSignedURL is the end-to-end guard: a cached
+// signed URL the CDN still accepts must be returned without touching getVideo.
+func TestStreamFromCache_ReplaysFreshSignedURL(t *testing.T) {
+	var probes, getVideoCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "getVideo") || strings.Contains(r.URL.RawQuery, "getVideo") {
+			getVideoCalls++
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		probes++
+		w.WriteHeader(http.StatusPartialContent)
+	}))
+	defer srv.Close()
+
+	saved := defaultStreamCache
+	t.Cleanup(func() { defaultStreamCache = saved })
+	defaultStreamCache = &streamCache{path: t.TempDir() + "/c.json"}
+	defaultStreamCache.put("filme:603", streamCacheEntry{
+		Host: srv.URL, Hash: "deadbeef",
+		StreamURL: srv.URL + "/master.txt",
+		StreamRef: srv.URL + "/video/deadbeef",
+		StreamUA:  "Chrome/151-test",
+		SignedAt:  time.Now().Unix(),
+		// Extras already known, so the replay needs no extra request.
+		DefaultAudio: []string{"por"}, ExtrasCached: true,
+	})
+
+	c := NewClientForTest(srv.URL)
+	res, ok := c.streamFromCache(t.Context(), "filme:603")
+	require.True(t, ok, "a live signed URL must replay")
+	require.NotNil(t, res)
+	assert.Equal(t, srv.URL+"/master.txt", res.StreamURL)
+	assert.Equal(t, "Chrome/151-test", res.UserAgent, "the UA must ride along — the CDN binds to it")
+	assert.Equal(t, 1, probes, "exactly one probe")
+	assert.Zero(t, getVideoCalls, "getVideo must not be touched on this path")
+}
+
+// A cached URL the CDN now rejects must fall through, not be handed to mpv.
+func TestStreamFromCache_RejectedSignedURLFallsThrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	saved := defaultStreamCache
+	t.Cleanup(func() { defaultStreamCache = saved })
+	defaultStreamCache = &streamCache{path: t.TempDir() + "/c.json"}
+	defaultStreamCache.put("filme:603", streamCacheEntry{
+		Host: srv.URL, Hash: "deadbeef",
+		StreamURL: srv.URL + "/master.txt",
+		StreamRef: srv.URL + "/video/deadbeef",
+		SignedAt:  time.Now().Unix(),
+	})
+
+	c := NewClientForTest(srv.URL)
+	_, ok := c.streamFromCache(t.Context(), "filme:603")
+	assert.False(t, ok, "an expired URL must trigger a re-resolve, not reach the player")
 }

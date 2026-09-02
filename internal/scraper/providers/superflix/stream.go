@@ -318,7 +318,13 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 	defaultStreamCache.put(cacheKey, streamCacheEntry{Host: playerBaseURL, Hash: videoHash})
 
 	referer := playerRefererFor(playerBaseURL, videoHash)
-	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
+	// signStreamURL, not GetVideoAPI: the player retired
+	// /player/index.php?do=getVideo and now answers it with 403/404 HTML. Going
+	// there first cost a wasted round-trip and surfaced a "the chosen server
+	// failed" warning on a server that was perfectly fine — the caller then
+	// fell back to a full browser solve. signStreamURL tries the live /layer/
+	// contract and keeps getVideo only as a fallback.
+	streamURL, thumbURL, err := c.signStreamURL(ctx, playerBaseURL, videoHash, referer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video from API: %w", err)
 	}
@@ -343,9 +349,10 @@ func (c *SuperFlixClient) StreamFromServer(ctx context.Context, tokens *SuperFli
 		// signed playlist for anything but the player's /video/<hash> page, so
 		// playback died while the API call right above it succeeded.
 		Referer: referer,
-		// This URL was signed for THIS client's UA, so that is the only UA the
-		// CDN will serve it to.
-		UserAgent:    c.userAgent,
+		// This URL was signed for the UA this client's requests actually carry
+		// (see effectiveUserAgent), and that is the only UA the CDN will serve
+		// it to.
+		UserAgent:    c.effectiveUserAgent(),
 		Thumb:        NormalizeSuperFlixImageURL(thumbURL),
 		DefaultAudio: defaultAudio,
 		Subtitles:    subtitles,
@@ -383,6 +390,27 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	}
 	referer := ent.Host + "/video/" + ent.Hash
 
+	// Fast path: a signed URL from the last solve that is still inside its TTL.
+	// One probe decides it, versus a getVideo round-trip the current player no
+	// longer answers followed by a ~7s browser solve.
+	if u, ref, ua, ok := ent.freshSignedURL(); ok {
+		if !c.streamURLDead(WithoutBrowserSolve(ctx), u, ref, ua) {
+			util.Debug("SuperFlix: replaying the cached signed URL (no getVideo, no browser)", "key", key)
+			audio, subs := ent.DefaultAudio, ent.Subtitles
+			if !ent.ExtrasCached {
+				audio, subs = c.fetchPlayerExtras(ctx, ent.Host, ent.Hash)
+			}
+			return &SuperFlixStreamResult{
+				StreamURL:    u,
+				Referer:      ref,
+				UserAgent:    ua,
+				DefaultAudio: audio,
+				Subtitles:    subs,
+			}, true
+		}
+		util.Debug("SuperFlix: cached signed URL no longer accepted; re-resolving", "key", key)
+	}
+
 	// The fresh signed HLS URL and the player metadata are independent HTTP
 	// requests. Run them in the shared bounded parallel executor and wait for
 	// both, so cache replay keeps every subtitle/audio track without paying their
@@ -396,19 +424,20 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	)
 	util.ParallelExecute(2,
 		func() {
-			streamURL, thumb, streamErr = c.GetVideoAPI(ctx, ent.Host, ent.Hash, referer)
-			// getVideo still signs URLs on the cached host even after that host
-			// rotates out of the CDN — the signed link then answers 403/404 and mpv
-			// dies a few seconds after launch. Probe the freshly signed URL right
-			// here, inside the parallel branch, so the CDN check overlaps the
-			// extras fetch instead of adding a third serial round-trip.
+			streamURL, thumb, streamErr = c.signStreamURL(ctx, ent.Host, ent.Hash, referer)
+			// The signing endpoint still signs URLs on the cached host even
+			// after that host rotates out of the CDN — the signed link then
+			// answers 403/404 and mpv dies a few seconds after launch. Probe
+			// the freshly signed URL right here, inside the parallel branch, so
+			// the CDN check overlaps the extras fetch instead of adding a third
+			// serial round-trip.
 			if streamErr == nil && streamURL != "" {
 				// referer, not ent.Host+"/": the CDN answers 403 to the bare
 				// player origin and 200 only to the /video/<hash> page (see
 				// playerRefererFor), so probing with the origin condemned every
 				// replay as a dead host. This path signs over plain HTTP, so
 				// the UA that obtained the URL is the client's own.
-				dead = c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, referer, c.userAgent)
+				dead = c.streamURLDead(WithoutBrowserSolve(ctx), streamURL, referer, c.effectiveUserAgent())
 			}
 		},
 		func() {
@@ -442,7 +471,7 @@ func (c *SuperFlixClient) streamFromCache(ctx context.Context, key string) (*Sup
 	return &SuperFlixStreamResult{
 		StreamURL:    streamURL,
 		Referer:      playerRefererFor(ent.Host, ent.Hash),
-		UserAgent:    c.userAgent,
+		UserAgent:    c.effectiveUserAgent(),
 		Thumb:        NormalizeSuperFlixImageURL(thumb),
 		DefaultAudio: audio,
 		Subtitles:    subs,
@@ -938,7 +967,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 	}
 
 	referer := playerRefererFor(playerBaseURL, videoHash)
-	streamURL, thumbURL, err := c.GetVideoAPI(ctx, playerBaseURL, videoHash, referer)
+	streamURL, thumbURL, err := c.signStreamURL(ctx, playerBaseURL, videoHash, referer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video from API: %w", err)
 	}
@@ -949,7 +978,7 @@ func (c *SuperFlixClient) GetStreamURL(ctx context.Context, mediaType, mediaID, 
 		// The SAME Referer used for getVideo just above. See playerRefererFor:
 		// the bare origin gets the signed playlist 403'd.
 		Referer:   referer,
-		UserAgent: c.userAgent,
+		UserAgent: c.effectiveUserAgent(),
 		Thumb:     NormalizeSuperFlixImageURL(thumbURL),
 	}
 
@@ -1027,18 +1056,19 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		referer = c.base() + "/"
 	}
 
+	// The dead-host probe below is a FirePlayer-CDN concept (a signed URL plus
+	// its header contract). A Blogger video page is neither, so probing it
+	// proves nothing — hand it straight to the player layer.
+	if isBloggerPlayerURL(res.StreamURL) {
+		return c.bloggerStreamResult(res.StreamURL, nil, ""), nil
+	}
+
 	// The browser can capture a signed URL for a player host that has already
 	// rotated out of the CDN — getVideo still signs on a dead host, so mpv would
 	// launch and then 404 a few seconds in. The cache path already probes for
 	// exactly this (see streamFromCache); the fresh path used to skip it. Probe
 	// here so a dead capture fails over to the next source instead of surfacing
 	// the 404 to the player, and so we never cache a doomed (host, hash).
-	// The dead-host probe is a FirePlayer-CDN concept (signed URL + its header
-	// contract). A Blogger video page is neither, so probing it proves nothing.
-	if isBloggerPlayerURL(res.StreamURL) {
-		return c.bloggerStreamResult(res.StreamURL, nil, ""), nil
-	}
-
 	if res.StreamURL != "" && c.streamURLDead(WithoutBrowserSolve(ctx), res.StreamURL, referer, res.UserAgent) {
 		return nil, fmt.Errorf("superflix sniffed a dead stream host (%s)", res.PlayerHost)
 	}
@@ -1053,7 +1083,18 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 	// re-solve on every subsequent play, and left a stale entry in place. Attach the
 	// extras only when we actually got them.
 	if res.PlayerHost != "" && res.VideoHash != "" {
-		ent := streamCacheEntry{Host: res.PlayerHost, Hash: res.VideoHash}
+		ent := streamCacheEntry{
+			Host: res.PlayerHost,
+			Hash: res.VideoHash,
+			// Keep the signed URL and the headers it is bound to. The pair
+			// above only replays through getVideo, which the current player
+			// does not answer; this is what actually lets the next play of the
+			// same episode skip the browser.
+			StreamURL: res.StreamURL,
+			StreamRef: referer,
+			StreamUA:  res.UserAgent,
+			SignedAt:  time.Now().Unix(),
+		}
 		if len(audio) > 0 || len(subs) > 0 {
 			ent.DefaultAudio = audio
 			ent.Subtitles = subs

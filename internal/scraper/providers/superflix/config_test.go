@@ -17,9 +17,16 @@ func TestLoadSuperflixConfig(t *testing.T) {
 		expected superflixConfig
 	}{
 		{
+			// Offscreen is the one knob that defaults ON: the bypass browser
+			// stays minimized unless asked otherwise.
 			name:     "all unset",
 			env:      map[string]string{},
-			expected: superflixConfig{},
+			expected: superflixConfig{Offscreen: true},
+		},
+		{
+			name:     "offscreen explicitly off",
+			env:      map[string]string{"GOANIME_SF_OFFSCREEN": "0"},
+			expected: superflixConfig{Offscreen: false},
 		},
 		{
 			name: "all set",
@@ -34,13 +41,15 @@ func TestLoadSuperflixConfig(t *testing.T) {
 				ForceBundled: true,
 				Channel:      "msedge",
 				Mask:         true,
+				Offscreen:    true,
 			},
 		},
 		{
 			name: "channel only",
 			env:  map[string]string{"GOANIME_SF_CHROME_CHANNEL": "chrome-beta"},
 			expected: superflixConfig{
-				Channel: "chrome-beta",
+				Channel:   "chrome-beta",
+				Offscreen: true,
 			},
 		},
 	}
@@ -51,6 +60,7 @@ func TestLoadSuperflixConfig(t *testing.T) {
 			for _, k := range []string{
 				"GOANIME_SF_HEADLESS", "GOANIME_SF_BUNDLED",
 				"GOANIME_SF_CHROME_CHANNEL", "GOANIME_SF_MASK",
+				"GOANIME_SF_OFFSCREEN",
 			} {
 				t.Setenv(k, "")
 			}

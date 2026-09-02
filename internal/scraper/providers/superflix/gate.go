@@ -17,7 +17,14 @@ import (
 
 // moveWindow positions the solver's OS window onscreen (Turnstile needs it
 // rendered to auto-pass). Best-effort.
+//
+// No-op under --sf-offscreen: the window was deliberately launched outside the
+// desktop, and dragging it back would defeat the whole point. Turnstile only
+// requires a real rendering browser, not a visible one.
 func moveWindow(page playwright.Page, x, y int) {
+	if loadSuperflixConfig().Offscreen {
+		return
+	}
 	_, _ = page.Evaluate(fmt.Sprintf(
 		`() => { try { window.moveTo(%d, %d); window.resizeTo(1100, 800); } catch (e) {} }`, x, y))
 }
@@ -45,15 +52,19 @@ func embedHostParentURL(embedURL string) string {
 // Best-effort: returns as soon as the gate clears (cfv redirect, or the
 // challenge markup is gone) or the budget elapses; the caller proceeds either
 // way. On an already-warm profile it returns almost immediately.
-func warmGateTopLevel(page playwright.Page, embedURL string, budget time.Duration) {
+func warmGateTopLevel(page playwright.Page, bctx playwright.BrowserContext, embedURL string, budget time.Duration) {
 	if _, err := page.Goto(embedURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   new(float64(budget.Milliseconds())),
 	}); err != nil {
 		return
 	}
-	_ = page.BringToFront()
+	hideSolverWindow(page, bctx)
+	focusSolverPage(page)
 	deadline := time.Now().Add(budget)
+	// A warm profile clears in a few seconds; well past that, a hidden window is
+	// keeping a solvable challenge away from the only one who can solve it.
+	revealAt := time.Now().Add(offscreenRevealAfter)
 	for time.Now().Before(deadline) {
 		if hasVerificationParam(page.URL()) {
 			return // passing: bouncing through the cfv verification redirect
@@ -63,6 +74,23 @@ func warmGateTopLevel(page playwright.Page, embedURL string, budget time.Duratio
 		}
 		humanize(page)
 		clickTurnstile(page)
+		// Deliberately does NOT extend the caller's budget when a retry is
+		// pressed. Recovery via the retry button is not reliable — measured
+		// live, one run cleared after three presses (~44s) and another never
+		// cleared after fifteen over three minutes — and the warm-up spends the
+		// SAME budget the sniff needs afterwards. Waiting longer here on a gate
+		// that may never open would starve the phase that actually captures the
+		// stream.
+		//
+		// A visible retry button IS, however, the definitive "this challenge is
+		// not going to auto-pass" signal, and it is exactly when a hidden
+		// window has to be handed to the user.
+		if clickChallengeRetry(page) {
+			revealSolverWindow(page, bctx, "challenge reported a load failure")
+		}
+		if time.Now().After(revealAt) {
+			revealSolverWindow(page, bctx, "gate did not clear on its own")
+		}
 		// The warm path normally clears in a few seconds.  Poll often enough to
 		// hand control to the iframe as soon as it does, without busy-looping the
 		// browser process.
@@ -195,16 +223,99 @@ func secureIntn(n int) int {
 	return int(v.Int64())
 }
 
-// turnstileSelectors locate a rendered Turnstile widget — either the explicit
-// mount the page declares (div.cf-turnstile / #cf-turnstile) or the challenge
-// iframe Cloudflare injects (challenges.cloudflare.com, or the cf-chl-widget-*
-// container). Checked in every frame because the widget can sit in the top
-// document or inside the (same-origin) embed.
+// turnstileSelectors locate a rendered Turnstile widget — the challenge iframe
+// Cloudflare injects (challenges.cloudflare.com), or the mount the page
+// declares around it. Checked in every frame because the widget can sit in the
+// top document or inside the (same-origin) embed.
+//
+// SuperFlix renamed its mount on 2026-09-01 to
+// `<div id="cfw-<hex>" class="cf-turnstile-placeholder">`, but that container
+// is deliberately NOT listed here. It is only the mount point: the clickable
+// checkbox lives inside the challenges.cloudflare.com iframe Cloudflare injects
+// into it, and clicking the empty container instead does nothing useful while
+// still counting as this function's one allowed click. Worse, measured live, a
+// click landing on a widget that is mid-"Verifying…" keeps it spinning so it
+// never reaches the failed state whose retry button clickChallengeRetry can
+// press — the gate then never recovers at all. When the widget fails to mount,
+// that retry button is the recovery, not a click here.
 var turnstileSelectors = []string{
 	"iframe[src*='challenges.cloudflare.com']",
 	"div.cf-turnstile",
 	"#cf-turnstile",
 	"div[id^='cf-chl-widget']",
+}
+
+// challengeRetrySelectors locate the retry control SuperFlix's own challenge
+// page renders when the Turnstile widget fails to load.
+//
+// The button is hidden (display:none) until that happens and is revealed with a
+// "show" class, so a visible bounding box already means "verification failed,
+// press me" — no text matching, and nothing to break when the page is served in
+// another language.
+var challengeRetrySelectors = []string{
+	"button.captcha-retry",
+	"button[id^='cfr-']",
+}
+
+// challengeRetryCooldown spaces out retry clicks. The widget needs several
+// seconds to attempt a verification and report failure again; clicking faster
+// would interrupt an attempt that is still in flight.
+const challengeRetryCooldown = 5 * time.Second
+
+// offscreenRevealAfter is how long an --sf-offscreen solve stays hidden while
+// the gate refuses to clear before the window is handed to the user. A warm
+// profile passes in under five seconds and a cold one in well under fifteen, so
+// crossing this means something needs a human.
+const offscreenRevealAfter = 15 * time.Second
+
+// clickChallengeRetry presses the challenge page's own "try again" control when
+// the Turnstile widget has failed to load.
+//
+// This is a distinct failure from the one clickTurnstile handles. There is no
+// checkbox to tick: the widget renders, sits on "Verifying…", and then the page
+// reports "Não foi possível carregar a verificação" with a retry button. Left
+// alone it never recovers, so the whole solve burns its 90s budget (twice, with
+// the retry) and playback fails on a title that works.
+//
+// Measured live 2026-09-01 on a residential IP where the challenge stopped
+// auto-passing: stuck indefinitely on its own, cleared after three retry
+// presses (~44s). Clicks are real OS-level mouse events for the same reason
+// clickTurnstile uses them — Cloudflare's script observes the page, and a
+// synthetic click carries isTrusted=false.
+func clickChallengeRetry(page playwright.Page) (pressed bool) {
+	fresh, err := page.Evaluate(fmt.Sprintf(
+		`() => { const n = Date.now(); if (window.__sfRetryAt && n - window.__sfRetryAt < %d) return false; return true; }`,
+		challengeRetryCooldown.Milliseconds()))
+	if err == nil {
+		if ok, isBool := fresh.(bool); isBool && !ok {
+			return false
+		}
+	}
+
+	for _, fr := range page.Frames() {
+		for _, sel := range challengeRetrySelectors {
+			loc := fr.Locator(sel).First()
+			if n, cErr := loc.Count(); cErr != nil || n == 0 {
+				continue
+			}
+			// Hidden until the widget reports failure, so a real box is the
+			// signal that a retry is warranted.
+			box, bErr := loc.BoundingBox()
+			if bErr != nil || box == nil || box.Width == 0 || box.Height == 0 {
+				continue
+			}
+			if m := page.Mouse(); m != nil {
+				x, y := box.X+box.Width/2, box.Y+box.Height/2
+				_ = m.Move(x, y)
+				_ = m.Click(x, y)
+				_, _ = page.Evaluate(`() => { window.__sfRetryAt = Date.now(); }`)
+				util.Debug("SuperFlix CF solve: pressed the challenge retry button", "x", x, "y", y)
+				return true
+			}
+			return false
+		}
+	}
+	return false
 }
 
 // clickTurnstile clicks a rendered Turnstile checkbox with a REAL, OS-level

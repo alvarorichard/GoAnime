@@ -193,6 +193,24 @@ func (c *SuperFlixClient) base() string {
 	return liveBase()
 }
 
+// effectiveUserAgent returns the User-Agent this client's requests actually go
+// out with.
+//
+// It is NOT always c.userAgent: once a Cloudflare solve has run through
+// cfFallbackTransport, RoundTrip rewrites every request to carry the solving
+// browser's UA so the UA-bound cf_clearance cookie stays valid. Any result that
+// reports a User-Agent has to report that one — the player CDN binds a signed
+// URL to the UA that fetched it, so handing mpv c.userAgent after the transport
+// signed with a different one gets every fetch 403'd.
+func (c *SuperFlixClient) effectiveUserAgent() string {
+	if t, ok := c.client.Transport.(*cfFallbackTransport); ok {
+		if ua := t.getSolvedUA(); ua != "" {
+			return ua
+		}
+	}
+	return c.userAgent
+}
+
 func (c *SuperFlixClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")

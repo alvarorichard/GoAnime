@@ -79,30 +79,48 @@ func (f *failingEmbedSolver) SniffEmbedStream(context.Context, string, time.Dura
 }
 
 // TestGetStreamURL_CacheHitSkipsBrowser is the core proof for the browser-free
-// replay: with a cached (host, hash) the stream is resolved over plain HTTP via
-// getVideo, and the browser solver is never invoked.
+// replay: with a cached (host, hash) the stream is resolved over plain HTTP,
+// and the browser solver is never invoked.
+//
+// The signing call is the current /layer/<key>/<hash>/ contract — the player
+// retired /player/index.php?do=getVideo, which now 404s. The key rotates per
+// session, so it is read out of the player's script bundle first.
 func TestGetStreamURL_CacheHitSkipsBrowser(t *testing.T) {
 	// Not parallel: mutates the package-global defaultStreamCache.
+	const layerKey = "a0b567c03b96daacbf60368ce59272ab6a965bd14XrbympqU6l5iDg3WFVbjA"
+	var sawScriptFetch, sawLayerPost bool
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The cache path makes two plain-HTTP calls: getVideo for a fresh signed
-		// link, and the player page for the subtitle/audio tracks.
-		if strings.HasPrefix(r.URL.Path, "/video/") {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/player/assets/scripts.php"):
+			// The player bundle carries the rotating layer key.
+			sawScriptFetch = true
+			fmt.Fprintf(w, `$.ajax({type:"POST",url:"/layer/%s/"+ID+"/",data:{hash:ID}});`, layerKey)
+		case strings.HasPrefix(r.URL.Path, "/layer/"):
+			sawLayerPost = true
+			assert.Equal(t, "POST", r.Method)
+			assert.Equal(t, "/layer/"+layerKey+"/data123/", r.URL.Path)
+			assert.Equal(t, "XMLHttpRequest", r.Header.Get("X-Requested-With"))
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"hls":true,"securedLink":"%s/cdn/hls/x/master.m3u8?md5=z&expires=9","videoImage":"%s/thumb.jpg"}`, srv0(r), srv0(r))
+		case strings.HasPrefix(r.URL.Path, "/video/"):
+			// The player page carries the subtitle/audio tracks.
 			assert.Equal(t, "/video/data123", r.URL.Path)
 			_, _ = fmt.Fprint(w, realPlayerPage)
-			return
-		}
-		if strings.HasPrefix(r.URL.Path, "/cdn/") {
+		case strings.HasPrefix(r.URL.Path, "/cdn/"):
 			// Live CDN: the cache path probes the freshly signed master.m3u8
 			// before trusting it, so serve a 200 here.
 			_, _ = fmt.Fprint(w, "#EXTM3U")
-			return
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
 		}
-		assert.Contains(t, r.URL.RawQuery, "do=getVideo")
-		assert.Equal(t, "data123", r.URL.Query().Get("data"))
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"hls":true,"securedLink":"%s/cdn/hls/x/master.m3u8?md5=z&expires=9","videoImage":"%s/thumb.jpg"}`, srv0(r), srv0(r))
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		assert.True(t, sawScriptFetch, "the layer key must be read from the player bundle")
+		assert.True(t, sawLayerPost, "the replay must sign through /layer/, not the retired getVideo")
+	})
 
 	// Point the cached host at the httptest server.
 	key := streamCacheKey("filme", "999001", "", "")
