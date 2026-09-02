@@ -2,6 +2,7 @@ package superflix
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -32,6 +33,24 @@ player ready</body></html>`))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(`<!doctype html><html><body>
 <iframe src="/child" style="width:300px;height:200px"></iframe></body></html>`))
+	})
+	// Reproduces SuperFlix's challenge shell: the retry control is display:none
+	// until the Turnstile widget reports a load failure, then gets the "show"
+	// class. ?failed=1 renders it already shown.
+	mux.HandleFunc("/challenge", func(w http.ResponseWriter, r *http.Request) {
+		show := ""
+		if r.URL.Query().Get("failed") != "" {
+			show = " show"
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!doctype html><html><head><style>
+.captcha-retry{display:none;width:300px;height:44px}
+.captcha-retry.show{display:block}
+</style></head><body>
+<div id="cfw-deadbeef" class="cf-turnstile-placeholder"></div>
+<button type="button" id="cfr-deadbeef" class="captcha-retry` + show + `"
+        onclick="window.__retryClicks=(window.__retryClicks||0)+1">Tentar novamente</button>
+</body></html>`))
 	})
 	mux.HandleFunc("/normal", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -135,6 +154,118 @@ func TestPlaywrightHelpers(t *testing.T) {
 		assert.True(t, embedFrameLive(page), "injected cross-origin embed must be a live frame")
 	})
 
+	t.Run("clickChallengeRetry presses a shown retry button", func(t *testing.T) {
+		// The recovery for a Turnstile that fails to LOAD: there is no checkbox
+		// to tick, only the page's own retry control.
+		page, err := bctx.NewPage()
+		require.NoError(t, err)
+		t.Cleanup(func() { forgetRevealedPage(page); _ = page.Close() })
+
+		_, err = page.Goto(srv.URL + "/challenge?failed=1")
+		require.NoError(t, err)
+
+		assert.True(t, clickChallengeRetry(page), "a visible retry button must be pressed")
+
+		clicks, err := page.Evaluate(`() => window.__retryClicks || 0`)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, clicks, "the press must reach the button's handler")
+	})
+
+	t.Run("clickChallengeRetry ignores a hidden retry button", func(t *testing.T) {
+		// While the widget is still verifying the button is display:none.
+		// Pressing then would interrupt an attempt that may yet succeed.
+		page, err := bctx.NewPage()
+		require.NoError(t, err)
+		t.Cleanup(func() { forgetRevealedPage(page); _ = page.Close() })
+
+		_, err = page.Goto(srv.URL + "/challenge")
+		require.NoError(t, err)
+
+		assert.False(t, clickChallengeRetry(page), "a hidden button means no failure to recover from")
+
+		clicks, err := page.Evaluate(`() => window.__retryClicks || 0`)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, clicks)
+	})
+
+	t.Run("clickChallengeRetry honours its cooldown", func(t *testing.T) {
+		// The widget needs seconds to retry and fail again; clicking every tick
+		// would interrupt an attempt still in flight.
+		page, err := bctx.NewPage()
+		require.NoError(t, err)
+		t.Cleanup(func() { forgetRevealedPage(page); _ = page.Close() })
+
+		_, err = page.Goto(srv.URL + "/challenge?failed=1")
+		require.NoError(t, err)
+
+		require.True(t, clickChallengeRetry(page))
+		assert.False(t, clickChallengeRetry(page), "an immediate second press must be held back")
+
+		clicks, err := page.Evaluate(`() => window.__retryClicks || 0`)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, clicks, "exactly one press inside the cooldown")
+	})
+
+	t.Run("clickTurnstile does not click the empty widget mount", func(t *testing.T) {
+		// /challenge renders div.cf-turnstile-placeholder with no Cloudflare
+		// iframe inside it. Clicking that container is useless AND harmful: it
+		// consumes the one allowed click and keeps a verifying widget spinning.
+		page, err := bctx.NewPage()
+		require.NoError(t, err)
+		t.Cleanup(func() { forgetRevealedPage(page); _ = page.Close() })
+
+		_, err = page.Goto(srv.URL + "/challenge?failed=1")
+		require.NoError(t, err)
+
+		clickTurnstile(page)
+
+		// The retry button sits right below the mount; if clickTurnstile had
+		// matched the placeholder it could have landed on it.
+		clicks, err := page.Evaluate(`() => window.__retryClicks || 0`)
+		require.NoError(t, err)
+		assert.EqualValues(t, 0, clicks, "no stray click from the turnstile path")
+	})
+
+	t.Run("hide then reveal moves the solver window", func(t *testing.T) {
+		// The smart-offscreen mechanic end to end, in real Chromium: minimize,
+		// then restore on demand.
+		t.Setenv("GOANIME_SF_OFFSCREEN", "1")
+		page, err := bctx.NewPage()
+		require.NoError(t, err)
+		t.Cleanup(func() { forgetRevealedPage(page); _ = page.Close() })
+
+		_, err = page.Goto(srv.URL + "/normal")
+		require.NoError(t, err)
+
+		windowState := func() string {
+			cdp, cErr := bctx.NewCDPSession(page)
+			if cErr != nil {
+				t.Skipf("CDP unavailable: %v", cErr)
+			}
+			win, wErr := cdp.Send("Browser.getWindowForTarget", nil)
+			if wErr != nil {
+				t.Skipf("window not addressable: %v", wErr)
+			}
+			m, _ := win.(map[string]any)
+			b, _ := m["bounds"].(map[string]any)
+			require.NotNil(t, b)
+			return fmt.Sprint(b["windowState"])
+		}
+
+		hideSolverWindow(page, bctx)
+		assert.Eventually(t, func() bool { return windowState() == "minimized" },
+			5*time.Second, 250*time.Millisecond, "hiding must minimize the window")
+
+		revealSolverWindow(page, bctx, "test")
+		assert.Eventually(t, func() bool { return windowState() == "normal" },
+			5*time.Second, 250*time.Millisecond, "revealing must restore it for the user")
+
+		// And hiding must not undo a deliberate reveal.
+		hideSolverWindow(page, bctx)
+		assert.Equal(t, "normal", windowState(),
+			"re-hiding after a reveal would take the captcha away mid-solve")
+	})
+
 	t.Run("warmGateTopLevel returns fast on a non-gated page", func(t *testing.T) {
 		page, err := bctx.NewPage()
 		require.NoError(t, err)
@@ -142,7 +273,7 @@ func TestPlaywrightHelpers(t *testing.T) {
 
 		const budget = 10 * time.Second
 		start := time.Now()
-		warmGateTopLevel(page, srv.URL+"/normal", budget)
+		warmGateTopLevel(page, bctx, srv.URL+"/normal", budget)
 		elapsed := time.Since(start)
 		assert.Less(t, elapsed, budget-2*time.Second,
 			"a page with no challenge markup must clear well before the budget")

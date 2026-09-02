@@ -130,7 +130,25 @@ func brandSolverPage(page playwright.Page) {
 
 // context. A non-empty channel selects a system browser distribution (e.g.
 // "chrome"); empty uses Playwright's bundled Chromium.
-func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, headless bool) (playwright.BrowserContext, error) {
+// solverOffscreenX is far enough outside any real desktop that no compositor
+// places the window on a visible monitor, while staying inside the 16-bit
+// coordinate range window managers accept.
+const solverOffscreenX = -32000
+
+// solverWindowPositionArg places the solver window: on screen at 60,60 by
+// default, or parked outside the desktop when the user asked for --sf-offscreen.
+func solverWindowPositionArg(offscreen bool) string {
+	if offscreen {
+		return fmt.Sprintf("--window-position=%d,%d", solverOffscreenX, solverOffscreenX)
+	}
+	return "--window-position=60,60"
+}
+
+func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, headless, offscreen bool) (playwright.BrowserContext, error) {
+	// Chromium restores the profile's saved window rectangle over
+	// --window-position, so the saved one has to agree with the mode.
+	pinSolverWindowPlacement(profileDir, offscreen)
+
 	opts := playwright.BrowserTypeLaunchPersistentContextOptions{
 		Headless: new(headless),
 		// Strip the "Chrome is being controlled by automated test software"
@@ -146,13 +164,20 @@ func launchSolverContext(pw *playwright.Playwright, profileDir, channel string, 
 			// overlays the solver page and can block the challenge, so suppress it.
 			"--hide-crash-restore-bubble",
 			"--disable-session-crashed-bubble",
-			// The window MUST be a real, onscreen, non-headless browser for
-			// Cloudflare Turnstile to auto-pass: headless is detected and an
-			// offscreen/occluded window gets throttled so the challenge stalls
-			// (both verified to fail). It's only shown on a COLD solve — the
-			// persistent profile pass cookie + on-disk stream cache make repeat
-			// plays browser-free.
-			"--window-position=60,60",
+			// The window MUST be a real, non-headless browser for Cloudflare
+			// Turnstile to auto-pass — headless is detected and the challenge
+			// never clears (re-measured 2026-09-01: >150s stuck on
+			// "Verificação", with the bundled Chromium and with the new
+			// headless mode; headed clears in under 5s).
+			//
+			// It does NOT have to be on the user's screen, though: the same
+			// solve clears just as fast with the window parked far outside the
+			// desktop, which is what --sf-offscreen does. On screen by default
+			// because that is the only way a user can click a Turnstile
+			// checkbox if the challenge stops auto-passing. Either way it is
+			// only shown on a COLD solve — the persistent profile pass cookie
+			// + on-disk stream cache make repeat plays browser-free.
+			solverWindowPositionArg(offscreen),
 			"--window-size=1100,800",
 		},
 	}
@@ -208,7 +233,7 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 	// Try system Chrome first; on failure (not installed), download + use bundled
 	// Chromium. Separate profile dirs so a Chrome-created and a Chromium-created
 	// profile never clash.
-	pctx, err := launchSolverContext(s.pw, solverProfileDir(cache, channel), channel, cfg.Headless)
+	pctx, err := launchSolverContext(s.pw, solverProfileDir(cache, channel), channel, cfg.Headless, cfg.Offscreen)
 	if err != nil && channel != "" {
 		util.Debug("SuperFlix: system Chrome unavailable, falling back to bundled Chromium", "err", err)
 		if !bundledChromiumInstalled() {
@@ -220,7 +245,7 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 		if instErr := installPlaywright(false); instErr != nil {
 			return nil, fmt.Errorf("%w: %v", ErrPlaywrightUnavailable, instErr)
 		}
-		pctx, err = launchSolverContext(s.pw, solverProfileDir(cache, ""), "", cfg.Headless)
+		pctx, err = launchSolverContext(s.pw, solverProfileDir(cache, ""), "", cfg.Headless, cfg.Offscreen)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("launch browser: %w", err)
@@ -317,11 +342,15 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 		}
 	}
 
-	// This window is headed and onscreen (Turnstile requires it). Until we
-	// navigate, its tab sits at a stark blank "about:blank" that reads as a hung or
-	// broken browser — the #184-adjacent report was exactly that confusion. Paint a
-	// branded holding page so the user knows GoAnime opened it on purpose and that
-	// it will close itself.
+	// Hide it before anything paints, so --sf-offscreen never flashes a window.
+	hideSolverWindow(page, bctx)
+
+	// This window is headed (Turnstile requires a real, rendering browser) and,
+	// unless --sf-offscreen minimized it, onscreen. Until we navigate, its tab
+	// sits at a stark blank "about:blank" that reads as a hung or broken
+	// browser — the #184-adjacent report was exactly that confusion. Paint a
+	// branded holding page so the user knows GoAnime opened it on purpose and
+	// that it will close itself.
 	brandSolverPage(page)
 
 	if _, err := page.Goto(targetURL, playwright.PageGotoOptions{
@@ -344,7 +373,7 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 	// the page has left the verification redirect (URL no longer carries a
 	// verification param) AND either shows a real SuperFlix marker or its HTML
 	// has stabilized between two reads.
-	_ = page.BringToFront() // surface the window so the challenge renders/focuses
+	focusSolverPage(page) // surface the window so the challenge renders/focuses (no-op while hidden)
 	deadline := time.Now().Add(timeout)
 	var html, prevContent string
 	var pastGate, settled bool

@@ -124,6 +124,8 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--sf-bundled", "Force Playwright's bundled Chromium instead of system Chrome.")
 	addOption(&helpContent, "--sf-headless", "Run the bypass browser headless (advanced; Turnstile usually rejects headless, so leave off unless you know what you're doing).")
 	addOption(&helpContent, "--sf-mask", "Enable browser fingerprint masking (advanced escape hatch; off by default because it usually breaks the challenge).")
+	addOption(&helpContent, "--sf-offscreen", "Default. The bypass browser starts minimized and surfaces only if the challenge actually needs you to solve it; it closes itself either way. It still runs a real browser — unlike --sf-headless, which the challenge rejects. Note: the player page raises the window when it loads, so this hides the start of the solve, not all of it.")
+	addOption(&helpContent, "--sf-window", "Always show the bypass browser window, instead of keeping it minimized until it is needed.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -180,6 +182,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d --source goyabu \"naruto\" 1", "Download from Goyabu (Portuguese)")
 	addExample(&helpContent, "goanime --sf-browser chrome \"loki\"", "Use system Chrome for the SuperFlix Cloudflare bypass")
 	addExample(&helpContent, "goanime --sf-bundled \"loki\"", "Force the bundled Chromium for the bypass")
+	addExample(&helpContent, "goanime --sf-window \"loki\"", "Watch the bypass browser work, instead of hiding it")
 	helpContent.WriteString("\n")
 
 	// Upscale Examples section

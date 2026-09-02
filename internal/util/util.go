@@ -504,6 +504,10 @@ func FlagParser() (string, error) {
 	sfBundledFlag := fs.Bool("sf-bundled", false, "force Playwright's bundled Chromium for the bypass instead of system Chrome")
 	sfBrowserFlag := fs.String("sf-browser", "", "browser channel for the Cloudflare bypass (e.g. chrome, chrome-beta, msedge); default: auto")
 	sfMaskFlag := fs.Bool("sf-mask", false, "enable fingerprint masking for the bypass browser (advanced escape hatch)")
+	// Hiding the bypass browser is the default; this flag stays so existing
+	// commands and scripts that pass it keep working.
+	sfOffscreenFlag := fs.Bool("sf-offscreen", false, "(default) keep the bypass browser minimized; it surfaces only if the challenge needs you, then closes")
+	sfWindowFlag := fs.Bool("sf-window", false, "always show the bypass browser window instead of keeping it minimized")
 
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
@@ -544,6 +548,15 @@ func FlagParser() (string, error) {
 	}
 	if *sfMaskFlag {
 		_ = os.Setenv("GOANIME_SF_MASK", "1")
+	}
+	if *sfOffscreenFlag {
+		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "1")
+	}
+	// --sf-window is the opt-out from the hidden default. Checked after
+	// --sf-offscreen so that passing both lands on "show it", the less
+	// surprising outcome of a contradictory pair.
+	if *sfWindowFlag {
+		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "0")
 	}
 
 	// Set debug mode based on flag (set unconditionally for consistency)

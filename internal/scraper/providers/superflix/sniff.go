@@ -249,6 +249,7 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
+	hideSolverWindow(page, bctx)
 
 	var mu sync.Mutex
 	var hitURL, hitRef, hitUA string
@@ -382,12 +383,16 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
-	defer func() { _ = page.Close() }()
+	defer func() {
+		forgetRevealedPage(page)
+		_ = page.Close()
+	}()
 	// Onscreen during the solve — Turnstile only auto-passes when the page truly
 	// renders (headless & offscreen both stall it). Close only this tab afterwards:
 	// keeping the persistent context alive retains Chromium's process, connection
 	// pools and first-party challenge state for the next episode. Re-launching the
 	// whole context here was the largest avoidable delay between plays.
+	hideSolverWindow(page, bctx)
 	moveWindow(page, 60, 60)
 
 	// Close ad popunders the embed spawns via window.open so they don't steal the
@@ -503,7 +508,11 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// another 45 seconds before that budget even begins.
 	deadline := time.Now().Add(timeout)
 	warmBudget := min(timeout/3, 20*time.Second)
-	warmGateTopLevel(page, embedURL, warmBudget)
+	warmGateTopLevel(page, bctx, embedURL, warmBudget)
+	// A navigation un-minimizes the window (the same reflex that dragged an
+	// offscreen one back onto the desktop), so hiding has to be re-asserted
+	// after every one of them.
+	hideSolverWindow(page, bctx)
 
 	// Phase 1 — SAME-ORIGIN (fast path). Navigate the parent to warezcdn's own
 	// (ungated) homepage and inject the player as a same-origin iframe so it reuses
@@ -512,6 +521,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	if err := injectEmbedSameOrigin(page, embedURL); err != nil {
 		return nil, err
 	}
+	hideSolverWindow(page, bctx)
 	if v, uErr := page.Evaluate("() => navigator.userAgent"); uErr == nil {
 		if str, ok := v.(string); ok {
 			ua = str
@@ -529,9 +539,12 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// foreground + a little pointer movement) which, with the stealthed fingerprint,
 	// is what tips a managed challenge into auto-passing without interaction.
 	recovered := false
+	// Past this point a hidden solve has clearly stalled, so the window is
+	// handed to the user rather than failing silently behind their back.
+	revealAt := time.Now().Add(offscreenRevealAfter)
 	embedSeen := false // have we ever observed a live embed frame?
 	var restrictedSince time.Time
-	_ = page.BringToFront() // surface the solve window once so the challenge renders/focuses
+	focusSolverPage(page) // surface the solve window once (no-op while hidden)
 
 	for time.Now().Before(deadline) {
 		mu.Lock()
@@ -598,6 +611,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 			if err := injectEmbedCrossOrigin(page, embedURL); err != nil {
 				util.Debug("SuperFlix cross-origin re-inject failed", "err", err)
 			}
+			hideSolverWindow(page, bctx)
 		}
 
 		// Fast bail on the restricted shell: the cross-origin embed read got a grace
@@ -617,6 +631,15 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		// completes it with no human.
 		humanize(page)
 		clickTurnstile(page)
+		// The widget can fail to load rather than demand a checkbox; then the
+		// page's own retry button is the only way forward — and a hidden window
+		// has to come out so the user can take over.
+		if clickChallengeRetry(page) {
+			revealSolverWindow(page, bctx, "challenge reported a load failure")
+		}
+		if time.Now().After(revealAt) {
+			revealSolverWindow(page, bctx, "no stream captured while the gate stayed closed")
+		}
 		triggerPlay(page)
 		select {
 		case <-ctx.Done():
