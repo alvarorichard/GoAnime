@@ -348,18 +348,35 @@ func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
 	}()
 
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		// os/exec documents that Wait closes the StdoutPipe once the process
+		// exits, "an implication is that it is incorrect to call Wait before
+		// all reads from the pipe have completed". Running Wait concurrently
+		// with the scanner above lost that race on a loaded machine: the pipe
+		// was closed mid-scan, scanner.Err() came back "read |0: file already
+		// closed", and a download whose media file was complete on disk was
+		// reported as a failure. Draining the progress reader first makes the
+		// ordering the API requires.
+		progressErr := <-progressDone
+		if waitErr := cmd.Wait(); waitErr != nil {
+			done <- waitErr
+			return
+		}
+		done <- progressErr
+	}()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
 		case err := <-done:
-			progressErr := <-progressDone
+			// A non-nil err here is ffmpeg's own exit failure when it has one,
+			// and otherwise the progress-reader error; both mean the download
+			// cannot be trusted.
 			if err != nil {
-				return fmt.Errorf("ffmpeg HLS download failed: %w: %s", err, strings.TrimSpace(stderr.String()))
-			}
-			if progressErr != nil {
-				return fmt.Errorf("failed to read ffmpeg download progress: %w", progressErr)
+				if stderrTail := strings.TrimSpace(stderr.String()); stderrTail != "" {
+					return fmt.Errorf("ffmpeg HLS download failed: %w: %s", err, stderrTail)
+				}
+				return fmt.Errorf("failed to read ffmpeg download progress: %w", err)
 			}
 			stat, statErr := os.Stat(partPath)
 			if statErr != nil || stat.Size() == 0 {
