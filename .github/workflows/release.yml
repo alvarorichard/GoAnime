@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.27.0'
+  GO_VERSION: '1.27.1'
   BINARY_NAME: goanime
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
