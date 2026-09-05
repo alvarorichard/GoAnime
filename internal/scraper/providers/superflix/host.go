@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
@@ -16,7 +17,8 @@ import (
 )
 
 // SuperFlix rotates its domain every few weeks (`.rest` → `.online` → `.best`
-// → `.fit` → `.cyou` → `.lifestyle` → `.pro` → `.sbs` → `.beer` → …), and every
+// → `.fit` → `.cyou` → `.lifestyle` → `.pro` → `.sbs` → `.beer` → `.baby` → …),
+// and every
 // rotation used to break playback until SuperFlixBase was hand-edited: Go's
 // http.Client follows the 301 but downgrades the POST to a GET and drops the
 // body, so /player/bootstrap answers HTML 404 and JSON decoding fails.
@@ -29,8 +31,8 @@ import (
 const (
 	// hostEnvOverride pins the host manually, skipping discovery entirely —
 	// the escape hatch for a rotation that redirects somewhere the family
-	// pattern below rejects. Value is a bare host ("superflixapi.beer") or a
-	// full origin ("https://superflixapi.beer").
+	// pattern below rejects. Value is a bare host ("superflixapi.baby") or a
+	// full origin ("https://superflixapi.baby").
 	hostEnvOverride = "GOANIME_SF_HOST"
 	// hostProbeBudget caps the whole redirect walk. Discovery is on the
 	// critical path of the first request, so it must fail fast.
@@ -83,6 +85,27 @@ func LiveBase(ctx context.Context) string {
 	return liveBase()
 }
 
+// discoveryAllowed reports whether this process may spend a network round trip
+// discovering the live host.
+//
+// Test binaries may not, unless they opted in with GOANIME_LIVE. Discovery used
+// to be gated on a guess — "this client still has the default base URL and the
+// real solver, so it must be production" — and a unit test that built a client
+// with NewSuperFlixClient() and pointed only its http.Client at an httptest
+// server slipped straight through it. That put a live network call inside
+// `go test -short`, and worse, it left the discovered host in a package global
+// where an unrelated parallel test compared it against the compiled constant
+// and failed the moment the domain rotated.
+//
+// testing.Testing() is the supported way to ask, and unlike the guess it cannot
+// be defeated by how a particular test happens to build its client.
+func discoveryAllowed() bool {
+	if !testing.Testing() {
+		return true
+	}
+	return os.Getenv("GOANIME_LIVE") != ""
+}
+
 // ensureLiveHost resolves the currently live SuperFlix host, once per process.
 // It is best-effort: any failure leaves liveEmbedHost on the compiled default.
 func ensureLiveHost(ctx context.Context) {
@@ -93,9 +116,16 @@ func ensureLiveHost(ctx context.Context) {
 	}
 	hostProbed = true
 
+	// The manual pin comes first: it costs no network, so it applies in tests
+	// too and stays the escape hatch when discovery is unavailable.
 	if pinned := hostFromEnv(); pinned != "" {
 		hostFound = pinned
 		util.Debug("SuperFlix host pinned via " + hostEnvOverride + ": " + pinned)
+		return
+	}
+	if !discoveryAllowed() {
+		util.Debug("SuperFlix host discovery skipped under `go test`; using the compiled default",
+			"default", SuperFlixEmbedHost)
 		return
 	}
 	host, err := probeLiveHost(ctx)

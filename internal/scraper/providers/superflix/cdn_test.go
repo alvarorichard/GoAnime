@@ -135,7 +135,7 @@ func TestFallbackGraceFor(t *testing.T) {
 	for _, ref := range []string{
 		"",
 		"https://player.best/",
-		"https://superflixapi.beer/filme/603",
+		"https://superflixapi.baby/filme/603",
 		"not a url",
 	} {
 		assert.Positivef(t, fallbackGraceFor(ref),

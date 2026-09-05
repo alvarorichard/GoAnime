@@ -91,8 +91,8 @@ func TestNextHopHost(t *testing.T) {
 		wantError bool
 	}{
 		{"200 is the live host", 200, "", cur, true, false},
-		{"301 to a sibling rotates", 301, "https://superflixapi.beer/", "superflixapi.beer", false, false},
-		{"302 rotates too", 302, "https://superflixapi.beer/", "superflixapi.beer", false, false},
+		{"301 to a sibling rotates", 301, "https://superflixapi.baby/", "superflixapi.baby", false, false},
+		{"302 rotates too", 302, "https://superflixapi.baby/", "superflixapi.baby", false, false},
 		{"403 challenge still means live", 403, "", cur, true, false},
 		{"503 challenge still means live", 503, "", cur, true, false},
 		{"404 is terminal, not a rotation", 404, "", cur, true, false},
@@ -100,7 +100,7 @@ func TestNextHopHost(t *testing.T) {
 		{"relative Location is not a rotation", 301, "/filme/550", cur, true, false},
 		{"same-host Location is not a rotation", 301, "https://" + cur + "/x", cur, true, false},
 		{"off-family redirect aborts", 301, "https://evil.test/", "", false, true},
-		{"lookalike subdomain aborts", 301, "https://superflixapi.beer.evil.test/", "", false, true},
+		{"lookalike subdomain aborts", 301, "https://superflixapi.baby.evil.test/", "", false, true},
 		{"unparseable Location aborts", 301, "://%%zz", "", false, true},
 	}
 
@@ -125,14 +125,65 @@ func TestNextHopHost(t *testing.T) {
 func TestSuperflixHostRe_RejectsOffFamilyRedirects(t *testing.T) {
 	rejected := []string{
 		"evil.test",
-		"superflixapi.beer.evil.test",
-		"notsuperflixapi.beer",
-		"sub.superflixapi.beer",
+		"superflixapi.baby.evil.test",
+		"notsuperflixapi.baby",
+		"sub.superflixapi.baby",
 		"superflixapi.",
-		"superflixapi.beer:8080",
+		"superflixapi.baby:8080",
 		"",
 	}
 	for _, h := range rejected {
 		assert.Falsef(t, superflixHostRe.MatchString(h), "%q must be rejected", h)
 	}
+}
+
+// TestDiscoveryAllowed_NeverProbesUnderGoTest is the regression for a CI
+// failure that had nothing to do with the domain rotation it appeared to be
+// about.
+//
+// Host discovery used to be gated on a guess — "this client still has the
+// default base URL and the real solver, so it must be production". A unit test
+// that built a client with NewSuperFlixClient() and only swapped its
+// http.Client for an httptest one slipped through: `go test -short` made a live
+// network call, resolved the rotated host into a package global, and an
+// unrelated parallel test comparing that global against the compiled constant
+// went red on three platforms at once.
+//
+// The gate is now testing.Testing(), which no client construction can defeat.
+func TestDiscoveryAllowed_NeverProbesUnderGoTest(t *testing.T) {
+	t.Setenv("GOANIME_LIVE", "")
+	assert.False(t, discoveryAllowed(),
+		"a test binary must never spend a network round trip discovering the host")
+}
+
+// Live tests opt back in explicitly, so the real rotation path stays covered.
+func TestDiscoveryAllowed_OptInForLiveTests(t *testing.T) {
+	t.Setenv("GOANIME_LIVE", "1")
+	assert.True(t, discoveryAllowed())
+}
+
+// TestEnsureLiveHost_NoNetworkInTests proves the gate end to end: even a
+// production-shaped client must leave the host on the compiled default while
+// under `go test`, so no global state leaks between tests.
+func TestEnsureLiveHost_NoNetworkInTests(t *testing.T) {
+	resetHostDiscovery(t)
+	t.Setenv("GOANIME_LIVE", "")
+	t.Setenv(hostEnvOverride, "")
+
+	c := NewSuperFlixClient() // default base URL, real solver: the shape that used to probe
+	assert.Equal(t, SuperFlixBase, c.base(),
+		"base() must not reach the network from a test binary")
+	assert.Equal(t, SuperFlixEmbedHost, liveEmbedHost(),
+		"and must not leave a discovered host behind for other tests to trip on")
+}
+
+// The manual pin costs no network, so it must keep working in tests — it is the
+// escape hatch when discovery is unavailable.
+func TestEnsureLiveHost_EnvPinWorksEvenInTests(t *testing.T) {
+	resetHostDiscovery(t)
+	t.Setenv("GOANIME_LIVE", "")
+	t.Setenv(hostEnvOverride, "superflixapi.pinned")
+
+	ensureLiveHost(t.Context())
+	assert.Equal(t, "superflixapi.pinned", liveEmbedHost())
 }
