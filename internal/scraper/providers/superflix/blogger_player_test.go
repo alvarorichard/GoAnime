@@ -50,7 +50,7 @@ func TestIsReplayablePlayerHost(t *testing.T) {
 
 	assert.True(t, isReplayablePlayerHost("https://xn--tckasiu6cvova0eb5fua2449g98vg.best"))
 
-	assert.False(t, isReplayablePlayerHost("https://superflixapi.beer/player/native/media/123"),
+	assert.False(t, isReplayablePlayerHost("https://superflixapi.baby/player/native/media/123"),
 		"the native player answers getVideo with 405")
 	assert.False(t, isReplayablePlayerHost("https://www.blogger.com"),
 		"blogger answers getVideo with 404")

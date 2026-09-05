@@ -1558,7 +1558,7 @@ func TestRegexPatterns(t *testing.T) {
 // than the cryptic JSON decode error.
 // =============================================================================
 
-func TestSuperFlixBase_PointsToLiveHost_2026_08_31(t *testing.T) {
+func TestSuperFlixBase_PointsToLiveHost_2026_09_02(t *testing.T) {
 	t.Parallel()
 	// Pinning the canonical host. If this needs to change in the future,
 	// also update internal/api/providers/metadata/metadata.go.
@@ -1577,8 +1577,10 @@ func TestSuperFlixBase_PointsToLiveHost_2026_08_31(t *testing.T) {
 	// own; these constants are the seed the walk starts from and the fallback
 	// when it fails, so they still have to name a host that redirects onto the
 	// live one.
-	assert.Equal(t, "https://superflixapi.beer", SuperFlixBase)
-	assert.Equal(t, "superflixapi.beer", SuperFlixEmbedHost,
+	// 2026-09-02: .beer → .baby. Discovery absorbed it with no code change —
+	// the app kept working — and only this seed had to be refreshed.
+	assert.Equal(t, "https://superflixapi.baby", SuperFlixBase)
+	assert.Equal(t, "superflixapi.baby", SuperFlixEmbedHost,
 		"the embed host must track the canonical host")
 	assert.Equal(t, SuperFlixBase, "https://"+SuperFlixEmbedHost,
 		"SuperFlixBase must be SuperFlixEmbedHost as an origin")
