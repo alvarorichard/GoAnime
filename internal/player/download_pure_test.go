@@ -86,7 +86,13 @@ func TestIsSuperFlixTextHLS(t *testing.T) {
 		{"SuperFlix master txt", "https://cdn.test/cdn/hls/hash/master.txt", true},
 		{"case insensitive", "https://cdn.test/CDN/HLS/hash/MASTER.TXT?x=1", true},
 		{"ordinary m3u8", "https://cdn.test/cdn/hls/hash/master.m3u8", false},
-		{"unrelated text file", "https://cdn.test/files/master.txt", false},
+		// Any path ending in master.txt now counts. The live SuperFlix URL is
+		// /<token>/<contentid>/<expires>/master.txt, which no rule can tell
+		// apart from this one — and requiring the old "/cdn/hls/" prefix is
+		// exactly what sent every real download to the MP4 Range downloader.
+		{"master.txt outside /cdn/hls/ is still a playlist", "https://cdn.test/files/master.txt", true},
+		{"master.txt only as a suffix, not a substring", "https://cdn.test/files/master.txt.html", false},
+		{"fragment is not part of the path", "https://cdn.test/a/b/master.txt#t=10", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

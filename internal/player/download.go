@@ -52,8 +52,38 @@ const downloadUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 const minDownloadedVideoSize int64 = 10 * 1024 * 1024
 
 func isSuperFlixTextHLS(u string) bool {
-	lower := strings.ToLower(u)
-	return strings.Contains(lower, "/cdn/hls/") && strings.Contains(lower, "master.txt")
+	// "master.txt" as the final path segment is the signature, NOT master.txt
+	// plus "/cdn/hls/". The player host changed its path shape from
+	//   /cdn/hls/<hash>/master.txt
+	// to
+	//   /<token>/<contentid>/<expires>/master.txt
+	// and the "/cdn/hls/" half of the old condition stopped matching. Every
+	// current SuperFlix URL then missed this branch and fell through the
+	// routing switch to the plain-MP4 Range downloader, which happily saved the
+	// playlist TEXT as the episode file. Playback had already been taught the
+	// same lesson — see LooksLikeHLS — so the two now agree.
+	//
+	// Matched as the final path segment rather than as a substring, so a page
+	// that merely mentions it (".../master.txt.html") is not mistaken for a
+	// playlist. The old "/cdn/hls/" clause is gone rather than OR-ed in: the
+	// suffix already covers the legacy shape, and keeping it would have pulled
+	// ordinary "/cdn/hls/<hash>/master.m3u8" URLs away from the native HLS
+	// downloader for no reason.
+	//
+	// Any master.txt is accepted, wherever it sits. The live URL is
+	// /<token>/<contentid>/<expires>/master.txt — structurally indistinguishable
+	// from any other path ending in master.txt — so there is nothing more
+	// specific to key on. Sending a stray master.txt through ffmpeg costs
+	// nothing; the reverse silently writes playlist text into an .mp4.
+	path := u
+	if before, _, ok := strings.Cut(path, "#"); ok {
+		path = before
+	}
+	if before, _, ok := strings.Cut(path, "?"); ok {
+		path = before
+	}
+	lower := strings.ToLower(path)
+	return strings.HasSuffix(lower, "/master.txt")
 }
 
 // Bundled media-tool installers used when ffmpeg/ffprobe are missing from
@@ -1910,7 +1940,12 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 				switch {
 				case isSuperFlixTextHLS(videoURL):
 					err = downloadWithFFmpegHLS(videoURL, episodePath, progressModel)
-				case strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL):
+				// LooksLikeHLS, not a bare ".m3u8" substring: the two other
+				// routing switches already use it, and keying on the extension
+				// alone missed playlists served under "/hls/" without one —
+				// those fell through to the plain-MP4 downloader, the same way
+				// SuperFlix's master.txt did.
+				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					err = downloadWithNativeHLS(videoURL, episodePath, progressModel)
 					if err != nil && errors.Is(err, hls.ErrSeparateAudioTracks) {
 						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, err)
@@ -2200,7 +2235,12 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 				switch {
 				case isSuperFlixTextHLS(videoURL):
 					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, progressModel)
-				case strings.Contains(videoURL, ".m3u8") || hasUnsafeExtension(videoURL):
+				// LooksLikeHLS, not a bare ".m3u8" substring: the two other
+				// routing switches already use it, and keying on the extension
+				// alone missed playlists served under "/hls/" without one —
+				// those fell through to the plain-MP4 downloader, the same way
+				// SuperFlix's master.txt did.
+				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, progressModel)
 					if dlErr != nil && errors.Is(dlErr, hls.ErrSeparateAudioTracks) {
 						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, dlErr)
