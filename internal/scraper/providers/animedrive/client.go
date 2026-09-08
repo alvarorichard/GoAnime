@@ -889,7 +889,6 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 
 // GetAnimeEpisodes converts AnimeDrive episodes to models.Episode format
 func (c *AnimeDriveClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	util.Debug("AnimeDrive episodes", "url", animeURL)
 
 	details, err := c.GetAnimeDetails(animeURL)
 	if err != nil {
@@ -899,6 +898,11 @@ func (c *AnimeDriveClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, 
 	var episodes []models.Episode
 	for _, ep := range details.Episodes {
 		num, _ := strconv.Atoi(ep.Number)
+		util.Debug("AnimeDrive episode candidate",
+			"number", ep.Number,
+			"url", ep.URL,
+		)
+
 		episodes = append(episodes, models.Episode{
 			Number: ep.Number,
 			Num:    num,
@@ -912,6 +916,7 @@ func (c *AnimeDriveClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, 
 	if len(episodes) == 0 {
 		return nil, errors.New("no episodes found on AnimeDrive")
 	}
+	util.Debug("AnimeDrive found episodes", "count", len(episodes))
 
 	return episodes, nil
 }
