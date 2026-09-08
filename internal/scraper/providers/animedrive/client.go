@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	AnimeDriveBase = "https://animesdrive.online"
+	AnimeDriveBase = "https://animesdrive.cloud/"
 )
 
 // Pre-compiled regexes for AnimeDrive scraper (avoid per-call compilation)
