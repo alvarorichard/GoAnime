@@ -26,7 +26,7 @@ const (
 
 // Pre-compiled regexes for AnimeDrive scraper (avoid per-call compilation)
 var (
-	animeDriveEpRe     = regexp.MustCompile(`(?i)episodio[s]?[-_]?(\d+)`)
+	animeDriveEpRe     = regexp.MustCompile(`(?i)episodios?[-_]?(\d+)`)
 	animeDriveDigitRe  = regexp.MustCompile(`(\d+)`)
 	animeDriveSourceRe = regexp.MustCompile(`source=([^&]+)`)
 	animeDriveTityosRe = regexp.MustCompile(`https?://tityos\.feralhosting\.com/[^\s<>"]+\.mp4`)
@@ -347,7 +347,7 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", searchURL, nil)
+		req, err := http.NewRequest("GET", searchURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -475,7 +475,7 @@ func (c *AnimeDriveClient) GetAnimesByPage(page int) ([]AnimeDriveShow, error) {
 		pageURL = fmt.Sprintf("%s/anime/page/%d/", c.baseURL, page)
 	}
 
-	req, err := http.NewRequest("GET", pageURL, nil)
+	req, err := http.NewRequest("GET", pageURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -573,7 +573,7 @@ func (c *AnimeDriveClient) GetAnimesByLetter(letter string, page int) ([]AnimeDr
 		letterURL = fmt.Sprintf("%s/anime/page/%d/?letter=%s", c.baseURL, page, letterParam)
 	}
 
-	req, err := http.NewRequest("GET", letterURL, nil)
+	req, err := http.NewRequest("GET", letterURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -634,7 +634,7 @@ func (c *AnimeDriveClient) GetAnimesByLetter(letter string, page int) ([]AnimeDr
 func (c *AnimeDriveClient) GetGenres() ([]AnimeDriveGenre, error) {
 	util.Debug("AnimeDrive getting genres")
 
-	req, err := http.NewRequest("GET", c.baseURL, nil)
+	req, err := http.NewRequest("GET", c.baseURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -699,7 +699,7 @@ func (c *AnimeDriveClient) GetAnimesByGenre(genreURL string, page int) ([]AnimeD
 
 	util.Debug("AnimeDrive getting animes by genre", "url", urlStr)
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("GET", urlStr, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -765,7 +765,7 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 		urlStr = c.baseURL + animeURL
 	}
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("GET", urlStr, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -930,7 +930,7 @@ func (c *AnimeDriveClient) GetVideoOptions(episodeURL string) ([]VideoOption, er
 		urlStr = c.baseURL + episodeURL
 	}
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("GET", urlStr, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -955,7 +955,7 @@ func (c *AnimeDriveClient) GetVideoOptions(episodeURL string) ([]VideoOption, er
 	var options []VideoOption
 
 	// Search for all player/server options
-	playerSelectors := ".dooplay_player_option, [class*='player_option'], .source-box li, .player_nav li, .server-item"
+	playerSelectors := ".dooplay_player_option, [class*='player_option'], .source-box li, .player_nav li, .server-item, animeq-player__iframe, animeq-player__stage"
 	serverIndex := 0
 
 	doc.Find(playerSelectors).Each(func(i int, s *goquery.Selection) {
@@ -1037,7 +1037,7 @@ func (c *AnimeDriveClient) GetVideoOptions(episodeURL string) ([]VideoOption, er
 
 // ResolveVideoURLWithType resolves the video URL for a specific option
 // Returns the URL and type (mp4, hls, or iframe)
-func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (string, string, error) {
+func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (videoURL, videoType string, err error) {
 	if option.VideoURL != "" {
 		return option.VideoURL, "mp4", nil
 	}
@@ -1051,7 +1051,7 @@ func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (string, 
 	apiURL := fmt.Sprintf("%s/wp-json/dooplayer/v2/%s/%s/%s",
 		c.baseURL, option.PostID, option.Type, option.Nume)
 
-	req, err := http.NewRequest("GET", apiURL, nil)
+	req, err := http.NewRequest("GET", apiURL, http.NoBody)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1101,7 +1101,7 @@ func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (string, 
 	}
 
 	// Return iframe for other types
-	videoType := apiData.Type
+	videoType = apiData.Type
 	if videoType == "" {
 		videoType = "iframe"
 	}
@@ -1136,7 +1136,7 @@ func (c *AnimeDriveClient) GetVideoURLWithSelection(episodeURL string) (string, 
 				opt.Label = opt.Quality.String()
 			}
 			if videoType == "hls" {
-				opt.Label = opt.Label + " (HLS)"
+				opt.Label += " (HLS)"
 			}
 			resolvedOptions = append(resolvedOptions, opt)
 		}
@@ -1253,7 +1253,7 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 		urlStr = c.baseURL + episodeURL
 	}
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("GET", urlStr, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1294,7 +1294,7 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 			apiURL := fmt.Sprintf("%s/wp-json/dooplayer/v2/%s/%s/%s",
 				c.baseURL, dataPost, dataType, dataNume)
 
-			apiReq, err := http.NewRequest("GET", apiURL, nil)
+			apiReq, err := http.NewRequest("GET", apiURL, http.NoBody)
 			if err == nil {
 				c.decorateRequest(apiReq)
 				apiReq.Header.Set("Referer", urlStr)
@@ -1353,7 +1353,7 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 			apiURL := fmt.Sprintf("%s/wp-json/dooplayer/v2/%s/%s/%s",
 				c.baseURL, dataPost, dataType, dataNume)
 
-			apiReq, err := http.NewRequest("GET", apiURL, nil)
+			apiReq, err := http.NewRequest("GET", apiURL, http.NoBody)
 			if err != nil {
 				return
 			}
@@ -1469,7 +1469,7 @@ func (c *AnimeDriveClient) extractFromIframe(iframeURL string) (string, error) {
 		urlStr = "https:" + urlStr
 	}
 
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequest("GET", urlStr, http.NoBody)
 	if err != nil {
 		return "", err
 	}
@@ -1512,7 +1512,7 @@ func (c *AnimeDriveClient) extractFromIframe(iframeURL string) (string, error) {
 func (c *AnimeDriveClient) GetLatestReleases() ([]AnimeDriveShow, error) {
 	util.Debug("AnimeDrive getting latest releases")
 
-	req, err := http.NewRequest("GET", c.baseURL, nil)
+	req, err := http.NewRequest("GET", c.baseURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1598,7 +1598,7 @@ func (c *AnimeDriveClient) GetFilms(page int) ([]AnimeDriveShow, error) {
 		pageURL = fmt.Sprintf("%s/filme/page/%d/", c.baseURL, page)
 	}
 
-	req, err := http.NewRequest("GET", pageURL, nil)
+	req, err := http.NewRequest("GET", pageURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -1667,30 +1667,30 @@ func (c *AnimeDriveClient) resolveURL(ref string) string {
 }
 
 // GetStreamURL gets the streaming URL for a specific episode (auto-selects best server)
-func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (string, map[string]string, error) {
+func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (videoURL string, metadata map[string]string, err error) {
 	util.Debug("AnimeDriveClient stream URL extraction", "episodeURL", episodeURL)
 
-	metadata := map[string]string{
+	metadata = map[string]string{
 		"source": "animedrive",
 	}
 
-	url, err := c.GetVideoURL(episodeURL)
+	videoUrl, err := c.GetVideoURL(episodeURL)
 	if err != nil {
 		return "", nil, err
 	}
 
-	return url, metadata, nil
+	return videoUrl, metadata, nil
 }
 
 // GetStreamURLWithSelection gets the streaming URL with user server selection
-func (c *AnimeDriveClient) GetStreamURLWithSelection(episodeURL string) (string, map[string]string, error) {
+func (c *AnimeDriveClient) GetStreamURLWithSelection(episodeURL string) (videoURL string, metadata map[string]string, err error) {
 
-	videoURL, err := c.GetVideoURLWithSelection(episodeURL)
+	videoURL, err = c.GetVideoURLWithSelection(episodeURL)
 	if err != nil {
 		return "", nil, err
 	}
 
-	metadata := map[string]string{
+	metadata = map[string]string{
 		"source": "animedrive",
 	}
 
