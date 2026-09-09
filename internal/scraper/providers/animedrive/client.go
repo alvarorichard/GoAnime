@@ -302,6 +302,26 @@ func isProblematicDomain(urlStr string) bool {
 	return false
 }
 
+// isAvailableStreamURL rejects stale direct links before handing them to mpv.
+// AnimeDrive sometimes leaves dead ccdn.xyz URLs in the episode HTML.
+func (c *AnimeDriveClient) isAvailableStreamURL(streamURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, streamURL, http.NoBody)
+	if err != nil {
+		return false
+	}
+
+	req.Header.Set("Range", "bytes=0-0")
+	c.decorateRequest(req)
+
+	resp, err := c.client.Do(req) // #nosec G704
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
+
 func (c *AnimeDriveClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
@@ -364,8 +384,8 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 			return nil, lastErr
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("server returned: %s", resp.Status)
+		if err := netx.CheckHTTPStatus(resp, "AnimeDrive search"); err != nil {
+			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
 				c.sleep()
@@ -378,6 +398,15 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 		_ = resp.Body.Close()
 		if err != nil {
 			lastErr = fmt.Errorf("failed to parse HTML: %w", err)
+			if c.shouldRetry(attempt) {
+				c.sleep()
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if err := netx.CheckChallengeDocument(doc, "AnimeDrive search"); err != nil {
+			lastErr = err
 			if c.shouldRetry(attempt) {
 				c.sleep()
 				continue
@@ -889,6 +918,7 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 
 // GetAnimeEpisodes converts AnimeDrive episodes to models.Episode format
 func (c *AnimeDriveClient) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	util.Debug("AnimeFire episodes", "url", animeURL)
 
 	details, err := c.GetAnimeDetails(animeURL)
 	if err != nil {
@@ -955,7 +985,7 @@ func (c *AnimeDriveClient) GetVideoOptions(episodeURL string) ([]VideoOption, er
 	var options []VideoOption
 
 	// Search for all player/server options
-	playerSelectors := ".dooplay_player_option, [class*='player_option'], .source-box li, .player_nav li, .server-item, animeq-player__iframe, animeq-player__stage"
+	playerSelectors := ".dooplay_player_option, [class*='player_option'], .source-box li, .player_nav li, .server-item"
 	serverIndex := 0
 
 	doc.Find(playerSelectors).Each(func(i int, s *goquery.Selection) {
@@ -1082,6 +1112,11 @@ func (c *AnimeDriveClient) ResolveVideoURLWithType(option VideoOption) (videoURL
 	}
 
 	util.Debug("AnimeDrive got embed URL", "type", apiData.Type, "url", apiData.EmbedURL)
+
+	if strings.Contains(apiData.EmbedURL, "blogger.com/video.g") ||
+		strings.Contains(apiData.EmbedURL, "blogspot.com/video.g") {
+		return apiData.EmbedURL, "blogger", nil
+	}
 
 	// If it's MP4 type, extract the source
 	if apiData.Type == "mp4" {
@@ -1227,6 +1262,14 @@ func (c *AnimeDriveClient) GetVideoURL(episodeURL string) (string, error) {
 		return best.url, nil
 	}
 
+	for _, option := range options {
+		videoURL, videoType, err := c.ResolveVideoURLWithType(option)
+		if err == nil && videoType == "blogger" && videoURL != "" {
+			util.Debug("AnimeDrive selected Blogger embed", "url", videoURL)
+			return videoURL, nil
+		}
+	}
+
 	// Fallback: try iframes
 	util.Debug("AnimeDrive no MP4 found, trying iframes...")
 	for _, option := range options {
@@ -1315,14 +1358,19 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 							sourceMatch := animeDriveSourceRe.FindStringSubmatch(apiData.EmbedURL)
 							if len(sourceMatch) > 1 {
 								decodedSource, err := url.QueryUnescape(sourceMatch[1])
-								if err == nil {
+								if err == nil && c.isAvailableStreamURL(decodedSource) {
 									util.Debug("AnimeDrive extracted MP4", "url", decodedSource)
 									return decodedSource, nil
 								}
+								util.Debug("AnimeDrive rejected unavailable MP4", "url", decodedSource)
 							}
 
 							// Only return embed URL if it's a direct video, not an iframe page
 							if strings.HasSuffix(apiData.EmbedURL, ".mp4") || strings.Contains(apiData.EmbedURL, ".m3u8") {
+								return apiData.EmbedURL, nil
+							}
+							if strings.Contains(apiData.EmbedURL, "blogger.com/video.g") ||
+								strings.Contains(apiData.EmbedURL, "blogspot.com/video.g") {
 								return apiData.EmbedURL, nil
 							}
 							util.Debug("AnimeDrive skipping non-playable embed URL", "url", apiData.EmbedURL)
@@ -1406,12 +1454,13 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 
 	// Method 2: search for any direct MP4 link
 	mp4Match := animeDriveMp4Re.FindString(html)
-	if mp4Match != "" {
+	if mp4Match != "" && c.isAvailableStreamURL(mp4Match) {
 		util.Debug("AnimeDrive found MP4 URL", "url", mp4Match)
 		return mp4Match, nil
 	}
 
 	// Method 3: search in iframes
+	var bloggerURL string
 	doc.Find("iframe").Each(func(i int, s *goquery.Selection) {
 		iframeSrc, _ := s.Attr("src")
 		if iframeSrc == "" {
@@ -1421,8 +1470,16 @@ func (c *AnimeDriveClient) getVideoURLFallback(episodeURL string) (string, error
 		if iframeSrc != "" {
 			util.Debug("AnimeDrive found iframe", "src", iframeSrc)
 			// Could try to extract from iframe here
+			if strings.Contains(iframeSrc, "blogger.com/video.g") ||
+				strings.Contains(iframeSrc, "blogspot.com/video.g") {
+				bloggerURL = iframeSrc
+			}
 		}
 	})
+	if bloggerURL != "" {
+		util.Debug("AnimeDrive selected Blogger iframe", "url", bloggerURL)
+		return bloggerURL, nil
+	}
 
 	// Method 4: search in scripts for player configurations
 	doc.Find("script").Each(func(i int, s *goquery.Selection) {
