@@ -231,7 +231,16 @@ func enrichAnimeData(anime *models.Anime) error {
 	}
 
 	aniListInfo, err := FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
-	if err != nil {
+	if errors.Is(err, ErrAniListAPIDisabled) {
+		// AniList switched its API off upstream; nothing here can fix that, and
+		// returning an error would drop the cover art, MAL id and title forms
+		// for the whole session. MyAnimeList carries the same facts.
+		util.Debugf("AniList API disabled upstream; enriching '%s' from MyAnimeList instead", anime.Name)
+		aniListInfo, err = fetchAnimeFromJikan(anime.Name)
+		if err != nil {
+			return fmt.Errorf("%w; MyAnimeList fallback also failed: %v", ErrAniListAPIDisabled, err)
+		}
+	} else if err != nil {
 		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)
 		return fmt.Errorf("AniList enrichment failed: %w", err)
 	}

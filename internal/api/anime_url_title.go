@@ -127,6 +127,11 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 	}
 
+	// A session that has already been told the API is off does not ask again.
+	if aniListIsDisabled() {
+		return nil, ErrAniListAPIDisabled
+	}
+
 	// Generate search variations including romaji from URL
 	searchVariations := generateSearchVariationsWithURL(cleanedName, animeURL)
 
@@ -162,6 +167,14 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			// An API that has announced it is switched off will answer every
+			// remaining search variation the same way, so stop rather than
+			// walking the list. Returning the named error also lets the caller
+			// fall back to another source instead of reporting a bare 403.
+			if bodySaysAniListDisabled(body) {
+				noteAniListDisabled()
+				return nil, ErrAniListAPIDisabled
+			}
 			// Cap the logged body: a Cloudflare challenge page is ~6KB of
 			// HTML/JS per attempt that buries the rest of the debug log.
 			snippet := string(body)

@@ -14,9 +14,9 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.1.1
-	github.com/enetx/surf v1.0.205
+	github.com/enetx/surf v1.0.206
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
-	github.com/lrstanley/go-ytdlp v1.5.1
+	github.com/lrstanley/go-ytdlp v1.5.2
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/pkg/errors v0.9.1
@@ -29,12 +29,12 @@ require (
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
-	github.com/andybalholm/brotli v1.2.3 // indirect
+	github.com/andybalholm/brotli v1.2.4 // indirect
 	github.com/andybalholm/cascadia v1.3.5 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260906173415-0277a179edd9 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260910203606-6c9e17dc7a16 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.1.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -55,7 +55,7 @@ require (
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
-	github.com/mattn/go-runewidth v0.0.29 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nsf/termbox-go v1.1.2 // indirect
@@ -67,8 +67,8 @@ require (
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/ulikunitz/xz v0.5.16 // indirect
 	github.com/wzshiming/socks5 v0.7.0 // indirect
-	github.com/xo/terminfo v1.0.0 // indirect
-	go.mongodb.org/mongo-driver v1.17.9 // indirect
+	github.com/xo/terminfo v1.2.0 // indirect
+	go.mongodb.org/mongo-driver v1.17.10 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect

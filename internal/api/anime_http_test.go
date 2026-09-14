@@ -191,10 +191,43 @@ func TestSearchAnimeOnPage_BadURLErrors(t *testing.T) {
 }
 
 func TestFetchAnimeFromAniList_DelegatesToWithURL(t *testing.T) {
-	// FetchAnimeFromAniList calls FetchAnimeFromAniListWithURL("name", "")
-	// which queries graphql.anilist.co. We can't reliably hit the network in
-	// tests, but invoking it covers the wrapper line. Errors are acceptable.
-	_, _ = FetchAnimeFromAniList("zzz-no-such-anime-test-xyz")
+	// This used to call the LIVE graphql.anilist.co and shrug off the result
+	// ("errors are acceptable"), which made a unit test depend on a third
+	// party's uptime. On 2026-09-09 AniList switched its API off and answered
+	// with an outage notice; the lookup path latches on that notice to stop
+	// re-asking a disabled API, so this test quietly poisoned that latch for
+	// every test that ran after it — TestZenpenKouhenBugFix failed with an
+	// error it had no business seeing.
+	//
+	// The wrapper is covered against a local server instead, which is all it
+	// ever needed: the point is that FetchAnimeFromAniList delegates with an
+	// empty URL, not that AniList is reachable.
+	var gotSearch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Variables struct {
+				Search string `json:"search"`
+			} `json:"variables"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		gotSearch = payload.Variables.Search
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"Media":{"id":42,"idMal":7,"title":{"romaji":"Delegated"},"coverImage":{"large":"https://img/x.jpg"}}}}`))
+	}))
+	defer srv.Close()
+
+	prev := aniListEndpoint
+	aniListEndpoint = srv.URL
+	t.Cleanup(func() { aniListEndpoint = prev })
+
+	res, err := FetchAnimeFromAniList("zzz-no-such-anime-test-xyz")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, 42, res.Data.Media.ID)
+	// CleanTitle normalises separators before searching, so the hyphens arrive
+	// as spaces — the delegation is what is under test, not the cleaning.
+	assert.Equal(t, "zzz no such anime test xyz", gotSearch,
+		"the wrapper must forward the name it was given, cleaned")
 }
 
 func TestSelectAnimeWithGoFuzzyFinder_EmptyListErrors(t *testing.T) {
