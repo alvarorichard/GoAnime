@@ -1579,8 +1579,12 @@ func TestSuperFlixBase_PointsToLiveHost_2026_09_02(t *testing.T) {
 	// live one.
 	// 2026-09-02: .beer → .baby. Discovery absorbed it with no code change —
 	// the app kept working — and only this seed had to be refreshed.
-	assert.Equal(t, "https://superflixapi.baby", SuperFlixBase)
-	assert.Equal(t, "superflixapi.baby", SuperFlixEmbedHost,
+	// 2026-09-14: .baby → .monster (issue #199, reported against v1.8.6, which
+	// predates discovery and still shipped .pro). .sbs had stopped answering
+	// by then, which is why discovery now walks every retired alias rather
+	// than a single seed; see retiredSuperFlixHosts.
+	assert.Equal(t, "https://superflixapi.monster", SuperFlixBase)
+	assert.Equal(t, "superflixapi.monster", SuperFlixEmbedHost,
 		"the embed host must track the canonical host")
 	assert.Equal(t, SuperFlixBase, "https://"+SuperFlixEmbedHost,
 		"SuperFlixBase must be SuperFlixEmbedHost as an origin")

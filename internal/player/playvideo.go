@@ -197,7 +197,8 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	// with disguised segment extensions load (fixes video-plays-but-no-audio on
 	// SuperFlix/FirePlayer streams).
 	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
-	if in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt") {
+	forcesHLSFormat := in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt")
+	if forcesHLSFormat {
 		mpvArgs = append(mpvArgs, hlsForceLavfFormatArg)
 	}
 
@@ -235,8 +236,26 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		)
 	}
 
-	// External subtitle files (already gated + resolved by the caller).
-	mpvArgs = append(mpvArgs, in.SubArgs...)
+	// External subtitle files (already gated + resolved by the caller) — except
+	// when the lavf format is forced, where they must be dropped.
+	//
+	// --demuxer-lavf-format is global in mpv: it applies to every file lavf
+	// opens, external subtitles included, and there is no per-file override. A
+	// WEBVTT file forced through the HLS demuxer cannot open — even a local one
+	// fails with "Can not open external file". For a remote one each failed open
+	// also waits on the network, so SuperFlix's 27 tracks kept mpv stalled for
+	// over two minutes before it showed a window: the "mpv never opens" report on
+	// "O Fim da Rua" (2026-09-14). Measured on that exact stream: 21s to play
+	// without the files, still stuck at a 123s timeout with them.
+	//
+	// Nothing is lost by dropping them. SuperFlix's master.txt declares the same
+	// 27 subtitle renditions (EXT-X-MEDIA TYPE=SUBTITLES, three Portuguese among
+	// them), and mpv exposes those from the stream itself — 27 tracks, zero
+	// failures — so --slang still picks one and the in-player menu still lists
+	// them all.
+	if !forcesHLSFormat {
+		mpvArgs = append(mpvArgs, in.SubArgs...)
+	}
 
 	// HLS resume is handled by seeking after start (--start is unreliable on HLS).
 	if in.ResumeTime > 0 && !in.IsHLS {

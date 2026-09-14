@@ -732,13 +732,16 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 		return nil
 	}
 
-	// Step 1: Search SuperFlix. The host is taken from the scraper package
-	// rather than spelled out again here — SuperFlix rotates its domain every
-	// few weeks, and a second hardcoded copy is a second place to forget.
-	// These two calls are plain GETs, so a stale constant still lands via the
-	// 301; only the player's POSTs (which the redirect downgrades to GETs)
-	// need the live host, and those go through the scraper client.
-	searchURL := superflix.SuperFlixBase + "/pesquisar?s=" + url.QueryEscape(cleanName)
+	// Step 1: Search SuperFlix, on the host that is live right now.
+	//
+	// This used to read the compiled constant on the reasoning that these are
+	// plain GETs and a stale host still lands via the 301. That only holds
+	// while the stale host is still redirecting: an alias that has died
+	// outright (as .sbs did) answers nothing, and this season lookup silently
+	// returned no data. LiveBase shares the scraper's discovery — the same
+	// resolution the player uses — so both follow a rotation together.
+	base := superflix.LiveBase(ctx)
+	searchURL := base + "/pesquisar?s=" + url.QueryEscape(cleanName)
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, http.NoBody)
 	if err != nil {
 		return nil
@@ -774,13 +777,13 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	// Step 2: Fetch episode data from player page
 	// Must include Referer and Sec-Fetch-* headers or SuperFlix returns
 	// "ACESSO RESTRITO" instead of the actual player page with ALL_EPISODES.
-	epURL := superflix.SuperFlixBase + "/serie/" + tmdbID
+	epURL := base + "/serie/" + tmdbID
 	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, http.NoBody)
 	if err != nil {
 		return nil
 	}
 	req2.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req2.Header.Set("Referer", superflix.SuperFlixBase+"/")
+	req2.Header.Set("Referer", base+"/")
 	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req2.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
 	req2.Header.Set("Sec-Fetch-Dest", "iframe")

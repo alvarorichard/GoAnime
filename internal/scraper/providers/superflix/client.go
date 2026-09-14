@@ -42,27 +42,26 @@ var ErrSuperFlixRestricted = errors.New("superflix: content is access-restricted
 var ErrSuperFlixNoEpisodeList = errors.New("superflix: page exposed no episode list")
 
 const (
-	// SuperFlixBase is the compiled-in seed and fallback for the SuperFlix
-	// host. Retired hosts (`superflixapi.rest`, `.online`, `.best`, `.fit`,
-	// `.cyou`, `.lifestyle`, `.pro`, `.sbs`, `.beer`) 301-redirect to whichever alias is
-	// live; Go's http.Client follows the redirect but downgrades the POST to a
-	// GET (dropping the body), which makes /player/bootstrap return HTML 404 and
-	// break JSON decoding — so requests must target the live host directly.
+	// SuperFlixBase is the compiled-in fallback for the SuperFlix host, and the
+	// first of many discovery seeds (the rest are retiredSuperFlixHosts in
+	// host.go). Retired aliases 301-redirect to whichever one is live; Go's
+	// http.Client follows the redirect but downgrades the POST to a GET
+	// (dropping the body), which makes /player/bootstrap return HTML and break
+	// JSON decoding — so requests must target the live host directly.
 	//
-	// Because the domain rotates every few weeks, the live host is discovered at
-	// runtime by following that redirect chain (see host.go); this constant is
-	// where the walk starts and where it falls back. `.beer` now 301-redirects to
-	// `.baby` (confirmed 2026-09-02) — discovery followed it on its own; only
-	// this seed and the tests pinned to it needed the edit.
-	SuperFlixBase = "https://superflixapi.baby"
+	// The live host is discovered at runtime (see host.go), so a stale value
+	// here is no longer an outage. `.baby` now 301-redirects to `.monster`
+	// (confirmed 2026-09-14, issue #199). When rotating this, move the old host
+	// to the top of retiredSuperFlixHosts rather than dropping it.
+	SuperFlixBase = "https://superflixapi.monster"
 	// SuperFlixEmbedHost is the host that serves the Turnstile-gated player
 	// embed. The frontend no longer funnels through warezcdn.lat (which now
 	// gates behind Google reCAPTCHA + a QR-scan we can't solve); instead the API
-	// host itself serves https://superflixapi.baby/{filme|serie}/<tmdb>, which
-	// clears Cloudflare Turnstile (handled by the cfBrowserSolver) and then the
-	// player's getVideo endpoint returns the signed HLS master. Like
-	// SuperFlixBase this is the seed/fallback for runtime host discovery.
-	SuperFlixEmbedHost = "superflixapi.baby"
+	// host itself serves https://superflixapi.monster/{filme|serie}/<tmdb>,
+	// which clears Cloudflare Turnstile (handled by the cfBrowserSolver) and
+	// then the player returns the signed HLS master. Like SuperFlixBase this is
+	// the fallback and first seed for runtime host discovery.
+	SuperFlixEmbedHost = "superflixapi.monster"
 	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
 	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
 	// the User-Agent that solved the challenge; if the HTTP client then sends a

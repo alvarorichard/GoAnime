@@ -46,24 +46,17 @@ func TestLiveSuperFlixAfterHostRotation(t *testing.T) {
 		return nil
 	})
 
-	// 2. the compiled default should still answer directly, without a redirect:
-	//    a 301 downgrades the player POSTs to GETs and breaks bootstrap.
-	//    Discovery now absorbs a rotation, so this failing is a nudge to
-	//    refresh the seed rather than an outage — but a seed more than one hop
-	//    stale eventually exhausts the hop budget.
-	stage("compiled default answers 200 (no 301)", func() error {
-		c := NewSuperFlixClient()
-		resp, err := c.client.Get(SuperFlixBase + "/")
-		if err != nil {
-			return err
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.Request.URL.Host != SuperFlixEmbedHost {
-			return fmt.Errorf("redirected to %s — SuperFlixBase is stale, rotate the seed to it",
-				resp.Request.URL.Host)
-		}
-		return nil
-	})
+	// 2. the compiled default vs. the live host. Advisory, NOT a failure:
+	//    discovery walks every retired alias, so a stale default no longer
+	//    breaks playback — it only means the next release should rotate it.
+	//    This used to fail the whole test, and it went red on a day when
+	//    discovery had already found .monster and search was working. It also
+	//    fetched through the Cloudflare-solving client, spending 3 minutes on a
+	//    browser solve just to learn a host name the probe had already reported.
+	if host, err := probeLiveHost(context.Background()); err == nil && host != SuperFlixEmbedHost {
+		fmt.Printf("note  compiled default %s is stale; live host is %s — rotate SuperFlixBase next release\n",
+			SuperFlixEmbedHost, host)
+	}
 
 	// 3. search must return parseable cards.
 	var tmdbID string
@@ -89,13 +82,22 @@ func TestLiveSuperFlixAfterHostRotation(t *testing.T) {
 	})
 
 	// 4. the embed URL must be built on the live host.
+	//
+	// This used to format SuperFlixBase and then check it contained
+	// SuperFlixEmbedHost — two constants compared with each other, so it passed
+	// while printing a URL on the dead .baby host. It now builds the URL the way
+	// production does and checks it against what discovery found.
 	stage("embed URL targets the live host", func() error {
 		if tmdbID == "" {
 			return fmt.Errorf("no tmdb id from search")
 		}
-		embed := fmt.Sprintf("%s/filme/%s", SuperFlixBase, tmdbID)
-		if !strings.Contains(embed, SuperFlixEmbedHost) {
-			return fmt.Errorf("embed %s does not use %s", embed, SuperFlixEmbedHost)
+		live, err := probeLiveHost(context.Background())
+		if err != nil {
+			return err
+		}
+		embed := fmt.Sprintf("%s/filme/%s", LiveBase(context.Background()), tmdbID)
+		if !strings.Contains(embed, "https://"+live+"/") {
+			return fmt.Errorf("embed %s does not use the live host %s", embed, live)
 		}
 		fmt.Printf("      %s\n", embed)
 		return nil
