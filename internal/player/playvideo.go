@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -44,7 +45,7 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
-func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, needsCORSOrigin bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
 		return mpvArgs, ""
@@ -58,7 +59,43 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 		return mpvArgs, ""
 	}
 
-	return append(mpvArgs, fmt.Sprintf("--http-header-fields=Referer: %s", referer)), referer
+	if !needsCORSOrigin {
+		return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
+	}
+
+	// SuperFlix's player CDN serves a signed URL only to a request that repeats
+	// the browser's own fingerprint — Referer alone gets a 403 on a URL the
+	// browser plays fine. superflix.CDNPlaybackHeaderFields owns the exact
+	// contract (and leads with the Referer); Origin is added on top because the
+	// segment hosts validate it separately.
+	//
+	// Each header goes in its own --http-header-fields-append: the contract's
+	// Accept-Language value contains a comma, and the comma-joined
+	// --http-header-fields form would split it into two malformed fields.
+	fields := superflix.CDNPlaybackHeaderFields(referer, util.GetGlobalUserAgent())
+	if origin := corsOriginOf(referer); origin != "" {
+		fields = append(fields, "Origin: "+origin)
+	}
+	for _, f := range fields {
+		mpvArgs = append(mpvArgs, "--http-header-fields-append="+f)
+	}
+	// mpv's own default UA (libmpv) is one of the values the CDN rejects, and
+	// --http-header-fields cannot override it — mpv sends both. --user-agent is
+	// the only option that replaces it.
+	if ua := util.GetGlobalUserAgent(); ua != "" {
+		mpvArgs = append(mpvArgs, "--user-agent="+ua)
+	}
+	return mpvArgs, referer
+}
+
+// corsOriginOf reduces a Referer to its bare scheme://host, the value a browser
+// puts in Origin.
+func corsOriginOf(referer string) string {
+	u, err := neturl.Parse(referer)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
@@ -90,9 +127,16 @@ func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
 // makes SuperFlix audio play — is deterministic and unit-testable without
 // launching mpv.
 type playbackArgsInput struct {
-	VideoURL         string
-	IsHLS            bool
-	Is9Anime         bool
+	VideoURL string
+	IsHLS    bool
+	Is9Anime bool
+	// IsSuperFlix adds the Origin header to the mpv request. SuperFlix's CDN
+	// serves the HLS segments from rotating third-party hosts and validates the
+	// CORS origin on them: hls.js fetches segments as a cross-origin XHR, so a
+	// real browser attaches Origin, and without it every segment comes back 403
+	// while the playlist itself loads fine. Verified live 2026-08-26 — the same
+	// stream goes from 121 failed segments to 0.
+	IsSuperFlix      bool
 	UpscalingEnabled bool
 	ShaderArgs       []string
 	Wayland          bool
@@ -148,12 +192,13 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
 	}
 
-	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS)
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS, in.IsSuperFlix)
 	// Relax the HLS segment-extension allowlist so alternative-audio renditions
 	// with disguised segment extensions load (fixes video-plays-but-no-audio on
 	// SuperFlix/FirePlayer streams).
 	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
-	if in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt") {
+	forcesHLSFormat := in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt")
+	if forcesHLSFormat {
 		mpvArgs = append(mpvArgs, hlsForceLavfFormatArg)
 	}
 
@@ -191,8 +236,26 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		)
 	}
 
-	// External subtitle files (already gated + resolved by the caller).
-	mpvArgs = append(mpvArgs, in.SubArgs...)
+	// External subtitle files (already gated + resolved by the caller) — except
+	// when the lavf format is forced, where they must be dropped.
+	//
+	// --demuxer-lavf-format is global in mpv: it applies to every file lavf
+	// opens, external subtitles included, and there is no per-file override. A
+	// WEBVTT file forced through the HLS demuxer cannot open — even a local one
+	// fails with "Can not open external file". For a remote one each failed open
+	// also waits on the network, so SuperFlix's 27 tracks kept mpv stalled for
+	// over two minutes before it showed a window: the "mpv never opens" report on
+	// "O Fim da Rua" (2026-09-14). Measured on that exact stream: 21s to play
+	// without the files, still stuck at a 123s timeout with them.
+	//
+	// Nothing is lost by dropping them. SuperFlix's master.txt declares the same
+	// 27 subtitle renditions (EXT-X-MEDIA TYPE=SUBTITLES, three Portuguese among
+	// them), and mpv exposes those from the stream itself — 27 tracks, zero
+	// failures — so --slang still picks one and the in-player menu still lists
+	// them all.
+	if !forcesHLSFormat {
+		mpvArgs = append(mpvArgs, in.SubArgs...)
+	}
 
 	// HLS resume is handled by seeking after start (--start is unreliable on HLS).
 	if in.ResumeTime > 0 && !in.IsHLS {
@@ -609,6 +672,7 @@ func playVideo(
 		VideoURL:         videoURL,
 		IsHLS:            isHLSStream,
 		Is9Anime:         is9Anime,
+		IsSuperFlix:      util.IsSuperFlixSource(),
 		UpscalingEnabled: upscalingEnabled,
 		ShaderArgs:       shaderArgs,
 		Wayland:          wayland,
@@ -803,7 +867,7 @@ func getTrackerDBPath() string {
 }
 
 // trackingKey builds an episode-specific tracking key so that each episode
-// gets its own row in the database. Without this, sources like AllAnime
+// gets its own row in the database. Without this, sources that
 // (where episode.URL is the anime ID, not the episode ID) would share a
 // single tracking row across all episodes, causing stale resume times.
 func trackingKey(episodeURL string, episodeNum int) string {
@@ -864,7 +928,7 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 
 	// Safety check: verify the saved progress belongs to the current episode.
 	// This prevents offering a resume from episode 3's position when the user
-	// has switched to episode 4 (e.g., AllAnime shares the same URL across episodes).
+	// has switched to episode 4 (some sources share one URL across episodes).
 	if progress.EpisodeNumber != episodeNum {
 		util.Debugf("Tracking: saved progress is for episode %d, current is %d - skipping resume",
 			progress.EpisodeNumber, episodeNum)
@@ -941,15 +1005,10 @@ func applyAniSkipResults(ch chan error, socketPath string, episode *models.Episo
 		select {
 		case err := <-ch:
 			if err == nil {
+				// Skip times are applied for every source. The extra
+				// chapter-marker pass that used to run here was AllAnime-only
+				// (gated on an AllAnime URL shape) and went with that source.
 				applySkipTimes(socketPath, episode)
-
-				// For AllAnime episodes, also try to set chapter markers (like Curd does)
-				if strings.Contains(episode.URL, "kibfyvtiFpKC") || len(episode.URL) < 30 {
-					allAnimeClient := allanime.NewAllAnimeClient()
-					if chapterErr := allAnimeClient.SendSkipTimesToMPV(episode, socketPath, MpvSendCommand); chapterErr != nil {
-						util.Debugf("Failed to set chapter markers: %v", chapterErr)
-					}
-				}
 			} else {
 				util.Debugf("AniSkip data unavailable for episode %d: %v", episodeNum, err)
 			}
@@ -1106,7 +1165,7 @@ func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 		return
 	}
 
-	// Skip preloading for AllAnime episodes (they use IDs, not HTTP URLs)
+	// Skip preloading for sources addressed by bare ids rather than URLs.
 	nextEpisodeURL := episodes[currentIndex+1].URL
 	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
 		return
@@ -1374,7 +1433,7 @@ func selectEpisode(episodes []models.Episode, malID, anilistID int, updater *dis
 }
 
 // findSelectedEpisodeIndex resolves a fuzzy-finder selection to a slice index.
-// The episode number is matched before the URL because sources like AllAnime
+// The episode number is matched before the URL because some sources
 // use the anime ID as the URL of every episode, so a URL-only match always
 // resolved to the first episode regardless of what the user picked.
 func findSelectedEpisodeIndex(episodes []models.Episode, url, numStr string) int {
@@ -1419,8 +1478,6 @@ func switchEpisode(newIndex int, episodes []models.Episode, malID, anilistID int
 		} else if ref := util.GetGlobalReferer(); strings.Contains(ref, "rapid-cloud") {
 			// Check global referer to detect 9Anime (uses rapid-cloud referer)
 			guessedSource = "9Anime"
-		} else if (len(storedURL) < 30 && !strings.Contains(storedURL, "http")) || strings.Contains(storedURL, "allanime") {
-			guessedSource = "AllAnime"
 		}
 		anime = &models.Anime{URL: storedURL, Source: guessedSource}
 	}

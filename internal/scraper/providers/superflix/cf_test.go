@@ -48,7 +48,14 @@ func TestIsCloudflareChallenge(t *testing.T) {
 		{"403 HTML treated as challenge", 403, `<html><body>blocked</body></html>`, nil, true},
 		{"503 HTML treated as challenge", 503, `<html>maintenance</html>`, nil, true},
 		{"cf-mitigated header forces challenge", 200, `{}`, map[string]string{"cf-mitigated": "challenge"}, true},
-		{"body contains challenge-platform path", 200, `<script src="/cdn-cgi/challenge-platform/foo.js"></script>`, nil, true},
+		{"body contains the interstitial orchestrate path", 200, `<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/jsch/v1"></script>`, nil, true},
+		// Cloudflare injects this passive bot-telemetry snippet into ordinary
+		// responses it proxies. It is not an interstitial, and treating it as
+		// one sent dead pages to the headed browser solver.
+		{"passive jsd telemetry snippet is not a challenge", 200, `<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>`, nil, false},
+		// The real 404 the SuperFlix player host serves for a retired hash:
+		// a plain Apache error page with Cloudflare's telemetry snippet appended.
+		{"404 player page is dead, not challenged", 404, deadPlayerPage404, nil, false},
 		{"body contains turnstile script", 200, `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>`, nil, true},
 		{"body contains cf_chl_opt", 200, `var cf_chl_opt = {};`, nil, true},
 		{"body contains Just a moment", 200, `<title>Just a moment...</title>`, nil, true},
@@ -562,3 +569,17 @@ func TestCFBrowserSolver_Solve(t *testing.T) {
 	assert.Contains(t, res.HTML, "Example Domain")
 	assert.NotEmpty(t, res.UserAgent)
 }
+
+// deadPlayerPage404 is a verbatim capture (2026-08-25) of what the rotated-out
+// SuperFlix player host answers for /video/<hash>: a plain Apache 404 with
+// Cloudflare's passive JS-detection snippet injected. Classifying this as a
+// challenge made the browser solver sit on it until the sniff timed out.
+const deadPlayerPage404 = `<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>404 Not Found</title>
+</head><body>
+<h1>Not Found</h1>
+<p>The requested URL was not found on this server.</p>
+<p>Additionally, a 404 Not Found
+error was encountered while trying to use an ErrorDocument to handle the request.</p>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a308972d3f9e6d53',t:'MTc4NzYzOTg3MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}})();</script></body></html>`

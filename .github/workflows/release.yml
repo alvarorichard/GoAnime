@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.26.5'
+  GO_VERSION: '1.27.1'
   BINARY_NAME: goanime
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
@@ -48,7 +48,7 @@ jobs:
       - name: Run linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.1
 
       - name: Run tests
         run: go test -short -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...

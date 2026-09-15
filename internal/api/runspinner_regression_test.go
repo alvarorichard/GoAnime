@@ -33,7 +33,7 @@ func TestAwaitActionThroughRunner_BlocksWhileRunnerExitsBeforeWrappedFinishes_20
 	t.Parallel()
 	// Simulate the bug: the runner schedules the wrapped action in a
 	// goroutine but returns before that goroutine has finished.
-	var got int64
+	var got atomic.Int64
 	runner := func(wrapped func()) {
 		go func() {
 			time.Sleep(50 * time.Millisecond)
@@ -41,9 +41,9 @@ func TestAwaitActionThroughRunner_BlocksWhileRunnerExitsBeforeWrappedFinishes_20
 		}()
 	}
 	awaitActionThroughRunner(func() {
-		atomic.StoreInt64(&got, 42)
+		got.Store(42)
 	}, runner)
-	assert.Equal(t, int64(42), atomic.LoadInt64(&got),
+	assert.Equal(t, int64(42), got.Load(),
 		"awaitActionThroughRunner must wait for the action to finish even when the runner returns first")
 }
 
@@ -53,12 +53,12 @@ func TestAwaitActionThroughRunner_RunsActionWhenRunnerNeverInvokesWrapped_2026_0
 	// even starts (early tea.Interrupt), wrapped is never invoked. The
 	// trailing safety call must still run the action so the caller does
 	// not observe zero values.
-	var got int64
+	var got atomic.Int64
 	noopRunner := func(wrapped func()) { /* never calls wrapped */ }
 	awaitActionThroughRunner(func() {
-		atomic.StoreInt64(&got, 7)
+		got.Store(7)
 	}, noopRunner)
-	assert.Equal(t, int64(7), atomic.LoadInt64(&got),
+	assert.Equal(t, int64(7), got.Load(),
 		"action must run via the trailing safety call when the runner never invokes wrapped")
 }
 
@@ -66,25 +66,23 @@ func TestAwaitActionThroughRunner_RunsActionExactlyOnce_2026_05_01(t *testing.T)
 	t.Parallel()
 	// sync.Once must guard against the race where both the runner-launched
 	// goroutine and the trailing safety call attempt to invoke action.
-	var calls int64
+	var calls atomic.Int64
 	runner := func(wrapped func()) {
 		var wg sync.WaitGroup
-		for i := 0; i < 5; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 5 {
+			wg.Go(func() {
 				wrapped()
-			}()
+			})
 		}
 		// Return immediately so the trailing safety call also races.
 
 	}
 	awaitActionThroughRunner(func() {
-		atomic.AddInt64(&calls, 1)
+		calls.Add(1)
 	}, runner)
 	// Allow any straggler goroutines to attempt their wrapped() — once.Do
 	// must still cap the count at 1.
 	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, int64(1), atomic.LoadInt64(&calls),
+	assert.Equal(t, int64(1), calls.Load(),
 		"action must execute exactly once across runner-spawned goroutines and the trailing safety call")
 }

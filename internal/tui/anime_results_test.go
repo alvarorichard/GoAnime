@@ -292,7 +292,7 @@ func TestRenderAnimeDetails(t *testing.T) {
 	assert.Contains(t, details, "The Boys")
 	assert.Contains(t, details, "SuperFlix")
 	assert.NotContains(t, details, theme.Primary.Render("Details")+" ")
-	for _, line := range strings.Split(details, "\n") {
+	for line := range strings.SplitSeq(details, "\n") {
 		assert.False(t, strings.HasSuffix(line, " "), "line has unstyled trailing padding: %q", line)
 	}
 }

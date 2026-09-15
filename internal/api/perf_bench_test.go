@@ -15,7 +15,7 @@ var benchTitles = []string{
 
 func BenchmarkCleanTitle(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, title := range benchTitles {
 			CleanTitle(title)
 		}
@@ -24,7 +24,7 @@ func BenchmarkCleanTitle(b *testing.B) {
 
 func BenchmarkGenerateSearchVariations(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		generateSearchVariations("Naruto Shippuuden Clássico III")
 	}
 }

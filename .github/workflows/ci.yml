@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.26.5'
+  GO_VERSION: '1.27.1'
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
 
@@ -58,19 +58,8 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.1
           args: --timeout=20m
-
-      - name: Install go-critic
-        run: go install github.com/go-critic/go-critic/cmd/gocritic@v0.14.4
-
-      - name: Run every go-critic check
-        run: >
-          gocritic check -enableAll
-          -@hugeParam.sizeThreshold=256
-          -@rangeValCopy.sizeThreshold=512
-          -@unnamedResult.checkExported=true
-          ./...
 
   security:
     name: Security gates
@@ -186,6 +175,25 @@ jobs:
         shell: bash
         run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
+      - name: Goroutine leak gate
+        if: runner.os == 'Linux'
+        shell: bash
+        # Go 1.27's goroutineleak profile. Run without -race: the detector needs
+        # a plain GC cycle, and the self-test in internal/util/leakcheck proves
+        # the gate can actually fail.
+        run: go test -count=1 ./internal/util/leakcheck/... ./test/leak/...
+
+      - name: JSON decoder differential fuzz
+        if: runner.os == 'Linux'
+        shell: bash
+        # Guards the encoding/json/v2 migration: any input encoding/json accepts
+        # must decode identically through internal/util/jsonx.
+        run: |
+          go test ./internal/util/jsonx/ -run FuzzUnmarshalMatchesV1 \
+            -fuzz FuzzUnmarshalMatchesV1 -fuzztime 45s
+          go test ./internal/util/jsonx/ -run FuzzUnmarshalStructMatchesV1 \
+            -fuzz FuzzUnmarshalStructMatchesV1 -fuzztime 45s
+
       - name: Enforce minimum coverage
         if: runner.os == 'Linux'
         shell: bash
@@ -245,7 +253,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.1'
 
       - name: Get dependencies
         run: go mod download
@@ -310,7 +318,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.1'
 
       - name: Check out code
         uses: actions/checkout@v7

@@ -61,7 +61,7 @@ func TestSecureIntn(t *testing.T) {
 	if got := secureIntn(-5); got != 0 {
 		t.Errorf("secureIntn(-5) = %d, want 0", got)
 	}
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		if got := secureIntn(500); got < 0 || got >= 500 {
 			t.Fatalf("secureIntn(500) = %d, out of [0,500)", got)
 		}

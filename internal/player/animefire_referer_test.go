@@ -99,19 +99,6 @@ func TestApplyDownloadAuthHeaders_FallsBackToAnimeFireForLightspeedst(t *testing
 	assert.Equal(t, "https://animefire.io", req.Header.Get("Origin"))
 }
 
-func TestApplyDownloadAuthHeaders_FallsBackToAllAnimeForAllAnimeHosts(t *testing.T) {
-	restore := snapshotGlobalReferer()
-	defer restore()
-	util.ClearGlobalReferer()
-
-	req, err := http.NewRequest(http.MethodHead, "https://allanime.day/video/episode.mp4", http.NoBody)
-	require.NoError(t, err)
-
-	applyDownloadAuthHeaders(req, req.URL.String())
-
-	assert.Equal(t, "https://allanime.to", req.Header.Get("Referer"))
-}
-
 func TestApplyDownloadAuthHeaders_PreservesExistingUserAgent(t *testing.T) {
 	restore := snapshotGlobalReferer()
 	defer restore()
@@ -383,7 +370,7 @@ func TestDownloadVideo_AnimeFireCDN_EndToEnd(t *testing.T) {
 	const numThreads = 4
 	chunkSize := contentLength / int64(numThreads)
 	destPath := filepath.Join(t.TempDir(), "episode.mp4")
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		from := int64(i) * chunkSize
 		to := from + chunkSize - 1
 		if i == numThreads-1 {

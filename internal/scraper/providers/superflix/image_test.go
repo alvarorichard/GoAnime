@@ -56,6 +56,24 @@ func TestNormalizeSuperFlixImageURL(t *testing.T) {
 			expected: "https://image.tmdb.org/t/p/w500/poster.jpg",
 		},
 		{
+			// 2026-08-31: the frontend dropped the CloudFront proxy and now
+			// emits the TMDB URL directly, still at w342. The upgrade used to
+			// be gated on the CloudFront wrapper, so these fell through at w342.
+			name:     "Direct TMDB w342 URL is upgraded to w500",
+			input:    "https://image.tmdb.org/t/p/w342/f1nV5NBIFwfQLw5g8FVrdt90FAy.jpg",
+			expected: "https://image.tmdb.org/t/p/w500/f1nV5NBIFwfQLw5g8FVrdt90FAy.jpg",
+		},
+		{
+			name:     "Direct TMDB w185 URL is upgraded to w500",
+			input:    "https://image.tmdb.org/t/p/w185/poster123.jpg",
+			expected: "https://image.tmdb.org/t/p/w500/poster123.jpg",
+		},
+		{
+			name:     "Direct TMDB original size is left alone",
+			input:    "https://image.tmdb.org/t/p/original/highres.jpg",
+			expected: "https://image.tmdb.org/t/p/original/highres.jpg",
+		},
+		{
 			name:     "Empty string returns empty",
 			input:    "",
 			expected: "",

@@ -1,0 +1,49 @@
+{
+  "data": [
+    {
+      "mal_id": 1735,
+      "title": "Naruto: Shippuuden",
+      "title_english": "Naruto Shippuden",
+      "title_japanese": "-ナルト- 疾風伝",
+      "title_synonyms": [
+        "Naruto Hurricane Chronicles"
+      ],
+      "synopsis": "It has been two and a half years since Naruto Uzumaki left Konohagakure, the Hidden Leaf Village, for intense training following events which fueled his desire to be stronger. Now Akatsuki, the mysterious organization of elite rogue ninja, is closing in on their grand plan which may threaten the safety of the entire shinobi world.\n \nAlthough Naruto is older and sinister events loom on the horizon, he has changed little in personality—still rambunctious and childish—though he is now far more confident and possesses an even greater determination to protect his friends and home. Come whatever may, Naruto will carry on with the fight for what is important to him, even at the expense of his own body, in the continuation of the saga about the boy who wishes to become Hokage.\n\n[Written by MAL Rewrite]",
+      "status": "Finished Airing",
+      "episodes": 500,
+      "score": 8.29,
+      "genres": [
+        {
+          "mal_id": 1,
+          "type": "anime",
+          "name": "Action",
+          "url": "https://myanimelist.net/anime/genre/1/Action"
+        },
+        {
+          "mal_id": 2,
+          "type": "anime",
+          "name": "Adventure",
+          "url": "https://myanimelist.net/anime/genre/2/Adventure"
+        },
+        {
+          "mal_id": 10,
+          "type": "anime",
+          "name": "Fantasy",
+          "url": "https://myanimelist.net/anime/genre/10/Fantasy"
+        }
+      ],
+      "images": {
+        "jpg": {
+          "image_url": "https://cdn.myanimelist.net/images/anime/1565/111305.jpg",
+          "small_image_url": "https://cdn.myanimelist.net/images/anime/1565/111305t.jpg",
+          "large_image_url": "https://cdn.myanimelist.net/images/anime/1565/111305l.jpg"
+        },
+        "webp": {
+          "image_url": "https://cdn.myanimelist.net/images/anime/1565/111305.webp",
+          "small_image_url": "https://cdn.myanimelist.net/images/anime/1565/111305t.webp",
+          "large_image_url": "https://cdn.myanimelist.net/images/anime/1565/111305l.webp"
+        }
+      }
+    }
+  ]
+}

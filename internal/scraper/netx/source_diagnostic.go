@@ -243,8 +243,7 @@ func DiagnoseError(source, layer string, err error) *SourceDiagnostic {
 		return nil
 	}
 
-	var diag *SourceDiagnostic
-	if errors.As(err, &diag) {
+	if diag, ok := errors.AsType[*SourceDiagnostic](err); ok {
 		copyDiag := *diag
 		if copyDiag.Source == "" {
 			copyDiag.Source = source
@@ -268,8 +267,7 @@ func DiagnoseError(source, layer string, err error) *SourceDiagnostic {
 	lower := strings.ToLower(err.Error())
 	if status := statusFromMessage(lower); status > 0 {
 		typedErr := NewHTTPStatusError(source, layer, status)
-		var typedDiag *SourceDiagnostic
-		if errors.As(typedErr, &typedDiag) {
+		if typedDiag, ok := errors.AsType[*SourceDiagnostic](typedErr); ok {
 			typedDiag.Err = joinDiagnosticErr(err, typedDiag.Err)
 			return typedDiag
 		}
@@ -294,8 +292,7 @@ func isNetworkUnavailable(err error) bool {
 		return true
 	}
 
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
 		return true
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/pkg/errors"
 )
 
@@ -120,10 +121,15 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 	cacheKey := "anilist:" + strings.ToLower(cleanedName)
 	if cached, found := cache.Get(cacheKey); found {
 		var result models.AniListResponse
-		if err := json.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
+		if err := jsonx.Unmarshal(cached, &result); err == nil && result.Data.Media.ID != 0 {
 			util.Debugf("AniList cache hit for: '%s'", cleanedName)
 			return &result, nil
 		}
+	}
+
+	// A session that has already been told the API is off does not ask again.
+	if aniListIsDisabled() {
+		return nil, ErrAniListAPIDisabled
 	}
 
 	// Generate search variations including romaji from URL
@@ -161,6 +167,14 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			// An API that has announced it is switched off will answer every
+			// remaining search variation the same way, so stop rather than
+			// walking the list. Returning the named error also lets the caller
+			// fall back to another source instead of reporting a bare 403.
+			if bodySaysAniListDisabled(body) {
+				noteAniListDisabled()
+				return nil, ErrAniListAPIDisabled
+			}
 			// Cap the logged body: a Cloudflare challenge page is ~6KB of
 			// HTML/JS per attempt that buries the rest of the debug log.
 			snippet := string(body)
@@ -173,7 +187,7 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 		}
 
 		var result models.AniListResponse
-		if err := json.Unmarshal(body, &result); err != nil {
+		if err := jsonx.Unmarshal(body, &result); err != nil {
 			lastErr = fmt.Errorf("JSON decode failed: %w", err)
 			continue
 		}

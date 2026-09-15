@@ -1,10 +1,12 @@
 package player
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAppendPlaybackRefererArgsAddsGlobalRefererForDirectHTTP(t *testing.T) {
@@ -12,7 +14,7 @@ func TestAppendPlaybackRefererArgsAddsGlobalRefererForDirectHTTP(t *testing.T) {
 	defer restore()
 	util.SetGlobalReferer("https://allmanga.to")
 
-	args, referer := appendPlaybackRefererArgs(nil, "https://tools.fast4speed.rsvp//media9/videos/id/sub/4?v=22", false)
+	args, referer := appendPlaybackRefererArgs(nil, "https://tools.fast4speed.rsvp//media9/videos/id/sub/4?v=22", false, false)
 
 	assert.Equal(t, "https://allmanga.to", referer)
 	assert.Contains(t, args, "--http-header-fields=Referer: https://allmanga.to")
@@ -23,7 +25,7 @@ func TestAppendPlaybackRefererArgsKeepsHLSFallbackReferer(t *testing.T) {
 	defer restore()
 	util.ClearGlobalReferer()
 
-	args, referer := appendPlaybackRefererArgs(nil, "https://cdn.example.com/master.m3u8", true)
+	args, referer := appendPlaybackRefererArgs(nil, "https://cdn.example.com/master.m3u8", true, false)
 
 	assert.Equal(t, defaultHLSReferer, referer)
 	assert.Contains(t, args, "--http-header-fields=Referer: "+defaultHLSReferer)
@@ -34,7 +36,7 @@ func TestAppendPlaybackRefererArgsSkipsLocalFiles(t *testing.T) {
 	defer restore()
 	util.SetGlobalReferer("https://allmanga.to")
 
-	args, referer := appendPlaybackRefererArgs([]string{"--cache=yes"}, "/tmp/episode.mp4", false)
+	args, referer := appendPlaybackRefererArgs([]string{"--cache=yes"}, "/tmp/episode.mp4", false, false)
 
 	assert.Empty(t, referer)
 	assert.Equal(t, []string{"--cache=yes"}, args)
@@ -223,5 +225,54 @@ func TestBuildPlaybackArgs(t *testing.T) {
 			SubArgs:     []string{"--sub-file=/tmp/pt.srt"},
 		})
 		assert.Contains(t, args, "--sub-file=/tmp/pt.srt")
+	})
+
+	// Regression for "mpv never opens" on SuperFlix's "O Fim da Rua"
+	// (2026-09-14). --demuxer-lavf-format=hls is global in mpv, so every
+	// external subtitle was forced through the HLS demuxer and failed to open;
+	// SuperFlix passed 27 of them, remote, and the network wait on each kept
+	// mpv stalled past a 123s timeout before it showed a window. The same 27
+	// tracks are declared inside master.txt, so dropping the files loses nothing.
+	t.Run("external subtitles are dropped when the HLS format is forced", func(t *testing.T) {
+		const master = "https://player.best/tok/f6e229b53d19b2257a19223e49a1acac/1789422774/master.txt"
+		subs := []string{
+			"--sub-file=https://segunda.online/q/aaa.html",
+			"--sub-file=https://segunda.online/q/bbb.html",
+		}
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL:    master,
+			IsHLS:       LooksLikeHLS(master),
+			IsSuperFlix: true,
+			IsMovieOrTV: true,
+			AudioLang:   "pt-BR,pt,por",
+			SubsLang:    "pt-BR,pt,por",
+			SubArgs:     subs,
+		})
+
+		require.Contains(t, args, hlsForceLavfFormatArg, "precondition: master.txt forces the HLS demuxer")
+		for _, s := range subs {
+			assert.NotContains(t, args, s, "a subtitle file cannot open under a forced HLS format")
+		}
+		for _, a := range args {
+			assert.Falsef(t, strings.HasPrefix(a, "--sub-file="), "no external subtitle may reach mpv here: %q", a)
+		}
+		// The embedded renditions stay selectable through the language preference.
+		assert.Contains(t, args, "--slang=pt-BR,pt,por")
+		assert.Contains(t, args, "--alang=pt-BR,pt,por")
+	})
+
+	// Only the forced format justifies dropping them: an ordinary HLS stream
+	// (and any non-HLS file) still receives its external subtitles.
+	t.Run("external subtitles still reach mpv when the format is not forced", func(t *testing.T) {
+		for _, url := range []string{"https://cdn/master.m3u8", "https://cdn/movie.mp4"} {
+			args := buildPlaybackArgs(playbackArgsInput{
+				VideoURL:    url,
+				IsHLS:       LooksLikeHLS(url),
+				IsMovieOrTV: true,
+				SubArgs:     []string{"--sub-file=https://subs.example/pt.vtt"},
+			})
+			require.NotContains(t, args, hlsForceLavfFormatArg)
+			assert.Containsf(t, args, "--sub-file=https://subs.example/pt.vtt", "%s must keep its subtitles", url)
+		}
 	})
 }

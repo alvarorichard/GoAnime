@@ -29,6 +29,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
 )
@@ -91,8 +92,6 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
 		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "allanime.pro") ||
-		strings.Contains(url, "allanime.day") ||
 		strings.Contains(url, "animefire") ||
 		strings.Contains(url, "blogger.com") ||
 		strings.Contains(url, "animesfire") ||
@@ -148,7 +147,7 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		// For known streaming URLs that might not have Content-Length, return a default size
 		if isKnownStreamURL {
 			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
-			return estimateContentLengthForAllAnime(url, client)
+			return estimateStreamContentLength(url, client)
 		}
 		// For any other URL without Content-Length, use a reasonable default instead of failing
 		util.Debugf("Content-Length header missing, using default estimate")
@@ -166,8 +165,9 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 	return contentLength, nil
 }
 
-// estimateContentLengthForAllAnime provides a fallback method to estimate content length for AllAnime URLs
-func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, error) {
+// estimateStreamContentLength estimates the size of a stream whose server
+// omits Content-Length.
+func estimateStreamContentLength(url string, client *http.Client) (int64, error) {
 	// For streaming URLs (.m3u8), we can't get exact size, so return a reasonable estimate
 	if strings.Contains(url, ".m3u8") {
 		util.Debugf("HLS stream detected, using estimated size for download")
@@ -175,7 +175,7 @@ func estimateContentLengthForAllAnime(url string, client *http.Client) (int64, e
 		return 500 * 1024 * 1024, nil
 	}
 
-	// For other AllAnime URLs, try to get partial content to estimate size
+	// Otherwise ask for a byte range and read the size off the response.
 	req, err := http.NewRequest("GET", url, http.NoBody)
 	if err != nil {
 		return 0, err
@@ -351,9 +351,9 @@ func ExtractEpisodeNumber(episodeStr string) string {
 
 // GetVideoURLForEpisode gets the video URL for a given episode URL
 func GetVideoURLForEpisode(episodeURL string) (string, error) {
-	// Check if this looks like an AllAnime ID instead of URL
+	// A bare identifier is not something this legacy extractor can fetch.
 	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
-		return "", fmt.Errorf("GetVideoURLForEpisode called with AllAnime ID '%s' instead of HTTP URL - use enhanced API", episodeURL)
+		return "", fmt.Errorf("GetVideoURLForEpisode called with bare id %q instead of an HTTP URL — use the registry path", episodeURL)
 	}
 
 	videoURL, err := extractVideoURL(episodeURL)
@@ -363,7 +363,7 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
-// GetVideoURLForEpisodeEnhanced gets the video URL using the enhanced API with AllAnime navigation support.
+// GetVideoURLForEpisodeEnhanced gets the video URL through the source registry.
 // ctx is honored at entry today; full downstream propagation lands when this
 // becomes a thin wrapper over source.Resolve → FetchStreamURL(ctx, …).
 func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode, anime *models.Anime) (string, error) {
@@ -386,7 +386,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		}
 
 		// URL-only resolution goes through the source registry — no more
-		// hardcoded fake-AllAnime guess (R3). The minimal anime context is
+		// hardcoded fake-source guess (R3). The minimal anime context is
 		// derived from what the registry itself matched, never assumed.
 		src, resolved := source.ResolveURL(episode.URL)
 		if src == nil {
@@ -414,19 +414,11 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 	// Phase 3 deletes them together with the api-level branching.
 	src, resolved := source.Resolve(anime)
 	if src == nil {
-		// Unknown source at the dispatch boundary — never silent (R4/R5):
-		// warn loudly, and only fall back to best-effort AllAnime when the
-		// user hasn't opted into strict resolution.
-		if util.StrictSourceResolution() {
-			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort fallback disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
-		}
-		util.Warn("unrecognized source; dispatching best-effort AllAnime (set GOANIME_STRICT_SOURCE=1 to fail instead)",
-			"anime", anime.Name, "url", anime.URL, "reason", resolved.Reason)
-		bestEffort, ok := source.Enabled(resolved.BestEffortKind())
-		if !ok {
-			return "", fmt.Errorf("no enabled source for %q (%s); it may be turned off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
-		}
-		src = bestEffort
+		// Unknown source at the dispatch boundary — never silent (R4/R5).
+		// There used to be a best-effort fallback to AllAnime here; that guess
+		// died with the source, so an unrecognized anime is now always an
+		// error rather than a request sent to an unrelated site.
+		return "", fmt.Errorf("unrecognized source for %q (%s)", anime.Name, resolved.Reason)
 	}
 	util.Debug("Source resolved", "kind", src.Describe().Kind,
 		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
@@ -450,9 +442,11 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
 			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		if resolved.Kind == source.AllAnime {
-			// For AllAnime, return the error instead of trying legacy method
-			return "", fmt.Errorf("failed to get AllAnime stream URL: %w", err)
+		if resolved.Kind == source.AniDB {
+			// Registry-backed source: surface the real error instead of falling
+			// back to the legacy scraper, which knows nothing about it. (This
+			// guard used to name AllAnime, which held the same position.)
+			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
 		}
 		// Legacy silent fallback for the remaining sources — removed in Phase 2.
 		return GetVideoURLForEpisode(episode.URL)
@@ -673,10 +667,18 @@ func newSurfClient() *surf.Client {
 // newSurfDownloadClient creates a surf client for downloading large files.
 // Unlike newSurfClient, it follows redirects (googlevideo CDN uses 302s)
 // and has a 10-minute timeout to handle large video chunks.
+//
+// Force HTTP/1.1 for the same reason as newBloggerProxyClient: some
+// googlevideo edges omit ALPN, so surf's HTTP/2 dial fails before any request
+// is sent ("negotiated ALPN \"\", expected h2"). Requests built with
+// http.NoBody then trip surf's h2->h1.1 fallback guard ("cannot retry because
+// req.GetBody is nil"), failing the download with "failed to get content
+// length". HTTP/1.1 handles both the HEAD length probe and chunked Range GETs.
 func newSurfDownloadClient() *surf.Client {
 	return surf.NewClient().
 		Builder().
 		Impersonate().Chrome().
+		ForceHTTP1().
 		Timeout(10 * time.Minute).
 		Build().
 		Unwrap()
@@ -803,6 +805,104 @@ func extractBloggerGoogleVideoURL(bloggerURL string) (string, error) {
 // fail fast and let the next-source fallback take over.
 var errBloggerVideoUnavailable = errors.New("blogger video unavailable upstream")
 
+// bloggerRPCError reports a batchexecute call that answered HTTP 200 with a
+// status code in place of a payload:
+//
+//	["wrb.fr","WcwnYd",null,null,null,[5],"generic"]
+//
+// The number in that slot is a canonical gRPC status code. Terminal codes wrap
+// errBloggerVideoUnavailable so callers fast-fail; transient ones do not, so
+// the existing retry loop still gets a chance.
+//
+// Reported in issue #195: 20 of 24 episodes of one AnimeFire title answered
+// with code 5 (NOT_FOUND) because the Blogger videos had been deleted upstream,
+// and every one of them surfaced as the opaque "no video URL found in
+// batchexecute response" — indistinguishable from a parser bug.
+type bloggerRPCError struct {
+	Code int
+}
+
+func (e bloggerRPCError) Error() string {
+	name, terminal := bloggerRPCStatusName(e.Code)
+	if terminal {
+		return fmt.Sprintf("blogger video unavailable upstream: RPC status %d (%s) — the video was removed or is not accessible", e.Code, name)
+	}
+	return fmt.Sprintf("blogger batchexecute returned RPC status %d (%s)", e.Code, name)
+}
+
+func (e bloggerRPCError) Unwrap() error {
+	if _, terminal := bloggerRPCStatusName(e.Code); terminal {
+		return errBloggerVideoUnavailable
+	}
+	return nil
+}
+
+// bloggerRPCStatusName maps a canonical gRPC status code to its name and says
+// whether retrying the same token could ever help.
+func bloggerRPCStatusName(code int) (name string, terminal bool) {
+	switch code {
+	case 3:
+		return "INVALID_ARGUMENT", true
+	case 5:
+		return "NOT_FOUND", true
+	case 7:
+		return "PERMISSION_DENIED", true
+	case 9:
+		return "FAILED_PRECONDITION", true
+	case 16:
+		return "UNAUTHENTICATED", true
+	case 2:
+		return "UNKNOWN", false
+	case 4:
+		return "DEADLINE_EXCEEDED", false
+	case 8:
+		return "RESOURCE_EXHAUSTED", false
+	case 13:
+		return "INTERNAL", false
+	case 14:
+		return "UNAVAILABLE", false
+	default:
+		return "unrecognised status", false
+	}
+}
+
+// batchexecuteRPCStatus returns the status code carried by a WcwnYd envelope
+// whose payload slot is null, e.g. ["wrb.fr","WcwnYd",null,null,null,[5],...].
+func batchexecuteRPCStatus(body []byte) (int, bool) {
+	for line := range strings.SplitSeq(string(body), "\n") {
+		if !strings.Contains(line, "wrb.fr") {
+			continue
+		}
+		var outer []any
+		if err := jsonx.Unmarshal([]byte(line), &outer); err != nil {
+			continue
+		}
+		for _, entry := range outer {
+			arr, ok := entry.([]any)
+			if !ok || len(arr) < 6 {
+				continue
+			}
+			if fmt.Sprint(arr[0]) != "wrb.fr" || fmt.Sprint(arr[1]) != "WcwnYd" {
+				continue
+			}
+			if arr[2] != nil {
+				continue // a payload is present; this is not an error envelope
+			}
+			status, ok := arr[5].([]any)
+			if !ok || len(status) == 0 {
+				continue
+			}
+			switch v := status[0].(type) {
+			case float64:
+				return int(v), true
+			case int:
+				return v, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // parseBatchexecuteResponse extracts the best MP4 video URL from a Google
 // batchexecute API response body (WcwnYd RPC).
 //
@@ -827,7 +927,7 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 			continue
 		}
 		var outer []any
-		if err := json.Unmarshal([]byte(line), &outer); err != nil {
+		if err := jsonx.Unmarshal([]byte(line), &outer); err != nil {
 			continue
 		}
 		for _, entry := range outer {
@@ -839,7 +939,7 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 				continue
 			}
 			var data []any
-			if err := json.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
+			if err := jsonx.Unmarshal(fmt.Append(nil, arr[2]), &data); err != nil {
 				continue
 			}
 			// Search all indices for a streams array (resilient to Google index changes).
@@ -910,6 +1010,11 @@ func parseBatchexecuteResponse(body []byte) (string, error) {
 		if len(stripped) == 0 {
 			util.Debugf("Blogger batchexecute returned empty body (%d bytes total) — token unavailable upstream", len(body))
 			return "", errBloggerVideoUnavailable
+		}
+		if code, ok := batchexecuteRPCStatus(body); ok {
+			err := bloggerRPCError{Code: code}
+			util.Debugf("Blogger batchexecute returned no payload: %v", err)
+			return "", err
 		}
 		util.Debugf("Blogger batchexecute response body (%d bytes, first 500): %s", len(body), string(body[:min(500, len(body))]))
 		return "", errors.New("no video URL found in batchexecute response")
@@ -1233,7 +1338,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 
 		// Try to parse as JSON
 		var videoResponse VideoResponse
-		err = json.Unmarshal(body, &videoResponse)
+		err = jsonx.Unmarshal(body, &videoResponse)
 		if err == nil && len(videoResponse.Data) > 0 {
 			if util.IsDebug {
 				util.Debugf("Found video data with %d qualities", len(videoResponse.Data))

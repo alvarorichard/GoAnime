@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -43,8 +44,16 @@ func TestParseRetryAfter(t *testing.T) {
 
 func TestHonorRetryAfter429_WaitsThenRetries(t *testing.T) {
 	t.Parallel()
+	// The Retry-After wait is real time; inside a synctest bubble the fake clock
+	// skips it while still proving the transport waited the full second.
+	synctest.Test(t, func(t *testing.T) {
+		testHonorRetryAfter429WaitsThenRetries(t)
+	})
+}
+
+func testHonorRetryAfter429WaitsThenRetries(t *testing.T) {
 	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits.Add(1) == 1 {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -54,9 +63,8 @@ func TestHonorRetryAfter429_WaitsThenRetries(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
-	t.Cleanup(srv.Close)
 
-	tr := &cfFallbackTransport{base: http.DefaultTransport}
+	tr := &cfFallbackTransport{base: srv.Client().Transport}
 	client := &http.Client{Transport: tr}
 
 	start := time.Now()
@@ -73,16 +81,21 @@ func TestHonorRetryAfter429_WaitsThenRetries(t *testing.T) {
 
 func TestHonorRetryAfter429_GivesUpWithinBudget(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		testHonorRetryAfter429GivesUpWithinBudget(t)
+	})
+}
+
+func testHonorRetryAfter429GivesUpWithinBudget(t *testing.T) {
 	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte("still limited"))
 	}))
-	t.Cleanup(srv.Close)
 
-	tr := &cfFallbackTransport{base: http.DefaultTransport}
+	tr := &cfFallbackTransport{base: srv.Client().Transport}
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Get(srv.URL)
@@ -118,13 +131,18 @@ func TestHonorRetryAfter429_POSTNotRetried(t *testing.T) {
 
 func TestHonorRetryAfter429_ContextCancel(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	synctest.Test(t, func(t *testing.T) {
+		testHonorRetryAfter429ContextCancel(t)
+	})
+}
+
+func testHonorRetryAfter429ContextCancel(t *testing.T) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "30")
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))
-	t.Cleanup(srv.Close)
 
-	tr := &cfFallbackTransport{base: http.DefaultTransport}
+	tr := &cfFallbackTransport{base: srv.Client().Transport}
 	client := &http.Client{Transport: tr}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

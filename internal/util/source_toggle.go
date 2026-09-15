@@ -44,7 +44,7 @@ func sourceListed(env, name string) bool {
 	if want == "" {
 		return false
 	}
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if canonSourceToken(part) == want {
 			return true
 		}

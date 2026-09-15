@@ -60,10 +60,10 @@ func preflightSuperFlixBrowser() {
 	// should see this before the (one-time) setup notice or the spinner.
 	// Plain language only — no "$DISPLAY"/"Cloudflare"/"headless" jargon.
 	if sfHeadlessEnvFn() {
-		sfWarnFn("⚠️  SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
+		sfWarnFn("SuperFlix needs to open a browser window, but no screen was found (you may be connected remotely). It probably won't work here — try running GoAnime on your normal computer.")
 	}
 	if sfSetupPendingFn() {
-		sfInfoFn("⏳ First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
+		sfInfoFn("First time on SuperFlix: setting up a small helper browser (one time only, needs internet). This may take a minute…")
 	}
 }
 
@@ -99,9 +99,9 @@ func describeSuperFlixErr(err error) error {
 	case errors.Is(err, superflix.ErrSuperFlixNoServers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
 	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
-		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AllAnime)."}
+		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AniDB)."}
 	case errors.Is(err, superflix.ErrSuperFlixRestricted):
-		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AllAnime)."}
+		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AniDB)."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
 	default:
@@ -223,7 +223,7 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 	return streamFetchFn(episode, anime, quality)
 }
 
-// Enhanced search that supports multiple sources - always searches both Animefire.io and allanime simultaneously
+// Enhanced search that supports multiple sources - fans out across every registered source
 func SearchAnimeEnhanced(name, src string) (*models.Anime, error) {
 	return searchAnimeEnhanced(name, src, searchFetchFn, tui.SelectAnime, enrichAnimeData)
 }
@@ -240,14 +240,14 @@ func searchAnimeEnhanced(
 	var registryKinds []apisource.SourceKind
 	normalizedSource := strings.ToLower(strings.TrimSpace(src))
 	switch normalizedSource {
-	case "allanime":
-		registryKinds = []apisource.SourceKind{apisource.AllAnime}
 	case "animefire":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "superflix":
 		registryKinds = []apisource.SourceKind{apisource.SuperFlix}
+	case "anidb":
+		registryKinds = []apisource.SourceKind{apisource.AniDB}
 	case "ptbr", "pt-br":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix}
 	}
@@ -283,26 +283,26 @@ func searchAnimeEnhanced(
 		// Ensure proper source identification (for internal use only)
 		if anime.Source == "" {
 			switch normalizedSource {
-			case "allanime":
-				anime.Source = "AllAnime"
 			case "animefire":
 				anime.Source = "Animefire.io"
 			case "goyabu":
 				anime.Source = "Goyabu"
 			case "superflix":
 				anime.Source = "SuperFlix"
+			case "anidb":
+				anime.Source = "AniDB"
 			}
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
 				switch {
-				case apisource.IsAllAnimeShortID(anime.URL), strings.Contains(lowerURL, "allanime"):
-					anime.Source = "AllAnime"
 				case strings.Contains(lowerURL, "animefire"):
 					anime.Source = "Animefire.io"
 				case strings.Contains(lowerURL, "goyabu"):
 					anime.Source = "Goyabu"
 				case strings.Contains(lowerURL, "superflix"), strings.Contains(lowerURL, "sflix"):
 					anime.Source = "SuperFlix"
+				case strings.Contains(lowerURL, "anidb.app"):
+					anime.Source = "AniDB"
 				}
 			}
 		}
@@ -315,9 +315,9 @@ func searchAnimeEnhanced(
 	breakdown := countSourceBreakdown(animes)
 	util.Debug("Source breakdown",
 		"AnimeFire", breakdown.AnimeFire,
-		"AllAnime", breakdown.AllAnime,
 		"SuperFlix", breakdown.SuperFlix,
 		"Goyabu", breakdown.Goyabu,
+		"AniDB", breakdown.AniDB,
 	)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
@@ -534,7 +534,7 @@ func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.An
 	if len(allEpisodes) == 0 {
 		return nil, &friendlyError{
 			cause: fmt.Errorf("superflix: no seasons for tmdb=%s (imdb=%q): TVmaze had no listing and the SuperFlix page exposed no episode list", tmdbID, media.IMDBID),
-			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AllAnime).",
+			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AniDB).",
 		}
 	}
 	return allEpisodes, nil
@@ -711,9 +711,7 @@ func maybePrefetchNextSuperFlixEpisode(sfClient *superflix.SuperFlixClient, tmdb
 	// Capture the seams synchronously: the goroutine may outlive a test that
 	// restores them, and reading the package vars there would be a data race.
 	getServers, streamFromServer := sfGetServersFn, sfStreamFromServerFn
-	sfPrefetchWG.Add(1)
-	go func() {
-		defer sfPrefetchWG.Done()
+	sfPrefetchWG.Go(func() {
 		defer sfPrefetchInFlight.Delete(key)
 
 		ctx, cancel := context.WithTimeout(superflix.WithoutBrowserSolve(context.Background()), sfPrefetchBudget)
@@ -736,7 +734,7 @@ func maybePrefetchNextSuperFlixEpisode(sfClient *superflix.SuperFlixClient, tmdb
 			return
 		}
 		util.Debug("SuperFlix prefetch: next episode cached for instant start", "key", key)
-	}()
+	})
 }
 
 // superFlixStream resolves a SuperFlix stream, preferring the path that lets the
@@ -868,10 +866,12 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 	// browser window) so a binge's next play starts from the cache fast path.
 	sfPrefetchNextFn(sfClient, tmdbID, sfType, season, epNum)
 
-	// Store referer globally for mpv playback
+	// Store referer + User-Agent globally for mpv playback. The CDN binds the
+	// signed URL to BOTH, so handing mpv only the referer gets every fetch 403'd.
 	if result.Referer != "" {
 		util.SetGlobalReferer(result.Referer)
 	}
+	util.SetGlobalUserAgent(result.UserAgent)
 	// Update cover image from stream thumbnail if not already set
 	if media.ImageURL == "" && result.Thumb != "" {
 		media.ImageURL = result.Thumb
@@ -934,9 +934,9 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 // testable in isolation.
 type sourceBreakdown struct {
 	AnimeFire int
-	AllAnime  int
 	SuperFlix int
 	Goyabu    int
+	AniDB     int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -952,12 +952,12 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 		switch {
 		case strings.Contains(strings.ToLower(anime.Source), "animefire"):
 			b.AnimeFire++
-		case anime.Source == "AllAnime":
-			b.AllAnime++
 		case anime.Source == "SuperFlix":
 			b.SuperFlix++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
+		case anime.Source == "AniDB":
+			b.AniDB++
 		}
 	}
 	return b

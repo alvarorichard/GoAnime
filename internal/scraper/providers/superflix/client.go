@@ -1,6 +1,7 @@
 package superflix
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -41,24 +42,26 @@ var ErrSuperFlixRestricted = errors.New("superflix: content is access-restricted
 var ErrSuperFlixNoEpisodeList = errors.New("superflix: page exposed no episode list")
 
 const (
-	// SuperFlixBase is the canonical SuperFlix host. Previous hosts
-	// (`superflixapi.rest`, `superflixapi.online`, `superflixapi.best`,
-	// `superflixapi.fit`, `superflixapi.cyou`, `superflixapi.lifestyle`)
-	// 301-redirect to whichever alias is live; Go's http.Client follows the
-	// redirect but downgrades the POST to a GET (dropping the body), which makes
-	// /player/bootstrap return HTML 404 and break JSON decoding — so we target
-	// the live host directly. `.lifestyle` redirects to `.pro` (the current
-	// canonical host, confirmed 2026-07-04 via the embed's `cfv` session token,
-	// which carries `"host":"superflixapi.pro"`).
-	SuperFlixBase = "https://superflixapi.pro"
+	// SuperFlixBase is the compiled-in fallback for the SuperFlix host, and the
+	// first of many discovery seeds (the rest are retiredSuperFlixHosts in
+	// host.go). Retired aliases 301-redirect to whichever one is live; Go's
+	// http.Client follows the redirect but downgrades the POST to a GET
+	// (dropping the body), which makes /player/bootstrap return HTML and break
+	// JSON decoding — so requests must target the live host directly.
+	//
+	// The live host is discovered at runtime (see host.go), so a stale value
+	// here is no longer an outage. `.baby` now 301-redirects to `.monster`
+	// (confirmed 2026-09-14, issue #199). When rotating this, move the old host
+	// to the top of retiredSuperFlixHosts rather than dropping it.
+	SuperFlixBase = "https://superflixapi.monster"
 	// SuperFlixEmbedHost is the host that serves the Turnstile-gated player
 	// embed. The frontend no longer funnels through warezcdn.lat (which now
 	// gates behind Google reCAPTCHA + a QR-scan we can't solve); instead the API
-	// host itself serves https://superflixapi.pro/{filme|serie}/<tmdb>, which
-	// clears Cloudflare Turnstile (handled by the cfBrowserSolver) and then the
-	// player's getVideo endpoint returns the signed HLS master. Confirmed live
-	// 2026-07-04 for both /filme and /serie.
-	SuperFlixEmbedHost = "superflixapi.pro"
+	// host itself serves https://superflixapi.monster/{filme|serie}/<tmdb>,
+	// which clears Cloudflare Turnstile (handled by the cfBrowserSolver) and
+	// then the player returns the signed HLS master. Like SuperFlixBase this is
+	// the fallback and first seed for runtime host discovery.
+	SuperFlixEmbedHost = "superflixapi.monster"
 	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
 	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
 	// the User-Agent that solved the challenge; if the HTTP client then sends a
@@ -167,6 +170,45 @@ func NewClientForTest(serverURL string) *SuperFlixClient {
 	c.maxRetries = 0
 	c.retryDelay = 0
 	return c
+}
+
+// base returns the origin every request should target.
+//
+// A test client (SetTestConfig / NewClientForTest) points at its own httptest
+// server and is returned verbatim. A production client seeded with the
+// compiled-in default instead resolves through runtime host discovery, so a
+// domain rotation is followed automatically rather than 301-ing every POST into
+// a body-less GET. Discovery runs at most once per process and falls back to
+// the constant, so this stays a cheap atomic load after the first call.
+func (c *SuperFlixClient) base() string {
+	if c.baseURL != SuperFlixBase {
+		return c.baseURL
+	}
+	if c.browserSolver == defaultCFSolver {
+		// Real solver == real site: safe to spend one round trip discovering
+		// the live host. Tests swap in a scripted solver (or nil) and never
+		// reach the network here.
+		ensureLiveHost(context.Background())
+	}
+	return liveBase()
+}
+
+// effectiveUserAgent returns the User-Agent this client's requests actually go
+// out with.
+//
+// It is NOT always c.userAgent: once a Cloudflare solve has run through
+// cfFallbackTransport, RoundTrip rewrites every request to carry the solving
+// browser's UA so the UA-bound cf_clearance cookie stays valid. Any result that
+// reports a User-Agent has to report that one — the player CDN binds a signed
+// URL to the UA that fetched it, so handing mpv c.userAgent after the transport
+// signed with a different one gets every fetch 403'd.
+func (c *SuperFlixClient) effectiveUserAgent() string {
+	if t, ok := c.client.Transport.(*cfFallbackTransport); ok {
+		if ua := t.getSolvedUA(); ua != "" {
+			return ua
+		}
+	}
+	return c.userAgent
 }
 
 func (c *SuperFlixClient) decorateRequest(req *http.Request) {

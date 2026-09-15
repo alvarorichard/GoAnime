@@ -31,7 +31,7 @@ func TestProviders_FetchStreamURL_CancelledContext(t *testing.T) {
 	for _, p := range []interface {
 		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
 	}{
-		&allAnimeProvider{},
+		&anidbProvider{},
 		&animeFireProvider{},
 		&goyabuProvider{},
 	} {

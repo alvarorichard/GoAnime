@@ -27,6 +27,14 @@ func NewProgram(model tea.Model, extra ...tea.ProgramOption) *tea.Program {
 
 // RunClean runs a TUI action with terminal capability probes suppressed and
 // drains delayed terminal responses afterwards.
+//
+// It deliberately does NOT refuse to run without a terminal. That guard was
+// tried and reverted: several non-interactive paths depend on these components
+// degrading quietly — most importantly the quality picker inside AnimeFire's
+// stream extraction, which without a TTY must fall back to a default instead of
+// failing, or the extracted URL is lost and mpv receives the raw API endpoint.
+// Prompts that need a real answer validate their own result instead; see
+// getUserInput in internal/util.
 func RunClean(run func() error) error {
 	restoreEnv := suppressBubbleTeaQueries()
 	defer func() {

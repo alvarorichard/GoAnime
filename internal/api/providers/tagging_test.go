@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTagResults_AllAnimeEnglish(t *testing.T) {
+func TestTagResults_AniDBEnglish(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "Naruto", URL: "id1"}}
-	tagResults(res, source.AllAnime)
+	tagResults(res, source.AniDB)
 	assert.Equal(t, "[English] Naruto", res[0].Name)
-	assert.Equal(t, "AllAnime", res[0].Source)
+	assert.Equal(t, "AniDB", res[0].Source)
 }
 
 func TestTagResults_AnimeFirePTBRAndSource(t *testing.T) {
@@ -39,7 +39,7 @@ func TestTagResults_SuperFlixMediaTypeTags(t *testing.T) {
 func TestTagResults_DoesNotDoubleTag(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "[English] Naruto"}}
-	tagResults(res, source.AllAnime)
+	tagResults(res, source.AniDB)
 	assert.Equal(t, "[English] Naruto", res[0].Name, "an already-tagged name must not be tagged twice")
 }
 

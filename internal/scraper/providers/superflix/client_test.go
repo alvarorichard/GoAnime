@@ -642,8 +642,10 @@ func TestSearchMedia_CacheCaseInsensitive(t *testing.T) {
 func TestSearchMediaWithContext_Cancelled(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second) // slow server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Slow server: block until the client gives up rather than sleeping a
+		// fixed 5s, so srv.Close() does not hold the suite open afterwards.
+		<-r.Context().Done()
 		fmt.Fprint(w, `<html><body></body></html>`)
 	}))
 	defer srv.Close()
@@ -830,8 +832,8 @@ func TestGetPlayerPage_SeriesWithSeasonAndEpisode(t *testing.T) {
 func TestGetPlayerPage_Cancelled(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
 	}))
 	defer srv.Close()
 
@@ -1135,7 +1137,7 @@ func TestResolveRedirect_FollowsRedirect(t *testing.T) {
 	defer redirectSrv.Close()
 
 	client := newTestSuperFlixClient(redirectSrv.URL)
-	baseURL, videoHash, playerHTML, err := client.ResolveRedirect(context.Background(), redirectSrv.URL+"/redirect")
+	_, baseURL, videoHash, playerHTML, err := client.ResolveRedirect(context.Background(), redirectSrv.URL+"/redirect")
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, baseURL)
@@ -1152,7 +1154,7 @@ func TestResolveRedirect_NoRedirect(t *testing.T) {
 	defer srv.Close()
 
 	client := newTestSuperFlixClient(srv.URL)
-	_, _, html, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/directhash")
+	_, _, _, html, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/directhash")
 
 	require.NoError(t, err)
 	assert.Contains(t, html, "direct page")
@@ -1186,7 +1188,7 @@ func TestResolveRedirect_DeadPlayerPage(t *testing.T) {
 			defer srv.Close()
 
 			client := newTestSuperFlixClient(srv.URL)
-			baseURL, videoHash, _, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/deadhash")
+			_, baseURL, videoHash, _, err := client.ResolveRedirect(context.Background(), srv.URL+"/video/deadhash")
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), fmt.Sprintf("player page dead (%d)", tt.status))
@@ -1556,7 +1558,7 @@ func TestRegexPatterns(t *testing.T) {
 // than the cryptic JSON decode error.
 // =============================================================================
 
-func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
+func TestSuperFlixBase_PointsToLiveHost_2026_09_02(t *testing.T) {
 	t.Parallel()
 	// Pinning the canonical host. If this needs to change in the future,
 	// also update internal/api/providers/metadata/metadata.go.
@@ -1567,7 +1569,25 @@ func TestSuperFlixBase_PointsToLiveHost_2026_06_05(t *testing.T) {
 	// 2026-06-18: .fit went dead (NXDOMAIN) and rotated to .cyou.
 	// 2026-07-04: .cyou→.lifestyle→.pro; .lifestyle 301-redirects to .pro, so
 	// we pin the real canonical host .pro (confirmed via the embed cfv token).
-	assert.Equal(t, "https://superflixapi.pro", SuperFlixBase)
+	// 2026-08-25: .pro now 301-redirects to .sbs — same POST→GET downgrade,
+	// which is why SuperFlix stopped playing. The served page references only
+	// superflixapi.sbs, so that is the new canonical host.
+	// 2026-08-31: .sbs now 301-redirects to .beer, same downgrade, same
+	// breakage. Runtime host discovery (host.go) now follows that chain on its
+	// own; these constants are the seed the walk starts from and the fallback
+	// when it fails, so they still have to name a host that redirects onto the
+	// live one.
+	// 2026-09-02: .beer → .baby. Discovery absorbed it with no code change —
+	// the app kept working — and only this seed had to be refreshed.
+	// 2026-09-14: .baby → .monster (issue #199, reported against v1.8.6, which
+	// predates discovery and still shipped .pro). .sbs had stopped answering
+	// by then, which is why discovery now walks every retired alias rather
+	// than a single seed; see retiredSuperFlixHosts.
+	assert.Equal(t, "https://superflixapi.monster", SuperFlixBase)
+	assert.Equal(t, "superflixapi.monster", SuperFlixEmbedHost,
+		"the embed host must track the canonical host")
+	assert.Equal(t, SuperFlixBase, "https://"+SuperFlixEmbedHost,
+		"SuperFlixBase must be SuperFlixEmbedHost as an origin")
 }
 
 func TestBootstrap_HTMLResponseSurfacesActionableError_2026_04_30(t *testing.T) {

@@ -1,198 +1,152 @@
-# GoAnime Release Notes - Version 1.8.6
+# GoAnime Release Notes - Version 1.8.7
 
-Release date: 2026-07-24
+Release date: 2026-09-14
 
 ## Highlights
 
-- **Source Registry Architecture (Model C)**: Sources are now self-describing. Each provider implements `source.Source` with a `Describe()` descriptor, and video/episode resolution dispatches through a registry instead of hardcoded branching. New optional capability interfaces — `Seasoned` (season-aware sources) and `BrowserGated` (sources needing a browser warm-up) — let the dispatcher adapt per source without special-casing call sites.
-- **Scraper Package Restructure**: `internal/scraper` split into `internal/scraper/netx` (transport, SSRF guard, diagnostics, circuit breaker) and `internal/scraper/providers/{allanime,animefire,goyabu,superflix}`. The monolithic `unified.go`/`media_manager.go` pair was replaced by `manager.go` with lazy, `sync.Once`-guarded adapter loading. Public API preserved.
-- **SuperFlix Revival with Headless Turnstile Auto-Solver**: SuperFlix is back and fully automatic. A Playwright-driven solver clears Cloudflare managed challenges with zero human interaction, backed by a stream cache, a dedicated transport with `Retry-After` handling, TVmaze episode mapping, and next-episode prefetching.
-- **AllAnime Dynamic Key Derivation**: The AllAnime client no longer relies on a static key. It derives the AES key per epoch from the referer page (`epoch` + `partB`) masked against the entry bundle, and caches it — used for both the `aaReq` token and the `tobeparsed` blob.
-- **Concurrent Multi-Source Search**: Search now fans out across all enabled sources in parallel with error tolerance — a dead source degrades the result set instead of failing the query.
-- **Manual Source Kill-Switch**: `GOANIME_DISABLED_SOURCES` / `GOANIME_ENABLED_SOURCES` turn sources off or on without a rebuild, complementing the automatic per-source circuit breaker.
-- **New TUI Layer**: Native anime-results screen, item picker, shell and theme, plus Windows ANSI/VT processing and color-profile detection.
-- **Dependency & Toolchain Refresh**: Go 1.26.5, Playwright migrated to `mxschmitt/playwright-go`, and project-wide dependency bumps (see *Dependencies*).
-- **CI Hardening**: CodeQL scanning, Dependabot, and a daily live source-health workflow added; the standalone coverage workflow was folded into `ci.yml` with a hard **66.0%** coverage gate.
+- **SuperFlix survives domain rotations without a new release**: SuperFlix moved its domain five times since 1.8.6 (`.pro` → `.sbs` → `.beer` → `.baby` → `.monster`), and every move used to break playback until a new version shipped. GoAnime now finds the live host on its own, through independent layers that cover each other's failures: a manual pin, the last host that worked (remembered on disk), every alias ever observed (walked concurrently), and — only when all of those fail — a one-line pointer in this repository that maintainers can update to repair installed copies without a release. Fixes #199.
+- **SuperFlix plays again, end to end**: the player CDN, signing endpoint, server picker and embed markup all changed. Streams, series, movies and Blogger-hosted titles resolve and play in mpv again.
+- **Movies no longer hang before mpv opens**: remote subtitle tracks forced through the HLS demuxer kept mpv stalled for over two minutes. The same tracks are embedded in the stream, so nothing is lost.
+- **SuperFlix downloads work again**: current playlist URLs were being sent to the plain MP4 downloader, which saved the playlist text as the episode file.
+- **Much faster repeat plays**: replaying an episode now skips the browser entirely. Measured during development: a cached replay went from ~6.8 s to under 200 ms, and a cold resolve from ~19 s to ~8 s.
+- **The bypass browser stays out of your way**: it starts minimized and only surfaces when the Cloudflare check actually needs you.
+- **New AniDB source**, and **AllAnime has been removed** (see *Breaking Changes*).
+- **Metadata survives an AniList outage**: when AniList disables its API, GoAnime says so plainly and falls back to MyAnimeList.
+
+## Breaking Changes
+
+- **AllAnime was removed as a source.** `--source allanime` now fails as an unknown source, and the `--allanime-smart` flag no longer exists. Use `--source anidb`, `animefire`, `goyabu` or `superflix`, or omit `--source` to search all of them.
 
 ## Features
 
-### Architecture & Sources
-
-- Introduce `internal/api/source` with the `Source` interface, `Descriptor` struct, and resolution logic that prioritizes explicit source fields, media types, tags, and URL patterns.
-- Migrate AllAnime, AnimeFire, Goyabu and SuperFlix to the self-describing model; registration supports both legacy and new paths during the phased migration, guarded by anti-drift tests.
-- Add `Seasoned` and `BrowserGated` capability interfaces; browser-gated sources are warmed up (`WarmUp`) before a video URL is fetched.
-- Add `internal/api/providers/dispatch` with `FetchEpisodes` and `FetchStreamURL`, routing episode and stream retrieval through the registry.
-- Add result tagging (`internal/api/providers/tagging.go`): language tagging and source identification on search results.
-- Implement concurrent search across multiple sources with per-source error tolerance.
-- Add manual source kill-switch (`internal/util/source_toggle.go`), parsed in the leaf `util` package so both the dispatch and search layers honor it without an import cycle.
-- Add strict-source handling (`GOANIME_STRICT_SOURCE`) and URL-only resolution for video URL retrieval.
-- Add `internal/api/source/enablement.go` and `capabilities.go` with dedicated tests.
-
 ### SuperFlix
 
-- Headless Cloudflare Turnstile auto-solver driven by Playwright (`browser.go`, `cf.go`), with configurable behavior via `GOANIME_SF_HEADLESS`, `GOANIME_SF_BUNDLED`, `GOANIME_SF_CHROME_CHANNEL` and `GOANIME_SF_MASK`.
-- Stream cache with CDN liveness probing (`streamcache.go`), dedicated HTTP transport honoring `Retry-After` (`transport.go`), and TVmaze episode mapping (`tvmaze.go`).
-- Next-episode prefetching, disableable via `GOANIME_SF_NO_PREFETCH`.
-- Interactive episode-flow selection and improved media handling.
-- Retry logic for transient embed stream-sniff failures.
-- Dedicated content-signal errors so the UI can explain *why* nothing played: `ErrSuperFlixNoServers`, `ErrSuperFlixRestricted`, `ErrSuperFlixNoEpisodeList`.
-- Migrate host to the current live domain `superflixapi.pro` (previous aliases `.rest`, `.online`, `.best`, `.fit`, `.cyou`, `.lifestyle` 301-redirect, which downgraded POSTs to GET and broke `/player/bootstrap`).
+- **Layered host discovery** resolves the live domain at runtime, in order:
+  1. `GOANIME_SF_HOST` — manual pin, no network.
+  2. The last host that verified, remembered in the user cache directory.
+  3. Every SuperFlix alias ever observed, walked concurrently; the first live one wins, so a dead alias costs its own slot instead of the whole budget.
+  4. The repository pointer [`superflix-host.txt`](https://github.com/alvarorichard/GoAnime/blob/main/superflix-host.txt), read only when every alias above has failed — a normal launch never contacts GitHub.
+  5. The compiled default, now `superflixapi.monster`.
+- **Smart offscreen solver** (on by default): the Cloudflare bypass browser starts minimized and is brought on screen only when the challenge needs a human — when Cloudflare reports a load failure or the check stops clearing — then closes when the solve ends. `--sf-window` restores the always-visible window.
+- **Challenge retry**: when the Turnstile widget fails to load ("Não foi possível carregar a verificação"), the solver presses the page's own retry control instead of waiting out its timeout.
+- **Browser-free re-signing** through the player's current `/layer/` endpoint, which replaced the retired `getVideo` endpoint. The legacy endpoint remains as a fallback.
+- **Signed stream URLs are cached** with the Referer and User-Agent they are bound to, and verified with a single probe before reuse.
+- **Blogger-hosted titles** are recognized and handed to the Blogger playback path instead of being treated as a FirePlayer host.
 
-### AllAnime
+### Sources
 
-- Per-epoch key derivation: fetch `epoch` and `partB` from the referer page, derive the AES key with the entry-bundle mask, and cache it. No network call when a valid cached key exists.
-- Split into `client.go`, `crypto.go`, `keys.go`, `search.go`, `episodes.go`, `stream.go` with regression tests for the CTR path and key derivation.
+- **AniDB source** (`anidb.app`): search, episode listing and stream resolution, included in the daily source-health checks. `GOANIME_ANIDB_LANG` selects subtitled (`jpn`/`sub`, default) or dubbed (`eng`/`dub`) releases.
 
-### Player & Playback
+### Metadata
 
-- Improved Windows support: better IPC socket handling and video-output configuration.
-- Playback argument assembly for HLS streams, including HLS demuxer args selected by video source type.
-- Subtitle handling: one `--sub-file=` per track, avoiding URL-separator corruption.
-- Episode navigation validated against the real episode list; `ListAllEpisodes` returns real episode numbers instead of fabricated ones.
-- Progress tracking and download-method selection per episode.
-
-### TUI
-
-- New anime-results screen with filtering, navigation and selection (`anime_results.go`).
-- New generic item picker (`picker.go`), shell (`shell.go`) and theme (`theme.go`); footer instructions adapt to terminal width.
-- Windows ANSI/VT processing (`vt_windows.go` / `vt_other.go`) and color-profile handling (`color_profile.go`).
-- Terminal-state restore helper (`restore.go`).
-
-### Downloads & SDK
-
-- Workflow enrichment for `HandleDownloadRequest` with path-handling tests.
-- `pkg/goanime` client updated to the registry-based fetch paths; integration tests run in the source-health workflow.
+- **AniList outage handling**: when AniList answers with its "API temporarily disabled" notice, the lookup names the outage instead of reporting a bare `403 Forbidden`, stops re-asking for the rest of the session, and falls back to MyAnimeList (Jikan) for titles, cover art, MAL id, genres and synopsis. Ordinary failures such as rate limits are still treated as transient.
+- Jikan requests retry transient failures (5xx, 429) with a backoff above Jikan's published rate limit.
+- Season lookups use the same live SuperFlix host as the player, so they follow a domain rotation too.
 
 ## Bug Fixes
 
-- **Data race in status rendering**: lock the mutex while rendering helper status output.
-- **Race conditions across concurrent components**: add mutex protection to `RichPresenceUpdater` state transitions; isolate episode-data mutation in `PlayEpisode`; make `ResponseCache` stop handing out mutable buffers; add synchronized accessors for global playback state and shader-mode management.
-- **Terminal state corruption**: `HandlePlaybackMode` now fetches anime details and episodes sequentially instead of concurrently.
-- Fix player menu and resume-dialog error handling so a failed action no longer triggers an unintended auto-advance.
-- Prefer unsigned HLS playlists over secured links during video URL extraction; evict stale cache entries via CDN liveness probe.
-- Fix AniList 403s by sending a non-browser `User-Agent` on AniList requests.
-- Simplify season year-range logic in `season_select` (clarity fix for wrong-season inference).
-- Handle empty SuperFlix episode lists explicitly instead of reporting a bare "no seasons found".
-- Ensure the SuperFlix browser solver window closes on every resolve path, and release the browser earlier to avoid lingering contexts.
-- Normalize line endings in shader source files for consistent processing.
-- Ensure pre-warm goroutines complete before test cleanup, preventing teardown races.
-- Fix the GoAnime Windows Installer link in `README` (#187, thanks @Jgmro).
+### SuperFlix playback
+
+- Fix playback breaking on every domain rotation: Go's HTTP client downgraded the player's `POST` requests to `GET` across the redirect, so `/player/bootstrap` returned HTML (#199).
+- Fix every stream being rejected with `403` by the player CDN. It now requires the player's `/video/<hash>` page as Referer, the exact User-Agent that obtained the signed URL, the browser's `Accept-Language`, and the `Sec-CH-UA-Mobile`/`Sec-CH-UA-Platform` client hints. The liveness probe was sending incomplete headers and discarding working streams as "dead hosts".
+- Fix the automatic server pick never clicking, after the server chooser switched to `.player_select_item` cards.
+- Recover the player host and content hash from the captured stream request now that the player no longer calls `getVideo`.
+- Fix a spurious "the chosen server failed" warning on healthy servers, caused by the retired `getVideo` endpoint answering `403`.
+- Fix Blogger-hosted titles failing with a `404` from a FirePlayer request sent to `blogger.com`. The bogus cache entries this left behind (`host=blogger.com`, `hash=video.g`) are now discarded on read.
+- Fix a solve that could hang for minutes: a Playwright protocol round-trip was made on the event dispatch goroutine.
+- Remove a fixed 8-second wait for an endpoint that no longer exists, which had been added to every play.
+- Fix Cloudflare challenge detection misclassifying `404` responses as challenges.
+- Poster images served as direct TMDB URLs are now upgraded to `w500`, like proxied ones.
+
+### Player
+
+- Fix mpv never opening on some SuperFlix movies ("O Fim da Rua"): `--demuxer-lavf-format=hls` applies to every file mpv opens, so each external subtitle failed to open, and SuperFlix passed 27 remote ones. External subtitle files are no longer passed when the HLS format is forced; the same tracks are embedded in the stream and remain selectable.
+- Send each CDN header as its own `--http-header-fields-append`, so the comma inside `Accept-Language` is no longer split into malformed fields, and replace mpv's default `libmpv` User-Agent with the one the stream was signed for.
+
+### Downloads
+
+- Fix SuperFlix downloads saving the playlist text as the video. Playlist detection still required a `/cdn/hls/` path segment the player no longer uses; it now keys on a trailing `master.txt`, matching playback. The HLS check is also consistent across all three download paths (addresses #193).
+- Fix completed downloads being reported as failed with `read |0: file already closed`: the ffmpeg progress pipe was closed by `Wait` while still being read.
+- Fix HTTP/2 fallback issues and improve ffmpeg integration for SuperFlix downloads, including installing a bundled ffmpeg when none is on `PATH`.
+- Headers required by the SuperFlix CDN are now passed to ffmpeg and ffprobe as well.
+
+### Other
+
+- Handle Blogger RPC error responses and status codes, so a dead video token fails fast instead of being retried.
+- Unit tests no longer make live network calls: SuperFlix host discovery and the AniList wrapper test previously reached real servers and leaked state between tests.
 
 ## Improvements
 
 ### Security
 
-- SSRF protection moved to `netx` with `SafeDialFunc` and `SafeScraperTransport` applied to scraper HTTP clients.
-- Shader URL validation and secure fetching before any shader is downloaded.
-- `crypto/rand` replaces `math/rand` for jitter (G404).
-- Browser profile-dir segment sanitized to block path traversal via `GOANIME_SF_CHROME_CHANNEL` (G703), with a regression test.
-- Cookie `SameSite` set when converting Playwright cookies (G124).
-- CodeQL workflow added for static analysis on the repository.
+- Host discovery only follows redirects inside the `superflixapi.*` domain family, and only accepts a host whose page proves it is SuperFlix (its page title, or a genuine Cloudflare challenge). A retired domain re-registered as a parking page cannot be adopted.
+- Hosts read from the repository pointer or from the remembered-host file go through the same family check and page verification. The remembered-host file is written with `0600` permissions.
 
 ### Diagnostics & Error Handling
 
-- `netx.SourceDiagnostic` gives structured, unwrappable per-source failure diagnostics; all `ErrSourceUnavailable` references now route through `netx`.
-- Origin probe added for better failure attribution, plus tighter search timeout handling.
-- Source health checks call adapters directly; the old `source_circuit` implementation was removed and replaced by the `netx` circuit breaker.
-- Kitsu API integration uses a configurable base URL, making it testable without live network.
-- Connection pre-warming for known hosts to cut first-request latency.
+- `ErrAniListAPIDisabled` identifies an upstream AniList outage; when the MyAnimeList fallback also fails, the error names both.
+- Host-discovery failures report every alias that was tried and why each one failed.
 
-### Code Quality
+### Testing & CI
 
-- Named return values on several method signatures for readability (`GetStreamURL`, `GetEpisodeStreamURL`, `GetUpscaledDimensions`, and test helpers).
-- `http.NoBody` replaces `nil` request bodies throughout the scraper and client code.
-- File-permission constants migrated to Go's `0o` octal syntax.
-- Pre-compiled regex patterns for title cleaning and season-number inference, with benchmarks (`perf_bench_test.go`) across `api`, `naming`, `hls`, `superflix` and `util`.
-- Playwright deprecated `QuerySelector` calls migrated to the Locator API.
-- `golangci-lint` action updated to v9 with adjusted timeouts.
+- New CI gates: a goroutine leak gate using Go 1.27's `goroutineleak` profile, and a differential fuzz test guarding the JSON decoder migration (`internal/util/jsonx`). The 66.0% coverage gate remains.
+- Offline tests drive every host-discovery layer with the real SuperFlix domain names, including dead, parked and hanging aliases.
+- Real-browser tests cover the challenge retry button and the minimize/reveal behavior.
+- Regression tests pin the CDN header contract, download routing for every observed playlist URL shape, playback and download agreeing on playlist detection, and subtitle handling under a forced HLS demuxer.
+- `go-critic` was removed from CI; `golangci-lint` updated to v2.13.1.
 
-### Testing
+### Repo Hygiene
 
-- **Coverage: 66.8%** with `go test -short -race -count=1 -covermode=atomic ./...`, enforced in CI by a **66.0%** gate to block regressions. Project target remains **≥ 70.0%**.
-- `MockScraper` added for network-free scraper testing; `wireEpisodesSeam` / `wireStreamSeam` let tests inject episode and stream data without importing the providers package.
-- Live and real-browser tests gated behind `skipInCI` (`CI` / `GITHUB_ACTIONS`) and `-short`, so CI never launches Chrome or hits the network.
-- Fuzz corpus added for `FuzzFitBlockRespectsBounds` (TUI block fitting).
-- New daily `source-health.yml` workflow runs live source diagnostics, the Goyabu Blogger playback diagnostic, and the public SDK integration tests.
-- Test files renamed to intent-revealing names (`ci_skip_test.go` → `skip_in_ci_test.go`, `source_diagnostic_extras_test.go` → `source_diagnostic_errors_test.go`).
-
-### Packaging
-
-- macOS releases now ship a single universal binary (`goanime-darwin-universal`) that runs natively on both Intel (x86_64) and Apple Silicon (arm64). The per-architecture `goanime-darwin-amd64` / `goanime-darwin-arm64` assets are no longer published — they are built only as `lipo` inputs. The updater already falls back to the universal asset, so existing installs keep updating.
-
-### Documentation & Repo Hygiene
-
-- Add `docs/ARCHITECTURE.md` and `docs/architecture/ARCH_STAGES.md` documenting the Model B → Model C source-registry migration.
-- Move test planning docs into `docs/testing/` (`TEST_PLAN.md`, `TEST_STRATEGY.md`, `TEST_STAGES.md`, `TEST_PLAN_FUNCTIONS.md`).
-- Add Dependabot for Go modules and GitHub Actions (weekly, minor/patch grouped).
-- Untrack the committed `.DS_Store`; fold `coverage.yml` into `ci.yml`.
+- Add [`superflix-host.txt`](https://github.com/alvarorichard/GoAnime/blob/main/superflix-host.txt), the maintainer-updatable pointer used by host discovery. A test fails if it disagrees with the compiled default.
+- Drop stale `go.sum` entries left by earlier dependency bumps.
 
 ## Dependencies
 
-**Toolchain:** Go `1.26.3` → **`1.26.5`** (also bumped in the CI and source-health workflows).
+**Toolchain:** Go `1.26.5` → **`1.27.1`** (also bumped in the CI, release and source-health workflows).
 
-**Module graph:** 116 modules total — 22 direct, the rest indirect.
-
-**Added (direct):**
-
-| Module | Version | Why |
-|---|---|---|
-| `github.com/mxschmitt/playwright-go` | `v0.6100.0` | Browser automation for the SuperFlix Turnstile solver; replaces `playwright-community/playwright-go`, which is no longer the maintained fork |
-| `github.com/charmbracelet/x/ansi` | `v0.11.7` | Promoted from indirect — used directly by the new TUI VT/color-profile code |
-| `golang.org/x/net` | `v0.57.0` | Promoted from indirect — used directly by scraper HTML parsing |
-
-**Added (indirect):** `deckarep/golang-set/v2 v2.9.0`, `go-jose/go-jose/v3 v3.0.5`, `go-stack/stack v1.8.1`, `go.mongodb.org/mongo-driver v1.17.9` — all pulled in transitively by `playwright-go`; `sahilm/fuzzy v0.1.3` via `charm.land/bubbles/v2/list`.
-
-> Note: `playwright-go` pulls `mongo-driver` only for its BSON serialization used by `golang-set`. It adds ~4 modules to the graph but no additional runtime services.
-
-**Upgraded:**
+**Direct dependencies updated:**
 
 | Module | From | To |
 |---|---|---|
-| `charm.land/bubbles/v2` | `v2.1.0` | `v2.1.1` |
-| `charm.land/bubbletea/v2` | `v2.0.6` | `v2.0.8` |
-| `charm.land/lipgloss/v2` | `v2.0.3` | `v2.0.5` |
-| `github.com/enetx/g` | `v1.0.224` | `v1.0.225` |
-| `github.com/enetx/surf` | `v1.0.200` | `v1.0.201` |
-| `github.com/enetx/http3` | `v1.0.7` | `v1.0.8` |
-| `github.com/quic-go/quic-go` | `v0.59.1` | `v0.60.0` |
-| `github.com/klauspost/compress` | `v1.18.6` | `v1.19.0` |
-| `github.com/cloudflare/circl` | `v1.6.3` | `v1.6.4` |
-| `github.com/mattn/go-sqlite3` | `v1.14.44` | `v1.14.48` |
-| `github.com/gdamore/tcell/v2` | `v2.13.9` | `v2.13.10` |
-| `github.com/andybalholm/brotli` | `v1.2.1` | `v1.2.2` |
-| `github.com/andybalholm/cascadia` | `v1.3.3` | `v1.3.4` |
-| `github.com/mattn/go-runewidth` | `v0.0.23` | `v0.0.24` |
-| `github.com/refraction-networking/utls` | `v1.8.3-0.20260301…` | `v1.8.3-0.20260623…` |
-| `github.com/charmbracelet/ultraviolet` | `20260511…` | `20260703…` |
-| `golang.org/x/crypto` | `v0.51.0` | `v0.54.0` |
-| `golang.org/x/net` | `v0.54.0` | `v0.57.0` |
-| `golang.org/x/sys` | `v0.44.0` | `v0.47.0` |
-| `golang.org/x/term` | `v0.43.0` | `v0.45.0` |
-| `golang.org/x/text` | `v0.37.0` | `v0.40.0` |
-| `golang.org/x/sync` | `v0.20.0` | `v0.22.0` |
-| `golang.org/x/exp` | `20260508…` | `20260611…` |
+| `charm.land/bubbles/v2` | `v2.1.1` | `v2.2.1` |
+| `charm.land/bubbletea/v2` | `v2.0.8` | `v2.0.9` |
+| `charm.land/lipgloss/v2` | `v2.0.5` | `v2.0.6` |
+| `charm.land/log/v2` | `v2.0.0` | `v2.0.1` |
+| `github.com/PuerkitoBio/goquery` | `v1.12.0` | `v1.13.0` |
+| `github.com/enetx/g` | `v1.0.225` | `v1.1.1` |
+| `github.com/enetx/surf` | `v1.0.201` | `v1.0.206` |
+| `github.com/lrstanley/go-ytdlp` | `v1.3.5` | `v1.5.2` |
+| `github.com/mattn/go-sqlite3` | `v1.14.48` | `v1.14.52` |
+| `github.com/mxschmitt/playwright-go` | `v0.6100.0` | `v0.6201.1` |
+| `github.com/stretchr/testify` | `v1.11.1` | `v1.12.1` |
+| `golang.org/x/net` | `v0.57.0` | `v0.59.0` |
+| `golang.org/x/sys` | `v0.47.0` | `v0.48.0` |
+| `golang.org/x/term` | `v0.45.0` | `v0.46.0` |
+
+**Notable indirect updates:** `quic-go/quic-go` `v0.60.0` → `v0.62.0`, `klauspost/compress` `v1.19.0` → `v1.20.0`, `andybalholm/brotli` `v1.2.2` → `v1.2.4`, `golang.org/x/crypto` `v0.54.0` → `v0.57.0`, `go.mongodb.org/mongo-driver` `v1.17.9` → `v1.17.10`; `gopkg.in/yaml.v3` replaced by `go.yaml.in/yaml/v3`.
+
+**GitHub Actions:** `actions/checkout` v7, `actions/setup-go` v7, `actions/upload-artifact` v7, `actions/download-artifact` v8, `actions/dependency-review-action` v5, `github/codeql-action` v4, `softprops/action-gh-release` v3, `KSXGitHub/github-actions-deploy-aur` v4.2.0.
 
 **Watch list:**
 
-- `refraction-networking/utls` and `charmbracelet/ultraviolet` are pinned to pseudo-versions (untagged commits) — they need manual review on each bump since Dependabot cannot reason about their semver.
-- `mxschmitt/playwright-go` requires a matching browser download at runtime; its version is coupled to the Playwright driver, so it should not be bumped blindly.
-- `quic-go` and `utls` sit on the network hot path (`enetx/surf`); regressions there surface as scraping failures rather than build breaks.
+- This is the first release built with the updated `upload-artifact`/`download-artifact` major versions; check that the release job collects every platform binary.
+- `mxschmitt/playwright-go` is coupled to a matching browser download at runtime, so it should not be bumped blindly.
+- `charmbracelet/ultraviolet` is pinned to a pseudo-version (untagged commit) and needs manual review on each bump.
 
 ---
 
-## Environment Variables
+## Environment Variables & Flags
 
-New knobs introduced in this release:
+New in this release:
 
-| Variable | Effect |
+| Variable / Flag | Effect |
 |---|---|
-| `GOANIME_DISABLED_SOURCES` | Comma-separated source names to turn off (case- and dot-insensitive) |
-| `GOANIME_ENABLED_SOURCES` | Opt into a source whose descriptor marks it `DefaultDisabled` |
-| `GOANIME_STRICT_SOURCE` | Fail instead of falling back when the requested source cannot serve the request |
-| `GOANIME_SF_HEADLESS` | Run the SuperFlix Turnstile solver headless |
-| `GOANIME_SF_BUNDLED` | Use the bundled browser instead of a system install |
-| `GOANIME_SF_CHROME_CHANNEL` | Select the Chrome channel for the solver (sanitized against path traversal) |
-| `GOANIME_SF_MASK` | Mask applied by the SuperFlix solver |
-| `GOANIME_SF_NO_PREFETCH` | Disable next-episode prefetching |
+| `GOANIME_SF_HOST` | Pin the SuperFlix host (bare host or full origin), skipping discovery |
+| `GOANIME_SF_OFFSCREEN` | Bypass browser starts minimized — **on by default**; set `0`, `false`, `no` or `off` to always show it |
+| `GOANIME_ANIDB_LANG` | AniDB release language: `jpn`/`sub` (default) or `eng`/`dub` |
+| `--sf-window` | Always show the bypass browser window |
+| `--sf-offscreen` | Keep the bypass browser minimized (now the default; kept for existing commands) |
+
+Removed: `--allanime-smart`.
 
 ---

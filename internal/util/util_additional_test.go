@@ -65,8 +65,8 @@ func TestRegisterCleanup_AppendsFunction(t *testing.T) {
 	cleanupFuncs = nil
 	cleanupMu.Unlock()
 
-	var called int32
-	RegisterCleanup(func() { atomic.AddInt32(&called, 1) })
+	var called atomic.Int32
+	RegisterCleanup(func() { called.Add(1) })
 
 	cleanupMu.Lock()
 	got := len(cleanupFuncs)
@@ -81,12 +81,10 @@ func TestRegisterCleanup_ConcurrentSafe(t *testing.T) {
 	cleanupMu.Unlock()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			RegisterCleanup(func() {})
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -105,15 +103,15 @@ func TestRunCleanup_InvokesAllRegisteredAndDisablesPerfPrint(t *testing.T) {
 	cleanupFuncs = nil
 	cleanupMu.Unlock()
 
-	var n int32
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
-	RegisterCleanup(func() { atomic.AddInt32(&n, 1) })
+	var n atomic.Int32
+	RegisterCleanup(func() { n.Add(1) })
+	RegisterCleanup(func() { n.Add(1) })
+	RegisterCleanup(func() { n.Add(1) })
 
 	PerfEnabled = false // avoid printing the perf report
 
 	RunCleanup()
-	assert.Equal(t, int32(3), atomic.LoadInt32(&n))
+	assert.Equal(t, int32(3), n.Load())
 }
 
 func TestRunCleanup_EmptyListIsNoOp(t *testing.T) {
@@ -359,26 +357,25 @@ func TestTreatingAnimeName_LowersAndDashes(t *testing.T) {
 
 func TestHandleDownloadModeWithSmart_EmptyArgsErrors(t *testing.T) {
 	snapshotGlobalRequest(t)
-	_, err := handleDownloadModeWithSmart(nil, false, false, "", "best", false)
+	_, err := handleDownloadModeWithSmart(nil, false, false, "", "best")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires anime name")
 }
 
 func TestHandleDownloadModeWithSmart_AllSetsRequest(t *testing.T) {
 	snapshotGlobalRequest(t)
-	name, err := handleDownloadModeWithSmart([]string{"naruto"}, false, true, "src", "1080p", true)
+	name, err := handleDownloadModeWithSmart([]string{"naruto"}, false, true, "src", "1080p")
 	require.ErrorIs(t, err, ErrDownloadRequested)
 	assert.Equal(t, "naruto", name)
 	require.NotNil(t, GlobalDownloadRequest)
 	assert.True(t, GlobalDownloadRequest.IsAll)
-	assert.True(t, GlobalDownloadRequest.AllAnimeSmart)
 	assert.Equal(t, "src", GlobalDownloadRequest.Source)
 	assert.Equal(t, "1080p", GlobalDownloadRequest.Quality)
 }
 
 func TestHandleDownloadModeWithSmart_RangeValid(t *testing.T) {
 	snapshotGlobalRequest(t)
-	name, err := handleDownloadModeWithSmart([]string{"naruto", "1-3"}, true, false, "", "best", false)
+	name, err := handleDownloadModeWithSmart([]string{"naruto", "1-3"}, true, false, "", "best")
 	require.ErrorIs(t, err, ErrDownloadRequested)
 	assert.Equal(t, "naruto", name)
 	require.NotNil(t, GlobalDownloadRequest)
@@ -389,34 +386,34 @@ func TestHandleDownloadModeWithSmart_RangeValid(t *testing.T) {
 
 func TestHandleDownloadModeWithSmart_RangeMissingRangeArg(t *testing.T) {
 	snapshotGlobalRequest(t)
-	_, err := handleDownloadModeWithSmart([]string{"naruto"}, true, false, "", "best", false)
+	_, err := handleDownloadModeWithSmart([]string{"naruto"}, true, false, "", "best")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "range")
 }
 
 func TestHandleDownloadModeWithSmart_RangeInvalidFormat(t *testing.T) {
 	snapshotGlobalRequest(t)
-	_, err := handleDownloadModeWithSmart([]string{"naruto", "abc"}, true, false, "", "best", false)
+	_, err := handleDownloadModeWithSmart([]string{"naruto", "abc"}, true, false, "", "best")
 	require.Error(t, err)
 }
 
 func TestHandleDownloadModeWithSmart_RangeStartAfterEnd(t *testing.T) {
 	snapshotGlobalRequest(t)
-	_, err := handleDownloadModeWithSmart([]string{"naruto", "5-2"}, true, false, "", "best", false)
+	_, err := handleDownloadModeWithSmart([]string{"naruto", "5-2"}, true, false, "", "best")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot be greater")
 }
 
 func TestHandleDownloadModeWithSmart_RangeNonPositive(t *testing.T) {
 	snapshotGlobalRequest(t)
-	_, err := handleDownloadModeWithSmart([]string{"naruto", "0-3"}, true, false, "", "best", false)
+	_, err := handleDownloadModeWithSmart([]string{"naruto", "0-3"}, true, false, "", "best")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be positive")
 }
 
 func TestHandleDownloadModeWithSmart_SingleNumericArg(t *testing.T) {
 	snapshotGlobalRequest(t)
-	name, err := handleDownloadModeWithSmart([]string{"naruto", "5"}, false, false, "", "best", false)
+	name, err := handleDownloadModeWithSmart([]string{"naruto", "5"}, false, false, "", "best")
 	require.ErrorIs(t, err, ErrDownloadRequested)
 	assert.Equal(t, "naruto", name)
 	require.NotNil(t, GlobalDownloadRequest)
@@ -441,7 +438,7 @@ func TestHandleDownloadModeWithSmart_NoEpisodeNumberFallsThroughToMenu(t *testin
 	os.Stdin = devnull
 	t.Cleanup(func() { os.Stdin = prev })
 
-	_, err = handleDownloadModeWithSmart([]string{"naruto"}, false, false, "", "best", false)
+	_, err = handleDownloadModeWithSmart([]string{"naruto"}, false, false, "", "best")
 	assert.Error(t, err)
 }
 

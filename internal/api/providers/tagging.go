@@ -26,21 +26,21 @@ var (
 // source matching stays consistent.
 func sourceDisplayName(kind source.SourceKind) string {
 	switch kind {
-	case source.AllAnime:
-		return "AllAnime"
 	case source.AnimeFire:
 		return "Animefire.io"
 	case source.Goyabu:
 		return "Goyabu"
 	case source.SuperFlix:
 		return "SuperFlix"
+	case source.AniDB:
+		return "AniDB"
 	default:
 		return string(kind)
 	}
 }
 
 func languageTag(kind source.SourceKind) string {
-	if kind == source.AllAnime {
+	if kind == source.AniDB {
 		return "[English]"
 	}
 	return "[PT-BR]"

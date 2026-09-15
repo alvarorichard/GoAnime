@@ -13,7 +13,15 @@ import (
 // in the HTTP path; converting to string on every check would allocate a copy
 // for a hot fallback decision.
 var cfChallengeMarkers = [][]byte{
-	[]byte("/cdn-cgi/challenge-platform"),
+	// Only the interstitial's orchestrate path counts. The bare
+	// "/cdn-cgi/challenge-platform" prefix does NOT: Cloudflare injects a
+	// passive bot-telemetry snippet
+	// ("/cdn-cgi/challenge-platform/scripts/jsd/main.js") into ORDINARY
+	// responses it proxies — including plain 404s from the origin. Matching the
+	// bare prefix made a dead player page look like a challenge, so the flow
+	// handed it to the headed browser, which then sat on a "404 Not Found" page
+	// waiting for a stream that could never load until the sniff timed out.
+	[]byte("/cdn-cgi/challenge-platform/h/"),
 	[]byte("challenges.cloudflare.com/turnstile"),
 	[]byte("cf_chl_opt"),
 	[]byte("__cf_chl_"),
@@ -66,15 +74,24 @@ func bodyHasChallengeMarker(body []byte) bool {
 // interstitial that requires a real browser to solve.
 //
 // Logic:
-//   - status 403/503 with HTML body → very likely a challenge
-//   - any status with a known marker substring in body → challenge
+//   - status 404/410 → never a challenge (the origin answered "not found")
 //   - presence of "cf-mitigated: challenge" response header → challenge
+//   - any other status with a known interstitial marker in body → challenge
+//   - status 403/503 with HTML body → very likely a challenge
 //
 // SuperFlix's real API can legitimately return 403 (rate limit) without a
 // challenge — those bodies are JSON, not HTML, so the marker check filters
 // them out.
 func IsCloudflareChallenge(resp *http.Response, body []byte) bool {
 	if resp == nil {
+		return false
+	}
+
+	// A 404/410 is the origin saying "this does not exist" — Cloudflare serves
+	// its interstitials as 403/503/429 (or a 200 HTML page), never as a missing
+	// resource. Treating a dead page as a challenge sends the flow to the
+	// browser solver for a page that will never resolve.
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 		return false
 	}
 

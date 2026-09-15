@@ -152,29 +152,29 @@ func TestFetchAnimeDetailsCore_SFlixCallsSourceOnly(t *testing.T) {
 }
 
 func TestFetchAnimeDetailsCore_MovieTypeCallsSourceOnly(t *testing.T) {
-	var srcCount int32
+	var srcCount atomic.Int32
 	withOverrides(t, appflowOverrides{
 		sourceDetails: func(*models.Anime) error {
-			atomic.AddInt32(&srcCount, 1)
+			srcCount.Add(1)
 			return nil
 		},
 	})
 
 	fetchAnimeDetailsCore(&models.Anime{Name: "Movie X", MediaType: models.MediaTypeMovie})
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcCount))
+	assert.Equal(t, int32(1), srcCount.Load())
 }
 
 func TestFetchAnimeDetailsCore_TVTypeCallsSourceOnly(t *testing.T) {
-	var srcCount int32
+	var srcCount atomic.Int32
 	withOverrides(t, appflowOverrides{
 		sourceDetails: func(*models.Anime) error {
-			atomic.AddInt32(&srcCount, 1)
+			srcCount.Add(1)
 			return nil
 		},
 	})
 
 	fetchAnimeDetailsCore(&models.Anime{Name: "TV Y", MediaType: models.MediaTypeTV})
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcCount))
+	assert.Equal(t, int32(1), srcCount.Load())
 }
 
 func TestFetchAnimeDetailsCore_SourceDetailsErrorIgnored(t *testing.T) {
@@ -231,18 +231,18 @@ func TestFetchAnimeDetailsCore_NeedsAniListOnly_NoCoverDoesNotOverwrite(t *testi
 	assert.Equal(t, "existing.jpg", anime.ImageURL, "empty cover must not overwrite existing")
 }
 
-func TestFetchAnimeDetailsCore_BothNeeded_DeterministicEnrichment(t *testing.T) {
-	anime := &models.Anime{
-		Name:   "AllAnimeShow",
-		Source: "AllAnime",
-		URL:    "https://allanime.to/anime/abcdefghij1234567890",
-	}
-	resp := makeAniListResp(7, 99, "https://cover")
-
+// TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher pins the shape after the
+// AllAnime removal: the source-details (og:image) enricher was only ever
+// reached for AllAnime titles, so AniList is now the single anime enrichment
+// path and sourceDetails must never be called.
+func TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher(t *testing.T) {
+	anime := &models.Anime{Name: "Show", URL: "https://anidb.app/anime/show-1"}
 	var aniHit, srcHit int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {
 			atomic.AddInt32(&aniHit, 1)
+			resp := &models.AniListResponse{}
+			resp.Data.Media.ID = 7
 			return resp, nil
 		},
 		sourceDetails: func(*models.Anime) error {
@@ -252,11 +252,11 @@ func TestFetchAnimeDetailsCore_BothNeeded_DeterministicEnrichment(t *testing.T) 
 	})
 
 	fetchAnimeDetailsCore(anime)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&aniHit))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcHit))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&aniHit), "AniList must run")
+	assert.Equal(t, int32(0), atomic.LoadInt32(&srcHit),
+		"the source-details enricher went with AllAnime and must not be called")
 	assert.Equal(t, 7, anime.AnilistID)
 }
-
 func TestFetchAnimeDetailsCore_BothNeeded_BothErrorNoCrash(t *testing.T) {
 	anime := &models.Anime{
 		Name:   "AllAnimeShow",
@@ -301,32 +301,6 @@ func TestFetchAnimeDetailsCore_DefaultBranch_AlreadyEnriched(t *testing.T) {
 	assert.Equal(t, int32(0), atomic.LoadInt32(&srcHit), "not AllAnime → no source call")
 }
 
-func TestFetchAnimeDetailsCore_DefaultBranch_AlreadyEnriched_AllAnimeStillFetchesSource(t *testing.T) {
-	anime := &models.Anime{
-		Name:      "Done",
-		Source:    "AllAnime",
-		URL:       "https://allanime.to/anime/abcdefghij1234567890",
-		AnilistID: 1,
-		MalID:     2,
-		ImageURL:  "x.jpg",
-	}
-	var aniHit, srcHit int32
-	withOverrides(t, appflowOverrides{
-		aniList: func(string) (*models.AniListResponse, error) {
-			atomic.AddInt32(&aniHit, 1)
-			return nil, nil
-		},
-		sourceDetails: func(*models.Anime) error {
-			atomic.AddInt32(&srcHit, 1)
-			return nil
-		},
-	})
-
-	fetchAnimeDetailsCore(anime)
-	assert.Equal(t, int32(0), atomic.LoadInt32(&aniHit), "already enriched → no AniList call")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&srcHit), "AllAnime URL must trigger source details")
-}
-
 func TestFetchAnimeDetailsCore_DefaultBranch_SourceDetailsError(t *testing.T) {
 	anime := &models.Anime{
 		Name:      "Done",
@@ -348,11 +322,11 @@ func TestFetchAnimeDetailsCore_DefaultBranch_SourceDetailsError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFetchAnimeDetails_FullPipeline_WithPassthroughSpinner(t *testing.T) {
-	var spinnerCalls int32
+	var spinnerCalls atomic.Int32
 	var spinnerTitle string
 	withOverrides(t, appflowOverrides{
 		runSpinner: func(title string, action func()) {
-			atomic.AddInt32(&spinnerCalls, 1)
+			spinnerCalls.Add(1)
 			spinnerTitle = title
 			action()
 		},
@@ -364,7 +338,7 @@ func TestFetchAnimeDetails_FullPipeline_WithPassthroughSpinner(t *testing.T) {
 	anime := &models.Anime{Name: "Test", Source: "AnimeFire"}
 	FetchAnimeDetails(anime)
 
-	assert.Equal(t, int32(1), atomic.LoadInt32(&spinnerCalls))
+	assert.Equal(t, int32(1), spinnerCalls.Load())
 	assert.Equal(t, "Fetching anime details...", spinnerTitle)
 	assert.Equal(t, 100, anime.AnilistID)
 }
@@ -375,9 +349,9 @@ func TestFetchAnimeDetails_FullPipeline_WithPassthroughSpinner(t *testing.T) {
 
 func TestGetAnimeEpisodes_NonSFlix_SpinnerSuccess(t *testing.T) {
 	want := []models.Episode{{Num: 1, Number: "1"}, {Num: 2, Number: "2"}}
-	var spinnerHit int32
+	var spinnerHit atomic.Int32
 	withOverrides(t, appflowOverrides{
-		runSpinner: func(_ string, a func()) { atomic.AddInt32(&spinnerHit, 1); a() },
+		runSpinner: func(_ string, a func()) { spinnerHit.Add(1); a() },
 		getEpisodes: func(*models.Anime) ([]models.Episode, error) {
 			return want, nil
 		},
@@ -386,21 +360,21 @@ func TestGetAnimeEpisodes_NonSFlix_SpinnerSuccess(t *testing.T) {
 	got, err := GetAnimeEpisodes(&models.Anime{Name: "X", Source: "AnimeFire"})
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&spinnerHit), "non-SFlix must use spinner")
+	assert.Equal(t, int32(1), spinnerHit.Load(), "non-SFlix must use spinner")
 }
 
 func TestGetAnimeEpisodes_SFlix_BypassesSpinner_Success(t *testing.T) {
 	want := []models.Episode{{Num: 1, Number: "1"}}
-	var spinnerHit int32
+	var spinnerHit atomic.Int32
 	withOverrides(t, appflowOverrides{
-		runSpinner:  func(_ string, _ func()) { atomic.AddInt32(&spinnerHit, 1) },
+		runSpinner:  func(_ string, _ func()) { spinnerHit.Add(1) },
 		getEpisodes: func(*models.Anime) ([]models.Episode, error) { return want, nil },
 	})
 
 	got, err := GetAnimeEpisodes(&models.Anime{Name: "Y", Source: "SFlix"})
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, int32(0), atomic.LoadInt32(&spinnerHit), "SFlix must NOT use spinner")
+	assert.Equal(t, int32(0), spinnerHit.Load(), "SFlix must NOT use spinner")
 }
 
 func TestGetAnimeEpisodes_FetchErrorWrapped(t *testing.T) {
@@ -484,10 +458,10 @@ func TestGetAnimeEpisodesLegacy_EmptyListIsError(t *testing.T) {
 
 func TestSearchAnimeWithRetry_RetriesUntilSuccess(t *testing.T) {
 	want := &models.Anime{Name: "FoundIt"}
-	var attempts int32
+	var attempts atomic.Int32
 	withOverrides(t, appflowOverrides{
 		searchRetry: func(name, _ string) (*models.Anime, error) {
-			n := atomic.AddInt32(&attempts, 1)
+			n := attempts.Add(1)
 			if n < 3 {
 				return nil, errors.New("not yet")
 			}
@@ -495,7 +469,7 @@ func TestSearchAnimeWithRetry_RetriesUntilSuccess(t *testing.T) {
 			return want, nil
 		},
 		promptForName: func(_ string) (string, error) {
-			n := atomic.LoadInt32(&attempts)
+			n := attempts.Load()
 			switch n {
 			case 1:
 				return "second", nil
@@ -509,15 +483,15 @@ func TestSearchAnimeWithRetry_RetriesUntilSuccess(t *testing.T) {
 	got, err := SearchAnimeWithRetry("initial")
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, int32(3), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(3), attempts.Load())
 }
 
 func TestSearchAnimeWithRetry_BackToSearchBranch(t *testing.T) {
 	want := &models.Anime{Name: "FoundIt"}
-	var attempts int32
+	var attempts atomic.Int32
 	withOverrides(t, appflowOverrides{
 		searchRetry: func(name, _ string) (*models.Anime, error) {
-			n := atomic.AddInt32(&attempts, 1)
+			n := attempts.Add(1)
 			if n == 1 {
 				return nil, api.ErrBackToSearch
 			}
@@ -529,7 +503,7 @@ func TestSearchAnimeWithRetry_BackToSearchBranch(t *testing.T) {
 	got, err := SearchAnimeWithRetry("first")
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
-	assert.Equal(t, int32(2), atomic.LoadInt32(&attempts))
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestSearchAnimeWithRetry_PromptCancelled(t *testing.T) {
@@ -549,10 +523,10 @@ func TestSearchAnimeWithRetry_PromptCancelled(t *testing.T) {
 
 func TestSearchAnimeWithRetry_NilAnimeContinuesLoop(t *testing.T) {
 	want := &models.Anime{Name: "Eventually"}
-	var attempts int32
+	var attempts atomic.Int32
 	withOverrides(t, appflowOverrides{
 		searchRetry: func(string, string) (*models.Anime, error) {
-			n := atomic.AddInt32(&attempts, 1)
+			n := attempts.Add(1)
 			if n == 1 {
 				return nil, nil // nil anime, no error → continues
 			}

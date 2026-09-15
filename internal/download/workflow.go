@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/providers"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/appflow"
@@ -96,34 +95,6 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	if request.IsRange {
 		util.Infof("Downloading episodes %d-%d of %s",
 			request.StartEpisode, request.EndEpisode, anime.Name)
-
-		if request.AllAnimeSmart && (anime.Source == "AllAnime" || source == "allanime" || source == "AllAnime") {
-			util.Info("AllAnime Smart Range enabled: mirror priority + AniSkip integration + progress UI")
-			eps, err := providers.FetchEpisodes(context.Background(), anime)
-			if err == nil && len(eps) > 0 {
-				dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
-				if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
-					return nil
-				}
-				util.Infof("Progress UI path failed, falling back to API smart range: %v", dlErr)
-			} else if err != nil {
-				util.Infof("Enhanced episodes fetch failed for progress path: %v", err)
-			}
-			if err := api.DownloadAllAnimeSmartRange(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
-				util.Errorf("AllAnime Smart Range failed: %v", err)
-				if err := api.DownloadEpisodeRangeEnhanced(anime, request.StartEpisode, request.EndEpisode, quality); err != nil {
-					util.Infof("Enhanced download failed, falling back to legacy: %v", err)
-					episodes, legacyErr := appflow.GetAnimeEpisodesLegacy(anime.URL)
-					if legacyErr != nil {
-						return fmt.Errorf("legacy episode fetch also failed: %w", legacyErr)
-					}
-					dl := downloader.NewEpisodeDownloaderWithAnime(episodes, anime.URL, anime)
-					return dl.DownloadEpisodeRange(request.StartEpisode, request.EndEpisode)
-				}
-				return nil
-			}
-			return nil
-		}
 
 		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {

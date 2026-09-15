@@ -55,20 +55,21 @@ func TestFetchEpisodes_NilAnime(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestFetchEpisodes_UnknownFallsBackToBestEffort(t *testing.T) {
+func TestFetchEpisodes_UnknownIsReportedNotGuessed(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	allAnime := &epStubSource{
-		desc: source.Descriptor{Kind: source.AllAnime, Priority: 1, Explicit: []string{"AllAnime"}},
+	only := &epStubSource{
+		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AniDB"}},
 		eps:  []models.Episode{{Number: "1"}},
 	}
-	restore := source.SwapRegistryForTesting(allAnime)
+	restore := source.SwapRegistryForTesting(only)
 	t.Cleanup(restore)
 
-	// An unrecognized anime dispatches best-effort to the registered AllAnime.
-	eps, err := FetchEpisodes(context.Background(), &models.Anime{Name: "Mystery", URL: "https://unknown.example/x"})
-	require.NoError(t, err)
-	assert.Len(t, eps, 1)
-	assert.Same(t, allAnime.gotAnime, allAnime.gotAnime)
+	// An unrecognized anime used to be dispatched best-effort to AllAnime.
+	// That guess died with the source: Unknown now fails with a readable
+	// reason instead of scraping whatever source happens to be registered.
+	_, err := FetchEpisodes(context.Background(), &models.Anime{Name: "Mystery", URL: "https://unknown.example/x"})
+	require.Error(t, err, "an unrecognized source must not silently dispatch somewhere")
+	assert.Nil(t, only.gotAnime, "no provider should have been called for an Unknown source")
 }
 
 func TestFetchEpisodes_ExplicitSourceNotOverwritten(t *testing.T) {
@@ -91,11 +92,11 @@ type searchStubSource struct {
 	results []*models.Anime
 	sErr    error
 	delay   time.Duration
-	calls   int32
+	calls   atomic.Int32
 }
 
 func (s *searchStubSource) Search(ctx context.Context, _ string) ([]*models.Anime, error) {
-	atomic.AddInt32(&s.calls, 1)
+	s.calls.Add(1)
 	if s.delay > 0 {
 		select {
 		case <-time.After(s.delay):
@@ -108,15 +109,15 @@ func (s *searchStubSource) Search(ctx context.Context, _ string) ([]*models.Anim
 
 func newSearchStub(kind source.SourceKind, results []*models.Anime, err error) *searchStubSource {
 	return &searchStubSource{
-		epStubSource: epStubSource{desc: source.Descriptor{Kind: kind, Priority: 1}},
-		results:      results,
-		sErr:         err,
+		desc:    source.Descriptor{Kind: kind, Priority: 1},
+		results: results,
+		sErr:    err,
 	}
 }
 
 func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AllAnime, []*models.Anime{{Name: "[English] Naruto"}}, nil)
+	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "[English] Naruto"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "[PT-BR] Naruto"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -124,13 +125,13 @@ func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 	got, err := SearchAll(context.Background(), "naruto")
 	require.NoError(t, err)
 	assert.Len(t, got, 2, "results from all searchable sources must be aggregated")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&a.calls))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+	assert.Equal(t, int32(1), a.calls.Load())
+	assert.Equal(t, int32(1), g.calls.Load())
 }
 
 func TestSearchAll_SpecificKindFilter(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AllAnime, []*models.Anime{{Name: "AA"}}, nil)
+	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "GY"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -139,13 +140,13 @@ func TestSearchAll_SpecificKindFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "GY", got[0].Name)
-	assert.Equal(t, int32(0), atomic.LoadInt32(&a.calls), "non-selected source must not be searched")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&g.calls))
+	assert.Equal(t, int32(0), a.calls.Load(), "non-selected source must not be searched")
+	assert.Equal(t, int32(1), g.calls.Load())
 }
 
 func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	ok := newSearchStub(source.AllAnime, []*models.Anime{{Name: "AA"}}, nil)
+	ok := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
 	bad := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(ok, bad)
 	t.Cleanup(restore)
@@ -157,7 +158,7 @@ func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 
 func TestSearchAll_AllFailReturnsError(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	b1 := newSearchStub(source.AllAnime, nil, assert.AnError)
+	b1 := newSearchStub(source.AniDB, nil, assert.AnError)
 	b2 := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(b1, b2)
 	t.Cleanup(restore)
@@ -192,8 +193,8 @@ func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
 	t.Cleanup(func() { perSourceSearchTimeout = prev })
 
 	stub := &hangingSearchSource{
-		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.Goyabu, Priority: 1}},
-		release:      make(chan struct{}),
+		desc:    source.Descriptor{Kind: source.Goyabu, Priority: 1},
+		release: make(chan struct{}),
 	}
 	t.Cleanup(func() { close(stub.release) }) // let the abandoned goroutine exit
 

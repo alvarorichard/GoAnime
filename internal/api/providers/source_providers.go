@@ -20,7 +20,7 @@ import (
 var (
 	// superFlixStreamFn / superFlixEpisodesFn keep SuperFlix delegating to the
 	// api package's UX-heavy paths (spinner, browser preflight, season picker).
-	// AllAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
+	// AniDB/AnimeFire/Goyabu are self-contained (adapter-direct).
 	superFlixStreamFn   = api.GetSuperFlixStreamURL
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
@@ -53,94 +53,6 @@ func EpisodeNumber(ep *models.Episode) string {
 		return fmt.Sprintf("%d", ep.Num)
 	}
 	return ""
-}
-
-// --- AllAnime Provider ---
-
-type allAnimeProvider struct {
-	once    sync.Once
-	adapter adapterSlot
-}
-
-func init() {
-	source.Register(&allAnimeProvider{})
-}
-
-func (p *allAnimeProvider) scraper() (scraper.UnifiedScraper, error) {
-	return lazyGetAdapter(&p.once, &p.adapter, scraper.AllAnimeType)
-}
-
-func (p *allAnimeProvider) Describe() source.Descriptor {
-	return source.Descriptor{
-		Kind:        source.AllAnime,
-		Priority:    40,
-		Explicit:    []string{"AllAnime"},
-		Tags:        []string{"[english]"},
-		URLMatchers: []string{"allanime"},
-		ShortID:     true,
-	}
-}
-
-func (p *allAnimeProvider) HasSeasons() bool { return false }
-
-func (p *allAnimeProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	adapter, err := p.scraper()
-	if err != nil {
-		return nil, err
-	}
-	results, err := adapter.SearchAnime(query)
-	if err != nil {
-		return nil, err
-	}
-	tagResults(results, source.AllAnime)
-	return results, nil
-}
-
-func (p *allAnimeProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
-	adapter, err := p.scraper()
-	if err != nil {
-		return nil, err
-	}
-	animeID := source.ExtractAllAnimeID(anime.URL)
-	return adapter.GetAnimeEpisodes(animeID)
-}
-
-// FetchStreamURL resolves the AllAnime stream directly through the AllAnime
-// adapter (self-contained — no delegation to the api package). The adapter's
-// GetStreamURL drives the client's navigation-aware GetEpisodeURL and returns
-// the referer in its metadata, which mpv needs; we publish it globally, exactly
-// as the deleted api enhanced-navigation path did.
-func (p *allAnimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
-	}
-	adapter, err := p.scraper()
-	if err != nil {
-		return "", err
-	}
-	animeID := source.ExtractAllAnimeID(anime.URL)
-	epNum := EpisodeNumber(episode)
-	if quality == "" {
-		quality = "best"
-	}
-	url, metadata, err := adapter.GetStreamURL(animeID, epNum, quality)
-	if err != nil {
-		return "", fmt.Errorf("allAnime stream: %w", err)
-	}
-	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from AllAnime")
-	}
-	if ref := metadata["referer"]; ref != "" {
-		util.SetGlobalReferer(ref)
-	}
-	return url, nil
 }
 
 // --- AnimeFire Provider ---
@@ -218,6 +130,113 @@ func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.
 	}
 	if url == "" {
 		return "", fmt.Errorf("empty stream URL returned from Animefire.io")
+	}
+	return url, nil
+}
+
+// --- AniDB Provider ---
+//
+// anidb.app replaces the AllAnime path, whose per-request key derivation broke
+// when mkissa.to removed the epoch/partB material it was scraped from. Priority
+// 50 keeps it below the existing sources: it is the newest and least battle-
+// tested, so it is picked only when nothing more specific matches.
+
+type anidbProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&anidbProvider{})
+}
+
+func (p *anidbProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AniDBType)
+}
+
+func (p *anidbProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.AniDB,
+		Priority: 50,
+		Explicit: []string{"AniDB", "anidb.app"},
+		// "[english]" moved here from the deleted AllAnime descriptor: tagging.go
+		// stamps "[English]" on AniDB results (it is the only English source
+		// left), so the resolver must be able to route those names back. Without
+		// it, an AniDB result whose Source field was lost — a title restored from
+		// history, say — resolved to Unknown.
+		Tags:        []string{"[anidb]", "[english]"},
+		URLMatchers: []string{"anidb.app"},
+		ProbeURL:    "https://anidb.app",
+	}
+}
+
+func (p *anidbProvider) HasSeasons() bool { return false }
+
+// The AniDB adapter implements scraper.ContextualScraper, so every call below
+// hands it the real context instead of letting a cancelled search keep an HTTP
+// request alive until the client timeout. The type assertion is the Model C
+// discovery pattern; the fallbacks keep this working if the capability is ever
+// dropped.
+func (p *anidbProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AniDB)
+	return results, nil
+}
+
+func (p *anidbProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		return ca.GetAnimeEpisodesContext(ctx, anime.URL)
+	}
+	return adapter.GetAnimeEpisodes(anime.URL)
+}
+
+// FetchStreamURL resolves an episode to its HLS URL. Unlike Goyabu, AniDB
+// honours the requested quality by picking the matching variant playlist.
+func (p *anidbProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return "", err
+	}
+	var url string
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		url, _, err = ca.GetStreamURLContext(ctx, episode.URL, quality)
+	} else {
+		url, _, err = adapter.GetStreamURL(episode.URL, quality)
+	}
+	if err != nil {
+		return "", fmt.Errorf("anidb stream: %w", err)
+	}
+	if url == "" {
+		return "", fmt.Errorf("empty stream URL returned from AniDB")
 	}
 	return url, nil
 }

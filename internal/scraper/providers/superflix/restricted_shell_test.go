@@ -12,7 +12,7 @@ import (
 const restrictedShellHTML = `<!doctype html><html lang="pt-br"><head><title>Embed | Blades</title></head>
 <body><div class="card"><span>ACESSO RESTRITO</span><h1>Visualização Externa</h1>
 <p>Este conteúdo é protegido. Use o código ao lado para incorporar…</p>
-<pre>&lt;iframe src="https://superflixapi.pro/filme/121390?embed_expires=1815362844&amp;embed_sig=deadbeef"&gt;</pre>
+<pre>&lt;iframe src="https://superflixapi.sbs/filme/121390?embed_expires=1815362844&amp;embed_sig=deadbeef"&gt;</pre>
 </div></body></html>`
 
 func TestIsRestrictedEmbedPage(t *testing.T) {

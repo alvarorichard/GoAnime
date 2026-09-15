@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +16,15 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 	"github.com/pkg/errors"
 )
+
+// maxJSONResponseBytes caps how much of an HTTP response jsonx.Decode will read
+// before failing with jsonx.ErrTooLarge. The decoders this replaced
+// (json.NewDecoder(resp.Body)) had no bound at all, so a hostile or broken
+// upstream could stream until the process ran out of memory.
+const maxJSONResponseBytes = 10 << 20 // 10 MiB
 
 // Common HTTP client instance - reuse the shared singleton for connection pooling
 var httpClient = util.GetSharedClient()
@@ -225,7 +231,16 @@ func enrichAnimeData(anime *models.Anime) error {
 	}
 
 	aniListInfo, err := FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
-	if err != nil {
+	if errors.Is(err, ErrAniListAPIDisabled) {
+		// AniList switched its API off upstream; nothing here can fix that, and
+		// returning an error would drop the cover art, MAL id and title forms
+		// for the whole session. MyAnimeList carries the same facts.
+		util.Debugf("AniList API disabled upstream; enriching '%s' from MyAnimeList instead", anime.Name)
+		aniListInfo, err = fetchAnimeFromJikan(anime.Name)
+		if err != nil {
+			return fmt.Errorf("%w; MyAnimeList fallback also failed: %v", ErrAniListAPIDisabled, err)
+		}
+	} else if err != nil {
 		util.Debugf("Warning: AniList enrichment failed for '%s': %v", anime.Name, err)
 		return fmt.Errorf("AniList enrichment failed: %w", err)
 	}
@@ -402,7 +417,7 @@ func makeGetRequest(url string, headers map[string]string) (map[string]any, erro
 	}
 
 	var responseData map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&responseData); err != nil {
+	if err := jsonx.Decode(resp.Body, maxJSONResponseBytes, &responseData); err != nil {
 		return nil, fmt.Errorf("JSON decode failed: %w", err)
 	}
 	return responseData, nil
@@ -523,7 +538,7 @@ var (
 	// CleanTitle patterns, applied in order
 	reMediaTags = regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
 	reLangTags  = regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
-	reSourceTag = regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|animedrive|9anime)\]\s*`)
+	reSourceTag = regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|anidb|animedrive|9anime)\]\s*`)
 	reEmDash    = regexp.MustCompile(`\s*[–—]\s+.*$`)
 	// For the regular hyphen ( - ) we cannot strip blindly — it appears inside legitimate
 	// titles such as "Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen" / "- Kouhen" (前編/後編,
@@ -537,7 +552,7 @@ var (
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|animefire|animedrive|9anime|goyabu|superflix|flixhq|sflix` +
+		`allanime|anidb|animefire|animedrive|9anime|goyabu|superflix|flixhq|sflix` +
 		`).*$`)
 	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)

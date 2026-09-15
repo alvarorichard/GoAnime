@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // streamCacheEntry is the browser-gated facts for one piece of content: the
@@ -12,11 +15,46 @@ import (
 // (ungated) getVideo endpoint over plain HTTP — no browser — for fresh signed
 // HLS links on every replay.
 type streamCacheEntry struct {
-	Host         string              `json:"host"` // e.g. https://xn--kcksk7a2bl5le7b6doc1h3f.com
-	Hash         string              `json:"hash"` // 32-hex warezcdn content id
+	Host string `json:"host"` // e.g. https://xn--kcksk7a2bl5le7b6doc1h3f.com
+	Hash string `json:"hash"` // 32-hex warezcdn content id
+	// StreamURL is the signed media URL captured on the last successful solve,
+	// with the Referer and User-Agent the CDN binds it to.
+	//
+	// The (host, hash) pair above only replays through the player's getVideo
+	// endpoint, and the current player has none — it answers 404, so every
+	// "cached" play fell through to a full browser solve (~7s). The signed URL
+	// itself outlives the solve by a useful margin (measured: still 200 sixteen
+	// minutes after capture), so keeping it turns a re-watch or a resume into a
+	// single probe. It is never trusted blindly: streamFromCache probes it and
+	// falls through to a re-solve on any rejection.
+	StreamURL    string              `json:"stream_url,omitempty"`
+	StreamRef    string              `json:"stream_referer,omitempty"`
+	StreamUA     string              `json:"stream_user_agent,omitempty"`
+	SignedAt     int64               `json:"signed_at,omitempty"` // unix seconds
 	DefaultAudio []string            `json:"default_audio,omitempty"`
 	Subtitles    []SuperFlixSubtitle `json:"subtitles,omitempty"`
 	ExtrasCached bool                `json:"extras_cached,omitempty"`
+}
+
+// signedURLTTL bounds how long a cached signed URL is worth probing.
+//
+// The CDN's real expiry is not published; one was measured still alive 16
+// minutes after capture. This is deliberately shorter than any observed
+// lifetime is likely to be — the probe, not this constant, is the authority on
+// whether a URL still works. Its only job is to stop us probing a URL so old
+// that a re-solve is the better bet anyway.
+const signedURLTTL = 30 * time.Minute
+
+// freshSignedURL returns the cached signed URL and its headers when one is
+// present and still within signedURLTTL.
+func (e streamCacheEntry) freshSignedURL() (streamURL, referer, userAgent string, ok bool) {
+	if e.StreamURL == "" || e.SignedAt == 0 {
+		return "", "", "", false
+	}
+	if time.Since(time.Unix(e.SignedAt, 0)) > signedURLTTL {
+		return "", "", "", false
+	}
+	return e.StreamURL, e.StreamRef, e.StreamUA, true
 }
 
 // streamCache persists tmdb→(host,hash) so the headed browser runs only on the
@@ -55,7 +93,7 @@ func (sc *streamCache) ensureLoaded() {
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, &sc.entries)
+	_ = jsonx.Unmarshal(data, &sc.entries)
 }
 
 func (sc *streamCache) get(key string) (streamCacheEntry, bool) {
@@ -67,9 +105,12 @@ func (sc *streamCache) get(key string) (streamCacheEntry, bool) {
 }
 
 func (sc *streamCache) put(key string, e streamCacheEntry) {
-	// A native-player host can never replay (its getVideo answers 405), so a
-	// central refusal here keeps every put site from poisoning the cache.
-	if e.Host == "" || e.Hash == "" || isNativePlayerHost(e.Host) {
+	// A host that does not implement the getVideo contract can never replay, so
+	// a central refusal here keeps every put site from poisoning the cache.
+	// Blogger is the case that got through: its player URL split into
+	// host="https://www.blogger.com", hash="video.g", which looked like a valid
+	// pair and was cached, then failed the same way on every later play.
+	if e.Host == "" || e.Hash == "" || !isReplayablePlayerHost(e.Host) {
 		return
 	}
 	sc.mu.Lock()

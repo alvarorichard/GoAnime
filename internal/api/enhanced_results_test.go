@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/api/source"
@@ -18,7 +17,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 
 	t.Run("search sort select enrich", func(t *testing.T) {
 		t.Parallel()
-		english := &models.Anime{Name: "Frieren [English]", Source: "AllAnime", URL: "frieren"}
+		english := &models.Anime{Name: "Frieren [English]", Source: "AniDB", URL: "frieren"}
 		portuguese := &models.Anime{Name: "Frieren [PT-BR]", URL: "https://animefire.example/frieren", Year: "2023"}
 		providerResults := []*models.Anime{english, nil, portuguese}
 		var selectedInput []*models.Anime
@@ -55,7 +54,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			src  string
 			want []source.SourceKind
 		}{
-			{src: "allanime", want: []source.SourceKind{source.AllAnime}},
+			{src: "anidb", want: []source.SourceKind{source.AniDB}},
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
 			{src: "superflix", want: []source.SourceKind{source.SuperFlix}},
@@ -90,16 +89,15 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			url  string
 			want string
 		}{
-			{name: "explicit allanime source", src: "allanime", url: "opaque", want: "AllAnime"},
+			{name: "explicit anidb source", src: "anidb", url: "opaque", want: "AniDB"},
 			{name: "explicit goyabu source", src: "goyabu", url: "opaque", want: "Goyabu"},
 			{name: "explicit superflix numeric id", src: "superflix", url: "8143", want: "SuperFlix"},
-			{name: "allanime URL", url: "https://ALLANIME.to/anime/frieren", want: "AllAnime"},
+			{name: "anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: "AniDB"},
 			{name: "animefire URL", url: "HTTPS://ANIMEFIRE.PLUS/frieren", want: "Animefire.io"},
 			{name: "goyabu URL", url: "https://GOYABU.example/frieren", want: "Goyabu"},
 			{name: "sflix URL", url: "https://SFLIX.example/tv/1", want: "SuperFlix"},
-			{name: "valid short id", url: strings.Repeat("a", 29) + "1", want: "AllAnime"},
-			{name: "numeric is not allanime", url: "8143", want: ""},
-			{name: "punctuation is not allanime", url: "abc/def", want: ""},
+			{name: "bare numeric matches nothing", url: "8143", want: ""},
+			{name: "bare punctuation matches nothing", url: "abc/def", want: ""},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {

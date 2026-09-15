@@ -1,0 +1,10 @@
+# Current SuperFlix host, one per line; blank lines and #-comments are ignored.
+#
+# GoAnime reads this file (from the main branch) ONLY when every SuperFlix alias
+# built into the binary has stopped leading to the live site. When SuperFlix
+# moves to a domain none of those aliases redirect to, updating the line below
+# repairs every installed copy of GoAnime without shipping a new release.
+#
+# The host must be in the superflixapi.* family, and GoAnime still verifies the
+# page before using it, so a wrong value cannot redirect users elsewhere.
+superflixapi.monster

@@ -107,9 +107,8 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
-	addOption(&helpContent, "--source", "Specify anime source (allanime, animefire). Default: search all sources.")
+	addOption(&helpContent, "--source", "Specify source (anidb, animefire, goyabu, superflix). Default: search all sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
-	addOption(&helpContent, "--allanime-smart", "AllAnime Smart Range: auto-skip intros/outros via AniSkip and use priority mirrors.")
 	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
 	helpContent.WriteString("\n")
@@ -125,6 +124,8 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--sf-bundled", "Force Playwright's bundled Chromium instead of system Chrome.")
 	addOption(&helpContent, "--sf-headless", "Run the bypass browser headless (advanced; Turnstile usually rejects headless, so leave off unless you know what you're doing).")
 	addOption(&helpContent, "--sf-mask", "Enable browser fingerprint masking (advanced escape hatch; off by default because it usually breaks the challenge).")
+	addOption(&helpContent, "--sf-offscreen", "Default. The bypass browser starts minimized and surfaces only if the challenge actually needs you to solve it; it closes itself either way. It still runs a real browser — unlike --sf-headless, which the challenge rejects. Note: the player page raises the window when it loads, so this hides the start of the solve, not all of it.")
+	addOption(&helpContent, "--sf-window", "Always show the bypass browser window, instead of keeping it minimized until it is needed.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -149,7 +150,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from AllAnime, AnimeFire, Goyabu, and SuperFlix with automatic fallback.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from AniDB, AnimeFire, Goyabu, and SuperFlix with automatic fallback.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")
@@ -157,7 +158,6 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
 	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
-	addFeature(&helpContent, "AllAnime Smart Range", "Exclusive: For AllAnime, download a range with mirror priority and optional intro/outro trimming.")
 	addFeature(&helpContent, "Anime4K Upscaling", "Enhance video and image quality using the Anime4K algorithm.")
 	helpContent.WriteString("\n")
 
@@ -173,16 +173,16 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --version", "Show version information")
 	addExample(&helpContent, "goanime -d \"one piece\" 1", "Download episode 1 of One Piece")
 	addExample(&helpContent, "goanime -d -r \"naruto\" 1-5", "Download episodes 1-5 of Naruto")
-	addExample(&helpContent, "goanime -d --source allanime \"bleach\" 10", "Download from AllAnime specifically")
+	addExample(&helpContent, "goanime -d --source anidb \"bleach\" 10", "Download from AniDB specifically")
 	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
-	addExample(&helpContent, "goanime -d -r --source allanime --allanime-smart \"vinland saga\" 1-4", "AllAnime Smart Range for episodes 1-4")
 	addExample(&helpContent, "goanime -d -a \"one piece\"", "Download ALL episodes of One Piece")
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
 	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
 	addExample(&helpContent, "goanime -d --source goyabu \"naruto\" 1", "Download from Goyabu (Portuguese)")
 	addExample(&helpContent, "goanime --sf-browser chrome \"loki\"", "Use system Chrome for the SuperFlix Cloudflare bypass")
 	addExample(&helpContent, "goanime --sf-bundled \"loki\"", "Force the bundled Chromium for the bypass")
+	addExample(&helpContent, "goanime --sf-window \"loki\"", "Watch the bypass browser work, instead of hiding it")
 	helpContent.WriteString("\n")
 
 	// Upscale Examples section

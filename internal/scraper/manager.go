@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/allanime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/anidb"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
@@ -27,11 +27,27 @@ import (
 type ScraperType int
 
 const (
-	AllAnimeType ScraperType = iota
-	AnimefireType
-	GoyabuType    // PT-BR anime source
-	SuperFlixType // SuperFlix PT-BR movies/series/animes/doramas
+	AnimefireType ScraperType = iota
+	GoyabuType                // PT-BR anime source
+	SuperFlixType             // SuperFlix PT-BR movies/series/animes/doramas
+	AniDBType                 // anidb.app — subbed/dubbed HLS
 )
+
+// ContextualScraper is the optional capability (Model C: discovered by type
+// assertion, never by a flag) for adapters whose client honours cancellation
+// end to end.
+//
+// UnifiedScraper predates context and cannot carry one; dispatch.go documents
+// the consequence — "the underlying adapter clients still issue non-cancelable
+// http.NewRequest calls", so a per-source deadline can fire while the request it
+// was meant to abort keeps running. Rather than widen the interface (which
+// would touch every adapter at once), an adapter that CAN be cancelled declares
+// it here, and a caller holding a context uses it when present.
+type ContextualScraper interface {
+	SearchAnimeContext(ctx context.Context, query string, options ...any) ([]*models.Anime, error)
+	GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error)
+	GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (string, map[string]string, error)
+}
 
 // UnifiedScraper provides a common interface for all scrapers
 type UnifiedScraper interface {
@@ -47,14 +63,14 @@ type UnifiedScraper interface {
 // does no network I/O.
 func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 	switch t {
-	case AllAnimeType:
-		return &AllAnimeAdapter{client: allanime.NewAllAnimeClient()}, nil
 	case AnimefireType:
 		return &AnimefireAdapter{client: animefire.NewAnimefireClient()}, nil
 	case GoyabuType:
 		return &GoyabuAdapter{client: goyabu.NewGoyabuClient()}, nil
 	case SuperFlixType:
 		return &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}, nil
+	case AniDBType:
+		return &AniDBAdapter{client: anidb.NewAniDBClient()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -64,14 +80,14 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 // the canonical Source spelling used by result tagging and diagnostics.
 func scraperDisplayName(scraperType ScraperType) string {
 	switch scraperType {
-	case AllAnimeType:
-		return "AllAnime"
 	case AnimefireType:
 		return "Animefire.io"
 	case GoyabuType:
 		return "Goyabu"
 	case SuperFlixType:
 		return "SuperFlix"
+	case AniDBType:
+		return "AniDB"
 	default:
 		return "Desconhecido"
 	}
@@ -80,14 +96,14 @@ func scraperDisplayName(scraperType ScraperType) string {
 // scraperLanguageTag returns the language tag prefix for a source.
 func scraperLanguageTag(scraperType ScraperType) string {
 	switch scraperType {
-	case AllAnimeType:
-		return "[English]"
 	case AnimefireType:
 		return "[PT-BR]"
 	case GoyabuType:
 		return "[PT-BR]"
 	case SuperFlixType:
 		return "[PT-BR]"
+	case AniDBType:
+		return "[English]"
 	default:
 		return "[Unknown]"
 	}
@@ -156,76 +172,6 @@ func needsMediaTypeDisambig(results []*models.Anime) map[string]bool {
 	return ambiguous
 }
 
-// AllAnimeAdapter adapts allanime.AllAnimeClient to UnifiedScraper interface
-type AllAnimeAdapter struct {
-	client *allanime.AllAnimeClient
-}
-
-// Client returns the underlying allanime.AllAnimeClient for direct access to enhanced features.
-func (a *AllAnimeAdapter) Client() *allanime.AllAnimeClient {
-	return a.client
-}
-
-func (a *AllAnimeAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
-	// mode is now hardcoded in the new implementation
-	return a.client.SearchAnime(query)
-}
-
-func (a *AllAnimeAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	// For AllAnime, animeURL is actually the anime ID
-	episodes, err := a.client.GetEpisodesList(animeURL, "sub")
-	if err != nil {
-		return nil, err
-	}
-
-	episodeModels := make([]models.Episode, 0, len(episodes))
-	for i, ep := range episodes {
-		episodeModels = append(episodeModels, models.Episode{
-			Number: ep,
-			Num:    i + 1,
-			URL:    animeURL, // Store the anime ID in URL field
-			Title: models.TitleDetails{
-				Romaji: fmt.Sprintf("Episode %s", ep),
-			},
-		})
-	}
-
-	return episodeModels, nil
-}
-
-func (a *AllAnimeAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
-	// For AllAnime, episodeURL contains the anime ID
-	animeID := episodeURL
-
-	// Parse options to get episode number
-	episodeNo := "1"
-	if len(options) > 0 {
-		if ep, ok := options[0].(string); ok {
-			episodeNo = ep
-		}
-	}
-
-	quality := "best"
-	if len(options) > 1 {
-		if q, ok := options[1].(string); ok {
-			quality = q
-		}
-	}
-
-	mode := "sub"
-	if len(options) > 2 {
-		if m, ok := options[2].(string); ok {
-			mode = m
-		}
-	}
-
-	return a.client.GetEpisodeURL(animeID, episodeNo, mode, quality)
-}
-
-func (a *AllAnimeAdapter) GetType() ScraperType {
-	return AllAnimeType
-}
-
 // AnimefireAdapter adapts animefire.AnimefireClient to UnifiedScraper interface
 type AnimefireAdapter struct {
 	client *animefire.AnimefireClient
@@ -272,6 +218,62 @@ func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (streamU
 
 func (a *GoyabuAdapter) GetType() ScraperType {
 	return GoyabuType
+}
+
+// AniDBAdapter adapts anidb.AniDBClient to the UnifiedScraper interface.
+type AniDBAdapter struct {
+	client *anidb.AniDBClient
+}
+
+// The *Context methods are the real implementations; the UnifiedScraper ones
+// below delegate with context.Background() because that interface has nowhere
+// to put a context. Callers that have one should use ContextualScraper.
+func (a *AniDBAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(ctx, query)
+}
+
+func (a *AniDBAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(ctx, animeURL)
+}
+
+// GetStreamURLContext accepts an optional quality string ("best", "1080p", …)
+// as the first variadic option, matching how the other adapters take theirs.
+func (a *AniDBAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.client.GetEpisodeStreamURL(ctx, episodeURL, qualityOption(options))
+}
+
+func (a *AniDBAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+func (a *AniDBAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+func (a *AniDBAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// qualityOption reads the optional quality string from a variadic option list.
+func qualityOption(options []any) string {
+	if len(options) > 0 {
+		if q, ok := options[0].(string); ok && q != "" {
+			return q
+		}
+	}
+	return "best"
+}
+
+func (a *AniDBAdapter) GetType() ScraperType {
+	return AniDBType
+}
+
+// NewAniDBAdapterForTest builds an AniDB adapter whose client talks to a test
+// server instead of anidb.app. It exists so the registry-level cascade test can
+// drive the real adapter glue offline; without it a test can only fake the
+// adapter, and an adapter bug would go unnoticed. Only for tests.
+func NewAniDBAdapterForTest(serverURL string) UnifiedScraper {
+	return &AniDBAdapter{client: anidb.NewClientForTest(serverURL)}
 }
 
 // SuperFlixAdapter adapts superflix.SuperFlixClient to UnifiedScraper interface

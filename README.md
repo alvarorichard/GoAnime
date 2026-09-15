@@ -33,8 +33,9 @@ support for both subbed and dubbed content in English and Portuguese.
 3.  [Installation](#installation)
 4.  [How to use](#how-to-use)
 5.  [Advanced usage](#advanced-usage)
-6.  [Community and mobile](#community-and-mobile)
-7.  [Contributing](#contributing)
+6.  [Troubleshooting](#troubleshooting)
+7.  [Community and mobile](#community-and-mobile)
+8.  [Contributing](#contributing)
 
 ## Features
 
@@ -162,6 +163,24 @@ To view all available commands and flags:
 ```bash
 goanime -h
 ```
+
+## Troubleshooting
+
+### TLS errors behind a corporate proxy or custom CA
+
+If every request fails with a certificate error — typically on a network that
+inspects TLS with its own root CA — point GoAnime at that CA bundle:
+
+```bash
+export SSL_CERT_FILE=/path/to/corporate-ca.pem   # a single PEM bundle
+export SSL_CERT_DIR=/path/to/ca-certificates.d   # or a directory of PEMs
+```
+
+Since Go 1.27 these variables are honoured on **Windows and macOS** as well, not
+just Linux: when either is set, GoAnime verifies certificates with Go's own
+verifier against your bundle instead of the platform certificate store. To go
+back to the platform store without unsetting the variables, run with
+`GODEBUG=x509sslcertoverrideplatform=0`.
 
 ## Community and mobile
 

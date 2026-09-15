@@ -265,9 +265,9 @@ func CleanMediaName(name string) string {
 
 	// Remove year in parentheses if present
 	// e.g., "Movie Name (2024)" -> "Movie Name"
-	if idx := strings.LastIndex(name, "("); idx > 0 {
-		if endIdx := strings.LastIndex(name, ")"); endIdx > idx {
-			possibleYear := strings.TrimSpace(name[idx+1 : endIdx])
+	if head, tail, ok := strings.CutLast(name, "("); ok && head != "" {
+		if inner, _, closed := strings.CutLast(tail, ")"); closed {
+			possibleYear := strings.TrimSpace(inner)
 			if len(possibleYear) == 4 {
 				// Check if it's a year
 				isYear := true
@@ -278,7 +278,7 @@ func CleanMediaName(name string) string {
 					}
 				}
 				if isYear {
-					name = name[:idx]
+					name = head
 				}
 			}
 		}
