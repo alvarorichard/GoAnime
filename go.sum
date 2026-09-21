@@ -98,8 +98,8 @@ github.com/ktr0731/go-fuzzyfinder v0.9.0 h1:JV8S118RABzRl3Lh/RsPhXReJWc2q0rbuipz
 github.com/ktr0731/go-fuzzyfinder v0.9.0/go.mod h1:uybx+5PZFCgMCSDHJDQ9M3nNKx/vccPmGffsXPn2ad8=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
-github.com/lrstanley/go-ytdlp v1.5.2 h1:hGlgOseLlotyKbdW0L9KPBXUiVJmN2ktvkPXKZvrYzo=
-github.com/lrstanley/go-ytdlp v1.5.2/go.mod h1:ZQvJt0xwprahnuV3wtrvGY7IiLlrMYxZtqGOwkbK064=
+github.com/lrstanley/go-ytdlp v1.5.3 h1:38Y/2FxHQZUJTbCded7tjawRjI+c/Fd8DVzMwvH2p7k=
+github.com/lrstanley/go-ytdlp v1.5.3/go.mod h1:ZQvJt0xwprahnuV3wtrvGY7IiLlrMYxZtqGOwkbK064=
 github.com/lucasb-eyer/go-colorful v1.4.1 h1:1EO+WB73+EH8EVbzlrG3KLAfEypQWVHIBqlTf+2hNss=
 github.com/lucasb-eyer/go-colorful v1.4.1/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/mattn/go-runewidth v0.0.30 h1:+KUuiDA4fF0R1p5FeueHefjDm+GIM+kWfFnDjybOPgk=
