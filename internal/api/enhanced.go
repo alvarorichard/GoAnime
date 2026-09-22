@@ -533,6 +533,21 @@ func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.An
 	if len(allEpisodes) == 0 {
 		preflightSuperFlixBrowser()
 
+		// Close the window as soon as the season list is in hand, the same way
+		// the stream path does once it has the server list.
+		//
+		// Without this the browser opened here stayed on screen through the
+		// season picker, the episode picker and everything after — every one of
+		// them waiting on the user — and closed only when a stream was finally
+		// resolved, or never at all if the user backed out. That is the window
+		// reported as "abre e não fecha". Nothing later needs it: the season
+		// list is data, and the stream path re-launches the browser itself when
+		// its turn comes.
+		//
+		// Deferred rather than called after the spinner so a failed listing
+		// releases it too.
+		defer sfReleaseBrowserFn()
+
 		var episodesErr error
 		runWithSpinner("Loading seasons..."+sfBrowserSpinnerHint, func() {
 			// Generous timeout: the player page may sit behind a Cloudflare Turnstile

@@ -18,6 +18,7 @@ import (
 type sfSeasonsHarness struct {
 	tvmazeCalls  int
 	browserCalls int
+	releaseCalls int
 	warned       bool
 }
 
@@ -30,11 +31,14 @@ func (h *sfSeasonsHarness) install(
 	prevTV, prevBrowser := sfTVmazeEpisodesFn, sfBrowserEpisodesFn
 	prevHeadless, prevPending := sfHeadlessEnvFn, sfSetupPendingFn
 	prevWarn, prevInfo := sfWarnFn, sfInfoFn
+	prevRelease := sfReleaseBrowserFn
 	t.Cleanup(func() {
 		sfTVmazeEpisodesFn, sfBrowserEpisodesFn = prevTV, prevBrowser
 		sfHeadlessEnvFn, sfSetupPendingFn = prevHeadless, prevPending
 		sfWarnFn, sfInfoFn = prevWarn, prevInfo
+		sfReleaseBrowserFn = prevRelease
 	})
+	sfReleaseBrowserFn = func() { h.releaseCalls++ }
 
 	sfTVmazeEpisodesFn = func(ctx context.Context, imdbID string) (map[string][]superflix.SuperFlixEpisode, error) {
 		h.tvmazeCalls++
@@ -240,4 +244,79 @@ func TestSortedSeasonNumbers(t *testing.T) {
 			assert.Equal(t, tt.want, sortedSeasonNumbers(tt.in))
 		})
 	}
+}
+
+// The browser opened for the season list has to be released when that listing
+// ends — not left on screen through the season picker, the episode picker and
+// whatever follows, all of which wait on the user.
+//
+// It used to be released only when a stream was finally resolved, so a user who
+// browsed the seasons and backed out kept a live Chrome window with nothing
+// driving it. That is the "abre e não fecha" report. The season list is data:
+// once it is in hand nothing downstream needs the browser, and the stream path
+// re-launches it when its turn comes.
+func TestFetchSuperFlixSeasons_ReleasesTheBrowserItOpened(t *testing.T) {
+	tests := []struct {
+		name    string
+		browser func(context.Context, *superflix.SuperFlixClient, string) (map[string][]superflix.SuperFlixEpisode, error)
+		wantErr bool
+	}{
+		{
+			name: "listing succeeded",
+			browser: func(context.Context, *superflix.SuperFlixClient, string) (map[string][]superflix.SuperFlixEpisode, error) {
+				return sfEpisodes(12), nil
+			},
+		},
+		{
+			// A failed listing leaves the same window behind, so the release
+			// cannot hang off the success path.
+			name: "listing failed",
+			browser: func(context.Context, *superflix.SuperFlixClient, string) (map[string][]superflix.SuperFlixEpisode, error) {
+				return nil, errors.New("cloudflare never cleared")
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &sfSeasonsHarness{}
+			h.install(t,
+				func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) {
+					return nil, errors.New("tvmaze has no listing")
+				},
+				tt.browser,
+			)
+
+			media := &models.Anime{Name: "Show", IMDBID: "tt1", URL: "1396"}
+			_, err := fetchSuperFlixSeasons(nil, media, "1396")
+
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, 1, h.browserCalls, "this case must actually reach the browser")
+			assert.Equal(t, 1, h.releaseCalls,
+				"the window opened for the season list must be closed when the listing ends")
+		})
+	}
+}
+
+// The mirror of the above: a listing answered by TVmaze never opens a window,
+// so it must not close one either. Releasing unconditionally would tear down a
+// browser another source is in the middle of using — the two share one.
+func TestFetchSuperFlixSeasons_DoesNotReleaseABrowserItNeverOpened(t *testing.T) {
+	h := &sfSeasonsHarness{}
+	h.install(t,
+		func(context.Context, string) (map[string][]superflix.SuperFlixEpisode, error) {
+			return sfEpisodes(24), nil
+		},
+		noBrowser(t),
+	)
+
+	media := &models.Anime{Name: "NHK ni Youkoso", IMDBID: "tt0857297", URL: "42821"}
+	_, err := fetchSuperFlixSeasons(nil, media, "42821")
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, h.releaseCalls, "nothing was opened, so nothing may be closed")
 }

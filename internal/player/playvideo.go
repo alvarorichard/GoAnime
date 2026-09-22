@@ -527,6 +527,32 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 // malID is the MyAnimeList ID (used by the AniSkip API).
 // anilistID is the AniList ID (used as the tracking/resume key).
 // They are distinct identifiers — passing one in place of the other
+// externalSubtitleArgs turns the tracks a source resolved into mpv --sub-file
+// arguments, asking the user to choose first when that is warranted.
+//
+// The gate is "did a source give us tracks", not a list of source names. It
+// used to be `wantsLangPrefs || is9Anime` — movies/TV, SuperFlix and 9Anime —
+// which meant any other source resolved its subtitles, stored them, and then
+// had them silently dropped: never passed to mpv, with nothing said about it.
+// HiAnime, which ships an English and a Brazilian Portuguese track per episode,
+// hit exactly that. Both download paths already gate on the track count; this
+// is the same rule, in the one place that did not follow it.
+//
+// 9Anime always prompts, per its own contract. Everyone else is only asked when
+// there is an actual choice to make — one track needs no picker.
+func externalSubtitleArgs(is9Anime bool) []string {
+	if is9Anime {
+		util.PromptSubtitleLanguage()
+	} else if len(util.GetGlobalSubtitles()) > 1 {
+		util.SelectSubtitles()
+	}
+	args := util.GetSubtitleArgs()
+	if len(args) > 0 {
+		util.Debugf("Added external subtitles: %v", args)
+	}
+	return args
+}
+
 // causes resume data to collide across sources.
 func playVideo(
 	videoURL string,
@@ -635,20 +661,8 @@ func playVideo(
 		util.Debugf("Applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
 	}
 
-	// External subtitle files (FlixHQ / SuperFlix / 9Anime). For 9Anime, ALWAYS
-	// prompt the user to pick a subtitle language after every episode selection.
-	var subArgs []string
-	if wantsLangPrefs || is9Anime {
-		if is9Anime {
-			util.PromptSubtitleLanguage()
-		} else if len(util.GetGlobalSubtitles()) > 1 {
-			util.SelectSubtitles()
-		}
-		subArgs = util.GetSubtitleArgs()
-		if len(subArgs) > 0 {
-			util.Debugf("Added external subtitles: %v", subArgs)
-		}
-	}
+	// External subtitle files, from whichever source resolved them.
+	subArgs := externalSubtitleArgs(is9Anime)
 
 	// YtdlpCanImpersonate is only consulted on the 9Anime HLS path; keep the call
 	// gated so non-9Anime playback doesn't pay for it.
