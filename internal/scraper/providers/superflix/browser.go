@@ -406,6 +406,9 @@ func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout t
 			humanize(page)
 			clickTurnstile(page)
 		}
+		// The gate's own redirects raise the window between our navigations;
+		// put it back down so --sf-offscreen holds for the whole solve (#202).
+		keepSolverWindowHidden(page, bctx)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

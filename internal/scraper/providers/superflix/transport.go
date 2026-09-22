@@ -75,12 +75,24 @@ type cfFallbackTransport struct {
 	jar     http.CookieJar
 	timeout time.Duration
 
+	// gate suppresses requests to a host that asked us to back off. nil means
+	// the process-wide gate; tests install their own.
+	gate *rateLimitGate
+
 	// solvedUA holds the User-Agent of the real browser that solved the gate.
 	// Cloudflare binds cf_clearance to the UA, so once we have it every
 	// subsequent request must send the SAME UA or the clearance is rejected.
 	// Guarded by uaMu; empty until the first successful solve.
 	uaMu     sync.Mutex
 	solvedUA string
+}
+
+// rateGate returns the gate this transport answers to.
+func (t *cfFallbackTransport) rateGate() *rateLimitGate {
+	if t.gate != nil {
+		return t.gate
+	}
+	return defaultRateLimitGate
 }
 
 func (t *cfFallbackTransport) getSolvedUA() string {
@@ -119,6 +131,20 @@ func (t *cfFallbackTransport) honorRetryAfter429(req *http.Request, resp *http.R
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		return resp, nil
 	}
+	// Best-effort requests do not sit out a rate limit. These are the same
+	// requests that must never open the headed browser — multi-source search,
+	// the prefetch, the stream-liveness probes, the optional player extras —
+	// and the reasoning carries over exactly: SuperFlix is one source among
+	// several, a missing SuperFlix result is an acceptable outcome, and the
+	// user is waiting on the whole fan-out. Sleeping 10s here spent almost the
+	// entire 12s per-source search budget to arrive at the same 429 (the
+	// "dexter" report, 2026-09-20). The play path, where the user explicitly
+	// chose SuperFlix content, still waits the rate limit out.
+	if browserSolveForbidden(req.Context()) {
+		util.Debug("SuperFlix 429 rate-limited; best-effort request, not waiting out Retry-After",
+			"retryAfter", parseRetryAfter(resp), "url", req.URL.String())
+		return resp, nil
+	}
 
 	var spent time.Duration
 	for tries := 0; tries < maxRetryAfterTries && resp.StatusCode == http.StatusTooManyRequests; tries++ {
@@ -131,6 +157,18 @@ func (t *cfFallbackTransport) honorRetryAfter429(req *http.Request, resp *http.R
 		}
 		if spent+wait > retryAfterBudget {
 			break // out of budget — hand the 429 back to the caller
+		}
+		// A wait the caller's deadline cannot cover is pure cost: we would
+		// sleep, get cancelled mid-wait (or retry once and get cancelled
+		// before reading the answer) and hand back nothing, having added
+		// another request to a host that is rate-limiting us. Multi-source
+		// search runs on a 12s per-source budget against a 10s Retry-After, so
+		// this is the common case, not the corner one. Give the 429 back now
+		// and let the search report a rate-limit instead of a timeout.
+		if deadline, ok := req.Context().Deadline(); ok && time.Until(deadline) <= wait {
+			util.Debug("SuperFlix 429 rate-limited; Retry-After exceeds the caller's deadline, not waiting",
+				"wait", wait, "remaining", time.Until(deadline), "url", req.URL.String())
+			break
 		}
 		spent += wait
 
@@ -192,6 +230,21 @@ func browserSolveForbidden(ctx context.Context) bool {
 }
 
 func (t *cfFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Respect a back-off this host asked for earlier, including one recorded by
+	// a previous run. The abuse guard is sticky — a probe sent during a block
+	// renews it — so the request is not sent at all.
+	//
+	// Only NEW requests pass through here. honorRetryAfter429 retries through
+	// t.base directly, so a request that is already waiting out its own
+	// Retry-After is not gated by the entry it just created.
+	host, path := req.URL.Host, req.URL.Path
+	gate := t.rateGate()
+	if in := gate.retryIn(host, path); in > 0 {
+		util.Debug("SuperFlix request suppressed by an active back-off",
+			"endpoint", backoffKey(host, path), "retryIn", in, "url", req.URL.String())
+		return nil, rateLimitedError(backoffKey(host, path), in)
+	}
+
 	// Once a solve has happened, force every request to carry the browser's UA
 	// so the UA-bound cf_clearance cookie stays valid.
 	if ua := t.getSolvedUA(); ua != "" {
@@ -210,6 +263,15 @@ func (t *cfFallbackTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	resp, err = t.honorRetryAfter429(req, resp)
 	if err != nil {
 		return resp, err
+	}
+
+	// Remember the outcome for the NEXT request, which is the part that was
+	// missing: honoring Retry-After only inside one request left the following
+	// search free to walk straight back into the block.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		noteRateLimit(gate, host, path, parseRetryAfter(resp))
+	} else {
+		gate.clear(host, path)
 	}
 
 	if !shouldInspect(resp) {

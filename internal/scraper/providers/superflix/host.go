@@ -263,6 +263,33 @@ func (p *hostProber) resolve(parent context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, hostProbeBudget)
 	defer cancel()
 
+	// Try the remembered host on its own before racing the alias list.
+	//
+	// The race is what makes a COLD discovery affordable — a dead alias costs
+	// its own timeout instead of the whole budget — but it is not free: every
+	// retired alias 301s into the SAME live origin, so racing a dozen seeds
+	// lands a dozen homepage GETs on that origin inside one second, on the
+	// critical path of the first SuperFlix request. A run that already knows
+	// which host worked last time has no reason to pay that.
+	//
+	// This is a volume/latency improvement, not a rate-limit fix: SuperFlix's
+	// abuse guard counts PER ENDPOINT (measured 2026-09-20 — `/` answered 200
+	// while `/pesquisar` was still 429ing from the same IP, both uncached), so
+	// these homepage probes never shared the search endpoint's allowance.
+	//
+	// A warm run now costs ONE walk. A cold run, or a remembered host that has
+	// since died or turned into a parked page, falls through to exactly the
+	// previous behaviour.
+	if remembered := normalizeHost(p.loadPersisted()); remembered != "" {
+		host, err := p.walkAndVerify(ctx, remembered)
+		if err == nil {
+			p.persist(host)
+			return host, nil
+		}
+		util.Debug("SuperFlix remembered host no longer resolves; racing the alias list",
+			"host", remembered, "err", err)
+	}
+
 	seeds := dedupeHosts(append([]string{p.loadPersisted()}, p.seeds...))
 	host, seedErr := p.race(ctx, seeds)
 	if seedErr == nil {

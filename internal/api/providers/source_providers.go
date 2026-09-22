@@ -346,6 +346,11 @@ func (p *superFlixProvider) Describe() source.Descriptor {
 // capability: SuperFlix is a movie/TV catalog organized into seasons.
 func (p *superFlixProvider) HasSeasons() bool { return true }
 
+// Search hands the fan-out deadline to the adapter. SuperFlix implements
+// scraper.ContextualScraper, so a search the dispatcher gives up on actually
+// stops instead of leaving the transport's Retry-After loop sleeping and
+// re-requesting against a host that is already rate-limiting us. Same Model C
+// discovery pattern as anidbProvider, with the plain call as the fallback.
 func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -354,7 +359,12 @@ func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models
 	if err != nil {
 		return nil, err
 	}
-	results, err := adapter.SearchAnime(query)
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
 	if err != nil {
 		return nil, err
 	}

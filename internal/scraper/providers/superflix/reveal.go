@@ -2,6 +2,7 @@ package superflix
 
 import (
 	"sync"
+	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/mxschmitt/playwright-go"
@@ -90,6 +91,44 @@ func hideSolverWindow(page playwright.Page, ctx playwright.BrowserContext) {
 	util.Debug("SuperFlix: solver window minimized (--sf-offscreen)")
 }
 
+// hideReassertInterval throttles keepSolverWindowHidden. Each re-assert is a
+// CDP round-trip and the sniff loop ticks every 500ms, so re-minimizing on
+// every tick would triple the loop's protocol traffic for no gain; the window
+// is raised by a page load, which is a rare event on that timescale.
+const hideReassertInterval = 2 * time.Second
+
+// lastHideAt records the last re-assert per page, so the throttle is per solve
+// and cleared with the page (forgetRevealedPage).
+var lastHideAt sync.Map // playwright.Page -> time.Time
+
+// keepSolverWindowHidden re-minimizes a window that the page raised behind our
+// back. hideSolverWindow is already re-asserted after every navigation we
+// perform, but the SuperFlix embed raises the window itself when it finishes
+// loading — which happens asynchronously, inside the sniff's wait loop, long
+// after the last navigation returned. Without this the window then stayed on
+// screen for the rest of the solve, which is the "Chrome opens and closes"
+// users report (issue #202).
+//
+// Carries hideSolverWindow's guards: no-op unless --sf-offscreen is on, and
+// never undoes a deliberate reveal, so the manual-verification rescue path is
+// unaffected.
+func keepSolverWindowHidden(page playwright.Page, ctx playwright.BrowserContext) {
+	if !loadSuperflixConfig().Offscreen {
+		return
+	}
+	if _, revealed := revealedPages.Load(page); revealed {
+		return
+	}
+	now := time.Now()
+	if prev, ok := lastHideAt.Load(page); ok {
+		if at, isTime := prev.(time.Time); isTime && now.Sub(at) < hideReassertInterval {
+			return
+		}
+	}
+	lastHideAt.Store(page, now)
+	hideSolverWindow(page, ctx)
+}
+
 // revealSolverWindow pulls the solver window onto the desktop and focuses it.
 //
 // No-op unless --sf-offscreen is on (otherwise the window is already visible)
@@ -144,4 +183,17 @@ func focusSolverPage(page playwright.Page) {
 // a page so the map does not grow across plays.
 func forgetRevealedPage(page playwright.Page) {
 	revealedPages.Delete(page)
+	lastHideAt.Delete(page)
+}
+
+// forgetSolverWindowState drops every page's window state at once. The solver
+// closes its whole context between plays, which invalidates all of its pages —
+// including the persistent context's own tab, which no forgetRevealedPage call
+// covers because the solver never closes it individually. Clearing here keeps
+// both maps bounded across a long session and, just as importantly, makes each
+// new context start hidden again rather than inheriting a reveal from the
+// previous play.
+func forgetSolverWindowState() {
+	revealedPages.Clear()
+	lastHideAt.Clear()
 }

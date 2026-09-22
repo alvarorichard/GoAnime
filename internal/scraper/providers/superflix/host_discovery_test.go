@@ -29,15 +29,25 @@ func (f fakeHosts) RoundTrip(r *http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("dial tcp: lookup %s: i/o timeout", r.URL.Host)
 }
 
+// respond builds a responder for fakeHosts.
+//
+// Every call returns a FRESH header map instead of handing out (or lazily
+// initialising) the captured one. The prober races its seeds concurrently and
+// several walkers can land on the same host — through a redirect, or because
+// the remembered host is also a seed — so a responder is called from more than
+// one goroutine. Mutating or sharing the captured header across those calls is
+// a data race, and sharing the map would also let net/http hand two responses
+// the same header storage.
 func respond(status int, header http.Header, body string) func(*http.Request) *http.Response {
 	return func(r *http.Request) *http.Response {
-		if header == nil {
-			header = http.Header{}
+		h := make(http.Header, len(header))
+		for k, v := range header {
+			h[k] = append([]string(nil), v...)
 		}
 		return &http.Response{
 			StatusCode: status,
 			Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
-			Header:     header,
+			Header:     h,
 			Body:       io.NopCloser(strings.NewReader(body)),
 			Request:    r,
 		}

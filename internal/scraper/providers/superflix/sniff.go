@@ -27,6 +27,24 @@ var sfEmbedURLRe = regexp.MustCompile(`(?i)src=["']([^"']*\?cfv=[^"']+)["']`)
 // The cfv value is a JWT (base64url segments + dots).
 var sfCfvURLRe = regexp.MustCompile(`https?://[a-zA-Z0-9.\-]+/(?:serie|filme)/[A-Za-z0-9/_\-]+\?cfv=[A-Za-z0-9._\-]+`)
 
+// sfPlainEmbedURLRe is the same box WITHOUT a cfv token.
+//
+// SuperFlix changed the restricted page's "Embed Code" on 2026-09-21 to hand
+// out a bare URL:
+//
+//	<iframe src="https://superflixapi.quest/serie/1405" allow="autoplay *; …">
+//
+// Both patterns above require ?cfv=, so extraction returned "" and the embed
+// recovery never ran — every SuperFlix title then failed with "didn't show an
+// episode list", after a solve that had actually cleared the gate.
+//
+// The token was never what made the read work. Loading the URL inside a genuine
+// cross-origin iframe is: that is what makes the request Sec-Fetch-Site:
+// cross-site, and the server issues a fresh cfv itself. So a bare embed URL is
+// just as usable, and is accepted here as the last resort — after the
+// cfv-bearing forms, which are more specific and identify the box unambiguously.
+var sfPlainEmbedURLRe = regexp.MustCompile(`(?i)<iframe[^>]+src=["'](https?://superflixapi\.[a-z0-9\-]+/(?:serie|filme)/[A-Za-z0-9/_\-]+)["']`)
+
 // extractSuperFlixEmbedURL pulls the player embed URL out of the restricted
 // page HTML. It first tries a live iframe attribute, then falls back to a raw
 // URL scan after unescaping the HTML entities the EMBED CODE box uses.
@@ -35,6 +53,10 @@ func extractSuperFlixEmbedURL(rawHTML string) string {
 	for _, r := range []struct{ from, to string }{
 		{"&amp;", "&"}, {"&#38;", "&"},
 		{"&quot;", `"`}, {"&#34;", `"`}, {"&#039;", "'"}, {"&#39;", "'"},
+		{"&lt;", "<"}, {"&#60;", "<"}, {"&gt;", ">"}, {"&#62;", ">"},
+		// The same snippet also appears JSON-escaped elsewhere on the page:
+		//   src=\"https:\/\/superflixapi.quest\/serie\/1405\"
+		{`\/`, "/"}, {`\"`, `"`},
 	} {
 		s = strings.ReplaceAll(s, r.from, r.to)
 	}
@@ -43,6 +65,9 @@ func extractSuperFlixEmbedURL(rawHTML string) string {
 	}
 	if u := sfCfvURLRe.FindString(s); u != "" {
 		return u
+	}
+	if m := sfPlainEmbedURLRe.FindStringSubmatch(s); len(m) >= 2 {
+		return m[1]
 	}
 	return ""
 }
@@ -631,14 +656,25 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		// completes it with no human.
 		humanize(page)
 		clickTurnstile(page)
+		// The embed raises the window when it finishes loading, which happens
+		// inside this loop rather than during one of our navigations. Put it
+		// back down (issue #202); no-op once the window was deliberately
+		// revealed for manual verification.
+		keepSolverWindowHidden(page, bctx)
 		// The widget can fail to load rather than demand a checkbox; then the
 		// page's own retry button is the only way forward — and a hidden window
 		// has to come out so the user can take over.
 		if clickChallengeRetry(page) {
 			revealSolverWindow(page, bctx, "challenge reported a load failure")
 		}
-		if time.Now().After(revealAt) {
-			revealSolverWindow(page, bctx, "no stream captured while the gate stayed closed")
+		// Hand the window over only when the wait is one a human can end. Past
+		// the gate the page just needs time to emit its media request, and a
+		// cold profile can cross this timer while doing exactly that — popping
+		// a captcha prompt there asks the user to solve something that is not
+		// on screen, which is how "the captcha stopped solving itself" gets
+		// reported for a solve that was working.
+		if time.Now().After(revealAt) && challengeVisible(page) {
+			revealSolverWindow(page, bctx, "a challenge is still on screen and has not cleared on its own")
 		}
 		triggerPlay(page)
 		select {

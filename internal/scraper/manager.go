@@ -282,7 +282,22 @@ type SuperFlixAdapter struct {
 }
 
 func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
-	media, err := a.client.SearchMedia(query)
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SuperFlixAdapter implements ContextualScraper: its client already threads a
+// context through every HTTP call, so a cancelled search can actually stop.
+//
+// This matters more here than elsewhere. SuperFlix's edge answers 429 with a
+// Retry-After of ~10s, and the transport honors it by sleeping and retrying —
+// a loop that only checks the REQUEST's context. Without the search deadline
+// reaching that request, the per-source timeout fired at 12s while the retry
+// goroutine kept sleeping and re-requesting for another 30s, against a host
+// that was rate-limiting precisely because it was being hit too often. Each
+// abandoned search left one of those behind, so consecutive searches stacked
+// up and the source could never recover on its own.
+func (a *SuperFlixAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	media, err := a.client.SearchMediaWithContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -294,12 +309,27 @@ func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.
 	return animes, nil
 }
 
+// GetAnimeEpisodesContext carries no extra behavior: SuperFlix's episode
+// listing runs the season picker in enhanced.go, not through this adapter. It
+// exists so SuperFlixAdapter satisfies ContextualScraper as a whole.
+func (a *SuperFlixAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
 func (a *SuperFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 	// For SuperFlix, animeURL contains the TMDB ID
 	return nil, fmt.Errorf("for SuperFlix, use GetSuperFlixEpisodes in enhanced.go")
 }
 
 func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetStreamURLContext resolves a stream under the caller's context. The
+// solve budget below still applies — it is derived from ctx, so a caller that
+// cancels earlier wins, and one that does not gets the same generous window as
+// before.
+func (a *SuperFlixAdapter) GetStreamURLContext(parent context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	// episodeURL = TMDB ID
 	// options[0] = media type ("filme" or "serie")
 	// options[1] = season (optional)
@@ -327,7 +357,7 @@ func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (stre
 	// Generous timeout: the first request in the pipeline may hit a Cloudflare
 	// Turnstile gate the client solves with a headed Firefox (10–40s); a
 	// shorter deadline cancels the solve mid-flight.
-	ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 210*time.Second)
 	defer cancel()
 
 	result, err := a.client.GetStreamURL(ctx, mediaType, episodeURL, season, episode)

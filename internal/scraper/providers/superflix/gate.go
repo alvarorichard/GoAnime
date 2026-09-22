@@ -268,6 +268,47 @@ const challengeRetryCooldown = 5 * time.Second
 // crossing this means something needs a human.
 const offscreenRevealAfter = 15 * time.Second
 
+// challengeVisible reports whether there is a challenge on screen right now —
+// something only a human can clear — as opposed to a solve that is simply
+// taking its time.
+//
+// Revealing on elapsed time alone popped a captcha prompt over solves that were
+// working and about to finish: past the gate the page just waits for the player
+// to emit its media request, which can outlast the reveal timer on a cold
+// profile. Nothing was there to click, so the prompt was noise.
+//
+// But "no Turnstile WIDGET" is not "no challenge". turnstileSelectors lists the
+// shapes clickTurnstile can click, and deliberately leaves out SuperFlix's own
+// mount (`div id="cfw-<hex>" class="cf-turnstile-placeholder"`) because clicking
+// an empty container wastes the one allowed click. Gating the hand-over on that
+// list alone meant SuperFlix's own "Verificação" page — a real challenge, shown
+// to the user, that this solve cannot finish by itself — never reached them:
+// the window stayed minimized and the solve ran out its budget in silence.
+//
+// So the page's own challenge markers count too. They are the same ones the
+// HTTP path uses to recognise a gate, so the two layers agree on what a
+// challenge is.
+//
+// Order is by cost: a Count() per selector per frame first, and the full page
+// content only if that finds nothing. The whole check runs only after the
+// reveal timer has elapsed, never on the happy path.
+func challengeVisible(page playwright.Page) bool {
+	if page == nil {
+		return false
+	}
+	for _, fr := range page.Frames() {
+		for _, sel := range turnstileSelectors {
+			if n, err := fr.Locator(sel).First().Count(); err == nil && n > 0 {
+				return true
+			}
+		}
+	}
+	if content, err := page.Content(); err == nil && content != "" {
+		return bodyHasChallengeMarker([]byte(content))
+	}
+	return false
+}
+
 // clickChallengeRetry presses the challenge page's own "try again" control when
 // the Turnstile widget has failed to load.
 //
@@ -507,6 +548,10 @@ func (s *cfBrowserSolver) closeContext() {
 	s.pctx = nil
 	s.lifeMu.Unlock()
 	if pctx != nil {
+		// Every page of that context is about to die, so its window state is
+		// worthless — and keeping it would leak a map entry per play and let a
+		// reveal carry over into the next (fresh, hidden) window.
+		forgetSolverWindowState()
 		go func() { _ = pctx.Close() }()
 	}
 }
