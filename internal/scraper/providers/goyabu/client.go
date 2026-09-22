@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -71,10 +73,26 @@ type GoyabuClient struct {
 	retryDelay time.Duration
 }
 
-// NewGoyabuClient creates a new Goyabu client
+// NewGoyabuClient creates a new Goyabu client.
+//
+// The HTTP client is wrapped with gateTransport: Goyabu sits behind a
+// Cloudflare managed challenge, so a 403 interstitial is handed to the browser
+// solver once and the request replayed with the resulting clearance. See
+// challenge.go for the measurements behind that design.
 func NewGoyabuClient() *GoyabuClient {
+	surf := util.NewFastClient()
+	jar, _ := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
+	gate := newGateTransport(surf.Transport, netx.SafeScraperTransport(30*time.Second), jar)
+
 	return &GoyabuClient{
-		client:     util.NewFastClient(),
+		client: &http.Client{
+			// No global timeout: gateTransport bounds each HTTP attempt itself
+			// (httpAttemptTimeout) and gives a browser solve its own, much
+			// larger budget. One cap covering both would have to be either too
+			// short for the solve or too long for a hung request.
+			Transport: gate,
+			Jar:       jar,
+		},
 		baseURL:    goyabuBase,
 		userAgent:  netx.UserAgent,
 		maxRetries: 2,
@@ -778,7 +796,7 @@ func (c *GoyabuClient) decodeBloggerToken(token string) (string, error) {
 func (c *GoyabuClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Accept-Language", netx.AcceptLanguage)
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Referer", c.baseURL+"/")
 }
