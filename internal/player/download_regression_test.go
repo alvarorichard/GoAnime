@@ -264,11 +264,15 @@ func TestHandleBatchDownloadRangeReturnsBatchErrorForAnimeFireNoStream(t *testin
 	restore := installDownloadRangeTestState(outputDir)
 	defer restore()
 
+	// AnimeFire is read through its JSON API now, so the stand-in has to be the
+	// API, not a page. Without pointing the client here the resolution would
+	// reach the live api.animefire.one — a unit test must not depend on it.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(`<html><body><h1>episode page without any playable source</h1></body></html>`))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"streams":[]}}`))
 	}))
 	defer server.Close()
+	t.Setenv("GOANIME_ANIMEFIRE_API", server.URL)
 
 	SetAnimeName("JUJUTSU KAISEN Season 2", 2)
 	SetExactMediaType(string(models.MediaTypeAnime))
@@ -293,7 +297,14 @@ func TestHandleBatchDownloadRangeReturnsBatchErrorForAnimeFireNoStream(t *testin
 	assert.Equal(t, 1, batchErr.Failures[0].Episode)
 	assert.Contains(t, err.Error(), "1 episode failed")
 	assert.Contains(t, err.Error(), "failed to resolve stream")
-	assert.Contains(t, err.Error(), "no video source found in the page")
+	// The old assertion pinned the HTML parser's wording ("no video source found
+	// in the page"), which went away with the API port. What matters is that the
+	// failure names the source that could not resolve it and says why.
+	assert.Contains(t, err.Error(), "Animefire.io")
+	// AnimeFire lists episodes it has no file for (is_offline, null url). That
+	// is content state, and the message now says so instead of blaming a parser
+	// for something the source never had.
+	assert.Contains(t, err.Error(), "no file for this episode")
 
 	var mp4s []string
 	walkErr := filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {

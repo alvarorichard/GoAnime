@@ -640,6 +640,35 @@ func isBloggerProxyURL(u string) bool {
 	return strings.Contains(u, "127.0.0.1") && strings.Contains(u, "blogger_proxy")
 }
 
+// isAnimeFireHLS reports whether u is AnimeFire's HLS playlist, which is served
+// under an image name.
+//
+// Its CDN hands out
+//
+//	https://akumast.net/i/<token>/h.jpg      the multivariant master
+//	.../<variant>/p.jpg                      the variant playlists inside it
+//
+// Both answer with application/vnd.apple.mpegurl and a body starting #EXTM3U.
+// The extension is camouflage, not a format.
+//
+// This is the third time this shape has bitten: SuperFlix's master.txt and its
+// path change are documented above for the same reason. Missing it here sends
+// the URL to the plain-MP4 downloader, which saves the ~200-byte playlist as
+// the episode and then deletes it for being too small — the download "failing"
+// with no sign that anything was misread.
+//
+// Matched on the final path segment rather than the host, because the host
+// rotates and the naming has not. A real picture never reaches this function:
+// it is only ever called on a resolved STREAM url, and artwork travels in a
+// different field (models.Media.ImageURL).
+func isAnimeFireHLS(lowerURL string) bool {
+	path := lowerURL
+	if before, _, ok := strings.Cut(path, "?"); ok {
+		path = before
+	}
+	return strings.HasSuffix(path, "/h.jpg") || strings.HasSuffix(path, "/p.jpg")
+}
+
 // LooksLikeHLS returns true if the URL appears to be an HLS stream.
 // Matches .m3u8 extensions and /hls/ path segments commonly used by CDNs
 // that serve HLS playlists without a .m3u8 extension.
@@ -647,6 +676,7 @@ func LooksLikeHLS(u string) bool {
 	lower := strings.ToLower(u)
 	return strings.Contains(lower, "m3u8") ||
 		strings.Contains(lower, "/hls/") ||
+		isAnimeFireHLS(lower) ||
 		// SuperFlix's FirePlayer serves its multivariant HLS master as
 		// "master.txt" with a text/plain content type. Missing it here silently
 		// disabled every HLS-only decision downstream — the forced lavf hls

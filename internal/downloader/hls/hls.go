@@ -59,6 +59,18 @@ type M3U8Playlist struct {
 	Segments       []Segment
 	EndList        bool
 	PlaylistType   string
+	// InitSegmentURL is the #EXT-X-MAP initialisation segment, for playlists
+	// whose media segments are fragmented MP4 rather than MPEG-TS.
+	//
+	// An fMP4 segment starts at a `moof` box and carries no headers of its own:
+	// the track definitions live once, in this init segment. Concatenating only
+	// the media segments therefore produces a file nothing can open —
+	// "trun track id unknown, no tfhd was found / error reading header" — which
+	// is exactly what AnimeFire's downloads turned into. The bytes were all
+	// there; the header never was.
+	//
+	// Empty for MPEG-TS playlists, which are self-describing.
+	InitSegmentURL string
 }
 
 // Downloader handles HLS downloads
@@ -316,6 +328,38 @@ func (d *Downloader) parseMediaPlaylist(ctx context.Context, url string, headers
 }
 
 // parseMediaPlaylistLines parses lines from a media playlist
+// extXMapURIRe pulls the URI out of an #EXT-X-MAP attribute list.
+//
+// The tag is an attribute list (URI, optionally BYTERANGE), so the value is
+// read by name rather than by position — BYTERANGE may precede it, and a
+// future attribute must not shift what we read.
+var extXMapURIRe = regexp.MustCompile(`(?i)URI="([^"]*)"`)
+
+// extXMapURI returns the initialisation segment URI from an #EXT-X-MAP
+// attribute list, or "" when there is none.
+func extXMapURI(attrs string) string {
+	m := extXMapURIRe.FindStringSubmatch(attrs)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+// resolveSegmentURL turns a playlist-relative reference into an absolute URL,
+// against the playlist's own location.
+func resolveSegmentURL(playlistURL, ref string) string {
+	if strings.HasPrefix(ref, "http") {
+		return ref
+	}
+	base := playlistURL
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[:i+1]
+	} else {
+		base += "/"
+	}
+	return base + ref
+}
+
 func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8Playlist, error) {
 	playlist := &M3U8Playlist{
 		Segments: make([]Segment, 0),
@@ -343,6 +387,10 @@ func (d *Downloader) parseMediaPlaylistLines(lines []string, url string) (*M3U8P
 			playlist.PlaylistType = after
 		} else if strings.HasPrefix(line, "#EXT-X-ENDLIST") {
 			playlist.EndList = true
+		} else if after, ok := strings.CutPrefix(line, "#EXT-X-MAP:"); ok {
+			if uri := extXMapURI(after); uri != "" {
+				playlist.InitSegmentURL = resolveSegmentURL(url, uri)
+			}
 		} else if after, ok := strings.CutPrefix(line, "#EXTINF:"); ok {
 			// Parse duration and title
 			infLine := after
@@ -509,6 +557,30 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 	totalSegments := len(playlist.Segments)
 	var downloadedSegments atomic.Int32
 	var bytesWritten int64 // cumulative bytes flushed to disk
+
+	// The initialisation segment goes first, before any media segment.
+	//
+	// For a fragmented-MP4 playlist it is the only place the track definitions
+	// exist; every media segment after it is a bare `moof`+`mdat` fragment.
+	// Writing the media segments alone produced a file that ffmpeg and mpv both
+	// refused — "no tfhd was found", "Failed to recognize file format" — so the
+	// download looked like it had worked (100+ MB on disk, well past the size
+	// check) and nothing could play it.
+	//
+	// Fetched synchronously and written before the workers start, because its
+	// position in the file is not negotiable.
+	if playlist.InitSegmentURL != "" {
+		initData, initErr := d.downloadSegment(ctx, playlist.InitSegmentURL, headers)
+		if initErr != nil {
+			return fmt.Errorf("failed to download HLS init segment: %w", initErr)
+		}
+		n, werr := bufferedWriter.Write(initData)
+		if werr != nil {
+			return fmt.Errorf("failed to write HLS init segment: %w", werr)
+		}
+		bytesWritten += int64(n)
+		util.Debug("HLS init segment written", "bytes", n, "url", playlist.InitSegmentURL)
+	}
 
 	// Report initial progress
 	if progressCallback != nil {

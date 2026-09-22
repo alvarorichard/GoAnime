@@ -18,10 +18,12 @@ import (
 
 func TestAnimefireAdapter_GetAnimeEpisodes_Success(t *testing.T) {
 	t.Parallel()
+	// AnimeFire is read through its JSON API now — the site became a single-page
+	// app whose HTML carries no episodes. The fixture follows the contract that
+	// exists; the guarantee under test is unchanged.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<html><body>`+
-			`<a class="lEp epT divNumEp smallbox px-2 mx-1 text-left d-flex" href="/ep/1">Episódio 1</a>`+
-			`</body></html>`)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"episodes":[{"id":"ep1","title":"Episódio 1","season":1,"number":1}]}}`)
 	}))
 	t.Cleanup(srv.Close)
 
