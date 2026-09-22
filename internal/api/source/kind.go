@@ -12,7 +12,7 @@ const (
 	AnimeFire SourceKind = "AnimeFire"
 	Goyabu    SourceKind = "Goyabu"
 	SuperFlix SourceKind = "SuperFlix"
-	AniDB     SourceKind = "AniDB"
+	HiAnime   SourceKind = "HiAnime"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -31,5 +31,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimeFire: scraper.AnimefireType,
 	Goyabu:    scraper.GoyabuType,
 	SuperFlix: scraper.SuperFlixType,
-	AniDB:     scraper.AniDBType,
+	HiAnime:   scraper.HiAnimeType,
 }

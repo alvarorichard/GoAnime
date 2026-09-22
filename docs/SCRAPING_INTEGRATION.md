@@ -5,14 +5,14 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 ##  New Features
 
 ### Multi-Source Support
-- **anidb.app**: Subbed and dubbed HLS streams with multiple resolutions
+- **hianime.at**: Subbed and dubbed HLS streams with multiple resolutions
 - **Animefire.io**: Brazilian anime streaming site with Portuguese content
 - **Automatic Fallback**: If one source fails, automatically tries others
 
 ### Enhanced CLI Options
 ```bash
 # New command-line flags
---source <source>     # Specify source (anidb, animefire, goyabu, superflix)
+--source <source>     # Specify source (hianime, animefire, goyabu, superflix)
 --quality <quality>   # Specify video quality (best, worst, 720p, 1080p, etc.)
 ```
 
@@ -30,7 +30,7 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 goanime "naruto"
 
 # Download with specific source
-goanime -d --source anidb "one piece" 1
+goanime -d --source hianime "one piece" 1
 
 # Download with quality preference
 goanime -d --quality 720p "attack on titan" 5
@@ -41,8 +41,8 @@ goanime -d -r --source animefire --quality best "demon slayer" 1-12
 
 ### Advanced Usage
 ```bash
-# Use AniDB for subbed/dubbed content
-goanime -d --source anidb --quality 1080p "jujutsu kaisen" 10
+# Use HiAnime for subbed/dubbed content
+goanime -d --source hianime --quality 1080p "jujutsu kaisen" 10
 
 # Use AnimeFire for Portuguese content
 goanime -d --source animefire "naruto" 25
@@ -57,7 +57,7 @@ goanime -d --quality best "bleach" 100
 ```
 internal/
 ├── scraper/
-│   ├── anidb/          # anidb.app scraper
+│   ├── hianime/        # hianime.at scraper
 │   ├── animefire.go    # Animefire.io scraper
 │   └── unified.go      # Unified scraper interface
 ├── api/
@@ -77,26 +77,52 @@ type UnifiedScraper interface {
 ```
 
 ### Features Implemented
-1. **GraphQL API Integration** (AniDB)
+1. **Frontend API Integration** (HiAnime)
 2. **HTML Parsing** (AnimeFire)
 3. **Video Link Extraction**
 4. **Quality Selection Logic**
 5. **Error Handling with Fallbacks**
 6. **Metadata Extraction**
 
-### AniDB Provider Notes
+### HiAnime Provider Notes
 
-The AniDB implementation follows the current `ani-cli` provider behavior for
-source resolution:
+This slot has held three hosts. AllAnime went first, when mkissa.to removed the
+material its per-request key was derived from. anidb.app took over and then went
+to a site-wide 503 "Under Maintenance" — homepage, `/browse` and its API alike —
+where it still was on 2026-09-22. hianime.at is the current one.
 
-- GraphQL requests use `https://api.anidb.app/api`.
-- Provider and playback requests use `https://allmanga.to` as the referer.
-- Encoded `/clock` source URLs are decoded with the ani-cli hex substitution
-  table and normalized to `/clock.json`.
-- `tools.fast4speed.rsvp` entries are treated as direct playable URLs. Some
-  shows expose this provider while the `/apivtwo/clock.json` providers return
-  server errors, so the resolver keeps the direct URL as a fallback instead of
-  requiring it to return a secondary JSON link list.
+The chain is four plain requests, with no challenge and no key derivation:
+
+| Stage | Request | Answers with |
+| --- | --- | --- |
+| search | `GET /search?keyword=<q>` | HTML, one `.flw-item` per result |
+| episodes | `GET /api/theme/episode/list/<animeID>` | `{"status","totalItems","html"}` |
+| servers | `GET /api/theme/episode/servers?episodeId=<id>` | `{"status","html"}` |
+| stream | `GET <embed URL>` | the player config |
+
+Notes that matter when this breaks:
+
+- The two API endpoints return **HTML inside a JSON envelope**, which is why the
+  client both decodes and parses in one call. A wrong path answers 404 with a
+  Laravel `{"message":"The route … could not be found."}`, not an HTML page.
+- A server's `data-hash` is **plain base64** of its embed URL, despite the name.
+- Only the **ZokoAnime** server is read. Its page carries the whole player
+  config in `window.__P`: base64, XOR'd with the build tag `otaku-embed-v1`.
+  The MegaPlay servers instead return an AES-encrypted `enc` field whose key
+  lives in a third-party repository — the same dependency shape that made
+  AllAnime unmaintainable.
+- The stream CDN **checks the Referer**, but not on every URL. Sampled
+  2026-09-22 across three titles with freshly resolved links, the master
+  playlist answered 200 with or without one, while the variant playlist below it
+  answered 403 without one on two of the three. A player that omits it therefore
+  appears to work until it hits a title where it matters. The scraper returns it
+  as `metadata["referer"]`, and `providers.applyPlaybackMetadata` is what puts
+  it where mpv and the downloader read it.
+- `GOANIME_HIANIME_AUDIO=dub` switches the preferred audio track; subtitled is
+  the default.
+
+`--source anidb` and `anidb.app` URLs still route here, so an existing alias or
+a title restored from history keeps working.
 
 Regression coverage:
 
@@ -128,7 +154,7 @@ goanime -d --quality 720p "anime name" 1
 export GOANIME_DEFAULT_QUALITY=720p
 
 # Set default source
-export GOANIME_DEFAULT_SOURCE=AniDB
+export GOANIME_DEFAULT_SOURCE=HiAnime
 
 # Set download directory
 export GOANIME_DOWNLOAD_DIR=/path/to/downloads
@@ -136,7 +162,7 @@ export GOANIME_DOWNLOAD_DIR=/path/to/downloads
 
 ### Source Priority
 When no source is specified, the system tries sources in this order:
-1. AniDB (generally higher quality)
+1. HiAnime (generally higher quality)
 2. AnimeFire (fallback option)
 
 ## 🐛 Troubleshooting
@@ -164,7 +190,7 @@ goanime --debug -d "your anime" 1
 ### Debug Mode
 Enable verbose logging to troubleshoot issues:
 ```bash
-goanime --debug -d --source AniDB "your anime" 1
+goanime --debug -d --source HiAnime "your anime" 1
 ```
 
 ##  Future Enhancements

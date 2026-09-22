@@ -17,7 +17,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 
 	t.Run("search sort select enrich", func(t *testing.T) {
 		t.Parallel()
-		english := &models.Anime{Name: "Frieren [English]", Source: "AniDB", URL: "frieren"}
+		english := &models.Anime{Name: "Frieren [English]", Source: "HiAnime", URL: "frieren"}
 		portuguese := &models.Anime{Name: "Frieren [PT-BR]", URL: "https://animefire.example/frieren", Year: "2023"}
 		providerResults := []*models.Anime{english, nil, portuguese}
 		var selectedInput []*models.Anime
@@ -54,7 +54,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			src  string
 			want []source.SourceKind
 		}{
-			{src: "anidb", want: []source.SourceKind{source.AniDB}},
+			{src: "hianime", want: []source.SourceKind{source.HiAnime}},
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
 			{src: "superflix", want: []source.SourceKind{source.SuperFlix}},
@@ -89,10 +89,13 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			url  string
 			want string
 		}{
-			{name: "explicit anidb source", src: "anidb", url: "opaque", want: "AniDB"},
+			{name: "explicit hianime source", src: "hianime", url: "opaque", want: "HiAnime"},
 			{name: "explicit goyabu source", src: "goyabu", url: "opaque", want: "Goyabu"},
 			{name: "explicit superflix numeric id", src: "superflix", url: "8143", want: "SuperFlix"},
-			{name: "anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: "AniDB"},
+			{name: "hianime URL", url: "https://HIANIME.at/frieren-1", want: "HiAnime"},
+			// anidb.app is where this source used to live; a title restored from
+			// history still carries that URL and must still route somewhere.
+			{name: "legacy anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: "HiAnime"},
 			{name: "animefire URL", url: "HTTPS://ANIMEFIRE.PLUS/frieren", want: "Animefire.io"},
 			{name: "goyabu URL", url: "https://GOYABU.example/frieren", want: "Goyabu"},
 			{name: "sflix URL", url: "https://SFLIX.example/tv/1", want: "SuperFlix"},

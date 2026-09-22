@@ -119,7 +119,7 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 func TestDescriptorMatchURL(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
-		Kind:        AniDB,
+		Kind:        HiAnime,
 		URLMatchers: []string{"stubhost"},
 	}
 	tests := []struct {
@@ -151,8 +151,8 @@ func TestResolve(t *testing.T) {
 		d.Tags = []string{"[goyabu]"}
 		d.URLMatchers = []string{"goyabu"}
 	})
-	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
-		d.Explicit = []string{"AniDB"}
+	allAnime := newFake(HiAnime, 40, func(d *Descriptor) {
+		d.Explicit = []string{"HiAnime"}
 		d.Tags = []string{"[english]"}
 		d.URLMatchers = []string{"stubhost"}
 	})
@@ -169,7 +169,7 @@ func TestResolve(t *testing.T) {
 		{"empty anime", &models.Anime{}, Unknown, nil},
 		{"explicit Source field", &models.Anime{Source: "Goyabu"}, Goyabu, goyabu},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, Goyabu, goyabu},
-		{"name tag", &models.Anime{Name: "Naruto [English]"}, AniDB, allAnime},
+		{"name tag", &models.Anime{Name: "Naruto [English]"}, HiAnime, allAnime},
 		{"URL pattern", &models.Anime{URL: "https://animefire.plus/naruto"}, AnimeFire, animeFire},
 		{"PT-BR fallback to AnimeFire", &models.Anime{Name: "Naruto [PT-BR]"}, AnimeFire, animeFire},
 		{"no match is Unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, Unknown, nil},
@@ -210,7 +210,7 @@ func TestResolve(t *testing.T) {
 
 func TestResolveURL(t *testing.T) {
 	animeFire := newFake(AnimeFire, 10, func(d *Descriptor) { d.URLMatchers = []string{"animefire"} })
-	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
+	allAnime := newFake(HiAnime, 40, func(d *Descriptor) {
 		d.URLMatchers = []string{"stubhost"}
 	})
 	restore := SwapRegistryForTesting(animeFire, allAnime)

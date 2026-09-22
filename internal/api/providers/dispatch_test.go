@@ -58,7 +58,7 @@ func TestFetchEpisodes_NilAnime(t *testing.T) {
 func TestFetchEpisodes_UnknownIsReportedNotGuessed(t *testing.T) {
 	// Swaps the global registry — not parallel.
 	only := &epStubSource{
-		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AniDB"}},
+		desc: source.Descriptor{Kind: source.HiAnime, Priority: 1, Explicit: []string{"HiAnime"}},
 		eps:  []models.Episode{{Number: "1"}},
 	}
 	restore := source.SwapRegistryForTesting(only)
@@ -117,7 +117,7 @@ func newSearchStub(kind source.SourceKind, results []*models.Anime, err error) *
 
 func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "[English] Naruto"}}, nil)
+	a := newSearchStub(source.HiAnime, []*models.Anime{{Name: "[English] Naruto"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "[PT-BR] Naruto"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -131,7 +131,7 @@ func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 
 func TestSearchAll_SpecificKindFilter(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
+	a := newSearchStub(source.HiAnime, []*models.Anime{{Name: "AA"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "GY"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -146,7 +146,7 @@ func TestSearchAll_SpecificKindFilter(t *testing.T) {
 
 func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	ok := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
+	ok := newSearchStub(source.HiAnime, []*models.Anime{{Name: "AA"}}, nil)
 	bad := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(ok, bad)
 	t.Cleanup(restore)
@@ -158,7 +158,7 @@ func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 
 func TestSearchAll_AllFailReturnsError(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	b1 := newSearchStub(source.AniDB, nil, assert.AnError)
+	b1 := newSearchStub(source.HiAnime, nil, assert.AnError)
 	b2 := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(b1, b2)
 	t.Cleanup(restore)

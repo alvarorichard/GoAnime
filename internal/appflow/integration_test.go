@@ -236,7 +236,7 @@ func TestFetchAnimeDetailsCore_NeedsAniListOnly_NoCoverDoesNotOverwrite(t *testi
 // reached for AllAnime titles, so AniList is now the single anime enrichment
 // path and sourceDetails must never be called.
 func TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher(t *testing.T) {
-	anime := &models.Anime{Name: "Show", URL: "https://anidb.app/anime/show-1"}
+	anime := &models.Anime{Name: "Show", URL: "https://hianime.at/anime/show-1"}
 	var aniHit, srcHit int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {

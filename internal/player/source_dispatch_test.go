@@ -57,22 +57,22 @@ func TestGetVideoURLForEpisodeEnhanced_DispatchesThroughSourceRegistry(t *testin
 // TestGetVideoURLForEpisodeEnhanced_RegistrySourceErrorNotSilentlyFallenBack
 // pins the policy: a failure from a registry-backed source surfaces as an
 // error, never the silent legacy extraction. The guard used to name AllAnime;
-// AniDB inherited that position when AllAnime was removed.
+// HiAnime inherited that position when AllAnime was removed.
 func TestGetVideoURLForEpisodeEnhanced_RegistrySourceErrorNotSilentlyFallenBack(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AniDB"}},
+		desc: source.Descriptor{Kind: source.HiAnime, Priority: 1, Explicit: []string{"HiAnime"}},
 		err:  assert.AnError,
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)
 
-	anime := &models.Anime{Source: "AniDB", URL: "https://anidb.app/anime/x-1"}
-	ep := &models.Episode{Number: "1", URL: "https://anidb.app/episode/1"}
+	anime := &models.Anime{Source: "HiAnime", URL: "https://hianime.at/anime/x-1"}
+	ep := &models.Episode{Number: "1", URL: "https://hianime.at/episode/1"}
 
 	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get AniDB stream URL")
+	assert.Contains(t, err.Error(), "failed to get HiAnime stream URL")
 }
 
 // TestGetVideoURLForEpisodeEnhanced_MovieTVErrorKeepsSourceLabel pins the
@@ -111,7 +111,7 @@ func TestGetVideoURLForEpisodeEnhanced_NilAnimeUnmatchedIDErrors(t *testing.T) {
 func TestGetVideoURLForEpisodeEnhanced_StrictSourceDisablesBestEffort(t *testing.T) {
 	// Swaps the global source registry and env — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AllAnime"}},
+		desc: source.Descriptor{Kind: source.HiAnime, Priority: 1, Explicit: []string{"AllAnime"}},
 		url:  "https://cdn.example/never.mp4",
 	}
 	restore := source.SwapRegistryForTesting(stub)
@@ -134,7 +134,7 @@ func TestGetVideoURLForEpisodeEnhanced_StrictSourceDisablesBestEffort(t *testing
 func TestGetVideoURLForEpisodeEnhanced_UnknownIsReportedNotGuessed(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AllAnime"}},
+		desc: source.Descriptor{Kind: source.HiAnime, Priority: 1, Explicit: []string{"AllAnime"}},
 		url:  "https://cdn.example/best-effort.mp4",
 	}
 	restore := source.SwapRegistryForTesting(stub)

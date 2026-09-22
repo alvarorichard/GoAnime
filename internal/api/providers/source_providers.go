@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -11,6 +12,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // Stream-fetch indirections. Production points at the proven api layer — the
@@ -20,7 +22,7 @@ import (
 var (
 	// superFlixStreamFn / superFlixEpisodesFn keep SuperFlix delegating to the
 	// api package's UX-heavy paths (spinner, browser preflight, season picker).
-	// AniDB/AnimeFire/Goyabu are self-contained (adapter-direct).
+	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
 	superFlixStreamFn   = api.GetSuperFlixStreamURL
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
 )
@@ -134,50 +136,56 @@ func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.
 	return url, nil
 }
 
-// --- AniDB Provider ---
+// --- HiAnime Provider ---
 //
-// anidb.app replaces the AllAnime path, whose per-request key derivation broke
-// when mkissa.to removed the epoch/partB material it was scraped from. Priority
-// 50 keeps it below the existing sources: it is the newest and least battle-
-// tested, so it is picked only when nothing more specific matches.
+// hianime.at is the English-language source, and the second host to hold that
+// slot. AllAnime went first when mkissa.to removed the material its per-request
+// key was derived from; anidb.app took over and then went to a site-wide 503
+// "Under Maintenance" on every path, API included, which is where it still was
+// on 2026-09-22. Priority 50 keeps it below the existing sources: it is the
+// newest and least battle-tested, so it is picked only when nothing more
+// specific matches.
 
-type anidbProvider struct {
+type hianimeProvider struct {
 	once    sync.Once
 	adapter adapterSlot
 }
 
 func init() {
-	source.Register(&anidbProvider{})
+	source.Register(&hianimeProvider{})
 }
 
-func (p *anidbProvider) scraper() (scraper.UnifiedScraper, error) {
-	return lazyGetAdapter(&p.once, &p.adapter, scraper.AniDBType)
+func (p *hianimeProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.HiAnimeType)
 }
 
-func (p *anidbProvider) Describe() source.Descriptor {
+func (p *hianimeProvider) Describe() source.Descriptor {
 	return source.Descriptor{
-		Kind:     source.AniDB,
+		Kind:     source.HiAnime,
 		Priority: 50,
-		Explicit: []string{"AniDB", "anidb.app"},
+		// "anidb"/"anidb.app" stay accepted: that is what this slot was called
+		// until 2026-09-22, and a --source flag in somebody's shell alias or a
+		// title restored from history still spells it that way.
+		Explicit: []string{"HiAnime", "hianime.at", "AniDB", "anidb.app"},
 		// "[english]" moved here from the deleted AllAnime descriptor: tagging.go
-		// stamps "[English]" on AniDB results (it is the only English source
+		// stamps "[English]" on HiAnime results (it is the only English source
 		// left), so the resolver must be able to route those names back. Without
-		// it, an AniDB result whose Source field was lost — a title restored from
+		// it, a HiAnime result whose Source field was lost — a title restored from
 		// history, say — resolved to Unknown.
-		Tags:        []string{"[anidb]", "[english]"},
-		URLMatchers: []string{"anidb.app"},
-		ProbeURL:    "https://anidb.app",
+		Tags:        []string{"[hianime]", "[anidb]", "[english]"},
+		URLMatchers: []string{"hianime.at", "anidb.app"},
+		ProbeURL:    "https://hianime.at",
 	}
 }
 
-func (p *anidbProvider) HasSeasons() bool { return false }
+func (p *hianimeProvider) HasSeasons() bool { return false }
 
-// The AniDB adapter implements scraper.ContextualScraper, so every call below
+// The HiAnime adapter implements scraper.ContextualScraper, so every call below
 // hands it the real context instead of letting a cancelled search keep an HTTP
 // request alive until the client timeout. The type assertion is the Model C
 // discovery pattern; the fallbacks keep this working if the capability is ever
 // dropped.
-func (p *anidbProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+func (p *hianimeProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -194,11 +202,11 @@ func (p *anidbProvider) Search(ctx context.Context, query string) ([]*models.Ani
 	if err != nil {
 		return nil, err
 	}
-	tagResults(results, source.AniDB)
+	tagResults(results, source.HiAnime)
 	return results, nil
 }
 
-func (p *anidbProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+func (p *hianimeProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -212,9 +220,16 @@ func (p *anidbProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) 
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-// FetchStreamURL resolves an episode to its HLS URL. Unlike Goyabu, AniDB
+// FetchStreamURL resolves an episode to its HLS URL. Unlike Goyabu, HiAnime
 // honours the requested quality by picking the matching variant playlist.
-func (p *anidbProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+//
+// It is also the first provider here to READ the metadata its adapter returns.
+// That map was being discarded, which was survivable while every source served
+// its own media: HiAnime's does not. Its playlists live on a CDN that checks the
+// Referer — on two of three titles sampled 2026-09-22 the variant playlist was
+// 403 without one — so dropping the metadata means the URL resolves and then
+// some titles play nothing.
+func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -227,18 +242,51 @@ func (p *anidbProvider) FetchStreamURL(ctx context.Context, episode *models.Epis
 		return "", err
 	}
 	var url string
+	var metadata map[string]string
 	if ca, ok := adapter.(scraper.ContextualScraper); ok {
-		url, _, err = ca.GetStreamURLContext(ctx, episode.URL, quality)
+		url, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)
 	} else {
-		url, _, err = adapter.GetStreamURL(episode.URL, quality)
+		url, metadata, err = adapter.GetStreamURL(episode.URL, quality)
 	}
 	if err != nil {
-		return "", fmt.Errorf("anidb stream: %w", err)
+		return "", fmt.Errorf("hianime stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from AniDB")
+		return "", fmt.Errorf("empty stream URL returned from HiAnime")
 	}
+	applyPlaybackMetadata(metadata)
 	return url, nil
+}
+
+// applyPlaybackMetadata moves a scraper's playback hints into the globals mpv
+// and the downloader read.
+//
+// The two keys are a contract on the metadata map, not something specific to
+// one source, so a future scraper can fill them and be played correctly without
+// touching this function:
+//
+//	referer    the origin to send with every media request
+//	subtitles  a JSON array of {"url","language","label"}
+//
+// A malformed subtitle payload is logged and dropped rather than failing the
+// episode: subtitles are an enhancement, and refusing to play a video because
+// its caption list did not parse would be the wrong trade.
+func applyPlaybackMetadata(metadata map[string]string) {
+	if referer := strings.TrimSpace(metadata["referer"]); referer != "" {
+		util.SetGlobalReferer(referer)
+	}
+	raw := strings.TrimSpace(metadata["subtitles"])
+	if raw == "" {
+		return
+	}
+	var tracks []util.SubtitleInfo
+	if err := jsonx.Unmarshal([]byte(raw), &tracks); err != nil {
+		util.Debug("could not read the subtitle list from the scraper", "error", err)
+		return
+	}
+	if len(tracks) > 0 {
+		util.SetGlobalSubtitles(tracks)
+	}
 }
 
 // --- Goyabu Provider ---
@@ -350,7 +398,7 @@ func (p *superFlixProvider) HasSeasons() bool { return true }
 // scraper.ContextualScraper, so a search the dispatcher gives up on actually
 // stops instead of leaving the transport's Retry-After loop sleeping and
 // re-requesting against a host that is already rate-limiting us. Same Model C
-// discovery pattern as anidbProvider, with the plain call as the fallback.
+// discovery pattern as hianimeProvider, with the plain call as the fallback.
 func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

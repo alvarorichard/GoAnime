@@ -36,8 +36,8 @@ func TestEpisodeNumber(t *testing.T) {
 
 func TestAllAnimeProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p := &anidbProvider{}
-	assert.Equal(t, source.AniDB, p.Describe().Kind)
+	p := &hianimeProvider{}
+	assert.Equal(t, source.HiAnime, p.Describe().Kind)
 	assert.False(t, p.HasSeasons())
 }
 
@@ -96,10 +96,10 @@ func TestSuperFlixProvider_Describe(t *testing.T) {
 // Model B path (nil sm) — no ScraperManager involved.
 func TestAllAnimeProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	ad, err := (&anidbProvider{}).scraper()
+	ad, err := (&hianimeProvider{}).scraper()
 	require.NoError(t, err)
 	require.NotNil(t, ad)
-	assert.Equal(t, scraper.AniDBType, ad.GetType())
+	assert.Equal(t, scraper.HiAnimeType, ad.GetType())
 }
 
 func TestAnimeFireProvider_Scraper(t *testing.T) {
@@ -130,7 +130,7 @@ func TestSuperFlixProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.AniDB, source.AnimeFire, source.Goyabu, source.SuperFlix, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.SuperFlix, source.HiAnime} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -153,7 +153,7 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
 		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}, source.SuperFlix},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
-		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.AniDB},
+		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
 		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
 		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}, source.SuperFlix},

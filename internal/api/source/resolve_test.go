@@ -32,8 +32,8 @@ func registerProductionLikeSources(t *testing.T) {
 			d.Tags = []string{"[superflix]"}
 			d.URLMatchers = []string{"superflix"}
 		}),
-		newFake(AniDB, 40, func(d *Descriptor) {
-			d.Explicit = []string{"AniDB"}
+		newFake(HiAnime, 40, func(d *Descriptor) {
+			d.Explicit = []string{"HiAnime"}
 			d.Tags = []string{"[english]"}
 			d.URLMatchers = []string{"stubhost"}
 		}),
@@ -49,7 +49,7 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		source   string
 		wantKind SourceKind
 	}{
-		{"AniDB", "AniDB", AniDB},
+		{"HiAnime", "HiAnime", HiAnime},
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
@@ -82,7 +82,7 @@ func TestResolve_NameTags(t *testing.T) {
 		animName string
 		wantKind SourceKind
 	}{
-		{"english tag", "Naruto [English]", AniDB},
+		{"english tag", "Naruto [English]", HiAnime},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
 		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
@@ -171,9 +171,9 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 
 func TestScraperTypeFor(t *testing.T) {
 	t.Parallel()
-	st, ok := ScraperTypeFor(AniDB)
-	require.True(t, ok, "ScraperTypeFor(AniDB) should return true")
-	assert.Equal(t, scraper.AniDBType, st)
+	st, ok := ScraperTypeFor(HiAnime)
+	require.True(t, ok, "ScraperTypeFor(HiAnime) should return true")
+	assert.Equal(t, scraper.HiAnimeType, st)
 
 	st, ok = ScraperTypeFor(AnimeFire)
 	require.True(t, ok)

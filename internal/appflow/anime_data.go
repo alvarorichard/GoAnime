@@ -137,7 +137,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		searchStart := time.Now()
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
-		// Respect user's --source flag (e.g. --source anidb) via GlobalSource
+		// Respect user's --source flag (e.g. --source hianime) via GlobalSource
 		source := util.GlobalSource
 		if source != "" {
 			util.Debugf("Searching for: %s (source: %s)", currentName, source)

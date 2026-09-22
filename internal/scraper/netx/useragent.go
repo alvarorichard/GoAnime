@@ -1,7 +1,7 @@
 package netx
 
 // UserAgent is the shared browser User-Agent presented by the plain-HTTP
-// scrapers (AniDB, AnimeFire, Goyabu). SuperFlix declares its own because
+// scrapers (HiAnime, AnimeFire, Goyabu). SuperFlix declares its own because
 // its UA must match the browser that solves the Cloudflare challenge.
 const UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 
@@ -33,7 +33,7 @@ const AcceptLanguage = "pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3"
 const ChromeAcceptLanguage = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
 
 // EnglishAcceptLanguage is the Firefox ladder for an English desktop, used by
-// sources with no Portuguese catalog (AniDB) so the request does not claim a
+// sources with no Portuguese catalog (HiAnime) so the request does not claim a
 // locale its content has nothing to do with.
 const EnglishAcceptLanguage = "en-US,en;q=0.5"
 

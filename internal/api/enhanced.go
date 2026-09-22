@@ -99,9 +99,9 @@ func describeSuperFlixErr(err error) error {
 	case errors.Is(err, superflix.ErrSuperFlixNoServers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this title right now. Try another episode, or come back later."}
 	case errors.Is(err, superflix.ErrSuperFlixNoEpisodeList):
-		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or AniDB)."}
+		return &friendlyError{cause: err, msg: "⚠️  SuperFlix didn't show an episode list for this title. Try searching it on another source (AnimeFire, Goyabu or HiAnime)."}
 	case errors.Is(err, superflix.ErrSuperFlixRestricted):
-		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou AniDB)."}
+		return &friendlyError{cause: err, msg: "⚠️  Este título está com acesso restrito no SuperFlix e não abriu. Tente outro título, ou procure em outra fonte (AnimeFire, Goyabu ou HiAnime)."}
 	case errors.Is(err, context.DeadlineExceeded) || isGateTimeout(err):
 		return &friendlyError{cause: err, msg: "⚠️  The \"are you human?\" check didn't finish in time. Please try again — if a small box appears in the browser window, click it."}
 	default:
@@ -259,8 +259,8 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "superflix":
 		registryKinds = []apisource.SourceKind{apisource.SuperFlix}
-	case "anidb":
-		registryKinds = []apisource.SourceKind{apisource.AniDB}
+	case "hianime", "anidb": // "anidb" is what this source was called before 2026-09-22
+		registryKinds = []apisource.SourceKind{apisource.HiAnime}
 	case "ptbr", "pt-br":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix}
 	}
@@ -302,8 +302,8 @@ func searchAnimeEnhanced(
 				anime.Source = "Goyabu"
 			case "superflix":
 				anime.Source = "SuperFlix"
-			case "anidb":
-				anime.Source = "AniDB"
+			case "hianime", "anidb":
+				anime.Source = "HiAnime"
 			}
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
@@ -314,8 +314,8 @@ func searchAnimeEnhanced(
 					anime.Source = "Goyabu"
 				case strings.Contains(lowerURL, "superflix"), strings.Contains(lowerURL, "sflix"):
 					anime.Source = "SuperFlix"
-				case strings.Contains(lowerURL, "anidb.app"):
-					anime.Source = "AniDB"
+				case strings.Contains(lowerURL, "hianime.at"), strings.Contains(lowerURL, "anidb.app"):
+					anime.Source = "HiAnime"
 				}
 			}
 		}
@@ -330,7 +330,7 @@ func searchAnimeEnhanced(
 		"AnimeFire", breakdown.AnimeFire,
 		"SuperFlix", breakdown.SuperFlix,
 		"Goyabu", breakdown.Goyabu,
-		"AniDB", breakdown.AniDB,
+		"HiAnime", breakdown.HiAnime,
 	)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
@@ -550,7 +550,7 @@ func fetchSuperFlixSeasons(sfClient *superflix.SuperFlixClient, media *models.An
 	if len(allEpisodes) == 0 {
 		return nil, &friendlyError{
 			cause: fmt.Errorf("superflix: no seasons for tmdb=%s (imdb=%q): TVmaze had no listing and the SuperFlix page exposed no episode list", tmdbID, media.IMDBID),
-			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or AniDB).",
+			msg:   "⚠️  Couldn't load the season list for this title on SuperFlix. Try searching it on another source (AnimeFire, Goyabu or HiAnime).",
 		}
 	}
 	return allEpisodes, nil
@@ -952,7 +952,7 @@ type sourceBreakdown struct {
 	AnimeFire int
 	SuperFlix int
 	Goyabu    int
-	AniDB     int
+	HiAnime   int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -972,8 +972,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.SuperFlix++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
-		case anime.Source == "AniDB":
-			b.AniDB++
+		case anime.Source == "HiAnime":
+			b.HiAnime++
 		}
 	}
 	return b

@@ -32,15 +32,15 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "Goyabu"
 	case source.SuperFlix:
 		return "SuperFlix"
-	case source.AniDB:
-		return "AniDB"
+	case source.HiAnime:
+		return "HiAnime"
 	default:
 		return string(kind)
 	}
 }
 
 func languageTag(kind source.SourceKind) string {
-	if kind == source.AniDB {
+	if kind == source.HiAnime {
 		return "[English]"
 	}
 	return "[PT-BR]"

@@ -133,7 +133,7 @@ func ClearGlobalUserAgent() {
 	GlobalUserAgent = ""
 }
 
-// SetGlobalAnimeSource stores the current anime source (e.g. "AniDB", "Goyabu")
+// SetGlobalAnimeSource stores the current anime source (e.g. "HiAnime", "Goyabu")
 func SetGlobalAnimeSource(source string) {
 	playbackStateMu.Lock()
 	GlobalAnimeSource = source
@@ -489,7 +489,7 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
-	sourceFlag := fs.String("source", "", "specify source (anidb, animefire, goyabu, superflix, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, superflix, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")

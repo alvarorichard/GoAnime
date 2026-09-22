@@ -131,7 +131,7 @@ func TestSearchableSources_CancellationCapabilityIsDeclaredOnPurpose(t *testing.
 		source.Goyabu:    "goyabu client builds requests without a context",
 	}
 
-	for _, kind := range []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.HiAnime} {
 		st, ok := source.ScraperTypeFor(kind)
 		require.Truef(t, ok, "%s has no scraper type", kind)
 
@@ -159,7 +159,7 @@ func TestSearchableSources_RefuseAnAlreadyCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	for _, kind := range []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.HiAnime} {
 		s, ok := source.Registered(kind)
 		require.Truef(t, ok, "%s is not registered", kind)
 		sr, ok := s.(source.Searchable)
@@ -188,7 +188,7 @@ func (s *rateLimitedStub) Search(ctx context.Context, _ string) ([]*models.Anime
 
 var errRateLimited = errors.New("server returned: 429 Too Many Requests")
 
-// The "dexter" scenario end to end at the dispatcher: AniDB down, the two anime
+// The "dexter" scenario end to end at the dispatcher: HiAnime down, the two anime
 // sources legitimately empty (Dexter is a US TV series), SuperFlix refusing
 // traffic. The user waited 12 seconds per attempt to be told it "timed out".
 //
@@ -200,9 +200,9 @@ func TestSearchAll_RateLimitedSourceFailsFastAndKeepsItsReason(t *testing.T) {
 	sf := &rateLimitedStub{epStubSource: epStubSource{
 		desc: source.Descriptor{Kind: source.SuperFlix, Priority: 30},
 	}}
-	anidb := newSearchStub(source.AniDB, nil, errors.New("AniDB search: upstream unavailable with HTTP 503"))
+	hianime := newSearchStub(source.HiAnime, nil, errors.New("HiAnime search: upstream unavailable with HTTP 503"))
 	empty := newSearchStub(source.Goyabu, nil, nil)
-	restore := source.SwapRegistryForTesting(sf, anidb, empty)
+	restore := source.SwapRegistryForTesting(sf, hianime, empty)
 	t.Cleanup(restore)
 
 	start := time.Now()

@@ -19,10 +19,10 @@ import (
 // What a user saw when every source declined, before this type existed:
 //
 //	Search failed for "dexter": failed to search: no results for "dexter" (all
-//	sources failed) — SuperFlix blocked the request: HTTP 429/challenge; AniDB
+//	sources failed) — SuperFlix blocked the request: HTTP 429/challenge; HiAnime
 //	temporarily unavailable: HTTP 503: SuperFlix: server returned: 429 Too Many
 //	Requests
-//	AniDB: AniDB search: upstream unavailable with HTTP 503
+//	HiAnime: HiAnime search: upstream unavailable with HTTP 503
 //
 // One fact, stated three times, in a paragraph. The failure is data now, so the
 // terminal gets one short line per source and the log keeps the causes.
@@ -35,7 +35,7 @@ func TestSearchFailure_ErrorIsOneShortLine(t *testing.T) {
 
 	assert.Contains(t, msg, `"dexter"`)
 	assert.Contains(t, msg, "SuperFlix")
-	assert.Contains(t, msg, "AniDB")
+	assert.Contains(t, msg, "HiAnime")
 	assert.NotContains(t, msg, "\n", "the one-line form must stay one line")
 	assert.NotContains(t, msg, "server returned",
 		"raw causes belong in Detail() and the chain, not in what is printed")
@@ -62,7 +62,7 @@ func TestSearchFailure_UnwrapsToEveryCause(t *testing.T) {
 	sentinel := errors.New("upstream is on fire")
 	f := &SearchFailure{Query: "dexter", Sources: []SourceFailure{
 		{Kind: source.SuperFlix, Reason: "failed", Err: errors.New("something")},
-		{Kind: source.AniDB, Reason: "failed", Err: sentinel},
+		{Kind: source.HiAnime, Reason: "failed", Err: sentinel},
 	}}
 
 	assert.ErrorIs(t, f, sentinel, "a cause from any source must be reachable")
@@ -75,7 +75,7 @@ func TestSearchFailure_RateLimitedFlagsTheActionableCase(t *testing.T) {
 		"one throttled source is enough: retrying immediately cannot help")
 
 	none := &SearchFailure{Query: "x", Sources: []SourceFailure{
-		{Kind: source.AniDB, Reason: "is temporarily unavailable (HTTP 503)"},
+		{Kind: source.HiAnime, Reason: "is temporarily unavailable (HTTP 503)"},
 	}}
 	assert.False(t, none.RateLimited(), "a source being down is not us being throttled")
 }
@@ -169,9 +169,9 @@ func twoSourceFailure() *SearchFailure {
 			Err:         errors.New("SuperFlix: server returned: 429 Too Many Requests"),
 		},
 		{
-			Kind:   source.AniDB,
+			Kind:   source.HiAnime,
 			Reason: "is temporarily unavailable (HTTP 503)",
-			Err:    errors.New("AniDB: AniDB search: upstream unavailable with HTTP 503"),
+			Err:    errors.New("HiAnime: HiAnime search: upstream unavailable with HTTP 503"),
 		},
 	}}
 }
@@ -219,7 +219,7 @@ func TestFinishSearch_PartialFailureIsReportedNotSwallowed(t *testing.T) {
 
 	logged := warnings()
 	assert.Contains(t, logged, "SuperFlix", "the user must learn which sources were missing")
-	assert.Contains(t, logged, "AniDB")
+	assert.Contains(t, logged, "HiAnime")
 	assert.Contains(t, logged, "incomplete", "and that the result set is smaller than usual")
 }
 
