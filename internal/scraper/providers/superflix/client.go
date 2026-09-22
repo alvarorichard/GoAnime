@@ -68,6 +68,19 @@ const (
 	// different UA, CF rejects the clearance and re-challenges in a loop. A
 	// Firefox-on-Linux UA is used because the solver drives a real Firefox.
 	SuperFlixUserAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
+	// superFlixAcceptLanguage is the shared Firefox q-ladder (netx.AcceptLanguage),
+	// aliased here because SuperFlix declares its own User-Agent and the two must
+	// describe the same browser.
+	//
+	// The previous value was Chrome's ladder under a Firefox UA. On 2026-09-21
+	// this host answered 429 to that exact string while serving every other
+	// Accept-Language 200, across eight probes interleaved 15s apart — and then
+	// stopped reproducing hours later, with the old value accepted again. So the
+	// rule is reputation-sensitive, not a fixed blocklist, and this change is
+	// hygiene rather than a guaranteed cure. It is kept because a coherent
+	// browser costs nothing, and because this host's CDN already matches
+	// Accept-Language by value (see cdn.go).
+	superFlixAcceptLanguage = netx.AcceptLanguage
 )
 
 // Pre-compiled regexes for SuperFlix scraper
@@ -214,7 +227,7 @@ func (c *SuperFlixClient) effectiveUserAgent() string {
 func (c *SuperFlixClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Accept-Language", superFlixAcceptLanguage)
 }
 
 // SetTestConfig overrides the base URL and HTTP client for testing.

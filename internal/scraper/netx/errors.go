@@ -108,3 +108,14 @@ func ValidateStreamURL(rawURL, source string) (string, error) {
 
 	return parsed.String(), nil
 }
+
+// ErrMediaOffline marks content a source still LISTS but has no file for.
+//
+// It is not a failure of the request, the parser or the network: the source
+// answered correctly and said the episode is offline. AnimeFire reports this
+// per episode (is_offline, with a null url) and whole titles can be in that
+// state — Naruto plays, Naruto Shippuden is offline end to end.
+//
+// It lives here because the scraper that detects it and the player that has to
+// explain it sit in packages that cannot import each other.
+var ErrMediaOffline = errors.New("the source has no file for this episode")

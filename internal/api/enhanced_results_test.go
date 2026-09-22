@@ -126,7 +126,8 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			contains  string
 		}{
 			{name: "back", err: tui.ErrSelectionBack, want: ErrBackToSearch},
-			{name: "cancel", err: tui.ErrSelectionCancelled, want: tui.ErrSelectionCancelled},
+			{name: "cancel", err: tui.ErrSelectionCancelled, want: ErrSearchAborted},
+			{name: "cancel keeps the TUI cause", err: tui.ErrSelectionCancelled, want: tui.ErrSelectionCancelled},
 			{name: "arbitrary", err: context.Canceled, want: context.Canceled},
 			{name: "nil without error", contains: "selection returned nil"},
 		} {

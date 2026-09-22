@@ -62,6 +62,12 @@ func HandlePlaybackMode(animeName string) {
 		searchTimer.Stop()
 
 		if err != nil {
+			// The user quit the result screen or the search prompt. That is an
+			// exit, not a failure, so leave without an error banner.
+			if errors.Is(err, api.ErrSearchAborted) {
+				util.Infof("Search cancelled.")
+				return
+			}
 			util.Errorf("Failed to search for anime: %v", err)
 			return
 		}

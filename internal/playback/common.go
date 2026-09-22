@@ -12,10 +12,56 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
+	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// alternateSources lists the sources that could still carry a title, excluding
+// the one that just failed and anything the user turned off via
+// GOANIME_DISABLED_SOURCES.
+func alternateSources(current string) []string {
+	disabled := make(map[apisource.SourceKind]bool, 4)
+	for _, k := range apisource.DisabledSources() {
+		disabled[k] = true
+	}
+	others := make([]string, 0, 3)
+	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix} {
+		// Source labels are not always the bare kind ("Animefire.io"), so match
+		// on the kind as a prefix rather than for equality.
+		if disabled[k] || strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
+			continue
+		}
+		others = append(others, string(k))
+	}
+	return others
+}
+
+// reportSourceVideoRemoved explains a dead episode in terms the user can act
+// on: the source still lists it, the host deleted the file, and the way
+// forward is the same title on another source (ESC in the episode list walks
+// back to the search results, where the other sources' entries are waiting).
+func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
+	current := ""
+	if anime != nil {
+		current = anime.Source
+	}
+	src := current
+	if src == "" {
+		src = "this source"
+	}
+	label := strings.TrimSpace(episodeNumberStr)
+	if label == "" {
+		label = "This episode"
+	}
+	util.Errorf("%s is no longer playable on %s: the host deleted the video file (the episode is still listed, the media behind it is gone).", label, src)
+	if others := alternateSources(current); len(others) > 0 {
+		util.Infof("Press ESC to leave the episode list and pick the same title from another source: %s.", strings.Join(others, ", "))
+	} else {
+		util.Infof("Press ESC to leave the episode list and search again.")
+	}
+}
 
 func PlayEpisode(
 	ctx context.Context,
@@ -116,7 +162,17 @@ func PlayEpisode(
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
 		// Route user back to episode selection so they can pick another one.
-		if !errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
+		switch {
+		case errors.Is(videoErr, player.ErrBackToEpisodeSelection):
+			// User-initiated: nothing to report.
+		case errors.Is(videoErr, player.ErrSourceVideoRemoved):
+			// The listing is alive but the media behind it is gone, so trying
+			// other episodes of the same title usually fails the same way
+			// (issue #203). Say that plainly and point at the only thing that
+			// can work — the same title on a different source — instead of
+			// printing a raw extraction error the user cannot act on.
+			reportSourceVideoRemoved(anime, episodeNumberStr)
+		default:
 			util.Warnf("Failed to extract video URL: %v", videoErr)
 		}
 		return player.ErrBackToEpisodeSelection

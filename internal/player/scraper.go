@@ -221,6 +221,14 @@ var ErrBackToAnimeSelection = errors.New("back to anime selection")
 // ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
 var ErrBackToEpisodeSelection = errors.New("back to episode selection")
 
+// ErrSourceVideoRemoved marks an episode whose video file no longer exists on
+// the source that listed it — the listing is still there, the media behind it
+// is gone (issue #203: every Bleach episode on Goyabu points at a Blogger token
+// Google answers with NOT_FOUND). Retrying, re-picking the episode or waiting
+// cannot recover it; only a different source can. Exported so the playback
+// layer can tell the user that instead of printing a raw extraction error.
+var ErrSourceVideoRemoved = errors.New("video unavailable on this source")
+
 // episodeDisplayTitle picks the best available episode title.
 func episodeDisplayTitle(ep models.Episode) string {
 	if ep.Title.Romaji != "" {
@@ -448,6 +456,21 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			// guard used to name AllAnime, which held the same position.)
 			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
 		}
+		// The source answered and said the episode is offline. That is content
+		// state, not a scraping failure: no retry and no other parser can
+		// produce a file that is not there, so it is routed to the message that
+		// tells the user to try the title on a different source.
+		if errors.Is(err, netx.ErrMediaOffline) {
+			return "", fmt.Errorf("%w: %w", ErrSourceVideoRemoved, err)
+		}
+		// AnimeFire is read through its JSON API; its pages are a client-side
+		// app with no markup to scrape. Falling through to the HTML extractor
+		// cannot succeed and actively lies about the cause — an episode the API
+		// correctly reported as offline came back as "no video source found in
+		// the page", pointing at a parser instead of at the source.
+		if resolved.Kind == source.AnimeFire {
+			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
+		}
 		// Legacy silent fallback for the remaining sources — removed in Phase 2.
 		return GetVideoURLForEpisode(episode.URL)
 	}
@@ -470,7 +493,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		// up so the caller routes the user back to episode selection instead
 		// of letting the player layer redundantly resolve the same dead URL.
 		if errors.Is(err, errBloggerVideoUnavailable) {
-			return "", fmt.Errorf("video unavailable on this source: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrSourceVideoRemoved, err)
 		}
 		// If resolution failed for an unknown reason, fall back to the original
 		// URL so yt-dlp can have a chance.

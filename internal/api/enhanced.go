@@ -168,6 +168,19 @@ func awaitActionThroughRunner(action func(), runner func(wrapped func())) {
 // ErrBackToSearch is returned when user selects the back option to search again
 var ErrBackToSearch = errors.New("back to search requested")
 
+// ErrSearchAborted is returned when the user QUITS the result screen (q /
+// Ctrl+C) rather than asking for the previous one. Quitting is a deliberate
+// exit, so callers must stop instead of re-prompting — the retry loop used to
+// answer a Ctrl+C with "No anime found with the name: <query>" and another
+// prompt, which read as a search bug on a screen that had just listed 15
+// results (issue #203).
+var ErrSearchAborted = errors.New("search aborted by user")
+
+// ErrNoResults is returned when every source answered and none had the title.
+// Distinct from a source/transport failure, which must not be reported as
+// "nothing matched".
+var ErrNoResults = errors.New("no results found")
+
 // SearchFetchFunc fans out a free-text search across the given source kinds
 // (empty = all) and returns the aggregated, language-tagged results. It is a
 // seam so the api package can dispatch through the Model B registry
@@ -275,7 +288,7 @@ func searchAnimeEnhanced(
 	animes = validAnimes
 
 	if len(animes) == 0 {
-		return nil, fmt.Errorf("no results found for: %s", name)
+		return nil, fmt.Errorf("%w for: %s", ErrNoResults, name)
 	}
 
 	// Enhance source identification - names already have language tags from unified.go
@@ -332,8 +345,11 @@ func searchAnimeEnhanced(
 	if errors.Is(err, tui.ErrSelectionBack) {
 		return nil, ErrBackToSearch
 	}
+	if errors.Is(err, tui.ErrSelectionCancelled) {
+		return nil, fmt.Errorf("%w: %w", ErrSearchAborted, err)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("anime selection cancelled: %w", err)
+		return nil, fmt.Errorf("anime selection failed: %w", err)
 	}
 	if selectedAnime == nil {
 		return nil, fmt.Errorf("anime selection returned nil")

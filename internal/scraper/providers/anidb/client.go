@@ -81,7 +81,7 @@ func NewClientForTest(serverURL string) *AniDBClient {
 func (c *AniDBClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Language", netx.EnglishAcceptLanguage)
 	req.Header.Set("Referer", c.baseURL+"/")
 }
 

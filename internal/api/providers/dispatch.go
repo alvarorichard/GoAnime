@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -126,14 +125,14 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 
 	var (
 		all        []*models.Anime
-		errs       []error
+		failures   []SourceFailure
 		graceTimer <-chan time.Time
 	)
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				return finishSearch(query, all, errs)
+				return finishSearch(query, all, failures)
 			}
 			if res.err != nil {
 				// Feed the breaker so a repeatedly-failing source opens.
@@ -142,7 +141,17 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 					util.Warn("search source circuit opened", "source", res.kind, "diagnostic", diag.UserMessage())
 				}
 				util.Debug("search source failed", "source", res.kind, "error", res.err)
-				errs = append(errs, fmt.Errorf("%s: %w", res.kind, res.err))
+				// Record the failure as DATA. The raw error stays attached for
+				// errors.Is and the debug log; the short reason is what a person
+				// sees. Flattening both into one string is how the message grew
+				// into three repetitions of the same fact.
+				reason, limited := describeFailure(diag, res.err)
+				failures = append(failures, SourceFailure{
+					Kind:        res.kind,
+					Reason:      reason,
+					RateLimited: limited,
+					Err:         fmt.Errorf("%s: %w", res.kind, res.err),
+				})
 				continue
 			}
 			searchBreaker.RecordSuccess(string(res.kind))
@@ -155,10 +164,10 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 		case <-graceTimer:
 			util.Debug("straggler grace elapsed; returning collected search results")
-			return finishSearch(query, all, errs)
+			return finishSearch(query, all, failures)
 		case <-ctx.Done():
 			util.Debug("search timeout reached; returning collected results")
-			return finishSearch(query, all, errs)
+			return finishSearch(query, all, failures)
 		}
 	}
 }
@@ -197,14 +206,49 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 	}
 }
 
-func finishSearch(query string, all []*models.Anime, errs []error) ([]*models.Anime, error) {
-	if len(all) == 0 {
-		if len(errs) > 0 {
-			return nil, fmt.Errorf("no results for %q (all sources failed): %w", query, errors.Join(errs...))
-		}
+// reportPartialFailure says which sources did not answer a search that still
+// returned something.
+//
+// A partial failure used to be invisible: the results were handed back and the
+// per-source reasons dropped on the floor, leaving them only in the debug log.
+// So a search where three of four sources were broken — AnimeFire's site
+// rewritten out from under its parser, SuperFlix rate limiting the network,
+// AniDB down — looked exactly like a search that had only ever had one source,
+// and was reported as "it is only searching Goyabu".
+//
+// Warn, not Error: the search worked. But a user comparing what they got
+// against what they expected deserves to know the catalogue was smaller than
+// usual, and why.
+func reportPartialFailure(failures []SourceFailure) {
+	if len(failures) == 0 {
+		return
+	}
+	util.Warnf("%d source(s) did not answer; results may be incomplete:", len(failures))
+	for _, f := range failures {
+		util.Warnf("  %s %s", f.Kind, f.Reason)
+	}
+}
+
+// finishSearch turns the fan-out's outcome into one result or one error.
+//
+// When everything failed, the message leads with the per-source DIAGNOSTICS
+// rather than the raw errors. A user staring at
+//
+//	no results for "matrix" (all sources failed): SuperFlix: server returned:
+//	429 Too Many Requests
+//
+// cannot tell whether GoAnime is broken, the title does not exist, or the host
+// is refusing them — and the third is the only one they can do something about
+// (wait). The raw errors stay in the chain for errors.Is/As and the debug log.
+func finishSearch(query string, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
+	if len(all) > 0 {
+		reportPartialFailure(failures)
+		return all, nil
+	}
+	if len(failures) == 0 {
 		return nil, fmt.Errorf("no results found for: %s", query)
 	}
-	return all, nil
+	return nil, &SearchFailure{Query: query, Sources: failures}
 }
 
 // FetchEpisodes lists an anime's episodes through the Model B registry — the

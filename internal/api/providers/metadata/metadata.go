@@ -785,7 +785,8 @@ func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName st
 	req2.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req2.Header.Set("Referer", base+"/")
 	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req2.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	// Chrome UA above, so Chrome's ladder: the pair has to describe one browser.
+	req2.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
 	req2.Header.Set("Sec-Fetch-Dest", "iframe")
 	req2.Header.Set("Sec-Fetch-Mode", "navigate")
 	req2.Header.Set("Sec-Fetch-Site", "cross-site")

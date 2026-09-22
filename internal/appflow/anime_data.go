@@ -92,11 +92,11 @@ func defaultPromptForName(_ string) (string, error) {
 			return nil
 		})
 	if err := tui.RunClean(prompt.Run); err != nil {
-		return "", fmt.Errorf("search cancelled by user")
+		return "", fmt.Errorf("search cancelled by user: %w", api.ErrSearchAborted)
 	}
 	name := strings.TrimSpace(newName)
 	if name == "" {
-		return "", fmt.Errorf("search cancelled: empty name provided")
+		return "", fmt.Errorf("search cancelled: empty name provided: %w", api.ErrSearchAborted)
 	}
 	return name, nil
 }
@@ -151,12 +151,27 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 			return anime, nil
 		}
 
-		// Check if user requested to go back to search
-		if errors.Is(searchErr, api.ErrBackToSearch) {
+		// A deliberate quit (q / Ctrl+C on the result screen) is an exit, not a
+		// failed search: stop here instead of claiming nothing was found and
+		// re-prompting (issue #203).
+		if errors.Is(searchErr, api.ErrSearchAborted) {
+			return nil, searchErr
+		}
+
+		var failure *providers.SearchFailure
+		switch {
+		case errors.Is(searchErr, api.ErrBackToSearch):
 			util.Infof("Going back to new search...")
-		} else {
-			// Display error message to user for other errors
+		case searchErr == nil, errors.Is(searchErr, api.ErrNoResults):
+			// Either every source answered with nothing, or the search
+			// returned no error and no anime — both are "not found".
 			util.Errorf("No anime found with the name: %s", currentName)
+		case errors.As(searchErr, &failure):
+			reportSearchFailure(currentName, failure)
+		default:
+			// A transport/source failure is not the same as an empty result;
+			// saying "no anime found" here hides the real reason.
+			util.Errorf("Search failed for %q: %v", currentName, searchErr)
 		}
 
 		util.Infof("Please enter a new search term.")
@@ -167,6 +182,25 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		}
 		currentName = nextName
 	}
+}
+
+// reportSearchFailure prints one short line per source instead of the error
+// chain.
+//
+// The chain is still what travels through the code and lands in the debug log;
+// what it is not is something to read. Printed whole it said the same thing
+// three times over — the aggregate summary, the per-source diagnostics, and
+// then every raw cause again — for a user whose only real question is "is this
+// me, the title, or the site?".
+func reportSearchFailure(query string, failure *providers.SearchFailure) {
+	util.Errorf("No results for %q — every source failed:", query)
+	for _, src := range failure.Sources {
+		util.Errorf("  %s %s", src.Kind, src.Reason)
+	}
+	if failure.RateLimited() {
+		util.Infof("A source is throttling this network. Searching again right away will not help.")
+	}
+	util.Debugf("search failure detail: %s", failure.Detail())
 }
 
 // FetchAnimeDetails enriches anime with metadata from AniList and/or the
