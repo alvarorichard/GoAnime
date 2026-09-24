@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.0.10
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
@@ -28,7 +28,7 @@ require (
 )
 
 require (
-	github.com/ProtonMail/go-crypto v1.4.1 // indirect
+	github.com/ProtonMail/go-crypto v1.5.1 // indirect
 	github.com/andybalholm/brotli v1.2.4 // indirect
 	github.com/andybalholm/cascadia v1.3.5 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
