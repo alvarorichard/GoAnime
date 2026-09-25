@@ -42,10 +42,41 @@ type SourceFailure struct {
 	Err error
 }
 
-// SearchFailure reports that every source declined a search.
+// SearchFailure reports a search that ended with nothing to show.
+//
+// That is not the same as every source breaking, and the difference is the
+// whole message. Searching "o-todo-poderoso" on 2026-09-24 had three sources
+// answer normally with no match and one refuse the connection, and it was
+// reported as "every source failed" — which tells the user their install is
+// broken when what actually happened is that nobody has that title and one
+// host is throttling. Searched is what makes the two distinguishable.
 type SearchFailure struct {
-	Query   string
-	Sources []SourceFailure
+	Query string
+	// Searched is how many sources were asked, including the ones that
+	// answered normally with no match.
+	Searched int
+	Sources  []SourceFailure
+}
+
+// AllFailed reports whether nothing answered at all, as opposed to some
+// sources answering with no match.
+//
+// Searched == 0 means the count was never filled in; treating that as
+// "everything failed" keeps an un-updated caller's message no worse than it
+// was rather than making it claim something new and wrong.
+func (f *SearchFailure) AllFailed() bool {
+	if f == nil {
+		return false
+	}
+	return f.Searched <= len(f.Sources)
+}
+
+// Answered is how many sources replied normally and simply had no match.
+func (f *SearchFailure) Answered() int {
+	if f == nil || f.Searched <= len(f.Sources) {
+		return 0
+	}
+	return f.Searched - len(f.Sources)
 }
 
 // Error is the one-line form, used when something prints the error directly.
@@ -61,8 +92,12 @@ func (f *SearchFailure) Error() string {
 	for _, s := range f.Sources {
 		parts = append(parts, fmt.Sprintf("%s %s", s.Kind, s.Reason))
 	}
-	return fmt.Sprintf("no results for %q (all sources failed): %s",
-		f.Query, strings.Join(parts, "; "))
+	if f.AllFailed() {
+		return fmt.Sprintf("no results for %q (all sources failed): %s",
+			f.Query, strings.Join(parts, "; "))
+	}
+	return fmt.Sprintf("no results for %q (%d source(s) had no match, %d could not be reached): %s",
+		f.Query, f.Answered(), len(f.Sources), strings.Join(parts, "; "))
 }
 
 // Detail is the full form for the debug log: every short reason followed by the

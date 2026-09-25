@@ -296,6 +296,7 @@ func TestPlaywrightHelpers(t *testing.T) {
 
 		_, err = page.Goto(srv.URL + "/normal")
 		require.NoError(t, err)
-		assert.NotPanics(t, func() { triggerPlay(page) })
+		assert.NotPanics(t, func() { triggerPlay(page, false) })
+		assert.NotPanics(t, func() { triggerPlay(page, true) })
 	})
 }

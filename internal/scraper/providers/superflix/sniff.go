@@ -325,7 +325,15 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 		return nil, fmt.Errorf("load embed iframe: %w", err)
 	}
 
+	// Disarm the ad traps for the length of the sniff, so the play overlay
+	// below is safe to click. See popunder.go.
+	guard := &popunderGuard{}
+	defer guard.install(page, bctx)()
+
 	deadline := time.Now().Add(timeout)
+	// Muted autoplay gets the first few rounds to itself; the overlay click is
+	// the escalation for a player that ignores it, which is every movie.
+	overlayAfter := time.Now().Add(overlayClickAfter)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		got := hitURL
@@ -333,7 +341,7 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 		if got != "" {
 			break
 		}
-		triggerPlay(page)
+		triggerPlay(page, time.Now().After(overlayAfter))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -350,7 +358,8 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 	if hitUA == "" {
 		hitUA = SuperFlixUserAgent
 	}
-	util.Debug("SuperFlix sniffed stream", "url", hitURL, "referer", hitRef)
+	util.Debug("SuperFlix sniffed stream", "url", hitURL, "referer", hitRef,
+		"popundersBlocked", guard.blocked())
 	return &CFStreamResult{StreamURL: hitURL, Referer: hitRef, UserAgent: hitUA}, nil
 }
 
@@ -576,6 +585,13 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	// Past this point a hidden solve has clearly stalled, so the window is
 	// handed to the user rather than failing silently behind their back.
 	revealAt := time.Now().Add(offscreenRevealAfter)
+	// Same pair as SniffStream: disarm the ad traps, then let the overlay be
+	// clicked once muted autoplay has had its rounds. This is the path a movie
+	// takes, and the one measured spending its whole 90s budget capturing
+	// nothing while the player sat unstarted.
+	guard := &popunderGuard{}
+	defer guard.install(page, bctx)()
+	overlayAfter := time.Now().Add(overlayClickAfter)
 	embedSeen := false // have we ever observed a live embed frame?
 	var restrictedSince time.Time
 	focusSolverPage(page) // surface the solve window once (no-op while hidden)
@@ -685,7 +701,7 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 		if time.Now().After(revealAt) && challengeVisible(page) {
 			revealSolverWindow(page, bctx, "a challenge is still on screen and has not cleared on its own")
 		}
-		triggerPlay(page)
+		triggerPlay(page, time.Now().After(overlayAfter))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -714,7 +730,8 @@ func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string,
 	if ua == "" {
 		ua = SuperFlixUserAgent
 	}
-	util.Debug("SuperFlix sniffed embed stream", "url", streamURL, "referer", referer, "host", playerHost, "hash", videoHash)
+	util.Debug("SuperFlix sniffed embed stream", "url", streamURL, "referer", referer,
+		"host", playerHost, "hash", videoHash, "popundersBlocked", guard.blocked())
 	return &CFStreamResult{
 		StreamURL:  streamURL,
 		Referer:    referer,

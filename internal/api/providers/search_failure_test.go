@@ -182,18 +182,18 @@ func twoSourceFailure() *SearchFailure {
 func TestFinishSearch_SeparatesEmptyFromFailed(t *testing.T) {
 	t.Parallel()
 
-	_, err := finishSearch("dexter", nil, nil)
+	_, err := finishSearch("dexter", 2, nil, nil)
 	require.Error(t, err)
 	var asFailure *SearchFailure
 	assert.False(t, errors.As(err, &asFailure),
 		"every source answered with nothing; that is not a failure to report per source")
 	assert.Contains(t, err.Error(), "no results found for")
 
-	_, err = finishSearch("dexter", nil, twoSourceFailure().Sources)
+	_, err = finishSearch("dexter", 2, nil, twoSourceFailure().Sources)
 	require.ErrorAs(t, err, &asFailure)
 	assert.Equal(t, "dexter", asFailure.Query)
 
-	results, err := finishSearch("dexter", []*models.Anime{{Name: "Dexter"}}, twoSourceFailure().Sources)
+	results, err := finishSearch("dexter", 3, []*models.Anime{{Name: "Dexter"}}, twoSourceFailure().Sources)
 	require.NoError(t, err, "one source answering is a successful search, whatever the others did")
 	assert.Len(t, results, 1)
 }
@@ -210,7 +210,7 @@ func TestFinishSearch_PartialFailureIsReportedNotSwallowed(t *testing.T) {
 	restore := captureWarnings()
 	defer restore()
 
-	results, err := finishSearch("naruto",
+	results, err := finishSearch("naruto", 3,
 		[]*models.Anime{{Name: "Naruto", Source: "Goyabu"}},
 		twoSourceFailure().Sources)
 
@@ -228,7 +228,7 @@ func TestFinishSearch_NoWarningWhenEverySourceAnswered(t *testing.T) {
 	restore := captureWarnings()
 	defer restore()
 
-	_, err := finishSearch("naruto", []*models.Anime{{Name: "Naruto"}}, nil)
+	_, err := finishSearch("naruto", 1, []*models.Anime{{Name: "Naruto"}}, nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, warnings(), "nothing failed; there is nothing to report")
@@ -248,3 +248,58 @@ func captureWarnings() func() {
 }
 
 func warnings() string { return warnBuf.String() }
+
+// Nothing found is not everything broken.
+//
+// Searching "o-todo-poderoso" on 2026-09-24 had HiAnime, AnimeFire and Goyabu
+// answer normally with no match while SuperFlix refused the connection, and it
+// was reported as "every source failed". The two call for opposite reactions —
+// try another title, versus wait for a host — so the failure has to carry
+// enough to tell them apart.
+func TestSearchFailure_DistinguishesNoMatchFromEverythingBroken(t *testing.T) {
+	t.Parallel()
+
+	partial := &SearchFailure{
+		Query:    "o-todo-poderoso",
+		Searched: 4,
+		Sources:  twoSourceFailure().Sources[:1],
+	}
+	assert.False(t, partial.AllFailed(),
+		"three sources answered; claiming every source failed tells the user their install is broken")
+	assert.Equal(t, 3, partial.Answered())
+	assert.NotContains(t, partial.Error(), "all sources failed")
+	assert.Contains(t, partial.Error(), "no match")
+
+	total := &SearchFailure{
+		Query:    "dexter",
+		Searched: 2,
+		Sources:  twoSourceFailure().Sources,
+	}
+	assert.True(t, total.AllFailed(), "nothing answered at all; that IS every source failing")
+	assert.Zero(t, total.Answered())
+	assert.Contains(t, total.Error(), "all sources failed")
+}
+
+// A caller that has not been updated to fill Searched must not start making a
+// new claim. Zero means unknown, and unknown keeps the old wording.
+func TestSearchFailure_UnsetCountKeepsTheConservativeWording(t *testing.T) {
+	t.Parallel()
+
+	f := &SearchFailure{Query: "x", Sources: twoSourceFailure().Sources}
+	assert.True(t, f.AllFailed())
+	assert.Zero(t, f.Answered())
+	assert.Contains(t, f.Error(), "all sources failed")
+}
+
+// finishSearch is what fills the count, and it has to be the number of sources
+// actually asked — not the number that failed.
+func TestFinishSearch_CarriesHowManySourcesWereAsked(t *testing.T) {
+	t.Parallel()
+
+	_, err := finishSearch("o-todo-poderoso", 4, nil, twoSourceFailure().Sources[:1])
+	var f *SearchFailure
+	require.ErrorAs(t, err, &f)
+	assert.Equal(t, 4, f.Searched)
+	assert.False(t, f.AllFailed())
+	assert.Equal(t, 3, f.Answered())
+}

@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"net/http"
 	neturl "net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/util"
@@ -268,6 +270,15 @@ const challengeRetryCooldown = 5 * time.Second
 // crossing this means something needs a human.
 const offscreenRevealAfter = 15 * time.Second
 
+// overlayClickAfter is how long muted autoplay gets before the sniff escalates
+// to clicking the play overlay.
+//
+// A player that honours a muted play() does it on the first tick, so anything
+// past a few seconds is a player that needs the click. Short, because the sniff
+// budget it is spending is 90 seconds total and a movie that never starts
+// spends all of it.
+const overlayClickAfter = 6 * time.Second
+
 // challengeVisible reports whether there is a challenge on screen right now —
 // something only a human can clear — as opposed to a solve that is simply
 // taking its time.
@@ -410,8 +421,15 @@ func clickTurnstile(page playwright.Page) {
 
 // triggerPlay nudges every frame's player to start: unmute-and-play any <video>,
 // and click the common big-play-button selectors. Best-effort, errors ignored.
-func triggerPlay(page playwright.Page) {
-	const js = `() => {
+// triggerPlay nudges the player into loading.
+//
+// allowOverlay decides whether the big play button may be clicked. It stays
+// false for the first attempts so muted autoplay — which costs nothing and
+// cannot open anything — gets its chance first, and is only turned on by a
+// caller that has armed popunderGuard. Clicking it unguarded is what the old
+// comment here was right to refuse.
+func triggerPlay(page playwright.Page, allowOverlay bool) {
+	js := `() => {
 	  const fire = (el) => {
 	    if (!el) return;
 	    try { el.click(); } catch(e){}
@@ -460,14 +478,50 @@ func triggerPlay(page playwright.Page) {
 	        if (clickable !== target) fire(target);
 	      }
 	    }
-	    // Muted autoplay only — do NOT click play overlays / the player area:
-	    // those are ad-click traps that open pop-unders. getVideo fires on player
-	    // load anyway, so we don't need a play click.
+	    // Muted autoplay first: it costs nothing and cannot open anything.
 	    document.querySelectorAll('video').forEach(v => { try { v.muted = true; const p = v.play && v.play(); if (p && p.catch) p.catch(()=>{}); } catch(e){} });
-	  } catch(e){}
+
+	    // The play overlay, once — and only when the caller has disarmed the
+	    // pop-unders. On a movie the muted nudge above does not start the
+	    // player at all, so without this the sniff spends its whole budget
+	    // capturing nothing and the user ends up pressing play by hand.
+	    //
+	    // Once, not repeatedly: re-clicking the player area is what spawns a
+	    // second and third pop-under, and the guard should not have to be the
+	    // only thing standing between us and that.
+	    if (ALLOW_OVERLAY && !window.__sfPlayClicked) {
+	      const PLAY = '.jw-icon-display,.vjs-big-play-button,.plyr__control--overlaid,' +
+	                   '[class*="play-button"],[class*="playButton"],[aria-label*="Play" i],' +
+	                   '[title*="Play" i],.play,#play';
+	      let btn = document.querySelector(PLAY);
+	      if (!btn) {
+	        // No known skin: the video element itself takes the click.
+	        btn = document.querySelector('video');
+	      }
+	      if (btn) {
+	        window.__sfPlayClicked = true;
+	        fire(btn);
+	      }
+	    }
+	    return "";
+	  } catch(e){ return String((e && e.message) || e); }
 	}`
+	js = strings.Replace(js, "ALLOW_OVERLAY", strconv.FormatBool(allowOverlay), 1)
+	// Report what the script swallows.
+	//
+	// This used to end in a bare catch(e){}, so a throw anywhere in it — the
+	// server pick, the autoplay nudge — silently skipped everything after,
+	// including the play click, and looked exactly like a player that ignores
+	// us. Debugging that cost a live measurement run; the message is free.
 	for _, fr := range page.Frames() {
-		_, _ = fr.Evaluate(js)
+		v, err := fr.Evaluate(js)
+		if err != nil {
+			util.Debug("SuperFlix: play nudge could not run in a frame", "err", err)
+			continue
+		}
+		if msg, ok := v.(string); ok && msg != "" {
+			util.Debug("SuperFlix: play nudge threw", "err", msg, "frame", fr.URL())
+		}
 	}
 }
 

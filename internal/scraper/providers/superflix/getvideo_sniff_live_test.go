@@ -79,7 +79,7 @@ func TestSuperFlixGetVideoSniff_Live(t *testing.T) {
 				}
 			}
 		}
-		triggerPlay(page)
+		triggerPlay(page, true)
 		time.Sleep(2 * time.Second)
 	}
 	t.Logf("NO getVideo in 60s")

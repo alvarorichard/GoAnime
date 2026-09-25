@@ -193,12 +193,27 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 // then every raw cause again — for a user whose only real question is "is this
 // me, the title, or the site?".
 func reportSearchFailure(query string, failure *providers.SearchFailure) {
-	util.Errorf("No results for %q — every source failed:", query)
+	// "Every source failed" only when every source did.
+	//
+	// Searching "o-todo-poderoso" on 2026-09-24 had three sources answer
+	// normally with no match and one refuse the connection, and said every
+	// source failed — which reads as "your install is broken" when the truth is
+	// "nobody has this title, and one host is throttling you". Those call for
+	// different reactions from the user, so they get different sentences.
+	if failure.AllFailed() {
+		util.Errorf("No results for %q — every source failed:", query)
+	} else {
+		util.Errorf("No results for %q — %d source(s) had no match and %d could not be reached:",
+			query, failure.Answered(), len(failure.Sources))
+	}
 	for _, src := range failure.Sources {
 		util.Errorf("  %s %s", src.Kind, src.Reason)
 	}
 	if failure.RateLimited() {
 		util.Infof("A source is throttling this network. Searching again right away will not help.")
+	}
+	if !failure.AllFailed() {
+		util.Infof("The sources that did answer simply do not have %q. Try another spelling, or a different title.", query)
 	}
 	util.Debugf("search failure detail: %s", failure.Detail())
 }

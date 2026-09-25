@@ -81,6 +81,11 @@ func init() {
 // ones. Per-source failures are logged and tolerated — a result is returned as
 // long as at least one source succeeds.
 func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([]*models.Anime, error) {
+	// Undo the slugging both input paths apply before anything sees the query.
+	// See query.go: three of the four sources found nothing for every
+	// multi-word search because of it.
+	query = normalizeSearchQuery(query)
+
 	want := map[source.SourceKind]bool{}
 	for _, k := range kinds {
 		want[k] = true
@@ -132,7 +137,7 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				return finishSearch(query, all, failures)
+				return finishSearch(query, len(searchers), all, failures)
 			}
 			if res.err != nil {
 				// Feed the breaker so a repeatedly-failing source opens.
@@ -164,10 +169,10 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 		case <-graceTimer:
 			util.Debug("straggler grace elapsed; returning collected search results")
-			return finishSearch(query, all, failures)
+			return finishSearch(query, len(searchers), all, failures)
 		case <-ctx.Done():
 			util.Debug("search timeout reached; returning collected results")
-			return finishSearch(query, all, failures)
+			return finishSearch(query, len(searchers), all, failures)
 		}
 	}
 }
@@ -240,7 +245,7 @@ func reportPartialFailure(failures []SourceFailure) {
 // cannot tell whether GoAnime is broken, the title does not exist, or the host
 // is refusing them — and the third is the only one they can do something about
 // (wait). The raw errors stay in the chain for errors.Is/As and the debug log.
-func finishSearch(query string, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
+func finishSearch(query string, searched int, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
 	if len(all) > 0 {
 		reportPartialFailure(failures)
 		return all, nil
@@ -248,7 +253,7 @@ func finishSearch(query string, all []*models.Anime, failures []SourceFailure) (
 	if len(failures) == 0 {
 		return nil, fmt.Errorf("no results found for: %s", query)
 	}
-	return nil, &SearchFailure{Query: query, Sources: failures}
+	return nil, &SearchFailure{Query: query, Searched: searched, Sources: failures}
 }
 
 // FetchEpisodes lists an anime's episodes through the Model B registry — the
