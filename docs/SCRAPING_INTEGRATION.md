@@ -12,7 +12,8 @@ This integration adds powerful web scraping capabilities to GoAnime, inspired by
 ### Enhanced CLI Options
 ```bash
 # New command-line flags
---source <source>     # Specify source (hianime, animefire, goyabu, superflix)
+--source <source>     # Specify source (hianime, animefire, superflix)
+                      # goyabu is off by default: GOANIME_ENABLED_SOURCES=goyabu
 --quality <quality>   # Specify video quality (best, worst, 720p, 1080p, etc.)
 ```
 

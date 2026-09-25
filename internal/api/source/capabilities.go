@@ -52,12 +52,25 @@ type BrowserGated interface {
 	WarmUp(ctx context.Context) error
 }
 
-// ActiveSources returns the enabled registered sources ordered by Priority.
-// Config-disabled sources (S1 kill-switch) are excluded. Registry-wide
-// operations — like the search fan-out — iterate this instead of a hardcoded
-// source list, so adding a source needs no edit here.
+// ActiveSources returns the sources that join the SEARCH fan-out, ordered by
+// Priority. Registry-wide operations iterate this instead of a hardcoded source
+// list, so adding a source needs no edit here.
+//
+// Both strengths of disabled are excluded here — the kill-switch and
+// ship-off-by-default — because neither should cost a search. Resolution uses
+// registeredByPriority directly, which drops only the kill-switch, so an entry
+// tagged with a default-off source still routes to it.
 func ActiveSources() []Source {
-	return registeredByPriority()
+	out := make([]Source, 0, len(registeredByPriority()))
+	for _, s := range registeredByPriority() {
+		if IsSearchEnabled(s.Describe()) {
+			out = append(out, s)
+			continue
+		}
+		util.Debug("source not searched (off by default; opt in with GOANIME_ENABLED_SOURCES)",
+			"kind", s.Describe().Kind)
+	}
+	return out
 }
 
 // IsSeasoned reports whether src advertises season organization. The type

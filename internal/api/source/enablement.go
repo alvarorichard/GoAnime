@@ -15,14 +15,34 @@ import (
 // parsing lives in util so the search layer honors the same switch without an
 // import cycle (see util.SourceDisabled).
 
-// IsEnabled reports whether the source described by d should participate in
-// resolution given the current config.
+// "Disabled" comes in two strengths, because "do not search this" and "I cannot
+// play what I already have" are different requests.
+//
+// GOANIME_DISABLED_SOURCES is the hard one: the source is gone, and anything
+// pointing at it stops resolving. DefaultDisabled is the soft one: the source
+// stays known, so an entry already tagged with it still routes home, but it does
+// not join the search unless asked for.
+//
+// The distinction is not theoretical. Marking Goyabu DefaultDisabled with one
+// predicate covering both made an anime saved as Goyabu resolve to AnimeFire —
+// the Kind no longer matched, so resolution fell through to the URL, which
+// happened to contain "animefire". Turning a source off had quietly started
+// playing other sources' links for it.
+
+// IsEnabled reports whether the source described by d may be used at all: it is
+// false only for the explicit kill-switch. Resolution asks this, so a source
+// that ships off by default still recognises its own entries.
 func IsEnabled(d Descriptor) bool {
-	if util.SourceDisabled(string(d.Kind)) {
+	return !util.SourceDisabled(string(d.Kind))
+}
+
+// IsSearchEnabled reports whether d joins the search fan-out. A source that
+// ships off by default has to be asked for by name.
+func IsSearchEnabled(d Descriptor) bool {
+	if !IsEnabled(d) {
 		return false
 	}
 	if d.DefaultDisabled {
-		// Off unless the user explicitly opted in.
 		return util.SourceForceEnabled(string(d.Kind))
 	}
 	return true

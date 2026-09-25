@@ -312,6 +312,40 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 		Tags:        []string{"[goyabu]"},
 		URLMatchers: []string{"goyabu"},
 		ProbeURL:    "https://goyabu.io",
+		// PARKED, not retired. Off until we find a way past the gate:
+		// GOANIME_ENABLED_SOURCES=goyabu turns it back on at any time.
+		//
+		// Goyabu is the only source that needs a browser. Everything else here
+		// is plain HTTP; this one sits behind a Cloudflare managed challenge,
+		// and on a network Cloudflare has flagged there is currently no way
+		// through — so it costs a Chrome launch, sometimes a visible window, and
+		// returns nothing. It stays disabled rather than deleted because the
+		// scraper is complete and correct: it works today on a network that is
+		// not flagged.
+		//
+		// What is known, so the next attempt does not restart from zero
+		// (measured 2026-09-25):
+		//
+		//   - In a real browser the gate clears on its own in about ten seconds
+		//     and leaves three cookies. It is not unsolvable.
+		//   - Those cookies do NOT replay. Tried: the plain transport and the
+		//     Chrome-impersonating one, each with the solving browser's
+		//     User-Agent and with our own, plus curl with the same cookie and
+		//     UA. All 403. Cloudflare is binding the clearance to something no
+		//     HTTP client here presents.
+		//   - Installing real Chrome (GOANIME_SF_CHROME_CHANNEL=chrome) instead
+		//     of Playwright's bundled Chromium did not change that.
+		//   - The site's own banner says ISPs are blocking it and recommends a
+		//     VPN, and a datacenter IP reaches it unchallenged while a flagged
+		//     residential one does not. The rule is reputation, not the path.
+		//
+		// The avenue NOT yet tried, and the most promising one: stop replaying
+		// cookies and fetch through the browser itself — the solver already has
+		// a context that passed the gate, so a transport that returns that
+		// page's HTML would sidestep the binding entirely. It is real work
+		// (every scraper call would route through it) and it was not started,
+		// so it is written down rather than half-built.
+		DefaultDisabled: true,
 	}
 }
 
