@@ -134,10 +134,20 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 		revealed = true
 		showSolverWindow(page, bctx)
 		_ = page.BringToFront()
-		// The window is on screen from here until the page paints something of
-		// its own. Say what it is meanwhile, instead of showing a blank window
-		// that reads as a hung browser.
-		brandSolverPage(page)
+		// Deliberately NOT branded.
+		//
+		// brandSolverPage does SetContent, which REPLACES whatever the tab is
+		// showing — and by the time we surface, that is the challenge itself.
+		// Overwriting it destroyed the gate mid-solve and left our own splash
+		// screen in the tab, which carries no Cloudflare markers, so the very
+		// next poll concluded the gate had cleared. It then found no cookies,
+		// because nothing had been solved. The log line was "gate cleared …
+		// cookies=0", and it cost hours of reading a 403 as a clearance that
+		// would not transfer.
+		//
+		// Measured afterwards, without the branding: goyabu.io's gate clears on
+		// its own in about ten seconds, with three cookies. Branding is only
+		// safe on a page that has not navigated to the target yet.
 		util.Info("A verificação do site precisa de um toque seu — abri a janela do navegador. Assim que ela passar, fecho sozinho.")
 		util.Debug("challenge solver: revealed the window", "url", targetURL, "reason", why, "policy", reveal.String())
 	}
