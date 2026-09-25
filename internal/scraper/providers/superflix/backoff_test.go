@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -311,33 +312,52 @@ var _ = func() bool { return errors.Is(rateLimitedError("h", time.Second), ErrRa
 
 // ── The header pairing ──────────────────────────────────────────────────────
 
-// GoAnime used to send Chrome's Accept-Language ladder under its Firefox
-// User-Agent. The live host 429'd that exact pair for a stretch on 2026-09-21,
-// and its CDN matches Accept-Language by value regardless, so the request must
-// present one coherent browser. The mock origin rejects the bad pair, which
-// makes every search in this file guard it too.
-func TestDecorateRequest_DoesNotSendTheMismatchedAcceptLanguage(t *testing.T) {
+// The request must present ONE coherent browser: the Accept-Language ladder has
+// to be the one the browser named in the User-Agent actually sends.
+//
+// The pair to avoid is not a fixed pair. This test used to forbid Chrome's
+// ladder outright, because the client claimed Firefox and sending Chrome's
+// ladder under it was the mismatch the host 429'd for a stretch on 2026-09-21.
+// The User-Agent has since moved to Chrome — the solver drives Chromium, and
+// the Firefox string it used to send is itself throttled now — so Chrome's
+// ladder is the CORRECT one and the Firefox ladder became the mismatch.
+//
+// Hence the rule, not the value: whatever the UA says, the ladder must agree.
+// The host's CDN also matches Accept-Language by value (cdn.go), and the mock
+// origin rejects an incoherent pair, so every search in this file guards it.
+func TestDecorateRequest_SendsTheLadderMatchingTheUserAgent(t *testing.T) {
 	t.Parallel()
-	require.NotEqual(t, netx.ChromeAcceptLanguage, superFlixAcceptLanguage,
-		"the client claims Firefox; Chrome's ladder cannot go with it")
+
+	want := netx.AcceptLanguage
+	if strings.Contains(SuperFlixUserAgent, "Chrome/") {
+		want = netx.ChromeAcceptLanguage
+	}
+	require.Equal(t, want, superFlixAcceptLanguage,
+		"the q-ladder does not describe the browser the User-Agent claims")
 
 	c := NewSuperFlixClient()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.invalid/", http.NoBody)
 	require.NoError(t, err)
 	c.decorateRequest(req)
 
-	assert.Equal(t, superFlixAcceptLanguage, req.Header.Get("Accept-Language"))
-	assert.NotEqual(t, netx.ChromeAcceptLanguage, req.Header.Get("Accept-Language"))
+	assert.Equal(t, want, req.Header.Get("Accept-Language"))
 }
 
-// The header must match the User-Agent we claim. A Firefox UA paired with
-// Chrome's language ladder is the mismatch that got us blocklisted in the first
-// place, so the pairing is pinned rather than left to chance.
+// The ladder must match the User-Agent we claim, whichever browser that is.
+//
+// Pinned as a rule rather than a value: the UA moved from Firefox to Chrome when
+// the Firefox string turned out to be throttled by this host, and a test that
+// named one ladder would have had to be rewritten to keep passing instead of
+// catching anything.
 func TestSuperFlixAcceptLanguage_MatchesTheClaimedBrowser(t *testing.T) {
 	t.Parallel()
-	require.Contains(t, SuperFlixUserAgent, "Firefox", "the UA changed; revisit the language ladder with it")
-	assert.Equal(t, netx.AcceptLanguage, superFlixAcceptLanguage,
-		"SuperFlix must use the shared Firefox ladder, so the pairing is decided in one place")
+	require.True(t,
+		strings.Contains(SuperFlixUserAgent, "Chrome/") || strings.Contains(SuperFlixUserAgent, "Firefox/"),
+		"the UA names a browser this test does not know a ladder for")
+	assert.True(t, headersDescribeOneBrowser(http.Header{
+		"User-Agent":      []string{SuperFlixUserAgent},
+		"Accept-Language": []string{superFlixAcceptLanguage},
+	}), "the q-ladder does not describe the browser the User-Agent claims")
 }
 
 // A search through the mock is refused outright when the bad pair comes back,
@@ -355,7 +375,13 @@ func TestSearch_IsRefusedWhenTheMismatchedHeaderComesBack(t *testing.T) {
 	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		c.base()+sfSearchPath+"?s=tehran", http.NoBody)
 	require.NoError(t, reqErr)
-	req.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
+	// Whichever ladder does NOT go with the current UA is the regression.
+	wrong := netx.ChromeAcceptLanguage
+	if strings.Contains(SuperFlixUserAgent, "Chrome/") {
+		wrong = netx.AcceptLanguage
+	}
+	req.Header.Set("User-Agent", SuperFlixUserAgent)
+	req.Header.Set("Accept-Language", wrong)
 	resp, doErr := http.DefaultClient.Do(req)
 	require.NoError(t, doErr)
 	defer func() { _ = resp.Body.Close() }()

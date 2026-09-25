@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -62,15 +63,36 @@ const (
 	// then the player returns the signed HLS master. Like SuperFlixBase this is
 	// the fallback and first seed for runtime host discovery.
 	SuperFlixEmbedHost = "superflixapi.monster"
-	// SuperFlixUserAgent MUST match the UA the CF solver's Firefox presents
-	// (see cfBrowserSolver.Solve). Cloudflare binds the cf_clearance cookie to
-	// the User-Agent that solved the challenge; if the HTTP client then sends a
-	// different UA, CF rejects the clearance and re-challenges in a loop. A
-	// Firefox-on-Linux UA is used because the solver drives a real Firefox.
-	SuperFlixUserAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
-	// superFlixAcceptLanguage is the shared Firefox q-ladder (netx.AcceptLanguage),
-	// aliased here because SuperFlix declares its own User-Agent and the two must
-	// describe the same browser.
+	// SuperFlixUserAgent is the UA the plain-HTTP path presents before any
+	// Cloudflare solve has run. It must describe the browser the solver drives:
+	// Cloudflare binds cf_clearance to the User-Agent that solved the
+	// challenge, and a client that then sends a different one is re-challenged
+	// in a loop. (After a solve, effectiveUserAgent switches to the real UA the
+	// browser reported.)
+	//
+	// It says Chrome because the solver drives Chromium — Playwright's bundled
+	// build, or the system Chrome channel. It used to say
+	// "X11; Linux x86_64 … Firefox/125.0", left over from when the solver was a
+	// Firefox, and that string is now throttled by this host. Measured
+	// 2026-09-24 against /pesquisar, requests spaced 25s apart on one IP with an
+	// identical Accept-Language:
+	//
+	//	Firefox/125.0 (X11; Linux x86_64)   429, 429, 429, 429
+	//	Firefox/125.0 (Windows NT 10.0)     200
+	//	Firefox/121.0 (Windows NT 10.0)     200, 200
+	//	Chrome/124 (X11; Linux x86_64)      200
+	//
+	// So it is neither "Linux" nor "Firefox 125" on its own — it is that exact
+	// string. The user-visible symptom was SuperFlix returning nothing from
+	// every search while plain curl on the same URL got 200 and three results.
+	//
+	// Treat this as measured behaviour, not a permanent law: the Accept-Language
+	// note below records a rule on this host that reproduced eight times and
+	// then stopped. GOANIME_SF_UA overrides it without waiting for a release.
+	SuperFlixUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	// superFlixAcceptLanguage is Chrome's q-ladder, because the User-Agent above
+	// says Chrome and the two must describe the same browser. It moved from the
+	// Firefox ladder when the UA did.
 	//
 	// The previous value was Chrome's ladder under a Firefox UA. On 2026-09-21
 	// this host answered 429 to that exact string while serving every other
@@ -80,7 +102,7 @@ const (
 	// hygiene rather than a guaranteed cure. It is kept because a coherent
 	// browser costs nothing, and because this host's CDN already matches
 	// Accept-Language by value (see cdn.go).
-	superFlixAcceptLanguage = netx.AcceptLanguage
+	superFlixAcceptLanguage = netx.ChromeAcceptLanguage
 )
 
 // Pre-compiled regexes for SuperFlix scraper
@@ -224,8 +246,22 @@ func (c *SuperFlixClient) effectiveUserAgent() string {
 	return c.userAgent
 }
 
+// userAgentOverrideEnv lets an installed binary route around a UA block without
+// waiting for a release — the same escape hatch GOANIME_SF_HOST is for a host
+// rotation. This host has blocked a User-Agent string once; it can do it again,
+// and the person it happens to should not have to wait for us.
+const userAgentOverrideEnv = "GOANIME_SF_UA"
+
+// resolveUserAgent returns the UA to present on plain HTTP requests.
+func resolveUserAgent(configured string) string {
+	if v := strings.TrimSpace(os.Getenv(userAgentOverrideEnv)); v != "" {
+		return v
+	}
+	return configured
+}
+
 func (c *SuperFlixClient) decorateRequest(req *http.Request) {
-	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("User-Agent", resolveUserAgent(c.userAgent))
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", superFlixAcceptLanguage)
 }

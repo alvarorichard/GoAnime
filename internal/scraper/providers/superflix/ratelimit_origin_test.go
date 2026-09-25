@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -72,14 +73,32 @@ type sfOrigin struct {
 	released chan struct{}
 }
 
-// mismatchedAcceptLanguage is Chrome's q-ladder, which GoAnime used to send
-// under its Firefox User-Agent — a pair no real browser produces.
+// headersDescribeOneBrowser reports whether the Accept-Language ladder is the
+// one the browser named in the User-Agent actually sends.
 //
-// On 2026-09-21 the live host answered 429 to exactly this value across eight
-// interleaved probes while serving every other Accept-Language 200; hours later
-// the same value was accepted again, so the rule is reputation-sensitive rather
-// than a fixed blocklist. The mock rejects it regardless: whether or not the
-// host is enforcing it today, GoAnime must not present a browser it is not.
+// The mock rejects an incoherent pair, so every test that searches through it
+// guards the headers too, instead of that being one assertion somebody can
+// delete.
+//
+// It checks the RULE, not a value. This started as "Chrome's ladder is the bad
+// one", because the client claimed Firefox and sending Chrome's ladder under it
+// was the pair the live host 429'd for a stretch on 2026-09-21. The client's UA
+// has since moved to Chrome — the solver drives Chromium, and the Firefox string
+// it used to send is itself throttled now — which flipped which ladder is wrong.
+// A hardcoded value would have flipped with it and stopped guarding anything.
+func headersDescribeOneBrowser(h http.Header) bool {
+	ua := h.Get("User-Agent")
+	al := h.Get("Accept-Language")
+	switch {
+	case strings.Contains(ua, "Chrome/"):
+		return al == netx.ChromeAcceptLanguage
+	case strings.Contains(ua, "Firefox/"):
+		// Two ladders are legitimate for Firefox: the pt-BR one and the English
+		// one used by sources with no Portuguese catalogue.
+		return al == netx.AcceptLanguage || al == netx.EnglishAcceptLanguage
+	}
+	return true
+}
 
 // sfSearchPath is the only endpoint the abuse guard is modelled on, matching
 // the real deployment where `/` is not rate limited alongside it.
@@ -145,10 +164,7 @@ func (o *sfOrigin) serve(w http.ResponseWriter, r *http.Request) {
 	limited := path == sfSearchPath && o.countLocked()
 	o.mu.Unlock()
 
-	// Reject the Firefox-UA/Chrome-ladder pair, so every test that searches
-	// through this mock also guards the header instead of it being one
-	// assertion somebody can delete.
-	if r.Header.Get("Accept-Language") == netx.ChromeAcceptLanguage {
+	if !headersDescribeOneBrowser(r.Header) {
 		limited = true
 	}
 
