@@ -55,8 +55,28 @@ func TestUserAgentDescribesTheBrowserWeDrive(t *testing.T) {
 func TestAcceptLanguageStillPairsWithTheUserAgent(t *testing.T) {
 	t.Parallel()
 	require.Contains(t, SuperFlixUserAgent, "Chrome/")
-	assert.Equal(t, netx.ChromeAcceptLanguage, superFlixAcceptLanguage,
+	assert.Equal(t, netx.ChromeEnglishAcceptLanguage, superFlixAcceptLanguage,
 		"a Chrome UA with Firefox's q-ladder is a pair no real browser produces")
+}
+
+// blockedAcceptLanguage is the exact ladder measured at 429. Like the blocked
+// User-Agent above, it stays here so it cannot quietly come back.
+//
+// It came back once already: switching the UA to Chrome brought Chrome's
+// Portuguese ladder with it, and that is precisely the string this host
+// refuses. Measured 2026-09-25, alternating 22s apart with the same UA — 429,
+// 429, 429 against 200, 200, 200 for en-US,en;q=0.9 — while no header at all,
+// "pt-BR", "en-US" and Firefox's pt-BR ladder all answered 200.
+const blockedAcceptLanguage = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+
+func TestAcceptLanguageIsNotTheBlockedLadder(t *testing.T) {
+	t.Parallel()
+	assert.NotEqual(t, blockedAcceptLanguage, superFlixAcceptLanguage,
+		"this ladder was measured at 429 three times out of three; SuperFlix returns nothing with it")
+	// And the guard has to be about THIS client, not about netx: the shared
+	// Chrome constant still legitimately holds that value for anyone else.
+	assert.Equal(t, blockedAcceptLanguage, netx.ChromeAcceptLanguage,
+		"if this drifts, the constant above is guarding a string nobody sends any more")
 }
 
 // The override is the escape hatch. This host has blocked a User-Agent once; the

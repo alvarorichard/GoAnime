@@ -1435,7 +1435,12 @@ func TestDecorateRequest_SetsHeaders(t *testing.T) {
 
 	assert.Contains(t, capturedHeaders.Get("User-Agent"), "Mozilla")
 	assert.Contains(t, capturedHeaders.Get("Accept"), "text/html")
-	assert.Contains(t, capturedHeaders.Get("Accept-Language"), "pt-BR")
+	// Not "pt-BR": this client sends Chrome's ENGLISH ladder, because the host
+	// 429s the Portuguese Chrome one (see client.go). The header's job here is
+	// to be present and coherent with the UA, which is what the shared rule
+	// checks; the site serves Portuguese content regardless.
+	assert.Equal(t, superFlixAcceptLanguage, capturedHeaders.Get("Accept-Language"))
+	assert.True(t, headersDescribeOneBrowser(capturedHeaders))
 }
 
 // =============================================================================

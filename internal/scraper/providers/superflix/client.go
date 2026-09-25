@@ -90,9 +90,29 @@ const (
 	// note below records a rule on this host that reproduced eight times and
 	// then stopped. GOANIME_SF_UA overrides it without waiting for a release.
 	SuperFlixUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-	// superFlixAcceptLanguage is Chrome's q-ladder, because the User-Agent above
-	// says Chrome and the two must describe the same browser. It moved from the
-	// Firefox ladder when the UA did.
+	// superFlixAcceptLanguage is Chrome's ENGLISH ladder, and the "English" part
+	// is not a preference — this host refuses the Portuguese one.
+	//
+	// Measured 2026-09-25 against /pesquisar, same Chrome User-Agent, requests
+	// alternating 22s apart:
+	//
+	//	pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7   429, 429, 429
+	//	en-US,en;q=0.9                        200, 200, 200
+	//
+	// and, in a separate sweep, every other value tried — no header at all,
+	// "pt-BR", "en-US", and Firefox's pt-BR ladder — also answered 200. So it is
+	// that one string, not Portuguese in general and not the presence of the
+	// header.
+	//
+	// This is the same rule first seen on 2026-09-21, when it reproduced eight
+	// times and then stopped; the note below records that. It came back, and it
+	// came back because switching the User-Agent to Chrome brought its ladder
+	// along and walked straight into it. The value is also exactly what the
+	// media CDN demands byte for byte (cdn.go), so one string now satisfies
+	// both.
+	//
+	// It stays coherent with the UA: en-US,en;q=0.9 is the whole header a real
+	// English Chrome sends.
 	//
 	// The previous value was Chrome's ladder under a Firefox UA. On 2026-09-21
 	// this host answered 429 to that exact string while serving every other
@@ -102,7 +122,7 @@ const (
 	// hygiene rather than a guaranteed cure. It is kept because a coherent
 	// browser costs nothing, and because this host's CDN already matches
 	// Accept-Language by value (see cdn.go).
-	superFlixAcceptLanguage = netx.ChromeAcceptLanguage
+	superFlixAcceptLanguage = netx.ChromeEnglishAcceptLanguage
 )
 
 // Pre-compiled regexes for SuperFlix scraper

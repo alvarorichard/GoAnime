@@ -328,19 +328,19 @@ var _ = func() bool { return errors.Is(rateLimitedError("h", time.Second), ErrRa
 func TestDecorateRequest_SendsTheLadderMatchingTheUserAgent(t *testing.T) {
 	t.Parallel()
 
-	want := netx.AcceptLanguage
-	if strings.Contains(SuperFlixUserAgent, "Chrome/") {
-		want = netx.ChromeAcceptLanguage
-	}
-	require.Equal(t, want, superFlixAcceptLanguage,
-		"the q-ladder does not describe the browser the User-Agent claims")
-
 	c := NewSuperFlixClient()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.invalid/", http.NoBody)
 	require.NoError(t, err)
 	c.decorateRequest(req)
 
-	assert.Equal(t, want, req.Header.Get("Accept-Language"))
+	// Asserted through the same coherence rule the mock origin applies, rather
+	// than against one named constant: a browser sends a different ladder per
+	// locale, and this client's is pinned to the English one because the host
+	// refuses the Portuguese Chrome ladder (client.go).
+	assert.True(t, headersDescribeOneBrowser(req.Header),
+		"the q-ladder %q does not describe the browser %q claims",
+		req.Header.Get("Accept-Language"), req.Header.Get("User-Agent"))
+	assert.Equal(t, superFlixAcceptLanguage, req.Header.Get("Accept-Language"))
 }
 
 // The ladder must match the User-Agent we claim, whichever browser that is.

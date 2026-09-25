@@ -91,7 +91,10 @@ func headersDescribeOneBrowser(h http.Header) bool {
 	al := h.Get("Accept-Language")
 	switch {
 	case strings.Contains(ua, "Chrome/"):
-		return al == netx.ChromeAcceptLanguage
+		// Both are ladders a real Chrome sends; which one depends on the
+		// profile's locale. The English one is what this client uses, because
+		// the host 429s the Portuguese one — see client.go.
+		return al == netx.ChromeAcceptLanguage || al == netx.ChromeEnglishAcceptLanguage
 	case strings.Contains(ua, "Firefox/"):
 		// Two ladders are legitimate for Firefox: the pt-BR one and the English
 		// one used by sources with no Portuguese catalogue.

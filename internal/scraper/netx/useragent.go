@@ -37,6 +37,15 @@ const ChromeAcceptLanguage = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
 // locale its content has nothing to do with.
 const EnglishAcceptLanguage = "en-US,en;q=0.5"
 
+// ChromeEnglishAcceptLanguage is Chrome's ladder for an English desktop.
+//
+// Chrome steps 0.9/0.8/0.7 and collapses to a single fallback for a one-locale
+// profile, so "en-US,en;q=0.9" is the whole header a real English Chrome sends.
+// It exists as a named constant because two places need exactly it: SuperFlix's
+// plain-HTTP client, whose host 429s the pt-BR Chrome ladder, and its media CDN,
+// which matches this value byte for byte (see superflix/cdn.go).
+const ChromeEnglishAcceptLanguage = "en-US,en;q=0.9"
+
 // APIUserAgent identifies GoAnime to first-party JSON/GraphQL APIs (AniList) as
 // an ordinary API client.
 //
