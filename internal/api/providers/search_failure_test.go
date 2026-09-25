@@ -107,14 +107,14 @@ func TestDescribeFailure_PhrasesEachClassForAPerson(t *testing.T) {
 		{
 			name:        "throttled by status",
 			diag:        &netx.SourceDiagnostic{Kind: netx.DiagnosticBlockedChallenge, StatusCode: http.StatusTooManyRequests},
-			wantSaid:    "rate limiting",
+			wantSaid:    "refusing this network",
 			wantLimited: true,
 		},
 		{
 			name:        "suppressed by our own back-off",
 			diag:        &netx.SourceDiagnostic{Kind: netx.DiagnosticUnknown},
 			err:         errors.New("failed to make request: superflix: rate limited, backing off: host asked us to wait"),
-			wantSaid:    "rate limiting",
+			wantSaid:    "refusing this network",
 			wantLimited: true,
 		},
 		{
@@ -164,7 +164,7 @@ func twoSourceFailure() *SearchFailure {
 	return &SearchFailure{Query: "dexter", Sources: []SourceFailure{
 		{
 			Kind:        source.SuperFlix,
-			Reason:      "is rate limiting this network — wait a few minutes",
+			Reason:      "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network",
 			RateLimited: true,
 			Err:         errors.New("SuperFlix: server returned: 429 Too Many Requests"),
 		},

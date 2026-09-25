@@ -210,7 +210,15 @@ func reportSearchFailure(query string, failure *providers.SearchFailure) {
 		util.Errorf("  %s %s", src.Kind, src.Reason)
 	}
 	if failure.RateLimited() {
-		util.Infof("A source is throttling this network. Searching again right away will not help.")
+		// Says what to DO, and says it in a way that does not invite the retry.
+		//
+		// The old line ("wait a few minutes") was read as an invitation to try
+		// again shortly, and trying again is the one thing that makes it worse:
+		// this host's guard is renewed by every request sent during a block.
+		// Measured 2026-09-25, /pesquisar stayed refused through three, six and
+		// ten minutes of TOTAL silence — and the user searching every ten
+		// seconds in between is what kept resetting that clock.
+		util.Infof("A source is refusing this network. Every new search restarts its block, so waiting is the fix — about 15 minutes, or switch network/VPN to get it back now.")
 	}
 	if !failure.AllFailed() {
 		util.Infof("The sources that did answer simply do not have %q. Try another spelling, or a different title.", query)

@@ -162,7 +162,7 @@ func describeFailure(diag *netx.SourceDiagnostic, err error) (reason string, rat
 	// A request the back-off suppressed never reached the host, so calling it
 	// a failure of that host would be wrong.
 	if err != nil && strings.Contains(err.Error(), errSearchRateLimited.Error()) {
-		return "is rate limiting this network — wait a few minutes", true
+		return "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network", true
 	}
 	if diag == nil {
 		return "failed", false
@@ -170,7 +170,7 @@ func describeFailure(diag *netx.SourceDiagnostic, err error) (reason string, rat
 
 	switch {
 	case diag.StatusCode == http.StatusTooManyRequests:
-		return "is rate limiting this network — wait a few minutes", true
+		return "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network", true
 	case diag.Kind == netx.DiagnosticBlockedChallenge:
 		return "blocked the request (captcha/challenge)", false
 	case diag.Kind == netx.DiagnosticSourceUnavailable && diag.StatusCode > 0:

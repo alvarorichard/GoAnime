@@ -212,7 +212,7 @@ func TestSearchAll_RateLimitedSourceFailsFastAndKeepsItsReason(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRateLimited,
 		"the raw cause must survive so callers can classify the failure")
-	assert.Contains(t, err.Error(), "rate limiting",
+	assert.Contains(t, err.Error(), "refusing this network",
 		"the aggregate must say why SuperFlix refused, not just that everything failed")
 	assert.Less(t, elapsed, perSourceSearchTimeout/2,
 		"no source was slow; the search must not spend its per-source budget anyway")
