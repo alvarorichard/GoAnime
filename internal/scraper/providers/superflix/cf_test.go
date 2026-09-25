@@ -529,17 +529,19 @@ func TestCFBrowserSolver_Close(t *testing.T) {
 }
 
 // TestCFBrowserSolver_CloseDoesNotBlockOnSolve guards the SIGINT-shutdown fix:
-// Close() must use lifeMu, not the solve mutex mu, so it can tear the browser
-// down while a solve still holds mu. If Close ever takes mu again, killing the
-// app mid-solve would hang for the whole solve budget (~90s) and the Playwright
-// driver would EPIPE-crash.
+// Close() must use lifeMu, not browserWorkGate, so it can tear the browser down
+// while a solve still holds the browser gate. If Close ever takes that gate,
+// killing the app mid-solve would hang for the whole solve budget (~90s) and the
+// Playwright driver would EPIPE-crash.
 func TestCFBrowserSolver_CloseDoesNotBlockOnSolve(t *testing.T) {
 	t.Parallel()
 	s := &cfBrowserSolver{}
 
-	// Simulate an in-flight solve holding the solve mutex.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Simulate an in-flight solve holding the browser gate.
+	if err := s.browserWorkGate.lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer s.browserWorkGate.unlock()
 
 	done := make(chan struct{})
 	go func() {
@@ -549,9 +551,9 @@ func TestCFBrowserSolver_CloseDoesNotBlockOnSolve(t *testing.T) {
 
 	select {
 	case <-done:
-		// Close returned without waiting on mu — correct.
+		// Close returned without waiting on the browser gate — correct.
 	case <-time.After(2 * time.Second):
-		t.Fatal("Close blocked while a solve held mu — shutdown would hang on SIGINT")
+		t.Fatal("Close blocked while a solve held the browser gate — shutdown would hang on SIGINT")
 	}
 }
 

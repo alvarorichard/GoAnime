@@ -39,11 +39,12 @@ type CFSolveResult struct {
 // reused across runs; headed means the user can complete a checkbox if one
 // appears.
 type cfBrowserSolver struct {
-	// mu serializes solves (one challenge at a time).
-	mu sync.Mutex
+	// browserWorkGate serializes browser work while letting a waiting caller
+	// leave promptly when its context is canceled or expires.
+	browserWorkGate contextGate
 
-	// lifeMu guards the lifecycle handles, independent of mu, so Close() (from
-	// the SIGINT cleanup) can tear everything down even while a solve holds mu.
+	// lifeMu guards lifecycle handles independently of browserWorkGate, so Close() (from
+	// SIGINT cleanup) can tear everything down while browser work is in progress.
 	lifeMu            sync.Mutex
 	pw                *playwright.Playwright
 	pctx              playwright.BrowserContext
@@ -342,14 +343,16 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 //     automatically on later runs.
 //  4. Capture cookies, HTML, and the real UA (cf_clearance is UA-bound).
 func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout time.Duration) (*CFSolveResult, error) {
+	if err := s.browserWorkGate.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer s.browserWorkGate.unlock()
+
 	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if timeout <= 0 {
 		timeout = 90 * time.Second

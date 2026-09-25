@@ -259,13 +259,16 @@ var sfMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/getVideo|v
 // Foundation: returns the first matching media URL. Some providers need extra
 // play interaction or de-obfuscation that can be layered on later.
 func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error) {
+	if err := s.browserWorkGate.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer s.browserWorkGate.unlock()
+
 	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if timeout <= 0 {
 		timeout = 120 * time.Second
@@ -410,13 +413,16 @@ var sfDirectMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/hls/
 const restrictedShellGrace = 12 * time.Second
 
 func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error) {
+	if err := s.browserWorkGate.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer s.browserWorkGate.unlock()
+
 	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if timeout <= 0 {
 		timeout = 90 * time.Second

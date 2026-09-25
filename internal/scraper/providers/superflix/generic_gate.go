@@ -43,6 +43,11 @@ func (genericGateSolver) SolveChallenge(ctx context.Context, targetURL string, t
 // stops at "the challenge markup is gone", which is all a plain HTTP scraper
 // needs before retrying its own request.
 func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeout time.Duration, reveal netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
+	if err := s.browserWorkGate.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer s.browserWorkGate.unlock()
+
 	// Declared before acquire so the release defer below can read it.
 	revealed := false
 
@@ -65,9 +70,6 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 			s.closeContext()
 		}
 	}()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if timeout <= 0 {
 		timeout = 90 * time.Second

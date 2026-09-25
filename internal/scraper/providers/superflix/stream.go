@@ -1027,6 +1027,20 @@ func (c *SuperFlixClient) getStreamViaBrowser(ctx context.Context, solver embedS
 		return res, nil
 	}
 
+	// Several UI actions can request the same episode before its first resolve
+	// has finished. Let one request do the expensive browser work; after waiting,
+	// the others recheck and reuse the cache when the result is replayable. The
+	// keyed gate is context-aware, so canceling a queued play does not leave it
+	// waiting for a different episode's browser solve to finish.
+	release, err := streamResolveGates.lock(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for SuperFlix stream resolution: %w", err)
+	}
+	defer release()
+	if res, ok := c.streamFromCache(ctx, key); ok {
+		return res, nil
+	}
+
 	// 2. Cache miss / stale → drive the headed browser through the gate once,
 	//    capture the stream + (host, hash), and cache the pair for next time.
 	var embedURL string

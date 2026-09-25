@@ -200,8 +200,13 @@ func (c *SuperFlixClient) getEpisodesViaBrowser(ctx context.Context, tmdbID stri
 	maps.Copy(episodes, parseFrontendEpisodes(res.HTML))
 
 	// Resolve the other seasons' URLs against the solved frontend domain and
-	// fetch each that we don't already have.
-	for season, seasonURL := range resolveFrontendSeasonURLs(res.HTML, res.FinalURL) {
+	// fetch them in numeric order, rather than depending on map iteration order.
+	seasonURLs := resolveFrontendSeasonURLs(res.HTML, res.FinalURL)
+	for _, season := range parseFrontendSeasons(res.HTML) {
+		seasonURL, ok := seasonURLs[season]
+		if !ok {
+			continue
+		}
 		if _, ok := episodes[season]; ok {
 			continue
 		}

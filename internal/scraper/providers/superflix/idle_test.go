@@ -1,6 +1,9 @@
 package superflix
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -201,6 +204,107 @@ func TestEveryBrowserEntryPointGoesThroughAcquire(t *testing.T) {
 	assert.Emptyf(t, offenders,
 		"these start the browser without registering a user, so the idle watchdog can never "+
 			"close the window they open — call s.acquire() and defer its release instead: %v", offenders)
+}
+
+// Every browser operation must serialize through browserWorkGate as well as
+// acquire the shared context. This structural scan catches a future entrypoint
+// that opens the browser safely but forgets the cancelable serialization gate.
+func TestEveryBrowserEntryPointUsesCancelableGate(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]bool{
+		"Solve":            false,
+		"solveGate":        false,
+		"SniffStream":      false,
+		"SniffEmbedStream": false,
+	}
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+
+	var offenders []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fset, name, nil, 0)
+		require.NoError(t, parseErr)
+
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || fn.Body == nil || receiverName(fn) != "cfBrowserSolver" {
+				continue
+			}
+
+			method := fn.Name.Name
+			_, expected := want[method]
+			usesAcquire, locksGate, defersUnlock := false, false, false
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				switch n := node.(type) {
+				case *ast.CallExpr:
+					switch selectorPath(n.Fun) {
+					case "s.acquire":
+						usesAcquire = true
+					case "s.browserWorkGate.lock":
+						locksGate = locksGate || (len(n.Args) == 1 && selectorPath(n.Args[0]) == "ctx")
+					}
+				case *ast.DeferStmt:
+					if selectorPath(n.Call.Fun) == "s.browserWorkGate.unlock" {
+						defersUnlock = true
+					}
+				}
+				return true
+			})
+
+			if expected {
+				want[method] = true
+				if !usesAcquire {
+					offenders = append(offenders, method+" no longer calls acquire()")
+				}
+			}
+			if usesAcquire && method != "acquire" {
+				if !locksGate {
+					offenders = append(offenders, method+" does not take browserWorkGate with ctx")
+				}
+				if !defersUnlock {
+					offenders = append(offenders, method+" does not defer browserWorkGate.unlock()")
+				}
+			}
+		}
+	}
+
+	for method, found := range want {
+		if !found {
+			offenders = append(offenders, "missing browser entrypoint "+method)
+		}
+	}
+	assert.Emptyf(t, offenders, "browser entrypoints must acquire and release the shared cancelable gate: %v", offenders)
+}
+
+func receiverName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	typ := fn.Recv.List[0].Type
+	if star, ok := typ.(*ast.StarExpr); ok {
+		typ = star.X
+	}
+	if ident, ok := typ.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+func selectorPath(expr ast.Expr) string {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return node.Name
+	case *ast.SelectorExpr:
+		return selectorPath(node.X) + "." + node.Sel.Name
+	default:
+		return ""
+	}
 }
 
 func itoa(n int) string {
