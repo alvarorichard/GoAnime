@@ -43,11 +43,28 @@ func (genericGateSolver) SolveChallenge(ctx context.Context, targetURL string, t
 // stops at "the challenge markup is gone", which is all a plain HTTP scraper
 // needs before retrying its own request.
 func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeout time.Duration, reveal netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
+	// Declared before acquire so the release defer below can read it.
+	revealed := false
+
 	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer func() {
+		release()
+		// A window the user can SEE has to go the moment it is done, not when
+		// the idle timer happens to fire. Measured: the watchdog closed it 16
+		// seconds after the solve — correct, and far too long to sit looking at
+		// a browser you did not ask for. A hidden window can wait; this one
+		// cannot.
+		//
+		// Only when nothing else is using the browser: a search runs its
+		// sources at once, and closing the context out from under another
+		// source's solve is the bug the use-count exists to prevent.
+		if revealed && !s.idle.busy() {
+			s.closeContext()
+		}
+	}()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,9 +83,6 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 	// the window in the screenshot, and it was never the page being solved.
 	var page playwright.Page
 	ownPage := false
-	// Declared before the teardown defer below, which reads it to decide whether
-	// there is a window to take off the screen.
-	revealed := false
 	if pages := bctx.Pages(); len(pages) > 0 {
 		page = pages[0]
 	} else {
