@@ -154,6 +154,8 @@ type SuperFlixClient struct {
 	maxRetries    int
 	retryDelay    time.Duration
 	searchCache   sync.Map
+	// persistentSearch backs searchCache across runs; nil means the shared one.
+	persistentSearch *searchCache
 }
 
 var (
@@ -257,6 +259,15 @@ func (c *SuperFlixClient) base() string {
 // reports a User-Agent has to report that one — the player CDN binds a signed
 // URL to the UA that fetched it, so handing mpv c.userAgent after the transport
 // signed with a different one gets every fetch 403'd.
+// diskCache returns the client's on-disk search cache, or the process-wide one.
+// A test installs its own by setting the field.
+func (c *SuperFlixClient) diskCache() *searchCache {
+	if c.persistentSearch != nil {
+		return c.persistentSearch
+	}
+	return defaultSearchCache
+}
+
 func (c *SuperFlixClient) effectiveUserAgent() string {
 	if t, ok := c.client.Transport.(*cfFallbackTransport); ok {
 		if ua := t.getSolvedUA(); ua != "" {

@@ -75,6 +75,15 @@ func (c *SuperFlixClient) SearchMediaWithContext(ctx context.Context, query stri
 	if cached, ok := c.searchCache.Load(cacheKey); ok {
 		return cached.([]*SuperFlixMedia), nil
 	}
+	// Then the on-disk one. GoAnime is run as a command, so the in-memory map
+	// above is empty on every invocation — without this, typing the same title
+	// again in a new run costs another request against an endpoint whose
+	// allowance is the thing that breaks searches here. See searchcache.go.
+	if cached, ok := c.diskCache().get(cacheKey); ok {
+		util.Debug("SuperFlix search served from the on-disk cache", "query", normalized, "results", len(cached))
+		c.searchCache.Store(cacheKey, cached)
+		return cached, nil
+	}
 
 	searchURL := fmt.Sprintf("%s/pesquisar?s=%s", c.base(), url.QueryEscape(normalized))
 	util.Debug("SuperFlix search", "query", query, "normalized", normalized, "url", searchURL)
@@ -102,6 +111,7 @@ func (c *SuperFlixClient) SearchMediaWithContext(ctx context.Context, query stri
 
 	results := c.parseCards(doc)
 	c.searchCache.Store(cacheKey, results)
+	c.diskCache().put(cacheKey, results)
 	return results, nil
 }
 
