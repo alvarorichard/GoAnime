@@ -3,6 +3,7 @@ package superflix
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
@@ -158,7 +159,7 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 	cleared := false
 	for time.Now().Before(deadline) {
 		content, cErr := page.Content()
-		if cErr == nil && content != "" && !bodyHasChallengeMarker([]byte(content)) {
+		if cErr == nil && pageLooksReal(content) && !bodyHasChallengeMarker([]byte(content)) {
 			cleared = true
 			break
 		}
@@ -194,6 +195,18 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 		rawCookies = nil
 	}
 
+	// Clearing a Cloudflare gate always leaves cookies. Reporting success with
+	// none is reporting a clearance that does not exist, and the caller then
+	// replays nothing and blames the replay — which is exactly what happened:
+	// "challenge cleared cookies=0" followed by a 403, read for hours as the
+	// clearance failing to transfer when there was no clearance to transfer.
+	//
+	// Failing here instead lets the caller's cooldown do its job and puts the
+	// truth in the log.
+	if len(rawCookies) == 0 {
+		return nil, fmt.Errorf("gate reported clear for %s but produced no cookies", targetURL)
+	}
+
 	ua := ""
 	if v, uErr := page.Evaluate("() => navigator.userAgent"); uErr == nil {
 		if str, ok := v.(string); ok {
@@ -225,6 +238,16 @@ func (s *cfBrowserSolver) solveGate(ctx context.Context, targetURL string, timeo
 // that is not going to pass on its own, and every further second hidden is a
 // second the only person who can solve it is not looking at it.
 const revealWhenStuckAfter = 10 * time.Second
+
+// pageLooksReal rejects a document with nothing in it.
+//
+// The clear check is "no challenge markers", and a blank page has none — so
+// about:blank, or a navigation that failed and left the tab empty, read as a
+// cleared gate. An interstitial is heavier than this; so is any real page.
+func pageLooksReal(html string) bool {
+	const minRealPage = 512
+	return len(strings.TrimSpace(html)) >= minRealPage
+}
 
 // showSolverWindow puts the window on screen at the same spot a revealed one
 // uses, and marks the page as revealed so the offscreen machinery does not
