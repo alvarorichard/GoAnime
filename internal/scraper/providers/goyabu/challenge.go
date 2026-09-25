@@ -303,7 +303,44 @@ func (t *gateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	_ = resp.Body.Close()
-	return t.send(req, ua)
+	cleared, err := t.send(req, ua)
+	if err != nil {
+		return cleared, err
+	}
+
+	// A solve that SUCCEEDS and still hands back a challenge means the
+	// clearance does not transfer out of the browser, and re-solving cannot
+	// change that. Without noticing it here, every request repeated the whole
+	// cycle — solve, replay, 403, discard, solve — four times per search in
+	// about three seconds, each one launching the browser again.
+	//
+	// Measured 2026-09-25 from a challenged network: the gate cleared in the
+	// browser and returned 14 cookies, and replaying them produced 403 on every
+	// combination available to us — the plain transport and the Chrome-
+	// impersonating one, each with the solving browser's User-Agent and with
+	// our own. Cloudflare was binding the clearance to something no HTTP client
+	// here can present.
+	//
+	// So it starts the same cooldown a failed solve does. The source reports
+	// itself blocked, promptly, instead of spending a browser launch per
+	// attempt to arrive at the same 403.
+	body, still := challengeBody(cleared)
+	restoreBody(cleared, body)
+	if still {
+		t.noteClearanceDoesNotTransfer()
+	}
+	return cleared, nil
+}
+
+// noteClearanceDoesNotTransfer starts the solve cooldown after a solve that
+// worked in the browser and did not survive the trip to an HTTP client.
+func (t *gateTransport) noteClearanceDoesNotTransfer() {
+	t.mu.Lock()
+	t.ua = ""
+	t.failedAt = time.Now()
+	t.mu.Unlock()
+	util.Debug("Goyabu: the browser cleared the gate but the clearance was refused on replay; "+
+		"re-solving cannot help, backing off", "retryIn", solveRetryCooldown)
 }
 
 // send issues req, using the cleared path when ua is set.

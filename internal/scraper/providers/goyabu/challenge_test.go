@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -539,4 +540,42 @@ func TestGateTransport_InvalidateOnlyDiscardsTheRefusedClearance(t *testing.T) {
 
 	assert.Equal(t, "FreshUA/2.0", gate.clearance(),
 		"a straggler reporting an old failure must not discard a newer clearance")
+}
+
+// ── When the browser clears the gate and the cookie does not travel ──────────
+
+// A solve that works in the browser and still yields a challenge on replay
+// means the clearance does not transfer, and re-solving cannot change that.
+//
+// Measured 2026-09-25 from a challenged network: the gate cleared and returned
+// 14 cookies, and replaying them produced 403 on every combination available —
+// the plain transport and the Chrome-impersonating one, each with the solving
+// browser's User-Agent and with our own. The client noticed none of it and ran
+// the whole cycle again: four browser solves in about three seconds, per
+// search, all arriving at the same 403.
+func TestGate_StopsResolvingWhenTheClearanceDoesNotTransfer(t *testing.T) {
+	solver := &fakeSolver{ua: "Chrome/151"}
+	withSolver(t, solver)
+
+	// An origin that is challenged no matter what it is shown — which is what a
+	// clearance that does not transfer looks like from our side.
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("cf-mitigated", "challenge")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<html><head><title>Just a moment...</title></head><body></body></html>`))
+	}))
+	defer srv.Close()
+
+	tr, _ := newTestGate(http.DefaultTransport, http.DefaultTransport)
+	for range 3 {
+		resp := mustGet(t, tr, srv.URL+"/?s=naruto")
+		_ = resp.Body.Close()
+	}
+
+	assert.LessOrEqual(t, int(solver.solves.Load()), 1,
+		"the browser was launched again for a clearance already proven not to transfer")
+	assert.LessOrEqual(t, int(hits.Load()), 4,
+		"each further attempt should cost one request, not another solve-and-replay cycle")
 }
