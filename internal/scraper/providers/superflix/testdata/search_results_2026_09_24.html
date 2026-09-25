@@ -1,0 +1,68 @@
+<!doctype html><html lang="en" class="dark"><head><meta charset="utf-8">
+<title>Pesquisar - SuperFlix</title>
+<!-- The site loads the real Turnstile widget for its LOGIN MODAL, on every page. -->
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer data-cfasync="false"></script>
+</head><body>
+<dialog><form><div class="flex min-h-[68px] justify-center overflow-hidden rounded-xl" data-api-auth-turnstile="login"></div></form></dialog>
+<div class="grid grid-cols-2">
+<div x-data="{ open: false }" @mouseleave="open = false" class="group/card relative w-full">
+                <div class="relative rounded-xl overflow-hidden aspect-[2/3] bg-slate-200 dark:bg-gray-800 shadow-lg transition-transform duration-300 group-hover/card:scale-[1.02] group-hover/card:shadow-2xl group-hover/card:z-20 ring-0 group-hover/card:ring-2 ring-lead/50">
+                    <img @click="open = true"
+                         src="https://image.tmdb.org/t/p/w342/zgI6Th73JRwATaD0bA3FVVDjUow.jpg"
+                         alt="Cowboy Bebop: O Filme"
+                         loading="lazy"
+                         class="w-full h-full object-cover cursor-pointer">
+
+                    
+                    <div class="absolute top-2 right-2 bg-black/80 rounded-full flex items-center justify-center backdrop-blur-md shadow-lg border border-white/10 z-10 pointer-events-none w-9 h-9">
+        <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90 p-0.5">
+            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="3"/>
+            <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#21d07a" stroke-width="3" stroke-linecap="round" stroke-dasharray="77, 100"/>
+            <text x="18" y="21" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle" transform="rotate(90,18,18)" class="">77<tspan font-size="6">%</tspan></text>
+        </svg>
+    </div>
+
+                    <div class="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center gap-3 p-4 transition-all duration-300 z-20"
+                         :class="open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none lg:group-hover/card:opacity-100 lg:group-hover/card:pointer-events-auto'">
+                        <a href="https://superflixapi.quest/filme/cowboy-bebop-o-filme"
+                           class="w-full bg-lead hover:opacity-90 text-white font-bold py-2.5 rounded-full text-sm flex items-center justify-center gap-2 shadow-lg transition-transform hover:scale-105">
+                            <i class="fa-solid fa-play"></i> Abrir
+                        </a>
+                        <div class="grid grid-cols-2 gap-2 w-full">
+            <button type="button" data-copy="https://superflixapi.quest/filme/11299" data-msg="Link copiado!"
+                class="bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-[10px] flex flex-col items-center justify-center gap-1 transition-colors">
+            <i class="fa-solid fa-link text-sm"></i> Link
+        </button>
+    
+            <button type="button" data-copy="Cowboy Bebop: O Filme" data-msg="Título copiado!"
+                class="bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-[10px] flex flex-col items-center justify-center gap-1 transition-colors">
+            <i class="fa-solid fa-font text-sm"></i> Título
+        </button>
+    
+            <button type="button" data-copy="11299" data-msg="TMDB ID copiado!"
+                class="bg-white/10 hover:bg-white/15 text-white py-2 rounded-lg text-[10px] flex flex-col items-center justify-center gap-1 transition-colors">
+            <i class="fa-solid fa-database text-sm"></i> TMDB
+        </button>
+    
+            <button type="button" data-copy="tt0275277" data-msg="IMDB ID copiado!"
+                class="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 py-2 rounded-lg text-[10px] flex flex-col items-center justify-center gap-1 transition-colors">
+            <i class="fa-brands fa-imdb text-lg"></i> IMDB
+        </button>
+    </div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <h3 class="text-sm font-bold text-slate-700 dark:text-gray-100 line-clamp-1 group-hover/card:text-lead transition-colors" title="Cowboy Bebop: O Filme">
+                        Cowboy Bebop: O Filme
+                    </h3>
+                    <div class="flex justify-between items-center text-xs text-slate-400 dark:text-gray-500 mt-1 font-medium">
+                        <span>2001</span>
+                        <span class="border border-slate-300 dark:border-white/10 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider">Filme</span>
+                    </div>
+                </div>
+            </div>
+                    
+            
+</div>
+</body></html>

@@ -22,7 +22,22 @@ var cfChallengeMarkers = [][]byte{
 	// handed it to the headed browser, which then sat on a "404 Not Found" page
 	// waiting for a stream that could never load until the sniff timed out.
 	[]byte("/cdn-cgi/challenge-platform/h/"),
-	[]byte("challenges.cloudflare.com/turnstile"),
+	// "challenges.cloudflare.com/turnstile" used to be listed here and is NOT
+	// any more. It is the second marker on this list to be too broad, for the
+	// same reason as the one above: a script URL says the page can render a
+	// Turnstile widget, not that the page IS one.
+	//
+	// SuperFlix added a login modal that mounts a Turnstile
+	// (data-api-auth-turnstile="login"), so from 2026-09-24 that script tag
+	// ships on EVERY page — including a perfectly good search results page.
+	// Every SuperFlix search was then classified as a captcha block and the
+	// source dropped out of the fan-out entirely, while plain curl on the same
+	// URL got 200 and three results. testdata/search_results_2026_09_24.html is
+	// that page.
+	//
+	// The gates themselves are still caught: a Cloudflare managed challenge
+	// carries cf_chl_opt / __cf_chl_ / "Just a moment...", and SuperFlix's own
+	// gate carries cf-turnstile-form and <title>Verificação</title>.
 	[]byte("cf_chl_opt"),
 	[]byte("__cf_chl_"),
 	[]byte("Just a moment..."),

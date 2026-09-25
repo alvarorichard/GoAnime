@@ -56,7 +56,16 @@ func TestIsCloudflareChallenge(t *testing.T) {
 		// The real 404 the SuperFlix player host serves for a retired hash:
 		// a plain Apache error page with Cloudflare's telemetry snippet appended.
 		{"404 player page is dead, not challenged", 404, deadPlayerPage404, nil, false},
-		{"body contains turnstile script", 200, `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>`, nil, true},
+		// The Turnstile SCRIPT is not a challenge, and this case used to assert
+		// that it was. SuperFlix's login modal mounts a Turnstile, so from
+		// 2026-09-24 that tag shipped on every page and every search was
+		// classified as a captcha block — the source vanished from the fan-out
+		// while curl got 200 and three results. A page that can render the
+		// widget is not a page that is one; the gates carry cf_chl_opt,
+		// __cf_chl_, "Just a moment" or cf-turnstile-form, and those still
+		// match below. See challenge_falsepositive_test.go for the real page.
+		{"turnstile script alone is not a challenge", 200, `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>`, nil, false},
+		{"superflix's own turnstile gate is", 200, `<html><head><title>Verificação</title></head><body><form id="cf-turnstile-form"></form></body></html>`, nil, true},
 		{"body contains cf_chl_opt", 200, `var cf_chl_opt = {};`, nil, true},
 		{"body contains Just a moment", 200, `<title>Just a moment...</title>`, nil, true},
 		{"body contains __cf_chl_", 200, `window.__cf_chl_tk = "abc";`, nil, true},
