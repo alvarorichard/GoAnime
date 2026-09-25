@@ -2,6 +2,7 @@ package superflix
 
 import (
 	"context"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"os"
 	"testing"
 	"time"
@@ -46,7 +47,7 @@ func TestSolveGate_LeavesNoWindowOnScreen_Live(t *testing.T) {
 	// gives up, the defer runs and the window has to be gone. The failure path
 	// is the one that matters more, since that is when a user is left staring at
 	// a browser that achieved nothing.
-	_, solveErr := defaultCFSolver.solveGate(context.Background(), "https://goyabu.io/", 90*time.Second, true)
+	_, solveErr := defaultCFSolver.solveGate(context.Background(), "https://goyabu.io/", 90*time.Second, netx.RevealAlways)
 	t.Logf("solve outcome (not asserted): %v", solveErr)
 
 	// The browser has to be GONE, not merely out of the way. A minimized window
@@ -60,7 +61,7 @@ func TestSolveGate_LeavesNoWindowOnScreen_Live(t *testing.T) {
 	// And releasing it must not cost the NEXT solve: the driver and the on-disk
 	// profile survive, so a second solve has to relaunch and clear again. This
 	// is the half that a previous attempt got wrong.
-	second, secondErr := defaultCFSolver.solveGate(context.Background(), "https://goyabu.io/", 90*time.Second, true)
+	second, secondErr := defaultCFSolver.solveGate(context.Background(), "https://goyabu.io/", 90*time.Second, netx.RevealAlways)
 	t.Logf("second solve outcome: %v", secondErr)
 	if secondErr == nil {
 		assert.NotEmpty(t, second.Cookies, "a relaunched solve must still produce clearance")

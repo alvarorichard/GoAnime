@@ -529,6 +529,19 @@ func sameSiteFromPlaywright(s *playwright.SameSiteAttribute) http.SameSite {
 // throughout and closes it exactly once at the end. No-op when no window is open
 // (e.g. the cache fast path).
 func ReleaseSharedBrowser() {
+	// Only if nobody else is mid-operation. This used to close unconditionally,
+	// which was safe while one resolve owned the browser end to end and is not
+	// now that a search drives several sources at once: tearing the context down
+	// under another source's solve leaves it relaunching onto a profile
+	// directory the dying instance still has locked.
+	//
+	// When someone is still using it, dropping the request is not dropping the
+	// window — the watchdog in idle.go closes it as soon as the last user
+	// leaves. This call is the fast path, not the only path.
+	if defaultCFSolver.idle.busy() {
+		util.Debug("SuperFlix: release skipped, the browser is still in use")
+		return
+	}
 	defaultCFSolver.closeContext()
 }
 

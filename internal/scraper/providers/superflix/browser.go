@@ -48,6 +48,29 @@ type cfBrowserSolver struct {
 	pw                *playwright.Playwright
 	pctx              playwright.BrowserContext
 	cleanupRegistered bool
+
+	// idle closes the window when the last operation using it finishes. See
+	// idle.go for why the explicit releases are not enough on their own.
+	idle idleState
+}
+
+// acquire initialises the shared context and marks it in use. The returned
+// function must be deferred: it is what lets the window close itself once
+// nothing is using it any more.
+func (s *cfBrowserSolver) acquire() (playwright.BrowserContext, func(), error) {
+	// Claim BEFORE building the context, not after.
+	//
+	// beginUse and the watchdog's close share a lock, so claiming first means an
+	// acquire that lands while a close is running waits for it to finish and
+	// then calls init() on a solver with no context — getting a fresh one. The
+	// other order hands back a context that is already being torn down.
+	s.idle.beginUse()
+	bctx, err := s.init()
+	if err != nil {
+		s.idle.endUse(s.closeContext)
+		return nil, func() {}, err
+	}
+	return bctx, func() { s.idle.endUse(s.closeContext) }, nil
 }
 
 var defaultCFSolver = &cfBrowserSolver{}
@@ -319,10 +342,11 @@ func (s *cfBrowserSolver) init() (playwright.BrowserContext, error) {
 //     automatically on later runs.
 //  4. Capture cookies, HTML, and the real UA (cf_clearance is UA-bound).
 func (s *cfBrowserSolver) Solve(ctx context.Context, targetURL string, timeout time.Duration) (*CFSolveResult, error) {
-	bctx, err := s.init()
+	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

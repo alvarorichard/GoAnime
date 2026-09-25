@@ -259,10 +259,11 @@ var sfMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/getVideo|v
 // Foundation: returns the first matching media URL. Some providers need extra
 // play interaction or de-obfuscation that can be layered on later.
 func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error) {
-	bctx, err := s.init()
+	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -274,6 +275,13 @@ func (s *cfBrowserSolver) SniffStream(ctx context.Context, embedURL string, time
 	if err != nil {
 		return nil, fmt.Errorf("create page: %w", err)
 	}
+	// This page is ours, so we close it. SniffEmbedStream already did; this one
+	// did not, so every sniff left a tab behind in a context that outlives the
+	// call — and a context with tabs left in it is a window left on screen.
+	defer func() {
+		forgetRevealedPage(page)
+		_ = page.Close()
+	}()
 	hideSolverWindow(page, bctx)
 
 	var mu sync.Mutex
@@ -393,10 +401,11 @@ var sfDirectMediaRe = regexp.MustCompile(`(?i)\.m3u8(\?|$|#)|\.mp4(\?|$|#)|/hls/
 const restrictedShellGrace = 12 * time.Second
 
 func (s *cfBrowserSolver) SniffEmbedStream(ctx context.Context, embedURL string, timeout time.Duration) (*CFStreamResult, error) {
-	bctx, err := s.init()
+	bctx, release, err := s.acquire()
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

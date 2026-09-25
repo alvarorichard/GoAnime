@@ -32,18 +32,53 @@ type ChallengeSolveResult struct {
 	FinalURL  string
 }
 
+// RevealPolicy says when the solver window may appear on screen.
+//
+// A browser window is a cost paid by the user, so it is not a preference set
+// once and forgotten — it is decided by what the gate actually does. Measured
+// against goyabu.io on 2026-09-24, three consecutive solves:
+//
+//	cold profile, window hidden    never cleared in 90s
+//	warm profile, window hidden    cleared in 1.8s
+//	warm profile, window visible   cleared in 1.6s
+//
+// A hidden window is therefore enough almost always, and useless exactly when
+// the profile has no clearance yet. That is the whole case for RevealWhenStuck:
+// stay out of the way, and surface only once staying hidden is provably keeping
+// a solvable challenge away from the only one who can solve it.
+type RevealPolicy int
+
+const (
+	// RevealWhenStuck keeps the window off screen while the challenge is
+	// self-solving and surfaces it only when it is not going to. This is what a
+	// source should ask for unless it has a reason not to.
+	RevealWhenStuck RevealPolicy = iota
+	// RevealAlways puts the window on screen immediately, for a gate known to
+	// need a human every time.
+	RevealAlways
+	// RevealNever keeps it hidden even when stuck, failing instead, for runs
+	// where nobody is watching the screen anyway.
+	RevealNever
+)
+
+func (p RevealPolicy) String() string {
+	switch p {
+	case RevealAlways:
+		return "always"
+	case RevealNever:
+		return "never"
+	default:
+		return "when-stuck"
+	}
+}
+
 // ChallengeSolver clears an interstitial for targetURL and returns the proof.
 type ChallengeSolver interface {
 	// SolveChallenge navigates to targetURL in a real browser and returns once
 	// the challenge markup is gone, or fails within timeout.
 	//
-	// visible asks for an on-screen window. It is not decoration: measured
-	// 2026-09-21 against goyabu.io from a challenged IP, with the profile wiped
-	// between runs, a minimized window never cleared in 70s while a visible one
-	// cleared every time (~1min cold, ~6s warm). Headless never cleared at all.
-	// SuperFlix's own gate is happier and passes minimized, so the caller says
-	// what its source needs.
-	SolveChallenge(ctx context.Context, targetURL string, timeout time.Duration, visible bool) (*ChallengeSolveResult, error)
+	// reveal says when the window may be shown; see RevealPolicy.
+	SolveChallenge(ctx context.Context, targetURL string, timeout time.Duration, reveal RevealPolicy) (*ChallengeSolveResult, error)
 }
 
 var (
@@ -65,7 +100,7 @@ func RegisterChallengeSolver(s ChallengeSolver) {
 // ok is false when no solver is registered — a build or test that never imported
 // the package owning the browser. That is a plain "cannot help here", not an
 // error to surface: the caller reports the challenge it already has.
-func SolveChallengeFor(ctx context.Context, targetURL string, timeout time.Duration, visible bool) (res *ChallengeSolveResult, ok bool, err error) {
+func SolveChallengeFor(ctx context.Context, targetURL string, timeout time.Duration, reveal RevealPolicy) (res *ChallengeSolveResult, ok bool, err error) {
 	challengeSolverMu.RLock()
 	s := challengeSolver
 	challengeSolverMu.RUnlock()
@@ -73,7 +108,7 @@ func SolveChallengeFor(ctx context.Context, targetURL string, timeout time.Durat
 	if s == nil {
 		return nil, false, nil
 	}
-	res, err = s.SolveChallenge(ctx, targetURL, timeout, visible)
+	res, err = s.SolveChallenge(ctx, targetURL, timeout, reveal)
 	return res, true, err
 }
 

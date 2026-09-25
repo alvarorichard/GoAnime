@@ -28,12 +28,22 @@ import (
 // challenge, has the browser clear it once, and replays the request with the
 // resulting clearance.
 //
-// Two measurements shaped the design, both taken with the profile wiped between
-// runs:
+// Two measurements shaped the design. The first, taken with the profile wiped
+// between runs — the COLD case only:
 //
 //	window minimized (--sf-offscreen)   never cleared in 70s
 //	window visible                      cleared every time (~1min cold, ~6s warm)
 //	headless                            never cleared
+//
+// Re-measured 2026-09-24 without wiping, which is how a real second run looks:
+//
+//	cold profile, hidden    never cleared in 90s
+//	warm profile, hidden    cleared in 1.8s
+//	warm profile, visible   cleared in 1.6s
+//
+// Reading only the first table is what made this ask for a forced window and
+// charge every search the cold case's price. The window is now earned, not
+// assumed: see netx.RevealWhenStuck.
 //
 //	clearance replayed on a plain client   200, real page
 //	clearance replayed on the surf client  403, still challenged
@@ -382,7 +392,11 @@ func (t *gateTransport) ensureCleared(req *http.Request) (string, bool) {
 
 func (t *gateTransport) solve(req *http.Request) (string, bool) {
 	target := &url.URL{Scheme: req.URL.Scheme, Host: req.URL.Host, Path: "/"}
-	util.Info("Goyabu pediu verificação — abrindo o navegador para resolvê-la (isso leva alguns segundos).")
+	// Says what is happening, not what will be on screen. The window usually is
+	// not: with a warm profile the gate falls in under two seconds with nothing
+	// shown, and solveGate only surfaces it once it is clear the challenge will
+	// not pass on its own — at which point it prints its own line.
+	util.Info("Goyabu pediu verificação — resolvendo automaticamente (leva alguns segundos).")
 
 	// The solve gets its OWN budget, detached from the request that triggered
 	// it. A caller's deadline is sized for an HTTP round trip, not for a browser
@@ -391,9 +405,13 @@ func (t *gateTransport) solve(req *http.Request) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(req.Context()), gateSolveTimeout)
 	defer cancel()
 
-	// visible=true is not a preference: a minimized window never cleared this
-	// gate in measurement, while a visible one cleared every time.
-	res, _, err := netx.SolveChallengeFor(ctx, target.String(), gateSolveTimeout, true)
+	// RevealWhenStuck, not a forced window. The earlier measurement that put
+	// visible=true here was taken with the profile wiped between runs, which is
+	// the cold case only; re-measured 2026-09-24 on three consecutive solves, a
+	// warm profile clears hidden in 1.8s against 1.6s visible, and only a cold
+	// one fails to clear hidden at all. Forcing the window made every search
+	// pay the cold case's price.
+	res, _, err := netx.SolveChallengeFor(ctx, target.String(), gateSolveTimeout, netx.RevealWhenStuck)
 	if err != nil || res == nil {
 		util.Debug("Goyabu: challenge solve failed", "url", target.String(), "err", err)
 		return "", false

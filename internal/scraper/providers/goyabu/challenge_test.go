@@ -91,16 +91,16 @@ func respondWith(status int, body string, header http.Header) func(*http.Request
 
 // fakeSolver stands in for the browser.
 type fakeSolver struct {
-	solves  atomic.Int32
-	ua      string
-	err     error
-	delay   time.Duration
-	visible atomic.Bool
+	solves atomic.Int32
+	ua     string
+	err    error
+	delay  time.Duration
+	reveal atomic.Int32
 }
 
-func (f *fakeSolver) SolveChallenge(_ context.Context, targetURL string, _ time.Duration, visible bool) (*netx.ChallengeSolveResult, error) {
+func (f *fakeSolver) SolveChallenge(_ context.Context, targetURL string, _ time.Duration, reveal netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
 	f.solves.Add(1)
-	f.visible.Store(visible)
+	f.reveal.Store(int32(reveal))
 	if f.delay > 0 {
 		time.Sleep(f.delay)
 	}
@@ -169,8 +169,9 @@ func TestGateTransport_SolvesOnceThenReplaysWithClearance(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "the replay must be what the caller gets")
 	assert.Equal(t, int32(1), solver.solves.Load())
-	assert.True(t, solver.visible.Load(),
-		"a minimized window never cleared this gate in measurement; the solve must ask for a visible one")
+	assert.Equal(t, int32(netx.RevealWhenStuck), solver.reveal.Load(),
+		"the solve must let the window be earned: a warm profile clears hidden in ~1.8s, "+
+			"so forcing one on screen charges every search for the cold case")
 
 	assert.Equal(t, "SolverUA/1.0", plain.ua(),
 		"cf_clearance is bound to the solving browser's UA; sending any other one is challenged again")
@@ -294,7 +295,7 @@ type deadlineSolver struct {
 	hadDeadline bool
 }
 
-func (d *deadlineSolver) SolveChallenge(ctx context.Context, targetURL string, _ time.Duration, _ bool) (*netx.ChallengeSolveResult, error) {
+func (d *deadlineSolver) SolveChallenge(ctx context.Context, targetURL string, _ time.Duration, _ netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
 	if dl, ok := ctx.Deadline(); ok {
 		d.hadDeadline = true
 		d.gotBudget = time.Until(dl)
