@@ -46,8 +46,18 @@ const (
 	// backoffStateFileName holds the gate across process restarts, next to the
 	// host state and the stream cache.
 	backoffStateFileName = "superflix-backoff.json"
-	// minBackoff is used when a 429 arrives with no usable Retry-After.
-	minBackoff = 10 * time.Second
+	// minBackoff is the floor for every block, not just one with no usable
+	// Retry-After.
+	//
+	// It is a floor because this host's advertised Retry-After is not true. It
+	// sends "Retry-After: 10" and then stays blocked for minutes: measured
+	// 2026-09-25, /pesquisar was still refusing after three and six minutes of
+	// complete silence, and by then had escalated from answering 429 to
+	// dropping the connection. Obeying the advertised 10 seconds meant walking
+	// back into an active block on every retry, and the guard is sticky — a
+	// probe sent during a block renews it. So the floor is set from what the
+	// host does rather than from what it says.
+	minBackoff = 60 * time.Second
 	// maxBackoff caps the escalation. A blocked host is probed at worst every
 	// few minutes, which is a trickle the abuse guard cannot mistake for abuse,
 	// while still recovering on its own without the user restarting anything.
@@ -135,6 +145,23 @@ func defaultBackoffStatePath() string {
 		return ""
 	}
 	return filepath.Join(dir, "goanime", backoffStateFileName)
+}
+
+// knows reports whether this endpoint has already rate limited us at least
+// once, whether or not the block is currently active.
+//
+// It is what lets a refused connection be read as the same block escalating
+// rather than as an unrelated network failure.
+func (g *rateLimitGate) knows(host, path string) bool {
+	key := backoffKey(host, path)
+	if g == nil || key == "" {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.loadLocked()
+	b, ok := g.hosts[key]
+	return ok && b.Strikes > 0
 }
 
 // retryIn reports how long an endpoint must stay untouched, or 0 when it is free.

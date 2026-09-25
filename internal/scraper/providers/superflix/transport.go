@@ -253,6 +253,24 @@ func (t *cfFallbackTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
+		// A refused connection on an endpoint that has already rate limited us
+		// is the SAME block escalating, and it has to arm the gate exactly like
+		// a 429 does.
+		//
+		// This path used to return straight out, which quietly disabled the
+		// back-off at the worst moment. Measured 2026-09-25 against
+		// /pesquisar after this IP had been throttled: the endpoint stopped
+		// answering 429 and started dropping the connection outright — still
+		// dropping it after three and six minutes of total silence, while "/"
+		// on the same host answered 200. With the gate un-armed, every search
+		// went straight back at it, and a block that only time can lift was
+		// being renewed by the retries meant to survive it.
+		//
+		// Gated on the endpoint already having strikes, so an ordinary network
+		// failure against a healthy endpoint is still just a failure.
+		if gate.knows(host, path) {
+			noteRateLimit(gate, host, path, 0)
+		}
 		return resp, err
 	}
 

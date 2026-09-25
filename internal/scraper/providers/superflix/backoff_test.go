@@ -148,12 +148,22 @@ func TestRateLimitGate_CorruptStateIsIgnored(t *testing.T) {
 
 // The server's own Retry-After is the wait, not a constant of ours: guessing
 // shorter is what provokes the next 429.
+// An advertised delay ABOVE the floor is taken at its word.
+//
+// Below the floor it is not, and that is deliberate: this host advertises 10
+// seconds and then stays blocked for minutes (see minBackoff). So the rule is
+// "no shorter than the floor", not "whatever the host claims".
 func TestRateLimitGate_HonorsTheAdvertisedRetryAfter(t *testing.T) {
 	t.Parallel()
 	g := newRateLimitGate("")
 
-	wait := g.arm("superflixapi.quest", sfSearchPath, 42*time.Second)
-	assert.Equal(t, 42*time.Second, wait)
+	long := minBackoff + 42*time.Second
+	assert.Equal(t, long, g.arm("superflixapi.quest", sfSearchPath, long),
+		"a delay longer than the floor is the host's to choose")
+
+	g2 := newRateLimitGate("")
+	assert.Equal(t, minBackoff, g2.arm("superflixapi.quest", sfSearchPath, 10*time.Second),
+		"an understated delay must be raised to the floor, or the retry lands inside the block")
 }
 
 // A missing or unusable Retry-After still earns a real pause.
@@ -168,7 +178,9 @@ func TestRateLimitGate_FallsBackToAFloorWhenNoDelayIsAdvertised(t *testing.T) {
 func TestRateLimitGate_EscalatesOnConsecutiveStrikes(t *testing.T) {
 	t.Parallel()
 	g := newRateLimitGate("")
-	const advertised = 10 * time.Second
+	// Above the floor, so the escalation is what is being measured rather than
+	// the flooring.
+	advertised := minBackoff + 10*time.Second
 
 	first := g.arm("superflixapi.quest", sfSearchPath, advertised)
 	second := g.arm("superflixapi.quest", sfSearchPath, advertised)
@@ -197,7 +209,7 @@ func TestRateLimitGate_EscalationIsCapped(t *testing.T) {
 func TestRateLimitGate_SuccessClearsTheStrikeCount(t *testing.T) {
 	t.Parallel()
 	g := newRateLimitGate("")
-	const advertised = 10 * time.Second
+	advertised := minBackoff + 10*time.Second
 
 	g.arm("superflixapi.quest", sfSearchPath, advertised)
 	g.arm("superflixapi.quest", sfSearchPath, advertised)
@@ -434,4 +446,66 @@ func TestBackoffKey_NormalizesAndRefusesEmptyHosts(t *testing.T) {
 	assert.Equal(t, "superflixapi.quest/", backoffKey("superflixapi.quest", ""),
 		"a path-less URL is the root, not a second key for the same thing")
 	assert.Empty(t, backoffKey("", "/pesquisar"), "without a host there is nothing to gate")
+}
+
+// ── The block that stops answering ──────────────────────────────────────────
+
+// When this host's block escalates, it stops sending 429 and starts refusing
+// the connection. The back-off has to survive that, because it is the moment it
+// matters most.
+//
+// Measured 2026-09-25 with the IP already throttled: /pesquisar was still
+// dropping connections after three and six minutes of total silence, while "/"
+// on the same host answered 200. The transport returned every dial error
+// straight out without arming the gate, so the back-off switched itself off
+// exactly when the host had escalated — and each following search walked back
+// into a block only time could lift, renewing it.
+func TestGate_LearnsTheEndpointFromA429(t *testing.T) {
+	t.Parallel()
+	g := newRateLimitGate("")
+
+	assert.False(t, g.knows("h", "/pesquisar"), "an endpoint we have never been refused by is unknown")
+
+	g.arm("h", "/pesquisar", time.Second)
+	assert.True(t, g.knows("h", "/pesquisar"), "a 429 must make the endpoint known")
+	assert.False(t, g.knows("h", "/outro"), "knowledge is per endpoint, like the guard itself")
+}
+
+// knows must stay true after the block lapses: the endpoint is still one that
+// rate limits us, which is what makes a later dial error attributable.
+func TestGate_StillKnowsTheEndpointAfterTheBlockLapses(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := newRateLimitGate("")
+	g.now = func() time.Time { return now }
+
+	g.arm("h", "/pesquisar", time.Second)
+	now = now.Add(time.Hour)
+
+	assert.Zero(t, g.retryIn("h", "/pesquisar"), "the block itself must have lapsed")
+	assert.True(t, g.knows("h", "/pesquisar"), "but the endpoint is still known to refuse us")
+}
+
+// A cleared endpoint is forgotten, so a host that recovers stops being treated
+// as suspect forever.
+func TestGate_ForgetsTheEndpointOnSuccess(t *testing.T) {
+	t.Parallel()
+	g := newRateLimitGate("")
+	g.arm("h", "/pesquisar", time.Second)
+	g.clear("h", "/pesquisar")
+	assert.False(t, g.knows("h", "/pesquisar"))
+}
+
+// The floor exists because the advertised Retry-After is not true. A host that
+// says 10 seconds and blocks for minutes must not be believed, or every retry
+// lands inside the block and renews it.
+func TestGate_FloorsAnUnderstatedRetryAfter(t *testing.T) {
+	t.Parallel()
+	g := newRateLimitGate("")
+
+	wait := g.arm("h", "/pesquisar", 10*time.Second)
+	assert.GreaterOrEqual(t, wait, minBackoff,
+		"the host's advertised delay was obeyed literally; measured, it stays blocked far longer")
+	assert.GreaterOrEqual(t, minBackoff, 60*time.Second,
+		"a floor under a minute puts the next request back inside an active block")
 }
