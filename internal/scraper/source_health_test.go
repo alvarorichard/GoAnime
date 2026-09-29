@@ -19,6 +19,7 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		{"topcine", TopCineType, "dexter"},
 		{"allanime default", HiAnimeType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
+		{"animedrive default", AnimeDriveType, "naruto"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

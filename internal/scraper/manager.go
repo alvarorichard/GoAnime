@@ -228,8 +228,10 @@ func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...any) (str
 		metadata = make(map[string]string)
 	}
 	metadata["AnimeDrive"] = "animedrive"
-
-	return url, metadata, err
+	if err != nil {
+		return url, metadata, err
+	}
+	return url, metadata, nil
 }
 
 func (a *AnimeDriveAdapter) GetType() ScraperType {

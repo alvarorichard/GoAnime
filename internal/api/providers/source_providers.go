@@ -576,8 +576,8 @@ func (p *animeDriveProvider) Describe() source.Descriptor {
 		Priority:    25,
 		Explicit:    []string{"AnimeDrive", "Anime Drive"},
 		Tags:        []string{"[animedrive]"},
-		URLMatchers: []string{"animesdrive.online"},
-		ProbeURL:    "https://animesdrive.online",
+		URLMatchers: []string{"animesdrive.cloud"},
+		ProbeURL:    "https://animesdrive.cloud",
 	}
 }
 
