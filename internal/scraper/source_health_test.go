@@ -16,6 +16,7 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		want   string
 	}{
 		{"superflix", SuperFlixType, "dexter"},
+		{"startflix", StartFlixType, "dexter"},
 		{"allanime default", HiAnimeType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
 	}

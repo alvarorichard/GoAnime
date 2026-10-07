@@ -20,7 +20,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 // ScraperType represents different scraper types
@@ -31,6 +33,7 @@ const (
 	GoyabuType                // PT-BR anime source
 	SuperFlixType             // SuperFlix PT-BR movies/series/animes/doramas
 	HiAnimeType               // hianime.at — subbed/dubbed HLS
+	StartFlixType             // StartFlix PT-BR movies/series (successor to SuperFlix)
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -71,6 +74,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}, nil
 	case HiAnimeType:
 		return &HiAnimeAdapter{client: hianime.NewHiAnimeClient()}, nil
+	case StartFlixType:
+		return &StartFlixAdapter{client: startflix.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -88,6 +93,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return "SuperFlix"
 	case HiAnimeType:
 		return "HiAnime"
+	case StartFlixType:
+		return startflix.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -104,6 +111,8 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
+	case StartFlixType:
+		return "[PT-BR]"
 	default:
 		return "[Unknown]"
 	}
@@ -400,4 +409,86 @@ func (a *SuperFlixAdapter) GetClient() *superflix.SuperFlixClient {
 // Useful for testing with mock servers.
 func NewSuperFlixAdapterWithClient(client *superflix.SuperFlixClient) *SuperFlixAdapter {
 	return &SuperFlixAdapter{client: client}
+}
+
+// StartFlixAdapter adapts startflix.Client to the UnifiedScraper interface.
+//
+// The episode "URL" it streams from is the panel endpoint that lists the
+// players — /episodio/<id> for an episode, /filme/<imdb> for a movie — so a
+// stream resolves from the episode alone, which is what batch downloads need.
+type StartFlixAdapter struct {
+	client *startflix.Client
+}
+
+func (a *StartFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes StartFlixAdapter a ContextualScraper: every request
+// the client makes carries the caller's context.
+func (a *StartFlixAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	media, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(media))
+	for _, m := range media {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. Like SuperFlix, StartFlix lists episodes through the season and
+// audio pickers in the api package, not through this adapter.
+func (a *StartFlixAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *StartFlixAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for StartFlix, use GetStartFlixEpisodes in the api package")
+}
+
+func (a *StartFlixAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetStreamURLContext resolves the first playable server listed at episodeURL.
+// Metadata follows the providers.applyPlaybackMetadata contract: "referer",
+// and "subtitles" as a JSON array of {"url","language","label"}.
+func (a *StartFlixAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.Stream(ctx, episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	metadata = map[string]string{
+		"source":  "startflix",
+		"referer": stream.Referer,
+		"host":    stream.Host,
+	}
+	if len(stream.Subtitles) > 0 {
+		tracks := make([]map[string]string, 0, len(stream.Subtitles))
+		for _, sub := range stream.Subtitles {
+			tracks = append(tracks, map[string]string{"url": sub.URL, "language": sub.Language, "label": sub.Label})
+		}
+		if raw, err := jsonx.Marshal(tracks); err == nil {
+			metadata["subtitles"] = string(raw)
+		}
+	}
+	return stream.URL, metadata, nil
+}
+
+func (a *StartFlixAdapter) GetType() ScraperType {
+	return StartFlixType
+}
+
+// GetClient returns the underlying StartFlix client.
+func (a *StartFlixAdapter) GetClient() *startflix.Client {
+	return a.client
+}
+
+// NewStartFlixAdapterWithClient builds an adapter around a given client, for
+// tests that point it at a mock server.
+func NewStartFlixAdapterWithClient(client *startflix.Client) *StartFlixAdapter {
+	return &StartFlixAdapter{client: client}
 }

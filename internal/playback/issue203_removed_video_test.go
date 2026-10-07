@@ -23,12 +23,13 @@ func TestAlternateSources_ExcludesTheFailingSource(t *testing.T) {
 		current string
 		want    []string
 	}{
-		{name: "goyabu", current: "Goyabu", want: []string{"AnimeFire", "SuperFlix"}},
+		{name: "goyabu", current: "Goyabu", want: []string{"AnimeFire", "SuperFlix", "StartFlix"}},
 		// AnimeFire's display label is not the bare kind, so the match has to
 		// be prefix-based or the failing source is offered back to the user.
-		{name: "animefire label", current: "Animefire.io", want: []string{"Goyabu", "SuperFlix"}},
-		{name: "superflix", current: "SuperFlix", want: []string{"AnimeFire", "Goyabu"}},
-		{name: "unknown source keeps them all", current: "", want: []string{"AnimeFire", "Goyabu", "SuperFlix"}},
+		{name: "animefire label", current: "Animefire.io", want: []string{"Goyabu", "SuperFlix", "StartFlix"}},
+		{name: "superflix", current: "SuperFlix", want: []string{"AnimeFire", "Goyabu", "StartFlix"}},
+		{name: "startflix", current: "StartFlix", want: []string{"AnimeFire", "Goyabu", "SuperFlix"}},
+		{name: "unknown source keeps them all", current: "", want: []string{"AnimeFire", "Goyabu", "SuperFlix", "StartFlix"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, alternateSources(tt.current))

@@ -40,6 +40,12 @@ var (
 	GlobalUserAgent     string                         // Global variable to store the User-Agent the stream URL was signed for
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
+
+	// GlobalAudioLanguageExplicit records whether --audio was passed.
+	// GlobalAudioLanguage always holds a value — the flag's default
+	// "pt-BR,pt,english" when it was not — so this is the only way to tell a
+	// user's choice from that default.
+	GlobalAudioLanguageExplicit bool
 )
 
 // StrictSourceResolution reports whether the GOANIME_STRICT_SOURCE environment
@@ -489,7 +495,7 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
-	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, superflix, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, superflix, startflix, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
@@ -576,6 +582,12 @@ func FlagParser() (string, error) {
 	GlobalMediaType = *mediaTypeFlag
 	GlobalSubsLanguage = *subsLanguageFlag
 	GlobalAudioLanguage = *audioLanguageFlag
+	GlobalAudioLanguageExplicit = false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "audio" {
+			GlobalAudioLanguageExplicit = true
+		}
+	})
 	GlobalNoSubs = *noSubsFlag
 	GlobalOutputDir = *outputDirFlag
 

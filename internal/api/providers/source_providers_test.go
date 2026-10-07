@@ -126,11 +126,21 @@ func TestSuperFlixProvider_Scraper(t *testing.T) {
 	assert.Equal(t, scraper.SuperFlixType, ad.GetType())
 }
 
+func TestStartFlixProvider_Scraper(t *testing.T) {
+	t.Parallel()
+	ad, err := (&startFlixProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.StartFlixType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual, "StartFlix searches must be cancellable by the fan-out deadline")
+}
+
 // TestSourceRegistry_LiveSourcesRegistered verifies init() populated the
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.SuperFlix, source.HiAnime} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -152,11 +162,14 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"explicit AnimeFire legacy", &models.Anime{Source: "Animefire.io"}, source.AnimeFire},
 		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
 		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}, source.SuperFlix},
+		{"explicit StartFlix", &models.Anime{Source: "StartFlix"}, source.StartFlix},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
 		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
 		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
 		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}, source.SuperFlix},
+		{"startflix URL", &models.Anime{URL: "https://www.startflix.biz/series/naruto/"}, source.StartFlix},
+		{"startflix panel URL", &models.Anime{URL: "https://www.painel-aso.sbs/filme/tt0816692"}, source.StartFlix},
 		{"PT-BR fallback", &models.Anime{Name: "Naruto [PT-BR]"}, source.AnimeFire},
 		{"unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, source.Unknown},
 	}

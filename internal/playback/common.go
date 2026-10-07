@@ -22,12 +22,12 @@ import (
 // the one that just failed and anything the user turned off via
 // GOANIME_DISABLED_SOURCES.
 func alternateSources(current string) []string {
-	disabled := make(map[apisource.SourceKind]bool, 4)
+	disabled := make(map[apisource.SourceKind]bool, 5)
 	for _, k := range apisource.DisabledSources() {
 		disabled[k] = true
 	}
-	others := make([]string, 0, 3)
-	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix} {
+	others := make([]string, 0, 4)
+	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix, apisource.StartFlix} {
 		// Source labels are not always the bare kind ("Animefire.io"), so match
 		// on the kind as a prefix rather than for equality.
 		if disabled[k] || strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {

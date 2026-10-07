@@ -259,10 +259,12 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "superflix":
 		registryKinds = []apisource.SourceKind{apisource.SuperFlix}
+	case "startflix":
+		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "hianime", "anidb": // "anidb" is what this source was called before 2026-09-22
 		registryKinds = []apisource.SourceKind{apisource.HiAnime}
 	case "ptbr", "pt-br":
-		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix}
+		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix, apisource.StartFlix}
 	}
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
@@ -302,6 +304,8 @@ func searchAnimeEnhanced(
 				anime.Source = "Goyabu"
 			case "superflix":
 				anime.Source = "SuperFlix"
+			case "startflix":
+				anime.Source = "StartFlix"
 			case "hianime", "anidb":
 				anime.Source = "HiAnime"
 			}
@@ -312,6 +316,8 @@ func searchAnimeEnhanced(
 					anime.Source = "Animefire.io"
 				case strings.Contains(lowerURL, "goyabu"):
 					anime.Source = "Goyabu"
+				case strings.Contains(lowerURL, "startflix"):
+					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "superflix"), strings.Contains(lowerURL, "sflix"):
 					anime.Source = "SuperFlix"
 				case strings.Contains(lowerURL, "hianime.at"), strings.Contains(lowerURL, "anidb.app"):
@@ -329,6 +335,7 @@ func searchAnimeEnhanced(
 	util.Debug("Source breakdown",
 		"AnimeFire", breakdown.AnimeFire,
 		"SuperFlix", breakdown.SuperFlix,
+		"StartFlix", breakdown.StartFlix,
 		"Goyabu", breakdown.Goyabu,
 		"HiAnime", breakdown.HiAnime,
 	)
@@ -966,6 +973,7 @@ func GetSuperFlixStreamURL(media *models.Anime, episode *models.Episode, quality
 type sourceBreakdown struct {
 	AnimeFire int
 	SuperFlix int
+	StartFlix int
 	Goyabu    int
 	HiAnime   int
 }
@@ -985,6 +993,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.AnimeFire++
 		case anime.Source == "SuperFlix":
 			b.SuperFlix++
+		case anime.Source == "StartFlix":
+			b.StartFlix++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
 		case anime.Source == "HiAnime":

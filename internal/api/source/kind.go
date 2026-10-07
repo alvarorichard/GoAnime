@@ -13,6 +13,7 @@ const (
 	Goyabu    SourceKind = "Goyabu"
 	SuperFlix SourceKind = "SuperFlix"
 	HiAnime   SourceKind = "HiAnime"
+	StartFlix SourceKind = "StartFlix"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -32,4 +33,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	Goyabu:    scraper.GoyabuType,
 	SuperFlix: scraper.SuperFlixType,
 	HiAnime:   scraper.HiAnimeType,
+	StartFlix: scraper.StartFlixType,
 }

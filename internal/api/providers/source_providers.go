@@ -25,6 +25,11 @@ var (
 	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
 	superFlixStreamFn   = api.GetSuperFlixStreamURL
 	superFlixEpisodesFn = api.GetSuperFlixEpisodes
+
+	// startFlixStreamFn / startFlixEpisodesFn do the same for StartFlix, whose
+	// listing also runs interactive pickers (season, then Dublado/Legendado).
+	startFlixStreamFn   = api.GetStartFlixStreamURL
+	startFlixEpisodesFn = api.GetStartFlixEpisodes
 )
 
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
@@ -493,4 +498,82 @@ func (p *superFlixProvider) FetchStreamURL(ctx context.Context, episode *models.
 		util.SetGlobalAnimeSource(anime.Source)
 	}
 	return superFlixStreamFn(anime, episode, quality)
+}
+
+// --- StartFlix Provider ---
+//
+// StartFlix is SuperFlix's planned successor and, for now, runs alongside it.
+// It needs no browser: the catalog and its video panel are plain HTTP. What it
+// cannot do yet is play every title — of the panel's player hosts only Byse is
+// resolved today, so a title offered solely on the others fails with a message
+// naming them, and SuperFlix stays registered until that gap closes.
+
+type startFlixProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&startFlixProvider{})
+}
+
+func (p *startFlixProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.StartFlixType)
+}
+
+func (p *startFlixProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.StartFlix,
+		Priority: 40,
+		Explicit: []string{"StartFlix"},
+		Tags:     []string{"[startflix]"},
+		// "painel-aso" is the video panel the title pages embed; an episode URL
+		// points there rather than at startflix itself.
+		URLMatchers: []string{"startflix", "painel-aso"},
+		ProbeURL:    "https://www.startflix.biz",
+	}
+}
+
+// HasSeasons: StartFlix is a movie/TV catalog organized into seasons.
+func (p *startFlixProvider) HasSeasons() bool { return true }
+
+func (p *startFlixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.StartFlix)
+	return results, nil
+}
+
+// FetchEpisodes runs the interactive listing (season, then audio) in the api
+// package, the way SuperFlix does.
+func (p *startFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return startFlixEpisodesFn(anime)
+}
+
+func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	return startFlixStreamFn(anime, episode, quality)
 }

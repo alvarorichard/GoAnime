@@ -129,6 +129,14 @@ func selectSuperFlixSeason(media *models.Anime, seasonNums []string, allEpisodes
 
 // selectSuperFlixSeasonWith isolates picker execution for deterministic tests.
 func selectSuperFlixSeasonWith(pick seasonPickFunc, media *models.Anime, seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) (string, error) {
+	return selectSeasonWith(pick, media, seasonNums, func() []tui.PickItem {
+		return seasonPickItems(seasonNums, allEpisodes)
+	})
+}
+
+// selectSeasonWith is the source-independent picker: seasonNums are the keys in
+// display order, and items builds their rows (only when a picker is shown).
+func selectSeasonWith(pick seasonPickFunc, media *models.Anime, seasonNums []string, items func() []tui.PickItem) (string, error) {
 	if len(seasonNums) == 1 {
 		only := seasonNums[0]
 		util.Infof("Only one season available — %s selected automatically.", seasonDisplayName(only))
@@ -149,7 +157,7 @@ func selectSuperFlixSeasonWith(pick seasonPickFunc, media *models.Anime, seasonN
 	if name == "" {
 		name = "Title"
 	}
-	idx, err := pick(seasonPickItems(seasonNums, allEpisodes), tui.PickOptions{
+	idx, err := pick(items(), tui.PickOptions{
 		Breadcrumb:   fmt.Sprintf("Search > %s > Seasons", name),
 		WindowTitle:  "GoAnime - Seasons",
 		ItemSingular: "season",

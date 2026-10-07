@@ -512,7 +512,7 @@ func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	if anime == nil {
 		return false
 	}
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" {
+	if anime.Source == "SFlix" || anime.Source == "SuperFlix" || anime.Source == "StartFlix" {
 		return true
 	}
 	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {

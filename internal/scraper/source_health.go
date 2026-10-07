@@ -37,7 +37,7 @@ type SourceHealthResult struct {
 // DefaultHealthCheckQuery returns a stable query expected to produce results.
 func DefaultHealthCheckQuery(source ScraperType) string {
 	switch source {
-	case SuperFlixType:
+	case SuperFlixType, StartFlixType:
 		return "dexter"
 	default:
 		return "naruto"
@@ -46,7 +46,7 @@ func DefaultHealthCheckQuery(source ScraperType) string {
 
 // healthTargets returns the source types to probe, in deterministic order.
 func healthTargets() []ScraperType {
-	return []ScraperType{AnimefireType, GoyabuType, SuperFlixType, HiAnimeType}
+	return []ScraperType{AnimefireType, GoyabuType, SuperFlixType, HiAnimeType, StartFlixType}
 }
 
 // checkSourceHealthWith probes a single scraper (which may be nil) and classifies

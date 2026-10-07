@@ -58,8 +58,9 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
 			{src: "superflix", want: []source.SourceKind{source.SuperFlix}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}},
+			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}
