@@ -14,14 +14,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
@@ -31,9 +29,8 @@ type ScraperType int
 const (
 	AnimefireType ScraperType = iota
 	GoyabuType                // PT-BR anime source
-	SuperFlixType             // SuperFlix PT-BR movies/series/animes/doramas
 	HiAnimeType               // hianime.at — subbed/dubbed HLS
-	StartFlixType             // StartFlix PT-BR movies/series (successor to SuperFlix)
+	StartFlixType             // StartFlix PT-BR movies/series
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -70,8 +67,6 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &AnimefireAdapter{client: animefire.NewAnimefireClient()}, nil
 	case GoyabuType:
 		return &GoyabuAdapter{client: goyabu.NewGoyabuClient()}, nil
-	case SuperFlixType:
-		return &SuperFlixAdapter{client: superflix.NewSuperFlixClient()}, nil
 	case HiAnimeType:
 		return &HiAnimeAdapter{client: hianime.NewHiAnimeClient()}, nil
 	case StartFlixType:
@@ -89,8 +84,6 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return "Animefire.io"
 	case GoyabuType:
 		return "Goyabu"
-	case SuperFlixType:
-		return "SuperFlix"
 	case HiAnimeType:
 		return "HiAnime"
 	case StartFlixType:
@@ -106,8 +99,6 @@ func scraperLanguageTag(scraperType ScraperType) string {
 	case AnimefireType:
 		return "[PT-BR]"
 	case GoyabuType:
-		return "[PT-BR]"
-	case SuperFlixType:
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
@@ -285,132 +276,6 @@ func NewHiAnimeAdapterForTest(serverURL string) UnifiedScraper {
 	return &HiAnimeAdapter{client: hianime.NewClientForTest(serverURL)}
 }
 
-// SuperFlixAdapter adapts superflix.SuperFlixClient to UnifiedScraper interface
-type SuperFlixAdapter struct {
-	client *superflix.SuperFlixClient
-}
-
-func (a *SuperFlixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
-	return a.SearchAnimeContext(context.Background(), query, options...)
-}
-
-// SuperFlixAdapter implements ContextualScraper: its client already threads a
-// context through every HTTP call, so a cancelled search can actually stop.
-//
-// This matters more here than elsewhere. SuperFlix's edge answers 429 with a
-// Retry-After of ~10s, and the transport honors it by sleeping and retrying —
-// a loop that only checks the REQUEST's context. Without the search deadline
-// reaching that request, the per-source timeout fired at 12s while the retry
-// goroutine kept sleeping and re-requesting for another 30s, against a host
-// that was rate-limiting precisely because it was being hit too often. Each
-// abandoned search left one of those behind, so consecutive searches stacked
-// up and the source could never recover on its own.
-func (a *SuperFlixAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
-	media, err := a.client.SearchMediaWithContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	var animes []*models.Anime
-	for _, m := range media {
-		animes = append(animes, m.ToAnimeModel())
-	}
-	return animes, nil
-}
-
-// GetAnimeEpisodesContext carries no extra behavior: SuperFlix's episode
-// listing runs the season picker in enhanced.go, not through this adapter. It
-// exists so SuperFlixAdapter satisfies ContextualScraper as a whole.
-func (a *SuperFlixAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
-	return a.GetAnimeEpisodes(animeURL)
-}
-
-func (a *SuperFlixAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
-	// For SuperFlix, animeURL contains the TMDB ID
-	return nil, fmt.Errorf("for SuperFlix, use GetSuperFlixEpisodes in enhanced.go")
-}
-
-func (a *SuperFlixAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
-	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
-}
-
-// GetStreamURLContext resolves a stream under the caller's context. The
-// solve budget below still applies — it is derived from ctx, so a caller that
-// cancels earlier wins, and one that does not gets the same generous window as
-// before.
-func (a *SuperFlixAdapter) GetStreamURLContext(parent context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
-	// episodeURL = TMDB ID
-	// options[0] = media type ("filme" or "serie")
-	// options[1] = season (optional)
-	// options[2] = episode number (optional)
-	mediaType := "filme"
-	season := ""
-	episode := ""
-
-	if len(options) > 0 {
-		if s, ok := options[0].(string); ok {
-			mediaType = s
-		}
-	}
-	if len(options) > 1 {
-		if s, ok := options[1].(string); ok {
-			season = s
-		}
-	}
-	if len(options) > 2 {
-		if s, ok := options[2].(string); ok {
-			episode = s
-		}
-	}
-
-	// Generous timeout: the first request in the pipeline may hit a Cloudflare
-	// Turnstile gate the client solves with a headed Firefox (10–40s); a
-	// shorter deadline cancels the solve mid-flight.
-	ctx, cancel := context.WithTimeout(parent, 210*time.Second)
-	defer cancel()
-
-	result, err := a.client.GetStreamURL(ctx, mediaType, episodeURL, season, episode)
-	if err != nil {
-		return "", nil, err
-	}
-
-	metadata = make(map[string]string)
-	metadata["source"] = "superflix"
-	metadata["referer"] = result.Referer
-	metadata["title"] = result.Title
-
-	if len(result.Subtitles) > 0 {
-		var subURLs, subLabels []string
-		for _, sub := range result.Subtitles {
-			subURLs = append(subURLs, sub.URL)
-			subLabels = append(subLabels, sub.Lang)
-		}
-		metadata["subtitles"] = strings.Join(subURLs, ",")
-		metadata["subtitle_labels"] = strings.Join(subLabels, ",")
-	}
-
-	if len(result.DefaultAudio) > 0 {
-		metadata["audio_lang"] = result.DefaultAudio[0]
-	}
-
-	return result.StreamURL, metadata, nil
-}
-
-func (a *SuperFlixAdapter) GetType() ScraperType {
-	return SuperFlixType
-}
-
-// GetClient returns the underlying SuperFlix client for direct access
-func (a *SuperFlixAdapter) GetClient() *superflix.SuperFlixClient {
-	return a.client
-}
-
-// NewSuperFlixAdapterWithClient creates a SuperFlixAdapter with a pre-configured client.
-// Useful for testing with mock servers.
-func NewSuperFlixAdapterWithClient(client *superflix.SuperFlixClient) *SuperFlixAdapter {
-	return &SuperFlixAdapter{client: client}
-}
-
 // StartFlixAdapter adapts startflix.Client to the UnifiedScraper interface.
 //
 // The episode "URL" it streams from is the panel endpoint that lists the
@@ -439,8 +304,8 @@ func (a *StartFlixAdapter) SearchAnimeContext(ctx context.Context, query string,
 }
 
 // GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
-// a whole. Like SuperFlix, StartFlix lists episodes through the season and
-// audio pickers in the api package, not through this adapter.
+// a whole. StartFlix lists episodes through the season and audio pickers in
+// the api package, not through this adapter.
 func (a *StartFlixAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
 	return a.GetAnimeEpisodes(animeURL)
 }

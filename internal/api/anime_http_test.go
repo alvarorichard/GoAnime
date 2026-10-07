@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 
@@ -15,18 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// skipUnlessLiveBrowser skips tests whose only code path drives a real headed
-// browser (SuperFlix's Cloudflare Turnstile solver). There is no injection seam
-// at the api layer, so on runners with system Chrome present these tests launch
-// a live browser, run for minutes, and trip the race detector inside
-// playwright-go's frame dispatcher. Set GOANIME_LIVE_BROWSER_TESTS=1 to run them.
-func skipUnlessLiveBrowser(t *testing.T) {
-	t.Helper()
-	if os.Getenv("GOANIME_LIVE_BROWSER_TESTS") == "" {
-		t.Skip("skipping live headed-browser test; set GOANIME_LIVE_BROWSER_TESTS=1 to run")
-	}
-}
 
 // withJikan swaps jikanBaseURL for the given test server URL and restores it
 // at test end. Tests using this MUST run serially (no t.Parallel) because
@@ -174,7 +161,7 @@ func TestSearchAnime_InvalidPageURLReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestEnrichAnimeData_SuperFlixSkipsAniList(t *testing.T) {
+func TestEnrichAnimeData_SFlixSkipsAniList(t *testing.T) {
 	anime := &models.Anime{
 		Name:      "Inception",
 		Source:    "SFlix",
@@ -301,40 +288,10 @@ func TestSearchAnimeWithSource_DelegatesToEnhanced(t *testing.T) {
 }
 
 func TestGetAnimeEpisodesWithSource_DelegatesToEnhanced(t *testing.T) {
-	// SuperFlix branch with empty URL surfaces a TMDB error → exercise the
-	// delegation through a path that reliably errors without network access.
-	anime := &models.Anime{Source: "SuperFlix", URL: ""}
+	// A StartFlix title with no page URL errors before any network access, so
+	// the delegation is exercised hermetically.
+	anime := &models.Anime{Source: "StartFlix", URL: ""}
 	_, err := GetAnimeEpisodesWithSource(anime)
-	require.Error(t, err)
-}
-
-func TestGetSuperFlixEpisodes_MissingTMDBErrors(t *testing.T) {
-	_, err := GetSuperFlixEpisodes(&models.Anime{Source: "SuperFlix", URL: ""})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "TMDB")
-}
-
-func TestGetSuperFlixEpisodes_MovieReturnsSingleEpisode(t *testing.T) {
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "12345",
-		Name:      "TestMovie",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetSuperFlixEpisodes(media)
-	require.NoError(t, err)
-	require.Len(t, eps, 1)
-	assert.Equal(t, "12345", eps[0].URL)
-	assert.Equal(t, "TestMovie", eps[0].Title.English)
-}
-
-func TestGetSuperFlixStreamURL_NetworkErrorPropagates(t *testing.T) {
-	// See TestGetEpisodeStreamURL_SuperFlixDispatch: this reaches the live
-	// headed-browser solver and is non-hermetic. Opt in explicitly.
-	skipUnlessLiveBrowser(t)
-	media := &models.Anime{Source: "SuperFlix", URL: "00000000", MediaType: models.MediaTypeMovie}
-	episode := &models.Episode{Number: "1", URL: "00000000"}
-	_, err := GetSuperFlixStreamURL(media, episode, "best")
 	require.Error(t, err)
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -341,46 +342,51 @@ func TestEnrichAnime_TMDBFallbackForSingleSeason(t *testing.T) {
 	}
 }
 
-func TestEnrichAnime_SuperFlixFallback(t *testing.T) {
+func TestEnrichAnime_StartFlixFallback(t *testing.T) {
 	// Black Clover: AniList has 170 eps, no sequels.
-	// No TMDB_API_KEY. SuperFlix provides season data.
+	// No TMDB_API_KEY. StartFlix's video panel provides the season data.
 	t.Setenv("TMDB_API_KEY", "") // ensure TMDB path is skipped
+	t.Setenv("GOANIME_STARTFLIX_URL", "")
 
 	mock := newMockClient()
 	mock.addAniListResponse(makeMedia(97986, 34572, "Black Clover", "Black Clover", 2017, 170))
 
-	// Mock SuperFlix search page — contains a serie link with TMDB ID
-	searchHTML := `<html><body>
-		<div class="card">
-			<h3>Black Clover</h3>
-			<button data-msg="Copiar TMDB" data-copy="73223">TMDB</button>
-			<button data-msg="Copiar Link" data-copy="https://superflixapi.monster/serie/73223">Link</button>
-		</div>
-	</body></html>`
-	mock.responses["GET:superflixapi.monster/pesquisar"] = &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(searchHTML)),
+	html := func(body string) *http.Response {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}
 	}
+	// Search: a movie and a spin-off around the series, so the match has to be
+	// by title and by kind, not by position.
+	mock.responses["GET:www.startflix.biz/"] = html(`
+		<div class="result-item"><article><div class="details"><div class="title">
+			<a href="https://www.startflix.biz/filmes/black-clover-a-espada-do-rei-mago/">Black Clover: A Espada do Rei Mago</a></div></div></article></div>
+		<div class="result-item"><article><div class="details"><div class="title">
+			<a href="https://www.startflix.biz/series/black-clover-quartet-knights/">Black Clover Quartet Knights</a></div></div></article></div>
+		<div class="result-item"><article><div class="details"><div class="title">
+			<a href="https://www.startflix.biz/series/black-clover/">Black Clover</a></div></div></article></div>`)
+	mock.responses["GET:www.startflix.biz/series/black-clover/"] = html(
+		`<iframe src="https://www.painel-aso.sbs/embed/73223"></iframe>`)
 
-	// Mock SuperFlix player page — contains ALL_EPISODES JS variable
-	allEpisodes := `var ALL_EPISODES = {"1":[` +
-		strings.Repeat(`{"epi_num":"1","title":"ep","air_date":"2017-10-03"},`, 50) +
-		`{"epi_num":"51","title":"ep","air_date":"2018-09-25"}` +
-		`],"2":[` +
-		strings.Repeat(`{"epi_num":"1","title":"ep","air_date":"2018-10-02"},`, 50) +
-		`{"epi_num":"51","title":"ep","air_date":"2019-09-24"}` +
-		`],"3":[` +
-		strings.Repeat(`{"epi_num":"1","title":"ep","air_date":"2019-10-01"},`, 51) +
-		`{"epi_num":"52","title":"ep","air_date":"2020-09-29"}` +
-		`],"4":[` +
-		strings.Repeat(`{"epi_num":"1","title":"ep","air_date":"2020-12-01"},`, 15) +
-		`{"epi_num":"16","title":"ep","air_date":"2021-03-30"}` +
-		`]};`
-	playerHTML := `<html><body><script>` + allEpisodes + `</script></body></html>`
-	mock.responses["GET:superflixapi.monster/serie/73223"] = &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(playerHTML)),
+	// Panel: four seasons; season 3's dub stops at 40 while its subtitled list
+	// reaches 52, so the season's size must come from the longer list.
+	var panel strings.Builder
+	panel.WriteString(`<ul class="header-navigation">`)
+	for n := 1; n <= 4; n++ {
+		fmt.Fprintf(&panel, `<li data-season-id="s%d" data-season-number="%d">%d</li>`, n, n, n)
 	}
+	panel.WriteString(`</ul><div class="cards">`)
+	writeCard := func(audio string, sizes map[int]int) {
+		fmt.Fprintf(&panel, `<div class="card"><h2 class="card-title">%s</h2><ul>`, audio)
+		for season := 1; season <= 4; season++ {
+			for ep := 1; ep <= sizes[season]; ep++ {
+				fmt.Fprintf(&panel, `<li data-season-id="s%d" data-episode-id="%s%d-%d"><a>%d - Episódio</a></li>`, season, audio, season, ep, ep)
+			}
+		}
+		panel.WriteString(`</ul></div>`)
+	}
+	writeCard("Dublado", map[int]int{1: 51, 2: 51, 3: 40, 4: 16})
+	writeCard("Legendado", map[int]int{1: 51, 2: 51, 3: 52, 4: 16})
+	panel.WriteString(`</div>`)
+	mock.responses["GET:www.painel-aso.sbs/embed/73223"] = html(panel.String())
 
 	enricher := NewEnricherWithClient(mock)
 	anime := &models.Anime{Name: "[PT-BR] Black Clover (Dublado)"}
@@ -390,7 +396,7 @@ func TestEnrichAnime_SuperFlixFallback(t *testing.T) {
 	}
 
 	if len(seasonMap) != 4 {
-		t.Fatalf("expected 4 seasons from SuperFlix, got %d: %+v", len(seasonMap), seasonMap)
+		t.Fatalf("expected 4 seasons from StartFlix, got %d: %+v", len(seasonMap), seasonMap)
 	}
 
 	// Season 1: 51 eps (1-51)

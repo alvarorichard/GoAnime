@@ -25,14 +25,14 @@ func TestTagResults_AnimeFirePTBRAndSource(t *testing.T) {
 	assert.Equal(t, "Animefire.io", res[0].Source, "AnimeFire stamps the canonical Animefire.io source")
 }
 
-func TestTagResults_SuperFlixMediaTypeTags(t *testing.T) {
+func TestTagResults_StartFlixMediaTypeTags(t *testing.T) {
 	t.Parallel()
 	movie := []*models.Anime{{Name: "Inception", MediaType: models.MediaTypeMovie}}
-	tagResults(movie, source.SuperFlix)
+	tagResults(movie, source.StartFlix)
 	assert.Equal(t, "[Movie] [PT-BR] Inception", movie[0].Name)
 
 	tv := []*models.Anime{{Name: "Breaking Bad", MediaType: models.MediaTypeTV}}
-	tagResults(tv, source.SuperFlix)
+	tagResults(tv, source.StartFlix)
 	assert.Equal(t, "[TV] [PT-BR] Breaking Bad", tv[0].Name)
 }
 

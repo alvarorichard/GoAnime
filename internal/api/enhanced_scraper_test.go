@@ -78,39 +78,6 @@ func injectMultiScraper(t *testing.T, mocks map[scraper.ScraperType]scraper.Unif
 	}
 }
 
-// --- GetSuperFlixEpisodes ---
-
-func TestGetSuperFlixEpisodes_EmptyURL(t *testing.T) {
-	t.Parallel()
-	media := &models.Anime{Source: "SuperFlix", URL: ""}
-	_, err := GetSuperFlixEpisodes(media)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no TMDB ID")
-}
-
-func TestGetSuperFlixEpisodes_MovieType(t *testing.T) {
-	t.Parallel()
-	media := &models.Anime{
-		Source:    "SuperFlix",
-		URL:       "12345",
-		Name:      "Avengers",
-		MediaType: models.MediaTypeMovie,
-	}
-	eps, err := GetSuperFlixEpisodes(media)
-	require.NoError(t, err)
-	require.Len(t, eps, 1)
-	assert.Equal(t, "1", eps[0].Number)
-	assert.Equal(t, 1, eps[0].Num)
-	assert.Equal(t, "12345", eps[0].URL)
-	assert.Equal(t, "Avengers", eps[0].Title.English)
-}
-
-// NOTE: the per-source episode SWITCH (GetAnimeEpisodesEnhanced) was deleted in
-// Etapa 6.3. Source detection is now source.Resolve (covered by
-// providers.TestResolve_LiveRegistry) and dispatch by providers.FetchEpisodes
-// (covered by providers.TestFetchEpisodes_*). SuperFlix-specific episode logic
-// stays covered by TestGetSuperFlixEpisodes_* above.
-
 // --- DownloadEpisodeEnhanced ---
 
 func TestDownloadEpisodeEnhanced_EpisodesError(t *testing.T) {

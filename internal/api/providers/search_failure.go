@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,8 +18,8 @@ import (
 // line of signal wrapped in three layers of repetition:
 //
 //	Search failed for "dexter": failed to search: no results for "dexter" (all
-//	sources failed) — SuperFlix blocked the request: HTTP 429/challenge; AniDB
-//	temporarily unavailable: HTTP 503: SuperFlix: server returned: 429 Too Many
+//	sources failed) — <source> blocked the request: HTTP 429/challenge; AniDB
+//	temporarily unavailable: HTTP 503: <source>: server returned: 429 Too Many
 //	Requests
 //	AniDB: AniDB search: upstream unavailable with HTTP 503
 //
@@ -30,7 +29,7 @@ import (
 
 // SourceFailure is one source's reason for not answering a search.
 type SourceFailure struct {
-	// Kind names the source, e.g. "SuperFlix".
+	// Kind names the source, e.g. "StartFlix".
 	Kind source.SourceKind
 	// Reason is one short, user-facing clause: "rate limited (HTTP 429)".
 	// It does NOT repeat the source name — the caller prints that.
@@ -148,22 +147,10 @@ func (f *SearchFailure) RateLimited() bool {
 	return false
 }
 
-// errSearchRateLimited matches a request GoAnime suppressed itself because the
-// host had asked it to back off (superflix.ErrRateLimited). Declared as a
-// variable so this package does not import the scraper just to name it; the
-// sentinel is matched by message because errors.Is needs the concrete value and
-// pulling it in would invert the dependency.
-var errSearchRateLimited = errors.New("superflix: rate limited, backing off")
-
 // describeFailure reduces a source's error to one short clause plus the
 // rate-limited flag. The diagnostic machinery already classifies the error for
 // the circuit breaker; this is the same classification, phrased for a person.
 func describeFailure(diag *netx.SourceDiagnostic, err error) (reason string, rateLimited bool) {
-	// A request the back-off suppressed never reached the host, so calling it
-	// a failure of that host would be wrong.
-	if err != nil && strings.Contains(err.Error(), errSearchRateLimited.Error()) {
-		return "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network", true
-	}
 	if diag == nil {
 		return "failed", false
 	}

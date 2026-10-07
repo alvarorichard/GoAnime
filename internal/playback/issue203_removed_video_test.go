@@ -23,18 +23,30 @@ func TestAlternateSources_ExcludesTheFailingSource(t *testing.T) {
 		current string
 		want    []string
 	}{
-		{name: "goyabu", current: "Goyabu", want: []string{"AnimeFire", "SuperFlix", "StartFlix"}},
+		// Goyabu and SuperFlix ship off by default, so they are never offered
+		// unless opted in: the user would not find them in the results.
+		{name: "goyabu", current: "Goyabu", want: []string{"AnimeFire", "StartFlix"}},
 		// AnimeFire's display label is not the bare kind, so the match has to
 		// be prefix-based or the failing source is offered back to the user.
-		{name: "animefire label", current: "Animefire.io", want: []string{"Goyabu", "SuperFlix", "StartFlix"}},
-		{name: "superflix", current: "SuperFlix", want: []string{"AnimeFire", "Goyabu", "StartFlix"}},
-		{name: "startflix", current: "StartFlix", want: []string{"AnimeFire", "Goyabu", "SuperFlix"}},
-		{name: "unknown source keeps them all", current: "", want: []string{"AnimeFire", "Goyabu", "SuperFlix", "StartFlix"}},
+		{name: "animefire label", current: "Animefire.io", want: []string{"StartFlix"}},
+		{name: "superflix", current: "SuperFlix", want: []string{"AnimeFire", "StartFlix"}},
+		{name: "startflix", current: "StartFlix", want: []string{"AnimeFire"}},
+		{name: "unknown source keeps every searched one", current: "", want: []string{"AnimeFire", "StartFlix"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, alternateSources(tt.current))
 		})
 	}
+}
+
+func TestAlternateSources_FollowsOptInAndKillSwitch(t *testing.T) {
+	t.Setenv("GOANIME_ENABLED_SOURCES", "goyabu")
+	assert.Equal(t, []string{"AnimeFire", "Goyabu"}, alternateSources("StartFlix"),
+		"an opted-in source is offered again")
+
+	t.Setenv("GOANIME_DISABLED_SOURCES", "animefire")
+	assert.Equal(t, []string{"Goyabu"}, alternateSources("StartFlix"),
+		"a killed source is never offered")
 }
 
 // The report must survive a nil anime and a blank episode label: it runs on an

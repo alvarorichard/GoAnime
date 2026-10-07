@@ -134,5 +134,5 @@ func TestValidateStreamURL(t *testing.T) {
 }
 
 // =============================================================================
-// Unit Tests: Scraper manager integration with SuperFlix
+// Unit Tests: Scraper manager integration
 // =============================================================================

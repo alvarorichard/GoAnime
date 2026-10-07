@@ -30,8 +30,8 @@ type Descriptor struct {
 	// search timeout: after a per-source deadline the dispatcher issues a quick
 	// HEAD against it (netx.EnrichTimeoutWithProbe) so a 5xx / Cloudflare-origin
 	// failure is reported as "site down" instead of a generic timeout. Leave
-	// empty for opaque APIs or browser-gated sources
-	// (SuperFlix) where a homepage probe is not meaningful.
+	// empty for opaque APIs or browser-gated sources, where a homepage probe is
+	// not meaningful.
 	ProbeURL string
 }
 

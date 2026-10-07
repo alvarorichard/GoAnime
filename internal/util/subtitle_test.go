@@ -174,7 +174,7 @@ func TestGetSubtitleArgs_MultipleSubtitles(t *testing.T) {
 
 func TestGetSubtitleArgs_HTTPSURLsNotSplitByColon(t *testing.T) {
 	t.Cleanup(resetSubtitleState)
-	// SuperFlix-style WEBVTT served behind .html paths.
+	// WEBVTT served behind .html paths, as some hosts do.
 	SetGlobalSubtitles([]SubtitleInfo{
 		{URL: "https://corda.sbs/q/abc.html", Language: "por", Label: "Portuguese"},
 		{URL: "https://corda.sbs/q/def.html", Language: "eng", Label: "English"},

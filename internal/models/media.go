@@ -117,12 +117,11 @@ func (m *Media) IsMovieOrTV() bool {
 // open its own terminal UI (the season-selection fuzzyfinder), meaning callers
 // MUST NOT run a spinner or any other TUI concurrently with the fetch — two
 // programs writing to the terminal at once eat each other's output and corrupt
-// terminal state. SuperFlix/SFlix are matched by SOURCE, not just media type:
-// their catalogs tag western animation (e.g. "Os Simpsons") as anime, which
-// would otherwise slip past the movie/TV check. StartFlix is matched the same
-// way because its listing always runs the season and audio pickers.
+// terminal state. StartFlix is matched by SOURCE, not just media type: its
+// listing always runs the season and audio pickers, whatever the title's type.
+// SFlix is a legacy movie/TV label matched the same way.
 func (m *Media) HasInteractiveEpisodeFlow() bool {
-	return m.Source == "SFlix" || m.Source == "SuperFlix" || m.Source == "StartFlix" ||
+	return m.Source == "SFlix" || m.Source == "StartFlix" ||
 		m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
 }
 

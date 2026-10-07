@@ -11,7 +11,6 @@ type SourceKind string
 const (
 	AnimeFire SourceKind = "AnimeFire"
 	Goyabu    SourceKind = "Goyabu"
-	SuperFlix SourceKind = "SuperFlix"
 	HiAnime   SourceKind = "HiAnime"
 	StartFlix SourceKind = "StartFlix"
 
@@ -31,7 +30,6 @@ func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
 var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimeFire: scraper.AnimefireType,
 	Goyabu:    scraper.GoyabuType,
-	SuperFlix: scraper.SuperFlixType,
 	HiAnime:   scraper.HiAnimeType,
 	StartFlix: scraper.StartFlixType,
 }

@@ -45,7 +45,7 @@ const defaultAPIBase = "https://api.animefire.one"
 
 // apiBaseEnvOverride points the client at a different API origin.
 //
-// It is the same escape hatch SuperFlix has for its host: this site has already
+// It is an escape hatch for a host that moves: this site has already
 // moved once (animefire.io → animefire.one, and a scraped page → this API), and
 // when it moves again an env var repairs an installed binary without waiting
 // for a release. It also lets a test drive the whole client against an httptest
@@ -277,7 +277,7 @@ func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
 	}
 	util.Warnf("AnimeFire lists this title but has no video files for it — "+
 		"the first and middle episodes are both offline (%d episodes listed).", len(episodes))
-	util.Infof("Try the same title on another source (Goyabu or SuperFlix).")
+	util.Infof("Try the same title on another source (StartFlix or HiAnime).")
 }
 
 // streamAPI resolves an episode's playable URL.

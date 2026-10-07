@@ -107,25 +107,10 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
-	addOption(&helpContent, "--source", "Specify source (hianime, animefire, superflix, startflix). Default: search all of them.")
+	addOption(&helpContent, "--source", "Specify source (hianime, animefire, startflix). Default: search all of them. Goyabu is off by default; see GOANIME_ENABLED_SOURCES.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
-	helpContent.WriteString("\n")
-
-	// SuperFlix / Cloudflare bypass section
-	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
-	helpContent.WriteString("\n")
-	helpContent.WriteString(sectionTitleStyle.Render("Cloudflare Bypass (SuperFlix):"))
-	helpContent.WriteString("\n")
-	helpContent.WriteString(descriptionStyle.Render("    SuperFlix may be behind Cloudflare Turnstile. GoAnime opens a real browser window to clear it automatically; if a checkbox appears, just click it. The first run sets up the browser engine (one-time, may download up to ~150MB). These flags tune that behavior."))
-	helpContent.WriteString("\n")
-	addOption(&helpContent, "--sf-browser", "Browser channel to use for the bypass (e.g. chrome, chrome-beta, msedge). Default: auto-detect system Chrome, else bundled Chromium.")
-	addOption(&helpContent, "--sf-bundled", "Force Playwright's bundled Chromium instead of system Chrome.")
-	addOption(&helpContent, "--sf-headless", "Run the bypass browser headless (advanced; Turnstile usually rejects headless, so leave off unless you know what you're doing).")
-	addOption(&helpContent, "--sf-mask", "Enable browser fingerprint masking (advanced escape hatch; off by default because it usually breaks the challenge).")
-	addOption(&helpContent, "--sf-offscreen", "Default. The bypass browser starts minimized and surfaces only if the challenge actually needs you to solve it; it closes itself either way. It still runs a real browser — unlike --sf-headless, which the challenge rejects. Note: the player page raises the window when it loads, so this hides the start of the solve, not all of it.")
-	addOption(&helpContent, "--sf-window", "Always show the bypass browser window, instead of keeping it minimized until it is needed.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -150,7 +135,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire, SuperFlix and StartFlix with automatic fallback.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire and StartFlix with automatic fallback, no browser needed.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")
@@ -179,10 +164,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d -a \"one piece\"", "Download ALL episodes of One Piece")
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
 	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
-	addExample(&helpContent, "GOANIME_ENABLED_SOURCES=goyabu goanime \"naruto\"", "Turn on Goyabu (off by default: needs a browser)")
-	addExample(&helpContent, "goanime --sf-browser chrome \"loki\"", "Use system Chrome for the SuperFlix Cloudflare bypass")
-	addExample(&helpContent, "goanime --sf-bundled \"loki\"", "Force the bundled Chromium for the bypass")
-	addExample(&helpContent, "goanime --sf-window \"loki\"", "Watch the bypass browser work, instead of hiding it")
+	addExample(&helpContent, "GOANIME_ENABLED_SOURCES=goyabu goanime \"naruto\"", "Turn on Goyabu (off by default: it sits behind a Cloudflare challenge)")
 	helpContent.WriteString("\n")
 
 	// Upscale Examples section

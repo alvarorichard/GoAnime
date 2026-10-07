@@ -16,9 +16,8 @@ import "strings"
 //	"o-todo-poderoso"   0 results
 //	"o todo poderoso"   32 results
 //
-// SuperFlix had already found this and undone the dashes inside its own client
-// (search.go, "CLI args arrive hyphenated like the-boys"). The other three
-// sources never did, so every multi-word search in the app was quietly asking
+// One source had already found this and undone the dashes inside its own
+// client ("CLI args arrive hyphenated like the-boys"). The others never did, so every multi-word search in the app was quietly asking
 // them for a string no catalogue contains — and the fan-out then reported the
 // empty result as if the title did not exist.
 //

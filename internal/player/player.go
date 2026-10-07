@@ -590,10 +590,10 @@ func filterMPVArgs(args []string) []string {
 		"--sub-files=",                 // legacy mpv multi-file form (unused — colon breaks https://)
 		"--audio-file=",                // External audio file
 		"--http-header-fields=",        // HTTP headers for HLS streams
-		"--http-header-fields-append=", // one header per option; required for values containing a comma (SuperFlix's Accept-Language)
+		"--http-header-fields-append=", // one header per option; required for values containing a comma
 		"--stream-lavf-o=",             // FFmpeg/lavf options for streaming protocols
 		"--demuxer-lavf-o=",            // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
-		"--demuxer-lavf-format=",       // Force HLS for SuperFlix's valid master.txt fallback
+		"--demuxer-lavf-format=",       // Force a lavf demuxer format (e.g. hls)
 		"--referrer=",                  // HTTP referrer for streaming
 		"--user-agent=",                // HTTP user agent for streaming
 		// Anime4K real-time upscaling shaders
@@ -1144,8 +1144,6 @@ func downloadAndPlayEpisode(
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
 				switch {
-				case isSuperFlixTextHLS(videoURL):
-					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, m)
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {

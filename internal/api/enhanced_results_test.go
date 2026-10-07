@@ -57,10 +57,10 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "hianime", want: []source.SourceKind{source.HiAnime}},
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
-			{src: "superflix", want: []source.SourceKind{source.SuperFlix}},
+			{src: "superflix", want: nil}, // removed source: no longer a valid selector
 			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.StartFlix}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.StartFlix}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}
@@ -92,14 +92,16 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 		}{
 			{name: "explicit hianime source", src: "hianime", url: "opaque", want: "HiAnime"},
 			{name: "explicit goyabu source", src: "goyabu", url: "opaque", want: "Goyabu"},
-			{name: "explicit superflix numeric id", src: "superflix", url: "8143", want: "SuperFlix"},
+			{name: "explicit startflix source", src: "startflix", url: "https://www.startflix.biz/series/x/", want: "StartFlix"},
+			{name: "removed superflix selector sets nothing", src: "superflix", url: "8143", want: ""},
 			{name: "hianime URL", url: "https://HIANIME.at/frieren-1", want: "HiAnime"},
 			// anidb.app is where this source used to live; a title restored from
 			// history still carries that URL and must still route somewhere.
 			{name: "legacy anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: "HiAnime"},
 			{name: "animefire URL", url: "HTTPS://ANIMEFIRE.PLUS/frieren", want: "Animefire.io"},
 			{name: "goyabu URL", url: "https://GOYABU.example/frieren", want: "Goyabu"},
-			{name: "sflix URL", url: "https://SFLIX.example/tv/1", want: "SuperFlix"},
+			{name: "startflix URL", url: "https://WWW.STARTFLIX.biz/filmes/x/", want: "StartFlix"},
+			{name: "sflix URL matches nothing", url: "https://SFLIX.example/tv/1", want: ""},
 			{name: "bare numeric matches nothing", url: "8143", want: ""},
 			{name: "bare punctuation matches nothing", url: "abc/def", want: ""},
 		}

@@ -12,12 +12,12 @@ import (
 )
 
 // =============================================================================
-// Tests for EnrichMedia with SuperFlix content
+// Tests for EnrichMedia with StartFlix content
 // Verifies the TMDB ID direct lookup path and image URL enrichment
 // =============================================================================
 
 // mockTMDBServer creates a test server that simulates TMDB API responses
-// for the specific IDs used by SuperFlix content
+// for the specific IDs used by StartFlix content
 func mockTMDBServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -96,22 +96,22 @@ func newTestTMDBClient(serverURL string) *TMDBClient {
 	}
 }
 
-// TestEnrichMedia_SuperFlixTV_WithTMDBID tests the core fix:
-// When SuperFlix provides a TMDB ID, EnrichMedia should fetch details directly
+// TestEnrichMedia_StartFlixTV_WithTMDBID tests the core fix:
+// When StartFlix provides a TMDB ID, EnrichMedia should fetch details directly
 // instead of searching by name. This ensures the ImageURL gets populated.
-func TestEnrichMedia_SuperFlixTV_WithTMDBID(t *testing.T) {
+func TestEnrichMedia_StartFlixTV_WithTMDBID(t *testing.T) {
 	t.Parallel()
 	srv := mockTMDBServer(t)
 	defer srv.Close()
 
-	// Simulate a SuperFlix TV show (Dexter) with TMDB ID already set
-	// This is what ToAnimeModel produces after parsing SuperFlix search results
+	// Simulate a StartFlix TV show (Dexter) with TMDB ID already set
+	// This is what ToAnimeModel produces after parsing StartFlix search results
 	media := &models.Media{
 		Name:      "Dexter",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeTV,
 		TMDBID:    1405,
-		URL:       "1405", // SuperFlix stores TMDB ID as URL
+		URL:       "1405", // StartFlix stores TMDB ID as URL
 	}
 
 	// Override the TMDB client's base URL
@@ -154,21 +154,21 @@ func TestEnrichMedia_SuperFlixTV_WithTMDBID(t *testing.T) {
 
 	// VERIFY: Setup fields are preserved
 	assert.Equal(t, "Dexter", media.Name)
-	assert.Equal(t, "SuperFlix", media.Source)
+	assert.Equal(t, "StartFlix", media.Source)
 	assert.Equal(t, models.MediaTypeTV, media.MediaType)
 	assert.Equal(t, "1405", media.URL)
 	assert.NotNil(t, media.TMDBDetails)
 }
 
-// TestEnrichMedia_SuperFlixMovie_WithTMDBID tests movie enrichment with direct ID
-func TestEnrichMedia_SuperFlixMovie_WithTMDBID(t *testing.T) {
+// TestEnrichMedia_StartFlixMovie_WithTMDBID tests movie enrichment with direct ID
+func TestEnrichMedia_StartFlixMovie_WithTMDBID(t *testing.T) {
 	t.Parallel()
 	srv := mockTMDBServer(t)
 	defer srv.Close()
 
 	media := &models.Media{
 		Name:      "Inception",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeMovie,
 		TMDBID:    27205,
 		URL:       "27205",
@@ -199,17 +199,17 @@ func TestEnrichMedia_SuperFlixMovie_WithTMDBID(t *testing.T) {
 
 	// VERIFY: Setup fields are preserved
 	assert.Equal(t, "Inception", media.Name)
-	assert.Equal(t, "SuperFlix", media.Source)
+	assert.Equal(t, "StartFlix", media.Source)
 	assert.Equal(t, models.MediaTypeMovie, media.MediaType)
 	assert.Equal(t, "27205", media.URL)
 	assert.NotNil(t, media.TMDBDetails)
 	assert.NotEmpty(t, media.Overview)
 }
 
-// TestEnrichMedia_SuperFlix_OriginalBug_NoTMDBID documents the original problem:
-// Before the fix, SuperFlix content had TMDBID=0 and only a numeric URL,
+// TestEnrichMedia_StartFlix_OriginalBug_NoTMDBID documents the original problem:
+// Before the fix, StartFlix content had TMDBID=0 and only a numeric URL,
 // so EnrichMedia would search by name which could fail or return wrong results.
-func TestEnrichMedia_SuperFlix_OriginalBug_NoTMDBID(t *testing.T) {
+func TestEnrichMedia_StartFlix_OriginalBug_NoTMDBID(t *testing.T) {
 	t.Parallel()
 	srv := mockTMDBServer(t)
 	defer srv.Close()
@@ -217,7 +217,7 @@ func TestEnrichMedia_SuperFlix_OriginalBug_NoTMDBID(t *testing.T) {
 	// BEFORE THE FIX: TMDBID was 0, ToAnimeModel didn't parse it
 	media := &models.Media{
 		Name:      "Dexter",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeTV,
 		TMDBID:    0,      // Original bug: TMDBID was never set
 		URL:       "1405", // This was all we had
@@ -230,9 +230,9 @@ func TestEnrichMedia_SuperFlix_OriginalBug_NoTMDBID(t *testing.T) {
 	assert.Equal(t, 0, media.TMDBID,
 		"original bug: TMDBID was zero before the fix")
 	assert.Empty(t, media.ImageURL,
-		"original bug: no image was extracted from SuperFlix search")
+		"original bug: no image was extracted from StartFlix search")
 	assert.Equal(t, "Dexter", media.Name)
-	assert.Equal(t, "SuperFlix", media.Source)
+	assert.Equal(t, "StartFlix", media.Source)
 	assert.Equal(t, models.MediaTypeTV, media.MediaType)
 	assert.Equal(t, "1405", media.URL)
 
@@ -250,8 +250,8 @@ func TestEnrichMedia_SuperFlix_OriginalBug_NoTMDBID(t *testing.T) {
 		"after fix: TMDB details include poster path for Discord RPC")
 }
 
-// TestEnrichMedia_SuperFlix_NoPosterPath tests enrichment when TMDB has no poster
-func TestEnrichMedia_SuperFlix_NoPosterPath(t *testing.T) {
+// TestEnrichMedia_StartFlix_NoPosterPath tests enrichment when TMDB has no poster
+func TestEnrichMedia_StartFlix_NoPosterPath(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
@@ -271,7 +271,7 @@ func TestEnrichMedia_SuperFlix_NoPosterPath(t *testing.T) {
 	tmdbClient := newTestTMDBClient(srv.URL)
 	media := &models.Media{
 		Name:      "Obscure Show",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeTV,
 		TMDBID:    99999,
 		ImageURL:  "https://image.tmdb.org/t/p/w500/some_poster_from_search.jpg", // Set from search card
@@ -280,7 +280,7 @@ func TestEnrichMedia_SuperFlix_NoPosterPath(t *testing.T) {
 	details, err := tmdbClient.GetTVDetails(media.TMDBID)
 	require.NoError(t, err)
 
-	// If TMDB has no poster, don't overwrite the one from SuperFlix search
+	// If TMDB has no poster, don't overwrite the one from StartFlix search
 	if details.PosterPath != "" {
 		media.ImageURL = tmdbClient.GetImageURL(details.PosterPath, "w500")
 	}
@@ -288,7 +288,7 @@ func TestEnrichMedia_SuperFlix_NoPosterPath(t *testing.T) {
 	assert.Equal(t, "https://image.tmdb.org/t/p/w500/some_poster_from_search.jpg",
 		media.ImageURL, "should keep search card image when TMDB has no poster")
 	assert.Equal(t, "Obscure Show", media.Name)
-	assert.Equal(t, "SuperFlix", media.Source)
+	assert.Equal(t, "StartFlix", media.Source)
 	assert.Equal(t, models.MediaTypeTV, media.MediaType)
 }
 
@@ -333,9 +333,9 @@ func TestEnrichMedia_GetImageURL(t *testing.T) {
 	}
 }
 
-// TestEnrichMedia_RealTMDB_SuperFlixDexter is an integration test that
+// TestEnrichMedia_RealTMDB_StartFlixDexter is an integration test that
 // verifies the full enrichment pipeline with the real TMDB API
-func TestEnrichMedia_RealTMDB_SuperFlixDexter(t *testing.T) {
+func TestEnrichMedia_RealTMDB_StartFlixDexter(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test that hits real TMDB API")
 	}
@@ -343,7 +343,7 @@ func TestEnrichMedia_RealTMDB_SuperFlixDexter(t *testing.T) {
 
 	media := &models.Media{
 		Name:      "Dexter",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeTV,
 		TMDBID:    1405,
 		URL:       "1405",
@@ -369,8 +369,8 @@ func TestEnrichMedia_RealTMDB_SuperFlixDexter(t *testing.T) {
 		media.ImageURL, media.Rating, media.IMDBID)
 }
 
-// TestEnrichMedia_RealTMDB_SuperFlixInception tests movie enrichment with real API
-func TestEnrichMedia_RealTMDB_SuperFlixInception(t *testing.T) {
+// TestEnrichMedia_RealTMDB_StartFlixInception tests movie enrichment with real API
+func TestEnrichMedia_RealTMDB_StartFlixInception(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test that hits real TMDB API")
 	}
@@ -378,7 +378,7 @@ func TestEnrichMedia_RealTMDB_SuperFlixInception(t *testing.T) {
 
 	media := &models.Media{
 		Name:      "Inception",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeMovie,
 		TMDBID:    27205,
 		URL:       "27205",

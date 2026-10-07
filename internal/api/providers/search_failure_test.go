@@ -19,8 +19,8 @@ import (
 // What a user saw when every source declined, before this type existed:
 //
 //	Search failed for "dexter": failed to search: no results for "dexter" (all
-//	sources failed) — SuperFlix blocked the request: HTTP 429/challenge; HiAnime
-//	temporarily unavailable: HTTP 503: SuperFlix: server returned: 429 Too Many
+//	sources failed) — <source> blocked the request: HTTP 429/challenge; HiAnime
+//	temporarily unavailable: HTTP 503: <source>: server returned: 429 Too Many
 //	Requests
 //	HiAnime: HiAnime search: upstream unavailable with HTTP 503
 //
@@ -34,7 +34,7 @@ func TestSearchFailure_ErrorIsOneShortLine(t *testing.T) {
 	msg := f.Error()
 
 	assert.Contains(t, msg, `"dexter"`)
-	assert.Contains(t, msg, "SuperFlix")
+	assert.Contains(t, msg, "StartFlix")
 	assert.Contains(t, msg, "HiAnime")
 	assert.NotContains(t, msg, "\n", "the one-line form must stay one line")
 	assert.NotContains(t, msg, "server returned",
@@ -61,7 +61,7 @@ func TestSearchFailure_UnwrapsToEveryCause(t *testing.T) {
 	t.Parallel()
 	sentinel := errors.New("upstream is on fire")
 	f := &SearchFailure{Query: "dexter", Sources: []SourceFailure{
-		{Kind: source.SuperFlix, Reason: "failed", Err: errors.New("something")},
+		{Kind: source.StartFlix, Reason: "failed", Err: errors.New("something")},
 		{Kind: source.HiAnime, Reason: "failed", Err: sentinel},
 	}}
 
@@ -111,13 +111,6 @@ func TestDescribeFailure_PhrasesEachClassForAPerson(t *testing.T) {
 			wantLimited: true,
 		},
 		{
-			name:        "suppressed by our own back-off",
-			diag:        &netx.SourceDiagnostic{Kind: netx.DiagnosticUnknown},
-			err:         errors.New("failed to make request: superflix: rate limited, backing off: host asked us to wait"),
-			wantSaid:    "refusing this network",
-			wantLimited: true,
-		},
-		{
 			name:     "origin down",
 			diag:     &netx.SourceDiagnostic{Kind: netx.DiagnosticSourceUnavailable, StatusCode: http.StatusServiceUnavailable},
 			wantSaid: "temporarily unavailable (HTTP 503)",
@@ -154,19 +147,19 @@ func TestDescribeFailure_PhrasesEachClassForAPerson(t *testing.T) {
 func TestDescribeFailure_ReasonDoesNotRepeatTheSourceName(t *testing.T) {
 	t.Parallel()
 	reason, _ := describeFailure(&netx.SourceDiagnostic{
-		Source: "SuperFlix", Kind: netx.DiagnosticSourceUnavailable, StatusCode: 503,
+		Source: "StartFlix", Kind: netx.DiagnosticSourceUnavailable, StatusCode: 503,
 	}, nil)
 
-	assert.NotContains(t, reason, "SuperFlix")
+	assert.NotContains(t, reason, "StartFlix")
 }
 
 func twoSourceFailure() *SearchFailure {
 	return &SearchFailure{Query: "dexter", Sources: []SourceFailure{
 		{
-			Kind:        source.SuperFlix,
+			Kind:        source.StartFlix,
 			Reason:      "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network",
 			RateLimited: true,
-			Err:         errors.New("SuperFlix: server returned: 429 Too Many Requests"),
+			Err:         errors.New("StartFlix: server returned: 429 Too Many Requests"),
 		},
 		{
 			Kind:   source.HiAnime,
@@ -218,7 +211,7 @@ func TestFinishSearch_PartialFailureIsReportedNotSwallowed(t *testing.T) {
 	assert.Len(t, results, 1)
 
 	logged := warnings()
-	assert.Contains(t, logged, "SuperFlix", "the user must learn which sources were missing")
+	assert.Contains(t, logged, "StartFlix", "the user must learn which sources were missing")
 	assert.Contains(t, logged, "HiAnime")
 	assert.Contains(t, logged, "incomplete", "and that the result set is smaller than usual")
 }
@@ -252,7 +245,7 @@ func warnings() string { return warnBuf.String() }
 // Nothing found is not everything broken.
 //
 // Searching "o-todo-poderoso" on 2026-09-24 had HiAnime, AnimeFire and Goyabu
-// answer normally with no match while SuperFlix refused the connection, and it
+// answer normally with no match while another source refused the connection, and it
 // was reported as "every source failed". The two call for opposite reactions —
 // try another title, versus wait for a host — so the failure has to carry
 // enough to tell them apart.

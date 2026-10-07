@@ -80,18 +80,18 @@ func TestGetVideoURLForEpisodeEnhanced_RegistrySourceErrorNotSilentlyFallenBack(
 func TestGetVideoURLForEpisodeEnhanced_MovieTVErrorKeepsSourceLabel(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &stubSource{
-		desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+		desc: source.Descriptor{Kind: source.StartFlix, Priority: 1, Explicit: []string{"StartFlix"}},
 		err:  assert.AnError,
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)
 
-	anime := &models.Anime{Source: "SuperFlix", URL: "1234", MediaType: models.MediaTypeTV}
+	anime := &models.Anime{Source: "StartFlix", URL: "1234", MediaType: models.MediaTypeTV}
 	ep := &models.Episode{Number: "1", URL: "1234"}
 
 	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get SuperFlix stream URL")
+	assert.Contains(t, err.Error(), "failed to get StartFlix stream URL")
 }
 
 func TestGetVideoURLForEpisodeEnhanced_NilAnimeUnmatchedIDErrors(t *testing.T) {
@@ -167,14 +167,14 @@ func (g *gatedStubSource) WarmUp(_ context.Context) error {
 func TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &gatedStubSource{
-		desc:      source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+		desc:      source.Descriptor{Kind: "GatedStub", Priority: 1, Explicit: []string{"GatedStub"}},
 		url:       "https://cdn.example/should-not-be-reached.m3u8",
 		warmUpErr: assert.AnError,
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)
 
-	anime := &models.Anime{Source: "SuperFlix", URL: "1234", MediaType: models.MediaTypeTV}
+	anime := &models.Anime{Source: "GatedStub", URL: "1234", MediaType: models.MediaTypeTV}
 	ep := &models.Episode{Number: "1", URL: "1234"}
 
 	_, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)
@@ -188,13 +188,13 @@ func TestGetVideoURLForEpisodeEnhanced_WarmsUpBrowserGatedBeforeFetch(t *testing
 func TestGetVideoURLForEpisodeEnhanced_WarmUpSuccessProceedsToFetch(t *testing.T) {
 	// Swaps the global source registry — not parallel.
 	stub := &gatedStubSource{
-		desc: source.Descriptor{Kind: source.SuperFlix, Priority: 1, Explicit: []string{"SuperFlix"}},
+		desc: source.Descriptor{Kind: "GatedStub", Priority: 1, Explicit: []string{"GatedStub"}},
 		url:  "https://cdn.example/sf.m3u8",
 	}
 	restore := source.SwapRegistryForTesting(stub)
 	t.Cleanup(restore)
 
-	anime := &models.Anime{Source: "SuperFlix", URL: "1234", MediaType: models.MediaTypeTV}
+	anime := &models.Anime{Source: "GatedStub", URL: "1234", MediaType: models.MediaTypeTV}
 	ep := &models.Episode{Number: "1", URL: "1234"}
 
 	url, err := GetVideoURLForEpisodeEnhanced(context.Background(), ep, anime)

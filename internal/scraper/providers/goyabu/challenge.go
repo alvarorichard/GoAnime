@@ -23,10 +23,11 @@ import (
 // cf-mitigated: challenge, __cf_chl markers and "Just a moment…". No header
 // tuning gets past it — it wants a real browser.
 //
-// GoAnime already drives one for SuperFlix, offered through
-// netx.ChallengeSolver. This transport is the piece that uses it: it notices a
-// challenge, has the browser clear it once, and replays the request with the
-// resulting clearance.
+// A browser is offered through netx.ChallengeSolver when a build registers
+// one. This transport is the piece that uses it: it notices a challenge, has
+// the browser clear it once, and replays the request with the resulting
+// clearance. No solver is registered today (GoAnime no longer ships a
+// browser), so a challenge is reported as blocked.
 //
 // Two measurements shaped the design. The first, taken with the profile wiped
 // between runs — the COLD case only:

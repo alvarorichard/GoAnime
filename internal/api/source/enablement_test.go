@@ -125,12 +125,12 @@ func TestResolve_SkipsDisabledSource(t *testing.T) {
 
 func TestDisabledSources(t *testing.T) {
 	// Swaps registry + env — not parallel.
-	restore := SwapRegistryForTesting(newFake(HiAnime, 1), newFake(Goyabu, 2), newFake(SuperFlix, 3))
+	restore := SwapRegistryForTesting(newFake(HiAnime, 1), newFake(Goyabu, 2), newFake(StartFlix, 3))
 	t.Cleanup(restore)
 
-	t.Setenv(disabledSourcesEnvForTest, "Goyabu,SuperFlix")
+	t.Setenv(disabledSourcesEnvForTest, "Goyabu,StartFlix")
 	got := DisabledSources()
-	assert.Equal(t, []SourceKind{Goyabu, SuperFlix}, got, "must list disabled registered sources, sorted")
+	assert.Equal(t, []SourceKind{Goyabu, StartFlix}, got, "must list disabled registered sources, sorted")
 
 	t.Setenv(disabledSourcesEnvForTest, "")
 	assert.Empty(t, DisabledSources(), "nothing disabled ⇒ empty")

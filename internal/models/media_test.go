@@ -202,8 +202,9 @@ func TestMedia_HasInteractiveEpisodeFlow(t *testing.T) {
 		want   bool
 	}{
 		{"sflix by source", "SFlix", MediaTypeAnime, true},
-		{"superflix by source even when tagged anime", "SuperFlix", MediaTypeAnime, true},
-		{"superflix with empty media type", "SuperFlix", "", true},
+		{"startflix by source even when tagged anime", "StartFlix", MediaTypeAnime, true},
+		{"startflix with empty media type", "StartFlix", "", true},
+		{"removed superflix is no longer special", "SuperFlix", MediaTypeAnime, false},
 		{"movie by media type", "AllAnime", MediaTypeMovie, true},
 		{"tv by media type", "AllAnime", MediaTypeTV, true},
 		{"regular anime source", "AllAnime", MediaTypeAnime, false},

@@ -42,7 +42,7 @@ Read the Goyabu column as "copy this, rename it".
 | 7 | `internal/scraper/source_health.go` | `healthTargets` `:49` · `DefaultHealthCheckQuery` `:38` | 🟡 |
 | 8 | `internal/api/enhanced.go` | `--source` case `:247` · `ptbr` group `:252` · backfill by name `:290` · backfill by URL `:302` · debug print `:320` · `sourceBreakdown` field `:939` · `countSourceBreakdown` case `:959` | 🟡 |
 | 9 | `internal/api/anime.go` | `reSpaceDashNoise` source alternation `:540` | 🟡 |
-| 10 | `internal/util/util.go` | `--source` help text `:461` — currently stale: lists `flixhq`, omits `goyabu` and `superflix` | ⚪ |
+| 10 | `internal/util/util.go` | `--source` help text in `parseFlags` | ⚪ |
 | 11 | `pkg/goanime/types/source.go` | public SDK enum — **breaking change** | ⚪ |
 | 12 | tests | see [Tests](#tests) | ✅ |
 
@@ -73,7 +73,9 @@ regexes compiled at package level (`client.go:32`), errors via
 `iota`: **append at the end, never insert.** If your stream needs a referer,
 subtitles or an audio language, put them in `GetStreamURL`'s
 `metadata map[string]string` under `referer` / `subtitles` / `subtitle_labels` /
-`audio_lang` — the contract `SuperFlixAdapter` uses and the player reads.
+`audio_lang`. `providers.applyPlaybackMetadata` reads `referer` and
+`subtitles` (a JSON array of `{"url","language","label"}`); `StartFlixAdapter`
+is the example.
 
 **3. Kind.** `kind.go` — string constant plus the `scraperTypeMap` entry.
 
@@ -104,7 +106,7 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 | `DefaultDisabled` | ships off unless `GOANIME_ENABLED_SOURCES` names it | shipping live |
 | `ProbeURL` | homepage; HEAD-probed on search timeout to tell "site down" from "opaque hang" | GraphQL/opaque APIs, browser-gated sources |
 
-Priorities in use: AnimeFire `10` · Goyabu `20` · SuperFlix `30` · StartFlix `40` · HiAnime `50`.
+Priorities in use: AnimeFire `10` · Goyabu `20` · StartFlix `40` · HiAnime `50`.
 Leave gaps of 10. Priority is ignored when `anime.Source` matches an `Explicit`
 entry.
 
@@ -114,7 +116,7 @@ them and the previous episode's subtitles leak into this one.
 
 **Capabilities** are discovered by type assertion, not by a flag. Implement only
 what is true: `HasSeasons() bool` → `source.Seasoned` · `WarmUp(ctx) error` →
-`source.BrowserGated` (called before every stream fetch; see `superFlixProvider`)
+`source.BrowserGated` (called before every stream fetch; no source implements it today)
 · `Search(ctx, query)` → `source.Searchable`. **A source without `Search` is
 silently excluded from the search fan-out** — it can still play by URL.
 

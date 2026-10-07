@@ -69,7 +69,7 @@ func TestScraperDisplayName(t *testing.T) {
 		{HiAnimeType, "HiAnime"},
 		{AnimefireType, "Animefire.io"},
 		{GoyabuType, "Goyabu"},
-		{SuperFlixType, "SuperFlix"},
+		{StartFlixType, "StartFlix"},
 		{ScraperType(999), "Desconhecido"},
 	}
 	for _, tt := range tests {
@@ -86,7 +86,7 @@ func TestScraperLanguageTag(t *testing.T) {
 		{HiAnimeType, "[English]"},
 		{AnimefireType, "[PT-BR]"},
 		{GoyabuType, "[PT-BR]"},
-		{SuperFlixType, "[PT-BR]"},
+		{StartFlixType, "[PT-BR]"},
 		{ScraperType(999), "[Unknown]"},
 	}
 	for _, tt := range tests {

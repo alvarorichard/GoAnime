@@ -115,7 +115,6 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 		// Put back what other tests in this package expect to find.
 		util.SetGlobalAudioLanguage(prevAudio)
 		util.GlobalAudioLanguageExplicit = prevExplicit
-		resetSuperFlixAudioChoices()
 	})
 }
 
@@ -123,7 +122,6 @@ func resetStartFlixState() {
 	sfxAudioMu.Lock()
 	sfxAudioChoices = map[string]startflix.Audio{}
 	sfxAudioMu.Unlock()
-	resetSuperFlixAudioChoices() // also re-snapshots --audio
 	// What the real binary starts with when --audio is not passed: the flag's
 	// default, not an empty string.
 	util.SetGlobalAudioLanguage("pt-BR,pt,english")
@@ -270,7 +268,6 @@ func TestSelectStartFlixAudio(t *testing.T) {
 		useFakeStartFlix(t, 0, 0)
 		util.SetGlobalAudioLanguage("jpn,eng")
 		util.GlobalAudioLanguageExplicit = true
-		resetSuperFlixAudioChoices()
 		sfxPickFn = func(string, []string) (int, error) { t.Fatal("asked despite --audio"); return 0, nil }
 		assert.Equal(t, startflix.AudioSubtitled, selectStartFlixAudio("t", both))
 	})

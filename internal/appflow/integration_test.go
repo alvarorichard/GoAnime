@@ -114,7 +114,7 @@ func TestFetchAnimeDetailsCore_NilAnime(t *testing.T) {
 	assert.NotPanics(t, func() { fetchAnimeDetailsCore(nil) })
 }
 
-func TestFetchAnimeDetailsCore_SuperFlixSkipsAll(t *testing.T) {
+func TestFetchAnimeDetailsCore_StartFlixSkipsAniList(t *testing.T) {
 	var aniCount, srcCount int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {
@@ -127,9 +127,9 @@ func TestFetchAnimeDetailsCore_SuperFlixSkipsAll(t *testing.T) {
 		},
 	})
 
-	fetchAnimeDetailsCore(&models.Anime{Name: "Spirited Away", Source: "SuperFlix"})
-	assert.Equal(t, int32(0), atomic.LoadInt32(&aniCount), "SuperFlix must skip AniList")
-	assert.Equal(t, int32(0), atomic.LoadInt32(&srcCount), "SuperFlix must skip source details")
+	fetchAnimeDetailsCore(&models.Anime{Name: "Spirited Away", Source: "StartFlix"})
+	assert.Equal(t, int32(0), atomic.LoadInt32(&aniCount), "StartFlix is a movie/TV catalog: AniList is skipped")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&srcCount), "StartFlix is enriched from TMDB through the source-details path")
 }
 
 func TestFetchAnimeDetailsCore_SFlixCallsSourceOnly(t *testing.T) {

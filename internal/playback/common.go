@@ -19,18 +19,20 @@ import (
 )
 
 // alternateSources lists the sources that could still carry a title, excluding
-// the one that just failed and anything the user turned off via
-// GOANIME_DISABLED_SOURCES.
+// the one that just failed and any source the search does not reach — turned
+// off via GOANIME_DISABLED_SOURCES, or shipped off by default (Goyabu) and not
+// opted back in. Suggesting a source the user cannot find in
+// the results would only send them looking for it.
 func alternateSources(current string) []string {
-	disabled := make(map[apisource.SourceKind]bool, 5)
-	for _, k := range apisource.DisabledSources() {
-		disabled[k] = true
-	}
 	others := make([]string, 0, 4)
-	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.SuperFlix, apisource.StartFlix} {
+	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.StartFlix} {
+		s, ok := apisource.Registered(k)
+		if !ok || !apisource.IsSearchEnabled(s.Describe()) {
+			continue
+		}
 		// Source labels are not always the bare kind ("Animefire.io"), so match
 		// on the kind as a prefix rather than for equality.
-		if disabled[k] || strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
+		if strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
 			continue
 		}
 		others = append(others, string(k))

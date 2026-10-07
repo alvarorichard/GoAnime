@@ -14,11 +14,9 @@ import (
 //
 // Three scrapers used to send Chrome's q-ladder under a Firefox User-Agent — a
 // pair no real browser produces, and the exact line copied through countless
-// scraping snippets. It is not a theoretical concern in this ecosystem:
-// SuperFlix's CDN matches Accept-Language BY VALUE and 403s anything else (see
-// superflix/cdn.go), and on 2026-09-21 its API host answered 429 to that one
-// string across eight interleaved probes before the behaviour stopped
-// reproducing hours later.
+// scraping snippets. It is not a theoretical concern in this ecosystem: hosts
+// here have been seen matching Accept-Language BY VALUE, answering 403 or 429
+// to one specific ladder while serving every other.
 //
 // So the ladders live here as named constants, one per browser, and these tests
 // keep every client referencing one instead of inventing its own.
@@ -45,9 +43,6 @@ func TestNoClientHardcodesAnAcceptLanguageOfItsOwn(t *testing.T) {
 	allowed := map[string]bool{
 		filepath.Join("internal", "scraper", "netx", "useragent.go"):              true,
 		filepath.Join("internal", "scraper", "netx", "useragent_pairing_test.go"): true,
-		// The CDN needs a DIFFERENT, browser-specific value, matched by the
-		// signed-URL host byte for byte. cdn.go documents the measurements.
-		filepath.Join("internal", "scraper", "providers", "superflix", "cdn.go"): true,
 	}
 
 	var offenders []string
@@ -82,8 +77,8 @@ func TestNoClientHardcodesAnAcceptLanguageOfItsOwn(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Emptyf(t, offenders,
-		"Accept-Language must come from netx.AcceptLanguage (or, for signed media URLs, "+
-			"superflix.CDNPlaybackHeaders) so it cannot drift away from the User-Agent: %v", offenders)
+		"Accept-Language must come from a named netx constant so it cannot drift away "+
+			"from the User-Agent: %v", offenders)
 }
 
 // repoRoot walks up from the test's working directory to the module root.

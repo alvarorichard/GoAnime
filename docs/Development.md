@@ -609,8 +609,7 @@ func TestSomethingWithBackoff(t *testing.T) {
 is not "durably blocked", so the fake clock would never advance. Note that
 `srv.URL` is only populated after the first `srv.Client()` call.
 
-This turned `internal/downloader/hls` from 15.1s into 0.02s and
-`internal/scraper/providers/superflix` from 10.1s into 0.8s.
+This turned `internal/downloader/hls` from 15.1s into 0.02s.
 
 A test server whose handler parks (to simulate a slow upstream) must be released
 before `srv.Close()` runs, otherwise `Close` waits for it forever. Prefer

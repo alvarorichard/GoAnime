@@ -13,14 +13,13 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
@@ -450,12 +449,12 @@ func (e *Enricher) EnrichAnime(ctx context.Context, anime *models.Anime) ([]Seas
 			}
 		}
 
-		// Try 2: SuperFlix (scrapes TMDB data, no API key needed)
+		// Try 2: StartFlix (its panel is keyed by TMDB id; no API key needed)
 		if len(seasonMap) == 0 {
-			if sfMap := e.buildSeasonMapFromSuperFlix(ctx, anime.Name); len(sfMap) > 1 {
-				util.Debug("using SuperFlix season map",
-					"seasons", len(sfMap), "anime", anime.Name)
-				seasonMap = sfMap
+			if sfxMap := e.buildSeasonMapFromStartFlix(ctx, anime.Name); len(sfxMap) > 1 {
+				util.Debug("using StartFlix season map",
+					"seasons", len(sfxMap), "anime", anime.Name)
+				seasonMap = sfxMap
 			}
 		}
 	}
@@ -661,7 +660,7 @@ func buildSeasonMap(media aniListMedia) []SeasonMapping {
 	}
 
 	if len(sequels) == 0 {
-		return nil // No sequels → no useful season map; let TMDB/SuperFlix provide one
+		return nil // No sequels → no useful season map; let TMDB/StartFlix provide one
 	}
 
 	// Sort sequels chronologically (simple: by year then month)
@@ -710,237 +709,114 @@ func cleanSearchName(name string) string {
 // reParenTag matches parenthetical tags that should be stripped from anime names.
 var reParenTag = regexp.MustCompile(`\s*\((?i:dublado|legendado|sub|dub|dual[- ]?audio|completo|todos os epis[oó]dios)\)`)
 
-// --- SuperFlix-based TMDB season lookup (no API key needed) ---
+// --- StartFlix-based season lookup (no API key needed) ---
+//
+// StartFlix's video panel is keyed by TMDB id and lists each season's
+// episodes, which is exactly the season structure TMDB gives, without a key.
 
-var (
-	// reSFTMDBID extracts TMDB IDs from SuperFlix search result HTML.
-	// Matches: data-msg="Copiar TMDB" data-copy="73223"
-	reSFTMDBID = regexp.MustCompile(`data-msg="Copiar TMDB"\s+data-copy="(\d+)"`)
-	// reSFSerieLink detects serie links in SuperFlix HTML.
-	// Matches: data-copy="http...//superflixapi.rest/serie/73223" or similar
-	reSFSerieLink = regexp.MustCompile(`data-copy="[^"]*?/serie/(\d+)"`)
-	// reSFAllEpisodes extracts ALL_EPISODES JS variable from player page.
-	reSFAllEpisodes = regexp.MustCompile(`var ALL_EPISODES\s*=\s*(\{.+?\});`)
-)
+// enricherTransport lets a StartFlix client send its requests through the
+// enricher's own HTTPClient, so production uses the shared client and tests
+// serve the pages from the same mock as every other lookup here.
+type enricherTransport struct{ c HTTPClient }
 
-// buildSeasonMapFromSuperFlix searches SuperFlix for an anime by name, finds
-// its TMDB ID, fetches the player page, and extracts per-season episode counts
-// from the ALL_EPISODES JavaScript variable. No API key needed.
-func (e *Enricher) buildSeasonMapFromSuperFlix(ctx context.Context, animeName string) []SeasonMapping {
+func (t enricherTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.c.Do(req)
+}
+
+// buildSeasonMapFromStartFlix searches StartFlix for an anime by name, opens
+// the matching series' panel, and turns its per-season episode lists into a
+// season map.
+func (e *Enricher) buildSeasonMapFromStartFlix(ctx context.Context, animeName string) []SeasonMapping {
 	cleanName := cleanSearchName(animeName)
 	if cleanName == "" {
 		return nil
 	}
+	c := startflix.NewClientWithHTTP(&http.Client{Transport: enricherTransport{e.client}})
 
-	// Step 1: Search SuperFlix, on the host that is live right now.
-	//
-	// This used to read the compiled constant on the reasoning that these are
-	// plain GETs and a stale host still lands via the 301. That only holds
-	// while the stale host is still redirecting: an alias that has died
-	// outright (as .sbs did) answers nothing, and this season lookup silently
-	// returned no data. LiveBase shares the scraper's discovery — the same
-	// resolution the player uses — so both follow a rotation together.
-	base := superflix.LiveBase(ctx)
-	searchURL := base + "/pesquisar?s=" + url.QueryEscape(cleanName)
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, http.NoBody)
+	results, err := c.Search(ctx, cleanName)
 	if err != nil {
+		util.Debug("StartFlix search failed", "error", err)
 		return nil
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-
-	resp, err := e.client.Do(req)
+	target, ok := matchStartFlixSeries(results, cleanName)
+	if !ok {
+		util.Debug("StartFlix: no series matches", "query", cleanName)
+		return nil
+	}
+	panel, err := c.Panel(ctx, target.URL)
 	if err != nil {
-		util.Debug("SuperFlix search failed", "error", err)
+		util.Debug("StartFlix: no panel for the series", "url", target.URL, "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // 512KB max
+	seasons, err := c.Seasons(ctx, panel)
 	if err != nil {
-		return nil
-	}
-	html := string(body)
-
-	// Find all TMDB IDs that are for series (not movies)
-	tmdbID := findSerieTMDBID(html, cleanName)
-	if tmdbID == "" {
-		util.Debug("SuperFlix: no serie TMDB ID found", "query", cleanName)
+		util.Debug("StartFlix: no seasons on the panel", "panel", panel.URL, "error", err)
 		return nil
 	}
 
-	util.Debug("SuperFlix: found serie TMDB ID", "tmdbID", tmdbID, "query", cleanName)
-
-	// Step 2: Fetch episode data from player page
-	// Must include Referer and Sec-Fetch-* headers or SuperFlix returns
-	// "ACESSO RESTRITO" instead of the actual player page with ALL_EPISODES.
-	epURL := base + "/serie/" + tmdbID
-	req2, err := http.NewRequestWithContext(ctx, "GET", epURL, http.NoBody)
-	if err != nil {
+	result := seasonMapFromStartFlix(seasons)
+	if len(result) <= 1 {
 		return nil
 	}
-	req2.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req2.Header.Set("Referer", base+"/")
-	req2.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	// Chrome UA above, so Chrome's ladder: the pair has to describe one browser.
-	req2.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
-	req2.Header.Set("Sec-Fetch-Dest", "iframe")
-	req2.Header.Set("Sec-Fetch-Mode", "navigate")
-	req2.Header.Set("Sec-Fetch-Site", "cross-site")
-
-	resp2, err := e.client.Do(req2)
-	if err != nil {
-		util.Debug("SuperFlix episode page failed", "error", err)
-		return nil
-	}
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != http.StatusOK {
-		return nil
-	}
-
-	body2, err := io.ReadAll(io.LimitReader(resp2.Body, 1024*1024)) // 1MB max
-	if err != nil {
-		return nil
-	}
-
-	// Parse ALL_EPISODES
-	m := reSFAllEpisodes.FindSubmatch(body2)
-	if len(m) < 2 {
-		util.Debug("SuperFlix: ALL_EPISODES not found", "tmdbID", tmdbID)
-		return nil
-	}
-
-	var allEpisodes map[string][]json.RawMessage
-	if err := jsonx.Unmarshal(m[1], &allEpisodes); err != nil {
-		return nil
-	}
-
-	// Build season map from episode counts per season key
-	type seasonInfo struct {
-		num     int
-		epCount int
-	}
-	var seasons []seasonInfo
-	for key, eps := range allEpisodes {
-		sNum, err := strconv.Atoi(key)
-		if err != nil || sNum < 1 {
-			continue
-		}
-		seasons = append(seasons, seasonInfo{num: sNum, epCount: len(eps)})
-	}
-
-	if len(seasons) <= 1 {
-		return nil
-	}
-
-	// Sort by season number
-	sort.Slice(seasons, func(i, j int) bool { return seasons[i].num < seasons[j].num })
-
-	// Build cumulative episode ranges
-	var result []SeasonMapping
-	currentEp := 1
-	for _, s := range seasons {
-		if s.epCount <= 0 {
-			continue
-		}
-		result = append(result, SeasonMapping{
-			Season:       s.num,
-			StartEp:      currentEp,
-			EndEp:        currentEp + s.epCount - 1,
-			EpisodeCount: s.epCount,
-		})
-		currentEp += s.epCount
-	}
-
-	util.Debug("SuperFlix season map built", "seasons", len(result), "tmdbID", tmdbID)
+	util.Debug("StartFlix season map built", "seasons", len(result), "tmdbID", panel.TMDBID)
 	return result
 }
 
-// reSFCardTitle matches the alt attribute from card images or h3 text content.
-var reSFCardTitle = regexp.MustCompile(`(?i)(?:alt="([^"]+)"|<h3[^>]*>([^<]+)<)`)
-
-// findSerieTMDBID extracts the TMDB ID from SuperFlix HTML that best matches
-// the given search name. It considers only results that link to /serie/ (TV shows)
-// and picks the one whose title is the closest match.
-func findSerieTMDBID(html, searchName string) string {
-	type candidate struct {
-		tmdbID string
-		title  string
-	}
-
-	// Find all /serie/ links with their positions
-	serieMatches := reSFSerieLink.FindAllStringSubmatchIndex(html, -1)
-	if len(serieMatches) == 0 {
-		// Fallback: use any TMDB ID
-		tmdbMatches := reSFTMDBID.FindAllStringSubmatch(html, -1)
-		if len(tmdbMatches) > 0 {
-			return tmdbMatches[0][1]
+// seasonMapFromStartFlix builds cumulative episode ranges. A season's size is
+// its highest episode number across both audio lists: the dub and the
+// subtitled list are often at different points in the same season.
+func seasonMapFromStartFlix(seasons []startflix.Season) []SeasonMapping {
+	var result []SeasonMapping
+	currentEp := 1
+	for _, s := range seasons {
+		if s.Number < 1 {
+			continue
 		}
-		return ""
-	}
-
-	normalizedSearch := strings.ToLower(strings.TrimSpace(searchName))
-
-	var candidates []candidate
-	for _, m := range serieMatches {
-		tmdbID := html[m[2]:m[3]]
-		// Look at the surrounding context (±3000 chars) for a title
-		start := max(m[0]-3000, 0)
-		end := min(m[1]+1000, len(html))
-		block := html[start:end]
-
-		// Extract all titles from the block (alt attrs and h3 tags)
-		titleMatches := reSFCardTitle.FindAllStringSubmatch(block, -1)
-		bestTitle := ""
-		for _, tm := range titleMatches {
-			t := tm[1]
-			if t == "" {
-				t = tm[2]
+		count := 0
+		for _, list := range [][]startflix.Episode{s.Dubbed, s.Subtitled} {
+			for _, ep := range list {
+				count = max(count, ep.Number)
 			}
-			t = strings.TrimSpace(t)
-			if t == "" {
-				continue
+		}
+		if count <= 0 {
+			continue
+		}
+		result = append(result, SeasonMapping{
+			Season:       s.Number,
+			StartEp:      currentEp,
+			EndEp:        currentEp + count - 1,
+			EpisodeCount: count,
+		})
+		currentEp += count
+	}
+	return result
+}
+
+// matchStartFlixSeries picks the series whose title best matches the search:
+// exact, then the search containing the title, then the title containing the
+// search, then the first series. Movies never match.
+func matchStartFlixSeries(results []startflix.Media, searchName string) (startflix.Media, bool) {
+	var series []startflix.Media
+	for _, r := range results {
+		if r.Kind == startflix.KindSeries {
+			series = append(series, r)
+		}
+	}
+	if len(series) == 0 {
+		return startflix.Media{}, false
+	}
+	search := strings.ToLower(strings.TrimSpace(searchName))
+	rules := []func(title string) bool{
+		func(t string) bool { return t == search },
+		func(t string) bool { return t != "" && strings.Contains(search, t) },
+		func(t string) bool { return strings.Contains(t, search) },
+	}
+	for _, rule := range rules {
+		for _, s := range series {
+			if rule(strings.ToLower(strings.TrimSpace(s.Title))) {
+				return s, true
 			}
-			// Prefer the title closest to the serie link (last match in block)
-			bestTitle = t
-		}
-		util.Debug("SuperFlix candidate", "tmdbID", tmdbID, "title", bestTitle)
-		candidates = append(candidates, candidate{tmdbID: tmdbID, title: bestTitle})
-	}
-
-	if len(candidates) == 0 {
-		return ""
-	}
-
-	// If only one candidate, use it
-	if len(candidates) == 1 {
-		return candidates[0].tmdbID
-	}
-
-	// Pick the candidate whose title best matches the search name.
-	// 1. Exact match (case-insensitive)
-	for _, c := range candidates {
-		if strings.EqualFold(c.title, normalizedSearch) {
-			return c.tmdbID
 		}
 	}
-	// 2. Search name contains candidate title
-	for _, c := range candidates {
-		if c.title != "" && strings.Contains(normalizedSearch, strings.ToLower(c.title)) {
-			return c.tmdbID
-		}
-	}
-	// 3. Candidate title contains search name
-	for _, c := range candidates {
-		if strings.Contains(strings.ToLower(c.title), normalizedSearch) {
-			return c.tmdbID
-		}
-	}
-
-	// No title match; return first
-	return candidates[0].tmdbID
+	return series[0], true
 }

@@ -1,6 +1,6 @@
 package api
 
-// Season selection UI for SuperFlix/FlixHQ-style seasoned titles.
+// Season selection UI for seasoned titles (StartFlix).
 //
 // The picker uses the shared Bubble Tea screen from internal/tui (tui.Pick):
 //
@@ -8,7 +8,7 @@ package api
 //   - seasons are listed ascending top-down with instant fuzzy filtering;
 //   - the previously watched season (media.CurrentSeason) is preselected
 //     when the user re-enters the picker;
-//   - each row carries the episode count and air-year range in the details line.
+//   - each row carries its episode counts per audio (Dublado/Legendado).
 //
 // tui.ErrPickBack / tui.ErrPickCancelled are returned unwrapped so the
 // caller can map them to ErrBackToSearch.
@@ -18,7 +18,6 @@ import (
 	"strconv"
 
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -44,63 +43,6 @@ func episodeCountLabel(n int) string {
 	return fmt.Sprintf("%d episodes", n)
 }
 
-// airYear extracts the 4-digit year prefix from an ISO-ish air date
-// ("2019-04-01" → "2019"). Returns "" when the date is missing or malformed.
-func airYear(d string) string {
-	if len(d) < 4 {
-		return ""
-	}
-	y := d[:4]
-	for _, r := range y {
-		if r < '0' || r > '9' {
-			return ""
-		}
-	}
-	return y
-}
-
-// seasonYearRange summarizes a season's air years as "2019" or "2019-2021".
-// Episodes without a usable air date are ignored; all-unknown yields "".
-func seasonYearRange(eps []superflix.SuperFlixEpisode) string {
-	first, last := "", ""
-	for _, ep := range eps {
-		y := airYear(ep.AirDate)
-		if y == "" {
-			continue
-		}
-		if first == "" || y < first {
-			first = y
-		}
-		if last == "" || y > last {
-			last = y
-		}
-	}
-	switch first {
-	case "":
-		return ""
-	case last:
-		return first
-	default:
-		return first + "-" + last
-	}
-}
-
-// seasonPickItems maps ascending season keys to picker rows.
-func seasonPickItems(seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) []tui.PickItem {
-	items := make([]tui.PickItem, len(seasonNums))
-	for i, sn := range seasonNums {
-		details := episodeCountLabel(len(allEpisodes[sn]))
-		if yr := seasonYearRange(allEpisodes[sn]); yr != "" {
-			details += "  •  " + yr
-		}
-		items[i] = tui.PickItem{
-			Label:   seasonDisplayName(sn),
-			Details: details,
-		}
-	}
-	return items
-}
-
 // currentSeasonIndex locates media.CurrentSeason in the season keys, falling
 // back to the first season when unset or absent.
 func currentSeasonIndex(media *models.Anime, seasonNums []string) int {
@@ -118,21 +60,6 @@ func currentSeasonIndex(media *models.Anime, seasonNums []string) int {
 
 // seasonPickFunc matches tui.Pick so tests can inject a headless picker.
 type seasonPickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
-
-// selectSuperFlixSeason asks the user to pick a season and returns its key.
-// Single-season titles are selected automatically without opening the picker.
-// tui.ErrPickBack / tui.ErrPickCancelled are returned unwrapped so the caller
-// can map them to ErrBackToSearch.
-func selectSuperFlixSeason(media *models.Anime, seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) (string, error) {
-	return selectSuperFlixSeasonWith(tui.Pick, media, seasonNums, allEpisodes)
-}
-
-// selectSuperFlixSeasonWith isolates picker execution for deterministic tests.
-func selectSuperFlixSeasonWith(pick seasonPickFunc, media *models.Anime, seasonNums []string, allEpisodes map[string][]superflix.SuperFlixEpisode) (string, error) {
-	return selectSeasonWith(pick, media, seasonNums, func() []tui.PickItem {
-		return seasonPickItems(seasonNums, allEpisodes)
-	})
-}
 
 // selectSeasonWith is the source-independent picker: seasonNums are the keys in
 // display order, and items builds their rows (only when a picker is shown).

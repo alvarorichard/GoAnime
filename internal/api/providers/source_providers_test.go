@@ -55,10 +55,10 @@ func TestGoyabuProvider_KindAndHasSeasons(t *testing.T) {
 	assert.False(t, p.HasSeasons())
 }
 
-func TestSuperFlixProvider_KindAndHasSeasons(t *testing.T) {
+func TestStartFlixProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p := &superFlixProvider{}
-	assert.Equal(t, source.SuperFlix, p.Describe().Kind)
+	p := &startFlixProvider{}
+	assert.Equal(t, source.StartFlix, p.Describe().Kind)
 	assert.True(t, p.HasSeasons())
 }
 
@@ -82,14 +82,15 @@ func TestGoyabuProvider_Describe(t *testing.T) {
 	assert.Equal(t, []string{"goyabu"}, d.URLMatchers)
 }
 
-func TestSuperFlixProvider_Describe(t *testing.T) {
+func TestStartFlixProvider_Describe(t *testing.T) {
 	t.Parallel()
-	d := (&superFlixProvider{}).Describe()
-	assert.Equal(t, source.SuperFlix, d.Kind)
-	assert.Equal(t, 30, d.Priority)
-	assert.Equal(t, []string{"SuperFlix"}, d.Explicit)
-	assert.Equal(t, []string{"[superflix]"}, d.Tags)
-	assert.Equal(t, []string{"superflix"}, d.URLMatchers)
+	d := (&startFlixProvider{}).Describe()
+	assert.Equal(t, source.StartFlix, d.Kind)
+	assert.Equal(t, 40, d.Priority)
+	assert.Equal(t, []string{"StartFlix"}, d.Explicit)
+	assert.Equal(t, []string{"[startflix]"}, d.Tags)
+	assert.Equal(t, []string{"startflix", "painel-aso"}, d.URLMatchers)
+	assert.False(t, d.DefaultDisabled, "StartFlix is the movie/TV source and must search by default")
 }
 
 // Each provider's scraper() builds a standalone, correctly-typed adapter on the
@@ -118,14 +119,6 @@ func TestGoyabuProvider_Scraper(t *testing.T) {
 	assert.Equal(t, scraper.GoyabuType, ad.GetType())
 }
 
-func TestSuperFlixProvider_Scraper(t *testing.T) {
-	t.Parallel()
-	ad, err := (&superFlixProvider{}).scraper()
-	require.NoError(t, err)
-	require.NotNil(t, ad)
-	assert.Equal(t, scraper.SuperFlixType, ad.GetType())
-}
-
 func TestStartFlixProvider_Scraper(t *testing.T) {
 	t.Parallel()
 	ad, err := (&startFlixProvider{}).scraper()
@@ -140,7 +133,7 @@ func TestStartFlixProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.SuperFlix, source.StartFlix} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.StartFlix} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -161,13 +154,13 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"empty anime", &models.Anime{}, source.Unknown},
 		{"explicit AnimeFire legacy", &models.Anime{Source: "Animefire.io"}, source.AnimeFire},
 		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
-		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}, source.SuperFlix},
+		// SuperFlix was removed; a title saved under it no longer routes.
+		{"removed SuperFlix", &models.Anime{Source: "SuperFlix"}, source.Unknown},
 		{"explicit StartFlix", &models.Anime{Source: "StartFlix"}, source.StartFlix},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
 		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
 		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
-		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}, source.SuperFlix},
 		{"startflix URL", &models.Anime{URL: "https://www.startflix.biz/series/naruto/"}, source.StartFlix},
 		{"startflix panel URL", &models.Anime{URL: "https://www.painel-aso.sbs/filme/tt0816692"}, source.StartFlix},
 		{"PT-BR fallback", &models.Anime{Name: "Naruto [PT-BR]"}, source.AnimeFire},
@@ -199,7 +192,9 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		{"https://goyabu.to/ep/naruto-1", source.Goyabu},
 		// The AllAnime host was removed; its URLs now resolve to nothing.
 		{"https://allanime.to/anime/hHjXnUTda", source.Unknown},
-		{"https://superflix.to/naruto", source.SuperFlix},
+		// The SuperFlix host was removed too.
+		{"https://superflix.to/naruto", source.Unknown},
+		{"https://www.startflix.biz/series/naruto/", source.StartFlix},
 		{"https://example.com/video", source.Unknown},
 	}
 	for _, tt := range tests {

@@ -243,13 +243,11 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 	if anime == nil {
 		return
 	}
-	// For FlixHQ/SuperFlix movies/TV shows: skip AniList, optionally enrich.
+	// For movie/TV catalogs (StartFlix, FlixHQ): skip AniList, enrich from TMDB.
 	if anime.HasInteractiveEpisodeFlow() {
 		util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
-		if anime.Source != "SuperFlix" {
-			if err := sourceDetailsFetchFn(anime); err != nil {
-				util.Debugf("Failed to enrich content with TMDB: %v", err)
-			}
+		if err := sourceDetailsFetchFn(anime); err != nil {
+			util.Debugf("Failed to enrich content with TMDB: %v", err)
 		}
 		return
 	}
@@ -293,8 +291,8 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 
 	// No spinner when the fetch can open its own UI (season-selection
 	// fuzzyfinder): a spinner animating over the finder eats the prompt text
-	// and corrupts terminal state. HasInteractiveEpisodeFlow matches SuperFlix
-	// by source because its catalog tags western animation as anime.
+	// and corrupts terminal state. HasInteractiveEpisodeFlow matches StartFlix
+	// by source because its listing always runs the season and audio pickers.
 	if anime.HasInteractiveEpisodeFlow() {
 		episodes, fetchErr = getAnimeEpisodesEnhancedFn(anime)
 	} else {

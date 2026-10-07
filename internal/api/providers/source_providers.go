@@ -10,7 +10,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
@@ -20,14 +19,9 @@ import (
 // the Source registry cannot change behavior. Tests swap these to avoid
 // network. The api bodies migrate into per-source packages in Phase 3.
 var (
-	// superFlixStreamFn / superFlixEpisodesFn keep SuperFlix delegating to the
-	// api package's UX-heavy paths (spinner, browser preflight, season picker).
+	// startFlixStreamFn / startFlixEpisodesFn keep StartFlix delegating to the
+	// api package's interactive paths (season picker, then Dublado/Legendado).
 	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
-	superFlixStreamFn   = api.GetSuperFlixStreamURL
-	superFlixEpisodesFn = api.GetSuperFlixEpisodes
-
-	// startFlixStreamFn / startFlixEpisodesFn do the same for StartFlix, whose
-	// listing also runs interactive pickers (season, then Dublado/Legendado).
 	startFlixStreamFn   = api.GetStartFlixStreamURL
 	startFlixEpisodesFn = api.GetStartFlixEpisodes
 )
@@ -320,11 +314,10 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 		// PARKED, not retired. Off until we find a way past the gate:
 		// GOANIME_ENABLED_SOURCES=goyabu turns it back on at any time.
 		//
-		// Goyabu is the only source that needs a browser. Everything else here
-		// is plain HTTP; this one sits behind a Cloudflare managed challenge,
-		// and on a network Cloudflare has flagged there is currently no way
-		// through — so it costs a Chrome launch, sometimes a visible window, and
-		// returns nothing. It stays disabled rather than deleted because the
+		// Goyabu is the only source behind a bot gate. Everything else here is
+		// plain HTTP; this one sits behind a Cloudflare managed challenge, and
+		// GoAnime no longer ships the browser that used to try clearing it — on
+		// a flagged network even that browser returned nothing. It stays disabled rather than deleted because the
 		// scraper is complete and correct: it works today on a network that is
 		// not flagged.
 		//
@@ -404,109 +397,12 @@ func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 	return url, nil
 }
 
-// --- SuperFlix Provider ---
-
-type superFlixProvider struct {
-	once    sync.Once
-	adapter adapterSlot
-}
-
-func init() {
-	source.Register(&superFlixProvider{})
-}
-
-func (p *superFlixProvider) scraper() (scraper.UnifiedScraper, error) {
-	return lazyGetAdapter(&p.once, &p.adapter, scraper.SuperFlixType)
-}
-
-func (p *superFlixProvider) Describe() source.Descriptor {
-	return source.Descriptor{
-		Kind:        source.SuperFlix,
-		Priority:    30,
-		Explicit:    []string{"SuperFlix"},
-		Tags:        []string{"[superflix]"},
-		URLMatchers: []string{"superflix"},
-	}
-}
-
-// HasSeasons satisfies both providers.Provider and the source.Seasoned
-// capability: SuperFlix is a movie/TV catalog organized into seasons.
-func (p *superFlixProvider) HasSeasons() bool { return true }
-
-// Search hands the fan-out deadline to the adapter. SuperFlix implements
-// scraper.ContextualScraper, so a search the dispatcher gives up on actually
-// stops instead of leaving the transport's Retry-After loop sleeping and
-// re-requesting against a host that is already rate-limiting us. Same Model C
-// discovery pattern as hianimeProvider, with the plain call as the fallback.
-func (p *superFlixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	adapter, err := p.scraper()
-	if err != nil {
-		return nil, err
-	}
-	var results []*models.Anime
-	if ca, ok := adapter.(scraper.ContextualScraper); ok {
-		results, err = ca.SearchAnimeContext(ctx, query)
-	} else {
-		results, err = adapter.SearchAnime(query)
-	}
-	if err != nil {
-		return nil, err
-	}
-	tagResults(results, source.SuperFlix)
-	return results, nil
-}
-
-// WarmUp satisfies the source.BrowserGated capability. SuperFlix clears a
-// Cloudflare Turnstile gate with a headed browser; if there is no graphical
-// display (and the user hasn't opted into headless), that solve is doomed, so
-// fail fast here with a plain-language reason instead of letting the user wait
-// out a browser that can never appear. The check is cheap and performs no
-// eager solve — the happy path (display present) returns nil immediately.
-func (p *superFlixProvider) WarmUp(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if superflix.HeadlessEnvironment() {
-		return fmt.Errorf("SuperFlix needs a graphical browser to pass its \"are you human?\" check, but no screen was found — run GoAnime on your desktop session, or pass --sf-headless to try anyway")
-	}
-	return nil
-}
-
-// FetchEpisodes lists SuperFlix content. Unlike the anime sources, this is not
-// a flat adapter call: it runs the season picker (TVmaze-first, browser
-// fallback) and sets anime.CurrentSeason. Delegated to the proven api path so
-// the interactive UX is byte-identical to the legacy episode switch.
-func (p *superFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return superFlixEpisodesFn(anime)
-}
-
-// FetchStreamURL mirrors api.GetEpisodeStreamURL's SuperFlix branch: the same
-// entry side effects, then the full UX path (browser preflight notices,
-// spinner, global referer/subtitles, friendly errors) via GetSuperFlixStreamURL.
-func (p *superFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
-	}
-	return superFlixStreamFn(anime, episode, quality)
-}
-
 // --- StartFlix Provider ---
 //
-// StartFlix is SuperFlix's planned successor and, for now, runs alongside it.
-// It needs no browser: the catalog and its video panel are plain HTTP. What it
-// cannot do yet is play every title — of the panel's player hosts only Byse is
-// resolved today, so a title offered solely on the others fails with a message
-// naming them, and SuperFlix stays registered until that gap closes.
+// StartFlix is the movie/TV source. It needs no browser: the catalog and its
+// video panel are plain HTTP. What it cannot do is play every title —
+// of the panel's player hosts only Byse is resolved, so a title offered solely
+// on the others fails with a message naming them.
 
 type startFlixProvider struct {
 	once    sync.Once
@@ -559,7 +455,7 @@ func (p *startFlixProvider) Search(ctx context.Context, query string) ([]*models
 }
 
 // FetchEpisodes runs the interactive listing (season, then audio) in the api
-// package, the way SuperFlix does.
+// package.
 func (p *startFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

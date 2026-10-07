@@ -432,9 +432,9 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
 
 	// Model C capability: warm up a browser-gated source before fetching. For a
-	// non-gated source this is an explicit (logged) no-op; for SuperFlix on a
-	// display-less box it fails fast with a clear reason instead of stalling on
-	// a browser that can never appear.
+	// non-gated source this is an explicit (logged) no-op; a browser-gated one on
+	// a display-less box fails fast with a clear reason instead of stalling on a
+	// browser that can never appear.
 	if err := source.WarmUp(ctx, src); err != nil {
 		return "", err
 	}
@@ -505,14 +505,14 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 
 // Helper function to check if anime is from FlixHQ source (player module)
 // isMovieOrTVSourcePlayer routes any movie/TV content through the enhanced API,
-// which dispatches by anime.Source (SuperFlix, FlixHQ, ...). Despite the legacy
-// name, this is not FlixHQ-specific — SuperFlix selections also reach this
+// which dispatches by anime.Source (StartFlix, FlixHQ, ...). Despite the legacy
+// name, this is not FlixHQ-specific — StartFlix selections also reach this
 // branch because their MediaType is MediaTypeMovie/MediaTypeTV.
 func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	if anime == nil {
 		return false
 	}
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" || anime.Source == "StartFlix" {
+	if anime.Source == "SFlix" || anime.Source == "StartFlix" {
 		return true
 	}
 	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {

@@ -89,9 +89,9 @@ func TestRegisteredByPriority(t *testing.T) {
 func TestDescriptorMatchNonExplicit(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
-		Kind:        SuperFlix,
-		Tags:        []string{"[superflix]"},
-		URLMatchers: []string{"superflix"},
+		Kind:        StartFlix,
+		Tags:        []string{"[startflix]"},
+		URLMatchers: []string{"startflix"},
 		MediaTypes:  []models.MediaType{models.MediaTypeMovie},
 	}
 	tests := []struct {
@@ -101,8 +101,8 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 		wantReason string
 	}{
 		{"media type", &models.Anime{MediaType: models.MediaTypeMovie}, true, "MediaType=movie"},
-		{"name tag", &models.Anime{Name: "Filme [SuperFlix]"}, true, "tag [superflix]"},
-		{"url matcher", &models.Anime{URL: "https://superflix.to/x"}, true, "URL contains superflix"},
+		{"name tag", &models.Anime{Name: "Filme [StartFlix]"}, true, "tag [startflix]"},
+		{"url matcher", &models.Anime{URL: "https://startflix.to/x"}, true, "URL contains startflix"},
 		{"no match", &models.Anime{Name: "X", URL: "https://example.com/1"}, false, ""},
 		{"empty anime", &models.Anime{}, false, ""},
 	}

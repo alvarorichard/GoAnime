@@ -1,8 +1,6 @@
 package player
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +9,6 @@ import (
 	"net/http"
 	neturl "net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -29,7 +26,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
@@ -51,250 +47,9 @@ const downloadUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 
 const minDownloadedVideoSize int64 = 10 * 1024 * 1024
 
-func isSuperFlixTextHLS(u string) bool {
-	// "master.txt" as the final path segment is the signature, NOT master.txt
-	// plus "/cdn/hls/". The player host changed its path shape from
-	//   /cdn/hls/<hash>/master.txt
-	// to
-	//   /<token>/<contentid>/<expires>/master.txt
-	// and the "/cdn/hls/" half of the old condition stopped matching. Every
-	// current SuperFlix URL then missed this branch and fell through the
-	// routing switch to the plain-MP4 Range downloader, which happily saved the
-	// playlist TEXT as the episode file. Playback had already been taught the
-	// same lesson — see LooksLikeHLS — so the two now agree.
-	//
-	// Matched as the final path segment rather than as a substring, so a page
-	// that merely mentions it (".../master.txt.html") is not mistaken for a
-	// playlist. The old "/cdn/hls/" clause is gone rather than OR-ed in: the
-	// suffix already covers the legacy shape, and keeping it would have pulled
-	// ordinary "/cdn/hls/<hash>/master.m3u8" URLs away from the native HLS
-	// downloader for no reason.
-	//
-	// Any master.txt is accepted, wherever it sits. The live URL is
-	// /<token>/<contentid>/<expires>/master.txt — structurally indistinguishable
-	// from any other path ending in master.txt — so there is nothing more
-	// specific to key on. Sending a stray master.txt through ffmpeg costs
-	// nothing; the reverse silently writes playlist text into an .mp4.
-	path := u
-	if before, _, ok := strings.Cut(path, "#"); ok {
-		path = before
-	}
-	if before, _, ok := strings.Cut(path, "?"); ok {
-		path = before
-	}
-	lower := strings.ToLower(path)
-	return strings.HasSuffix(lower, "/master.txt")
-}
-
-// Bundled media-tool installers used when ffmpeg/ffprobe are missing from
-// PATH. They download static builds via the go-ytdlp cache (the same
-// mechanism that fetches yt-dlp). Package-level so tests can stub them
-// without hitting the network.
-var (
-	installFFmpegFunc = func(ctx context.Context) (string, error) {
-		resolved, err := ytdlp.InstallFFmpeg(ctx, nil)
-		if err != nil {
-			return "", err
-		}
-		return resolved.Executable, nil
-	}
-	installFFprobeFunc = func(ctx context.Context) (string, error) {
-		resolved, err := ytdlp.InstallFFprobe(ctx, nil)
-		if err != nil {
-			return "", err
-		}
-		return resolved.Executable, nil
-	}
-)
-
-// resolveFFmpeg returns an absolute, symlink-resolved path to an ffmpeg
-// executable, installing a bundled static build when ffmpeg is not on PATH.
-//
-// The native HLS downloader cannot substitute for ffmpeg on SuperFlix:
-// segments are video-only with a separate audio group, and yt-dlp treats the
-// .txt master playlist as a plain file, so ffmpeg (or the bundled build) is
-// the only reliable way to mux the final file.
-func resolveFFmpeg(installFFmpeg func(ctx context.Context) (string, error)) (string, error) {
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		// ffmpeg is not on PATH. Install the bundled static build so
-		// SuperFlix HLS downloads work without the user installing ffmpeg.
-		util.Debug("ffmpeg not found on PATH, installing bundled ffmpeg", "error", err)
-		installCtx, installCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		var installErr error
-		ffmpegPath, installErr = installFFmpeg(installCtx)
-		installCancel()
-		if installErr != nil {
-			return "", fmt.Errorf("ffmpeg is required for SuperFlix HLS downloads and the bundled install failed: %w", installErr)
-		}
-	}
-	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
-	if err != nil || !filepath.IsAbs(ffmpegPath) {
-		return "", fmt.Errorf("invalid ffmpeg executable path")
-	}
-	return ffmpegPath, nil
-}
-
-// resolveFFprobe is resolveFFmpeg's sibling for ffprobe (shipped in the same
-// bundled archive). It never fails the download: a missing or broken ffprobe
-// only disables duration-based progress.
-func resolveFFprobe(installFFprobe func(ctx context.Context) (string, error)) string {
-	if ffprobePath, err := exec.LookPath("ffprobe"); err == nil {
-		if resolved, evalErr := filepath.EvalSymlinks(ffprobePath); evalErr == nil && filepath.IsAbs(resolved) {
-			return resolved
-		}
-	}
-	installCtx, installCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer installCancel()
-	if resolved, err := installFFprobe(installCtx); err == nil {
-		return resolved
-	}
-	return ""
-}
-
-func ffmpegHLSDownloadArgs(streamURL, outputPath, referer string) []string {
-	args := []string{
-		"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-		"-f", "hls",
-		// SuperFlix serves MPEG-TS segments behind misleading .js URLs.
-		// Current ffmpeg requires extension_picky=0 even when ALL is supplied
-		// to the older allowed_extensions options.
-		"-extension_picky", "0",
-		"-user_agent", downloadUserAgent,
-		"-progress", "pipe:1", "-nostats",
-	}
-	if ua, headers := pinnedCDNHeaders(referer); headers != "" {
-		return append(append(args, "-user_agent", ua, "-headers", headers),
-			ffmpegHLSOutputArgs(streamURL, outputPath)...)
-	}
-	if referer != "" {
-		args = append(args, "-headers", "Referer: "+referer+"\r\n")
-	}
-	return append(args, ffmpegHLSOutputArgs(streamURL, outputPath)...)
-}
-
-// ffmpegHLSOutputArgs is the input/mapping/output tail every HLS download
-// shares, split out so the header-carrying branches above build the same
-// command.
-func ffmpegHLSOutputArgs(streamURL, outputPath string) []string {
-	return []string{
-		"-i", streamURL,
-		"-map", "0:v:0",
-		"-map", "0:a?",
-		"-c", "copy",
-		"-movflags", "+faststart",
-		outputPath,
-	}
-}
-
-// pinnedCDNHeaders returns the User-Agent and CRLF-joined header block a
-// source has pinned for the current stream, or ("", "") when none has.
-//
-// SuperFlix's player CDN serves a signed URL only to a request that repeats the
-// browser's fingerprint — the right Referer, the browser's exact
-// Accept-Language, the Sec-CH-UA-* client hints, and the exact User-Agent that
-// obtained the URL. Downloading with ffmpeg's own UA and a lone Referer gets
-// every segment 403'd, the same way playback did.
-//
-// The pinned User-Agent (util.SetGlobalUserAgent, set beside the referer when
-// the stream is resolved) is what marks such a source; other sources keep the
-// plain Referer-only behaviour.
-func pinnedCDNHeaders(referer string) (userAgent, headerBlock string) {
-	ua := util.GetGlobalUserAgent()
-	if ua == "" || referer == "" || !util.IsSuperFlixSource() {
-		return "", ""
-	}
-	fields := superflix.CDNPlaybackHeaderFields(referer, ua)
-	if origin := corsOriginOf(referer); origin != "" {
-		fields = append(fields, "Origin: "+origin)
-	}
-	return ua, strings.Join(fields, "\r\n") + "\r\n"
-}
-
-func ffprobeHLSDurationArgs(streamURL, referer string) []string {
-	args := []string{
-		"-v", "error", "-f", "hls", "-extension_picky", "0",
-		"-user_agent", downloadUserAgent,
-	}
-	if ua, headers := pinnedCDNHeaders(referer); headers != "" {
-		args = append(args, "-user_agent", ua, "-headers", headers)
-	} else if referer != "" {
-		args = append(args, "-headers", "Referer: "+referer+"\r\n")
-	}
-	return append(args,
-		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1",
-		streamURL,
-	)
-}
-
-func probeHLSDuration(ctx context.Context, streamURL, referer, ffprobePath string) (time.Duration, error) {
-	if ffprobePath == "" {
-		var err error
-		ffprobePath, err = exec.LookPath("ffprobe")
-		if err != nil {
-			return 0, err
-		}
-	}
-	ffprobePath, err := filepath.EvalSymlinks(ffprobePath)
-	if err != nil || !filepath.IsAbs(ffprobePath) {
-		return 0, fmt.Errorf("invalid ffprobe executable path")
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(probeCtx, ffprobePath, ffprobeHLSDurationArgs(streamURL, referer)...).Output() // #nosec G204 -- executable and URL are validated by the caller
-	if err != nil {
-		return 0, err
-	}
-	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil || seconds <= 0 {
-		return 0, fmt.Errorf("invalid HLS duration %q", strings.TrimSpace(string(out)))
-	}
-	return time.Duration(seconds * float64(time.Second)), nil
-}
-
-func ffmpegProgressTime(line string) (time.Duration, bool) {
-	value, ok := strings.CutPrefix(strings.TrimSpace(line), "out_time_us=")
-	if !ok {
-		return 0, false
-	}
-	microseconds, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || microseconds < 0 {
-		return 0, false
-	}
-	return time.Duration(microseconds) * time.Microsecond, true
-}
-
-func updateTimedDownloadProgress(m *model, current, total time.Duration) {
-	if m == nil || total <= 0 || current < 0 {
-		return
-	}
-	if current > total {
-		current = total
-	}
-	pct := float64(current) / float64(total)
-	progressTotal := m.progressTotal()
-	if progressTotal <= 0 {
-		// Single downloads have no byte estimate for HLS. Microseconds are a
-		// stable unit and the model only needs a numerator/denominator ratio.
-		progressTotal = total.Microseconds()
-		m.setProgressTotal(progressTotal)
-	}
-	m.setProgressReceived(int64(float64(progressTotal) * pct))
-	m.setProgressPeak(pct)
-}
-
-func partialMediaPath(path string) string {
-	ext := filepath.Ext(path)
-	base := strings.TrimSuffix(path, ext)
-	if ext == "" {
-		ext = ".mp4"
-	}
-	return base + ".part" + ext
-}
-
-// validateDownloadedVideo prevents CDN error pages (for example SuperFlix's
-// 14-byte "security error") from ever being reported as a completed download.
+// validateDownloadedVideo prevents CDN error pages (a few bytes of "security
+// error" text served with a 200) from ever being reported as a completed
+// download.
 func validateDownloadedVideo(path string) error {
 	stat, err := os.Stat(path)
 	if err != nil {
@@ -305,127 +60,6 @@ func validateDownloadedVideo(path string) error {
 			stat.Size(), float64(stat.Size())/(1024*1024), float64(minDownloadedVideoSize)/(1024*1024))
 	}
 	return nil
-}
-
-// downloadWithFFmpegHLS handles SuperFlix's master.txt playlist. The playlist
-// and its disguised .js/.css MPEG-TS segments are fetchable over plain HTTP
-// with the right User-Agent/Referer, but the segments are video-only with a
-// separate audio group — ffmpeg is the only supported downloader that follows
-// the master playlist's alternate audio and muxes the final file. yt-dlp
-// treats the .txt master as a generic file, and the native HLS downloader
-// rejects the separate audio group. If ffmpeg is not installed, a bundled
-// static build is installed via the go-ytdlp cache (same mechanism as
-// yt-dlp).
-func downloadWithFFmpegHLS(streamURL, path string, m *model) error {
-	safeURL, err := sanitizeMediaTarget(streamURL)
-	if err != nil {
-		return fmt.Errorf("invalid download URL: %w", err)
-	}
-	safePath, err := sanitizeOutputPath(path)
-	if err != nil {
-		return fmt.Errorf("invalid output path: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(safePath), 0o700); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	ffmpegPath, err := resolveFFmpeg(installFFmpegFunc)
-	if err != nil {
-		return err
-	}
-	ffprobePath := resolveFFprobe(installFFprobeFunc)
-
-	partPath := partialMediaPath(safePath)
-	_ = os.Remove(partPath)
-	defer func() { _ = os.Remove(partPath) }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
-	defer cancel()
-	referer := util.GetGlobalReferer()
-	if referer == "" {
-		referer = extractRefererFromURL(safeURL)
-	}
-	args := ffmpegHLSDownloadArgs(safeURL, partPath, referer)
-	util.Debug("Starting ffmpeg HLS download", "streamURL", safeURL, "referer", referer)
-	duration, probeErr := probeHLSDuration(ctx, safeURL, referer, ffprobePath)
-	if probeErr != nil {
-		util.Debug("Could not probe HLS duration; progress will use downloaded bytes", "error", probeErr)
-	} else {
-		util.Debug("HLS duration detected for download progress", "duration", duration)
-		updateTimedDownloadProgress(m, 0, duration)
-	}
-
-	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, ffmpegPath, args...) // #nosec G204 -- executable and all media/path inputs are validated above
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to capture ffmpeg progress: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start ffmpeg: %w", err)
-	}
-
-	progressDone := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			if current, ok := ffmpegProgressTime(scanner.Text()); ok && duration > 0 {
-				updateTimedDownloadProgress(m, current, duration)
-			}
-		}
-		progressDone <- scanner.Err()
-	}()
-
-	done := make(chan error, 1)
-	go func() {
-		// os/exec documents that Wait closes the StdoutPipe once the process
-		// exits, "an implication is that it is incorrect to call Wait before
-		// all reads from the pipe have completed". Running Wait concurrently
-		// with the scanner above lost that race on a loaded machine: the pipe
-		// was closed mid-scan, scanner.Err() came back "read |0: file already
-		// closed", and a download whose media file was complete on disk was
-		// reported as a failure. Draining the progress reader first makes the
-		// ordering the API requires.
-		progressErr := <-progressDone
-		if waitErr := cmd.Wait(); waitErr != nil {
-			done <- waitErr
-			return
-		}
-		done <- progressErr
-	}()
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case err := <-done:
-			// A non-nil err here is ffmpeg's own exit failure when it has one,
-			// and otherwise the progress-reader error; both mean the download
-			// cannot be trusted.
-			if err != nil {
-				if stderrTail := strings.TrimSpace(stderr.String()); stderrTail != "" {
-					return fmt.Errorf("ffmpeg HLS download failed: %w: %s", err, stderrTail)
-				}
-				return fmt.Errorf("failed to read ffmpeg download progress: %w", err)
-			}
-			stat, statErr := os.Stat(partPath)
-			if statErr != nil || stat.Size() == 0 {
-				return fmt.Errorf("ffmpeg HLS download produced no media")
-			}
-			if err := os.Rename(partPath, safePath); err != nil {
-				return fmt.Errorf("failed to finalize HLS download: %w", err)
-			}
-			return nil
-		case <-ticker.C:
-			if m != nil {
-				if stat, statErr := os.Stat(partPath); statErr == nil {
-					m.setProgressReceived(stat.Size())
-				}
-			}
-		case <-ctx.Done():
-			return fmt.Errorf("ffmpeg HLS download timed out: %w", ctx.Err())
-		}
-	}
 }
 
 // applyDownloadAuthHeaders sets the Referer / User-Agent headers required by
@@ -440,15 +74,6 @@ func applyDownloadAuthHeaders(req *http.Request, url string) {
 	}
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", downloadUserAgent)
-	}
-
-	// A source that pinned a User-Agent did so because its CDN only serves the
-	// signed URL to that exact UA (see pinnedCDNHeaders); the generic default
-	// above would be rejected.
-	if ua, _ := pinnedCDNHeaders(util.GetGlobalReferer()); ua != "" {
-		for name, values := range superflix.CDNPlaybackHeaders(util.GetGlobalReferer(), ua) {
-			req.Header.Set(name, values[0])
-		}
 	}
 
 	if ref := util.GetGlobalReferer(); ref != "" {
@@ -651,8 +276,7 @@ func isBloggerProxyURL(u string) bool {
 // Both answer with application/vnd.apple.mpegurl and a body starting #EXTM3U.
 // The extension is camouflage, not a format.
 //
-// This is the third time this shape has bitten: SuperFlix's master.txt and its
-// path change are documented above for the same reason. Missing it here sends
+// Missing it here sends
 // the URL to the plain-MP4 downloader, which saves the ~200-byte playlist as
 // the episode and then deletes it for being too small — the download "failing"
 // with no sign that anything was misread.
@@ -676,13 +300,7 @@ func LooksLikeHLS(u string) bool {
 	lower := strings.ToLower(u)
 	return strings.Contains(lower, "m3u8") ||
 		strings.Contains(lower, "/hls/") ||
-		isAnimeFireHLS(lower) ||
-		// SuperFlix's FirePlayer serves its multivariant HLS master as
-		// "master.txt" with a text/plain content type. Missing it here silently
-		// disabled every HLS-only decision downstream — the forced lavf hls
-		// demuxer and allowed_extensions=ALL were both gated on IsHLS, so mpv
-		// received a text file with no hint it was a playlist.
-		strings.Contains(lower, "master.txt")
+		isAnimeFireHLS(lower)
 }
 
 // hasUnsafeExtension returns true if the URL has a file extension that yt-dlp
@@ -1187,7 +805,7 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	// Use go-ytdlp library (no external binary required on PATH).
-	// 60-minute timeout: movies from SuperFlix/FlixHQ can be 2+ hours of video;
+	// 60-minute timeout: movies from StartFlix/FlixHQ can be 2+ hours of video;
 	// a 10-minute timeout was killing yt-dlp mid-download ("signal: killed").
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
@@ -1628,7 +1246,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 // It uses the anime context to route to the correct source-specific stream resolver.
 func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, error) {
 	// Source-aware routing: use anime.Source to determine the correct resolver.
-	// Sources like SuperFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
+	// Sources like StartFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
 	// source-specific identifiers or HTTP pages that need scraper-specific
 	// resolution instead of the legacy generic page extractor.
 	source := anime.Source
@@ -1968,13 +1586,10 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
 				switch {
-				case isSuperFlixTextHLS(videoURL):
-					err = downloadWithFFmpegHLS(videoURL, episodePath, progressModel)
 				// LooksLikeHLS, not a bare ".m3u8" substring: the two other
 				// routing switches already use it, and keying on the extension
 				// alone missed playlists served under "/hls/" without one —
-				// those fell through to the plain-MP4 downloader, the same way
-				// SuperFlix's master.txt did.
+				// those fell through to the plain-MP4 downloader.
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					err = downloadWithNativeHLS(videoURL, episodePath, progressModel)
 					if err != nil && errors.Is(err, hls.ErrSeparateAudioTracks) {
@@ -2263,13 +1878,10 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 				// (.jpg, .png) and "live" HLS (no #EXT-X-ENDLIST) that break yt-dlp.
 				// Also for URLs with extensions yt-dlp rejects (.aspx, .php, etc.).
 				switch {
-				case isSuperFlixTextHLS(videoURL):
-					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, progressModel)
 				// LooksLikeHLS, not a bare ".m3u8" substring: the two other
 				// routing switches already use it, and keying on the extension
 				// alone missed playlists served under "/hls/" without one —
-				// those fell through to the plain-MP4 downloader, the same way
-				// SuperFlix's master.txt did.
+				// those fell through to the plain-MP4 downloader.
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, progressModel)
 					if dlErr != nil && errors.Is(dlErr, hls.ErrSeparateAudioTracks) {

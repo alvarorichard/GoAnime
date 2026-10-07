@@ -66,7 +66,7 @@ func (r *recordingSource) queries() []string {
 
 // The fix has to land where EVERY source sees it.
 //
-// SuperFlix undid the dashes inside its own client and the other three never
+// One source undid the dashes inside its own client and the others never
 // did, which is exactly the failure this guards: a per-source workaround looks
 // like a fix until you count how many sources have it. Asserting on what the
 // source actually receives is the only way to catch a new source that would be

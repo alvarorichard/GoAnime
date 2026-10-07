@@ -1,13 +1,13 @@
 package api
 
-// Regression suite for the FlixHQ/SuperFlix "season selection abort" bug.
+// Regression suite for the FlixHQ/StartFlix "season selection abort" bug.
 //
 // Discovered:  2026-04-27 — user-supplied debug log
 //              ("00:08:12 ERRO  GoAnime  : Failed to get episodes:
 //              failed to fetch episodes: season selection cancelled: abort")
 // Fixed:       2026-04-27 — same-day fix in this commit.
-// Root cause:  internal/api/enhanced.go GetFlixHQEpisodes (FlixHQ) and
-//              GetSuperFlixEpisodes (SuperFlix) wrapped the season-picker
+// Root cause:  the movie/TV sources' episode listers (FlixHQ, and the source
+//              StartFlix later replaced) wrapped the season-picker
 //              abort as `fmt.Errorf("season selection cancelled: %w", err)`
 //              and returned it. Because that error chain was not
 //              ErrBackToSearch, the playback handler
@@ -39,7 +39,7 @@ import (
 )
 
 // mapSeasonSelectionErr mirrors the production predicate from
-// internal/api/enhanced.go (GetSuperFlixEpisodes). Keeping the predicate
+// internal/api/startflix.go (GetStartFlixEpisodes). Keeping the predicate
 // in one tiny helper means this test pins the exact shape of the mapping
 // rather than just observing some end-to-end behaviour.
 func mapSeasonSelectionErr(err error) error {

@@ -61,6 +61,15 @@ func NewClient() *Client {
 	}
 }
 
+// NewClientWithHTTP builds a client on a caller-supplied HTTP client, for
+// callers that route requests through their own transport (the metadata
+// enricher does, so its tests can serve these pages from a mock).
+func NewClientWithHTTP(hc *http.Client) *Client {
+	c := NewClient()
+	c.http = hc
+	return c
+}
+
 // NewClientForTest points a client at a test server.
 func NewClientForTest(hc *http.Client, baseURL string) *Client {
 	return &Client{

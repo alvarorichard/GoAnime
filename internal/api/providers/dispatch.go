@@ -217,7 +217,7 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 // A partial failure used to be invisible: the results were handed back and the
 // per-source reasons dropped on the floor, leaving them only in the debug log.
 // So a search where three of four sources were broken — AnimeFire's site
-// rewritten out from under its parser, SuperFlix rate limiting the network,
+// rewritten out from under its parser, another source rate limiting the network,
 // AniDB down — looked exactly like a search that had only ever had one source,
 // and was reported as "it is only searching Goyabu".
 //
@@ -239,7 +239,7 @@ func reportPartialFailure(failures []SourceFailure) {
 // When everything failed, the message leads with the per-source DIAGNOSTICS
 // rather than the raw errors. A user staring at
 //
-//	no results for "matrix" (all sources failed): SuperFlix: server returned:
+//	no results for "matrix" (all sources failed): <source>: server returned:
 //	429 Too Many Requests
 //
 // cannot tell whether GoAnime is broken, the title does not exist, or the host
@@ -263,7 +263,7 @@ func finishSearch(query string, searched int, all []*models.Anime, failures []So
 // FetchEpisodes.
 //
 // Behavior is equivalent to the legacy switch: HiAnime/AnimeFire/Goyabu list
-// via their adapters; SuperFlix runs its season picker; an unrecognized source
+// via their adapters; StartFlix runs its season picker; an unrecognized source
 // reports Unknown rather than guessing at a source.
 func FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if anime == nil {

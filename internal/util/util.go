@@ -37,7 +37,6 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
-	GlobalUserAgent     string                         // Global variable to store the User-Agent the stream URL was signed for
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 
@@ -108,37 +107,6 @@ func ClearGlobalReferer() {
 	GlobalReferer = ""
 }
 
-// SetGlobalUserAgent stores the User-Agent that the current stream URL was
-// signed for.
-//
-// SuperFlix's player CDN binds a signed URL to the exact User-Agent that
-// obtained it — the same URL answers 200 for that UA and 403 for any other,
-// including a different version of the same browser. mpv therefore cannot use
-// its own default; it has to replay the one recorded here.
-func SetGlobalUserAgent(userAgent string) {
-	playbackStateMu.Lock()
-	GlobalUserAgent = userAgent
-	playbackStateMu.Unlock()
-	if userAgent != "" {
-		Debugf("Stored user agent for stream requests: %s", userAgent)
-	}
-}
-
-// GetGlobalUserAgent returns the stored playback User-Agent, empty when the
-// current source does not pin one.
-func GetGlobalUserAgent() string {
-	playbackStateMu.RLock()
-	defer playbackStateMu.RUnlock()
-	return GlobalUserAgent
-}
-
-// ClearGlobalUserAgent clears the stored playback User-Agent.
-func ClearGlobalUserAgent() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-	GlobalUserAgent = ""
-}
-
 // SetGlobalAnimeSource stores the current anime source (e.g. "HiAnime", "Goyabu")
 func SetGlobalAnimeSource(source string) {
 	playbackStateMu.Lock()
@@ -159,17 +127,6 @@ func GetGlobalAnimeSource() string {
 // Is9AnimeSource returns true if the current stream is from 9Anime
 func Is9AnimeSource() bool {
 	return GetGlobalAnimeSource() == "9Anime"
-}
-
-// IsSuperFlixSource returns true if the current stream is from SuperFlix.
-//
-// SuperFlix streams are multi-audio HLS with an external Portuguese subtitle
-// track, so they need mpv's audio/subtitle language preferences applied — for
-// EVERY media type, not just movies/TV. Its anime and dorama entries carry the
-// same tracks, and gating those preferences on IsMovieOrTV silently dropped both
-// the chosen audio track and the subtitles for them.
-func IsSuperFlixSource() bool {
-	return GetGlobalAnimeSource() == "SuperFlix"
 }
 
 // SetGlobalAudioLanguage stores the current playback audio preference.
@@ -357,7 +314,7 @@ func PromptSubtitleLanguage() {
 //
 // Always emits one --sub-file=URL per track. Never use --sub-files=URL1:URL2:
 // on Unix the separator is ":", which collides with "https://" and silently
-// corrupts every remote subtitle URL (SuperFlix ships WEBVTT behind .html
+// corrupts every remote subtitle URL (some hosts ship WEBVTT behind .html
 // paths). That made mpv fail to load movie streams with multiple tracks.
 func GetSubtitleArgs() []string {
 	playbackStateMu.RLock()
@@ -495,25 +452,13 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
-	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, superflix, startflix, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, startflix, ptbr; goyabu needs GOANIME_ENABLED_SOURCES)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
 	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
-
-	// SuperFlix Cloudflare-bypass browser flags. These surface the previously
-	// env-only knobs (GOANIME_SF_*) as discoverable CLI options; each just sets
-	// the corresponding env var so the deeper scraper code keeps reading os.Getenv.
-	sfHeadlessFlag := fs.Bool("sf-headless", false, "run the Cloudflare-bypass browser headless (advanced; Turnstile usually rejects headless)")
-	sfBundledFlag := fs.Bool("sf-bundled", false, "force Playwright's bundled Chromium for the bypass instead of system Chrome")
-	sfBrowserFlag := fs.String("sf-browser", "", "browser channel for the Cloudflare bypass (e.g. chrome, chrome-beta, msedge); default: auto")
-	sfMaskFlag := fs.Bool("sf-mask", false, "enable fingerprint masking for the bypass browser (advanced escape hatch)")
-	// Hiding the bypass browser is the default; this flag stays so existing
-	// commands and scripts that pass it keep working.
-	sfOffscreenFlag := fs.Bool("sf-offscreen", false, "(default) keep the bypass browser minimized; it surfaces only if the challenge needs you, then closes")
-	sfWindowFlag := fs.Bool("sf-window", false, "always show the bypass browser window instead of keeping it minimized")
 
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
@@ -538,31 +483,6 @@ func FlagParser() (string, error) {
 			return "", ErrHelpRequested
 		}
 		return "", err
-	}
-
-	// Apply SuperFlix bypass-browser flags by exporting the env vars the scraper
-	// reads. Only set when provided so an unset flag never overrides an env var
-	// the user exported manually.
-	if *sfHeadlessFlag {
-		_ = os.Setenv("GOANIME_SF_HEADLESS", "1")
-	}
-	if *sfBundledFlag {
-		_ = os.Setenv("GOANIME_SF_BUNDLED", "1")
-	}
-	if *sfBrowserFlag != "" {
-		_ = os.Setenv("GOANIME_SF_CHROME_CHANNEL", *sfBrowserFlag)
-	}
-	if *sfMaskFlag {
-		_ = os.Setenv("GOANIME_SF_MASK", "1")
-	}
-	if *sfOffscreenFlag {
-		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "1")
-	}
-	// --sf-window is the opt-out from the hidden default. Checked after
-	// --sf-offscreen so that passing both lands on "show it", the less
-	// surprising outcome of a contradictory pair.
-	if *sfWindowFlag {
-		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "0")
 	}
 
 	// Set debug mode based on flag (set unconditionally for consistency)

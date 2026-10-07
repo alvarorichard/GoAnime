@@ -18,7 +18,6 @@ require (
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/lrstanley/go-ytdlp v1.5.4
 	github.com/mattn/go-sqlite3 v1.14.52
-	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tr1xem/go-discordrpc v1.0.0
@@ -43,7 +42,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
-	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/enetx/http v1.0.29 // indirect
 	github.com/enetx/http2 v1.0.26 // indirect
@@ -51,7 +49,6 @@ require (
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.10 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
-	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/ktr0731/go-ansisgr v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
@@ -68,7 +65,6 @@ require (
 	github.com/ulikunitz/xz v0.5.17 // indirect
 	github.com/wzshiming/socks5 v0.8.0 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
-	go.mongodb.org/mongo-driver v1.17.10 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20261005173118-76772065c9b0 // indirect

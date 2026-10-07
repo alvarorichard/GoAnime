@@ -5,6 +5,6 @@
 // leaf provider package — it depends only on netx/util/models, never on the
 // dispatch layers above it.
 //
-// Unlike SuperFlix there is no browser anywhere in this package: neither the
-// site nor its panel is behind a bot gate.
+// There is no browser anywhere in this package: neither the site nor its panel
+// is behind a bot gate.
 package startflix

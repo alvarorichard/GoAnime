@@ -220,7 +220,7 @@ func getBoolValue(data map[string]any, field string) bool {
 
 // Enrich anime data from AniList
 func enrichAnimeData(anime *models.Anime) error {
-	// Use TMDB/OMDb enrichment for movie/TV catalogs. SuperFlix and StartFlix are included by
+	// Use TMDB/OMDb enrichment for movie/TV catalogs. StartFlix is included by
 	// SOURCE, not just media type: its catalog tags western animation (e.g.
 	// "Os Simpsons") as anime, which would otherwise fall through to AniList —
 	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
@@ -552,7 +552,7 @@ var (
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|superflix|startflix|flixhq|sflix` +
+		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|startflix|flixhq|sflix` +
 		`).*$`)
 	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)

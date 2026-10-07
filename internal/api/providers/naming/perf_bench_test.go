@@ -12,6 +12,6 @@ func BenchmarkSanitizeFilename(b *testing.B) {
 func BenchmarkCleanTitle(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		CleanTitle("[PT-BR] [SuperFlix] Vinland Saga [TV]")
+		CleanTitle("[PT-BR] [StartFlix] Vinland Saga [TV]")
 	}
 }

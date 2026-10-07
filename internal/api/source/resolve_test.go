@@ -27,10 +27,10 @@ func registerProductionLikeSources(t *testing.T) {
 			d.Tags = []string{"[goyabu]"}
 			d.URLMatchers = []string{"goyabu"}
 		}),
-		newFake(SuperFlix, 30, func(d *Descriptor) {
-			d.Explicit = []string{"SuperFlix"}
-			d.Tags = []string{"[superflix]"}
-			d.URLMatchers = []string{"superflix"}
+		newFake(StartFlix, 30, func(d *Descriptor) {
+			d.Explicit = []string{"StartFlix"}
+			d.Tags = []string{"[startflix]"}
+			d.URLMatchers = []string{"startflix"}
 		}),
 		newFake(HiAnime, 40, func(d *Descriptor) {
 			d.Explicit = []string{"HiAnime"}
@@ -53,7 +53,7 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
-		{"SuperFlix", "SuperFlix", SuperFlix},
+		{"StartFlix", "StartFlix", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestResolve_NameTags(t *testing.T) {
 		{"english tag", "Naruto [English]", HiAnime},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
-		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
+		{"startflix tag", "Naruto [StartFlix]", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestResolve_URLPatterns(t *testing.T) {
 		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
 		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
 		{"removed allanime host resolves to nothing", "https://allanime.to/anime/abc", Unknown},
-		{"superflix URL", "https://superflix.to/naruto", SuperFlix},
+		{"startflix URL", "https://startflix.to/naruto", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

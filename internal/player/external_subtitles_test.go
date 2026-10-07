@@ -11,7 +11,7 @@ import (
 // Subtitles resolved by a source have to reach mpv no matter which source that
 // was.
 //
-// The old gate was a list of source names — movies/TV, SuperFlix, 9Anime — so
+// The old gate was a list of source names — movies/TV, 9Anime — so
 // any other source resolved its tracks, stored them in the globals, and had
 // them dropped on the way to the command line. Nothing said so: playback
 // started fine, just without subtitles. HiAnime ships an English and a
@@ -29,7 +29,7 @@ func TestExternalSubtitleArgs_PassesTracksFromAnySource(t *testing.T) {
 	// the gate itself rather than the prompt.
 	got := externalSubtitleArgs(false)
 
-	require.Len(t, got, 1, "a track resolved by a non-SuperFlix, non-9Anime source must still reach mpv")
+	require.Len(t, got, 1, "a track resolved by a non-movie, non-9Anime source must still reach mpv")
 	assert.Equal(t, "--sub-file=https://cdn.example/pt.vtt", got[0])
 }
 

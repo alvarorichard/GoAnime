@@ -7,18 +7,15 @@ import (
 	"time"
 )
 
-// Clearing a Cloudflare challenge needs a real browser, and more than one source
-// needs that now.
+// Clearing a Cloudflare challenge needs a real browser. Goyabu serves a managed
+// challenge (403, cf-mitigated: challenge, "Just a moment…"), which no amount
+// of header tuning gets past.
 //
-// SuperFlix has driven one for a while; Goyabu started serving a managed
-// challenge too (403, cf-mitigated: challenge, "Just a moment…"), which no
-// amount of header tuning gets past. The browser machinery is not
-// SuperFlix-specific — it launches Chrome, waits out the gate and collects
-// cf_clearance — but it lives in that package, and a scraper reaching across
-// into a sibling provider would be the wrong shape.
-//
-// So the capability is declared here, where every scraper already looks, and
-// whoever owns a browser registers it. netx keeps no dependency on any provider.
+// The capability is declared here, where every scraper already looks, and
+// whoever owns a browser registers it. netx keeps no dependency on any
+// provider. No package registers one today — GoAnime no longer ships a browser
+// — so ChallengeSolverAvailable reports false and a gated source reports the
+// challenge as blocked instead of solving it.
 
 // ChallengeSolveResult is what clearing a gate yields: the cookies that prove it
 // and the User-Agent they are bound to.

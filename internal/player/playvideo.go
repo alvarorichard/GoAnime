@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	neturl "net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
 	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/upscaler"
@@ -45,7 +43,7 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
-func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, needsCORSOrigin bool) (args []string, refererURL string) {
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
 		return mpvArgs, ""
@@ -58,50 +56,13 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, n
 	if referer == "" {
 		return mpvArgs, ""
 	}
-
-	if !needsCORSOrigin {
-		return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
-	}
-
-	// SuperFlix's player CDN serves a signed URL only to a request that repeats
-	// the browser's own fingerprint — Referer alone gets a 403 on a URL the
-	// browser plays fine. superflix.CDNPlaybackHeaderFields owns the exact
-	// contract (and leads with the Referer); Origin is added on top because the
-	// segment hosts validate it separately.
-	//
-	// Each header goes in its own --http-header-fields-append: the contract's
-	// Accept-Language value contains a comma, and the comma-joined
-	// --http-header-fields form would split it into two malformed fields.
-	fields := superflix.CDNPlaybackHeaderFields(referer, util.GetGlobalUserAgent())
-	if origin := corsOriginOf(referer); origin != "" {
-		fields = append(fields, "Origin: "+origin)
-	}
-	for _, f := range fields {
-		mpvArgs = append(mpvArgs, "--http-header-fields-append="+f)
-	}
-	// mpv's own default UA (libmpv) is one of the values the CDN rejects, and
-	// --http-header-fields cannot override it — mpv sends both. --user-agent is
-	// the only option that replaces it.
-	if ua := util.GetGlobalUserAgent(); ua != "" {
-		mpvArgs = append(mpvArgs, "--user-agent="+ua)
-	}
-	return mpvArgs, referer
-}
-
-// corsOriginOf reduces a Referer to its bare scheme://host, the value a browser
-// puts in Origin.
-func corsOriginOf(referer string) string {
-	u, err := neturl.Parse(referer)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
+	return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
 // mpv fetches segments served with disguised extensions (.js/.css/.woff, …).
-// Some providers (e.g. SuperFlix's FirePlayer host) obfuscate their HLS
-// segments this way AND serve the separate alternative-audio rendition's
+// Some providers obfuscate their HLS segments this way AND serve the separate
+// alternative-audio rendition's
 // segments with the same disguised extensions. mpv's builtin ffmpeg only
 // relaxes the check for the main variant (it auto-sets extension_picky=0), so
 // the audio rendition stays blocked by the stricter `allowed_extensions`
@@ -109,7 +70,6 @@ func corsOriginOf(referer string) string {
 // allowed_extensions=ALL lets the audio rendition load too. It only widens a
 // check, never restricts, so it is safe for well-behaved HLS sources as well.
 const hlsAllowAllExtensionsArg = "--demuxer-lavf-o=allowed_extensions=ALL"
-const hlsForceLavfFormatArg = "--demuxer-lavf-format=hls"
 
 // appendHLSDemuxerArgs adds HLS-specific demuxer options to mpvArgs when the
 // stream is HLS, and returns mpvArgs unchanged otherwise.
@@ -124,19 +84,12 @@ func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
 // list. playVideo gathers these (some via interactive prompts, globals, and
 // tracking side effects) and hands them to buildPlaybackArgs, so the actual
 // argument assembly — including the HLS referer + allowed_extensions wiring that
-// makes SuperFlix audio play — is deterministic and unit-testable without
-// launching mpv.
+// makes alternative-audio renditions play — is deterministic and unit-testable
+// without launching mpv.
 type playbackArgsInput struct {
-	VideoURL string
-	IsHLS    bool
-	Is9Anime bool
-	// IsSuperFlix adds the Origin header to the mpv request. SuperFlix's CDN
-	// serves the HLS segments from rotating third-party hosts and validates the
-	// CORS origin on them: hls.js fetches segments as a cross-origin XHR, so a
-	// real browser attaches Origin, and without it every segment comes back 403
-	// while the playlist itself loads fine. Verified live 2026-08-26 — the same
-	// stream goes from 121 failed segments to 0.
-	IsSuperFlix      bool
+	VideoURL         string
+	IsHLS            bool
+	Is9Anime         bool
 	UpscalingEnabled bool
 	ShaderArgs       []string
 	Wayland          bool
@@ -192,15 +145,10 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
 	}
 
-	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS, in.IsSuperFlix)
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS)
 	// Relax the HLS segment-extension allowlist so alternative-audio renditions
-	// with disguised segment extensions load (fixes video-plays-but-no-audio on
-	// SuperFlix/FirePlayer streams).
+	// with disguised segment extensions load (fixes video-plays-but-no-audio).
 	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
-	forcesHLSFormat := in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt")
-	if forcesHLSFormat {
-		mpvArgs = append(mpvArgs, hlsForceLavfFormatArg)
-	}
 
 	// For 9Anime (Cloudflare-protected CDNs), route playback through yt-dlp with
 	// Chrome TLS impersonation so ffmpeg's TLS fingerprint is not rejected.
@@ -236,26 +184,8 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		)
 	}
 
-	// External subtitle files (already gated + resolved by the caller) — except
-	// when the lavf format is forced, where they must be dropped.
-	//
-	// --demuxer-lavf-format is global in mpv: it applies to every file lavf
-	// opens, external subtitles included, and there is no per-file override. A
-	// WEBVTT file forced through the HLS demuxer cannot open — even a local one
-	// fails with "Can not open external file". For a remote one each failed open
-	// also waits on the network, so SuperFlix's 27 tracks kept mpv stalled for
-	// over two minutes before it showed a window: the "mpv never opens" report on
-	// "O Fim da Rua" (2026-09-14). Measured on that exact stream: 21s to play
-	// without the files, still stuck at a 123s timeout with them.
-	//
-	// Nothing is lost by dropping them. SuperFlix's master.txt declares the same
-	// 27 subtitle renditions (EXT-X-MEDIA TYPE=SUBTITLES, three Portuguese among
-	// them), and mpv exposes those from the stream itself — 27 tracks, zero
-	// failures — so --slang still picks one and the in-player menu still lists
-	// them all.
-	if !forcesHLSFormat {
-		mpvArgs = append(mpvArgs, in.SubArgs...)
-	}
+	// External subtitle files, already gated and resolved by the caller.
+	mpvArgs = append(mpvArgs, in.SubArgs...)
 
 	// HLS resume is handled by seeking after start (--start is unreliable on HLS).
 	if in.ResumeTime > 0 && !in.IsHLS {
@@ -531,7 +461,7 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 // arguments, asking the user to choose first when that is warranted.
 //
 // The gate is "did a source give us tracks", not a list of source names. It
-// used to be `wantsLangPrefs || is9Anime` — movies/TV, SuperFlix and 9Anime —
+// used to be `wantsLangPrefs || is9Anime` — movies/TV and 9Anime —
 // which meant any other source resolved its subtitles, stored them, and then
 // had them silently dropped: never passed to mpv, with nothing said about it.
 // HiAnime, which ships an English and a Brazilian Portuguese track per episode,
@@ -626,26 +556,18 @@ func playVideo(
 		}
 	}
 
-	// Audio/subtitle language preferences apply to movies/TV (FlixHQ) and to
-	// SuperFlix.
-	//
-	// SuperFlix must be matched by SOURCE, not by media type: its streams are
-	// multi-audio HLS with an external Portuguese subtitle track regardless of
-	// whether the entry is a movie, a series, an anime or a dorama. Gating on
-	// IsMovieOrTV alone silently threw away both the audio track the user picked
-	// and the subtitles for every SuperFlix anime.
-	isSuperFlix := util.IsSuperFlixSource()
+	// Audio/subtitle language preferences apply to movies/TV (StartFlix,
+	// FlixHQ).
 	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
-		isSuperFlix = isSuperFlix || strings.EqualFold(anime.Source, "SuperFlix")
 		// Update exact media type for download path organization.
 		if anime.MediaType != "" && titleSnap.MediaType == "" {
 			SetExactMediaType(string(anime.MediaType))
 		}
 	}
-	wantsLangPrefs := isMovieOrTV || isSuperFlix
+	wantsLangPrefs := isMovieOrTV
 
 	audioLang, subsLang := "", ""
 	if wantsLangPrefs {
@@ -686,7 +608,6 @@ func playVideo(
 		VideoURL:         videoURL,
 		IsHLS:            isHLSStream,
 		Is9Anime:         is9Anime,
-		IsSuperFlix:      util.IsSuperFlixSource(),
 		UpscalingEnabled: upscalingEnabled,
 		ShaderArgs:       shaderArgs,
 		Wayland:          wayland,

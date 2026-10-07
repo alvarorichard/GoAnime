@@ -23,7 +23,7 @@ package netx
 //              between (a) their network being slow, (b) the site being dead,
 //              and (c) the GoAnime client being broken.
 // Blast radius:diagnostic-only — search results were already correct (the
-//              source was correctly skipped, SuperFlix etc. still returned
+//              source was correctly skipped, the others still returned
 //              results). The bug was that the WARN line lied about the
 //              cause, and users repeatedly opened issues asking us to
 //              "fix flixhq" when the actual fix was on the upstream side.

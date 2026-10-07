@@ -91,7 +91,7 @@ func HandlePlaybackMode(animeName string) {
 		episodesTimer.Stop()
 		fetchTimer.Stop()
 
-		// User aborted season selection (FlixHQ/SuperFlix ESC) — go back to a
+		// User aborted season selection (FlixHQ/StartFlix ESC) — go back to a
 		// fresh search prompt instead of killing the session.
 		if errors.Is(epErr, api.ErrBackToSearch) {
 			util.Infof("Going back to new search...")

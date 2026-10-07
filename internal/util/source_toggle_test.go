@@ -15,7 +15,7 @@ func TestSourceDisabled(t *testing.T) {
 		{"case-insensitive", "allanime", "AllAnime", true},
 		{"dot-forgiving list side", "Animefire.io", "AnimeFire", true},
 		{"dot-forgiving probe side", "animefire", "Animefire.io", true},
-		{"one of several", "Goyabu, SuperFlix ,AllAnime", "SuperFlix", true},
+		{"one of several", "Goyabu, StartFlix ,AllAnime", "StartFlix", true},
 		{"whitespace tolerant", "  AllAnime  ", "AllAnime", true},
 		{"not listed", "Goyabu", "AllAnime", false},
 		{"empty probe", "AllAnime", "", false},

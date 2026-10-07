@@ -13,7 +13,7 @@ import (
 )
 
 // =============================================================================
-// Tests for Discord RPC cover image handling with SuperFlix content
+// Tests for Discord RPC cover image handling with StartFlix content
 // Tests both the original bug (CloudFront URLs) and the fix
 // =============================================================================
 
@@ -35,12 +35,12 @@ func mockMPVFullState(socketPath string, args []any) (any, error) {
 	return nil, fmt.Errorf("mock: unsupported command: %v", args)
 }
 
-// TestDiscordRPC_SuperFlixCloudFrontURL_OriginalBug documents the original bug:
+// TestDiscordRPC_StartFlixCloudFrontURL_OriginalBug documents the original bug:
 // When ImageURL was a CloudFront-wrapped URL, Discord showed "?" instead of cover.
-func TestDiscordRPC_SuperFlixCloudFrontURL_OriginalBug(t *testing.T) {
+func TestDiscordRPC_StartFlixCloudFrontURL_OriginalBug(t *testing.T) {
 	t.Parallel()
 
-	// Simulate a SuperFlix anime with the ORIGINAL (buggy) CloudFront URL
+	// Simulate a StartFlix anime with the ORIGINAL (buggy) CloudFront URL
 	cloudFrontURL := "https://d1muf25xaso8hp.cloudfront.net/https://image.tmdb.org/t/p/w342/f1nV5NBIFwfQLw5g8FVrdt90FAy.jpg"
 
 	// This is what the Discord RPC normalize code does inline
@@ -69,7 +69,7 @@ func TestDiscordRPC_NormalizeImageURL(t *testing.T) {
 		description string
 	}{
 		{
-			name:        "CloudFront SuperFlix URL is normalized",
+			name:        "CloudFront StartFlix URL is normalized",
 			inputURL:    "https://d1muf25xaso8hp.cloudfront.net/https://image.tmdb.org/t/p/w342/poster.jpg",
 			wantClean:   "https://image.tmdb.org/t/p/w342/poster.jpg",
 			wantHasCF:   false,
@@ -125,16 +125,16 @@ func TestDiscordRPC_NormalizeImageURL(t *testing.T) {
 	}
 }
 
-// TestDiscordRPC_SuperFlixTV_WithCover tests end-to-end: SuperFlix TV show
+// TestDiscordRPC_StartFlixTV_WithCover tests end-to-end: StartFlix TV show
 // with a TMDB cover should show the cover in Discord RPC
-func TestDiscordRPC_SuperFlixTV_WithCover(t *testing.T) {
+func TestDiscordRPC_StartFlixTV_WithCover(t *testing.T) {
 	t.Parallel()
 
-	// Simulate Dexter from SuperFlix with a properly normalized TMDB cover
+	// Simulate Dexter from StartFlix with a properly normalized TMDB cover
 	anime := &models.Anime{
 		Name:          "Dexter",
 		URL:           "1405",
-		Source:        "SuperFlix",
+		Source:        "StartFlix",
 		MediaType:     models.MediaTypeTV,
 		TMDBID:        1405,
 		IMDBID:        "tt0773262",
@@ -164,7 +164,7 @@ func TestDiscordRPC_SuperFlixTV_WithCover(t *testing.T) {
 
 	// Verify content type detection
 	assert.True(t, anime.IsMovieOrTV(),
-		"SuperFlix TV content must be detected as movie/TV for Discord state formatting")
+		"StartFlix TV content must be detected as movie/TV for Discord state formatting")
 
 	// Verify season/episode formatting (tested in season_discord_test.go too)
 	episodeNumber := anime.Episodes[0].Number
@@ -173,14 +173,14 @@ func TestDiscordRPC_SuperFlixTV_WithCover(t *testing.T) {
 		"should show S03E6 for Dexter Season 3 Episode 6")
 }
 
-// TestDiscordRPC_SuperFlixMovie_WithCover tests movie cover in Discord RPC
-func TestDiscordRPC_SuperFlixMovie_WithCover(t *testing.T) {
+// TestDiscordRPC_StartFlixMovie_WithCover tests movie cover in Discord RPC
+func TestDiscordRPC_StartFlixMovie_WithCover(t *testing.T) {
 	t.Parallel()
 
 	anime := &models.Anime{
 		Name:      "Inception",
 		URL:       "27205",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeMovie,
 		TMDBID:    27205,
 		IMDBID:    "tt1375666",
@@ -208,18 +208,18 @@ func TestDiscordRPC_SuperFlixMovie_WithCover(t *testing.T) {
 
 	// Movie state
 	assert.True(t, anime.IsMovie())
-	assert.Equal(t, "SuperFlix", anime.Source)
+	assert.Equal(t, "StartFlix", anime.Source)
 }
 
-// TestDiscordRPC_SuperFlixAnime_WithCover tests anime/dorama cover
-func TestDiscordRPC_SuperFlixAnime_WithCover(t *testing.T) {
+// TestDiscordRPC_StartFlixAnime_WithCover tests anime/dorama cover
+func TestDiscordRPC_StartFlixAnime_WithCover(t *testing.T) {
 	t.Parallel()
 
-	// SuperFlix also serves anime and doramas — they use MediaTypeTV
+	// StartFlix also serves anime and doramas — they use MediaTypeTV
 	anime := &models.Anime{
 		Name:          "O Laboratório de Dexter",
 		URL:           "4229",
-		Source:        "SuperFlix",
+		Source:        "StartFlix",
 		MediaType:     models.MediaTypeTV,
 		TMDBID:        4229,
 		Year:          "1996",
@@ -241,20 +241,20 @@ func TestDiscordRPC_SuperFlixAnime_WithCover(t *testing.T) {
 	assert.NotNil(t, updater)
 	assert.Equal(t, "https://image.tmdb.org/t/p/w500/12rxsv2if1i0TudBRFfP7WznJw0.jpg",
 		updater.GetAnime().ImageURL,
-		"anime/dorama from SuperFlix must have TMDB cover for Discord")
+		"anime/dorama from StartFlix must have TMDB cover for Discord")
 
 	// Verify the IMDB/TMDB buttons would be built (movie/TV path)
 	assert.True(t, anime.IsMovieOrTV())
 }
 
-// TestDiscordRPC_SuperFlix_NoCover_EmptyFallback tests the fallback when no cover is available
-func TestDiscordRPC_SuperFlix_NoCover_EmptyFallback(t *testing.T) {
+// TestDiscordRPC_StartFlix_NoCover_EmptyFallback tests the fallback when no cover is available
+func TestDiscordRPC_StartFlix_NoCover_EmptyFallback(t *testing.T) {
 	t.Parallel()
 
 	anime := &models.Anime{
 		Name:      "Unknown Show",
 		URL:       "00000",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeTV,
 		ImageURL:  "", // No cover available
 		Episodes: []models.Episode{
@@ -279,21 +279,21 @@ func TestDiscordRPC_SuperFlix_NoCover_EmptyFallback(t *testing.T) {
 		"empty ImageURL should remain empty — no broken fallback URL")
 }
 
-// TestDiscordRPC_SuperFlix_StreamThumbFallback tests that Thumb from stream API
+// TestDiscordRPC_StartFlix_StreamThumbFallback tests that Thumb from stream API
 // is propagated to ImageURL when no cover was available from search
-func TestDiscordRPC_SuperFlix_StreamThumbAsLastResort(t *testing.T) {
+func TestDiscordRPC_StartFlix_StreamThumbAsLastResort(t *testing.T) {
 	t.Parallel()
 
 	// Simulate: anime had no cover from search/enrichment, but stream API returned a thumb
 	anime := &models.Anime{
 		Name:      "Obscure Movie",
 		URL:       "88888",
-		Source:    "SuperFlix",
+		Source:    "StartFlix",
 		MediaType: models.MediaTypeMovie,
 		ImageURL:  "", // Empty before stream
 	}
 
-	// The fix in GetSuperFlixStreamURL does:
+	// The fix in GetStartFlixStreamURL does:
 	// if media.ImageURL == "" && result.Thumb != "" { media.ImageURL = result.Thumb }
 	streamThumb := "https://image.tmdb.org/t/p/w500/stream_thumb.jpg"
 
@@ -308,7 +308,7 @@ func TestDiscordRPC_SuperFlix_StreamThumbAsLastResort(t *testing.T) {
 	// Verify setup fields are preserved
 	assert.Equal(t, "Obscure Movie", anime.Name)
 	assert.Equal(t, "88888", anime.URL)
-	assert.Equal(t, "SuperFlix", anime.Source)
+	assert.Equal(t, "StartFlix", anime.Source)
 	assert.Equal(t, models.MediaTypeMovie, anime.MediaType)
 
 	// Verify it passes through Discord normalization cleanly

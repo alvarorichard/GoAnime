@@ -52,9 +52,9 @@ func describeStartFlixErr(err error) error {
 		return nil
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0:
 		return &friendlyError{cause: err, msg: "⚠️  StartFlix only offers this on servers GoAnime can't play yet (" +
-			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or search the title on SuperFlix."}
+			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."}
 	case errors.Is(err, startflix.ErrNoSupportedServer):
-		return &friendlyError{cause: err, msg: "⚠️  None of StartFlix's servers worked for this right now. Try again in a moment, or search the title on SuperFlix."}
+		return &friendlyError{cause: err, msg: "⚠️  None of StartFlix's servers worked for this right now. Try again in a moment."}
 	case errors.Is(err, startflix.ErrNoPlayers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this on StartFlix right now. Try another episode, or come back later."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
@@ -67,7 +67,8 @@ func describeStartFlixErr(err error) error {
 }
 
 // sfxAudioChoices remembers, per title page, the audio the user picked — so
-// every season of a binge is asked once. Session-scoped like SuperFlix's.
+// every season of a binge is asked once. Session-scoped on purpose: it is a
+// playback preference, not something worth persisting to disk.
 var (
 	sfxAudioMu      sync.Mutex
 	sfxAudioChoices = map[string]startflix.Audio{}
@@ -89,13 +90,25 @@ func recallStartFlixAudio(titleURL string) (startflix.Audio, bool) {
 // startFlixPinnedAudioLang is the --audio value only when the user actually
 // passed it. util.GlobalAudioLanguage is never empty in the real binary (it
 // holds the flag's default), so reading it alone would take "pt-BR,pt,english"
-// for a choice and never offer Legendado.
+// for a choice and never offer Legendado. When the flag was passed this package
+// never writes the global (see GetStartFlixStreamURL), so it is still the
+// user's value.
 func startFlixPinnedAudioLang() string {
 	if !util.GlobalAudioLanguageExplicit {
 		return ""
 	}
-	return userPinnedAudioLang()
+	return util.GetGlobalAudioLanguage()
 }
+
+// portugueseAudioCodes are the language codes that mean "the Portuguese dub".
+var portugueseAudioCodes = map[string]bool{"por": true, "pob": true, "pt": true, "ptb": true}
+
+// mpv matches --alang against whatever the manifest tags a track with, and
+// hosts spell the same language differently, so every plausible alias is given.
+const (
+	portugueseALang = "por,pob,pt-BR,ptbr,pt,portuguese"
+	originalALang   = "jpn,ja,japanese,eng,en,english,kor,ko,korean,spa,es,spanish"
+)
 
 // pinnedStartFlixAudio maps an explicit --audio onto the panel's lists:
 // Portuguese means the dub, any other language means the original audio.
@@ -322,9 +335,9 @@ func startFlixPlayersURL(c *startflix.Client, media *models.Anime, episode *mode
 // with burned-in subtitles; either way the user's list choice decides.
 func audioLangForStartFlix(a startflix.Audio) string {
 	if a == startflix.AudioSubtitled {
-		return "jpn,ja,japanese,eng,en,english,kor,ko,korean,spa,es,spanish"
+		return originalALang
 	}
-	return strings.Join(mpvAudioSynonyms["por"], ",")
+	return portugueseALang
 }
 
 // GetStartFlixStreamURL resolves an episode or movie to a playable URL and

@@ -18,8 +18,6 @@ import (
 // and reported a failed download, with nothing to say the URL had been misread.
 // Playback shares this helper, so it was routing the same URL wrong too.
 //
-// This is the third shape to catch this code out — SuperFlix's master.txt and
-// its later path change are documented beside it for the same reason.
 
 func TestLooksLikeHLS_KnowsAnimeFiresDisguisedPlaylist(t *testing.T) {
 	t.Parallel()
@@ -27,12 +25,12 @@ func TestLooksLikeHLS_KnowsAnimeFiresDisguisedPlaylist(t *testing.T) {
 		url  string
 		want bool
 	}{
-		"animefire master":            {"https://akumast.net/i/mqkkYJoeiFt51sJd/h.jpg", true},
-		"animefire variant":           {"https://akumast.net/Vmhagys/p.jpg", true},
-		"animefire master with query": {"https://akumast.net/i/tok/h.jpg?x=1", true},
-		"still a plain m3u8":          {"https://cdn.example.com/master.m3u8", true},
-		"still an hls path":           {"https://cdn.example.com/hls/stream", true},
-		"still superflix master.txt":  {"https://host.best/tok/id/exp/master.txt", true},
+		"animefire master":             {"https://akumast.net/i/mqkkYJoeiFt51sJd/h.jpg", true},
+		"animefire variant":            {"https://akumast.net/Vmhagys/p.jpg", true},
+		"animefire master with query":  {"https://akumast.net/i/tok/h.jpg?x=1", true},
+		"still a plain m3u8":           {"https://cdn.example.com/master.m3u8", true},
+		"still an hls path":            {"https://cdn.example.com/hls/stream", true},
+		"a txt file is not a playlist": {"https://host.best/tok/id/exp/master.txt", false},
 
 		// Must NOT match: these would be routed to the HLS downloader for nothing.
 		"an ordinary mp4":          {"https://cdn.example.com/video.mp4", false},

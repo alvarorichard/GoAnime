@@ -12,16 +12,16 @@ import (
 // A Source implements one of the interfaces below ONLY when it genuinely has
 // that capability. The dispatch layer discovers them by type assertion, so a
 // simple anime source never carries movie/season or browser methods it doesn't
-// need. They were introduced with SuperFlix — the first source to require them
-// — per §4's incremental rule: "introduce those interfaces when wiring
-// SuperFlix, not before."
+// need. They were introduced with the first movie/TV source to require them,
+// per §4's incremental rule: introduce an interface when a source needs it,
+// not before.
 //
 // The type assertion IS the capability signal; helpers below wrap the assertion
 // so callers get an explicit, logged decision (R5: a missing capability is
 // visible, never a silent no-op).
 
 // Seasoned marks a source whose catalog is organized into seasons (movie/TV,
-// e.g. SuperFlix). It generalizes the old providers.HasSeasons() bool: instead
+// e.g. StartFlix). It generalizes the old providers.HasSeasons() bool: instead
 // of every provider carrying a HasSeasons() that returns false, dispatch asks
 // IsSeasoned and only genuinely-seasoned sources answer true.
 type Seasoned interface {
@@ -41,8 +41,8 @@ type Searchable interface {
 }
 
 // BrowserGated marks a source that must drive a headed browser to clear a bot
-// gate (e.g. SuperFlix's Cloudflare Turnstile). Pure-HTTP anime sources don't
-// implement it, so they never carry browser methods.
+// gate (e.g. a Cloudflare Turnstile). No source implements it today: every
+// registered source is plain HTTP, so none carries browser methods.
 type BrowserGated interface {
 	// WarmUp readies the headed-browser machinery and reports whether this
 	// environment can run it. It returns a non-nil error when the browser

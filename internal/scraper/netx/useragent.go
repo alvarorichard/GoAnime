@@ -1,8 +1,7 @@
 package netx
 
 // UserAgent is the shared browser User-Agent presented by the plain-HTTP
-// scrapers (HiAnime, AnimeFire, Goyabu). SuperFlix declares its own because
-// its UA must match the browser that solves the Cloudflare challenge.
+// scrapers (HiAnime, AnimeFire, Goyabu).
 const UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
 
 // AcceptLanguage is the Accept-Language that goes with UserAgent: Firefox's own
@@ -14,13 +13,10 @@ const UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/201
 // browser, and it is the stock line copied through countless scraping snippets,
 // so it is exactly the kind of thing an anti-bot rule keys on.
 //
-// This matters more than it looks in this codebase. SuperFlix's CDN matches
-// Accept-Language BY VALUE and 403s anything but one specific string (see
-// superflix/cdn.go), and on 2026-09-21 its API host answered 429 to the Chrome
-// ladder while serving every other value — a correlation that held across eight
-// interleaved probes and then stopped reproducing a few hours later, so treat it
-// as reputation-sensitive rather than a fixed rule. Either way, presenting a
-// coherent browser costs nothing and removes a whole class of surprise.
+// This matters more than it looks: hosts in this ecosystem have been seen
+// matching Accept-Language BY VALUE, 403ing or 429ing one specific ladder while
+// serving every other. Presenting a coherent browser costs nothing and removes
+// a whole class of surprise.
 const AcceptLanguage = "pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3"
 
 // ChromeAcceptLanguage is Chrome's q-ladder, for the few requests that
@@ -36,15 +32,6 @@ const ChromeAcceptLanguage = "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
 // sources with no Portuguese catalog (HiAnime) so the request does not claim a
 // locale its content has nothing to do with.
 const EnglishAcceptLanguage = "en-US,en;q=0.5"
-
-// ChromeEnglishAcceptLanguage is Chrome's ladder for an English desktop.
-//
-// Chrome steps 0.9/0.8/0.7 and collapses to a single fallback for a one-locale
-// profile, so "en-US,en;q=0.9" is the whole header a real English Chrome sends.
-// It exists as a named constant because two places need exactly it: SuperFlix's
-// plain-HTTP client, whose host 429s the pt-BR Chrome ladder, and its media CDN,
-// which matches this value byte for byte (see superflix/cdn.go).
-const ChromeEnglishAcceptLanguage = "en-US,en;q=0.9"
 
 // APIUserAgent identifies GoAnime to first-party JSON/GraphQL APIs (AniList) as
 // an ordinary API client.

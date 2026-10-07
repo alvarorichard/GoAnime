@@ -65,7 +65,7 @@ func TestGoyabu_KillSwitchStillWins(t *testing.T) {
 // The sources that carry the catalogue must NOT have picked up the same
 // default. This is the test that fails if someone copies the descriptor.
 func TestTheWorkingSourcesStayOn(t *testing.T) {
-	for _, kind := range []source.SourceKind{source.AnimeFire, source.HiAnime, source.SuperFlix} {
+	for _, kind := range []source.SourceKind{source.AnimeFire, source.HiAnime, source.StartFlix} {
 		src, ok := source.Registered(kind)
 		require.Truef(t, ok, "%s is not registered", kind)
 		d := src.Describe()
