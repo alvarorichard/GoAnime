@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1205,5 +1206,88 @@ func TestMakeAbyssFilePicksTallestRendition(t *testing.T) {
 				t.Errorf("codec = %s, want %s", f.chunk.codec, tt.wantCodec)
 			}
 		})
+	}
+}
+
+// TestChunkedAdvanceKeepsAnotherRangesFetch pins that sequential reading
+// never cancels anything. A downloader reads one file as several ranges:
+// range A timed out with part 2 in flight and was about to retry at the same
+// spot, while range B, further in, moved on — and B's move cancelled A's
+// fetch, so the retry started over (seen live: "part=85 ... context
+// canceled"). Only a reader opening elsewhere — a seek — drops fetches now.
+func TestChunkedAdvanceKeepsAnotherRangesFetch(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 18 * chunk
+	_, srv, f, _ := newPartsFixture(t, size, func(up *fakeChunkUpstream) {
+		up.hold = map[string]bool{"sora:2": true}
+	})
+	ctx := context.Background()
+	b := f.openPartReader(srv.Client(), 10*chunk, size-1)
+	defer b.close()
+	if _, err := b.part(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	a := f.openPartReader(srv.Client(), 2*chunk, 9*chunk)
+	actx, cancel := context.WithCancel(ctx)
+	go func() { _, _ = a.part(actx, 2) }()
+	waitFor(t, "part 2 in flight", func() bool { _, ok := inflightParts(f)[2]; return ok })
+	held := inflightParts(f)[2]
+	t.Cleanup(held.cancel) // release the held request when the test ends
+	cancel()
+	a.close()
+
+	if _, err := b.part(ctx, 11); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held.done:
+		t.Fatalf("range B moving on cancelled range A's in-flight part: %v", held.err)
+	default:
+	}
+	retry := f.openPartReader(srv.Client(), 2*chunk, 9*chunk) // A's retry, same spot
+	defer retry.close()
+	if got := inflightParts(f)[2]; got != held {
+		t.Error("the retry did not find the original fetch still going")
+	}
+}
+
+// TestProbeAbyssFetchesHeadAndFirstPartAtOnce pins the probe's parallelism:
+// it opens the encrypted head and the first token part concurrently. Each
+// request here waits for the other to arrive, so a probe that fetched them
+// one after the other would fail.
+func TestProbeAbyssFetchesHeadAndFirstPartAtOnce(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 2*chunk + 1000
+	plain := make([]byte, size)
+	copy(plain, "\x00\x00\x00\x20ftypisom\x00\x00\x02\x00")
+	up := &fakeChunkUpstream{
+		plain: plain, fdSeed: "head.fd", fdSize: chunk,
+		size: size, md5ID: 99, resID: 2, chunk: chunk, origin: "https://playembedapi.site",
+	}
+	var arrived atomic.Int32
+	var bothOnce sync.Once
+	both := make(chan struct{})
+	barrier := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Retries can bring more than two requests; the second arrival opens
+		// the barrier for every one of them.
+		if arrived.Add(1) >= 2 {
+			bothOnce.Do(func() { close(both) })
+		}
+		select {
+		case <-both:
+			up.ServeHTTP(w, r)
+		case <-time.After(3 * time.Second):
+			w.WriteHeader(http.StatusGatewayTimeout) // the other request never came
+		}
+	})
+	srv := httptest.NewTLSServer(barrier)
+	t.Cleanup(srv.Close)
+	f := newChunkedFile(srv, size, chunk)
+	c := &Client{http: srv.Client(), baseURL: "https://www.startflix.test", userAgent: userAgent}
+	if err := c.probeAbyss(context.Background(), f); err != nil {
+		t.Fatalf("probe: %v (head and first part were not fetched at once)", err)
 	}
 }

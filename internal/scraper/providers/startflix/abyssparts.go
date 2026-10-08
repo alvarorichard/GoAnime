@@ -27,9 +27,10 @@ import (
 //     with a position. Once its current part is in hand, the next parts of
 //     its range are prefetched in parallel, nearest first, so sequential
 //     playback rarely waits on the origin.
-//   - Concurrent fetches of a part share one origin request, and when a
-//     reader lands somewhere new (a seek), in-flight fetches that no reader
-//     wants any more are cancelled so the new position gets the bandwidth.
+//   - Concurrent fetches of a part share one origin request, and when a new
+//     reader opens somewhere else (a seek: players seek by opening a new
+//     connection), in-flight fetches that no reader wants any more are
+//     cancelled so the new position gets the bandwidth.
 //
 // A failed fetch is never cached as data.
 const (
@@ -213,9 +214,12 @@ func (c *abyssPartCache) wantedLocked(idx int64) bool {
 
 // dropStaleLocked cancels the in-flight fetches no reader's window covers any
 // more — what a seek leaves behind — so they stop competing with the new
-// position for bandwidth. A reader that hangs up does not trigger this on its
-// own: its fetches run on until a reader lands elsewhere, so mpv reopening at
-// the same spot finds them still going. The caller holds c.mu.
+// position for bandwidth. It runs only when a reader opens: a seek always
+// arrives as a new connection, while a reader moving on is just sequential
+// reading. Hanging up does not trigger it either, so a client retrying at the
+// same spot — mpv reopening, a downloader range that timed out — finds its
+// fetches still going, even while other ranges of the file keep advancing.
+// The caller holds c.mu.
 func (c *abyssPartCache) dropStaleLocked() {
 	for idx, w := range c.inflight {
 		if !c.wantedLocked(idx) {
@@ -315,13 +319,13 @@ func (rd *abyssPartReader) close() {
 
 // part returns part idx, moving the reader there first. Prefetching past it
 // waits until the part is in hand, so after a seek the part mpv is blocked on
-// gets the bandwidth before the read-ahead does.
+// gets the bandwidth before the read-ahead does. Moving on is sequential
+// reading, not a seek, so it cancels nothing (see dropStaleLocked).
 func (rd *abyssPartReader) part(ctx context.Context, idx int64) ([]byte, error) {
 	c := rd.c
 	c.mu.Lock()
 	w := c.readers[rd]
 	w.pos, w.ready = idx, false
-	c.dropStaleLocked()
 	c.mu.Unlock()
 
 	data, err := rd.f.abyssGetPart(ctx, rd.client, idx)

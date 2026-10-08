@@ -297,6 +297,67 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		}
 		return nil, fmt.Errorf("season selection cancelled: %w", err)
 	}
+	return startFlixSeasonEpisodes(media, panel, season), nil
+}
+
+// ErrStartFlixNotSeries is returned when a series operation meets a movie.
+var ErrStartFlixNotSeries = errors.New("this StartFlix title is a movie, not a series")
+
+// loadStartFlixSeries opens a title's panel and its seasons, refusing movies.
+func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Season, error) {
+	if media == nil || media.URL == "" {
+		return startflix.Panel{}, nil, fmt.Errorf("no StartFlix page for this title")
+	}
+	c := sfxClientFn()
+	panel, err := loadStartFlixPanel(c, media)
+	if err != nil {
+		return startflix.Panel{}, nil, describeStartFlixErr(err)
+	}
+	if panel.Kind == startflix.KindMovie {
+		return startflix.Panel{}, nil, ErrStartFlixNotSeries
+	}
+	seasons, err := loadStartFlixSeasons(c, panel)
+	if err != nil {
+		return startflix.Panel{}, nil, describeStartFlixErr(err)
+	}
+	return panel, seasons, nil
+}
+
+// GetStartFlixSeasonNumbers lists a series' season numbers, in panel order,
+// for downloads that name the seasons rather than pick one.
+func GetStartFlixSeasonNumbers(media *models.Anime) ([]int, error) {
+	_, seasons, err := loadStartFlixSeries(media)
+	if err != nil {
+		return nil, err
+	}
+	nums := make([]int, 0, len(seasons))
+	for _, s := range seasons {
+		nums = append(nums, s.Number)
+	}
+	return nums, nil
+}
+
+// GetStartFlixSeasonEpisodes lists one season of a series without the season
+// picker, in the audio the user picks (asked once per title, then
+// remembered), and records it as the title's current season.
+func GetStartFlixSeasonEpisodes(media *models.Anime, seasonNum int) ([]models.Episode, error) {
+	panel, seasons, err := loadStartFlixSeries(media)
+	if err != nil {
+		return nil, err
+	}
+	available := make([]string, 0, len(seasons))
+	for _, s := range seasons {
+		if s.Number == seasonNum {
+			return startFlixSeasonEpisodes(media, panel, s), nil
+		}
+		available = append(available, s.Key())
+	}
+	return nil, fmt.Errorf("season %d is not on StartFlix for %q (seasons: %s)", seasonNum, media.Name, strings.Join(available, ", "))
+}
+
+// startFlixSeasonEpisodes builds a season's episode list in the audio the
+// user picks, and records the season as the title's current one.
+func startFlixSeasonEpisodes(media *models.Anime, panel startflix.Panel, season startflix.Season) []models.Episode {
 	audio := selectStartFlixAudio(media.URL, season)
 	media.CurrentSeason = season.Number
 
@@ -313,7 +374,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		})
 	}
 	util.Debug("StartFlix episodes loaded", "season", season.Number, "audio", audio, "count", len(episodes))
-	return episodes, nil
+	return episodes
 }
 
 // isStartFlixPlayersURL reports whether an episode URL is already the panel

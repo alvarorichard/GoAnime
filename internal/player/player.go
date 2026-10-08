@@ -78,6 +78,13 @@ func SetAnimeName(name string, season int) {
 	gMedia.animeSeason = max(season, 1)
 }
 
+// GetAnimeSeason returns the season downloads are currently filed under.
+func GetAnimeSeason() int {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	return gMedia.animeSeason
+}
+
 // SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
 // This determines whether downloads go to the movies or anime directory.
 func SetMediaType(isMovieOrTV bool) {
@@ -844,7 +851,7 @@ func HandleDownloadAndPlay(
 				util.Errorf("No episodes available to download")
 				continue
 			}
-			if err := HandleBatchDownloadRange(episodes, anime, 1, len(episodes)); err != nil {
+			if err := HandleDownloadAll(episodes, anime); err != nil {
 				if errors.Is(err, ErrUserQuit) {
 					return nil
 				}
@@ -1102,7 +1109,7 @@ func downloadAndPlayEpisode(
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 
@@ -1219,7 +1226,7 @@ func downloadAndPlayEpisode(
 			printDownloadLocation(episodePath)
 
 			// Download selected subtitles alongside the video file
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 
@@ -1279,7 +1286,7 @@ func downloadAndPlayEpisode(
 
 			// Download selected subtitles alongside the video file
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 		}
@@ -1677,17 +1684,26 @@ func printDownloadLocation(filePath string) {
 	util.PrintSavedLocation("File saved at:", absPath)
 }
 
-// downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
-// the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
-// (already filtered by util.SelectSubtitles).
-func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...any)) {
+// subtitleHTTPClientFn builds the SSRF-guarded client subtitle tracks are
+// fetched with; a seam for tests.
+var subtitleHTTPClientFn = func() *http.Client {
+	return &http.Client{
+		Transport: api.SafeTransport(30 * time.Second),
+		Timeout:   60 * time.Second,
+	}
+}
+
+// downloadSubtitleFiles fetches the given subtitle tracks and muxes them into
+// the downloaded video file. Single downloads pass util.GlobalSubtitles
+// (already filtered by util.SelectSubtitles); a batch passes each episode's
+// own tracks, captured when that episode's stream was resolved.
+func downloadSubtitleFiles(videoPath string, subs []util.SubtitleInfo, printFn func(format string, a ...any)) {
 	if printFn == nil {
 		printFn = func(format string, a ...any) {
 			fmt.Printf(format, a...)
 		}
 	}
 
-	subs := util.GetGlobalSubtitles()
 	if len(subs) == 0 {
 		return
 	}
@@ -1716,10 +1732,7 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 	}
 
 	dir := filepath.Dir(videoPath)
-	client := &http.Client{
-		Transport: api.SafeTransport(30 * time.Second),
-		Timeout:   60 * time.Second,
-	}
+	client := subtitleHTTPClientFn()
 
 	// Collect subtitle files to mux
 	type subEntry struct {

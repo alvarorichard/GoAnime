@@ -458,22 +458,27 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 // probeAbyss checks the CDN serves the file before mpv is pointed at it, so a
 // dead rendition fails over to the next player instead of a blank window. For
 // chunked files it opens both the encrypted head and the first token part, so
-// a broken token scheme is caught here rather than minutes into playback.
+// a broken token scheme is caught here rather than minutes into playback. The
+// two are fetched at once: each is a whole 2 MiB part, and one after the
+// other they doubled how long a stream took to resolve — which a batch pays
+// once per episode before its first download starts.
 func (c *Client) probeAbyss(ctx context.Context, f *abyssFile) error {
 	if f.chunk != nil {
-		buf, err := readAbyssRange(ctx, c.proxyClient(), f, 0, 15)
-		if err != nil {
-			return err
+		var head []byte
+		var headErr, partErr error
+		var wg sync.WaitGroup
+		wg.Go(func() { head, headErr = readAbyssRange(ctx, c.proxyClient(), f, 0, 15) })
+		if next := min(f.chunk.firstSize, f.size-1); next < f.size-1 {
+			wg.Go(func() { _, partErr = readAbyssRange(ctx, c.proxyClient(), f, next, next+15) })
 		}
-		if len(buf) < 8 || string(buf[4:8]) != "ftyp" {
+		wg.Wait()
+		if headErr != nil {
+			return headErr
+		}
+		if len(head) < 8 || string(head[4:8]) != "ftyp" {
 			return fmt.Errorf("abyss: decrypted chunk header is not an MP4")
 		}
-		if next := min(f.chunk.firstSize, f.size-1); next < f.size-1 {
-			if _, err := readAbyssRange(ctx, c.proxyClient(), f, next, next+15); err != nil {
-				return err
-			}
-		}
-		return nil
+		return partErr
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.upstream, http.NoBody)
 	if err != nil {

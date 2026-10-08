@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/downloader/hls"
@@ -88,10 +89,12 @@ type hlsChainCalls struct{ native, direct, ytdlp int }
 func useHLSChainMocks(t *testing.T, native, direct, ytdlp func(string, string, *model) error) *hlsChainCalls {
 	t.Helper()
 	calls := &hlsChainCalls{}
+	var mu sync.Mutex // batch tests run the chain from several goroutines
+	count := func(n *int) { mu.Lock(); *n++; mu.Unlock() }
 	prevN, prevD, prevY := nativeHLSDownloadFn, directHTTPDownloadFn, ytdlpDownloadFn
-	nativeHLSDownloadFn = func(u, p string, m *model) error { calls.native++; return native(u, p, m) }
-	directHTTPDownloadFn = func(u, p string, m *model) error { calls.direct++; return direct(u, p, m) }
-	ytdlpDownloadFn = func(u, p string, m *model) error { calls.ytdlp++; return ytdlp(u, p, m) }
+	nativeHLSDownloadFn = func(u, p string, m *model) error { count(&calls.native); return native(u, p, m) }
+	directHTTPDownloadFn = func(u, p string, m *model) error { count(&calls.direct); return direct(u, p, m) }
+	ytdlpDownloadFn = func(u, p string, m *model) error { count(&calls.ytdlp); return ytdlp(u, p, m) }
 	t.Cleanup(func() { nativeHLSDownloadFn, directHTTPDownloadFn, ytdlpDownloadFn = prevN, prevD, prevY })
 	return calls
 }

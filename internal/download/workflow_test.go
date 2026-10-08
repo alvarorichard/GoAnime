@@ -7,7 +7,6 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,19 +14,10 @@ import (
 // HandleMovieDownloadRequest
 // ---------------------------------------------------------------------------
 
-func TestHandleMovieDownloadRequest_AlwaysErrors(t *testing.T) {
+func TestHandleMovieDownloadRequest_NilOrEmptyRequest(t *testing.T) {
 	t.Parallel()
-	req := &util.DownloadRequest{AnimeName: "Any Movie"}
-	err := HandleMovieDownloadRequest(req)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no longer supported")
-}
-
-func TestHandleMovieDownloadRequest_NilRequest(t *testing.T) {
-	t.Parallel()
-	// nil request: the function ignores it entirely and returns the stub error
-	err := HandleMovieDownloadRequest(nil)
-	require.Error(t, err)
+	require.Error(t, HandleMovieDownloadRequest(nil))
+	require.Error(t, HandleMovieDownloadRequest(&util.DownloadRequest{AnimeName: "  "}))
 }
 
 // ---------------------------------------------------------------------------

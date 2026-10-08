@@ -155,9 +155,10 @@ func TestHandleMovieDownloadRequest_PropagatesError(t *testing.T) {
 	util.GlobalDownloadRequest = &util.DownloadRequest{}
 	t.Cleanup(func() { util.GlobalDownloadRequest = prev })
 
+	// An empty request fails before any search; the handler passes that on.
 	err := HandleMovieDownloadRequest()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no longer supported")
+	assert.Contains(t, err.Error(), "no movie or series name")
 }
 
 // --- SearchMedia ---

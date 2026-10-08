@@ -179,7 +179,7 @@ func TestDownloadSubtitleFiles_NoSubsIsNoop(t *testing.T) {
 	util.ClearGlobalSubtitles()
 	t.Cleanup(func() { util.GlobalSubtitles = prev })
 
-	assert.NotPanics(t, func() { downloadSubtitleFiles("/tmp/x.mp4", nil) })
+	assert.NotPanics(t, func() { downloadSubtitleFiles("/tmp/x.mp4", nil, nil) })
 }
 
 func TestStartVideo_InvalidLinkReturnsError(t *testing.T) {

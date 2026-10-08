@@ -22,7 +22,8 @@ func HandleDownloadRequest() error {
 	return nil
 }
 
-// HandleMovieDownloadRequest processes movie/TV download requests from FlixHQ/SFlix
+// HandleMovieDownloadRequest processes the -dm movie/series download requests,
+// served by StartFlix.
 func HandleMovieDownloadRequest() error {
 	// Initialize logger for download process
 	util.InitLogger()
@@ -31,8 +32,8 @@ func HandleMovieDownloadRequest() error {
 		return fmt.Errorf("movie download request is nil")
 	}
 
-	// download.HandleMovieDownloadRequest is currently a permanent stub that
-	// always fails (the movie/TV scrapers were removed); its error is already
-	// self-explanatory, so return it as-is.
-	return download.HandleMovieDownloadRequest(util.GlobalDownloadRequest)
+	if err := download.HandleMovieDownloadRequest(util.GlobalDownloadRequest); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	return nil
 }
