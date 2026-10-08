@@ -449,8 +449,7 @@ func abyssPartRequest(ctx context.Context, client *http.Client, rawURL string, f
 // abyssRetryableFailure reports whether a part fetch is worth retrying:
 // network errors and origin-side statuses, never client errors like 404/403.
 func abyssRetryableFailure(err error) bool {
-	var diag *netx.SourceDiagnostic
-	if errors.As(err, &diag) {
+	if diag, ok := errors.AsType[*netx.SourceDiagnostic](err); ok {
 		switch diag.StatusCode {
 		case http.StatusRequestTimeout, http.StatusTooManyRequests,
 			http.StatusInternalServerError, http.StatusBadGateway,
@@ -466,8 +465,7 @@ func abyssRetryableFailure(err error) bool {
 // abyssRedactTransportErr strips the upstream URL from transport errors: the
 // /sora/ URL embeds the chunk token, which never belongs in a log.
 func abyssRedactTransportErr(err error) error {
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		return &url.Error{Op: ue.Op, URL: "abyss-chunk", Err: ue.Err}
 	}
 	return err
@@ -510,7 +508,7 @@ func (f *abyssFile) abyssPartURLs() ([]string, error) {
 		n := (f.size + part - 1) / part
 		urls := make([]string, 0, n)
 		sora := "https://" + c.chunkHost + "/sora/" + strconv.FormatInt(f.size, 10) + "/"
-		for idx := int64(0); idx < n; idx++ {
+		for idx := range n {
 			if c.firstSize > 0 && idx*part < c.firstSize {
 				urls = append(urls, c.firstURL)
 				continue

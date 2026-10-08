@@ -477,3 +477,28 @@ func TestNoStreamErrorUnwrap(t *testing.T) {
 		t.Error("NoStreamError no longer matches ErrNoSupportedServer")
 	}
 }
+
+// TestAbyssRedactTransportErr pins that a transport error never carries the
+// /sora/ URL — it embeds the chunk token — into a log, even wrapped, while
+// keeping what failed; other errors pass through untouched.
+func TestAbyssRedactTransportErr(t *testing.T) {
+	t.Parallel()
+	const tokenURL = "https://qq.abyss.test/sora/123/SECRETTOKEN"
+	cause := errors.New("connection reset by peer")
+	for _, in := range []error{
+		&url.Error{Op: "Get", URL: tokenURL, Err: cause},
+		fmt.Errorf("abyss part 3: %w", &url.Error{Op: "Get", URL: tokenURL, Err: cause}),
+	} {
+		got := abyssRedactTransportErr(in)
+		if strings.Contains(got.Error(), "SECRETTOKEN") {
+			t.Errorf("%q leaks the chunk token", got)
+		}
+		if !strings.Contains(got.Error(), "abyss-chunk") || !errors.Is(got, cause) {
+			t.Errorf("%q lost what failed", got)
+		}
+	}
+	plain := errors.New("abyss chunk returned 10 bytes, expected 20")
+	if got := abyssRedactTransportErr(plain); got != plain {
+		t.Errorf("a non-transport error was rewritten: %v", got)
+	}
+}
