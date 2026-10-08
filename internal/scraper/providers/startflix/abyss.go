@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
@@ -23,8 +24,9 @@ import (
 
 // Abyss (abyss.to; on StartFlix's panel as playembedapi.site) is the host most
 // titles are offered on. Its embed page carries the video's metadata sealed,
-// and the video itself is an MP4 whose first 64 KiB arrive encrypted. Measured
-// against the player bundles (iamcdn.net/player-v2 core + sw) on 2026-10-07:
+// and the video itself is served in one of two layouts. Measured against the
+// player bundles (iamcdn.net/player-v2 core + sw) on 2026-10-07 and the live
+// player on 2026-10-08:
 //
 //   - The page sets `const datas = "<base64 JSON>"` with slug, md5_id, user_id
 //     and "media", a Latin-1 string of AES-256-CTR ciphertext. The key is the
@@ -36,10 +38,22 @@ import (
 //   - Bytes [0, 65536) of that file are AES-256-CTR encrypted with the key
 //     md5hex(<last path segment>), counter as above; the rest is plain. The
 //     player checks the decrypted head for "ftyp" before using it.
+//   - Renditions without url/path ("sub" plus a "domains" list instead) are
+//     served in chunks: the first partSize bytes come from a ".fd" URL with a
+//     Range (same head-only encryption as above, keyed by its last path
+//     segment), and every 2 MiB part after that comes from
+//     https://<domain>/sora/<size>/<token>, where token is the double base64
+//     (padding stripped) of the AES-256-CTR encryption of the part path
+//     "/mp4/<md5_id>/<res_id>/<size>/<chunk>/<part>". The token key is
+//     md5hex(<size>) — but computed by the player's own md5 over the size as
+//     a JS number: it stringifies to decimal and then hashes the digit VALUES
+//     ([3,9,2,...], not the ASCII bytes [51,57,...]), because its bytesToWords
+//     coerces each character with `<<`. The counter block is the first 16 key
+//     bytes, as usual. Verified byte-for-byte against tokens the live player
+//     minted on 2026-10-08.
 //
-// Renditions without url/path use the player's chunk token route. The local
-// proxy maps byte ranges to those chunks and opens the encrypted .fd prefix,
-// so mpv and the downloader still see one ordinary MP4.
+// The local proxy maps byte ranges to .fd ranges and chunk tokens, so mpv and
+// the downloader still see one ordinary MP4.
 
 const abyssEncryptedHead = 65536
 
@@ -140,6 +154,12 @@ func abyssKey(seed string) (key, iv []byte) {
 // is the initial block plus off/16, and off%16 keystream bytes are skipped.
 func abyssXOR(seed string, off int64, buf []byte) error {
 	key, iv := abyssKey(seed)
+	return abyssCTR(key, iv, off, buf)
+}
+
+// abyssCTR applies an AES-CTR keystream to buf, which starts at byte offset
+// off of the stream.
+func abyssCTR(key, iv []byte, off int64, buf []byte) error {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return err
@@ -157,16 +177,37 @@ func abyssXOR(seed string, off int64, buf []byte) error {
 }
 
 // abyssChunkToken mirrors the player's token builder: AES-CTR encrypts the
-// virtual chunk path using the ASCII MD5 hex of the file size as both key
-// material and the source of the initial counter, then wraps it in Base64
-// twice (without padding).
+// virtual chunk path, then wraps it in Base64 twice (without padding). The key
+// is the player's own md5 of the file size — computed over the size as a JS
+// number, which stringifies to decimal and then gets hashed as digit VALUES
+// (see abyssChunkKey), with the first 16 key bytes as the counter block.
 func abyssChunkToken(path string, size int64) string {
+	key, iv := abyssChunkKey(size)
 	ciphertext := []byte(path)
-	if err := abyssXOR(strconv.FormatInt(size, 10), 0, ciphertext); err != nil {
+	if err := abyssCTR(key, iv, 0, ciphertext); err != nil {
 		return ""
 	}
 	inner := strings.TrimRight(base64.StdEncoding.EncodeToString(ciphertext), "=")
 	return strings.TrimRight(base64.StdEncoding.EncodeToString([]byte(inner)), "=")
+}
+
+// abyssChunkKey derives the chunk token key for a file size. The player's md5
+// receives the size as a JS number, stringifies it to decimal, and then feeds
+// the string to a bytesToWords that coerces each character with `<<` — so the
+// hashed bytes are the digit values ([3,9,2,...]), not the ASCII codes
+// ([51,57,...]). Only non-negative integers reach this path (file sizes), so
+// mapping each decimal digit to its value replicates the player exactly.
+func abyssChunkKey(size int64) (key, iv []byte) {
+	decimal := strconv.FormatInt(size, 10)
+	digits := make([]byte, 0, len(decimal))
+	for i := 0; i < len(decimal); i++ {
+		if c := decimal[i]; c >= '0' && c <= '9' {
+			digits = append(digits, c-'0')
+		}
+	}
+	sum := md5.Sum(digits) // #nosec G401 -- see import
+	key = []byte(hex.EncodeToString(sum[:]))
+	return key, key[:aes.BlockSize]
 }
 
 // addToCounter adds n to a big-endian 128-bit counter, as CTR increments it.
@@ -217,11 +258,15 @@ func pickAbyssSource(sources []abyssSource) (abyssSource, bool) {
 	return files[0], true
 }
 
-func abyssChunkDomain(domains []string, sub string) string {
+func abyssChunkDomain(domains []string, size int64, sub string) string {
 	for _, domain := range domains {
 		if sub != "" && strings.Contains(domain, sub) {
 			return domain
 		}
+	}
+	// Without a sub match the player falls back to a size-picked domain.
+	if len(domains) > 0 && size > 0 {
+		return domains[int(uint64(size)%uint64(len(domains)))] // #nosec G115 -- size is positive here
 	}
 	return ""
 }
@@ -242,6 +287,15 @@ type abyssFile struct {
 	seed     string // last path segment: the head's key seed
 	origin   string // embed origin, sent as Origin and Referer
 	chunk    *abyssChunkSource
+
+	partsOnce sync.Once
+	parts     *abyssPartCache // per-file LRU of fetched chunk parts
+}
+
+// partsCache lazily creates the chunk part cache.
+func (f *abyssFile) partsCache() *abyssPartCache {
+	f.partsOnce.Do(func() { f.parts = newAbyssPartCache() })
+	return f.parts
 }
 
 type abyssChunkSource struct {
@@ -250,7 +304,8 @@ type abyssChunkSource struct {
 	sub       string
 	codec     string
 	label     string
-	chunkURL  string
+	chunkURL  string // full base URL (kept for debugging)
+	chunkPath string // URL path the tokens encrypt: /mp4/<md5>/<res>/<size>
 	chunkHost string
 	firstURL  string
 	firstSize int64
@@ -271,7 +326,7 @@ func (c *Client) resolveAbyss(ctx context.Context, embed *url.URL, p Player) (*S
 	if err != nil {
 		return nil, netx.NewDecryptError(SourceName, "abyss", "could not open the media list", err)
 	}
-	file, ok := makeAbyssFile(datas, media)
+	file, ok := makeAbyssFile(embed, datas, media)
 	if !ok {
 		return nil, fmt.Errorf("abyss %s: no supported MP4 rendition", datas.Slug)
 	}
@@ -285,14 +340,17 @@ func (c *Client) resolveAbyss(ctx context.Context, embed *url.URL, p Player) (*S
 	return &Stream{URL: local, Host: embed.Host}, nil
 }
 
-func makeAbyssFile(datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
+func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
+	// The CDN only serves media to requests carrying the embed's Origin and
+	// Referer, so the file carries the embed origin like the player does.
+	origin := embed.Scheme + "://" + embed.Host
 	if src, ok := pickAbyssSource(media.MP4.Sources); ok {
 		upstream := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(src.Path, "/")
 		return &abyssFile{
 			upstream: upstream,
 			size:     src.Size,
 			seed:     upstream[strings.LastIndex(upstream, "/")+1:],
-			origin:   "https://player.abyssplayer.com",
+			origin:   origin,
 		}, true
 	}
 
@@ -301,10 +359,7 @@ func makeAbyssFile(datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
 		if src.Size <= abyssEncryptedHead || src.Sub == "" || src.ResID <= 0 {
 			continue
 		}
-		if abyssChunkDomain(media.MP4.Domains, src.Sub) == "" {
-			continue
-		}
-		if _, ok := pickAbyssFirstData(media.MP4.FristDatas, src); !ok {
+		if abyssChunkDomain(media.MP4.Domains, src.Size, src.Sub) == "" {
 			continue
 		}
 		choices = append(choices, src)
@@ -320,28 +375,39 @@ func makeAbyssFile(datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
 		return choices[i].ResID > choices[j].ResID
 	})
 	src := choices[0]
-	first, _ := pickAbyssFirstData(media.MP4.FristDatas, src)
-	domain := abyssChunkDomain(media.MP4.Domains, src.Sub)
-	firstURL, err := url.Parse(first.URL)
-	if err != nil || firstURL.Scheme != "https" || firstURL.Host == "" {
-		return nil, false
+	// The encrypted head is optional: without a fristData entry — or when its
+	// partSize is not a whole number of parts, which the player refuses to
+	// split — every part goes through the chunk tokens instead.
+	var firstURL, firstSeed string
+	var firstSize int64
+	if first, ok := pickAbyssFirstData(media.MP4.FristDatas, src); ok {
+		part := min(src.Size, int64(2<<20))
+		if u, err := url.Parse(first.URL); err == nil && u.Scheme == "https" && u.Host != "" &&
+			part > 0 && first.PartSize%part == 0 {
+			firstURL, firstSize = first.URL, first.PartSize
+			firstSeed = u.Path[strings.LastIndex(u.Path, "/")+1:]
+		}
 	}
-	chunkURL := "https://" + domain + "/mp4/" + strconv.FormatInt(datas.MD5ID, 10) + "/" + strconv.Itoa(src.ResID) + "/" + strconv.FormatInt(src.Size, 10)
+	domain := abyssChunkDomain(media.MP4.Domains, src.Size, src.Sub)
+	chunkPath := "/mp4/" + strconv.FormatInt(datas.MD5ID, 10) + "/" + strconv.Itoa(src.ResID) + "/" + strconv.FormatInt(src.Size, 10)
+	chunkURL := "https://" + domain + chunkPath
 	return &abyssFile{
 		size:   src.Size,
-		origin: "https://player.abyssplayer.com",
+		origin: origin,
 		chunk: &abyssChunkSource{
 			md5ID: datas.MD5ID, resID: src.ResID, sub: src.Sub,
 			codec: src.Codec, label: src.Label,
-			chunkURL: chunkURL, chunkHost: domain,
-			firstURL: first.URL, firstSize: first.PartSize,
-			firstSeed: firstURL.Path[strings.LastIndex(firstURL.Path, "/")+1:],
+			chunkURL: chunkURL, chunkPath: chunkPath, chunkHost: domain,
+			firstURL: firstURL, firstSize: firstSize,
+			firstSeed: firstSeed,
 		},
 	}, true
 }
 
 // probeAbyss checks the CDN serves the file before mpv is pointed at it, so a
-// dead rendition fails over to the next player instead of a blank window.
+// dead rendition fails over to the next player instead of a blank window. For
+// chunked files it opens both the encrypted head and the first token part, so
+// a broken token scheme is caught here rather than minutes into playback.
 func (c *Client) probeAbyss(ctx context.Context, f *abyssFile) error {
 	if f.chunk != nil {
 		buf, err := readAbyssRange(ctx, c.proxyClient(), f, 0, 15)
@@ -350,6 +416,11 @@ func (c *Client) probeAbyss(ctx context.Context, f *abyssFile) error {
 		}
 		if len(buf) < 8 || string(buf[4:8]) != "ftyp" {
 			return fmt.Errorf("abyss: decrypted chunk header is not an MP4")
+		}
+		if next := min(f.chunk.firstSize, f.size-1); next < f.size-1 {
+			if _, err := readAbyssRange(ctx, c.proxyClient(), f, next, next+15); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

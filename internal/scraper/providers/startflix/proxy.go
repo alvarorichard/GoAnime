@@ -178,9 +178,22 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.chunk != nil {
+		// Open the first part this response needs before promising mpv any
+		// bytes: a dead origin must fail as 502 here, not as a 206 that
+		// truncates mid-stream once the headers have gone out.
+		first := start / f.abyssPartSize()
+		if _, err := f.abyssGetPart(r.Context(), f.client, first); err != nil {
+			util.Debug("StartFlix chunk proxy failed before headers", "err", err,
+				"range", fmt.Sprintf("%d-%d", start, end), "part", first)
+			http.Error(w, "upstream chunk unavailable", http.StatusBadGateway)
+			return
+		}
 		writeRangeHeaders(w, start, end, f.size, partial)
 		if err := copyAbyssChunkRange(r.Context(), f.client, f.abyssFile, start, end, w); err != nil && r.Context().Err() == nil {
-			util.Debug("StartFlix chunk proxy failed", "err", err, "range", fmt.Sprintf("%d-%d", start, end))
+			// Headers (and possibly bytes) are already out; all we can do is
+			// stop writing. The short body tells mpv the response ended badly.
+			util.Debug("StartFlix chunk proxy failed mid-stream", "err", err,
+				"range", fmt.Sprintf("%d-%d", start, end))
 		}
 		return
 	}
@@ -192,10 +205,10 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.decorate(req, userAgent)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	resp, err := f.client.Do(req)
+	resp, err := f.upstreamWithRetry(r.Context(), req)
 	if err != nil {
-		util.Debug("StartFlix proxy upstream failed", "err", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		util.Debug("StartFlix proxy upstream failed", "err", err, "range", req.Header.Get("Range"))
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -215,6 +228,57 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// upstreamWithRetry sends a single-file upstream request, retrying transient
+// failures (network errors, 5xx, 429) a couple of times with a short backoff
+// before the response headers reach the client.
+func (p *proxiedFile) upstreamWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+	started := time.Now()
+	var resp *http.Response
+	var err error
+	for attempt := 0; ; attempt++ {
+		resp, err = p.client.Do(req)
+		if err == nil && resp.StatusCode != http.StatusRequestTimeout &&
+			resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
+			return resp, nil
+		}
+		if ctx.Err() != nil || attempt >= abyssPartRetries {
+			break
+		}
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+		} else {
+			_ = resp.Body.Close()
+		}
+		util.Debug("StartFlix proxy upstream retry", "attempt", attempt+1,
+			"status", statusOrZero(resp, err), "err", errStringOrNone(err))
+		if rerr := abyssSleep(ctx, time.Duration(attempt+1)*250*time.Millisecond); rerr != nil {
+			return nil, rerr
+		}
+	}
+	if err == nil {
+		util.Debug("StartFlix proxy upstream unavailable", "status", resp.StatusCode,
+			"range", req.Header.Get("Range"), "dur", time.Since(started).Round(time.Millisecond).String())
+		return resp, nil
+	}
+	return nil, err
+}
+
+func statusOrZero(resp *http.Response, err error) int {
+	if err != nil || resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+func errStringOrNone(err error) string {
+	if err == nil {
+		return "none"
+	}
+	return err.Error()
+}
+
 // readAbyssRange fetches a small range through the same chunk path used by the
 // player's Service Worker. It is used during resolution to reject stale URLs
 // before handing the stream to mpv.
@@ -226,75 +290,33 @@ func readAbyssRange(ctx context.Context, client *http.Client, f *abyssFile, star
 	return out.Bytes(), nil
 }
 
+// copyAbyssChunkRange streams [start, end] out of the player's parts: each
+// part is fetched once through the per-file cache (concurrent callers share
+// the fetch) and the requested slice is written from it.
 func copyAbyssChunkRange(ctx context.Context, client *http.Client, f *abyssFile, start, end int64, dst io.Writer) error {
-	c := f.chunk
-	chunkSize := int64(2 << 20) // player core's `min(size, 0x200000)`
-	if f.size < chunkSize {
-		chunkSize = f.size
+	if f.chunk == nil {
+		return errors.New("not a chunked Abyss file")
+	}
+	part := f.abyssPartSize()
+	if part <= 0 || start < 0 || end < start || end >= f.size {
+		return fmt.Errorf("invalid Abyss chunk range %d-%d", start, end)
 	}
 	for pos := start; pos <= end; {
-		part := pos / chunkSize
-		partStart := part * chunkSize
-		partEnd := min(partStart+chunkSize-1, f.size-1)
-		to := min(end, partEnd)
-		upstream := ""
-		from, through := pos-partStart, to-partStart
-		seed := ""
-		if pos < c.firstSize {
-			upstream = c.firstURL
-			from, through = pos, min(to, c.firstSize-1)
-			seed = c.firstSeed
-			to = through
-			if from > through {
-				return fmt.Errorf("invalid Abyss first-data range %d-%d", from, through)
-			}
-		} else {
-			logicalPath := strings.TrimRight(c.chunkURL, "/") + "/" + strconv.FormatInt(chunkSize, 10) + "/" + strconv.FormatInt(part, 10)
-			token := abyssChunkToken(logicalPath, f.size)
-			if token == "" {
-				return errors.New("could not build Abyss chunk token")
-			}
-			upstream = "https://" + c.chunkHost + "/sora/" + strconv.FormatInt(f.size, 10) + "/" + token
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, http.NoBody)
+		idx := pos / part
+		lo, _ := f.abyssPartBounds(idx)
+		data, err := f.abyssGetPart(ctx, client, idx)
 		if err != nil {
+			return fmt.Errorf("abyss part %d: %w", idx, err)
+		}
+		from := pos - lo
+		to := min(end, lo+int64(len(data))-1) - lo
+		if from < 0 || to < from {
+			return fmt.Errorf("invalid Abyss part slice %d-%d", from, to)
+		}
+		if _, err := dst.Write(data[from : to+1]); err != nil {
 			return err
 		}
-		req.Header.Set("User-Agent", userAgent)
-		req.Header.Set("Accept", "*/*")
-		req.Header.Set("Origin", "https://player.abyssplayer.com")
-		req.Header.Set("Referer", "https://player.abyssplayer.com/")
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, through))
-		resp, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return readErr
-		}
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			return netx.NewHTTPStatusError(SourceName, "abyss chunk", resp.StatusCode)
-		}
-		if resp.StatusCode == http.StatusOK && len(body) > int(through-from+1) {
-			body = body[from : through+1]
-		}
-		if int64(len(body)) != through-from+1 {
-			return fmt.Errorf("Abyss chunk returned %d bytes, expected %d", len(body), through-from+1)
-		}
-		if seed != "" {
-			if from < abyssEncryptedHead {
-				n := min(int64(len(body)), abyssEncryptedHead-from)
-				if err := abyssXOR(seed, from, body[:n]); err != nil {
-					return err
-				}
-			}
-		}
-		if _, err := dst.Write(body); err != nil {
-			return err
-		}
-		pos = to + 1
+		pos = lo + to + 1
 	}
 	return nil
 }

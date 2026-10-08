@@ -1,0 +1,92 @@
+{
+    "mp4": {
+        "sources": [
+            {
+                "label": "360p",
+                "res_id": 2,
+                "size": 392440465,
+                "codec": "h264",
+                "status": true,
+                "sub": "e50zu2xv29"
+            },
+            {
+                "label": "360p",
+                "res_id": 2,
+                "size": 497549620,
+                "codec": "av1",
+                "status": true,
+                "sub": "weifxopsn26"
+            },
+            {
+                "label": "720p",
+                "res_id": 4,
+                "size": 844573812,
+                "codec": "h264",
+                "status": true,
+                "sub": "cqndlnxcq36"
+            },
+            {
+                "label": "720p",
+                "res_id": 4,
+                "size": 877599826,
+                "codec": "av1",
+                "status": true,
+                "sub": "dmuf4kduy30"
+            },
+            {
+                "label": "1080p",
+                "res_id": 5,
+                "size": 892468419,
+                "codec": "av1",
+                "status": true,
+                "sub": "vsnaiq1323"
+            },
+            {
+                "label": "1080p",
+                "res_id": 5,
+                "size": 1217612566,
+                "codec": "h264",
+                "status": true,
+                "sub": "o25chikcb28"
+            }
+        ],
+        "domains": [
+            "e50zu2xv29.sssrr.org",
+            "weifxopsn26.sssrr.org",
+            "cqndlnxcq36.sssrr.org",
+            "dmuf4kduy30.sssrr.org",
+            "vsnaiq1323.sssrr.org",
+            "o25chikcb28.sssrr.org"
+        ],
+        "fristDatas": [
+            {
+                "res_id": 2,
+                "size": 392440465,
+                "codec": "h264",
+                "url": "https://8oekkfci14.sssrr.org/d/8/1/4b5181e6f11f054530bf8639611fd.392440465.2.fd",
+                "partSize": 6291456
+            },
+            {
+                "res_id": 4,
+                "size": 844573812,
+                "codec": "h264",
+                "url": "https://yrir7uaz632.sssrr.org/4/7/0/4ab5735a36ca2e60e45a5df371a21.844573812.4.fd",
+                "partSize": 12582912
+            },
+            {
+                "res_id": 5,
+                "size": 892468419,
+                "codec": "av1",
+                "url": "https://g98ooid4p28.sssrr.org/6/4/a/958aa66099947784d3e47487e3a9d.892468419.5.fd",
+                "partSize": 12582912
+            },
+            {
+                "res_id": 5,
+                "size": 1217612566,
+                "codec": "h264",
+                "url": "https://yrir7uaz632.sssrr.org/f/e/e/e495aeb7e575f93364ba6daa6f4d9.1217612566.5.fd",
+                "partSize": 18874368
+            }
+        ]
+    }
+}
