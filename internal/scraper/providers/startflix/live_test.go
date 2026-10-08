@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -160,4 +161,58 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// TestLiveStartFlixAbyss resolves a movie the panel offers only on Abyss (and
+// UPNS/vidsrc, which have no resolver) and reads it back through the local
+// proxy the way mpv and the downloader will: the decrypted head must be an MP4,
+// a Range must be honoured, and ffprobe — which seeks to the moov atom — must
+// read the container end to end.
+func TestLiveStartFlixAbyss(t *testing.T) {
+	skipUnlessLive(t)
+	util.InitLogger()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	c := NewClient()
+
+	panel := Panel{URL: "https://www.painel-aso.sbs/filme/tt1013752", Kind: KindMovie, IMDBID: "tt1013752"} // Velozes e Furiosos 4
+	stream, err := c.Stream(ctx, panel.URL)
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	fmt.Printf("stream   : %s via %s\n", stream.URL, stream.Host)
+	if !util.IsLocalProxyURL(stream.URL) {
+		t.Fatalf("an Abyss stream must be served by the local proxy, got %s", stream.URL)
+	}
+
+	get := func(rng string) (*http.Response, []byte) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, stream.URL, http.NoBody)
+		req.Header.Set("Range", rng)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s: %v", rng, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		return resp, body
+	}
+	resp, head := get("bytes=0-63")
+	fmt.Printf("head     : HTTP %d %q %s\n", resp.StatusCode, head[4:12], resp.Header.Get("Content-Range"))
+	if resp.StatusCode != http.StatusPartialContent || string(head[4:8]) != "ftyp" {
+		t.Fatalf("decrypted head is not an MP4: HTTP %d % x", resp.StatusCode, head[:16])
+	}
+	// A range that straddles the end of the encrypted head.
+	resp, mid := get("bytes=65530-65545")
+	if resp.StatusCode != http.StatusPartialContent || len(mid) != 16 {
+		t.Fatalf("straddling range: HTTP %d, %d bytes", resp.StatusCode, len(mid))
+	}
+
+	if ffprobe, err := exec.LookPath("ffprobe"); err == nil {
+		out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-show_entries",
+			"format=duration:stream=codec_name,width,height", "-of", "compact", stream.URL).CombinedOutput() // #nosec G204 -- test-only, local URL
+		fmt.Printf("ffprobe  : %s\n", strings.ReplaceAll(strings.TrimSpace(string(out)), "\n", " | "))
+		if err != nil || !strings.Contains(string(out), "duration=") {
+			t.Fatalf("ffprobe could not read the file through the proxy: %v", err)
+		}
+	}
 }

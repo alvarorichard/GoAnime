@@ -734,13 +734,34 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 	return nil
 }
 
+// downloadTransport is the SSRF-guarded transport for media downloads, except
+// that it lets a request through to one of GoAnime's own loopback stream
+// proxies (util.IsLocalProxyURL) — the guard refuses loopback, and those
+// proxies are how a stream that needs rewriting reaches the downloader as a
+// plain file.
+func downloadTransport(timeout time.Duration) http.RoundTripper {
+	return localProxyAware{
+		guarded: api.SafeTransport(timeout),
+		local:   &http.Transport{ResponseHeaderTimeout: timeout},
+	}
+}
+
+type localProxyAware struct{ guarded, local http.RoundTripper }
+
+func (t localProxyAware) RoundTrip(r *http.Request) (*http.Response, error) {
+	if util.IsLocalProxyURL(r.URL.String()) {
+		return t.local.RoundTrip(r)
+	}
+	return t.guarded.RoundTrip(r)
+}
+
 // DownloadVideo downloads a video using multiple threads.
 func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	start := time.Now()
 	util.Debug("DownloadVideo started", "url", url)
 	destPath = filepath.Clean(destPath)
 	httpClient := &http.Client{
-		Transport: api.SafeTransport(10 * time.Second),
+		Transport: downloadTransport(10 * time.Second),
 	}
 	chunkSize := int64(0)
 	var contentLength int64
@@ -1062,7 +1083,7 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 // (e.g. SharePoint .aspx URLs that serve direct video content).
 func downloadDirectHTTP(videoURL, path string, m *model) error {
 	client := &http.Client{
-		Transport: api.SafeTransport(10 * time.Minute),
+		Transport: downloadTransport(10 * time.Minute),
 	}
 	return downloadDirectHTTPWithClient(videoURL, path, m, client)
 }
@@ -1084,7 +1105,7 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 
 	if client == nil {
 		client = &http.Client{
-			Transport: api.SafeTransport(10 * time.Minute),
+			Transport: downloadTransport(10 * time.Minute),
 		}
 	}
 	req, err := http.NewRequest("GET", safeURL, http.NoBody)
@@ -1399,7 +1420,7 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 		p          *tea.Program
 		totalBytes int64
 		httpClient = &http.Client{
-			Transport: api.SafeTransport(10 * time.Second),
+			Transport: downloadTransport(10 * time.Second),
 		}
 		episodesToDownload []int
 		resolvedURLs       = make(map[int]string) // cache URLs from pre-flight
@@ -1705,7 +1726,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 		m                  *model
 		p                  *tea.Program
 		totalBytes         int64
-		httpClient         = &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+		httpClient         = &http.Client{Transport: downloadTransport(10 * time.Second)}
 		episodesToDownload []int
 		resolvedURLs       = make(map[int]string) // cache URLs from pre-flight
 		sourceURLs         = make(map[int]string) // original source URLs used for fallback resolution

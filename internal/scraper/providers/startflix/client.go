@@ -37,6 +37,7 @@ const (
 // Client talks to StartFlix, its video panel and the player hosts.
 type Client struct {
 	http       *http.Client
+	stream     *http.Client // upstream client of the local stream proxy; no overall timeout
 	baseURL    string
 	userAgent  string
 	maxRetries int
@@ -54,6 +55,7 @@ func NewClient() *Client {
 	}
 	return &Client{
 		http:       util.NewFastClient(),
+		stream:     newStreamClient(),
 		baseURL:    base,
 		userAgent:  userAgent,
 		maxRetries: 2,
@@ -308,18 +310,21 @@ func (e *NoStreamError) Is(target error) bool { return target == ErrNoSupportedS
 func (e *NoStreamError) Unwrap() []error { return e.Failures }
 
 // playerRank orders resolution attempts: Byse first (a single JSON call), then
-// direct files (the panel's own video element), then everything else.
+// Abyss (one page plus a probe, then served through the local proxy), then
+// direct files (the panel's own video element, often dead), then the rest.
 func playerRank(p Player) int {
 	u, err := url.Parse(p.URL)
 	switch {
 	case err != nil:
-		return 3
+		return 4
 	case isByseHost(u.Host):
 		return 0
-	case p.IsDirectFile():
+	case isAbyssHost(u.Host):
 		return 1
-	default:
+	case p.IsDirectFile():
 		return 2
+	default:
+		return 3
 	}
 }
 
@@ -344,6 +349,8 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 		switch {
 		case isByseHost(u.Host):
 			s, err = c.resolveByse(ctx, u)
+		case isAbyssHost(u.Host):
+			s, err = c.resolveAbyss(ctx, u, p)
 		case p.IsDirectFile():
 			s, err = c.resolveDirect(ctx, p, u)
 		default:

@@ -1129,7 +1129,7 @@ func downloadAndPlayEpisode(
 			if LooksLikeHLS(videoURL) {
 				m.totalBytes = 0 // let download callbacks set the real value
 			} else {
-				httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+				httpClient := &http.Client{Transport: downloadTransport(10 * time.Second)}
 				if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 					m.totalBytes = sz
 				} else {
@@ -1238,7 +1238,7 @@ func downloadAndPlayEpisode(
 
 			// Get content length
 			httpClient := &http.Client{
-				Transport: api.SafeTransport(10 * time.Second),
+				Transport: downloadTransport(10 * time.Second),
 			}
 			contentLength, err := getContentLength(videoURL, httpClient)
 			if err != nil {
