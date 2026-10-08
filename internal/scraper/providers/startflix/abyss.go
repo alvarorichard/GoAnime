@@ -6,9 +6,12 @@ import (
 	"crypto/cipher"
 	"crypto/md5" // #nosec G501 -- md5 is the player's key derivation, not a security choice of ours
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/bits"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -110,11 +113,14 @@ func latin1ToUTF8(b []byte) []byte {
 	return out
 }
 
-// utf8ToLatin1 narrows a string of code points ≤ 0xFF back to bytes.
+// utf8ToLatin1 narrows a string of code points ≤ 0xFF back to bytes. Ranging
+// over a string never yields a negative rune (invalid UTF-8 comes out as
+// U+FFFD), but the lower bound is spelled out so the narrowing is checked on
+// both sides rather than assumed.
 func utf8ToLatin1(s string) ([]byte, error) {
 	out := make([]byte, 0, len(s))
 	for _, r := range s {
-		if r > 0xFF {
+		if r < 0 || r > 0xFF {
 			return nil, fmt.Errorf("code point %U is not a byte", r)
 		}
 		out = append(out, byte(r))
@@ -160,14 +166,17 @@ func abyssXOR(seed string, off int64, buf []byte) error {
 // abyssCTR applies an AES-CTR keystream to buf, which starts at byte offset
 // off of the stream.
 func abyssCTR(key, iv []byte, off int64, buf []byte) error {
+	if off < 0 {
+		return fmt.Errorf("negative CTR offset %d", off)
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return err
 	}
-	ctr := make([]byte, aes.BlockSize)
-	copy(ctr, iv)
-	addToCounter(ctr, uint64(off/aes.BlockSize)) // #nosec G115 -- off is never negative
-	stream := cipher.NewCTR(block, ctr)
+	var ctr [aes.BlockSize]byte
+	copy(ctr[:], iv)
+	addToCounter(&ctr, uint64(off/aes.BlockSize))
+	stream := cipher.NewCTR(block, ctr[:])
 	if skip := int(off % aes.BlockSize); skip > 0 {
 		var discard [aes.BlockSize]byte
 		stream.XORKeyStream(discard[:skip], discard[:skip])
@@ -210,13 +219,13 @@ func abyssChunkKey(size int64) (key, iv []byte) {
 	return key, key[:aes.BlockSize]
 }
 
-// addToCounter adds n to a big-endian 128-bit counter, as CTR increments it.
-func addToCounter(ctr []byte, n uint64) {
-	for i := len(ctr) - 1; i >= 0 && n > 0; i-- {
-		sum := uint64(ctr[i]) + (n & 0xFF)
-		ctr[i] = byte(sum)
-		n = (n >> 8) + (sum >> 8)
-	}
+// addToCounter adds n to a big-endian 128-bit counter block, as CTR
+// increments it: n goes into the low 64 bits, the carry into the high 64, and
+// the whole block wraps at 2^128 exactly like cipher.NewCTR's own counter.
+func addToCounter(ctr *[aes.BlockSize]byte, n uint64) {
+	lo, carry := bits.Add64(binary.BigEndian.Uint64(ctr[8:]), n, 0)
+	binary.BigEndian.PutUint64(ctr[8:], lo)
+	binary.BigEndian.PutUint64(ctr[:8], binary.BigEndian.Uint64(ctr[:8])+carry)
 }
 
 // decryptAbyssMedia opens the rendition list.
@@ -258,6 +267,35 @@ func pickAbyssSource(sources []abyssSource) (abyssSource, bool) {
 	return files[0], true
 }
 
+// isAbyssHostname reports whether s is a bare DNS host name, the only thing
+// the media list may put between "https://" and a path. A port, user info, a
+// path or query, or an IP literal would let that remote list steer requests
+// somewhere a CDN host name cannot.
+func isAbyssHostname(s string) bool {
+	if s == "" || len(s) > 253 || net.ParseIP(s) != nil {
+		return false
+	}
+	for label := range strings.SplitSeq(s, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isAbyssMediaURL reports whether raw is an https URL on a bare host name,
+// as every media URL the player loads is.
+func isAbyssMediaURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.User == nil && u.Opaque == "" && isAbyssHostname(u.Host)
+}
+
 func abyssChunkDomain(domains []string, size int64, sub string) string {
 	for _, domain := range domains {
 		if sub != "" && strings.Contains(domain, sub) {
@@ -289,7 +327,11 @@ type abyssFile struct {
 	chunk    *abyssChunkSource
 
 	partsOnce sync.Once
-	parts     *abyssPartCache // per-file LRU of fetched chunk parts
+	parts     *abyssPartCache // this file's side of the shared part cache
+
+	urlsOnce sync.Once
+	urls     []string // upstream URL of every part; see abyssPartURLs
+	urlsErr  error
 }
 
 // partsCache lazily creates the chunk part cache.
@@ -344,14 +386,18 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 	// The CDN only serves media to requests carrying the embed's Origin and
 	// Referer, so the file carries the embed origin like the player does.
 	origin := embed.Scheme + "://" + embed.Host
+	// A single-file rendition whose URL is not a plain https URL on a host
+	// name falls through to the chunked renditions below.
 	if src, ok := pickAbyssSource(media.MP4.Sources); ok {
 		upstream := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(src.Path, "/")
-		return &abyssFile{
-			upstream: upstream,
-			size:     src.Size,
-			seed:     upstream[strings.LastIndex(upstream, "/")+1:],
-			origin:   origin,
-		}, true
+		if isAbyssMediaURL(upstream) {
+			return &abyssFile{
+				upstream: upstream,
+				size:     src.Size,
+				seed:     upstream[strings.LastIndex(upstream, "/")+1:],
+				origin:   origin,
+			}, true
+		}
 	}
 
 	var choices []abyssSource
@@ -359,7 +405,7 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 		if src.Size <= abyssEncryptedHead || src.Sub == "" || src.ResID <= 0 {
 			continue
 		}
-		if abyssChunkDomain(media.MP4.Domains, src.Size, src.Sub) == "" {
+		if !isAbyssHostname(abyssChunkDomain(media.MP4.Domains, src.Size, src.Sub)) {
 			continue
 		}
 		choices = append(choices, src)
@@ -382,7 +428,7 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 	var firstSize int64
 	if first, ok := pickAbyssFirstData(media.MP4.FristDatas, src); ok {
 		part := min(src.Size, int64(2<<20))
-		if u, err := url.Parse(first.URL); err == nil && u.Scheme == "https" && u.Host != "" &&
+		if u, err := url.Parse(first.URL); err == nil && isAbyssMediaURL(first.URL) &&
 			part > 0 && first.PartSize%part == 0 {
 			firstURL, firstSize = first.URL, first.PartSize
 			firstSeed = u.Path[strings.LastIndex(u.Path, "/")+1:]

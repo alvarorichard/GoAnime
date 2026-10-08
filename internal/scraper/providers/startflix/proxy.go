@@ -25,11 +25,10 @@ import (
 // the encrypted head. Both consumers already speak Range over HTTP, so neither
 // needs to know Abyss exists.
 type streamProxy struct {
-	mu     sync.Mutex
-	base   string // http://127.0.0.1:port
-	files  map[string]*proxiedFile
-	order  []string
-	client *http.Client
+	mu    sync.Mutex
+	base  string // http://127.0.0.1:port
+	files map[string]*proxiedFile
+	order []string
 }
 
 type proxiedFile struct {
@@ -122,8 +121,8 @@ func parseRange(header string, size int64) (start, end int64, ok bool) {
 		return 0, 0, false
 	}
 	var err error
-	switch {
-	case first == "":
+	switch first {
+	case "":
 		n, err := strconv.ParseInt(last, 10, 64)
 		if err != nil || n <= 0 {
 			return 0, 0, false
@@ -178,18 +177,21 @@ func (p *streamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.chunk != nil {
+		// parseRange has already bounded [start, end] to the file.
+		rd := f.openPartReader(f.client, start, end)
+		defer rd.close()
 		// Open the first part this response needs before promising mpv any
 		// bytes: a dead origin must fail as 502 here, not as a 206 that
 		// truncates mid-stream once the headers have gone out.
 		first := start / f.abyssPartSize()
-		if _, err := f.abyssGetPart(r.Context(), f.client, first); err != nil {
+		if _, err := rd.part(r.Context(), first); err != nil {
 			util.Debug("StartFlix chunk proxy failed before headers", "err", err,
 				"range", fmt.Sprintf("%d-%d", start, end), "part", first)
 			http.Error(w, "upstream chunk unavailable", http.StatusBadGateway)
 			return
 		}
 		writeRangeHeaders(w, start, end, f.size, partial)
-		if err := copyAbyssChunkRange(r.Context(), f.client, f.abyssFile, start, end, w); err != nil && r.Context().Err() == nil {
+		if err := rd.copyRange(r.Context(), start, end, w); err != nil && r.Context().Err() == nil {
 			// Headers (and possibly bytes) are already out; all we can do is
 			// stop writing. The short body tells mpv the response ended badly.
 			util.Debug("StartFlix chunk proxy failed mid-stream", "err", err,
@@ -290,35 +292,16 @@ func readAbyssRange(ctx context.Context, client *http.Client, f *abyssFile, star
 	return out.Bytes(), nil
 }
 
-// copyAbyssChunkRange streams [start, end] out of the player's parts: each
-// part is fetched once through the per-file cache (concurrent callers share
-// the fetch) and the requested slice is written from it.
+// copyAbyssChunkRange streams [start, end] out of the player's parts through
+// a reader of its own: each part comes from the shared cache (concurrent
+// callers share the fetch) and the requested slice is written from it.
 func copyAbyssChunkRange(ctx context.Context, client *http.Client, f *abyssFile, start, end int64, dst io.Writer) error {
-	if f.chunk == nil {
-		return errors.New("not a chunked Abyss file")
+	if err := f.checkChunkRange(start, end); err != nil {
+		return err
 	}
-	part := f.abyssPartSize()
-	if part <= 0 || start < 0 || end < start || end >= f.size {
-		return fmt.Errorf("invalid Abyss chunk range %d-%d", start, end)
-	}
-	for pos := start; pos <= end; {
-		idx := pos / part
-		lo, _ := f.abyssPartBounds(idx)
-		data, err := f.abyssGetPart(ctx, client, idx)
-		if err != nil {
-			return fmt.Errorf("abyss part %d: %w", idx, err)
-		}
-		from := pos - lo
-		to := min(end, lo+int64(len(data))-1) - lo
-		if from < 0 || to < from {
-			return fmt.Errorf("invalid Abyss part slice %d-%d", from, to)
-		}
-		if _, err := dst.Write(data[from : to+1]); err != nil {
-			return err
-		}
-		pos = lo + to + 1
-	}
-	return nil
+	rd := f.openPartReader(client, start, end)
+	defer rd.close()
+	return rd.copyRange(ctx, start, end, dst)
 }
 
 func writeRangeHeaders(w http.ResponseWriter, start, end, size int64, partial bool) {

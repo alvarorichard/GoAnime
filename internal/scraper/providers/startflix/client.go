@@ -297,10 +297,13 @@ func (e *NoStreamError) Error() string {
 	var b strings.Builder
 	b.WriteString(ErrNoSupportedServer.Error())
 	if len(e.Unsupported) > 0 {
-		b.WriteString(" (unsupported: " + strings.Join(e.Unsupported, ", ") + ")")
+		b.WriteString(" (unsupported: ")
+		b.WriteString(strings.Join(e.Unsupported, ", "))
+		b.WriteString(")")
 	}
 	for _, f := range e.Failures {
-		b.WriteString("; " + f.Error())
+		b.WriteString("; ")
+		b.WriteString(f.Error())
 	}
 	return b.String()
 }

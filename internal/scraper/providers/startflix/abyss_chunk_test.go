@@ -10,11 +10,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -191,28 +195,36 @@ type fakeChunkUpstream struct {
 	mu       sync.Mutex
 	hits     map[string]int
 	failures map[string][]int
-	delay    time.Duration // applied to a target's first hit
+	delay    time.Duration   // applied to a target's first hit
+	hold     map[string]bool // targets whose hits hang until the request is cancelled
 }
 
 // record counts a hit on target, consumes a queued failure status (0 means
 // none) and returns it; a target's first successful hit sleeps once, to hold
-// the fetch open for the coalescing test.
-func (f *fakeChunkUpstream) record(target string) int {
+// the fetch open for the coalescing test. A held target never answers: ok is
+// false once the client gives up on it.
+func (f *fakeChunkUpstream) record(ctx context.Context, target string) (status int, ok bool) {
 	f.mu.Lock()
 	if f.hits == nil {
 		f.hits = map[string]int{}
 	}
 	f.hits[target]++
-	status := 0
 	if q := f.failures[target]; len(q) > 0 {
 		status, f.failures[target] = q[0], q[1:]
 	}
-	first, d := f.hits[target] == 1, f.delay
+	first, d, held := f.hits[target] == 1, f.delay, f.hold[target]
 	f.mu.Unlock()
-	if status == 0 && first && d > 0 {
-		time.Sleep(d)
+	if held {
+		<-ctx.Done()
+		return 0, false
 	}
-	return status
+	if status == 0 && first && d > 0 {
+		select {
+		case <-time.After(d):
+		case <-ctx.Done():
+		}
+	}
+	return status, true
 }
 
 func (f *fakeChunkUpstream) hitsFor(target string) int {
@@ -236,7 +248,11 @@ func (f *fakeChunkUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, ".fd") {
-		if status := f.record("fd"); status != 0 {
+		status, ok := f.record(r.Context(), "fd")
+		if !ok {
+			return // the client gave up on a held target
+		}
+		if status != 0 {
 			w.WriteHeader(status)
 			return
 		}
@@ -275,7 +291,11 @@ func (f *fakeChunkUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	if status := f.record("sora:" + strconv.Itoa(part)); status != 0 {
+	status, ok := f.record(r.Context(), "sora:"+strconv.Itoa(part))
+	if !ok {
+		return // the client gave up on a held target
+	}
+	if status != 0 {
 		w.WriteHeader(status)
 		return
 	}
@@ -316,7 +336,7 @@ func decodeChunkToken(tok string) ([]byte, error) {
 }
 
 // newChunkedFile builds a chunked abyssFile over a fake upstream.
-func newChunkedFile(srv *httptest.Server, plain []byte, size, chunk, fdSize int64) *abyssFile {
+func newChunkedFile(srv *httptest.Server, size, fdSize int64) *abyssFile {
 	host := strings.TrimPrefix(srv.URL, "https://")
 	return &abyssFile{
 		size:   size,
@@ -352,7 +372,7 @@ func TestChunkedProxyRoundTrip(t *testing.T) {
 	}
 	srv := httptest.NewTLSServer(up)
 	t.Cleanup(srv.Close)
-	f := newChunkedFile(srv, plain, size, chunk, fdSize)
+	f := newChunkedFile(srv, size, fdSize)
 
 	ctx := context.Background()
 	// Probe path: head decrypts to ftyp, and the first token part opens.
@@ -428,7 +448,7 @@ func TestChunkedProxyFailsFastBeforeHeaders(t *testing.T) {
 	up.queue("sora:1", http.StatusNotFound)
 	srv := httptest.NewTLSServer(up)
 	t.Cleanup(srv.Close)
-	f := newChunkedFile(srv, plain, size, chunk, chunk)
+	f := newChunkedFile(srv, size, chunk)
 	local, err := sharedStreamProxy().serve(f, srv.Client())
 	if err != nil {
 		t.Fatal(err)
@@ -482,7 +502,7 @@ func TestChunkedProxyRetriesTransient(t *testing.T) {
 	up.queue("sora:1", http.StatusServiceUnavailable)
 	srv := httptest.NewTLSServer(up)
 	t.Cleanup(srv.Close)
-	f := newChunkedFile(srv, plain, size, chunk, chunk)
+	f := newChunkedFile(srv, size, chunk)
 	local, err := sharedStreamProxy().serve(f, srv.Client())
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +565,7 @@ func TestChunkedProxyCachesParts(t *testing.T) {
 	}
 	srv := httptest.NewTLSServer(up)
 	t.Cleanup(srv.Close)
-	f := newChunkedFile(srv, plain, size, chunk, chunk)
+	f := newChunkedFile(srv, size, chunk)
 	local, err := sharedStreamProxy().serve(f, srv.Client())
 	if err != nil {
 		t.Fatal(err)
@@ -589,7 +609,7 @@ func TestChunkedProxyCoalescesFetches(t *testing.T) {
 	}
 	srv := httptest.NewTLSServer(up)
 	t.Cleanup(srv.Close)
-	f := newChunkedFile(srv, plain, size, chunk, chunk)
+	f := newChunkedFile(srv, size, chunk)
 	local, err := sharedStreamProxy().serve(f, srv.Client())
 	if err != nil {
 		t.Fatal(err)
@@ -630,5 +650,500 @@ func TestChunkedProxyCoalescesFetches(t *testing.T) {
 	}
 	if got := up.hitsFor("sora:1"); got != 1 {
 		t.Errorf("origin hits = %d, want 1 (concurrent reads coalesced)", got)
+	}
+}
+
+// newPartsFixture serves a size-byte file with known bytes through a fake
+// upstream whose head is the first part; configure runs before it serves.
+func newPartsFixture(t *testing.T, size int64, configure func(*fakeChunkUpstream)) (*fakeChunkUpstream, *httptest.Server, *abyssFile, []byte) {
+	t.Helper()
+	const chunk = int64(2 << 20)
+	plain := make([]byte, size)
+	for i := range plain {
+		plain[i] = byte(i % 241)
+	}
+	up := &fakeChunkUpstream{
+		plain: plain, fdSeed: "head.fd", fdSize: chunk,
+		size: size, md5ID: 99, resID: 2, chunk: chunk, origin: "https://playembedapi.site",
+	}
+	if configure != nil {
+		configure(up)
+	}
+	srv := httptest.NewTLSServer(up)
+	t.Cleanup(srv.Close)
+	return up, srv, newChunkedFile(srv, size, chunk), plain
+}
+
+func partCached(f *abyssFile, idx int64) bool {
+	_, ok := abyssParts.get(abyssPartKey{f.partsCache(), idx})
+	return ok
+}
+
+func inflightParts(f *abyssFile) map[int64]*abyssWaiter {
+	c := f.partsCache()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return maps.Clone(c.inflight)
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestChunkedReadAheadPrefetches pins the read-ahead: a short probe read
+// prefetches nothing, while a reader holding its part gets the next
+// abyssReadAhead parts of its range unasked — and nothing past them — so
+// reading them later costs no origin hit.
+func TestChunkedReadAheadPrefetches(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 10*chunk + 123
+	up, srv, f, plain := newPartsFixture(t, size, nil)
+	ctx := context.Background()
+
+	if _, err := readAbyssRange(ctx, srv.Client(), f, 0, 15); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(inflightParts(f)); n != 0 {
+		t.Fatalf("a 16-byte probe started %d prefetches", n)
+	}
+
+	rd := f.openPartReader(srv.Client(), chunk, size-1)
+	defer rd.close()
+	if _, err := rd.part(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	for idx := int64(2); idx <= 1+abyssReadAhead; idx++ {
+		waitFor(t, fmt.Sprintf("part %d prefetched", idx), func() bool { return partCached(f, idx) })
+	}
+	if got := up.hitsFor("sora:" + strconv.Itoa(2+abyssReadAhead)); got != 0 {
+		t.Errorf("part past the read-ahead window fetched %d times", got)
+	}
+	data, err := rd.part(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, plain[2*chunk:3*chunk]) {
+		t.Error("prefetched part differs from the source file")
+	}
+	if got := up.hitsFor("sora:2"); got != 1 {
+		t.Errorf("origin hits for a prefetched part = %d, want 1", got)
+	}
+}
+
+// TestChunkedSeekDropsStalePrefetch pins seeking: a reader that hangs up
+// leaves its prefetches running (mpv may reopen at the same spot), but a
+// reader landing elsewhere cancels the ones no window covers, and nothing
+// from them is cached.
+func TestChunkedSeekDropsStalePrefetch(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 18 * chunk
+	_, srv, f, plain := newPartsFixture(t, size, func(up *fakeChunkUpstream) {
+		up.hold = map[string]bool{}
+		for idx := 2; idx <= 1+abyssReadAhead; idx++ {
+			up.hold["sora:"+strconv.Itoa(idx)] = true
+		}
+	})
+	ctx := context.Background()
+
+	rd := f.openPartReader(srv.Client(), chunk, size-1)
+	if _, err := rd.part(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	held := inflightParts(f)
+	if len(held) != abyssPrefetchers {
+		t.Fatalf("prefetches in flight = %d, want %d", len(held), abyssPrefetchers)
+	}
+	rd.close()
+	if n := len(inflightParts(f)); n != len(held) {
+		t.Fatalf("hanging up dropped prefetches: %d of %d left", n, len(held))
+	}
+
+	seek := f.openPartReader(srv.Client(), 15*chunk, size-1)
+	defer seek.close()
+	for idx := range inflightParts(f) {
+		if idx < 15 {
+			t.Errorf("part %d still in flight after the seek", idx)
+		}
+	}
+	for idx, w := range held {
+		select {
+		case <-w.done:
+			if w.err == nil {
+				t.Errorf("dropped prefetch of part %d succeeded", idx)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("prefetch of part %d still running after the seek", idx)
+		}
+		if partCached(f, idx) {
+			t.Errorf("dropped part %d was cached", idx)
+		}
+	}
+	data, err := seek.part(ctx, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, plain[15*chunk:16*chunk]) {
+		t.Error("part at the seek target differs from the source file")
+	}
+}
+
+// TestChunkedPrefetchFailureLeftToReader pins that a failed prefetch is not
+// retried in a loop: the parts past it still prefetch, and the failed one is
+// fetched again only when the reader gets there.
+func TestChunkedPrefetchFailureLeftToReader(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 6 * chunk
+	up, srv, f, plain := newPartsFixture(t, size, func(up *fakeChunkUpstream) {
+		up.failures = map[string][]int{"sora:2": {http.StatusNotFound}}
+	})
+	ctx := context.Background()
+
+	rd := f.openPartReader(srv.Client(), chunk, size-1)
+	defer rd.close()
+	if _, err := rd.part(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	for idx := int64(3); idx <= 5; idx++ {
+		waitFor(t, fmt.Sprintf("part %d prefetched", idx), func() bool { return partCached(f, idx) })
+	}
+	waitFor(t, "prefetching to settle", func() bool { return len(inflightParts(f)) == 0 })
+	if got := up.hitsFor("sora:2"); got != 1 {
+		t.Errorf("failed prefetch hit the origin %d times, want 1", got)
+	}
+	data, err := rd.part(ctx, 2)
+	if err != nil {
+		t.Fatalf("reader fetch after a failed prefetch: %v", err)
+	}
+	if !bytes.Equal(data, plain[2*chunk:3*chunk]) {
+		t.Error("part differs from the source file")
+	}
+	if got := up.hitsFor("sora:2"); got != 2 {
+		t.Errorf("origin hits = %d, want 2 (prefetch, then the reader)", got)
+	}
+}
+
+// TestAbyssPartStoreLRU pins the shared store: least recently used goes
+// first, a read refreshes a part, both caps hold, and files never collide.
+func TestAbyssPartStoreLRU(t *testing.T) {
+	t.Parallel()
+	a, b := newAbyssPartCache(), newAbyssPartCache()
+	s := newAbyssPartStore(10, 100)
+	s.put(abyssPartKey{a, 1}, []byte("aaaa"))
+	s.put(abyssPartKey{b, 1}, []byte("bbbb"))
+	if got, ok := s.get(abyssPartKey{a, 1}); !ok || string(got) != "aaaa" {
+		t.Fatalf("a/1 = %q, %v", got, ok)
+	}
+	s.put(abyssPartKey{a, 2}, []byte("cccc")) // 12 bytes: b/1 is least recent
+	if _, ok := s.get(abyssPartKey{b, 1}); ok {
+		t.Error("b/1 survived past the byte budget")
+	}
+	for _, k := range []abyssPartKey{{a, 1}, {a, 2}} {
+		if _, ok := s.get(k); !ok {
+			t.Errorf("part %d evicted out of LRU order", k.idx)
+		}
+	}
+	if s.bytes != 8 {
+		t.Errorf("bytes = %d, want 8", s.bytes)
+	}
+
+	s = newAbyssPartStore(1<<20, 2)
+	for idx := int64(1); idx <= 3; idx++ {
+		s.put(abyssPartKey{a, idx}, []byte{byte(idx)})
+	}
+	if _, ok := s.get(abyssPartKey{a, 1}); ok || s.order.Len() != 2 {
+		t.Errorf("entry cap not held: %d entries", s.order.Len())
+	}
+}
+
+// addToCounterBytewise is the byte-at-a-time carry loop addToCounter
+// replaced, kept as the reference the 64-bit version must agree with.
+func addToCounterBytewise(ctr []byte, n uint64) {
+	for i := len(ctr) - 1; i >= 0 && n > 0; i-- {
+		sum := uint64(ctr[i]) + (n & 0xFF)
+		ctr[i] = byte(sum)
+		n = (n >> 8) + (sum >> 8)
+	}
+}
+
+// TestAddToCounterMatchesBytewiseCarry pins addToCounter to the loop it
+// replaced on the carries that matter — none, low half into high half, a
+// chain through every byte, the wrap at 2^128 — and on random counters.
+func TestAddToCounterMatchesBytewiseCarry(t *testing.T) {
+	t.Parallel()
+	ff := bytes.Repeat([]byte{0xFF}, aes.BlockSize)
+	type tc struct {
+		ctr []byte
+		n   uint64
+	}
+	cases := []tc{
+		{make([]byte, aes.BlockSize), 0},
+		{make([]byte, aes.BlockSize), 1},
+		{append(make([]byte, 8), ff[:8]...), 1},
+		{ff, 1},
+		{ff, math.MaxUint64},
+		{append(bytes.Repeat([]byte{0x12}, 8), ff[:8]...), math.MaxUint64},
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 20000 {
+		ctr := make([]byte, aes.BlockSize)
+		for i := range ctr {
+			ctr[i] = byte(rng.Uint32())
+		}
+		n := rng.Uint64()
+		if rng.IntN(2) == 0 {
+			n >>= rng.UintN(64) // small offsets too, like real file positions
+		}
+		cases = append(cases, tc{ctr, n})
+	}
+	for _, c := range cases {
+		want := bytes.Clone(c.ctr)
+		addToCounterBytewise(want, c.n)
+		var got [aes.BlockSize]byte
+		copy(got[:], c.ctr)
+		addToCounter(&got, c.n)
+		if !bytes.Equal(got[:], want) {
+			t.Fatalf("ctr % x + %d = % x, want % x", c.ctr, c.n, got, want)
+		}
+	}
+}
+
+// TestAbyssCTRSeekMatchesStream pins seeking against the standard library's
+// own CTR: decrypting from any offset equals the same slice of one continuous
+// keystream, including counters whose low 64 bits, or all 128, roll over
+// inside the span. Negative offsets are refused, not turned into a counter.
+func TestAbyssCTRSeekMatchesStream(t *testing.T) {
+	t.Parallel()
+	key := bytes.Repeat([]byte{7}, 32)
+	ivs := [][]byte{
+		make([]byte, aes.BlockSize),
+		{0, 0, 0, 0, 0, 0, 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD},
+		append(bytes.Repeat([]byte{0xFF}, aes.BlockSize-1), 0xFE),
+	}
+	const span = 8 * aes.BlockSize
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, iv := range ivs {
+		stream := make([]byte, span)
+		cipher.NewCTR(block, iv).XORKeyStream(stream, stream)
+		for off := range span {
+			for _, n := range []int{1, aes.BlockSize, span - off} {
+				if off+n > span {
+					continue
+				}
+				got := make([]byte, n)
+				if err := abyssCTR(key, iv, int64(off), got); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got, stream[off:off+n]) {
+					t.Fatalf("iv % x: keystream at %d+%d differs from the continuous stream", iv, off, n)
+				}
+			}
+		}
+	}
+	if err := abyssCTR(key, ivs[0], -1, make([]byte, 1)); err == nil {
+		t.Error("negative offset accepted")
+	}
+}
+
+// TestUTF8ToLatin1Bounds pins the narrowing: every byte value round-trips,
+// and nothing outside 0x00-0xFF — including what invalid UTF-8 decodes to —
+// is ever truncated into a byte.
+func TestUTF8ToLatin1Bounds(t *testing.T) {
+	t.Parallel()
+	all := make([]byte, 256)
+	for i := range all {
+		all[i] = byte(i)
+	}
+	got, err := utf8ToLatin1(string(latin1ToUTF8(all)))
+	if err != nil || !bytes.Equal(got, all) {
+		t.Fatalf("round trip: %v, % x", err, got)
+	}
+	for _, bad := range []string{"Ā", "Ł", "�", "\xff", "ok\xc3", "\U0001F600"} {
+		if out, err := utf8ToLatin1(bad); err == nil {
+			t.Errorf("%q narrowed to % x instead of failing", bad, out)
+		}
+	}
+}
+
+// recordingTransport records every upstream URL requested through it.
+type recordingTransport struct {
+	next http.RoundTripper
+	mu   sync.Mutex
+	urls []string
+}
+
+func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	r.urls = append(r.urls, req.URL.String())
+	r.mu.Unlock()
+	return r.next.RoundTrip(req)
+}
+
+func (r *recordingTransport) seen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.urls)
+}
+
+// TestChunkedProxyRangeOnlySelectsParts is the G704 proof for the proxy. The
+// Range header is the only part of a client request that reaches upstream
+// fetches; whatever it says, every upstream request — reads and prefetches —
+// is an entry of the file's own URL table, and ranges that are malformed or
+// out of bounds never reach upstream at all.
+func TestChunkedProxyRangeOnlySelectsParts(t *testing.T) {
+	t.Parallel()
+	const chunk = int64(2 << 20)
+	const size = 4*chunk + 77
+	_, srv, f, plain := newPartsFixture(t, size, nil)
+	rec := &recordingTransport{next: srv.Client().Transport}
+	client := &http.Client{Transport: rec}
+	local, err := sharedStreamProxy().serve(f, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	table, err := f.abyssPartURLs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{}
+	for _, u := range table {
+		allowed[u] = true
+	}
+
+	get := func(rng string) int {
+		req, _ := http.NewRequest(http.MethodGet, local, http.NoBody)
+		req.Header.Set("Range", rng)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Range %q: %v", rng, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusPartialContent {
+			var s, e, total int64
+			if _, err := fmt.Sscanf(resp.Header.Get("Content-Range"), "bytes %d-%d/%d", &s, &e, &total); err != nil {
+				t.Fatalf("Range %q: Content-Range %q", rng, resp.Header.Get("Content-Range"))
+			}
+			if !bytes.Equal(body, plain[s:e+1]) {
+				t.Errorf("Range %q: body differs from the file", rng)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	refused := []string{
+		fmt.Sprintf("bytes=%d-%d", size, size+10),
+		"bytes=9223372036854775807-", "bytes=-9223372036854775808", "bytes=-0",
+		"bytes=0-1,5-6", "bytes=5-1", "bytes=abc-", "items=0-1",
+		"bytes=https://evil.test/-", "bytes=-1-2", "bytes= 0-1;evil.test",
+	}
+	for _, rng := range refused {
+		if code := get(rng); code != http.StatusRequestedRangeNotSatisfiable {
+			t.Errorf("Range %q: HTTP %d, want 416", rng, code)
+		}
+	}
+	if n := len(rec.seen()); n != 0 {
+		t.Fatalf("refused ranges reached upstream %d times", n)
+	}
+
+	served := []string{
+		"bytes=-1", "bytes=-99999999999", fmt.Sprintf("bytes=%d-", size-1),
+		fmt.Sprintf("bytes=%d-%d", chunk-1, chunk), "bytes=0-9223372036854775807",
+	}
+	for _, rng := range served {
+		if code := get(rng); code != http.StatusPartialContent {
+			t.Errorf("Range %q: HTTP %d, want 206", rng, code)
+		}
+	}
+	waitFor(t, "prefetching to settle", func() bool { return len(inflightParts(f)) == 0 })
+	urls := rec.seen()
+	if len(urls) == 0 {
+		t.Fatal("no upstream request was recorded")
+	}
+	// Indices past either end of the table fail before any request.
+	for _, idx := range []int64{-1, int64(len(table)), math.MaxInt64} {
+		if _, err := f.abyssFetchPart(context.Background(), client, idx); err == nil {
+			t.Errorf("part %d fetched", idx)
+		}
+	}
+	if n := len(rec.seen()); n != len(urls) {
+		t.Errorf("out-of-range parts reached upstream %d times", n-len(urls))
+	}
+	for _, u := range urls {
+		if !allowed[u] {
+			t.Errorf("upstream request outside the file's URL table: %s", u)
+		}
+	}
+}
+
+// TestIsAbyssHostname pins what the media list may name as a host: a bare
+// DNS name, never a port, user info, path, query, fragment or IP literal.
+func TestIsAbyssHostname(t *testing.T) {
+	t.Parallel()
+	for _, ok := range []string{"o25chikcb28.sssrr.org", "qq.cdn.test", "a-b.c", "localhost"} {
+		if !isAbyssHostname(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{
+		"", "127.0.0.1", "169.254.169.254", "::1", "[::1]", "host:443", "user@host",
+		"host/path", "host?q", "host#f", "-a.b", "a-.b", "a..b", "a b", "h\x00st",
+		strings.Repeat("a", 64) + ".com", strings.Repeat("a.", 127) + "com",
+	} {
+		if isAbyssHostname(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// TestMakeAbyssFileRejectsSteeredHosts pins that the remote media list cannot
+// steer the proxy off a plain https host name: such renditions are skipped, a
+// bad head entry is dropped (its parts then come through the tokens), and a
+// bad single-file URL falls through to the chunked renditions.
+func TestMakeAbyssFileRejectsSteeredHosts(t *testing.T) {
+	t.Parallel()
+	embed := mustParseURL(t, "https://playembedapi.site/?v=x")
+	datas := &abyssDatas{Slug: "x", MD5ID: 42, UserID: 7}
+	chunked := func(domains []string, sub, head string) *abyssMedia {
+		m := &abyssMedia{}
+		m.MP4.Sources = []abyssSource{{Label: "720p", ResID: 4, Size: 1 << 22, Codec: "h264", Sub: sub}}
+		m.MP4.Domains = domains
+		if head != "" {
+			m.MP4.FristDatas = []abyssFirstData{{ResID: 4, Size: 1 << 22, Codec: "h264", URL: head, PartSize: 2 << 20}}
+		}
+		return m
+	}
+	// Each domain matches the rendition's sub, so only the host check can
+	// refuse it.
+	for _, d := range []struct{ domain, sub string }{
+		{"qq.cdn.test:8443", "qq"}, {"qq.cdn.test/x?", "qq"}, {"user@qq.cdn.test", "qq"},
+		{"127.0.0.1", "127"}, {"169.254.169.254", "169"},
+	} {
+		if f, ok := makeAbyssFile(embed, datas, chunked([]string{d.domain}, d.sub, "")); ok {
+			t.Errorf("domain %q resolved to host %q", d.domain, f.chunk.chunkHost)
+		}
+	}
+	for _, head := range []string{"https://127.0.0.1/h.fd", "http://qq.cdn.test/h.fd", "https://u@qq.cdn.test/h.fd", "https://qq.cdn.test:1/h.fd"} {
+		f, ok := makeAbyssFile(embed, datas, chunked([]string{"qq.cdn.test"}, "qq", head))
+		if !ok || f.chunk == nil || f.chunk.firstURL != "" {
+			t.Errorf("head %q: ok=%v file=%+v, want chunked without the head", head, ok, f)
+		}
+	}
+	m := chunked([]string{"qq.cdn.test"}, "qq", "")
+	m.MP4.Sources = append(m.MP4.Sources, abyssSource{Label: "1080p", ResID: 5, Size: 1 << 22, Codec: "h264", URL: "http://10.0.0.1", Path: "v.mp4"})
+	if f, ok := makeAbyssFile(embed, datas, m); !ok || f.chunk == nil || f.upstream != "" {
+		t.Errorf("bad single-file URL: ok=%v file=%+v, want the chunked rendition", ok, f)
 	}
 }
