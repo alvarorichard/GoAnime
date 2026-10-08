@@ -1,6 +1,8 @@
 package player
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1134,6 +1136,14 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
+	// Look at what came back before creating the file: a 200 is not proof of
+	// video. This runs as the fallback after a failed native HLS download, so
+	// it is often handed the .m3u8 itself, and CDNs serve error pages as 200.
+	body := bufio.NewReaderSize(resp.Body, 512)
+	if err := refuseNonMedia(resp.Header.Get("Content-Type"), body); err != nil {
+		return err
+	}
+
 	if m != nil {
 		m.setProgressTotal(resp.ContentLength)
 	}
@@ -1147,7 +1157,7 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 
 	buf := make([]byte, 256*1024)
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := body.Read(buf)
 		if n > 0 {
 			if _, wErr := out.Write(buf[:n]); wErr != nil {
 				return wErr
@@ -1164,6 +1174,31 @@ func downloadDirectHTTPWithClient(videoURL, path string, m *model, client *http.
 		}
 	}
 
+	return nil
+}
+
+// errNotMedia marks a response that is a playlist or a web page rather than
+// the video, so the caller moves on to its next way of fetching it.
+var errNotMedia = errors.New("response is not a media file")
+
+// refuseNonMedia rejects a playlist or HTML page served in place of the
+// video, by its Content-Type or, when the type is missing or generic, by how
+// the body starts. Video containers (MP4, MPEG-TS, Matroska) never begin with
+// "#EXTM3U" or markup.
+func refuseNonMedia(contentType string, body *bufio.Reader) error {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	for _, bad := range []string{"mpegurl", "text/html", "application/xhtml"} {
+		if strings.Contains(ct, bad) {
+			return fmt.Errorf("%w: served as %s", errNotMedia, contentType)
+		}
+	}
+	head, _ := body.Peek(512)
+	lead := strings.ToLower(strings.TrimLeft(string(bytes.TrimPrefix(head, []byte("\xef\xbb\xbf"))), " \t\r\n"))
+	for _, marker := range []string{"#extm3u", "<!doctype html", "<html", "<head", "<body"} {
+		if strings.HasPrefix(lead, marker) {
+			return fmt.Errorf("%w: body starts with %q", errNotMedia, marker)
+		}
+	}
 	return nil
 }
 
@@ -1406,6 +1441,40 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 	return sorted[idx].URL, nil
 }
 
+// The ways a batch fetches an HLS episode, in the order it tries them; seams
+// for tests.
+var (
+	nativeHLSDownloadFn  = downloadWithNativeHLS
+	directHTTPDownloadFn = downloadDirectHTTP
+	ytdlpDownloadFn      = downloadWithYtDlp
+)
+
+// downloadHLSWithFallbacks fetches one HLS episode for a batch: the native
+// downloader first; yt-dlp straight away when the stream needs muxing
+// (separate audio) or decryption (SAMPLE-AES) the native one cannot do;
+// otherwise direct HTTP, then yt-dlp. Direct HTTP refuses a playlist or web
+// page served in place of the video (refuseNonMedia), so a failed native
+// download always reaches yt-dlp instead of "succeeding" with the .m3u8 text.
+func downloadHLSWithFallbacks(videoURL, path string, m *model, epNum int) error {
+	err := nativeHLSDownloadFn(videoURL, path, m)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, hls.ErrSeparateAudioTracks) || errors.Is(err, hls.ErrUnsupportedEncryption) {
+		util.Debugf("Episode %d: native HLS cannot handle this stream, using yt-dlp: %v", epNum, err)
+		m.resetProgressReceived()
+		return ytdlpDownloadFn(videoURL, path, m)
+	}
+	util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, err)
+	m.resetProgressReceived()
+	if err = directHTTPDownloadFn(videoURL, path, m); err == nil {
+		return nil
+	}
+	util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, err)
+	m.resetProgressReceived()
+	return ytdlpDownloadFn(videoURL, path, m)
+}
+
 // HandleBatchDownload performs batch download of episodes.
 func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 	animeURL := anime.URL
@@ -1612,21 +1681,7 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 				// alone missed playlists served under "/hls/" without one —
 				// those fell through to the plain-MP4 downloader.
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
-					err = downloadWithNativeHLS(videoURL, episodePath, progressModel)
-					if err != nil && errors.Is(err, hls.ErrSeparateAudioTracks) {
-						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, err)
-						progressModel.resetProgressReceived()
-						err = downloadWithYtDlp(videoURL, episodePath, progressModel)
-					} else if err != nil {
-						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, err)
-						progressModel.resetProgressReceived()
-						err = downloadDirectHTTP(videoURL, episodePath, progressModel)
-					}
-					if err != nil {
-						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, err)
-						progressModel.resetProgressReceived()
-						err = downloadWithYtDlp(videoURL, episodePath, progressModel)
-					}
+					err = downloadHLSWithFallbacks(videoURL, episodePath, progressModel, epNum)
 				case strings.Contains(videoURL, "blogger.com"):
 					// Blogger URLs: extract googlevideo CDN URL and download directly
 					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
@@ -1904,21 +1959,7 @@ func HandleBatchDownloadRange(episodes []models.Episode, anime *models.Anime, st
 				// alone missed playlists served under "/hls/" without one —
 				// those fell through to the plain-MP4 downloader.
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
-					dlErr = downloadWithNativeHLS(videoURL, episodePath, progressModel)
-					if dlErr != nil && errors.Is(dlErr, hls.ErrSeparateAudioTracks) {
-						util.Debugf("Episode %d: HLS has separate audio tracks, using yt-dlp: %v", epNum, dlErr)
-						progressModel.resetProgressReceived()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, progressModel)
-					} else if dlErr != nil {
-						util.Debugf("Episode %d: Native HLS failed, trying direct HTTP: %v", epNum, dlErr)
-						progressModel.resetProgressReceived()
-						dlErr = downloadDirectHTTP(videoURL, episodePath, progressModel)
-					}
-					if dlErr != nil {
-						util.Debugf("Episode %d: Direct HTTP failed, falling back to yt-dlp: %v", epNum, dlErr)
-						progressModel.resetProgressReceived()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, progressModel)
-					}
+					dlErr = downloadHLSWithFallbacks(videoURL, episodePath, progressModel, epNum)
 				case strings.Contains(videoURL, "blogger.com"):
 					// Blogger URLs: extract googlevideo CDN URL and download directly
 					cdnURL, extractErr := extractBloggerGoogleVideoURL(videoURL)
