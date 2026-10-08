@@ -25,6 +25,19 @@ var workflowEnrichFn = func(ctx context.Context, anime *models.Anime) ([]metadat
 	return metadata.NewEnricher().EnrichAnime(ctx, anime)
 }
 
+// setMediaMeta hands the player what download paths are named from: the
+// official title, year and external ids the anime carries right now.
+func setMediaMeta(anime *models.Anime) {
+	player.SetMediaMeta(&util.MediaMeta{
+		OfficialTitle: anime.OfficialTitle(),
+		Year:          anime.Year,
+		TMDBID:        anime.TMDBID,
+		IMDBID:        anime.IMDBID,
+		AnilistID:     anime.AnilistID,
+		MalID:         anime.MalID,
+	})
+}
+
 // HandleDownloadRequest processes a download request from command line
 func HandleDownloadRequest(request *util.DownloadRequest) error {
 	util.Info("Starting enhanced download mode...")
@@ -50,31 +63,18 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	player.SetAnimeName(anime.Name, season)
 	player.SetExactMediaType(string(anime.MediaType))
 
-	player.SetMediaMeta(&util.MediaMeta{
-		OfficialTitle: anime.OfficialTitle(),
-		Year:          anime.Year,
-		TMDBID:        anime.TMDBID,
-		IMDBID:        anime.IMDBID,
-		AnilistID:     anime.AnilistID,
-		MalID:         anime.MalID,
-	})
+	setMediaMeta(anime)
 
 	seasonMap, _ := workflowEnrichFn(context.Background(), anime)
 	player.SetSeasonMap(seasonMap)
 
-	player.SetMediaMeta(&util.MediaMeta{
-		OfficialTitle: anime.OfficialTitle(),
-		Year:          anime.Year,
-		TMDBID:        anime.TMDBID,
-		IMDBID:        anime.IMDBID,
-		AnilistID:     anime.AnilistID,
-		MalID:         anime.MalID,
-	})
+	setMediaMeta(anime)
 
 	if request.IsAll {
 		util.Infof("Downloading ALL episodes of %s", anime.Name)
 		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
+			setMediaMeta(anime) // listing can reveal ids and the official title (StartFlix)
 			dlErr := player.HandleBatchDownload(eps, anime)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 				return nil
@@ -98,6 +98,7 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 
 		eps, err := providers.FetchEpisodes(context.Background(), anime)
 		if err == nil && len(eps) > 0 {
+			setMediaMeta(anime) // listing can reveal ids and the official title (StartFlix)
 			dlErr := player.HandleBatchDownloadRange(eps, anime, request.StartEpisode, request.EndEpisode)
 			if dlErr == nil || errors.Is(dlErr, player.ErrUserQuit) {
 				return nil

@@ -14,6 +14,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
@@ -226,6 +227,12 @@ func enrichAnimeData(anime *models.Anime) error {
 	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
 	// challenge for nothing. Mirrors appflow.fetchAnimeDetailsCore.
 	if anime.HasInteractiveEpisodeFlow() {
+		// StartFlix titles are looked up by id, keyless, once their panel loads
+		// (resolveStartFlixOfficial). Searching here by the Portuguese name
+		// would only ask OMDb with its demo key and risk matching another title.
+		if anime.Source == startflix.SourceName {
+			return nil
+		}
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
 		return movie.EnrichMedia(anime)
 	}

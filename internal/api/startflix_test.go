@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -98,9 +99,12 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 	target, _ := url.Parse(fake.srv.URL)
 	client := startflix.NewClientForTest(&http.Client{Transport: routeAll{target}}, "https://www.startflix.test")
 
-	prevClient, prevSeason, prevPick := sfxClientFn, sfxSeasonPickFn, sfxPickFn
+	prevClient, prevSeason, prevPick, prevEnrich := sfxClientFn, sfxSeasonPickFn, sfxPickFn, sfxEnrichByIDFn
 	prevAudio, prevExplicit := util.GetGlobalAudioLanguage(), util.GlobalAudioLanguageExplicit
 	sfxClientFn = func() *startflix.Client { return client }
+	// No metadata lookups over the network: by default nothing is found and
+	// the StartFlix name stands. Tests that need a record swap this again.
+	sfxEnrichByIDFn = func(*models.Media, bool) error { return movie.ErrNoOfficialRecord }
 	sfxSeasonPickFn = func([]tui.PickItem, tui.PickOptions) (int, error) {
 		if seasonIdx < 0 {
 			return 0, tui.ErrPickBack
@@ -110,7 +114,7 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 	sfxPickFn = func(string, []string) (int, error) { return audioIdx, nil }
 	resetStartFlixState()
 	t.Cleanup(func() {
-		sfxClientFn, sfxSeasonPickFn, sfxPickFn = prevClient, prevSeason, prevPick
+		sfxClientFn, sfxSeasonPickFn, sfxPickFn, sfxEnrichByIDFn = prevClient, prevSeason, prevPick, prevEnrich
 		resetStartFlixState()
 		// Put back what other tests in this package expect to find.
 		util.SetGlobalAudioLanguage(prevAudio)
@@ -174,6 +178,104 @@ func TestGetStartFlixEpisodes_Movie(t *testing.T) {
 	assert.Equal(t, "https://painel.test/filme/tt100", eps[0].URL)
 	assert.Equal(t, models.MediaTypeMovie, media.MediaType, "the panel corrects the search page's guess")
 	assert.Equal(t, "tt100", media.IMDBID)
+}
+
+// officialRecordFake answers EnrichByID with a fixed record and remembers
+// what it was asked.
+type officialRecordFake struct {
+	calls     int
+	movie     bool
+	tmdbID    int
+	imdbID    string
+	hadRecord bool
+	title     string
+	year      string
+}
+
+func (f *officialRecordFake) enrich(m *models.Media, isMovie bool) error {
+	f.calls++
+	f.movie, f.tmdbID, f.imdbID, f.hadRecord = isMovie, m.TMDBID, m.IMDBID, m.TMDBDetails != nil
+	if f.title == "" {
+		return movie.ErrNoOfficialRecord
+	}
+	m.TMDBDetails = &models.TMDBDetails{Title: f.title}
+	m.Year = f.year
+	return nil
+}
+
+// TestGetStartFlixEpisodes_MovieNamedAfterOfficialRecord pins the point of
+// the lookup: a movie listed under its Brazilian name is downloaded under the
+// official English title and year, with its IMDb id on the folder, the way
+// SuperFlix titles were.
+func TestGetStartFlixEpisodes_MovieNamedAfterOfficialRecord(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	fake := &officialRecordFake{title: "Heart of the Beast", year: "2026"}
+	sfxEnrichByIDFn = fake.enrich
+	media := &models.Anime{Name: "Coração Selvagem", URL: "https://www.startflix.test/filmes/film/", Source: "StartFlix", MediaType: models.MediaTypeMovie}
+
+	_, err := GetStartFlixEpisodes(media)
+	require.NoError(t, err)
+	require.Equal(t, 1, fake.calls)
+	assert.True(t, fake.movie, "a /filme/ panel is looked up as a movie")
+	assert.Equal(t, "tt100", fake.imdbID, "looked up by the panel's IMDb id")
+	assert.Equal(t, "Heart of the Beast", media.OfficialTitle())
+
+	meta := &util.MediaMeta{OfficialTitle: media.OfficialTitle(), Year: media.Year, TMDBID: media.TMDBID, IMDBID: media.IMDBID}
+	assert.Equal(t, "/dl/Heart of the Beast (2026) {imdb-tt100}/Heart of the Beast (2026).mp4",
+		util.FormatPlexMoviePath("/dl", media.Name, "", meta))
+}
+
+func TestGetStartFlixEpisodes_SeriesLookedUpByTMDBID(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	fake := &officialRecordFake{}
+	sfxEnrichByIDFn = fake.enrich
+	media := &models.Anime{Name: "Show", URL: "https://www.startflix.test/series/show/", Source: "StartFlix", MediaType: models.MediaTypeTV}
+
+	_, err := GetStartFlixEpisodes(media)
+	require.NoError(t, err)
+	require.Equal(t, 1, fake.calls)
+	assert.False(t, fake.movie)
+	assert.Equal(t, 100, fake.tmdbID)
+	assert.Equal(t, "Show", media.OfficialTitle(), "with no record found the StartFlix name stands")
+}
+
+// TestGetStartFlixEpisodes_PanelIDsReplaceNameGuess pins that the panel's ids
+// win over a match the selection-time search made by the Portuguese name:
+// the guessed ids and the record they brought in are dropped before the
+// lookup, so the wrong film's title never names the download.
+func TestGetStartFlixEpisodes_PanelIDsReplaceNameGuess(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	fake := &officialRecordFake{}
+	sfxEnrichByIDFn = fake.enrich
+	media := &models.Anime{
+		Name: "Coração Selvagem", URL: "https://www.startflix.test/filmes/film/", Source: "StartFlix",
+		MediaType: models.MediaTypeMovie, TMDBID: 483, IMDBID: "tt0100935", Rating: 7.2,
+		TMDBDetails: &models.TMDBDetails{Title: "Wild at Heart"},
+	}
+
+	_, err := GetStartFlixEpisodes(media)
+	require.NoError(t, err)
+	assert.Equal(t, "tt100", fake.imdbID)
+	assert.Zero(t, fake.tmdbID, "the guessed TMDB id belonged to the other film")
+	assert.False(t, fake.hadRecord, "the other film's record is dropped before the lookup")
+	assert.Equal(t, "Coração Selvagem", media.OfficialTitle())
+	assert.Zero(t, media.Rating)
+}
+
+func TestGetStartFlixEpisodes_MatchingGuessIsKept(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	fake := &officialRecordFake{}
+	sfxEnrichByIDFn = fake.enrich
+	media := &models.Anime{
+		Name: "Film", URL: "https://www.startflix.test/filmes/film/", Source: "StartFlix",
+		MediaType: models.MediaTypeMovie, TMDBID: 7, IMDBID: "tt100",
+		TMDBDetails: &models.TMDBDetails{Title: "The Film"},
+	}
+
+	_, err := GetStartFlixEpisodes(media)
+	require.NoError(t, err)
+	assert.Equal(t, 7, fake.tmdbID, "ids that agree with the panel stay")
+	assert.Equal(t, "The Film", media.OfficialTitle())
 }
 
 func TestGetStartFlixEpisodes_BackFromSeasonPicker(t *testing.T) {

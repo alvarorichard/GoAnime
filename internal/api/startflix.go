@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -186,7 +187,8 @@ func selectStartFlixSeason(media *models.Anime, seasons []startflix.Season) (sta
 	return startflix.Season{}, fmt.Errorf("season %q not found", key)
 }
 
-// loadStartFlixPanel resolves the title's panel and records the ids it carries.
+// loadStartFlixPanel resolves the title's panel, records the ids it carries
+// and looks up the official record those ids name.
 func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Panel, error) {
 	var panel startflix.Panel
 	var err error
@@ -194,15 +196,13 @@ func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Pan
 		ctx, cancel := context.WithTimeout(context.Background(), sfxListBudget)
 		defer cancel()
 		panel, err = c.Panel(ctx, media.URL)
+		if err == nil {
+			adoptStartFlixIDs(media, panel)
+			resolveStartFlixOfficial(media, panel)
+		}
 	})
 	if err != nil {
 		return startflix.Panel{}, err
-	}
-	if panel.TMDBID > 0 && media.TMDBID == 0 {
-		media.TMDBID = panel.TMDBID
-	}
-	if panel.IMDBID != "" && media.IMDBID == "" {
-		media.IMDBID = panel.IMDBID
 	}
 	// The panel is the authority on what the title is; the search page only
 	// guessed from its URL.
@@ -212,6 +212,44 @@ func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Pan
 		media.MediaType = models.MediaTypeTV
 	}
 	return panel, nil
+}
+
+// adoptStartFlixIDs records the panel's ids on the title. The panel is keyed
+// by them (TMDB id for shows, IMDb id for movies), so they are the title's
+// real ids. Enrichment at selection time searched by the Portuguese name and
+// may have matched another title — "Coração Selvagem" is also how Brazil
+// knows Lynch's "Wild at Heart" — so when the ids disagree, that guess and
+// everything it brought in are dropped.
+func adoptStartFlixIDs(media *models.Anime, panel startflix.Panel) {
+	tmdbDiffers := panel.TMDBID > 0 && panel.TMDBID != media.TMDBID
+	imdbDiffers := panel.IMDBID != "" && panel.IMDBID != media.IMDBID
+	if !tmdbDiffers && !imdbDiffers {
+		return
+	}
+	if media.TMDBID > 0 || media.IMDBID != "" {
+		util.Debug("StartFlix panel ids replace a name-search match", "title", media.Name,
+			"guessed_tmdb", media.TMDBID, "guessed_imdb", media.IMDBID, "tmdb", panel.TMDBID, "imdb", panel.IMDBID)
+	}
+	media.TMDBID, media.IMDBID = panel.TMDBID, panel.IMDBID
+	media.TMDBDetails, media.Rating, media.Overview, media.Genres, media.Runtime = nil, 0, "", nil, 0
+}
+
+// sfxEnrichByIDFn looks up the official record by id; a seam for tests.
+var sfxEnrichByIDFn = movie.EnrichByID
+
+// resolveStartFlixOfficial names the title after its official English record
+// — the one IMDb/TMDB file under the panel's ids — so downloads land as
+// "Heart of the Beast (2026) {imdb-tt7526136}" rather than under the
+// Portuguese "Coração Selvagem". SuperFlix got this for free, its search
+// results already carried the ids; StartFlix only reveals them here. Best
+// effort: without an answer, the StartFlix name stands.
+func resolveStartFlixOfficial(media *models.Anime, panel startflix.Panel) {
+	if err := sfxEnrichByIDFn(media, panel.Kind == startflix.KindMovie); err != nil {
+		util.Debug("StartFlix official title unavailable", "title", media.Name,
+			"tmdb", media.TMDBID, "imdb", media.IMDBID, "err", err)
+		return
+	}
+	util.Debug("StartFlix official title", "title", media.Name, "official", media.OfficialTitle(), "year", media.Year)
 }
 
 func loadStartFlixSeasons(c *startflix.Client, panel startflix.Panel) ([]startflix.Season, error) {
