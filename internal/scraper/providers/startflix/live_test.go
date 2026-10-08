@@ -216,3 +216,48 @@ func TestLiveStartFlixAbyss(t *testing.T) {
 		}
 	}
 }
+
+// TestLiveStartFlixPicksBestQuality checks the quality rule against the live
+// site: every server for "Velozes & Furiosos 5" is resolved and the tallest
+// stream wins — on 2026-10-08 Abyss's 1440p rendition. ffprobe then reads the
+// picture through the proxy. Hosts label the 16:9-equivalent class, so a
+// 2.39:1 film labelled 1440p is 2560x1086: the width is what must match.
+func TestLiveStartFlixPicksBestQuality(t *testing.T) {
+	skipUnlessLive(t)
+	util.InitLogger()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	c := NewClient()
+
+	panel := Panel{URL: "https://www.painel-aso.sbs/filme/tt1596343", Kind: KindMovie, IMDBID: "tt1596343"}
+	players, err := c.Players(ctx, panel.URL)
+	if err != nil {
+		t.Fatalf("players: %v", err)
+	}
+	stream, err := c.Stream(ctx, panel.URL)
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	fmt.Printf("stream   : %dp via %s (%d servers listed)\n", stream.Height, stream.Host, len(players))
+	if stream.Height < 1080 {
+		t.Fatalf("picked %dp; the title is offered in at least 1080p", stream.Height)
+	}
+
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe not installed; the label check above is all that ran")
+	}
+	out, err := exec.CommandContext(ctx, ffprobe, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height", "-of", "csv=p=0", stream.URL).Output() // #nosec G204 -- test-only, URL from our own resolver
+	if err != nil {
+		t.Fatalf("ffprobe: %v", err)
+	}
+	var width, height int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d,%d", &width, &height); err != nil {
+		t.Fatalf("ffprobe output %q: %v", out, err)
+	}
+	fmt.Printf("ffprobe  : %dx%d\n", width, height)
+	if want := stream.Height * 16 / 9; width < want*98/100 || width > want*102/100 {
+		t.Errorf("the video is %dx%d; a %dp-class picture is %d wide", width, height, stream.Height, want)
+	}
+}

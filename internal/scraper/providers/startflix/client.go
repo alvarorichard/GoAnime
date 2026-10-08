@@ -278,7 +278,7 @@ func (c *Client) Players(ctx context.Context, playersURL string) ([]Player, erro
 	return players, nil
 }
 
-// Stream resolves the first playable server listed at playersURL.
+// Stream resolves the best stream the servers listed at playersURL offer.
 func (c *Client) Stream(ctx context.Context, playersURL string) (*Stream, error) {
 	players, err := c.Players(ctx, playersURL)
 	if err != nil {
@@ -336,9 +336,9 @@ func playerRank(p Player) int {
 // ResolveStream returns the best stream the players offer. Every supported
 // player is resolved at once and the tallest stream wins, the player ranking
 // (Byse, Abyss, direct files) breaking ties between equally tall ones. The
-// first host to answer is not necessarily the best: on 2026-10-08 "Velozes &
-// Furiosos 5" came out of Abyss in 1440p. Resolving in parallel keeps the
-// wait at the slowest host's, not the sum of them.
+// first host to answer is not necessarily the best one, so all of them are
+// asked; resolving in parallel keeps the wait at the slowest host's, not the
+// sum of them.
 func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, error) {
 	if len(players) == 0 {
 		return nil, ErrNoPlayers

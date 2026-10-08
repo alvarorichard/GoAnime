@@ -179,7 +179,11 @@ type Stream struct {
 	Subtitles []Subtitle
 	// Host is the player host that served it, for diagnostics.
 	Host string
-	// Height is the tallest picture the stream offers (1080 for 1080p), or 0
-	// when the host does not say. ResolveStream keeps the tallest stream.
+	// Height is the stream's quality class as hosts label it — 1080 for
+	// "1080p" — or 0 when the host does not say. It is the 16:9-equivalent
+	// height, not the pixel height: a 2.39:1 film labelled 1440p is 2560x1086.
+	// Byse and Abyss both label this way (checked 2026-10-08: each said 1080
+	// for the same 1920x860 film), so their heights compare fairly.
+	// ResolveStream keeps the tallest stream.
 	Height int
 }

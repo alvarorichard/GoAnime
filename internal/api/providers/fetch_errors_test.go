@@ -93,3 +93,37 @@ func TestStartFlixProvider_FetchStreamURL(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	})
 }
+
+func TestStartFlixProvider_FetchEpisodes(t *testing.T) {
+	// Stubs a package-level fn indirection — not parallel.
+	p := &startFlixProvider{}
+	anime := &models.Anime{URL: "https://www.startflix.biz/filmes/x/", Source: "StartFlix", MediaType: models.MediaTypeMovie}
+	t.Cleanup(func() { startFlixEpisodesFn = api.GetStartFlixEpisodes })
+
+	t.Run("delegates to the interactive api listing", func(t *testing.T) {
+		var got *models.Anime
+		startFlixEpisodesFn = func(a *models.Anime) ([]models.Episode, error) {
+			got = a
+			return []models.Episode{{Number: "1", Num: 1}}, nil
+		}
+		eps, err := p.FetchEpisodes(context.Background(), anime)
+		require.NoError(t, err)
+		assert.Len(t, eps, 1)
+		assert.Same(t, anime, got)
+	})
+
+	t.Run("error passthrough", func(t *testing.T) {
+		startFlixEpisodesFn = func(*models.Anime) ([]models.Episode, error) { return nil, assert.AnError }
+		_, err := p.FetchEpisodes(context.Background(), anime)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("cancelled context returns immediately", func(t *testing.T) {
+		startFlixEpisodesFn = func(*models.Anime) ([]models.Episode, error) {
+			t.Error("must not list episodes with a cancelled context")
+			return nil, nil
+		}
+		_, err := p.FetchEpisodes(cancelledCtx(), anime)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}

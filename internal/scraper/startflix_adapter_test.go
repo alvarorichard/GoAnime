@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -56,6 +57,8 @@ func TestStartFlixAdapter_GetAnimeEpisodesPointsAtTheAPIFlow(t *testing.T) {
 	t.Parallel()
 	_, err := (&StartFlixAdapter{}).GetAnimeEpisodes("https://www.startflix.test/series/x/")
 	require.Error(t, err)
+	_, err = (&StartFlixAdapter{}).GetAnimeEpisodesContext(context.Background(), "https://www.startflix.test/series/x/")
+	require.ErrorContains(t, err, "GetStartFlixEpisodes", "the contextual form points at the api flow too")
 }
 
 // The metadata map is read by providers.applyPlaybackMetadata, which expects
