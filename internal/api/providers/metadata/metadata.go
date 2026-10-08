@@ -387,6 +387,16 @@ func (e *Enricher) EnrichAnime(ctx context.Context, anime *models.Anime) ([]Seas
 	if anime == nil {
 		return nil, nil
 	}
+	// StartFlix lists episodes per season, the way TMDB groups them, and
+	// names the title by its TMDB/IMDb ids. An AniList match by name would
+	// re-read those per-season numbers as absolute ones through its season
+	// map — "Attack on Titan" S04E20 came out as S01E20 — and could tag the
+	// folder with another title's AniList/MAL ids. Selection-time enrichment
+	// already keeps StartFlix away from AniList (api.enrichAnimeData).
+	if anime.Source == startflix.SourceName {
+		util.Debug("EnrichAnime skipped for StartFlix: season-relative episodes, ids from its panel", "name", anime.Name)
+		return nil, nil
+	}
 
 	util.Debug("EnrichAnime called", "name", anime.Name, "anilistID", anime.AnilistID, "malID", anime.MalID)
 
