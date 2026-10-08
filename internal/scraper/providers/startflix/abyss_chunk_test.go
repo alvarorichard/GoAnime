@@ -1147,3 +1147,63 @@ func TestMakeAbyssFileRejectsSteeredHosts(t *testing.T) {
 		t.Errorf("bad single-file URL: ok=%v file=%+v, want the chunked rendition", ok, f)
 	}
 }
+
+// TestMakeAbyssFilePicksTallestRendition pins the quality rule for Abyss: the
+// tallest picture wins whatever its codec or layout; H.264 only breaks a tie
+// in height, and a single file only a tie with a chunked rendition.
+func TestMakeAbyssFilePicksTallestRendition(t *testing.T) {
+	t.Parallel()
+	embed := mustParseURL(t, "https://playembedapi.site/?v=x")
+	datas := &abyssDatas{Slug: "x", MD5ID: 42, UserID: 7}
+	const size = 1 << 22
+	chunked := func(label string, res int, codec string) abyssSource {
+		return abyssSource{Label: label, ResID: res, Size: size, Codec: codec, Sub: "qq"}
+	}
+	single := func(label string, res int, codec string) abyssSource {
+		return abyssSource{Label: label, ResID: res, Size: size, Codec: codec, URL: "https://files.cdn.test/" + label, Path: "v.mp4"}
+	}
+	tests := []struct {
+		name       string
+		sources    []abyssSource
+		wantHeight int
+		wantCodec  string // chunked picks
+		wantSingle bool
+	}{
+		{name: "AV1-only 1080p beats H.264 720p",
+			sources:    []abyssSource{chunked("720p", 4, "h264"), chunked("1080p", 5, "av1")},
+			wantHeight: 1080, wantCodec: "av1"},
+		{name: "same height prefers H.264",
+			sources:    []abyssSource{chunked("1080p", 5, "av1"), chunked("1080p", 5, "h264"), chunked("720p", 4, "h264")},
+			wantHeight: 1080, wantCodec: "h264"},
+		{name: "chunked 1080p beats a 720p single file",
+			sources:    []abyssSource{single("720p", 4, "h264"), chunked("1080p", 5, "h264")},
+			wantHeight: 1080, wantCodec: "h264"},
+		{name: "single file wins a tie",
+			sources:    []abyssSource{chunked("1080p", 5, "h264"), single("1080p", 5, "h264")},
+			wantHeight: 1080, wantSingle: true},
+		{name: "taller single file beats chunked",
+			sources:    []abyssSource{chunked("720p", 4, "h264"), single("1080p", 5, "av1")},
+			wantHeight: 1080, wantSingle: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			media := &abyssMedia{}
+			media.MP4.Sources = tt.sources
+			media.MP4.Domains = []string{"qq.cdn.test"}
+			f, ok := makeAbyssFile(embed, datas, media)
+			if !ok {
+				t.Fatal("no rendition picked")
+			}
+			if f.height != tt.wantHeight {
+				t.Errorf("height = %d, want %d", f.height, tt.wantHeight)
+			}
+			if gotSingle := f.chunk == nil; gotSingle != tt.wantSingle {
+				t.Fatalf("single file = %v, want %v", gotSingle, tt.wantSingle)
+			}
+			if !tt.wantSingle && f.chunk.codec != tt.wantCodec {
+				t.Errorf("codec = %s, want %s", f.chunk.codec, tt.wantCodec)
+			}
+		})
+	}
+}

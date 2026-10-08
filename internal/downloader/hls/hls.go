@@ -224,10 +224,17 @@ func (d *Downloader) parsePlaylist(ctx context.Context, url string, headers map[
 // bandwidthRe extracts the BANDWIDTH attribute from #EXT-X-STREAM-INF tags.
 var bandwidthRe = regexp.MustCompile(`BANDWIDTH=(\d+)`)
 
-// selectBestStream finds the highest quality stream from a master playlist
+// resolutionRe extracts the picture height from a RESOLUTION=WxH attribute.
+var resolutionRe = regexp.MustCompile(`RESOLUTION=\d+x(\d+)`)
+
+// selectBestStream finds the highest quality stream from a master playlist:
+// the tallest picture, and among equally tall ones the highest bandwidth.
+// Height comes first because bandwidth alone can rank a 720p variant in an
+// older codec above a 1080p one in a more efficient codec.
 func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 	type StreamInfo struct {
 		URL       string
+		Height    int
 		Bandwidth int
 	}
 
@@ -235,44 +242,39 @@ func (d *Downloader) selectBestStream(lines []string, baseURL string) string {
 
 	for i, line := range lines {
 		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
-			// Parse bandwidth from the tag
-			bandwidth := 0
+			info := StreamInfo{}
 			if bwMatch := bandwidthRe.FindStringSubmatch(line); len(bwMatch) > 1 {
-				if bw, err := strconv.Atoi(bwMatch[1]); err == nil {
-					bandwidth = bw
-				}
+				info.Bandwidth, _ = strconv.Atoi(bwMatch[1])
+			}
+			if resMatch := resolutionRe.FindStringSubmatch(line); len(resMatch) > 1 {
+				info.Height, _ = strconv.Atoi(resMatch[1])
 			}
 
 			// Next non-tag line should be the URL
 			if i+1 < len(lines) {
 				urlLine := strings.TrimSpace(lines[i+1])
 				if strings.HasPrefix(urlLine, "http") {
-					streams = append(streams, StreamInfo{URL: urlLine, Bandwidth: bandwidth})
-				} else {
+					info.URL = urlLine
+					streams = append(streams, info)
+				} else if base, _, ok := strings.CutLast(baseURL, "/"); ok {
 					// Handle relative URL
-					if base, _, ok := strings.CutLast(baseURL, "/"); ok {
-						streams = append(streams, StreamInfo{
-							URL:       base + "/" + urlLine,
-							Bandwidth: bandwidth,
-						})
-					}
+					info.URL = base + "/" + urlLine
+					streams = append(streams, info)
 				}
 			}
 		}
 	}
 
-	// Select the stream with the highest bandwidth
-	if len(streams) > 0 {
-		best := streams[0]
-		for _, s := range streams[1:] {
-			if s.Bandwidth > best.Bandwidth {
-				best = s
-			}
-		}
-		return best.URL
+	if len(streams) == 0 {
+		return ""
 	}
-
-	return ""
+	best := streams[0]
+	for _, s := range streams[1:] {
+		if s.Height > best.Height || (s.Height == best.Height && s.Bandwidth > best.Bandwidth) {
+			best = s
+		}
+	}
+	return best.URL
 }
 
 // parseMediaPlaylist fetches and parses a media playlist (not master)

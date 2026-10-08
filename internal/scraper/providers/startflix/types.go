@@ -179,4 +179,7 @@ type Stream struct {
 	Subtitles []Subtitle
 	// Host is the player host that served it, for diagnostics.
 	Host string
+	// Height is the tallest picture the stream offers (1080 for 1080p), or 0
+	// when the host does not say. ResolveStream keeps the tallest stream.
+	Height int
 }

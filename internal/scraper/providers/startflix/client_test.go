@@ -343,8 +343,10 @@ func TestResolveStream(t *testing.T) {
 	}{
 		{name: "byse preferred over listing order", players: []Player{abyss, okFile, byse}, wantURL: "https://cdn.test/master.m3u8", wantSubs: 1},
 		{name: "byse gone falls through to file", players: []Player{byse, okFile}, byseErr: "video record missing", wantURL: "https://files.test/ok.mp4", wantSubs: 1},
-		{name: "only unsupported hosts", players: []Player{abyss, vidsrc, abyss}, wantErr: ErrNoSupportedServer, unsupported: 2},
-		{name: "supported but dead", players: []Player{deadFile, pageFile, abyss}, wantErr: ErrNoSupportedServer, unsupported: 1, failures: 2},
+		// Abyss is supported; the fake answers its embed with a 403, so it
+		// counts as a failure, not as an unsupported host.
+		{name: "only unsupported or dead hosts", players: []Player{abyss, vidsrc, abyss}, wantErr: ErrNoSupportedServer, unsupported: 1, failures: 2},
+		{name: "supported but dead", players: []Player{deadFile, pageFile, abyss}, wantErr: ErrNoSupportedServer, unsupported: 0, failures: 3},
 		{name: "no players", players: nil, wantErr: ErrNoPlayers},
 	}
 	for _, tt := range tests {
@@ -369,6 +371,104 @@ func TestResolveStream(t *testing.T) {
 				t.Errorf("stream = %+v, want %s with %d subtitles", s, tt.wantURL, tt.wantSubs)
 			}
 		})
+	}
+}
+
+// qualityHosts serves Byse videos by code, each with its own source height,
+// and a working direct file of unknown height; it counts the Byse calls.
+func qualityHosts(t *testing.T, heights map[string]int, calls *atomic.Int32) http.Handler {
+	t.Helper()
+	pbs := map[string]bysePlayback{}
+	for code, h := range heights {
+		pbs[code] = sealByse(t, map[string]any{
+			"sources": []map[string]any{{"url": "https://cdn.test/" + code + "/master.m3u8", "height": h}},
+		}, 6)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch host := r.Header.Get("X-Original-Host"); {
+		case host == "embedplaybyse.test" && strings.HasPrefix(r.URL.Path, "/api/videos/"):
+			calls.Add(1)
+			pb, ok := pbs[strings.TrimPrefix(r.URL.Path, "/api/videos/")]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"video record missing"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"title": "x", "playback": pb})
+		case host == "files.test" && r.URL.Path == "/ok.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte{0, 0})
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	})
+}
+
+// TestResolveStreamPicksTallest pins the quality rule: every supported player
+// is resolved and the tallest stream wins, whatever order the players are
+// listed in; equally tall streams go to the better-ranked, earlier player,
+// and a failing player never hides a working one.
+func TestResolveStreamPicksTallest(t *testing.T) {
+	t.Parallel()
+	byse := func(code string) Player {
+		return Player{URL: "https://embedplaybyse.test/e/" + code + "/x", Type: "iframe"}
+	}
+	okFile := Player{URL: "https://files.test/ok.mp4", Type: "jwplayer", referer: "https://p.test/"}
+	heights := map[string]int{"sd480000": 480, "hd720000": 720, "fhd10800": 1080, "fhd20800": 1080, "qhd14400": 1440}
+
+	tests := []struct {
+		name      string
+		players   []Player
+		wantCode  string
+		wantH     int
+		wantCalls int32
+	}{
+		{name: "taller listed later", players: []Player{byse("sd480000"), byse("fhd10800")}, wantCode: "fhd10800", wantH: 1080, wantCalls: 2},
+		{name: "full HD is not the ceiling", players: []Player{byse("fhd10800"), byse("hd720000"), byse("qhd14400")}, wantCode: "qhd14400", wantH: 1440, wantCalls: 3},
+		{name: "equal heights keep listing order", players: []Player{byse("fhd20800"), byse("fhd10800")}, wantCode: "fhd20800", wantH: 1080, wantCalls: 2},
+		{name: "a failing player hides nothing", players: []Player{byse("missing1"), byse("hd720000"), byse("sd480000")}, wantCode: "hd720000", wantH: 720, wantCalls: 3},
+		{name: "a known height beats an unknown one", players: []Player{okFile, byse("hd720000")}, wantCode: "hd720000", wantH: 720, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			c := newTestClient(t, qualityHosts(t, heights, &calls))
+			s, err := c.ResolveStream(context.Background(), tt.players)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(s.URL, "/"+tt.wantCode+"/") || s.Height != tt.wantH {
+				t.Errorf("stream = %s (%dp), want %s (%dp)", s.URL, s.Height, tt.wantCode, tt.wantH)
+			}
+			if got := calls.Load(); got != tt.wantCalls {
+				t.Errorf("Byse resolutions = %d, want %d", got, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestLabelHeight(t *testing.T) {
+	t.Parallel()
+	for label, want := range map[string]int{
+		"1080p": 1080, "720p HD": 720, "FULL HD 1080P": 1080, "480p": 480, "4K": 2160,
+		"Player #2": 0, "": 0, "HD": 0, "10800p": 0,
+	} {
+		if got := labelHeight(label); got != want {
+			t.Errorf("labelHeight(%q) = %d, want %d", label, got, want)
+		}
+	}
+}
+
+func TestPickByseSourceFallsBackToLabel(t *testing.T) {
+	t.Parallel()
+	src, ok := pickByseSource([]byseSource{
+		{URL: "https://cdn.test/a.m3u8", Label: "480p"},
+		{URL: "https://cdn.test/b.m3u8", Label: "1080p"},
+	})
+	if !ok || src.URL != "https://cdn.test/b.m3u8" || src.height() != 1080 {
+		t.Errorf("picked %+v, want the 1080p-labelled source", src)
 	}
 }
 

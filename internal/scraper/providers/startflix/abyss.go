@@ -245,26 +245,34 @@ func decryptAbyssMedia(d *abyssDatas) (*abyssMedia, error) {
 	return &media, nil
 }
 
-// pickAbyssSource prefers the tallest H.264 rendition that is a single file
-// (url + path); AV1 only when nothing else is offered.
+// abyssBetter orders renditions best first: the tallest picture (res_id grows
+// with resolution — 2 is 360p, 4 is 720p, 5 is 1080p), and at the same
+// height H.264 before AV1, which more machines decode in hardware.
+func abyssBetter(a, b abyssSource) bool {
+	if a.ResID != b.ResID {
+		return a.ResID > b.ResID
+	}
+	return !strings.EqualFold(a.Codec, "av1") && strings.EqualFold(b.Codec, "av1")
+}
+
+// pickAbyssSource returns the best rendition served as a single file (url +
+// path on a plain https host name).
 func pickAbyssSource(sources []abyssSource) (abyssSource, bool) {
 	var files []abyssSource
 	for _, s := range sources {
-		if s.URL != "" && s.Path != "" && s.Size > abyssEncryptedHead {
+		if s.URL != "" && s.Path != "" && s.Size > abyssEncryptedHead && isAbyssMediaURL(abyssSingleFileURL(s)) {
 			files = append(files, s)
 		}
 	}
 	if len(files) == 0 {
 		return abyssSource{}, false
 	}
-	sort.SliceStable(files, func(i, j int) bool {
-		ai, aj := strings.EqualFold(files[i].Codec, "av1"), strings.EqualFold(files[j].Codec, "av1")
-		if ai != aj {
-			return !ai
-		}
-		return files[i].ResID > files[j].ResID
-	})
+	sort.SliceStable(files, func(i, j int) bool { return abyssBetter(files[i], files[j]) })
 	return files[0], true
+}
+
+func abyssSingleFileURL(s abyssSource) string {
+	return strings.TrimRight(s.URL, "/") + "/" + strings.TrimLeft(s.Path, "/")
 }
 
 // isAbyssHostname reports whether s is a bare DNS host name, the only thing
@@ -324,6 +332,7 @@ type abyssFile struct {
 	size     int64
 	seed     string // last path segment: the head's key seed
 	origin   string // embed origin, sent as Origin and Referer
+	height   int    // the rendition's picture height, 0 when its label gives none
 	chunk    *abyssChunkSource
 
 	partsOnce sync.Once
@@ -379,26 +388,14 @@ func (c *Client) resolveAbyss(ctx context.Context, embed *url.URL, p Player) (*S
 	if err != nil {
 		return nil, err
 	}
-	return &Stream{URL: local, Host: embed.Host}, nil
+	return &Stream{URL: local, Host: embed.Host, Height: file.height}, nil
 }
 
 func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
 	// The CDN only serves media to requests carrying the embed's Origin and
 	// Referer, so the file carries the embed origin like the player does.
 	origin := embed.Scheme + "://" + embed.Host
-	// A single-file rendition whose URL is not a plain https URL on a host
-	// name falls through to the chunked renditions below.
-	if src, ok := pickAbyssSource(media.MP4.Sources); ok {
-		upstream := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(src.Path, "/")
-		if isAbyssMediaURL(upstream) {
-			return &abyssFile{
-				upstream: upstream,
-				size:     src.Size,
-				seed:     upstream[strings.LastIndex(upstream, "/")+1:],
-				origin:   origin,
-			}, true
-		}
-	}
+	single, hasSingle := pickAbyssSource(media.MP4.Sources)
 
 	var choices []abyssSource
 	for _, src := range media.MP4.Sources {
@@ -410,16 +407,23 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 		}
 		choices = append(choices, src)
 	}
+	sort.SliceStable(choices, func(i, j int) bool { return abyssBetter(choices[i], choices[j]) })
+
+	// The best picture wins whichever way it is served; at a tie the single
+	// file does, being one plain request per range.
+	if hasSingle && (len(choices) == 0 || !abyssBetter(choices[0], single)) {
+		upstream := abyssSingleFileURL(single)
+		return &abyssFile{
+			upstream: upstream,
+			size:     single.Size,
+			seed:     upstream[strings.LastIndex(upstream, "/")+1:],
+			origin:   origin,
+			height:   labelHeight(single.Label),
+		}, true
+	}
 	if len(choices) == 0 {
 		return nil, false
 	}
-	sort.SliceStable(choices, func(i, j int) bool {
-		ai, aj := strings.EqualFold(choices[i].Codec, "av1"), strings.EqualFold(choices[j].Codec, "av1")
-		if ai != aj {
-			return !ai
-		}
-		return choices[i].ResID > choices[j].ResID
-	})
 	src := choices[0]
 	// The encrypted head is optional: without a fristData entry — or when its
 	// partSize is not a whole number of parts, which the player refuses to
@@ -440,6 +444,7 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 	return &abyssFile{
 		size:   src.Size,
 		origin: origin,
+		height: labelHeight(src.Label),
 		chunk: &abyssChunkSource{
 			md5ID: datas.MD5ID, resID: src.ResID, sub: src.Sub,
 			codec: src.Codec, label: src.Label,

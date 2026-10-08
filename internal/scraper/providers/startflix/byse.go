@@ -172,8 +172,17 @@ func pickByseSource(sources []byseSource) (byseSource, bool) {
 	if len(playable) == 0 {
 		return byseSource{}, false
 	}
-	sort.SliceStable(playable, func(i, j int) bool { return playable[i].Height > playable[j].Height })
+	sort.SliceStable(playable, func(i, j int) bool { return playable[i].height() > playable[j].height() })
 	return playable[0], true
+}
+
+// height is the source's picture height: its height field, or the number in
+// a "1080p"-style label when the field is missing.
+func (s byseSource) height() int {
+	if s.Height > 0 {
+		return s.Height
+	}
+	return labelHeight(s.Label)
 }
 
 func byseSubtitles(tracks ...[]byseTrackRaw) []Subtitle {
@@ -242,5 +251,6 @@ func (c *Client) resolveByse(ctx context.Context, embed *url.URL) (*Stream, erro
 		Referer:   origin + "/",
 		Subtitles: byseSubtitles(sources.Tracks, video.Tracks),
 		Host:      embed.Host,
+		Height:    src.height(),
 	}, nil
 }

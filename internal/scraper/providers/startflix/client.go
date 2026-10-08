@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -331,7 +333,12 @@ func playerRank(p Player) int {
 	}
 }
 
-// ResolveStream tries each player in turn and returns the first stream.
+// ResolveStream returns the best stream the players offer. Every supported
+// player is resolved at once and the tallest stream wins, the player ranking
+// (Byse, Abyss, direct files) breaking ties between equally tall ones. The
+// first host to answer is not necessarily the best: on 2026-10-08 "Velozes &
+// Furiosos 5" came out of Abyss in 1440p. Resolving in parallel keeps the
+// wait at the slowest host's, not the sum of them.
 func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, error) {
 	if len(players) == 0 {
 		return nil, ErrNoPlayers
@@ -339,44 +346,85 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 	ordered := slices.Clone(players)
 	slices.SortStableFunc(ordered, func(a, b Player) int { return playerRank(a) - playerRank(b) })
 
+	type outcome struct {
+		stream *Stream
+		err    error
+		host   string
+	}
 	noStream := &NoStreamError{}
-	for _, p := range ordered {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	results := make([]*outcome, len(ordered))
+	var wg sync.WaitGroup
+	for i, p := range ordered {
 		u, err := url.Parse(p.URL)
 		if err != nil || u.Host == "" {
 			continue
 		}
-		var s *Stream
+		var resolve func() (*Stream, error)
 		switch {
 		case isByseHost(u.Host):
-			s, err = c.resolveByse(ctx, u)
+			resolve = func() (*Stream, error) { return c.resolveByse(ctx, u) }
 		case isAbyssHost(u.Host):
-			s, err = c.resolveAbyss(ctx, u, p)
+			resolve = func() (*Stream, error) { return c.resolveAbyss(ctx, u, p) }
 		case p.IsDirectFile():
-			s, err = c.resolveDirect(ctx, p, u)
+			resolve = func() (*Stream, error) { return c.resolveDirect(ctx, p, u) }
 		default:
 			if !slices.Contains(noStream.Unsupported, u.Host) {
 				noStream.Unsupported = append(noStream.Unsupported, u.Host)
 			}
 			continue
 		}
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxErr
-			}
-			util.Debug("StartFlix player failed", "host", u.Host, "label", p.Label, "err", err)
-			noStream.Failures = append(noStream.Failures, fmt.Errorf("%s: %w", u.Host, err))
+		wg.Go(func() {
+			s, err := resolve()
+			results[i] = &outcome{stream: s, err: err, host: u.Host}
+		})
+	}
+	wg.Wait()
+
+	var best *Stream
+	for i, r := range results {
+		if r == nil {
 			continue
 		}
-		if p.Subtitles != "" {
-			s.Subtitles = append(s.Subtitles, Subtitle{URL: p.Subtitles, Language: "pt-br", Label: "Português"})
+		if r.err != nil {
+			if ctx.Err() == nil {
+				util.Debug("StartFlix player failed", "host", r.host, "label", ordered[i].Label, "err", r.err)
+				noStream.Failures = append(noStream.Failures, fmt.Errorf("%s: %w", r.host, r.err))
+			}
+			continue
 		}
-		util.Debug("StartFlix stream resolved", "host", s.Host, "label", p.Label)
-		return s, nil
+		if ordered[i].Subtitles != "" {
+			r.stream.Subtitles = append(r.stream.Subtitles, Subtitle{URL: ordered[i].Subtitles, Language: "pt-br", Label: "Português"})
+		}
+		util.Debug("StartFlix stream candidate", "host", r.stream.Host, "label", ordered[i].Label, "height", r.stream.Height)
+		if best == nil || r.stream.Height > best.Height {
+			best = r.stream
+		}
+	}
+	if best != nil {
+		util.Debug("StartFlix stream resolved", "host", best.Host, "height", best.Height)
+		return best, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return nil, noStream
+}
+
+// heightRe finds a picture height in a quality label: "1080p", "720p HD".
+var heightRe = regexp.MustCompile(`(?i)\b(\d{3,4})p\b`)
+
+// labelHeight reads the picture height from a quality label, 0 when the label
+// names none.
+func labelHeight(label string) int {
+	if strings.Contains(strings.ToUpper(label), "4K") {
+		return 2160
+	}
+	m := heightRe.FindStringSubmatch(label)
+	if m == nil {
+		return 0
+	}
+	h, _ := strconv.Atoi(m[1])
+	return h
 }
 
 // resolveDirect checks that a direct-file player still serves media. The panel
