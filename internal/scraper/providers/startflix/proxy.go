@@ -2,6 +2,7 @@ package startflix
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -26,27 +27,36 @@ import (
 // needs to know Abyss exists.
 type streamProxy struct {
 	mu    sync.Mutex
-	base  string // http://127.0.0.1:port
-	files map[string]*proxiedFile
-	order []string
+	base  string                   // http://127.0.0.1:port
+	files map[string]*list.Element // id -> element of lru
+	lru   *list.List               // front = most recently used; values are *proxiedFile
 }
 
 type proxiedFile struct {
 	*abyssFile
 	client *http.Client
+	id     string
 }
 
-// maxProxiedFiles bounds the registry: a binge registers one file per episode,
-// and only the latest few can still be playing or downloading.
-const maxProxiedFiles = 64
+// maxProxiedFiles bounds the registry. A batch download resolves every
+// episode of its range before it downloads any, so each URL must outlive the
+// registration of the whole range; files are evicted least recently used, so
+// whatever mpv or the downloader is reading stays. A registered file costs a
+// few hundred bytes until it is read (its parts live in the shared, budgeted
+// part store), so the cap can comfortably exceed any real batch.
+const maxProxiedFiles = 1024
 
 var (
 	proxyOnce   sync.Once
 	proxyShared *streamProxy
 )
 
+func newStreamProxy() *streamProxy {
+	return &streamProxy{files: map[string]*list.Element{}, lru: list.New()}
+}
+
 func sharedStreamProxy() *streamProxy {
-	proxyOnce.Do(func() { proxyShared = &streamProxy{files: map[string]*proxiedFile{}} })
+	proxyOnce.Do(func() { proxyShared = newStreamProxy() })
 	return proxyShared
 }
 
@@ -92,21 +102,26 @@ func (p *streamProxy) serve(f *abyssFile, client *http.Client) (string, error) {
 		return "", err
 	}
 	id := hex.EncodeToString(raw[:])
-	p.files[id] = &proxiedFile{abyssFile: f, client: client}
-	p.order = append(p.order, id)
-	for len(p.order) > maxProxiedFiles {
-		delete(p.files, p.order[0])
-		p.order = p.order[1:]
+	p.files[id] = p.lru.PushFront(&proxiedFile{abyssFile: f, client: client, id: id})
+	for p.lru.Len() > maxProxiedFiles {
+		oldest := p.lru.Back()
+		p.lru.Remove(oldest)
+		delete(p.files, oldest.Value.(*proxiedFile).id)
 	}
 	return p.base + "/abyss/" + id + ".mp4", nil
 }
 
+// lookup finds a registered file and marks it most recently used.
 func (p *streamProxy) lookup(path string) (*proxiedFile, bool) {
 	id := strings.TrimSuffix(strings.TrimPrefix(path, "/abyss/"), ".mp4")
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	f, ok := p.files[id]
-	return f, ok
+	e, ok := p.files[id]
+	if !ok {
+		return nil, false
+	}
+	p.lru.MoveToFront(e)
+	return e.Value.(*proxiedFile), true
 }
 
 // parseRange reads a single "bytes=a-b" / "bytes=a-" / "bytes=-n" range against
