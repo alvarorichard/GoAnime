@@ -36,6 +36,18 @@ func TestTagResults_StartFlixMediaTypeTags(t *testing.T) {
 	assert.Equal(t, "[TV] [PT-BR] Breaking Bad", tv[0].Name)
 }
 
+func TestTagResults_TopCineMediaTypeTags(t *testing.T) {
+	t.Parallel()
+	res := []*models.Anime{
+		{Name: "Zona Zero", MediaType: models.MediaTypeMovie},
+		{Name: "Breaking Bad", MediaType: models.MediaTypeTV},
+	}
+	tagResults(res, source.TopCine)
+	assert.Equal(t, "[Movie] [PT-BR] Zona Zero", res[0].Name)
+	assert.Equal(t, "[TV] [PT-BR] Breaking Bad", res[1].Name)
+	assert.Equal(t, "TopCine", res[0].Source)
+}
+
 func TestTagResults_DoesNotDoubleTag(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "[English] Naruto"}}

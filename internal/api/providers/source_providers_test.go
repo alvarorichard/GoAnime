@@ -62,6 +62,13 @@ func TestStartFlixProvider_KindAndHasSeasons(t *testing.T) {
 	assert.True(t, p.HasSeasons())
 }
 
+func TestTopCineProvider_KindAndHasSeasons(t *testing.T) {
+	t.Parallel()
+	p := &topCineProvider{}
+	assert.Equal(t, source.TopCine, p.Describe().Kind)
+	assert.True(t, p.HasSeasons())
+}
+
 func TestAnimeFireProvider_Describe(t *testing.T) {
 	t.Parallel()
 	d := (&animeFireProvider{}).Describe()
@@ -91,6 +98,19 @@ func TestStartFlixProvider_Describe(t *testing.T) {
 	assert.Equal(t, []string{"[startflix]"}, d.Tags)
 	assert.Equal(t, []string{"startflix", "painel-aso"}, d.URLMatchers)
 	assert.False(t, d.DefaultDisabled, "StartFlix is the movie/TV source and must search by default")
+}
+
+func TestTopCineProvider_Describe(t *testing.T) {
+	t.Parallel()
+	d := (&topCineProvider{}).Describe()
+	assert.Equal(t, source.TopCine, d.Kind)
+	assert.Equal(t, 45, d.Priority)
+	assert.Equal(t, []string{"TopCine"}, d.Explicit)
+	assert.Equal(t, []string{"[topcine]"}, d.Tags)
+	assert.Equal(t, []string{"topcine"}, d.URLMatchers)
+	assert.Equal(t, "https://topcine3.site", d.ProbeURL)
+	assert.False(t, d.DefaultDisabled, "TopCine is offered next to StartFlix and must search by default")
+	assert.Equal(t, sourceDisplayName(source.TopCine), d.Explicit[0], "a saved title must route back by its display name")
 }
 
 // Each provider's scraper() builds a standalone, correctly-typed adapter on the
@@ -129,11 +149,21 @@ func TestStartFlixProvider_Scraper(t *testing.T) {
 	assert.True(t, contextual, "StartFlix searches must be cancellable by the fan-out deadline")
 }
 
+func TestTopCineProvider_Scraper(t *testing.T) {
+	t.Parallel()
+	ad, err := (&topCineProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.TopCineType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual, "TopCine searches must be cancellable by the fan-out deadline")
+}
+
 // TestSourceRegistry_LiveSourcesRegistered verifies init() populated the
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.StartFlix} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.StartFlix, source.TopCine} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -157,6 +187,11 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		// SuperFlix was removed; a title saved under it no longer routes.
 		{"removed SuperFlix", &models.Anime{Source: "SuperFlix"}, source.Unknown},
 		{"explicit StartFlix", &models.Anime{Source: "StartFlix"}, source.StartFlix},
+		{"explicit TopCine", &models.Anime{Source: "TopCine"}, source.TopCine},
+		// A TopCine episode plays from the StartFlix panel; the title's Source
+		// still routes it back to TopCine.
+		{"TopCine title, panel URL", &models.Anime{Source: "TopCine", URL: "https://www.painel-aso.sbs/embed/1396"}, source.TopCine},
+		{"topcine URL", &models.Anime{URL: "https://topcine3.site/serie/breaking-bad"}, source.TopCine},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
 		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
@@ -195,6 +230,7 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		// The SuperFlix host was removed too.
 		{"https://superflix.to/naruto", source.Unknown},
 		{"https://www.startflix.biz/series/naruto/", source.StartFlix},
+		{"https://topcine3.site/filme/zona-zero", source.TopCine},
 		{"https://example.com/video", source.Unknown},
 	}
 	for _, tt := range tests {

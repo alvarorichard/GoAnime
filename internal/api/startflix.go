@@ -13,6 +13,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -20,6 +21,10 @@ import (
 // StartFlix flow: title page → video panel → season → Dublado/Legendado →
 // episodes. Each episode's URL is the panel endpoint that lists its players, so
 // a stream (or a batch download) resolves from the episode alone.
+//
+// TopCine titles take the same flow from the panel on: their page names the
+// TMDB id the panel is keyed by (see topcine.go), so only the first step
+// differs.
 //
 // The audio choice is made here, while listing, rather than per stream: the
 // panel keeps a separate episode list per audio, and asking before the list is
@@ -29,10 +34,12 @@ import (
 var (
 	sfxClientFn                    = startflix.Shared
 	sfxSeasonPickFn seasonPickFunc = tui.Pick
-	sfxPickFn                      = func(prompt string, labels []string) (int, error) {
+	// sfxPickFn's prompt opens with the source's breadcrumb, "StartFlix > …".
+	sfxPickFn = func(prompt string, labels []string) (int, error) {
+		source, _, _ := strings.Cut(prompt, " > ")
 		return tui.PickLabels(labels, tui.PickOptions{
-			Breadcrumb:   "StartFlix > " + prompt,
-			WindowTitle:  "GoAnime - StartFlix",
+			Breadcrumb:   prompt,
+			WindowTitle:  "GoAnime - " + source,
 			ItemSingular: "option",
 			ItemPlural:   "options",
 		})
@@ -47,24 +54,47 @@ const (
 // describeStartFlixErr turns a StartFlix failure into a plain-language message,
 // keeping the cause reachable through Unwrap.
 func describeStartFlixErr(err error) error {
+	return describePanelErr(startflix.SourceName, err)
+}
+
+// describePanelErr is describeStartFlixErr for any source whose titles play
+// through the StartFlix panel, naming that source.
+func describePanelErr(source string, err error) error {
 	var noStream *startflix.NoStreamError
 	switch {
 	case err == nil:
 		return nil
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0:
-		return &friendlyError{cause: err, msg: "⚠️  StartFlix only offers this on servers GoAnime can't play yet (" +
+		return &friendlyError{cause: err, msg: "⚠️  " + source + " only offers this on servers GoAnime can't play yet (" +
 			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."}
 	case errors.Is(err, startflix.ErrNoSupportedServer):
-		return &friendlyError{cause: err, msg: "⚠️  None of StartFlix's servers worked for this right now. Try again in a moment."}
+		return &friendlyError{cause: err, msg: "⚠️  None of " + source + "'s servers worked for this right now. Try again in a moment."}
 	case errors.Is(err, startflix.ErrNoPlayers):
-		return &friendlyError{cause: err, msg: "⚠️  No video sources for this on StartFlix right now. Try another episode, or come back later."}
+		return &friendlyError{cause: err, msg: "⚠️  No video sources for this on " + source + " right now. Try another episode, or come back later."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
-		return &friendlyError{cause: err, msg: "⚠️  StartFlix lists this title but has no video for it. Try searching it on another source."}
+		return &friendlyError{cause: err, msg: "⚠️  " + source + " lists this title but has no video for it. Try searching it on another source."}
 	case errors.Is(err, context.DeadlineExceeded):
-		return &friendlyError{cause: err, msg: "⚠️  StartFlix took too long to answer. Please try again."}
+		return &friendlyError{cause: err, msg: "⚠️  " + source + " took too long to answer. Please try again."}
 	default:
 		return err
 	}
+}
+
+// describeMediaErr describes a panel failure for the source the title came
+// from.
+func describeMediaErr(media *models.Anime, err error) error {
+	if isTopCine(media) {
+		return describeTopCineErr(media, err)
+	}
+	return describeStartFlixErr(err)
+}
+
+// panelSourceName is the source a panel title is listed on, for messages.
+func panelSourceName(media *models.Anime) string {
+	if isTopCine(media) {
+		return topcine.SourceName
+	}
+	return startflix.SourceName
 }
 
 // sfxAudioChoices remembers, per title page, the audio the user picked — so
@@ -128,6 +158,12 @@ func pinnedStartFlixAudio() (startflix.Audio, bool) {
 // selectStartFlixAudio picks the episode list to show, asking only when the
 // season genuinely has both.
 func selectStartFlixAudio(titleURL string, season startflix.Season) startflix.Audio {
+	return selectPanelAudio(startflix.SourceName, titleURL, season)
+}
+
+// selectPanelAudio is selectStartFlixAudio with the picker titled after the
+// source the title came from.
+func selectPanelAudio(source, titleURL string, season startflix.Season) startflix.Audio {
 	audios := season.Audios()
 	if len(audios) == 1 {
 		return audios[0]
@@ -145,7 +181,7 @@ func selectStartFlixAudio(titleURL string, season startflix.Season) startflix.Au
 		fmt.Sprintf("💬 Legendado (%s)", episodeCountLabel(len(season.Subtitled))),
 	}
 	choice := startflix.AudioDubbed
-	if idx, err := sfxPickFn("Você quer assistir dublado ou legendado? ", labels); err == nil && idx == 1 {
+	if idx, err := sfxPickFn(source+" > Você quer assistir dublado ou legendado? ", labels); err == nil && idx == 1 {
 		choice = startflix.AudioSubtitled
 	} else if err != nil {
 		util.Debug("StartFlix: audio picker unavailable, taking the dub", "err", err)
@@ -195,7 +231,7 @@ func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Pan
 	runWithSpinner("Loading title...", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), sfxListBudget)
 		defer cancel()
-		panel, err = c.Panel(ctx, media.URL)
+		panel, err = panelForMedia(ctx, c, media)
 		if err == nil {
 			adoptStartFlixIDs(media, panel)
 			resolveStartFlixOfficial(media, panel)
@@ -212,6 +248,15 @@ func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Pan
 		media.MediaType = models.MediaTypeTV
 	}
 	return panel, nil
+}
+
+// panelForMedia finds a title's panel: from its StartFlix title page, or by
+// the TMDB id a TopCine page names.
+func panelForMedia(ctx context.Context, c *startflix.Client, media *models.Anime) (startflix.Panel, error) {
+	if isTopCine(media) {
+		return topCinePanel(ctx, media)
+	}
+	return c.Panel(ctx, media.URL)
 }
 
 // adoptStartFlixIDs records the panel's ids on the title. The panel is keyed
@@ -273,7 +318,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
-		return nil, describeStartFlixErr(err)
+		return nil, describeMediaErr(media, err)
 	}
 
 	if panel.Kind == startflix.KindMovie {
@@ -287,7 +332,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
-		return nil, describeStartFlixErr(err)
+		return nil, describeMediaErr(media, err)
 	}
 
 	season, err := selectStartFlixSeason(media, seasons)
@@ -300,8 +345,9 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	return startFlixSeasonEpisodes(media, panel, season), nil
 }
 
-// ErrStartFlixNotSeries is returned when a series operation meets a movie.
-var ErrStartFlixNotSeries = errors.New("this StartFlix title is a movie, not a series")
+// ErrStartFlixNotSeries is returned when a series operation meets a movie
+// (StartFlix or TopCine).
+var ErrStartFlixNotSeries = errors.New("this title is a movie, not a series")
 
 // loadStartFlixSeries opens a title's panel and its seasons, refusing movies.
 func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Season, error) {
@@ -311,14 +357,14 @@ func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Seas
 	c := sfxClientFn()
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
-		return startflix.Panel{}, nil, describeStartFlixErr(err)
+		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	if panel.Kind == startflix.KindMovie {
 		return startflix.Panel{}, nil, ErrStartFlixNotSeries
 	}
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
-		return startflix.Panel{}, nil, describeStartFlixErr(err)
+		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	return panel, seasons, nil
 }
@@ -352,13 +398,13 @@ func GetStartFlixSeasonEpisodes(media *models.Anime, seasonNum int) ([]models.Ep
 		}
 		available = append(available, s.Key())
 	}
-	return nil, fmt.Errorf("season %d is not on StartFlix for %q (seasons: %s)", seasonNum, media.Name, strings.Join(available, ", "))
+	return nil, fmt.Errorf("season %d is not on %s for %q (seasons: %s)", seasonNum, panelSourceName(media), media.Name, strings.Join(available, ", "))
 }
 
 // startFlixSeasonEpisodes builds a season's episode list in the audio the
 // user picks, and records the season as the title's current one.
 func startFlixSeasonEpisodes(media *models.Anime, panel startflix.Panel, season startflix.Season) []models.Episode {
-	audio := selectStartFlixAudio(media.URL, season)
+	audio := selectPanelAudio(panelSourceName(media), media.URL, season)
 	media.CurrentSeason = season.Number
 
 	list := season.Episodes(audio)
@@ -373,7 +419,10 @@ func startFlixSeasonEpisodes(media *models.Anime, panel startflix.Panel, season 
 			Title:    models.TitleDetails{English: ep.Title, Romaji: ep.Title},
 		})
 	}
-	util.Debug("StartFlix episodes loaded", "season", season.Number, "audio", audio, "count", len(episodes))
+	if isTopCine(media) {
+		fillTopCineEpisodeTitles(media, episodes)
+	}
+	util.Debug("Panel episodes loaded", "source", media.Source, "season", season.Number, "audio", audio, "count", len(episodes))
 	return episodes
 }
 
@@ -449,7 +498,7 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 
 	playersURL, err := startFlixPlayersURL(c, media, episode)
 	if err != nil {
-		return "", describeStartFlixErr(err)
+		return "", describeMediaErr(media, err)
 	}
 
 	var stream *startflix.Stream
@@ -461,7 +510,7 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 	if err != nil {
 		// No prefix: the player dispatch already wraps this as "failed to get
 		// StartFlix stream URL", and the friendly text should follow it directly.
-		return "", describeStartFlixErr(err)
+		return "", describeMediaErr(media, err)
 	}
 
 	if stream.Referer != "" {

@@ -186,6 +186,7 @@ func TestIsMovieOrTVSourcePlayer(t *testing.T) {
 		{"nil", nil, false},
 		{"flixhq source", &models.Anime{Source: "SFlix"}, true},
 		{"startflix source", &models.Anime{Source: "StartFlix"}, true},
+		{"topcine source", &models.Anime{Source: "TopCine"}, true},
 		{"movie media type", &models.Anime{MediaType: models.MediaTypeMovie}, true},
 		{"tv media type", &models.Anime{MediaType: models.MediaTypeTV}, true},
 		{"flixhq url", &models.Anime{URL: "https://flixhq.to/x"}, true},

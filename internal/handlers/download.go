@@ -23,7 +23,7 @@ func HandleDownloadRequest() error {
 }
 
 // HandleMovieDownloadRequest processes the -dm movie/series download requests,
-// served by StartFlix.
+// served by StartFlix and TopCine.
 func HandleMovieDownloadRequest() error {
 	// Initialize logger for download process
 	util.InitLogger()

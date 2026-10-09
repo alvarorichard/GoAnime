@@ -1,0 +1,912 @@
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta property="og:title" content="Assistir Breaking Bad (2008) Online Dublado HD"></head><body>
+<section class="bloco-serie-player-compacto" id="player">
+
+    
+
+    
+        <!-- BLOCO: Escolha Simples de Temporada e Episódio -->
+        <!-- Propósito: Exibe temporada e episódio como listas suspensas -->
+        <!-- Dependências: Array $temporadasSerie, variáveis $temporadaInicial e $episodioInicial -->
+
+        <div class="serie-escolha-compacta">
+
+            <!-- BLOCO: Título da Escolha -->
+            <!-- Propósito: Mostra uma orientação simples para o usuário -->
+            <!-- Dependências: Nenhuma -->
+
+            <div class="serie-escolha-cabecalho">
+
+                <strong>
+                    Escolha para assistir
+                </strong>
+
+                <small>
+                    Selecione a temporada e depois o episódio
+                </small>
+
+            </div>
+
+
+            <!-- BLOCO: Select de Temporada -->
+            <!-- Propósito: Permite escolher a temporada da série -->
+            <!-- Dependências: Array $temporadasSerie -->
+
+            <div class="serie-campos-selecao">
+
+                <div class="serie-campo-select">
+
+                    <label for="selectTemporadaSerie">
+                        Temporada
+                    </label>
+
+                    <select id="selectTemporadaSerie" class="serie-seletor-temporada">
+
+                        
+                            <option 
+                                value="1"
+                                selected                            >
+                                Temporada 1 
+                                - 7                                episódios                            </option>
+
+                        
+                            <option 
+                                value="2"
+                                                            >
+                                Temporada 2 
+                                - 13                                episódios                            </option>
+
+                        
+                            <option 
+                                value="3"
+                                                            >
+                                Temporada 3 
+                                - 13                                episódios                            </option>
+
+                        
+                            <option 
+                                value="4"
+                                                            >
+                                Temporada 4 
+                                - 13                                episódios                            </option>
+
+                        
+                            <option 
+                                value="5"
+                                                            >
+                                Temporada 5 
+                                - 16                                episódios                            </option>
+
+                        
+                    </select>
+
+                </div>
+
+
+                <!-- BLOCO: Select de Episódio -->
+                <!-- Propósito: Mostra uma lista suspensa de episódios para cada temporada, começando sem episódio selecionado -->
+                <!-- Dependências: Array $temporadasSerie -->
+
+                <div class="serie-campo-select">
+
+                    <label>
+                        Episódio
+                    </label>
+
+                    
+                        <select 
+                            class="serie-seletor-episodio ativo"
+                            data-lista-temporada="1"
+                            aria-label="Escolha o episódio da temporada 1"
+                        >
+
+                            <!-- BLOCO: Opção Inicial do Episódio -->
+                            <!-- Propósito: Evita carregar o player automaticamente ao abrir a página -->
+                            <!-- Dependências: Select de episódio -->
+
+                            <option value="" selected disabled>
+                                Escolha um episódio
+                            </option>
+
+                            
+                                
+                                <option
+                                    value="1"
+                                    data-temporada="1"
+                                    data-episodio="1"
+                                    data-titulo="Piloto"
+                                    data-player="https://azullog.top/serie/1396/1/1"
+                                >
+                                    EP 01 - Piloto                                </option>
+
+                            
+                                
+                                <option
+                                    value="2"
+                                    data-temporada="1"
+                                    data-episodio="2"
+                                    data-titulo="The Cat&#039;s in the Bag"
+                                    data-player="https://azullog.top/serie/1396/1/2"
+                                >
+                                    EP 02 - The Cat&#039;s in the Bag                                </option>
+
+                            
+                                
+                                <option
+                                    value="3"
+                                    data-temporada="1"
+                                    data-episodio="3"
+                                    data-titulo="And the Bag&#039;s in the River"
+                                    data-player="https://azullog.top/serie/1396/1/3"
+                                >
+                                    EP 03 - And the Bag&#039;s in the River                                </option>
+
+                            
+                                
+                                <option
+                                    value="4"
+                                    data-temporada="1"
+                                    data-episodio="4"
+                                    data-titulo="Cancer Man"
+                                    data-player="https://azullog.top/serie/1396/1/4"
+                                >
+                                    EP 04 - Cancer Man                                </option>
+
+                            
+                                
+                                <option
+                                    value="5"
+                                    data-temporada="1"
+                                    data-episodio="5"
+                                    data-titulo="Gray Matter"
+                                    data-player="https://azullog.top/serie/1396/1/5"
+                                >
+                                    EP 05 - Gray Matter                                </option>
+
+                            
+                                
+                                <option
+                                    value="6"
+                                    data-temporada="1"
+                                    data-episodio="6"
+                                    data-titulo="Crazy Handful of Nothin&#039;"
+                                    data-player="https://azullog.top/serie/1396/1/6"
+                                >
+                                    EP 06 - Crazy Handful of Nothin&#039;                                </option>
+
+                            
+                                
+                                <option
+                                    value="7"
+                                    data-temporada="1"
+                                    data-episodio="7"
+                                    data-titulo="A No-Rough-Stuff-Type Deal"
+                                    data-player="https://azullog.top/serie/1396/1/7"
+                                >
+                                    EP 07 - A No-Rough-Stuff-Type Deal                                </option>
+
+                            
+                        </select>
+
+                    
+                        <select 
+                            class="serie-seletor-episodio "
+                            data-lista-temporada="2"
+                            aria-label="Escolha o episódio da temporada 2"
+                        >
+
+                            <!-- BLOCO: Opção Inicial do Episódio -->
+                            <!-- Propósito: Evita carregar o player automaticamente ao abrir a página -->
+                            <!-- Dependências: Select de episódio -->
+
+                            <option value="" selected disabled>
+                                Escolha um episódio
+                            </option>
+
+                            
+                                
+                                <option
+                                    value="1"
+                                    data-temporada="2"
+                                    data-episodio="1"
+                                    data-titulo="Seven Thirty-Seven"
+                                    data-player="https://azullog.top/serie/1396/2/1"
+                                >
+                                    EP 01 - Seven Thirty-Seven                                </option>
+
+                            
+                                
+                                <option
+                                    value="2"
+                                    data-temporada="2"
+                                    data-episodio="2"
+                                    data-titulo="Grilled"
+                                    data-player="https://azullog.top/serie/1396/2/2"
+                                >
+                                    EP 02 - Grilled                                </option>
+
+                            
+                                
+                                <option
+                                    value="3"
+                                    data-temporada="2"
+                                    data-episodio="3"
+                                    data-titulo="Bit by a Dead Bee"
+                                    data-player="https://azullog.top/serie/1396/2/3"
+                                >
+                                    EP 03 - Bit by a Dead Bee                                </option>
+
+                            
+                                
+                                <option
+                                    value="4"
+                                    data-temporada="2"
+                                    data-episodio="4"
+                                    data-titulo="Down"
+                                    data-player="https://azullog.top/serie/1396/2/4"
+                                >
+                                    EP 04 - Down                                </option>
+
+                            
+                                
+                                <option
+                                    value="5"
+                                    data-temporada="2"
+                                    data-episodio="5"
+                                    data-titulo="Breakage"
+                                    data-player="https://azullog.top/serie/1396/2/5"
+                                >
+                                    EP 05 - Breakage                                </option>
+
+                            
+                                
+                                <option
+                                    value="6"
+                                    data-temporada="2"
+                                    data-episodio="6"
+                                    data-titulo="Peekaboo"
+                                    data-player="https://azullog.top/serie/1396/2/6"
+                                >
+                                    EP 06 - Peekaboo                                </option>
+
+                            
+                                
+                                <option
+                                    value="7"
+                                    data-temporada="2"
+                                    data-episodio="7"
+                                    data-titulo="Negro y Azul"
+                                    data-player="https://azullog.top/serie/1396/2/7"
+                                >
+                                    EP 07 - Negro y Azul                                </option>
+
+                            
+                                
+                                <option
+                                    value="8"
+                                    data-temporada="2"
+                                    data-episodio="8"
+                                    data-titulo="Better Call Saul"
+                                    data-player="https://azullog.top/serie/1396/2/8"
+                                >
+                                    EP 08 - Better Call Saul                                </option>
+
+                            
+                                
+                                <option
+                                    value="9"
+                                    data-temporada="2"
+                                    data-episodio="9"
+                                    data-titulo="4 Days Out"
+                                    data-player="https://azullog.top/serie/1396/2/9"
+                                >
+                                    EP 09 - 4 Days Out                                </option>
+
+                            
+                                
+                                <option
+                                    value="10"
+                                    data-temporada="2"
+                                    data-episodio="10"
+                                    data-titulo="Over"
+                                    data-player="https://azullog.top/serie/1396/2/10"
+                                >
+                                    EP 10 - Over                                </option>
+
+                            
+                                
+                                <option
+                                    value="11"
+                                    data-temporada="2"
+                                    data-episodio="11"
+                                    data-titulo="Mandala"
+                                    data-player="https://azullog.top/serie/1396/2/11"
+                                >
+                                    EP 11 - Mandala                                </option>
+
+                            
+                                
+                                <option
+                                    value="12"
+                                    data-temporada="2"
+                                    data-episodio="12"
+                                    data-titulo="Phoenix"
+                                    data-player="https://azullog.top/serie/1396/2/12"
+                                >
+                                    EP 12 - Phoenix                                </option>
+
+                            
+                                
+                                <option
+                                    value="13"
+                                    data-temporada="2"
+                                    data-episodio="13"
+                                    data-titulo="ABQ"
+                                    data-player="https://azullog.top/serie/1396/2/13"
+                                >
+                                    EP 13 - ABQ                                </option>
+
+                            
+                        </select>
+
+                    
+                        <select 
+                            class="serie-seletor-episodio "
+                            data-lista-temporada="3"
+                            aria-label="Escolha o episódio da temporada 3"
+                        >
+
+                            <!-- BLOCO: Opção Inicial do Episódio -->
+                            <!-- Propósito: Evita carregar o player automaticamente ao abrir a página -->
+                            <!-- Dependências: Select de episódio -->
+
+                            <option value="" selected disabled>
+                                Escolha um episódio
+                            </option>
+
+                            
+                                
+                                <option
+                                    value="1"
+                                    data-temporada="3"
+                                    data-episodio="1"
+                                    data-titulo="Chega!"
+                                    data-player="https://azullog.top/serie/1396/3/1"
+                                >
+                                    EP 01 - Chega!                                </option>
+
+                            
+                                
+                                <option
+                                    value="2"
+                                    data-temporada="3"
+                                    data-episodio="2"
+                                    data-titulo="Cavalo Sem Nome"
+                                    data-player="https://azullog.top/serie/1396/3/2"
+                                >
+                                    EP 02 - Cavalo Sem Nome                                </option>
+
+                            
+                                
+                                <option
+                                    value="3"
+                                    data-temporada="3"
+                                    data-episodio="3"
+                                    data-titulo="Eu Transei Com Ted"
+                                    data-player="https://azullog.top/serie/1396/3/3"
+                                >
+                                    EP 03 - Eu Transei Com Ted                                </option>
+
+                            
+                                
+                                <option
+                                    value="4"
+                                    data-temporada="3"
+                                    data-episodio="4"
+                                    data-titulo="Sinal Verde"
+                                    data-player="https://azullog.top/serie/1396/3/4"
+                                >
+                                    EP 04 - Sinal Verde                                </option>
+
+                            
+                                
+                                <option
+                                    value="5"
+                                    data-temporada="3"
+                                    data-episodio="5"
+                                    data-titulo="Mas"
+                                    data-player="https://azullog.top/serie/1396/3/5"
+                                >
+                                    EP 05 - Mas                                </option>
+
+                            
+                                
+                                <option
+                                    value="6"
+                                    data-temporada="3"
+                                    data-episodio="6"
+                                    data-titulo="Ao Pôr do Sol"
+                                    data-player="https://azullog.top/serie/1396/3/6"
+                                >
+                                    EP 06 - Ao Pôr do Sol                                </option>
+
+                            
+                                
+                                <option
+                                    value="7"
+                                    data-temporada="3"
+                                    data-episodio="7"
+                                    data-titulo="Um Minuto"
+                                    data-player="https://azullog.top/serie/1396/3/7"
+                                >
+                                    EP 07 - Um Minuto                                </option>
+
+                            
+                                
+                                <option
+                                    value="8"
+                                    data-temporada="3"
+                                    data-episodio="8"
+                                    data-titulo="Eu Vejo Você"
+                                    data-player="https://azullog.top/serie/1396/3/8"
+                                >
+                                    EP 08 - Eu Vejo Você                                </option>
+
+                            
+                                
+                                <option
+                                    value="9"
+                                    data-temporada="3"
+                                    data-episodio="9"
+                                    data-titulo="Kafkiano"
+                                    data-player="https://azullog.top/serie/1396/3/9"
+                                >
+                                    EP 09 - Kafkiano                                </option>
+
+                            
+                                
+                                <option
+                                    value="10"
+                                    data-temporada="3"
+                                    data-episodio="10"
+                                    data-titulo="A Mosca"
+                                    data-player="https://azullog.top/serie/1396/3/10"
+                                >
+                                    EP 10 - A Mosca                                </option>
+
+                            
+                                
+                                <option
+                                    value="11"
+                                    data-temporada="3"
+                                    data-episodio="11"
+                                    data-titulo="Abiquiu"
+                                    data-player="https://azullog.top/serie/1396/3/11"
+                                >
+                                    EP 11 - Abiquiu                                </option>
+
+                            
+                                
+                                <option
+                                    value="12"
+                                    data-temporada="3"
+                                    data-episodio="12"
+                                    data-titulo="Medida Pela Metade"
+                                    data-player="https://azullog.top/serie/1396/3/12"
+                                >
+                                    EP 12 - Medida Pela Metade                                </option>
+
+                            
+                                
+                                <option
+                                    value="13"
+                                    data-temporada="3"
+                                    data-episodio="13"
+                                    data-titulo="Medida Completa"
+                                    data-player="https://azullog.top/serie/1396/3/13"
+                                >
+                                    EP 13 - Medida Completa                                </option>
+
+                            
+                        </select>
+
+                    
+                        <select 
+                            class="serie-seletor-episodio "
+                            data-lista-temporada="4"
+                            aria-label="Escolha o episódio da temporada 4"
+                        >
+
+                            <!-- BLOCO: Opção Inicial do Episódio -->
+                            <!-- Propósito: Evita carregar o player automaticamente ao abrir a página -->
+                            <!-- Dependências: Select de episódio -->
+
+                            <option value="" selected disabled>
+                                Escolha um episódio
+                            </option>
+
+                            
+                                
+                                <option
+                                    value="1"
+                                    data-temporada="4"
+                                    data-episodio="1"
+                                    data-titulo="Estilete"
+                                    data-player="https://azullog.top/serie/1396/4/1"
+                                >
+                                    EP 01 - Estilete                                </option>
+
+                            
+                                
+                                <option
+                                    value="2"
+                                    data-temporada="4"
+                                    data-episodio="2"
+                                    data-titulo="38 cano curto"
+                                    data-player="https://azullog.top/serie/1396/4/2"
+                                >
+                                    EP 02 - 38 cano curto                                </option>
+
+                            
+                                
+                                <option
+                                    value="3"
+                                    data-temporada="4"
+                                    data-episodio="3"
+                                    data-titulo="Casa em exposição"
+                                    data-player="https://azullog.top/serie/1396/4/3"
+                                >
+                                    EP 03 - Casa em exposição                                </option>
+
+                            
+                                
+                                <option
+                                    value="4"
+                                    data-temporada="4"
+                                    data-episodio="4"
+                                    data-titulo="Frases curtas"
+                                    data-player="https://azullog.top/serie/1396/4/4"
+                                >
+                                    EP 04 - Frases curtas                                </option>
+
+                            
+                                
+                                <option
+                                    value="5"
+                                    data-temporada="4"
+                                    data-episodio="5"
+                                    data-titulo="Espingarda"
+                                    data-player="https://azullog.top/serie/1396/4/5"
+                                >
+                                    EP 05 - Espingarda                                </option>
+
+                            
+                                
+                                <option
+                                    value="6"
+                                    data-temporada="4"
+                                    data-episodio="6"
+                                    data-titulo="Encurralado"
+                                    data-player="https://azullog.top/serie/1396/4/6"
+                                >
+                                    EP 06 - Encurralado                                </option>
+
+                            
+                                
+                                <option
+                                    value="7"
+                                    data-temporada="4"
+                                    data-episodio="7"
+                                    data-titulo="Cachorro problemático"
+                                    data-player="https://azullog.top/serie/1396/4/7"
+                                >
+                                    EP 07 - Cachorro problemático                                </option>
+
+                            
+                                
+                                <option
+                                    value="8"
+                                    data-temporada="4"
+                                    data-episodio="8"
+                                    data-titulo="Hermanos"
+                                    data-player="https://azullog.top/serie/1396/4/8"
+                                >
+                                    EP 08 - Hermanos                                </option>
+
+                            
+                                
+                                <option
+                                    value="9"
+                                    data-temporada="4"
+                                    data-episodio="9"
+                                    data-titulo="Escuta"
+                                    data-player="https://azullog.top/serie/1396/4/9"
+                                >
+                                    EP 09 - Escuta                                </option>
+
+                            
+                                
+                                <option
+                                    value="10"
+                                    data-temporada="4"
+                                    data-episodio="10"
+                                    data-titulo="Saúde"
+                                    data-player="https://azullog.top/serie/1396/4/10"
+                                >
+                                    EP 10 - Saúde                                </option>
+
+                            
+                                
+                                <option
+                                    value="11"
+                                    data-temporada="4"
+                                    data-episodio="11"
+                                    data-titulo="Cave"
+                                    data-player="https://azullog.top/serie/1396/4/11"
+                                >
+                                    EP 11 - Cave                                </option>
+
+                            
+                                
+                                <option
+                                    value="12"
+                                    data-temporada="4"
+                                    data-episodio="12"
+                                    data-titulo="Hora do fim"
+                                    data-player="https://azullog.top/serie/1396/4/12"
+                                >
+                                    EP 12 - Hora do fim                                </option>
+
+                            
+                                
+                                <option
+                                    value="13"
+                                    data-temporada="4"
+                                    data-episodio="13"
+                                    data-titulo="Confronto"
+                                    data-player="https://azullog.top/serie/1396/4/13"
+                                >
+                                    EP 13 - Confronto                                </option>
+
+                            
+                        </select>
+
+                    
+                        <select 
+                            class="serie-seletor-episodio "
+                            data-lista-temporada="5"
+                            aria-label="Escolha o episódio da temporada 5"
+                        >
+
+                            <!-- BLOCO: Opção Inicial do Episódio -->
+                            <!-- Propósito: Evita carregar o player automaticamente ao abrir a página -->
+                            <!-- Dependências: Select de episódio -->
+
+                            <option value="" selected disabled>
+                                Escolha um episódio
+                            </option>
+
+                            
+                                
+                                <option
+                                    value="1"
+                                    data-temporada="5"
+                                    data-episodio="1"
+                                    data-titulo="Viva livre ou morra"
+                                    data-player="https://azullog.top/serie/1396/5/1"
+                                >
+                                    EP 01 - Viva livre ou morra                                </option>
+
+                            
+                                
+                                <option
+                                    value="2"
+                                    data-temporada="5"
+                                    data-episodio="2"
+                                    data-titulo="Madrigal"
+                                    data-player="https://azullog.top/serie/1396/5/2"
+                                >
+                                    EP 02 - Madrigal                                </option>
+
+                            
+                                
+                                <option
+                                    value="3"
+                                    data-temporada="5"
+                                    data-episodio="3"
+                                    data-titulo="Hazard Pay"
+                                    data-player="https://azullog.top/serie/1396/5/3"
+                                >
+                                    EP 03 - Hazard Pay                                </option>
+
+                            
+                                
+                                <option
+                                    value="4"
+                                    data-temporada="5"
+                                    data-episodio="4"
+                                    data-titulo="Cinquenta e um"
+                                    data-player="https://azullog.top/serie/1396/5/4"
+                                >
+                                    EP 04 - Cinquenta e um                                </option>
+
+                            
+                                
+                                <option
+                                    value="5"
+                                    data-temporada="5"
+                                    data-episodio="5"
+                                    data-titulo="Evoluir"
+                                    data-player="https://azullog.top/serie/1396/5/5"
+                                >
+                                    EP 05 - Evoluir                                </option>
+
+                            
+                                
+                                <option
+                                    value="6"
+                                    data-temporada="5"
+                                    data-episodio="6"
+                                    data-titulo="Aquisição"
+                                    data-player="https://azullog.top/serie/1396/5/6"
+                                >
+                                    EP 06 - Aquisição                                </option>
+
+                            
+                                
+                                <option
+                                    value="7"
+                                    data-temporada="5"
+                                    data-episodio="7"
+                                    data-titulo="Diga meu nome"
+                                    data-player="https://azullog.top/serie/1396/5/7"
+                                >
+                                    EP 07 - Diga meu nome                                </option>
+
+                            
+                                
+                                <option
+                                    value="8"
+                                    data-temporada="5"
+                                    data-episodio="8"
+                                    data-titulo="Planando sobre tudo"
+                                    data-player="https://azullog.top/serie/1396/5/8"
+                                >
+                                    EP 08 - Planando sobre tudo                                </option>
+
+                            
+                                
+                                <option
+                                    value="9"
+                                    data-temporada="5"
+                                    data-episodio="9"
+                                    data-titulo="Dinheiro sujo de sangue"
+                                    data-player="https://azullog.top/serie/1396/5/9"
+                                >
+                                    EP 09 - Dinheiro sujo de sangue                                </option>
+
+                            
+                                
+                                <option
+                                    value="10"
+                                    data-temporada="5"
+                                    data-episodio="10"
+                                    data-titulo="Enterrado"
+                                    data-player="https://azullog.top/serie/1396/5/10"
+                                >
+                                    EP 10 - Enterrado                                </option>
+
+                            
+                                
+                                <option
+                                    value="11"
+                                    data-temporada="5"
+                                    data-episodio="11"
+                                    data-titulo="Confissões"
+                                    data-player="https://azullog.top/serie/1396/5/11"
+                                >
+                                    EP 11 - Confissões                                </option>
+
+                            
+                                
+                                <option
+                                    value="12"
+                                    data-temporada="5"
+                                    data-episodio="12"
+                                    data-titulo="Cão raivoso"
+                                    data-player="https://azullog.top/serie/1396/5/12"
+                                >
+                                    EP 12 - Cão raivoso                                </option>
+
+                            
+                                
+                                <option
+                                    value="13"
+                                    data-temporada="5"
+                                    data-episodio="13"
+                                    data-titulo="To&#039;hajiilee"
+                                    data-player="https://azullog.top/serie/1396/5/13"
+                                >
+                                    EP 13 - To&#039;hajiilee                                </option>
+
+                            
+                                
+                                <option
+                                    value="14"
+                                    data-temporada="5"
+                                    data-episodio="14"
+                                    data-titulo="Ozymandias"
+                                    data-player="https://azullog.top/serie/1396/5/14"
+                                >
+                                    EP 14 - Ozymandias                                </option>
+
+                            
+                                
+                                <option
+                                    value="15"
+                                    data-temporada="5"
+                                    data-episodio="15"
+                                    data-titulo="Estado granito"
+                                    data-player="https://azullog.top/serie/1396/5/15"
+                                >
+                                    EP 15 - Estado granito                                </option>
+
+                            
+                                
+                                <option
+                                    value="16"
+                                    data-temporada="5"
+                                    data-episodio="16"
+                                    data-titulo="Felina"
+                                    data-player="https://azullog.top/serie/1396/5/16"
+                                >
+                                    EP 16 - Felina                                </option>
+
+                            
+                        </select>
+
+                    
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- BLOCO: Caixa do Player da Série -->
+        <!-- Propósito: Mostra uma mensagem inicial, exibe carregando ao trocar episódio e depois abre o iframe -->
+        <!-- Dependências: JavaScript do player e iframePlayerSerie -->
+
+        <div class="serie-player-compacto-caixa">
+
+            <!-- BLOCO: Estado Visual do Player -->
+            <!-- Propósito: Mostra mensagem inicial e carregamento antes do iframe aparecer -->
+            <!-- Dependências: JavaScript do player -->
+
+            <div class="serie-player-status" id="statusPlayerSerie">
+
+                <strong id="tituloStatusPlayerSerie">
+                    Escolha a temporada e episódio
+                </strong>
+
+                <span id="textoStatusPlayerSerie">
+                    Use os menus acima para selecionar o que deseja assistir.
+                </span>
+
+            </div>
+
+            <iframe 
+                title="Player de Breaking Bad"
+                allow="autoplay; encrypted-media; fullscreen; picture-in-picture; web-share"
+                allowfullscreen
+                webkitallowfullscreen
+                mozallowfullscreen
+                referrerpolicy="no-referrer-when-downgrade"
+                loading="lazy"
+                id="iframePlayerSerie"
+            ></iframe>
+
+        </div>
+
+    
+</section>
+</body></html>

@@ -23,7 +23,13 @@ import (
 // off via GOANIME_DISABLED_SOURCES, or shipped off by default (Goyabu) and not
 // opted back in. Suggesting a source the user cannot find in
 // the results would only send them looking for it.
+//
+// TopCine is never offered, and a failing TopCine title counts as StartFlix:
+// both play through the same StartFlix panel, so one cannot rescue the other.
 func alternateSources(current string) []string {
+	if strings.EqualFold(current, string(apisource.TopCine)) {
+		current = string(apisource.StartFlix)
+	}
 	others := make([]string, 0, 4)
 	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.StartFlix} {
 		s, ok := apisource.Registered(k)

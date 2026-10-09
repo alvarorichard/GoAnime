@@ -62,6 +62,8 @@ func scraperKind(st scraper.ScraperType) (apisource.SourceKind, bool) {
 		return apisource.Goyabu, true
 	case scraper.StartFlixType:
 		return apisource.StartFlix, true
+	case scraper.TopCineType:
+		return apisource.TopCine, true
 	default:
 		return "", false
 	}

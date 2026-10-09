@@ -106,7 +106,7 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 | `DefaultDisabled` | ships off unless `GOANIME_ENABLED_SOURCES` names it | shipping live |
 | `ProbeURL` | homepage; HEAD-probed on search timeout to tell "site down" from "opaque hang" | GraphQL/opaque APIs, browser-gated sources |
 
-Priorities in use: AnimeFire `10` · Goyabu `20` · StartFlix `40` · HiAnime `50`.
+Priorities in use: AnimeFire `10` · Goyabu `20` · StartFlix `40` · TopCine `45` · HiAnime `50`.
 Leave gaps of 10. Priority is ignored when `anime.Source` matches an `Explicit`
 entry.
 

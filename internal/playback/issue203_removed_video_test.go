@@ -31,6 +31,8 @@ func TestAlternateSources_ExcludesTheFailingSource(t *testing.T) {
 		{name: "animefire label", current: "Animefire.io", want: []string{"StartFlix"}},
 		{name: "superflix", current: "SuperFlix", want: []string{"AnimeFire", "StartFlix"}},
 		{name: "startflix", current: "StartFlix", want: []string{"AnimeFire"}},
+		// TopCine plays through StartFlix's panel: neither rescues the other.
+		{name: "topcine", current: "TopCine", want: []string{"AnimeFire"}},
 		{name: "unknown source keeps every searched one", current: "", want: []string{"AnimeFire", "StartFlix"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
@@ -31,6 +32,7 @@ const (
 	GoyabuType                // PT-BR anime source
 	HiAnimeType               // hianime.at — subbed/dubbed HLS
 	StartFlixType             // StartFlix PT-BR movies/series
+	TopCineType               // TopCine PT-BR movies/series, played through the StartFlix panel
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -71,6 +73,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &HiAnimeAdapter{client: hianime.NewHiAnimeClient()}, nil
 	case StartFlixType:
 		return &StartFlixAdapter{client: startflix.Shared()}, nil
+	case TopCineType:
+		return &TopCineAdapter{client: topcine.Shared(), panel: startflix.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -88,6 +92,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return "HiAnime"
 	case StartFlixType:
 		return startflix.SourceName
+	case TopCineType:
+		return topcine.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -102,7 +108,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType:
+	case StartFlixType, TopCineType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -356,4 +362,71 @@ func (a *StartFlixAdapter) GetClient() *startflix.Client {
 // tests that point it at a mock server.
 func NewStartFlixAdapterWithClient(client *startflix.Client) *StartFlixAdapter {
 	return &StartFlixAdapter{client: client}
+}
+
+// TopCineAdapter adapts topcine.Client to the UnifiedScraper interface.
+//
+// TopCine's own player host is behind a Cloudflare Turnstile, so its titles
+// play by TMDB id through the StartFlix panel: the episode "URL" it streams
+// from is that panel's player list, exactly as for StartFlixAdapter.
+type TopCineAdapter struct {
+	client *topcine.Client
+	panel  *startflix.Client
+}
+
+func (a *TopCineAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes TopCineAdapter a ContextualScraper.
+func (a *TopCineAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	media, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(media))
+	for _, m := range media {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. TopCine lists episodes through the season and audio pickers in the
+// api package, not through this adapter.
+func (a *TopCineAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *TopCineAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for TopCine, use GetTopCineEpisodes in the api package")
+}
+
+func (a *TopCineAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetStreamURLContext resolves the panel player list at episodeURL; the
+// metadata contract is StartFlixAdapter's.
+func (a *TopCineAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	streamURL, metadata, err = (&StartFlixAdapter{client: a.panel}).GetStreamURLContext(ctx, episodeURL, options...)
+	if metadata != nil {
+		metadata["source"] = "topcine"
+	}
+	return streamURL, metadata, err
+}
+
+func (a *TopCineAdapter) GetType() ScraperType {
+	return TopCineType
+}
+
+// GetClient returns the underlying TopCine client.
+func (a *TopCineAdapter) GetClient() *topcine.Client {
+	return a.client
+}
+
+// NewTopCineAdapterWithClients builds an adapter around given clients, for
+// tests that point them at a mock server.
+func NewTopCineAdapterWithClients(client *topcine.Client, panel *startflix.Client) *TopCineAdapter {
+	return &TopCineAdapter{client: client, panel: panel}
 }

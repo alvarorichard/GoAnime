@@ -34,6 +34,8 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "HiAnime"
 	case source.StartFlix:
 		return "StartFlix"
+	case source.TopCine:
+		return "TopCine"
 	default:
 		return string(kind)
 	}
@@ -77,7 +79,7 @@ func tagResults(results []*models.Anime, kind source.SourceKind) {
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			if kind == source.StartFlix {
+			if kind == source.StartFlix || kind == source.TopCine {
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
 					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)

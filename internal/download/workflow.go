@@ -35,10 +35,12 @@ var (
 	workflowBatchRangeFn     = player.HandleBatchDownloadRange
 )
 
-// StartFlix, the movie/TV source, for the -dm downloads; seams for tests.
+// The movie/TV sources (StartFlix and TopCine, searched together) for the -dm
+// downloads; seams for tests. TopCine titles list through the same panel flow,
+// so the StartFlix listing functions serve both.
 var (
 	movieSearchFn = func(name string) (*models.Anime, error) {
-		return api.SearchAnimeEnhanced(name, "startflix")
+		return api.SearchAnimeEnhanced(name, api.MovieTVSources)
 	}
 	seriesSeasonsFn  = api.GetStartFlixSeasonNumbers
 	seriesEpisodesFn = api.GetStartFlixSeasonEpisodes
@@ -180,8 +182,8 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	return dl.DownloadSingleEpisode(request.EpisodeNum)
 }
 
-// HandleMovieDownloadRequest downloads movies and series from StartFlix, the
-// movie/TV source. The -dm forms:
+// HandleMovieDownloadRequest downloads movies and series from the movie/TV
+// sources, StartFlix and TopCine. The -dm forms:
 //
 //	goanime -dm "Movie"                     the movie
 //	goanime -dm --type tv "Show" 2 5        season 2, episode 5
@@ -199,9 +201,9 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	}
 	title, err := movieSearchFn(request.AnimeName)
 	if err != nil {
-		return fmt.Errorf("failed to search StartFlix: %w", err)
+		return fmt.Errorf("failed to search the movie/TV sources: %w", err)
 	}
-	player.SetSeasonMap(nil) // StartFlix numbers episodes per season
+	player.SetSeasonMap(nil) // the panel numbers episodes per season
 
 	if !request.IsTV {
 		return downloadStartFlixMovie(title)
@@ -228,7 +230,7 @@ func downloadStartFlixMovie(title *models.Anime) error {
 		return fmt.Errorf("failed to open %q: %w", title.Name, err)
 	}
 	if title.MediaType != models.MediaTypeMovie {
-		return fmt.Errorf("%q is a series on StartFlix: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, title.Name)
+		return fmt.Errorf("%q is a series on %s: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, sourceOr(title), title.Name)
 	}
 	if len(eps) == 0 {
 		return fmt.Errorf("%q lists nothing to download", title.Name)
@@ -264,7 +266,15 @@ func downloadStartFlixSeries(title *models.Anime) error {
 
 func seriesErr(title *models.Anime, err error) error {
 	if errors.Is(err, api.ErrStartFlixNotSeries) {
-		return fmt.Errorf("%q is a movie on StartFlix: download it with -dm \"%s\"", title.Name, title.Name)
+		return fmt.Errorf("%q is a movie on %s: download it with -dm \"%s\"", title.Name, sourceOr(title), title.Name)
 	}
 	return fmt.Errorf("failed to list %q: %w", title.Name, err)
+}
+
+// sourceOr names the source a title came from, for messages.
+func sourceOr(title *models.Anime) string {
+	if title.Source != "" {
+		return title.Source
+	}
+	return "StartFlix"
 }

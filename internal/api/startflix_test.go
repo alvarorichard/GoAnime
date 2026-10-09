@@ -65,6 +65,10 @@ func newFakeStartFlix(t *testing.T) *fakeStartFlix {
 			_, _ = w.Write([]byte(fakeSeriesPage))
 		case host == "www.startflix.test" && r.URL.Path == "/filmes/film/":
 			_, _ = w.Write([]byte(fakeMoviePage))
+		case host == "painel.test" && r.URL.Path == "/embed/999":
+			// The panel's answer for a title it does not carry.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("Conteúdo não encontrado."))
 		case host == "painel.test" && r.URL.Path == "/embed/100":
 			_, _ = w.Write([]byte(fakeSeriesPanel))
 		case host == "painel.test" && r.URL.Path == "/filme/tt100":

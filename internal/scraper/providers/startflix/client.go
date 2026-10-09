@@ -222,6 +222,29 @@ func (c *Client) Panel(ctx context.Context, pageURL string) (Panel, error) {
 	return panel, nil
 }
 
+// DefaultPanelBase is the video panel StartFlix's title pages embed (checked
+// 2026-10-09). GOANIME_STARTFLIX_PANEL_URL repoints it.
+const DefaultPanelBase = "https://www.painel-aso.sbs"
+
+func panelBase() string {
+	if base := strings.TrimRight(strings.TrimSpace(os.Getenv("GOANIME_STARTFLIX_PANEL_URL")), "/"); base != "" {
+		return base
+	}
+	return DefaultPanelBase
+}
+
+// SeriesPanel is a series' panel by TMDB id. The panel is keyed by id alone, so
+// a catalog that knows the id (TopCine) reaches it without a StartFlix title
+// page.
+func SeriesPanel(tmdbID int) Panel {
+	return Panel{URL: panelBase() + "/embed/" + strconv.Itoa(tmdbID), Kind: KindSeries, TMDBID: tmdbID}
+}
+
+// MoviePanel is a movie's panel by IMDb id; see SeriesPanel.
+func MoviePanel(imdbID string) Panel {
+	return Panel{URL: panelBase() + "/filme/" + imdbID, Kind: KindMovie, IMDBID: imdbID}
+}
+
 // Seasons lists a series panel's seasons. Cached per panel.
 func (c *Client) Seasons(ctx context.Context, panel Panel) ([]Season, error) {
 	if panel.Kind != KindSeries {

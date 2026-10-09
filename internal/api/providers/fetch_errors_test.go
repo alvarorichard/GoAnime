@@ -35,6 +35,7 @@ func TestProviders_FetchStreamURL_CancelledContext(t *testing.T) {
 		&animeFireProvider{},
 		&goyabuProvider{},
 		&startFlixProvider{},
+		&topCineProvider{},
 	} {
 		_, err := p.FetchStreamURL(cancelledCtx(), ep, anime, "best")
 		require.ErrorIs(t, err, context.Canceled)

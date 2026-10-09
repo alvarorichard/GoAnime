@@ -24,6 +24,11 @@ var (
 	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
 	startFlixStreamFn   = api.GetStartFlixStreamURL
 	startFlixEpisodesFn = api.GetStartFlixEpisodes
+
+	// topCineStreamFn / topCineEpisodesFn do the same for TopCine, whose titles
+	// play through the StartFlix panel by TMDB id.
+	topCineStreamFn   = api.GetTopCineStreamURL
+	topCineEpisodesFn = api.GetTopCineEpisodes
 )
 
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
@@ -472,4 +477,80 @@ func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.
 		util.SetGlobalAnimeSource(anime.Source)
 	}
 	return startFlixStreamFn(anime, episode, quality)
+}
+
+// --- TopCine Provider ---
+//
+// TopCine is a second movie/TV catalog. Its own player host sits behind a
+// Cloudflare Turnstile, so its titles play by TMDB id through the StartFlix
+// panel; search, seasons and episode names are TopCine's.
+
+type topCineProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&topCineProvider{})
+}
+
+func (p *topCineProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.TopCineType)
+}
+
+func (p *topCineProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.TopCine,
+		Priority: 45,
+		Explicit: []string{"TopCine"},
+		Tags:     []string{"[topcine]"},
+		// The title page is the identifier; episode URLs point at the StartFlix
+		// panel, but anime.Source routes them back here through Explicit.
+		URLMatchers: []string{"topcine"},
+		ProbeURL:    "https://topcine3.site",
+	}
+}
+
+// HasSeasons: TopCine is a movie/TV catalog organized into seasons.
+func (p *topCineProvider) HasSeasons() bool { return true }
+
+func (p *topCineProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.TopCine)
+	return results, nil
+}
+
+// FetchEpisodes runs the interactive listing (season, then audio) in the api
+// package.
+func (p *topCineProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return topCineEpisodesFn(anime)
+}
+
+func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	return topCineStreamFn(anime, episode, quality)
 }

@@ -107,7 +107,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
-	addOption(&helpContent, "--source", "Specify source (hianime, animefire, startflix). Default: search all of them. Goyabu is off by default; see GOANIME_ENABLED_SOURCES.")
+	addOption(&helpContent, "--source", "Specify source (hianime, animefire, startflix, topcine). Default: search all of them. Goyabu is off by default; see GOANIME_ENABLED_SOURCES.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
@@ -135,7 +135,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire and StartFlix with automatic fallback, no browser needed.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire, StartFlix and TopCine with automatic fallback, no browser needed.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")

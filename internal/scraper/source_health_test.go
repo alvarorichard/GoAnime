@@ -16,6 +16,7 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		want   string
 	}{
 		{"startflix", StartFlixType, "dexter"},
+		{"topcine", TopCineType, "dexter"},
 		{"allanime default", HiAnimeType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
 	}
@@ -34,6 +35,12 @@ func TestHealthTargets_DeterministicOrder(t *testing.T) {
 	for i := 1; i < len(targets); i++ {
 		assert.LessOrEqual(t, targets[i-1], targets[i], "must be sorted asc")
 	}
+}
+
+func TestHealthTargets_IncludeEveryMovieTVSource(t *testing.T) {
+	t.Parallel()
+	assert.Contains(t, healthTargets(), StartFlixType)
+	assert.Contains(t, healthTargets(), TopCineType)
 }
 
 func TestCheckSourceHealth_NilScraperFails(t *testing.T) {

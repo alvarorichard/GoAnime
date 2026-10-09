@@ -15,6 +15,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
@@ -227,10 +228,11 @@ func enrichAnimeData(anime *models.Anime) error {
 	// a query that can't match (TMDB-indexed content) and pays a Cloudflare
 	// challenge for nothing. Mirrors appflow.fetchAnimeDetailsCore.
 	if anime.HasInteractiveEpisodeFlow() {
-		// StartFlix titles are looked up by id, keyless, once their panel loads
-		// (resolveStartFlixOfficial). Searching here by the Portuguese name
-		// would only ask OMDb with its demo key and risk matching another title.
-		if anime.Source == startflix.SourceName {
+		// StartFlix and TopCine titles are looked up by id, keyless, once their
+		// panel loads (resolveStartFlixOfficial). Searching here by the
+		// Portuguese name would only ask OMDb with its demo key and risk
+		// matching another title.
+		if anime.Source == startflix.SourceName || anime.Source == topcine.SourceName {
 			return nil
 		}
 		util.Debug("Using TMDB enrichment for movie/TV content", "name", anime.Name)
@@ -559,7 +561,7 @@ var (
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|startflix|flixhq|sflix` +
+		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|startflix|topcine|flixhq|sflix` +
 		`).*$`)
 	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)

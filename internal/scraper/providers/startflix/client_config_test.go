@@ -84,3 +84,25 @@ func TestCopyAbyssChunkRangeRejectsBadRanges(t *testing.T) {
 		t.Errorf("single-file file: err = %v", err)
 	}
 }
+
+// TestPanelsByID: a panel built from a bare id has the URL a StartFlix title
+// page would iframe, so the season/player caches and the referer logic treat it
+// the same. Not parallel: it sets the environment.
+func TestPanelsByID(t *testing.T) {
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", "")
+	if DefaultPanelBase != "https://www.painel-aso.sbs" {
+		t.Errorf("DefaultPanelBase = %q; update this pin together with the host (2026-10-09)", DefaultPanelBase)
+	}
+	series := SeriesPanel(1396)
+	if want, ok := panelFromURL(DefaultPanelBase + "/embed/1396"); !ok || series != want {
+		t.Errorf("SeriesPanel = %+v, want %+v", series, want)
+	}
+	movie := MoviePanel("tt34385135")
+	if want, ok := panelFromURL(DefaultPanelBase + "/filme/tt34385135"); !ok || movie != want {
+		t.Errorf("MoviePanel = %+v, want %+v", movie, want)
+	}
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", " https://painel.example/ ")
+	if got := SeriesPanel(1).URL; got != "https://painel.example/embed/1" {
+		t.Errorf("override panel URL = %q", got)
+	}
+}

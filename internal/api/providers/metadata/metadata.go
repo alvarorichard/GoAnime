@@ -20,6 +20,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
@@ -393,8 +394,9 @@ func (e *Enricher) EnrichAnime(ctx context.Context, anime *models.Anime) ([]Seas
 	// map — "Attack on Titan" S04E20 came out as S01E20 — and could tag the
 	// folder with another title's AniList/MAL ids. Selection-time enrichment
 	// already keeps StartFlix away from AniList (api.enrichAnimeData).
-	if anime.Source == startflix.SourceName {
-		util.Debug("EnrichAnime skipped for StartFlix: season-relative episodes, ids from its panel", "name", anime.Name)
+	// TopCine plays through the same panel, numbered the same way.
+	if anime.Source == startflix.SourceName || anime.Source == topcine.SourceName {
+		util.Debug("EnrichAnime skipped for StartFlix/TopCine: season-relative episodes, ids from the panel", "name", anime.Name, "source", anime.Source)
 		return nil, nil
 	}
 
