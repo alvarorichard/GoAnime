@@ -106,3 +106,43 @@ func TestPanelsByID(t *testing.T) {
 		t.Errorf("override panel URL = %q", got)
 	}
 }
+
+// TestPanelBase: the panel host defaults to the pinned one and follows a
+// trimmed override. Not parallel: it sets the environment.
+func TestPanelBase(t *testing.T) {
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", "")
+	if got := panelBase(); got != DefaultPanelBase {
+		t.Errorf("panelBase = %q, want %q", got, DefaultPanelBase)
+	}
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", "   ")
+	if got := panelBase(); got != DefaultPanelBase {
+		t.Errorf("blank override: panelBase = %q, want the default", got)
+	}
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", " https://painel.example// ")
+	if got := panelBase(); got != "https://painel.example" {
+		t.Errorf("override: panelBase = %q", got)
+	}
+}
+
+// TestSeriesPanel: keyed by TMDB id, with the episode endpoint on its origin.
+// Not parallel: it sets the environment.
+func TestSeriesPanel(t *testing.T) {
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", "https://painel.test")
+	p := SeriesPanel(1396)
+	if p.URL != "https://painel.test/embed/1396" || p.Kind != KindSeries || p.TMDBID != 1396 || p.IMDBID != "" {
+		t.Errorf("SeriesPanel = %+v", p)
+	}
+	if got := p.EpisodeURL("18145"); got != "https://painel.test/episodio/18145" {
+		t.Errorf("EpisodeURL = %q", got)
+	}
+}
+
+// TestMoviePanel: keyed by IMDb id; the URL is the players list itself.
+// Not parallel: it sets the environment.
+func TestMoviePanel(t *testing.T) {
+	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", "https://painel.test")
+	p := MoviePanel("tt34385135")
+	if p.URL != "https://painel.test/filme/tt34385135" || p.Kind != KindMovie || p.IMDBID != "tt34385135" || p.TMDBID != 0 {
+		t.Errorf("MoviePanel = %+v", p)
+	}
+}

@@ -312,7 +312,7 @@ func loadStartFlixSeasons(c *startflix.Client, panel startflix.Panel) ([]startfl
 // episodes of the season and audio the user picks.
 func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 	if media == nil || media.URL == "" {
-		return nil, fmt.Errorf("no StartFlix page for this title")
+		return nil, fmt.Errorf("no %s page for this title", panelSourceName(media))
 	}
 	c := sfxClientFn()
 
@@ -352,7 +352,7 @@ var ErrStartFlixNotSeries = errors.New("this title is a movie, not a series")
 // loadStartFlixSeries opens a title's panel and its seasons, refusing movies.
 func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Season, error) {
 	if media == nil || media.URL == "" {
-		return startflix.Panel{}, nil, fmt.Errorf("no StartFlix page for this title")
+		return startflix.Panel{}, nil, fmt.Errorf("no %s page for this title", panelSourceName(media))
 	}
 	c := sfxClientFn()
 	panel, err := loadStartFlixPanel(c, media)
@@ -492,7 +492,7 @@ func audioLangForStartFlix(a startflix.Audio) string {
 // hands mpv/the downloader the referer, subtitles and audio preference.
 func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ string) (string, error) {
 	if media == nil || episode == nil {
-		return "", fmt.Errorf("no StartFlix title or episode to play")
+		return "", fmt.Errorf("no %s title or episode to play", panelSourceName(media))
 	}
 	c := sfxClientFn()
 

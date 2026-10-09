@@ -104,12 +104,9 @@ func topCineUnplayableMessage(media *models.Anime) string {
 		if title, err = tcClientFn().Title(ctx, media.URL); err != nil {
 			return
 		}
-		player := topCineAnyPlayer(title, media.CurrentSeason)
-		if player == "" {
-			err = topcine.ErrNoPlayer
-			return
-		}
-		langs, err = tcLanguagesFn(ctx, player)
+		// Title fails with ErrNoPlayer for a page without one, so there is
+		// always a player to ask here.
+		langs, err = tcLanguagesFn(ctx, topCineAnyPlayer(title, media.CurrentSeason))
 	})
 	switch {
 	case err != nil:

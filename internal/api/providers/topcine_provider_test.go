@@ -212,3 +212,15 @@ func TestTopCineProvider_DefaultSeams(t *testing.T) {
 	_, err := topCineEpisodesFn(nil)
 	require.ErrorContains(t, err, "no TopCine page")
 }
+
+// TestTopCineProvider_HasSeasons: the registry reads the capability from the
+// method, which is what sends TopCine titles through the season picker.
+func TestTopCineProvider_HasSeasons(t *testing.T) {
+	t.Parallel()
+	p := &topCineProvider{}
+	assert.True(t, p.HasSeasons())
+	assert.True(t, source.IsSeasoned(p))
+	registered, ok := source.Registered(source.TopCine)
+	require.True(t, ok)
+	assert.True(t, source.IsSeasoned(registered))
+}

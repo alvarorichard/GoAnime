@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -418,4 +419,139 @@ func TestGetTopCineStreamURL_EpisodeFromHistory(t *testing.T) {
 	streamURL, err := GetTopCineStreamURL(media, ep, "best")
 	require.NoError(t, err)
 	assert.Equal(t, "https://files.test/ep-2002.mp4", streamURL)
+}
+
+func TestDescribePanelErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"unsupported hosts", &startflix.NoStreamError{Unsupported: []string{"vidsrcme.su"}}, "TopCine only offers this on servers GoAnime can't play yet (vidsrcme.su)"},
+		{"failing servers", &startflix.NoStreamError{Failures: []error{errors.New("x")}}, "None of TopCine's servers worked"},
+		{"no players", startflix.ErrNoPlayers, "No video sources for this on TopCine"},
+		{"not on panel", startflix.ErrNotOnPanel, "TopCine lists this title but has no video for it"},
+		{"no panel", startflix.ErrNoPanel, "TopCine lists this title but has no video for it"},
+		{"timeout", fmt.Errorf("wrap: %w", context.DeadlineExceeded), "TopCine took too long"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := describePanelErr("TopCine", tt.err)
+			assert.Contains(t, got.Error(), tt.want)
+			assert.ErrorIs(t, got, tt.err, "the cause stays reachable")
+		})
+	}
+	assert.NoError(t, describePanelErr("TopCine", nil))
+	plain := errors.New("plain")
+	assert.Same(t, plain, describePanelErr("TopCine", plain))
+}
+
+func TestSelectPanelAudio(t *testing.T) {
+	both := startflix.Season{Number: 1,
+		Dubbed:    []startflix.Episode{{Number: 1}},
+		Subtitled: []startflix.Episode{{Number: 1}, {Number: 2}},
+	}
+	t.Run("asks once, titled after the source, and remembers", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		var prompts []string
+		var labels []string
+		sfxPickFn = func(p string, l []string) (int, error) { prompts, labels = append(prompts, p), l; return 1, nil }
+
+		assert.Equal(t, startflix.AudioSubtitled, selectPanelAudio("TopCine", "https://topcine.test/serie/a", both))
+		assert.Equal(t, startflix.AudioSubtitled, selectPanelAudio("TopCine", "https://topcine.test/serie/a", both))
+		require.Len(t, prompts, 1, "the second season of a binge is not asked again")
+		assert.True(t, strings.HasPrefix(prompts[0], "TopCine > "), "prompt = %q", prompts[0])
+		require.Len(t, labels, 2)
+		assert.Contains(t, labels[0], "Dublado")
+		assert.Contains(t, labels[1], "Legendado")
+	})
+	t.Run("single audio is not asked", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		sfxPickFn = func(string, []string) (int, error) { t.Fatal("asked"); return 0, nil }
+		dubOnly := startflix.Season{Dubbed: []startflix.Episode{{Number: 1}}}
+		assert.Equal(t, startflix.AudioDubbed, selectPanelAudio("TopCine", "https://topcine.test/serie/b", dubOnly))
+	})
+	t.Run("no picker takes the dub", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		sfxPickFn = func(string, []string) (int, error) { return 0, errors.New("no tty") }
+		assert.Equal(t, startflix.AudioDubbed, selectPanelAudio("TopCine", "https://topcine.test/serie/c", both))
+	})
+	t.Run("StartFlix keeps its own breadcrumb", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		var prompt string
+		sfxPickFn = func(p string, _ []string) (int, error) { prompt = p; return 0, nil }
+		selectStartFlixAudio("https://www.startflix.test/series/d/", both)
+		assert.True(t, strings.HasPrefix(prompt, "StartFlix > "), "prompt = %q", prompt)
+	})
+}
+
+func TestPanelForMedia(t *testing.T) {
+	useFakeTopCine(t, 0, 0)
+	c := sfxClientFn()
+
+	panel, err := panelForMedia(context.Background(), c, topCineSeries("show"))
+	require.NoError(t, err)
+	assert.Equal(t, startflix.SeriesPanel(100), panel, "a TopCine title reaches the panel by its TMDB id")
+
+	panel, err = panelForMedia(context.Background(), c, &models.Anime{Source: "StartFlix", URL: "https://www.startflix.test/series/show/"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://painel.test/embed/100", panel.URL, "a StartFlix title reads its own title page")
+}
+
+func TestGetTopCineSeasonNumbers(t *testing.T) {
+	useFakeTopCine(t, 0, 0)
+	got, err := GetTopCineSeasonNumbers(topCineSeries("show"))
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 2}, got, "the panel's seasons, in order")
+
+	_, err = GetTopCineSeasonNumbers(nil)
+	require.ErrorContains(t, err, "no StartFlix page")
+	_, err = GetTopCineSeasonNumbers(&models.Anime{Source: topcine.SourceName})
+	require.ErrorContains(t, err, "no TopCine page", "the guard names the title's source")
+}
+
+func TestGetTopCineSeasonEpisodes(t *testing.T) {
+	useFakeTopCine(t, 0, 1) // Legendado where offered
+	media := topCineSeries("show")
+	eps, err := GetTopCineSeasonEpisodes(media, 1)
+	require.NoError(t, err)
+	require.Len(t, eps, 1)
+	assert.Equal(t, "https://painel.test/episodio/1101", eps[0].URL)
+	assert.Equal(t, "1", eps[0].SeasonID)
+	assert.Equal(t, 1, media.CurrentSeason)
+}
+
+func TestGetTopCineStreamURL(t *testing.T) {
+	t.Run("missing title or episode", func(t *testing.T) {
+		_, err := GetTopCineStreamURL(nil, &models.Episode{}, "")
+		require.Error(t, err)
+		_, err = GetTopCineStreamURL(topCineSeries("x"), nil, "")
+		require.ErrorContains(t, err, "no TopCine title or episode")
+	})
+	t.Run("movie plays the dub preference", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		sfxEnrichByIDFn = func(m *models.Media, _ bool) error { m.IMDBID = "tt100"; return nil }
+		media := &models.Anime{URL: "https://topcine.test/filme/film", Source: topcine.SourceName, MediaType: models.MediaTypeMovie}
+		streamURL, err := GetTopCineStreamURL(media, &models.Episode{Number: "1", URL: "https://painel.test/filme/tt100"}, "best")
+		require.NoError(t, err)
+		assert.Equal(t, "https://files.test/movie.mp4", streamURL)
+		assert.Equal(t, portugueseALang, util.GetGlobalAudioLanguage())
+	})
+	t.Run("panel failure is described as TopCine's", func(t *testing.T) {
+		useFakeTopCine(t, 0, 0)
+		media := &models.Anime{URL: "https://topcine.test/filme/film", Source: topcine.SourceName, MediaType: models.MediaTypeMovie}
+		_, err := GetTopCineStreamURL(media, &models.Episode{URL: "https://painel.test/filme/tt999"}, "")
+		require.ErrorIs(t, err, startflix.ErrNoPlayers)
+		assert.Contains(t, err.Error(), "No video sources for this on TopCine")
+	})
+}
+
+func TestTopCineUnplayableMessage(t *testing.T) {
+	useFakeTopCine(t, 0, 0)
+	tcLanguagesFn = func(context.Context, string) (topcine.Languages, error) {
+		return topcine.Languages{Dubbed: true, Subtitled: true, Hosts: []string{"1take.top", "2take.top"}}, nil
+	}
+	got := topCineUnplayableMessage(topCineSeries("show"))
+	assert.Contains(t, got, "only on 1take.top, 2take.top")
+	assert.True(t, strings.HasPrefix(got, "⚠️"))
 }

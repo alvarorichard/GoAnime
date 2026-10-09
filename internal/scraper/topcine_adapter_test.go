@@ -138,3 +138,76 @@ func TestTopCineAdapter_StreamSubtitlesMetadata(t *testing.T) {
 	assert.Contains(t, metadata["subtitles"], "https://files.test/pt.vtt")
 	assert.Equal(t, "files.test", metadata["host"])
 }
+
+func TestNewTopCineAdapterWithClients(t *testing.T) {
+	t.Parallel()
+	tc := topcine.NewClientForTest(http.DefaultClient, "https://topcine.test")
+	sfx := startflix.NewClientForTest(http.DefaultClient, "https://www.startflix.test")
+	a := NewTopCineAdapterWithClients(tc, sfx)
+	assert.Same(t, tc, a.client)
+	assert.Same(t, sfx, a.panel, "streams resolve on the StartFlix client given")
+	var _ ContextualScraper = a
+	var _ UnifiedScraper = a
+}
+
+func TestTopCineAdapter_GetType(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, TopCineType, (&TopCineAdapter{}).GetType())
+	assert.NotEqual(t, StartFlixType, TopCineType, "TopCine is its own scraper type")
+}
+
+func TestTopCineAdapter_SearchAnimeContext(t *testing.T) {
+	t.Parallel()
+	var gotQuery string
+	adapter := newTopCineTestAdapter(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("q")
+		fmt.Fprint(w, `<article class="pagina-busca-card"><a href="/filme/zona-zero"><h2>Zona Zero</h2><small>2026 • Filme</small></a></article>`)
+	})
+
+	results, err := adapter.SearchAnimeContext(context.Background(), "zona-zero")
+	require.NoError(t, err)
+	assert.Equal(t, "zona zero", gotQuery)
+	require.Len(t, results, 1)
+	assert.Equal(t, models.MediaTypeMovie, results[0].MediaType)
+	assert.Equal(t, "2026", results[0].Year)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = adapter.SearchAnimeContext(ctx, "x")
+	require.ErrorIs(t, err, context.Canceled, "the fan-out deadline reaches the request")
+}
+
+func TestTopCineAdapter_GetAnimeEpisodesContext(t *testing.T) {
+	t.Parallel()
+	eps, err := (&TopCineAdapter{}).GetAnimeEpisodesContext(context.Background(), "https://topcine.test/serie/x")
+	require.ErrorContains(t, err, "GetTopCineEpisodes")
+	assert.Nil(t, eps)
+}
+
+func TestTopCineAdapter_GetStreamURL(t *testing.T) {
+	t.Parallel()
+	adapter := newTopCineTestAdapter(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ep.mp4" {
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusPartialContent)
+			return
+		}
+		fmt.Fprint(w, `<button data-show-player="true" data-source="https://files.test/ep.mp4" data-type="jwplayer" data-id="1">P</button>`)
+	})
+	streamURL, metadata, err := adapter.GetStreamURL("https://painel.test/episodio/7")
+	require.NoError(t, err)
+	assert.Equal(t, "https://files.test/ep.mp4", streamURL)
+	assert.Equal(t, "topcine", metadata["source"])
+}
+
+func TestTopCineAdapter_GetStreamURLContext(t *testing.T) {
+	t.Parallel()
+	adapter := newTopCineTestAdapter(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("requested with a cancelled context")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, metadata, err := adapter.GetStreamURLContext(ctx, "https://painel.test/episodio/7")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, metadata, "no metadata without a stream")
+}
