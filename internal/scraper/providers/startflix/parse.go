@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
 var (
@@ -221,9 +222,62 @@ func sortEpisodes(eps []Episode) {
 	sort.SliceStable(eps, func(i, j int) bool { return eps[i].Number < eps[j].Number })
 }
 
+// inlinePlayerRe finds the play({...}) call an episode with a single player
+// renders instead of buttons — Breaking Bad S01E01 on 2026-10-09.
+var inlinePlayerRe = regexp.MustCompile(`(?s)\bplay\((\{.*?\})\);?\s*(?:</script>|$)`)
+
+// inlinePlayer is the record that call passes.
+type inlinePlayer struct {
+	Title     string  `json:"title"`
+	Source    string  `json:"source"`
+	Subtitles *string `json:"subtitles"`
+	Player    string  `json:"player"`
+	Type      string  `json:"type"`
+	ID        int     `json:"id"`
+}
+
 // parsePlayers reads the player buttons from an episode fragment or a movie
-// panel. Both render the same markup.
+// panel. Both render the same markup — except when there is a single player,
+// which the panel starts at once from a script; see parseInlinePlayers.
 func parsePlayers(doc *goquery.Document) []Player {
+	if out := parsePlayerButtons(doc); len(out) > 0 {
+		return out
+	}
+	return parseInlinePlayers(doc)
+}
+
+// parseInlinePlayers reads the play({...}) calls in the page's scripts.
+func parseInlinePlayers(doc *goquery.Document) []Player {
+	var out []Player
+	doc.Find("script").Each(func(_ int, script *goquery.Selection) {
+		for _, m := range inlinePlayerRe.FindAllStringSubmatch(script.Text()+"</script>", -1) {
+			var rec inlinePlayer
+			if err := jsonx.Unmarshal([]byte(m[1]), &rec); err != nil || strings.TrimSpace(rec.Source) == "" {
+				continue
+			}
+			kind := rec.Type
+			if kind == "" {
+				kind = rec.Player
+			}
+			p := Player{
+				URL:   strings.TrimSpace(rec.Source),
+				Type:  strings.TrimSpace(kind),
+				Label: strings.Join(strings.Fields(rec.Title), " "),
+			}
+			if rec.Subtitles != nil {
+				p.Subtitles = strings.TrimSpace(*rec.Subtitles)
+			}
+			if rec.ID > 0 {
+				p.ID = strconv.Itoa(rec.ID)
+			}
+			out = append(out, p)
+		}
+	})
+	return out
+}
+
+// parsePlayerButtons reads the "SELECIONE UM PLAYER" buttons.
+func parsePlayerButtons(doc *goquery.Document) []Player {
 	var out []Player
 	doc.Find("[data-show-player][data-source]").Each(func(_ int, b *goquery.Selection) {
 		src := strings.TrimSpace(b.AttrOr("data-source", ""))

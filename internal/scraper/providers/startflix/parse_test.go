@@ -251,6 +251,12 @@ func TestParsePlayers(t *testing.T) {
 			[]string{"playembedapi.site", "embedplaybyse.top", "vidsrcme.su"},
 			[]bool{false, false, false},
 		},
+		{
+			// A single player is started from a script, not listed as a button.
+			"episode_single_player_2026_10_09.html",
+			[]string{"playembedapi.site"},
+			[]bool{false},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
@@ -271,6 +277,25 @@ func TestParsePlayers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseInlinePlayers(t *testing.T) {
+	t.Parallel()
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<div><script>
+		play({"title":"Player #2","source":"https:\/\/apiblogger.click\/v.mp4","subtitles":"https:\/\/s.test\/pt.vtt","player":"jwplayer","id":70711,"type":"jwplayer"});
+	</script><script>function play(o){}</script><script>play({broken</script></div>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	players := parsePlayers(doc)
+	if len(players) != 1 {
+		t.Fatalf("got %d players, want 1 (the function definition and the broken call are skipped): %+v", len(players), players)
+	}
+	p := players[0]
+	if p.URL != "https://apiblogger.click/v.mp4" || p.Type != "jwplayer" || !p.IsDirectFile() ||
+		p.Subtitles != "https://s.test/pt.vtt" || p.ID != "70711" || p.Label != "Player #2" {
+		t.Errorf("player = %+v", p)
 	}
 }
 
