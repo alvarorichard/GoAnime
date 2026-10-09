@@ -115,8 +115,7 @@ func TestClientSearchHTTPError(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	_, err := c.Search(context.Background(), "x")
-	var de *netx.SourceDiagnostic
-	if !errors.As(err, &de) {
+	if _, ok := errors.AsType[*netx.SourceDiagnostic](err); !ok {
 		t.Fatalf("err = %v, want a classified HTTP status error", err)
 	}
 }

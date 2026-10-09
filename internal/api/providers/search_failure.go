@@ -147,10 +147,10 @@ func (f *SearchFailure) RateLimited() bool {
 	return false
 }
 
-// describeFailure reduces a source's error to one short clause plus the
+// describeFailure reduces a source's diagnostic to one short clause plus the
 // rate-limited flag. The diagnostic machinery already classifies the error for
 // the circuit breaker; this is the same classification, phrased for a person.
-func describeFailure(diag *netx.SourceDiagnostic, err error) (reason string, rateLimited bool) {
+func describeFailure(diag *netx.SourceDiagnostic) (reason string, rateLimited bool) {
 	if diag == nil {
 		return "failed", false
 	}

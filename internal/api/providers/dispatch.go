@@ -150,7 +150,7 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 				// errors.Is and the debug log; the short reason is what a person
 				// sees. Flattening both into one string is how the message grew
 				// into three repetitions of the same fact.
-				reason, limited := describeFailure(diag, res.err)
+				reason, limited := describeFailure(diag)
 				failures = append(failures, SourceFailure{
 					Kind:        res.kind,
 					Reason:      reason,

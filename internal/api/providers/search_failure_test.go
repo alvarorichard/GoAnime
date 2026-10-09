@@ -100,7 +100,6 @@ func TestDescribeFailure_PhrasesEachClassForAPerson(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		diag        *netx.SourceDiagnostic
-		err         error
 		wantSaid    string
 		wantLimited bool
 	}{
@@ -132,7 +131,7 @@ func TestDescribeFailure_PhrasesEachClassForAPerson(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			reason, limited := describeFailure(tt.diag, tt.err)
+			reason, limited := describeFailure(tt.diag)
 
 			assert.Contains(t, reason, tt.wantSaid)
 			assert.Equal(t, tt.wantLimited, limited)
@@ -148,7 +147,7 @@ func TestDescribeFailure_ReasonDoesNotRepeatTheSourceName(t *testing.T) {
 	t.Parallel()
 	reason, _ := describeFailure(&netx.SourceDiagnostic{
 		Source: "StartFlix", Kind: netx.DiagnosticSourceUnavailable, StatusCode: 503,
-	}, nil)
+	})
 
 	assert.NotContains(t, reason, "StartFlix")
 }

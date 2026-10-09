@@ -75,8 +75,7 @@ func TestGetOnce(t *testing.T) {
 				t.Errorf("retry = %v, want %v", retry, tt.wantRetry)
 			}
 			if tt.wantErr {
-				var d *netx.SourceDiagnostic
-				if !errors.As(err, &d) || d.StatusCode != tt.status || d.Layer != "player" {
+				if d, ok := errors.AsType[*netx.SourceDiagnostic](err); !ok || d.StatusCode != tt.status || d.Layer != "player" {
 					t.Errorf("err = %v, want a player-layer %d diagnostic", err, tt.status)
 				}
 				if body != nil {

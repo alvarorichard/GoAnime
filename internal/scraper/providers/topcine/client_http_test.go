@@ -69,8 +69,7 @@ func TestGetRetries(t *testing.T) {
 				t.Errorf("hits = %d, want %d", got, tt.wantHits)
 			}
 			if tt.wantErr {
-				var d *netx.SourceDiagnostic
-				if !errors.As(err, &d) || d.Source != SourceName || d.Layer != "search" {
+				if d, ok := errors.AsType[*netx.SourceDiagnostic](err); !ok || d.Source != SourceName || d.Layer != "search" {
 					t.Errorf("err = %v, want a TopCine search-layer diagnostic", err)
 				}
 				return
@@ -88,8 +87,7 @@ func TestGetUnnamedLayerIsHTTP(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	_, err := c.get(context.Background(), "https://topcine.test/x", getOptions{})
-	var d *netx.SourceDiagnostic
-	if !errors.As(err, &d) || d.Layer != "http" || d.StatusCode != http.StatusBadRequest {
+	if d, ok := errors.AsType[*netx.SourceDiagnostic](err); !ok || d.Layer != "http" || d.StatusCode != http.StatusBadRequest {
 		t.Errorf("err = %v, want an http-layer 400 diagnostic", err)
 	}
 }
@@ -232,8 +230,7 @@ func TestLanguagesHTTPError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	_, err := c.Languages(context.Background(), "https://azullog.top/filme/1")
-	var d *netx.SourceDiagnostic
-	if !errors.As(err, &d) || d.Layer != "player" {
+	if d, ok := errors.AsType[*netx.SourceDiagnostic](err); !ok || d.Layer != "player" {
 		t.Errorf("err = %v, want a player-layer diagnostic", err)
 	}
 }
