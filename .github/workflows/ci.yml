@@ -86,7 +86,9 @@ jobs:
 
       - name: Install security scanners
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          # Pinned to a master commit: v2.29.0 ships x/tools v0.49.0, which can't
+          # read Go 1.27.2 export data. Move back to a tag once one includes x/tools >= v0.50.0.
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261005092323-d2b649ec0182
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 
       - name: Scan source for insecure patterns
