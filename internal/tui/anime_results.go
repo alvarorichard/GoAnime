@@ -14,7 +14,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const wideResultsBreakpoint = 100
+const (
+	wideResultsBreakpoint = 100
+	// resultsGutter separates the result list from the details panel.
+	resultsGutter = 2
+)
+
+// resultsListWidth is the column the result list takes on a wide screen; the
+// details panel gets the rest.
+func resultsListWidth(width int) int {
+	return width * 3 / 5
+}
 
 var (
 	// ErrSelectionBack means the user requested the previous screen.
@@ -34,13 +44,29 @@ func (i animeResultItem) FilterValue() string {
 	if i.anime == nil {
 		return ""
 	}
-	return strings.Join([]string{
-		singleLine(i.anime.Name),
-		singleLine(i.anime.Source),
-		singleLine(i.anime.Year),
-		singleLine(string(i.anime.MediaType)),
-		singleLine(i.anime.Quality),
-	}, " ")
+	fields := make([]string, 0, 6)
+	for _, value := range []string{
+		i.anime.Name, i.anime.Source, i.anime.Year, string(i.anime.MediaType), i.anime.Audio, i.anime.Quality,
+	} {
+		if value = singleLine(value); value != "" {
+			fields = append(fields, value)
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+// mediaTypeLabel is how a media type reads on screen.
+func mediaTypeLabel(mediaType models.MediaType) string {
+	switch mediaType {
+	case models.MediaTypeAnime:
+		return "Anime"
+	case models.MediaTypeMovie:
+		return "Movie"
+	case models.MediaTypeTV:
+		return "TV"
+	default:
+		return singleLine(string(mediaType))
+	}
 }
 
 // Title returns the primary result label.
@@ -55,13 +81,13 @@ func (i animeResultItem) Title() string {
 	return title
 }
 
-// Description returns compact source, year, type, and quality metadata.
+// Description returns compact source, year, type, audio, and quality metadata.
 func (i animeResultItem) Description() string {
 	if i.anime == nil {
 		return "Information unavailable"
 	}
-	parts := make([]string, 0, 4)
-	for _, value := range []string{i.anime.Source, i.anime.Year, string(i.anime.MediaType), i.anime.Quality} {
+	parts := make([]string, 0, 5)
+	for _, value := range []string{i.anime.Source, i.anime.Year, mediaTypeLabel(i.anime.MediaType), i.anime.Audio, i.anime.Quality} {
 		if value = singleLine(value); value != "" {
 			parts = append(parts, value)
 		}
@@ -163,7 +189,7 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.shell.Resize(msg.Width, msg.Height)
 		width, height := m.shell.ContentSize()
 		if width >= wideResultsBreakpoint {
-			width = width * 3 / 5
+			width = resultsListWidth(width) - resultsGutter
 		}
 		m.results.SetSize(width, height)
 		return m, nil
@@ -210,9 +236,8 @@ func (m *animeResultsModel) View() tea.View {
 	width, height := m.shell.ContentSize()
 	body := m.results.View()
 	if width >= wideResultsBreakpoint {
-		listWidth := width * 3 / 5
-		panelWidth := width - listWidth
-		name, source, year, mediaType, quality := "No result selected", "—", "—", "—", "—"
+		listWidth := resultsListWidth(width)
+		name, source, year, mediaType, audio := "No result selected", "—", "—", "—", "—"
 		if item, ok := m.results.SelectedItem().(animeResultItem); ok && item.anime != nil {
 			name = item.Title()
 			if value := singleLine(item.anime.Source); value != "" {
@@ -221,20 +246,20 @@ func (m *animeResultsModel) View() tea.View {
 			if value := singleLine(item.anime.Year); value != "" {
 				year = value
 			}
-			if value := singleLine(string(item.anime.MediaType)); value != "" {
+			if value := mediaTypeLabel(item.anime.MediaType); value != "" {
 				mediaType = value
 			}
-			if value := singleLine(item.anime.Quality); value != "" {
-				quality = value
+			if value := singleLine(item.anime.Audio); value != "" {
+				audio = value
 			}
 		}
-		details := renderAnimeDetails(&m.theme, name, source, year, mediaType, quality)
-		frameWidth, frameHeight := m.theme.Panel.GetFrameSize()
-		panel := m.theme.Panel.
-			Width(max(panelWidth-frameWidth, 1)).
-			Height(max(height-frameHeight, 1)).
-			Render(details)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, body, panel)
+		fields := []detailField{{"Source", source}, {"Year", year}, {"Type", mediaType}, {"Audio", audio}}
+		if panel := m.renderDetailsPanel(name, fields, width-listWidth, height); panel != "" {
+			// A fixed-width column keeps the panel in place whatever the
+			// length of the visible rows.
+			column := lipgloss.NewStyle().Width(listWidth).Render(body)
+			body = lipgloss.JoinHorizontal(lipgloss.Top, column, panel)
+		}
 	}
 
 	footer := m.results.Help.ShortHelpView(m.results.ShortHelp())
@@ -244,21 +269,48 @@ func (m *animeResultsModel) View() tea.View {
 	return view
 }
 
+// detailField is one labelled value in the details panel.
+type detailField struct{ label, value string }
+
+// renderDetailsPanel draws the details panel within width x height. Each label
+// sits above its value when that fits; on a shorter screen the panel switches
+// to one "Label  value" line per field rather than lose its last rows, and
+// when even that does not fit it is left out ("") instead of drawn cut off.
+func (m *animeResultsModel) renderDetailsPanel(name string, fields []detailField, width, height int) string {
+	frameWidth, frameHeight := m.theme.Panel.GetFrameSize()
+	style := m.theme.Panel.Width(max(width-frameWidth, 1)).Height(max(height-frameHeight, 1))
+	for _, details := range []string{
+		renderAnimeDetails(&m.theme, name, fields),
+		renderAnimeDetailsCompact(&m.theme, name, fields),
+	} {
+		if panel := style.Render(details); lipgloss.Height(panel) <= height {
+			return panel
+		}
+	}
+	return ""
+}
+
 // renderAnimeDetails composes styled lines without JoinVertical's unstyled padding.
-func renderAnimeDetails(theme *Theme, name, source, year, mediaType, quality string) string {
-	return strings.Join([]string{
-		theme.Primary.Render("Details"),
-		"",
-		theme.Value.Render(name),
-		"",
-		theme.Label.Render("Source"), theme.Value.Render(source),
-		"",
-		theme.Label.Render("Year"), theme.Value.Render(year),
-		"",
-		theme.Label.Render("Type"), theme.Value.Render(mediaType),
-		"",
-		theme.Label.Render("Quality"), theme.Value.Render(quality),
-	}, "\n")
+func renderAnimeDetails(theme *Theme, name string, fields []detailField) string {
+	lines := []string{theme.Primary.Render("Details"), "", theme.Value.Render(name)}
+	for _, f := range fields {
+		lines = append(lines, "", theme.Label.Render(f.label), theme.Value.Render(f.value))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderAnimeDetailsCompact puts each label and its value on one line.
+func renderAnimeDetailsCompact(theme *Theme, name string, fields []detailField) string {
+	labelWidth := 0
+	for _, f := range fields {
+		labelWidth = max(labelWidth, len(f.label))
+	}
+	lines := []string{theme.Primary.Render("Details"), theme.Value.Render(name)}
+	for _, f := range fields {
+		label := f.label + strings.Repeat(" ", labelWidth-len(f.label)+2)
+		lines = append(lines, theme.Label.Render(label)+theme.Value.Render(f.value))
+	}
+	return strings.Join(lines, "\n")
 }
 
 type animeResultsRunner func(tea.Model) (tea.Model, error)

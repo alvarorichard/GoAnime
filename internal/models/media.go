@@ -27,6 +27,7 @@ type Media struct {
 	MediaType MediaType // Type of media (anime, movie, tv)
 	Year      string    // Release year
 	Quality   string    // Video quality (if available)
+	Audio     string    // Audio the source offers, worded by AudioLabel (if known)
 
 	// Anime-specific fields (AniList)
 	AnilistID int
@@ -111,6 +112,22 @@ func (m *Media) IsTV() bool {
 // IsMovieOrTV returns true if the media is movie or TV (non-anime)
 func (m *Media) IsMovieOrTV() bool {
 	return m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
+}
+
+// AudioLabel words the audio a source offers for a title, so every source
+// describes it the same way: "Dubbed", "Subtitled", "Dubbed and subtitled",
+// or "" when the source says neither.
+func AudioLabel(dubbed, subtitled bool) string {
+	switch {
+	case dubbed && subtitled:
+		return "Dubbed and subtitled"
+	case dubbed:
+		return "Dubbed"
+	case subtitled:
+		return "Subtitled"
+	default:
+		return ""
+	}
 }
 
 // HasInteractiveEpisodeFlow reports whether fetching this title's episodes may

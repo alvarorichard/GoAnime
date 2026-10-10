@@ -79,11 +79,12 @@ type apiSearchResponse struct {
 }
 
 type apiAnime struct {
-	ID        string            `json:"id"`
-	Titles    map[string]string `json:"titles"`
-	Audio     string            `json:"audio"`
-	PosterSrc string            `json:"poster_src"`
-	Status    string            `json:"status"`
+	ID          string            `json:"id"`
+	Titles      map[string]string `json:"titles"`
+	Audio       string            `json:"audio"`
+	PosterSrc   string            `json:"poster_src"`
+	Status      string            `json:"status"`
+	PublishedAt string            `json:"published_at"`
 }
 
 // title picks the Brazilian title, falling back through the other languages the
@@ -100,6 +101,31 @@ func (a apiAnime) title() string {
 		}
 	}
 	return ""
+}
+
+// year is the year of the first release, from published_at ("2002-10-03").
+func (a apiAnime) year() string {
+	if y, _, _ := strings.Cut(strings.TrimSpace(a.PublishedAt), "-"); len(y) == 4 {
+		if _, err := strconv.Atoi(y); err == nil {
+			return y
+		}
+	}
+	return ""
+}
+
+// audioLabel reads the API's audio field ("Dublado", "Legendado" or
+// "Dublado & Legendado") into the wording every source uses.
+func audioLabel(audio string) string {
+	var dubbed, subtitled bool
+	for part := range strings.SplitSeq(strings.ToLower(audio), "&") {
+		switch strings.TrimSpace(part) {
+		case "dublado":
+			dubbed = true
+		case "legendado":
+			subtitled = true
+		}
+	}
+	return models.AudioLabel(dubbed, subtitled)
 }
 
 // apiAnimeResponse is GET /anime/<id>.
@@ -213,9 +239,12 @@ func (c *AnimefireClient) searchAPI(query string) ([]*models.Anime, error) {
 			continue
 		}
 		animes = append(animes, &models.Anime{
-			Name:     name,
-			URL:      animeURLFor(a.ID),
-			ImageURL: a.PosterSrc,
+			Name:      name,
+			URL:       animeURLFor(a.ID),
+			ImageURL:  a.PosterSrc,
+			MediaType: models.MediaTypeAnime,
+			Year:      a.year(),
+			Audio:     audioLabel(a.Audio),
 		})
 	}
 	return animes, nil

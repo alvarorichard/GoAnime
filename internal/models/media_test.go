@@ -90,6 +90,14 @@ func TestMedia_IsMovieOrTV(t *testing.T) {
 	}
 }
 
+func TestAudioLabel(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "Dubbed and subtitled", AudioLabel(true, true))
+	assert.Equal(t, "Dubbed", AudioLabel(true, false))
+	assert.Equal(t, "Subtitled", AudioLabel(false, true))
+	assert.Empty(t, AudioLabel(false, false), "nothing known, nothing claimed")
+}
+
 func TestMedia_GetDisplayName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

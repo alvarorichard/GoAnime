@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -92,7 +93,18 @@ func (c *HiAnimeClient) extractSearchResults(doc *goquery.Document) []*models.An
 			ImageURL:  poster,
 			Source:    sourceLabel,
 			MediaType: models.MediaTypeAnime,
+			// The poster's badges count the subtitled and dubbed episodes.
+			Audio: models.AudioLabel(tickCount(card, ".tick-dub") > 0, tickCount(card, ".tick-sub") > 0),
 		})
 	})
 	return out
+}
+
+// tickCount reads one of a card's episode-count badges; 0 when it is absent.
+func tickCount(card *goquery.Selection, badge string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(card.Find(badge).First().Text()))
+	if err != nil {
+		return 0
+	}
+	return n
 }

@@ -22,8 +22,8 @@ func TestAnimeResultItemFilterValue(t *testing.T) {
 		item animeResultItem
 		want string
 	}{
-		{name: "metadata", item: animeResultItem{anime: &models.Anime{Name: "Frieren", Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Quality: "1080p"}}, want: "Frieren AnimeFire 2023 anime 1080p"},
-		{name: "control sequences", item: animeResultItem{anime: &models.Anime{Name: "Title\nfake\x1b[2J", Source: "Source\rInjected"}}, want: "Title fake Source Injected   "},
+		{name: "metadata", item: animeResultItem{anime: &models.Anime{Name: "Frieren", Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled", Quality: "1080p"}}, want: "Frieren AnimeFire 2023 anime Dubbed and subtitled 1080p"},
+		{name: "control sequences", item: animeResultItem{anime: &models.Anime{Name: "Title\nfake\x1b[2J", Source: "Source\rInjected"}}, want: "Title fake Source Injected"},
 		{name: "nil", item: animeResultItem{}, want: ""},
 	}
 	for _, tt := range tests {
@@ -63,7 +63,8 @@ func TestAnimeResultItemDescription(t *testing.T) {
 		item animeResultItem
 		want string
 	}{
-		{name: "complete", item: animeResultItem{anime: &models.Anime{Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Quality: "1080p"}}, want: "AnimeFire  •  2023  •  anime  •  1080p"},
+		{name: "complete", item: animeResultItem{anime: &models.Anime{Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Subtitled", Quality: "1080p"}}, want: "AnimeFire  •  2023  •  Anime  •  Subtitled  •  1080p"},
+		{name: "tv", item: animeResultItem{anime: &models.Anime{Source: "StartFlix", Year: "2019", MediaType: models.MediaTypeTV}}, want: "StartFlix  •  2019  •  TV"},
 		{name: "partial", item: animeResultItem{anime: &models.Anime{Source: "AllAnime"}}, want: "AllAnime"},
 		{name: "single line", item: animeResultItem{anime: &models.Anime{Source: "Source\r\nInjected\x1b[2J"}}, want: "Source Injected"},
 		{name: "empty", item: animeResultItem{anime: &models.Anime{}}, want: "Information unavailable"},
@@ -142,7 +143,7 @@ func TestAnimeResultsModelUpdate(t *testing.T) {
 		updated, cmd := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 		require.Same(t, model, updated)
 		assert.Nil(t, cmd)
-		assert.Equal(t, 72, model.results.Width())
+		assert.Equal(t, 70, model.results.Width(), "3/5 of the width, less the gutter before the details panel")
 		assert.Equal(t, 36, model.results.Height())
 
 		_, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -240,7 +241,7 @@ func TestAnimeResultsModelUpdate(t *testing.T) {
 		for _, size := range []struct {
 			width     int
 			wantWidth int
-		}{{99, 99}, {100, 60}, {101, 60}, {99, 99}} {
+		}{{99, 99}, {100, 58}, {101, 58}, {99, 99}} {
 			_, _ = model.Update(tea.WindowSizeMsg{Width: size.width, Height: 24})
 			assert.Equal(t, size.wantWidth, model.results.Width())
 			assert.Equal(t, 1, model.results.Index())
@@ -259,7 +260,7 @@ func TestAnimeResultsModelView(t *testing.T) {
 	}{
 		{name: "minimum compact", width: 20, height: 5, wantDetails: false},
 		{name: "compact", width: 80, height: 8, wantDetails: false},
-		{name: "wide boundary", width: 100, height: 10, wantDetails: true},
+		{name: "wide boundary", width: 100, height: 18, wantDetails: true},
 		{name: "wide", width: 120, height: 18, wantDetails: true},
 	}
 	for _, tt := range tests {
@@ -286,15 +287,49 @@ func TestRenderAnimeDetails(t *testing.T) {
 	t.Parallel()
 
 	theme := NewTheme(true)
-	details := renderAnimeDetails(&theme, "The Boys", "StartFlix", "2019", "tv", "—")
-
-	assert.Contains(t, details, "Details")
-	assert.Contains(t, details, "The Boys")
-	assert.Contains(t, details, "StartFlix")
-	assert.NotContains(t, details, theme.Primary.Render("Details")+" ")
-	for line := range strings.SplitSeq(details, "\n") {
-		assert.False(t, strings.HasSuffix(line, " "), "line has unstyled trailing padding: %q", line)
+	fields := []detailField{{"Source", "StartFlix"}, {"Year", "2019"}, {"Type", "TV"}, {"Audio", "Dubbed and subtitled"}}
+	for name, details := range map[string]string{
+		"stacked": renderAnimeDetails(&theme, "The Boys", fields),
+		"compact": renderAnimeDetailsCompact(&theme, "The Boys", fields),
+	} {
+		assert.Contains(t, details, "Details", name)
+		assert.Contains(t, details, "The Boys", name)
+		assert.Contains(t, details, "StartFlix", name)
+		assert.Contains(t, details, "Audio", name)
+		assert.Contains(t, details, "Dubbed and subtitled", name)
+		assert.NotContains(t, details, "Quality", "%s: no source fills it, so the panel does not offer it", name)
+		assert.NotContains(t, details, theme.Primary.Render("Details")+" ", name)
+		for line := range strings.SplitSeq(details, "\n") {
+			assert.False(t, strings.HasSuffix(line, " "), "%s: line has unstyled trailing padding: %q", name, line)
+		}
 	}
+}
+
+// On a short terminal the details panel must keep its last field and its
+// bottom border instead of running off the screen.
+func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
+	t.Parallel()
+	anime := &models.Anime{Name: "[PT-BR] Frieren e a Jornada para o Além", Source: "Animefire.io",
+		Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled"}
+	bottomRight := lipgloss.RoundedBorder().BottomRight
+
+	for _, height := range []int{16, 22, 40} {
+		model := newAnimeResultsModel([]*models.Anime{anime})
+		_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: height})
+		view := model.View().Content
+
+		assert.Contains(t, view, "Audio", "height %d: the last field was cut", height)
+		assert.Contains(t, view, bottomRight, "height %d: the panel lost its bottom border", height)
+		assert.LessOrEqual(t, lipgloss.Height(view), height)
+	}
+
+	// Too short for even the compact panel: no panel at all, never half of
+	// one. The result rows still carry the same details.
+	model := newAnimeResultsModel([]*models.Anime{anime})
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: 10})
+	view := model.View().Content
+	assert.NotContains(t, view, "Details")
+	assert.Contains(t, view, "Dubbed and subtitled")
 }
 
 func TestSelectAnimeWithRunner(t *testing.T) {

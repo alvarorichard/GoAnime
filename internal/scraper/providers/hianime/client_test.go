@@ -230,6 +230,11 @@ const searchPage = `<html><body>
 	<div class="film_list-wrap">
 		<div class="flw-item">
 			<div class="film-poster">
+				<div class="tick ltr">
+					<div class="tick-item tick-sub"><i class="fas fa-closed-captioning mr-1"></i>26</div>
+					<div class="tick-item tick-dub"><i class="fas fa-microphone mr-1"></i>26</div>
+					<div class="tick-item tick-eps">26</div>
+				</div>
 				<img src="https://cdn.example/26.jpg" class="film-poster-img" alt="Cowboy Bebop">
 				<a href="https://hianime.at/watch/cowboy-bebop-26" class="film-poster-ahref" data-id="26"></a>
 			</div>
@@ -241,6 +246,9 @@ const searchPage = `<html><body>
 		</div>
 		<div class="flw-item">
 			<div class="film-poster">
+				<div class="tick ltr">
+					<div class="tick-item tick-sub"><i class="fas fa-closed-captioning mr-1"></i>1</div>
+				</div>
 				<img data-src="https://cdn.example/17.jpg" class="film-poster-img" alt="Cowboy Bebop: The Movie">
 			</div>
 			<div class="film-detail"><h3 class="film-name">
@@ -297,9 +305,11 @@ func TestSearchAnime(t *testing.T) {
 	assert.Equal(t, srv.URL+"/cowboy-bebop-26", got[0].URL)
 	assert.Equal(t, "https://cdn.example/26.jpg", got[0].ImageURL)
 	assert.Equal(t, "HiAnime", got[0].Source)
+	assert.Equal(t, "Dubbed and subtitled", got[0].Audio, "read from the sub and dub badges")
 
 	assert.Equal(t, "Cowboy Bebop: The Movie", got[1].Name)
 	assert.Equal(t, "https://cdn.example/17.jpg", got[1].ImageURL, "lazy-loaded posters live in data-src")
+	assert.Equal(t, "Subtitled", got[1].Audio, "no dub badge, no dub")
 }
 
 func TestSearchAnime_EmptyQuery(t *testing.T) {

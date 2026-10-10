@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,10 +75,11 @@ func TestSearchAPI_MapsResultsFromTheLiveShape(t *testing.T) {
 	srv := newAPIServer(t, map[string]func(http.ResponseWriter){
 		"/animes/pesquisar": writeJSON(map[string]any{"data": []map[string]any{
 			{
-				"id":         "eU7t5IvcNKU",
-				"titles":     map[string]string{"BR": "Naruto"},
-				"audio":      "Dublado & Legendado",
-				"poster_src": "https://image.tmdb.org/t/p/original/poster.jpg",
+				"id":           "eU7t5IvcNKU",
+				"titles":       map[string]string{"BR": "Naruto"},
+				"audio":        "Dublado & Legendado",
+				"poster_src":   "https://image.tmdb.org/t/p/original/poster.jpg",
+				"published_at": "2002-10-03",
 			},
 			{
 				"id":     "V2Q_qcvaKhb",
@@ -94,7 +96,41 @@ func TestSearchAPI_MapsResultsFromTheLiveShape(t *testing.T) {
 	assert.Equal(t, "https://animefire.one/anime/eU7t5IvcNKU", res[0].URL,
 		"the URL has to carry the id back to us when episodes are requested")
 	assert.Equal(t, "https://image.tmdb.org/t/p/original/poster.jpg", res[0].ImageURL)
+	assert.Equal(t, "2002", res[0].Year)
+	assert.Equal(t, models.MediaTypeAnime, res[0].MediaType)
+	assert.Equal(t, "Dubbed and subtitled", res[0].Audio)
 	assert.Equal(t, "Naruto Shippuden", res[1].Name, "the Brazilian title wins when several exist")
+	assert.Empty(t, res[1].Year, "no published_at, no year")
+	assert.Empty(t, res[1].Audio, "no audio field, nothing claimed")
+}
+
+// The result screen describes every source's audio in the same words, so the
+// API's Portuguese labels are read, not passed through.
+func TestAudioLabel_ReadsTheAPIsLabels(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"Dublado & Legendado": "Dubbed and subtitled",
+		"Legendado":           "Subtitled",
+		"Dublado":             "Dubbed",
+		" dublado ":           "Dubbed",
+		"":                    "",
+		"Original":            "",
+	} {
+		assert.Equal(t, want, audioLabel(in), "audio %q", in)
+	}
+}
+
+func TestAPIAnimeYear_ReadsOnlyAWellFormedDate(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"2002-10-03": "2002",
+		"1917":       "1917",
+		"":           "",
+		"soon":       "",
+		"20-10-03":   "",
+	} {
+		assert.Equal(t, want, apiAnime{PublishedAt: in}.year(), "published_at %q", in)
+	}
 }
 
 // A title in another language is still a title. Dropping the entry would be
