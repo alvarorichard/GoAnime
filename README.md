@@ -3,8 +3,13 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="GoAnime" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="GoAnime logo" width="160">
+  </picture>
 </p>
+
+<h1 align="center">GoAnime</h1>
 
 <p align="center">
   <a href="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml"><img src="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
