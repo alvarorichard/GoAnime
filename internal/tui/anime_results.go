@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
@@ -34,6 +35,43 @@ var (
 	// ErrNoAnimeResults prevents opening an empty result screen.
 	ErrNoAnimeResults = errors.New("no anime results to select")
 )
+
+// resultsNotice holds a message for the next result screen to show above the
+// list.
+var resultsNotice struct {
+	sync.Mutex
+	text string
+}
+
+// NoticeOnNextResults makes the next result screen show text above the list.
+//
+// It is how a step that sends the user back to the results, such as opening a
+// title that has no episodes yet, says why: anything printed to the terminal
+// before the screen opens is hidden behind it.
+func NoticeOnNextResults(text string) {
+	resultsNotice.Lock()
+	resultsNotice.text = singleLine(text)
+	resultsNotice.Unlock()
+}
+
+// takeResultsNotice returns the pending notice and clears it, so it is shown
+// once.
+func takeResultsNotice() string {
+	resultsNotice.Lock()
+	defer resultsNotice.Unlock()
+	text := resultsNotice.text
+	resultsNotice.text = ""
+	return text
+}
+
+// noticeLines is the height a notice takes above the list: its line and a
+// blank one.
+func noticeLines(notice string) int {
+	if notice == "" {
+		return 0
+	}
+	return 2
+}
 
 type animeResultItem struct {
 	anime *models.Anime
@@ -120,6 +158,7 @@ type animeResultsModel struct {
 	theme         Theme
 	shell         Shell
 	results       list.Model
+	notice        string
 	selected      *models.Anime
 	err           error
 	filterPending bool
@@ -147,8 +186,9 @@ func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
 	delegate.Styles.DimmedDesc = theme.Muted.Faint(true).PaddingLeft(2)
 	delegate.Styles.FilterMatch = theme.FilterMatch
 
+	notice := takeResultsNotice()
 	width, height := shell.ContentSize()
-	results := list.New(items, delegate, width, height)
+	results := list.New(items, delegate, width, max(height-noticeLines(notice), 1))
 	results.SetShowTitle(false)
 	results.SetShowHelp(false)
 	results.SetStatusBarItemName("result", "results")
@@ -171,7 +211,7 @@ func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
 		}
 	}
 
-	return &animeResultsModel{theme: theme, shell: shell, results: results}
+	return &animeResultsModel{theme: theme, shell: shell, results: results, notice: notice}
 }
 
 // Init starts the result screen without background work.
@@ -191,7 +231,7 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if width >= wideResultsBreakpoint {
 			width = resultsListWidth(width) - resultsGutter
 		}
-		m.results.SetSize(width, height)
+		m.results.SetSize(width, max(height-noticeLines(m.notice), 1))
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -234,6 +274,7 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders compact results or a wide list-and-details layout.
 func (m *animeResultsModel) View() tea.View {
 	width, height := m.shell.ContentSize()
+	height = max(height-noticeLines(m.notice), 1)
 	body := m.results.View()
 	if width >= wideResultsBreakpoint {
 		listWidth := resultsListWidth(width)
@@ -260,6 +301,9 @@ func (m *animeResultsModel) View() tea.View {
 			column := lipgloss.NewStyle().Width(listWidth).Render(body)
 			body = lipgloss.JoinHorizontal(lipgloss.Top, column, panel)
 		}
+	}
+	if m.notice != "" {
+		body = m.theme.Primary.Render(ansi.Truncate(m.notice, width, "…")) + "\n\n" + body
 	}
 
 	footer := m.results.Help.ShortHelpView(m.results.ShortHelp())

@@ -3,12 +3,14 @@ package hianime
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -415,6 +417,11 @@ func TestGetAnimeEpisodes_Failures(t *testing.T) {
 			wantMsg: "no entries",
 		},
 		{
+			name:    "count says there are episodes but none are listed",
+			body:    `{"status":true,"totalItems":12,"html":"<div class=\"ss-list\"></div>"}`,
+			wantMsg: "no entries",
+		},
+		{
 			name:    "entries carry no ids",
 			body:    `{"status":true,"html":"<a class=\"ssl-item ep-item\" data-number=\"1\"></a>"}`,
 			wantMsg: "none carried a usable id",
@@ -429,6 +436,21 @@ func TestGetAnimeEpisodes_Failures(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantMsg)
 		})
 	}
+}
+
+// A season that has been announced but has not aired is listed with an
+// explicit totalItems of 0 (Sousou no Frieren 3rd Season, 2026-10-10). That is
+// not a broken layout, and the user has to be told the title has no episodes
+// yet rather than that the source failed.
+func TestGetAnimeEpisodes_UnairedSeasonHasNoEpisodes(t *testing.T) {
+	t.Parallel()
+	srv := episodeServer(t, `{"status":true,"totalItems":0,"html":"<div class=\"seasons-block\">`+
+		`<div class=\"ssc-label\">List of episodes:</div><div class=\"ss-list\"></div></div>"}`)
+
+	_, err := NewClientForTest(srv.URL).GetAnimeEpisodes(context.Background(), srv.URL+"/cowboy-bebop-26")
+	require.ErrorIs(t, err, netx.ErrNoEpisodes)
+	var diag *netx.SourceDiagnostic
+	assert.False(t, errors.As(err, &diag), "an unaired season must not read as a layout change")
 }
 
 // ---------------------------------------------------------------------------

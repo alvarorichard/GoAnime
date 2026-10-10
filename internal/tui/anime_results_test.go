@@ -283,6 +283,28 @@ func TestAnimeResultsModelView(t *testing.T) {
 	}
 }
 
+// A step that sends the user back to the results explains why on the result
+// screen itself, since anything printed before the screen opens is hidden
+// behind it. Not parallel: the notice is package-level.
+func TestAnimeResultsModel_ShowsNoticeOnce(t *testing.T) {
+	NoticeOnNextResults("Sousou no Frieren 3rd Season has no episodes on HiAnime yet.")
+	animes := []*models.Anime{{Name: "Sousou no Frieren", Source: "HiAnime"}}
+
+	model := newAnimeResultsModel(animes)
+	for _, size := range []tea.WindowSizeMsg{{Width: 80, Height: 12}, {Width: 120, Height: 18}} {
+		_, _ = model.Update(size)
+		view := model.View().Content
+		assert.Contains(t, view, "has no episodes on HiAnime yet", "width %d", size.Width)
+		assert.Contains(t, view, "Sousou no Frieren", "the notice must not push the results off screen")
+		assert.LessOrEqual(t, lipgloss.Height(view), size.Height)
+		assert.LessOrEqual(t, lipgloss.Width(view), size.Width)
+	}
+
+	again := newAnimeResultsModel(animes)
+	_, _ = again.Update(tea.WindowSizeMsg{Width: 120, Height: 18})
+	assert.NotContains(t, again.View().Content, "has no episodes", "a notice is shown once")
+}
+
 func TestRenderAnimeDetails(t *testing.T) {
 	t.Parallel()
 
@@ -306,14 +328,15 @@ func TestRenderAnimeDetails(t *testing.T) {
 }
 
 // On a short terminal the details panel must keep its last field and its
-// bottom border instead of running off the screen.
+// bottom border instead of running off the screen. A notice above the list
+// takes two rows, which is what first pushed it off.
 func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
-	t.Parallel()
 	anime := &models.Anime{Name: "[PT-BR] Frieren e a Jornada para o Além", Source: "Animefire.io",
 		Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled"}
 	bottomRight := lipgloss.RoundedBorder().BottomRight
 
-	for _, height := range []int{16, 22, 40} {
+	for _, height := range []int{18, 24, 40} {
+		NoticeOnNextResults("A title has no episodes yet.") // not parallel: package-level notice
 		model := newAnimeResultsModel([]*models.Anime{anime})
 		_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: height})
 		view := model.View().Content
@@ -325,8 +348,9 @@ func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 
 	// Too short for even the compact panel: no panel at all, never half of
 	// one. The result rows still carry the same details.
+	NoticeOnNextResults("A title has no episodes yet.")
 	model := newAnimeResultsModel([]*models.Anime{anime})
-	_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: 10})
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: 12})
 	view := model.View().Content
 	assert.NotContains(t, view, "Details")
 	assert.Contains(t, view, "Dubbed and subtitled")

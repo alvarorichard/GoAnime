@@ -168,24 +168,31 @@ func (c *HiAnimeClient) getBody(ctx context.Context, rawURL, layer string, decor
 }
 
 // fragmentResponse is the envelope both frontend endpoints answer with: a
-// status flag and a chunk of rendered HTML.
+// status flag and a chunk of rendered HTML. The episode list also carries
+// totalItems; it is a pointer so an absent field is not read as zero.
 type fragmentResponse struct {
 	Status     bool   `json:"status"`
-	TotalItems int    `json:"totalItems"`
+	TotalItems *int   `json:"totalItems"`
 	HTML       string `json:"html"`
 }
 
 // getFragment calls one of the frontend endpoints and returns its HTML payload.
+func (c *HiAnimeClient) getFragment(ctx context.Context, rawURL, layer, referer string) (string, error) {
+	payload, err := c.getPayload(ctx, rawURL, layer, referer)
+	return payload.HTML, err
+}
+
+// getPayload calls one of the frontend endpoints and returns its envelope.
 //
 // The endpoints are XHR-only in the site's own use, so they get the header that
 // says so; without it a rotation could plausibly start answering with the full
 // page instead of the fragment.
-func (c *HiAnimeClient) getFragment(ctx context.Context, rawURL, layer, referer string) (string, error) {
+func (c *HiAnimeClient) getPayload(ctx context.Context, rawURL, layer, referer string) (fragmentResponse, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
 		if err != nil {
-			return "", netx.NewParserError(sourceLabel, layer, "bad request URL", err)
+			return fragmentResponse{}, netx.NewParserError(sourceLabel, layer, "bad request URL", err)
 		}
 		c.decorateRequest(req)
 		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
@@ -201,7 +208,7 @@ func (c *HiAnimeClient) getFragment(ctx context.Context, rawURL, layer, referer 
 				c.sleep(ctx)
 				continue
 			}
-			return "", netx.NewParserError(sourceLabel, layer, "request failed", lastErr)
+			return fragmentResponse{}, netx.NewParserError(sourceLabel, layer, "request failed", lastErr)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -210,7 +217,7 @@ func (c *HiAnimeClient) getFragment(ctx context.Context, rawURL, layer, referer 
 				c.sleep(ctx)
 				continue
 			}
-			return "", netx.NewHTTPStatusError(sourceLabel, layer, resp.StatusCode)
+			return fragmentResponse{}, netx.NewHTTPStatusError(sourceLabel, layer, resp.StatusCode)
 		}
 
 		var payload fragmentResponse
@@ -222,15 +229,15 @@ func (c *HiAnimeClient) getFragment(ctx context.Context, rawURL, layer, referer 
 				c.sleep(ctx)
 				continue
 			}
-			return "", netx.NewParserError(sourceLabel, layer, "malformed JSON response", lastErr)
+			return fragmentResponse{}, netx.NewParserError(sourceLabel, layer, "malformed JSON response", lastErr)
 		}
 		if !payload.Status || strings.TrimSpace(payload.HTML) == "" {
 			// A 200 that carries no fragment: the route still exists but the id
 			// meant nothing to it. Saying so beats handing an empty document to
 			// a parser that would then report "layout changed".
-			return "", netx.NewParserError(sourceLabel, layer,
+			return fragmentResponse{}, netx.NewParserError(sourceLabel, layer,
 				"the endpoint answered with no content for this id", nil)
 		}
-		return payload.HTML, nil
+		return payload, nil
 	}
 }

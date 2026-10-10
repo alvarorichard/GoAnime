@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -12,7 +13,9 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/playback"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/version"
 )
@@ -85,9 +88,6 @@ func HandlePlaybackMode(animeName string) {
 
 		episodesTimer := util.StartTimer("GetAnimeEpisodes")
 		episodes, epErr = appflow.GetAnimeEpisodes(anime)
-		if epErr != nil && !errors.Is(epErr, api.ErrBackToSearch) {
-			util.Errorf("Failed to get episodes: %v", epErr)
-		}
 		episodesTimer.Stop()
 		fetchTimer.Stop()
 
@@ -99,13 +99,14 @@ func HandlePlaybackMode(animeName string) {
 			continue
 		}
 
-		if epErr != nil {
-			return
-		}
-
-		if len(episodes) == 0 {
-			util.Errorf("No episodes found for this anime. Try a different search.")
-			return
+		// A title that cannot be opened sends the user back to the results
+		// instead of ending the session: another result, often the same title
+		// on another source, may well play. Ending here used to look like a
+		// silent crash, because the terminal is cleared on exit.
+		if epErr != nil || len(episodes) == 0 {
+			reportEpisodesUnavailable(anime, epErr)
+			util.Infof("Going back to anime selection...")
+			continue
 		}
 
 		util.PerfCount("anime_loaded")
@@ -134,4 +135,33 @@ func HandlePlaybackMode(animeName string) {
 		// Normal exit or other errors
 		break
 	}
+}
+
+// reportEpisodesUnavailable says why a title could not be opened, both in the
+// terminal and on the result screen the user is sent back to, where anything
+// printed before it opens would be hidden.
+func reportEpisodesUnavailable(anime *models.Anime, err error) {
+	notice, failed := episodesUnavailableNotice(anime, err)
+	if failed {
+		util.Errorf("Failed to get episodes: %v", err)
+	} else {
+		util.Warn(notice)
+	}
+	tui.NoticeOnNextResults(notice)
+}
+
+// episodesUnavailableNotice words the result-screen notice for a title whose
+// episodes could not be listed. failed is false when the source simply has no
+// episodes for it, such as an announced season that has not aired: that is
+// content state, not an error.
+func episodesUnavailableNotice(anime *models.Anime, err error) (notice string, failed bool) {
+	name := tui.SingleLine(anime.Name)
+	where := ""
+	if src := tui.SingleLine(anime.Source); src != "" {
+		where = " on " + src
+	}
+	if err == nil || errors.Is(err, netx.ErrNoEpisodes) {
+		return fmt.Sprintf("%s has no episodes%s yet.", name, where), false
+	}
+	return fmt.Sprintf("Could not load the episodes of %s%s. Try another result.", name, where), true
 }

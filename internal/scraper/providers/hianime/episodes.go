@@ -2,6 +2,7 @@ package hianime
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,12 +24,12 @@ func (c *HiAnimeClient) GetAnimeEpisodes(ctx context.Context, animeURL string) (
 	listURL := c.restURL("episode/list/" + id)
 	util.Debug("HiAnime episodes", "anime", id, "url", listURL)
 
-	fragment, err := c.getFragment(ctx, listURL, "episodes", c.baseURL+"/")
+	payload, err := c.getPayload(ctx, listURL, "episodes", c.baseURL+"/")
 	if err != nil {
 		return nil, err
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(fragment))
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(payload.HTML))
 	if err != nil {
 		return nil, netx.NewParserError(sourceLabel, "episodes", "failed to parse episode list", err)
 	}
@@ -56,6 +57,12 @@ func (c *HiAnimeClient) GetAnimeEpisodes(ctx context.Context, animeURL string) (
 	})
 
 	if listed == 0 {
+		// A season that is announced but has not aired is listed with
+		// totalItems 0 and an empty list. Only that explicit zero means "no
+		// episodes yet"; an empty list without it is still a layout change.
+		if payload.TotalItems != nil && *payload.TotalItems == 0 {
+			return nil, fmt.Errorf("%s anime %s: %w", sourceLabel, id, netx.ErrNoEpisodes)
+		}
 		return nil, netx.NewParserError(sourceLabel, "episodes",
 			"the episode list carried no entries (layout changed?)", nil)
 	}

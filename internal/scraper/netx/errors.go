@@ -119,3 +119,12 @@ func ValidateStreamURL(rawURL, source string) (string, error) {
 // It lives here because the scraper that detects it and the player that has to
 // explain it sit in packages that cannot import each other.
 var ErrMediaOffline = errors.New("the source has no file for this episode")
+
+// ErrNoEpisodes marks a title a source lists with no episodes at all, the
+// way HiAnime lists a season that has been announced but has not aired.
+//
+// Like ErrMediaOffline it is content state, not a failure: the source said
+// so explicitly. A scraper must return it only on that explicit word, and
+// keep reporting an empty or unreadable list it cannot account for as a
+// parser error, since that is how a changed layout shows up.
+var ErrNoEpisodes = errors.New("the source has no episodes for this title yet")
