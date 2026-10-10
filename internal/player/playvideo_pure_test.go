@@ -133,6 +133,24 @@ func TestGetTrackerDBPath_CachesAndReturnsValidPath(t *testing.T) {
 	assert.Equal(t, got, again)
 }
 
+// TestGetTrackerDBPath_FollowsHome pins that watch history lives under HOME,
+// like the logs and downloads. It used to come from the account database,
+// so a run with HOME pointed elsewhere still wrote into the real home.
+func TestGetTrackerDBPath_FollowsHome(t *testing.T) {
+	// Mutates package-level cachedDBPath and the environment — keep serial.
+	prev := cachedDBPath
+	cachedDBPath = ""
+	t.Cleanup(func() { cachedDBPath = prev })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", "") // Windows falls back to <home>\AppData\Local
+
+	got := getTrackerDBPath()
+	assert.True(t, strings.HasPrefix(got, home), "path %q should be under HOME %q", got, home)
+}
+
 func TestGetCurrentEpisode(t *testing.T) {
 	t.Parallel()
 	episodes := []models.Episode{

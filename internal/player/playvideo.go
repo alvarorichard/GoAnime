@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -777,25 +776,35 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 // 	return tracker, 0
 // }
 
-// cachedDBPath stores the database path to avoid repeated user.Current() calls
+// cachedDBPath stores the database path so it is resolved only once.
 var cachedDBPath string
 
-// getTrackerDBPath returns the cached database path
+// getTrackerDBPath returns the progress database path.
+//
+// The home directory comes from os.UserHomeDir, as it does for the log and
+// download directories, so every file GoAnime writes follows HOME
+// (USERPROFILE on Windows). It used to come from user.Current, which reads
+// the account database and ignores HOME: a run with HOME pointed elsewhere
+// kept writing watch history into the real home directory.
 func getTrackerDBPath() string {
 	if cachedDBPath != "" {
 		return cachedDBPath
 	}
 
-	currentUser, err := user.Current()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		util.Errorf("Failed to get current user: %v", err)
+		util.Errorf("Failed to locate the home directory: %v", err)
 		return ""
 	}
 
 	if runtime.GOOS == "windows" {
-		cachedDBPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(home, "AppData", "Local")
+		}
+		cachedDBPath = filepath.Join(localAppData, "GoAnime", "tracking", "progress.db")
 	} else {
-		cachedDBPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
+		cachedDBPath = filepath.Join(home, ".local", "goanime", "tracking", "progress.db")
 	}
 
 	return cachedDBPath

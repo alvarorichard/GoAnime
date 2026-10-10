@@ -11,7 +11,6 @@ import (
 	neturl "net/url"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -975,11 +974,6 @@ func downloadAndPlayEpisode(
 		}
 	}
 
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
-	}
-
 	// Use Plex-compatible naming when anime name is available
 	var downloadPath, episodePath string
 	snap := snapshotMedia()
@@ -1016,11 +1010,9 @@ func downloadAndPlayEpisode(
 		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
 	} else {
 		// Fallback: route based on media type even without anime name
-		var fallbackBase string
+		fallbackBase := util.DefaultDownloadDir()
 		if snap.IsMovieOrTV {
 			fallbackBase = util.DefaultMovieDownloadDir()
-		} else {
-			fallbackBase = filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime")
 		}
 		downloadPath = filepath.Join(fallbackBase, DownloadFolderFormatter(animeURL))
 		episodePath = filepath.Join(downloadPath, episodeNumberStr+".mp4")
