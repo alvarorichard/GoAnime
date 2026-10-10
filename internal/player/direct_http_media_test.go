@@ -23,6 +23,7 @@ import (
 func TestDirectHTTPRefusesNonMediaBodies(t *testing.T) {
 	home := t.TempDir() // the output path must live under $HOME; not parallel
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	bodies := map[string]struct {
 		contentType string
 		body        string
@@ -64,6 +65,7 @@ func TestDirectHTTPRefusesNonMediaBodies(t *testing.T) {
 func TestDirectHTTPStillSavesMedia(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	media := append([]byte("\x00\x00\x00\x20ftypisom"), make([]byte, 4096)...)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -108,6 +110,7 @@ func ok(string, string, *model) error { return nil }
 func TestHLSChainReachesYtDlpWhenNativeFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:4.0,\nseg0.ts\n"))
