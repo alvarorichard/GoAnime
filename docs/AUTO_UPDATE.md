@@ -22,7 +22,11 @@ The code lives in `internal/updater`.
    | macOS    | `goanime-darwin-<arch>` when published, otherwise `goanime-darwin-universal` |
    | Linux    | `goanime-linux-<arch>`                                                |
 
-4. Copies the running executable to `<path>.backup`, puts the new one in its
+4. Downloads `checksums-sha256.txt` from the same release and checks the
+   asset's SHA-256 digest against it. If the release does not publish that
+   file, the asset is not listed in it, or the digest differs, the update
+   stops and nothing is installed.
+5. Copies the running executable to `<path>.backup`, puts the new one in its
    place and deletes the backup. If the replacement fails, the backup is
    restored.
 
@@ -41,11 +45,16 @@ and prints `Update will complete when you restart the application`.
 
 ## Safety
 
-- Release data and assets are downloaded over HTTPS, and only from
-  `github.com`, `api.github.com`, `objects.githubusercontent.com` and
-  `github-releases.githubusercontent.com`.
-- The download is not yet verified against the `checksums-sha256.txt` file
-  published with each release.
+- The release lookup and every download start at a GitHub address over
+  HTTPS (`github.com`, `api.github.com`, `objects.githubusercontent.com` or
+  `github-releases.githubusercontent.com`); any other starting URL is refused.
+  GitHub redirects asset downloads to its own storage, and that redirect is
+  followed.
+- Every download is checked against the release's `checksums-sha256.txt`
+  before anything is installed, and on Windows before the zip is extracted.
+  This catches a corrupted, truncated or altered download. It does not
+  protect against a compromised release, since the checksums come from the
+  same place as the asset; that would need signed releases.
 
 ## Installations managed by a package manager
 

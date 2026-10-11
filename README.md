@@ -151,8 +151,10 @@ Get-FileHash goanime-windows-amd64.zip # Windows, in PowerShell
 | AUR                         | Your AUR helper, for example `yay -Syu`           |
 | `go install`                | The same `go install` command                     |
 
-`goanime --update` replaces the executable in place. If it lives in a folder
-you cannot write to, such as `/usr/local/bin`, run `sudo goanime --update`.
+`goanime --update` checks the download against the release's
+`checksums-sha256.txt` and installs nothing if they do not match. It replaces
+the executable in place, so if it lives in a folder you cannot write to, such
+as `/usr/local/bin`, run `sudo goanime --update`.
 
 ## Usage
 
