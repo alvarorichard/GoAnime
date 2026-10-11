@@ -223,7 +223,7 @@ GOANIME_DISABLED_SOURCES=<Name> go run ./cmd/goanime "naruto" # kill-switch sees
 
 ## Known friction
 
-`ARCHITECTURE.md` §2 (R2) promises "adding a source = one file". Today it is
+The registry was designed so that adding a source means adding one file. Today it is
 **12 files, ~20 edit sites**. Only #1, #3 and #4 are the architecture; the rest is
 migration debt, with four named causes in descending order of cost:
 
@@ -241,10 +241,8 @@ migration debt, with four named causes in descending order of cost:
    backfill switches that duplicate what `source.Resolve` already computes.
 
 Fixing 1–3 reduces adding a source to one new package plus one provider block.
-Until then, trust this table over the architecture doc's ideal.
+Until then, trust this table.
 
 ---
 
-**See also:** [`ARCHITECTURE.md`](ARCHITECTURE.md) ·
-[`architecture/ARCH_STAGES.md`](architecture/ARCH_STAGES.md) ·
-[`Development.md`](Development.md) · [`testing/TEST_STRATEGY.md`](testing/TEST_STRATEGY.md)
+**See also:** [`Development.md`](Development.md)

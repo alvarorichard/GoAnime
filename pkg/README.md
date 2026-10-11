@@ -1,7 +1,7 @@
 # GoAnime Public API
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 A clean and simple Go library for searching and scraping anime content from multiple sources.
 
@@ -294,9 +294,9 @@ This is a public API extracted from the internal implementation. When contributi
 
 ## License
 
-MIT License - see [LICENSE](../../LICENSE) for details
+MIT License - see [LICENSE](../LICENSE) for details
 
 ## Related Projects
 
-- [GoAnime CLI](../../) - Full-featured CLI application using this library
-- Main project documentation in the [root README](../../README.md)
+- [GoAnime CLI](../) - Full-featured CLI application using this library
+- Main project documentation in the [root README](../README.md)

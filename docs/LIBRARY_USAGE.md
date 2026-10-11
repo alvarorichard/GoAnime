@@ -9,7 +9,6 @@ Foi criada uma estrutura completa em `pkg/goanime` que expõe as funcionalidades
 ```
 pkg/
 ├── README.md                                 # Documentação principal da biblioteca
-├── PACKAGE_INFO.md                          # Informações sobre a estrutura do pacote
 └── goanime/                                 # Pacote principal
     ├── client.go                            # Cliente principal da API
     ├── client_test.go                       # Testes unitários e de integração
@@ -176,10 +175,9 @@ go build -o source ./pkg/goanime/examples/source_specific/
 
 ## 📖 Documentação
 
-1. **[pkg/README.md](pkg/README.md)** - Visão geral e início rápido
-2. **[pkg/goanime/README.md](pkg/goanime/README.md)** - Documentação detalhada da API
-3. **[pkg/goanime/examples/](pkg/goanime/examples/)** - Exemplos práticos de uso
-4. **[pkg/PACKAGE_INFO.md](pkg/PACKAGE_INFO.md)** - Informações sobre o pacote
+1. **[pkg/README.md](../pkg/README.md)** - Visão geral e início rápido
+2. **[pkg/goanime/README.md](../pkg/goanime/README.md)** - Documentação detalhada da API
+3. **[pkg/goanime/examples/](../pkg/goanime/examples/)** - Exemplos práticos de uso
 
 ## 🎓 Exemplos de Integração
 
@@ -255,8 +253,8 @@ MIT License - veja [LICENSE](../LICENSE)
 ## 🔗 Links Úteis
 
 - Repositório principal: <https://github.com/alvarorichard/GoAnime>
-- Documentação completa: [pkg/goanime/README.md](pkg/goanime/README.md)
-- Exemplos: [pkg/goanime/examples/](pkg/goanime/examples/)
+- Documentação completa: [pkg/goanime/README.md](../pkg/goanime/README.md)
+- Exemplos: [pkg/goanime/examples/](../pkg/goanime/examples/)
 - Issues: <https://github.com/alvarorichard/GoAnime/issues>
 
 ---
