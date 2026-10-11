@@ -73,19 +73,24 @@ func TestCheckForUpdatesQuietly_APIError(t *testing.T) {
 	assert.NotPanics(t, CheckForUpdatesQuietly)
 }
 
-// withPerformHooks installs stubbed hooks for PerformUpdate.
+// withPerformHooks installs stubbed hooks for PerformUpdate. Checksum
+// verification is stubbed to succeed so these tests exercise the rest of the
+// flow; the verification itself is covered in checksum_test.go, and a test can
+// override verifyDownloadFn after calling this.
 func withPerformHooks(t *testing.T, fa func(*GitHubRelease) (string, string, error),
 	dl func(string, string) (string, error), exeFn func() (string, error),
 	rep func(string, string) error) {
 	t.Helper()
-	pFA, pDL, pEXE, pREP := findAssetFn, downloadFn, osExecutableFn, replaceExecutableFn
+	pFA, pDL, pVER, pEXE, pREP := findAssetFn, downloadFn, verifyDownloadFn, osExecutableFn, replaceExecutableFn
 	findAssetFn = fa
 	downloadFn = dl
+	verifyDownloadFn = func(*GitHubRelease, string, string) error { return nil }
 	osExecutableFn = exeFn
 	replaceExecutableFn = rep
 	t.Cleanup(func() {
 		findAssetFn = pFA
 		downloadFn = pDL
+		verifyDownloadFn = pVER
 		osExecutableFn = pEXE
 		replaceExecutableFn = pREP
 	})

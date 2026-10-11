@@ -2,6 +2,8 @@ package updater
 
 import (
 	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +30,14 @@ import (
 // upstream could stream until the process ran out of memory.
 const maxJSONResponseBytes = 10 << 20 // 10 MiB
 
+// checksumsAssetName is the file every release publishes with the SHA-256
+// digest of each of its assets, in sha256sum format.
+const checksumsAssetName = "checksums-sha256.txt"
+
+// maxChecksumsBytes caps how much of the checksums file is read. The real file
+// is under 1 KiB; anything near this size is not a checksums file.
+const maxChecksumsBytes = 1 << 20 // 1 MiB
+
 const (
 	GitHubOwner = "alvarorichard"
 	GitHubRepo  = "GoAnime"
@@ -39,6 +49,8 @@ var (
 	releaseAPIURL       = GitHubAPI + "/releases/latest"
 	findAssetFn         = findAssetForPlatform
 	downloadFn          = downloadAsset
+	fetchChecksumsFn    = fetchChecksums
+	verifyDownloadFn    = verifyDownload
 	osExecutableFn      = os.Executable
 	replaceExecutableFn = replaceExecutable
 	runForm             = tui.RunClean
@@ -117,6 +129,14 @@ func PerformUpdate(release *GitHubRelease) error {
 			util.Debug("Failed to remove temp file:", removeErr)
 		}
 	}()
+
+	// Verify before anything else touches the file, including zip extraction:
+	// nothing from an unverified download may reach the executable's path.
+	util.Info("Verifying the download against " + checksumsAssetName + "...")
+	if err := verifyDownloadFn(release, tempFile, assetName); err != nil {
+		return fmt.Errorf("update verification failed, nothing was installed: %w", err)
+	}
+	util.Info("Checksum verified")
 
 	updateFile := tempFile
 	cleanupUpdateFile := func() {}
@@ -610,6 +630,150 @@ func downloadAssetWithTestFlag(url, filename string, allowTestMode bool) (string
 	}
 
 	return tempFile, nil
+}
+
+// verifyDownload checks a downloaded release asset against the release's
+// checksums-sha256.txt. A release that does not publish the file, or a file
+// with no entry for the asset, is refused: installing an unverified executable
+// is never the fallback.
+func verifyDownload(release *GitHubRelease, path, assetName string) error {
+	url, err := findChecksumsAsset(release)
+	if err != nil {
+		return err
+	}
+
+	data, err := fetchChecksumsFn(url)
+	if err != nil {
+		return fmt.Errorf("failed to download %s: %w", checksumsAssetName, err)
+	}
+
+	sums, err := parseChecksums(data)
+	if err != nil {
+		return err
+	}
+
+	return verifyAssetChecksum(path, assetName, sums)
+}
+
+// findChecksumsAsset returns the download URL of the release's checksums file.
+func findChecksumsAsset(release *GitHubRelease) (string, error) {
+	for _, asset := range release.Assets {
+		if strings.EqualFold(asset.Name, checksumsAssetName) {
+			return asset.BrowserDownloadURL, nil
+		}
+	}
+	return "", fmt.Errorf("release %s does not publish %s", release.TagName, checksumsAssetName)
+}
+
+func fetchChecksums(url string) ([]byte, error) {
+	return fetchChecksumsWithTestFlag(url, false)
+}
+
+// fetchChecksumsWithTestFlag downloads the checksums file under the same URL
+// rules as downloadAssetWithTestFlag, reading at most maxChecksumsBytes.
+func fetchChecksumsWithTestFlag(url string, allowTestMode bool) ([]byte, error) {
+	if err := validateGitHubURLWithTestFlag(url, allowTestMode); err != nil {
+		return nil, fmt.Errorf("URL validation failed: %w", err)
+	}
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Get(url) // #nosec G107 -- URL is validated above to ensure it's from trusted GitHub domains
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			util.Debug("Failed to close response body:", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumsBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxChecksumsBytes {
+		return nil, fmt.Errorf("%s is larger than %d bytes", checksumsAssetName, maxChecksumsBytes)
+	}
+	return data, nil
+}
+
+// parseChecksums reads sha256sum output, one "<digest>  <name>" per line (or
+// "<digest> *<name>" in binary mode), into a map from file name to lowercase
+// hex digest. Any malformed line fails the whole file rather than being
+// skipped, since a damaged checksums file proves nothing.
+func parseChecksums(data []byte) (map[string]string, error) {
+	sums := make(map[string]string)
+	for i, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		digest, name, ok := strings.Cut(line, " ")
+		name = strings.TrimLeft(name, " *")
+		if _, hexErr := hex.DecodeString(digest); !ok || name == "" ||
+			len(digest) != sha256.Size*2 || hexErr != nil {
+			return nil, fmt.Errorf("malformed line %d in %s", i+1, checksumsAssetName)
+		}
+
+		digest = strings.ToLower(digest)
+		if prev, seen := sums[name]; seen && prev != digest {
+			return nil, fmt.Errorf("%s lists conflicting checksums for %s", checksumsAssetName, name)
+		}
+		sums[name] = digest
+	}
+
+	if len(sums) == 0 {
+		return nil, fmt.Errorf("%s lists no checksums", checksumsAssetName)
+	}
+	return sums, nil
+}
+
+// verifyAssetChecksum checks the file at path against the digest sums lists for
+// assetName.
+func verifyAssetChecksum(path, assetName string, sums map[string]string) error {
+	want, ok := sums[assetName]
+	if !ok {
+		return fmt.Errorf("%s has no entry for %s", checksumsAssetName, assetName)
+	}
+
+	got, err := fileSHA256(path)
+	if err != nil {
+		return fmt.Errorf("failed to hash %s: %w", assetName, err)
+	}
+
+	if got != want {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", assetName, want, got)
+	}
+	return nil
+}
+
+// fileSHA256 returns the lowercase hex SHA-256 digest of the file at path.
+func fileSHA256(path string) (string, error) {
+	if err := validateFilePath(path); err != nil {
+		return "", err
+	}
+
+	// #nosec G304 - path is validated above
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			util.Debug("Failed to close file:", closeErr)
+		}
+	}()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func copyFile(src, dst string) error {
