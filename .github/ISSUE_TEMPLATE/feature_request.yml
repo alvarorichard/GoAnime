@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a new feature or a change to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Portuguese. Search the [existing issues](https://github.com/alvarorichard/GoAnime/issues?q=is%3Aissue) first; if the idea is already there, add your use case to it instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do
+      description: The problem or the situation this would help with.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: How it could work
+      description: The command, flag or behavior you have in mind.
+      placeholder: goanime --last
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Anything you tried or considered instead.

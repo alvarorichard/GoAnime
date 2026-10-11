@@ -10,13 +10,12 @@ Issues and pull requests can be written in English or Portuguese.
 ## Reporting a bug
 
 Search the [existing issues](https://github.com/alvarorichard/GoAnime/issues)
-first. If nothing matches, open a new one and include:
-
-- The output of `goanime --version`.
-- Your operating system.
-- The exact command you ran and the source you used.
-- The debug log. Run the same command with `--debug`; GoAnime prints the path
-  of the log file when it starts.
+first. If nothing matches, open a
+[bug report](https://github.com/alvarorichard/GoAnime/issues/new?template=bug_report.yml).
+The form asks for the output of `goanime --version`, your operating system,
+the command you ran, the source, and a debug log.
+[Reporting a problem](README.md#reporting-a-problem) in the README explains how
+to produce the log and where to find it on each system.
 
 Most bugs are a source that stopped working because the site behind it
 changed. The [source health workflow](https://github.com/alvarorichard/GoAnime/actions/workflows/source-health.yml)

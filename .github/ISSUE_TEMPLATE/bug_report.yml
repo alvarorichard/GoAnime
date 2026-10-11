@@ -1,0 +1,93 @@
+name: Bug report
+description: Something does not work as described in the README.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. You can write in English or Portuguese.
+
+        Before you continue:
+
+        - Search the [existing issues](https://github.com/alvarorichard/GoAnime/issues?q=is%3Aissue) to see whether it was already reported.
+        - If a source stopped returning results, check the [source health workflow](https://github.com/alvarorichard/GoAnime/actions/workflows/source-health.yml). Sources break when the site behind them changes, and the daily check usually shows it first.
+
+  - type: input
+    id: version
+    attributes:
+      label: GoAnime version
+      description: The output of `goanime --version`.
+      placeholder: GoAnime v1.8.7 (with SQLite tracking)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name and version.
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install GoAnime?
+      options:
+        - Windows installer
+        - Release binary or archive
+        - AUR
+        - go install
+        - Built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source
+      description: The source of the title that failed. The details panel beside the search results shows it under Source.
+      options:
+        - HiAnime
+        - AnimeFire
+        - Goyabu
+        - StartFlix
+        - TopCine
+        - Not sure, or every source
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      placeholder: goanime --debug "naruto"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, what you expected, and what happened instead. Paste any error message shown in the terminal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log
+      description: |
+        1. Run the same command again with `--debug` added, for example `goanime --debug "naruto"`, and repeat what you did until the problem happens.
+        2. When it starts, GoAnime prints the path of the log file next to `Debug log →`. Each run writes a new file named `goanime_<date>_<time>.log` in:
+           - Windows: `%LOCALAPPDATA%\GoAnime\logs`
+           - macOS: `~/Library/Logs/GoAnime`
+           - Linux: `~/.local/share/goanime/logs`
+        3. Drag the newest file into this box to attach it.
+
+        The log lists the titles you searched and paths on your computer, which can include your user name. Read it first if that matters to you.
+      placeholder: Drag the .log file here.
+    validations:
+      required: true
