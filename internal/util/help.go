@@ -114,7 +114,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")
 	addOption(&helpContent, "--audio", "Preferred audio language for movies and TV shows, such as pt-BR or english.")
 	addOption(&helpContent, "--no-subs", "Disable subtitles.")
-	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Must be inside your home folder. Files use Plex naming: Anime - S01E01.mp4.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -167,7 +167,7 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
 	addExample(&helpContent, "goanime -d -a \"one piece\"", "Download ALL episodes of One Piece")
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
-	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
+	addExample(&helpContent, "goanime -d -r -o ~/Videos/anime \"naruto\" 1-12", "Download range to custom directory")
 	addExample(&helpContent, "goanime -dm \"interstellar\"", "Download a movie")
 	addExample(&helpContent, "goanime -dm -r \"dark\" 1 1-5", "Download episodes 1-5 of season 1 of a TV show")
 	addExample(&helpContent, "goanime -dm --type tv \"dark\" 1 5", "Download episode 5 of season 1 of a TV show")
