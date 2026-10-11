@@ -29,7 +29,8 @@ ponto em que você parou.
 </p>
 
 É um único binário para Linux, macOS e Windows, e só precisa do mpv para
-funcionar.
+assistir. O [FFmpeg](https://ffmpeg.org/) é opcional: os downloads o usam para
+embutir legendas, e o upscaling de vídeos depende dele.
 
 ## Conteúdo
 
@@ -55,9 +56,9 @@ funcionar.
   intervalo ou da série inteira.
 - Downloads salvos com nomes compatíveis com o Plex (`Anime - S01E01.mp4`).
 - Retoma a reprodução e lembra os episódios assistidos.
-- Pula aberturas e encerramentos automaticamente.
+- Pula a abertura pelo menu do player, usando os tempos do AniSkip.
 - Discord Rich Presence.
-- Upscaling com Anime4K para vídeos e imagens baixados.
+- Upscaling com Anime4K para arquivos de vídeo e imagem.
 - Atualiza a si mesmo com `goanime --update`.
 
 ## Instalação
@@ -75,7 +76,10 @@ Baixe e execute o `GoAnime-Installer-<versão>.exe` da
 Ele instala o GoAnime e o mpv e adiciona os dois ao `PATH`.
 
 Se preferir não usar o instalador, baixe o `goanime-windows-amd64.zip`,
-extraia e coloque o `goanime.exe` e o `mpv.exe` em uma pasta do seu `PATH`.
+extraia o `goanime-windows-amd64.exe`, renomeie para `goanime.exe` e coloque em
+uma pasta do seu `PATH`. O arquivo não inclui o mpv:
+[instale-o](https://mpv.io/installation/) separadamente. O GoAnime encontra o
+`mpv.exe` no `PATH` ou na mesma pasta do `goanime.exe`.
 
 ### macOS
 
@@ -84,10 +88,12 @@ brew install mpv
 curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-darwin-universal
 chmod +x goanime
 sudo mv goanime /usr/local/bin/
-sudo xattr -d com.apple.quarantine /usr/local/bin/goanime
 ```
 
 O binário é universal e roda tanto em Macs com Apple Silicon quanto com Intel.
+Se você baixar pelo navegador em vez do `curl`, o macOS coloca o arquivo em
+quarentena e se recusa a executá-lo; para liberar, rode
+`xattr -d com.apple.quarantine /usr/local/bin/goanime`.
 
 ### Arch Linux
 
@@ -136,8 +142,8 @@ goanime "one piece"
 
 Use espaços no nome, não hífens.
 
-Os downloads vão para `~/.local/goanime/downloads/anime/`, a menos que você
-use `-o`:
+Os downloads de anime vão para `~/.local/goanime/downloads/anime/`, a menos
+que você use `-o`:
 
 ```bash
 goanime -d "one piece" 1                  # episódio 1
@@ -147,13 +153,17 @@ goanime -d --quality 720p "frieren" 1     # uma qualidade específica
 goanime -d -o ~/Anime "bleach" 10         # outra pasta
 ```
 
-Filmes e séries usam `-dm`:
+Filmes e séries usam `-dm` e vão para `~/.local/goanime/downloads/movies/`:
 
 ```bash
 goanime -dm "Interestelar"                # um filme
+goanime -dm --type tv "Dark" 1 5          # temporada 1, episódio 5
 goanime -dm -r "Dark" 1 1-5               # temporada 1, episódios 1 a 5
 goanime -dm -a "Dark"                     # todas as temporadas
 ```
+
+Alguns streams são baixados com o [yt-dlp](https://github.com/yt-dlp/yt-dlp),
+que o GoAnime baixa sozinho na primeira vez que precisa dele.
 
 Outras opções:
 
@@ -176,8 +186,12 @@ Rode `goanime -h` para ver todas as opções.
 | StartFlix | Filmes, séries   | Português (Brasil)            | Dublado e legendado                           |
 | TopCine   | Filmes, séries   | Português (Brasil)            | Apenas catálogo; a reprodução usa o StartFlix |
 
-O Goyabu fica atrás de uma verificação do Cloudflare e vem desativado. Para
-ativá-lo, use `GOANIME_ENABLED_SOURCES=goyabu`.
+`--source` limita a busca a uma fonte: `hianime`, `animefire`, `startflix` ou
+`topcine`, ou `ptbr` para todas as fontes em português.
+
+O Goyabu fica atrás de uma verificação do Cloudflare e vem desativado. Ele
+ainda funciona em redes que o Cloudflare não verifica; para ativá-lo, use
+`GOANIME_ENABLED_SOURCES=goyabu`.
 
 O GoAnime depende de sites de terceiros, e esses sites mudam sem aviso. Quando
 isso acontece, a fonte correspondente pode parar de funcionar até ser
@@ -190,21 +204,48 @@ reportada.
 O GoAnime não precisa de arquivo de configuração. Algumas variáveis de
 ambiente cobrem casos menos comuns:
 
-| Variável                        | Descrição                                                         |
-| ------------------------------- | ----------------------------------------------------------------- |
-| `GOANIME_ENABLED_SOURCES`       | Fontes a ativar, separadas por vírgula, como `goyabu`             |
-| `GOANIME_DISABLED_SOURCES`      | Fontes a ignorar, separadas por vírgula                           |
-| `GOANIME_HIANIME_AUDIO`         | `sub` (padrão) ou `dub`                                           |
-| `GOANIME_STRICT_SOURCE`         | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida |
+| Variável                      | Descrição                                                                |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `GOANIME_ENABLED_SOURCES`     | Fontes a ativar, separadas por vírgula, como `goyabu`                    |
+| `GOANIME_DISABLED_SOURCES`    | Fontes a ignorar, separadas por vírgula                                  |
+| `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
+| `GOANIME_STRICT_SOURCE`       | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida      |
+| `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
+| `GOANIME_STARTFLIX_URL`       | Endereço do StartFlix                                                    |
+| `GOANIME_STARTFLIX_PANEL_URL` | Endereço do painel de vídeo do StartFlix                                 |
+| `GOANIME_TOPCINE_URL`         | Endereço do TopCine                                                      |
+| `TMDB_API_KEY`                | Uma chave do [TMDB](https://www.themoviedb.org/settings/api) para detalhes de filmes, séries e temporadas |
+| `OMDB_API_KEY`                | Uma chave do [OMDb](https://www.omdbapi.com/apikey.aspx) para usar no lugar da chave de demonstração compartilhada |
+
+As variáveis de endereço apontam uma fonte para um novo domínio quando o site
+muda, sem esperar uma nova versão.
 
 ## Solução de problemas
 
 ### Reportando um problema
 
-Rode o mesmo comando de novo com `--debug`. Ao iniciar, o GoAnime mostra o
-caminho de um arquivo de log. Anexe esse arquivo à sua
-[issue](https://github.com/alvarorichard/GoAnime/issues/new), junto com o
-comando que você usou e o seu sistema operacional.
+Abra um
+[relatório de bug](https://github.com/alvarorichard/GoAnime/issues/new?template=bug_report.yml)
+e anexe um log de depuração:
+
+1. Rode o mesmo comando de novo adicionando `--debug`, por exemplo
+   `goanime --debug "naruto"`, e repita o que você fez até o problema
+   acontecer.
+2. Ao iniciar, o GoAnime mostra o caminho do arquivo de log. Cada execução
+   grava um arquivo novo, chamado `goanime_<data>_<hora>.log`, nesta pasta:
+
+   | Sistema | Pasta                          |
+   | ------- | ------------------------------ |
+   | Windows | `%LOCALAPPDATA%\GoAnime\logs`  |
+   | macOS   | `~/Library/Logs/GoAnime`       |
+   | Linux   | `~/.local/share/goanime/logs`  |
+
+3. Anexe o arquivo mais recente à issue, junto com a saída de
+   `goanime --version`, o seu sistema operacional e o comando que você usou.
+
+O log lista os títulos que você buscou e caminhos do seu computador, que podem
+incluir o seu nome de usuário. Leia antes de anexar, se isso for importante
+para você.
 
 ### O mpv não é encontrado
 
@@ -221,8 +262,10 @@ client := goanime.NewClient()
 results, err := client.SearchAnime("One Piece", nil)
 ```
 
-Veja [pkg/goanime](pkg/goanime) para a API e
-[pkg/goanime/examples](pkg/goanime/examples) para programas completos.
+A busca cobre todas as fontes. Por enquanto, a lista de episódios e as URLs de
+stream só estão disponíveis para resultados do AnimeFire.
+O [docs/LIBRARY_USAGE.md](docs/LIBRARY_USAGE.md) explica a API passo a passo, e
+o [pkg/goanime/examples](pkg/goanime/examples) tem programas completos.
 
 ## Contribuindo
 
