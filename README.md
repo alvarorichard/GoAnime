@@ -195,7 +195,6 @@ common needs:
 | `GOANIME_DISABLED_SOURCES`       | Comma-separated sources to skip                                   |
 | `GOANIME_HIANIME_AUDIO`          | `sub` (default) or `dub`                                          |
 | `GOANIME_STRICT_SOURCE`          | Set to `1` to report an error instead of guessing an unknown source |
-| `SSL_CERT_FILE`, `SSL_CERT_DIR`  | Use a custom CA bundle, see [Troubleshooting](#troubleshooting)   |
 
 ## Troubleshooting
 
@@ -211,22 +210,6 @@ command you ran and your operating system.
 Make sure `mpv --version` works in the same terminal you run GoAnime from.
 On Windows, open a new terminal after installing so the updated `PATH` is
 picked up.
-
-### TLS errors behind a corporate proxy or custom CA
-
-If every request fails with a certificate error, typically on a network that
-inspects TLS with its own root CA, point GoAnime at that CA bundle:
-
-```bash
-export SSL_CERT_FILE=/path/to/corporate-ca.pem   # a single PEM bundle
-export SSL_CERT_DIR=/path/to/ca-certificates.d   # or a directory of PEMs
-```
-
-Since Go 1.27 these variables are honoured on Windows and macOS as well, not
-just Linux: when either is set, GoAnime verifies certificates with Go's own
-verifier against your bundle instead of the platform certificate store. To go
-back to the platform store without unsetting the variables, run with
-`GODEBUG=x509sslcertoverrideplatform=0`.
 
 ## Using GoAnime as a library
 

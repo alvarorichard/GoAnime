@@ -196,7 +196,6 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_DISABLED_SOURCES`      | Fontes a ignorar, separadas por vírgula                           |
 | `GOANIME_HIANIME_AUDIO`         | `sub` (padrão) ou `dub`                                           |
 | `GOANIME_STRICT_SOURCE`         | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida |
-| `SSL_CERT_FILE`, `SSL_CERT_DIR` | Usar um bundle de CA próprio, veja [Solução de problemas](#solução-de-problemas) |
 
 ## Solução de problemas
 
@@ -212,23 +211,6 @@ comando que você usou e o seu sistema operacional.
 Confira se `mpv --version` funciona no mesmo terminal em que você roda o
 GoAnime. No Windows, abra um terminal novo depois de instalar, para que o
 `PATH` atualizado seja carregado.
-
-### Erros de TLS atrás de proxy corporativo ou CA própria
-
-Se todas as requisições falham com erro de certificado, normalmente em uma
-rede que inspeciona TLS com uma CA raiz própria, aponte o GoAnime para esse
-bundle:
-
-```bash
-export SSL_CERT_FILE=/caminho/para/ca-corporativa.pem   # um único bundle PEM
-export SSL_CERT_DIR=/caminho/para/ca-certificates.d      # ou um diretório de PEMs
-```
-
-Desde o Go 1.27 essas variáveis também valem no Windows e no macOS, não só no
-Linux: quando uma delas está definida, o GoAnime verifica os certificados com
-o verificador do próprio Go usando o seu bundle, em vez do repositório de
-certificados do sistema. Para voltar a usar o repositório do sistema sem
-remover as variáveis, rode com `GODEBUG=x509sslcertoverrideplatform=0`.
 
 ## Usando o GoAnime como biblioteca
 
