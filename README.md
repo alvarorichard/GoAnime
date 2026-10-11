@@ -39,10 +39,12 @@ subtitles, and upscaling a video requires it.
 - [Usage](#usage)
 - [Sources](#sources)
 - [Configuration](#configuration)
+- [Files](#files)
 - [Troubleshooting](#troubleshooting)
 - [Using GoAnime as a library](#using-goanime-as-a-library)
 - [Contributing](#contributing)
 - [Community](#community)
+- [Acknowledgments](#acknowledgments)
 - [Disclaimer](#disclaimer)
 - [License](#license)
 
@@ -58,7 +60,7 @@ subtitles, and upscaling a video requires it.
 - Resumes playback and remembers watched episodes.
 - Skips the opening from the player menu, using timestamps from AniSkip.
 - Discord Rich Presence.
-- Anime4K upscaling for video and image files.
+- Anime4K upscaling in real time while you watch, or of video and image files.
 - Updates itself with `goanime --update`.
 
 ## Installation
@@ -129,11 +131,35 @@ be available when building. Without one, GoAnime still builds and runs, but
 does not track progress. The release binaries are built with SQLite. See
 [docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for details.
 
+### Verifying a download
+
+Every release includes `checksums-sha256.txt`. Compute the hash of the file
+you downloaded and compare it with the line for that file:
+
+```bash
+sha256sum goanime-linux-amd64.tar.gz   # Linux
+shasum -a 256 goanime                  # macOS, the goanime-darwin-universal line
+Get-FileHash goanime-windows-amd64.zip # Windows, in PowerShell
+```
+
+### Updating
+
+| Installed with              | Update with                                       |
+| --------------------------- | ------------------------------------------------- |
+| Windows installer           | The installer of the new version                  |
+| A release binary or archive | `goanime --update`                                |
+| AUR                         | Your AUR helper, for example `yay -Syu`           |
+| `go install`                | The same `go install` command                     |
+
+`goanime --update` replaces the executable in place. If it lives in a folder
+you cannot write to, such as `/usr/local/bin`, run `sudo goanime --update`.
+
 ## Usage
 
 Run `goanime` without arguments to start the interactive search. Type a name,
-choose a result with the arrow keys, pick an episode, and it opens in mpv.
-You can also pass the name directly:
+choose a result and, for a series, an episode. A menu then offers to download
+the episode, a range or the whole series, to turn on real-time upscaling, or
+to play it online in mpv. You can also pass the name directly:
 
 ```bash
 goanime "one piece"
@@ -151,6 +177,8 @@ goanime -d -a "one piece"                 # every episode
 goanime -d --quality 720p "frieren" 1     # a specific quality
 goanime -d -o ~/Anime "bleach" 10         # a custom directory
 ```
+
+The directory given to `-o` must be inside your home folder.
 
 Movies and TV shows use `-dm` and go to `~/.local/goanime/downloads/movies/`:
 
@@ -174,6 +202,40 @@ goanime --debug "naruto"                      # write a debug log
 ```
 
 Run `goanime -h` for the full list of options.
+
+### Keys
+
+| Key                   | Action                    |
+| --------------------- | ------------------------- |
+| `↑` `↓` or `k` `j`    | Move                      |
+| Type, or `/`          | Filter the list           |
+| `g` `G`               | First or last item        |
+| `Enter`               | Select                    |
+| `Esc`                 | Go back                   |
+
+### While watching
+
+While mpv plays, the terminal shows the player menu:
+
+| Option                           | What it does                                          |
+| -------------------------------- | ----------------------------------------------------- |
+| Next episode, Previous episode   | Play the next or previous episode                     |
+| Select episode                   | Pick another episode from the list                    |
+| Change anime                     | Search for another title                              |
+| Skip intro                       | Jump past the opening, when AniSkip has its timestamps |
+| ← Back                           | Return to the download and playback menu              |
+| Exit                             | Close mpv and quit                                    |
+
+For a movie, the menu offers Replay movie, Change movie and Exit. When an
+episode or movie has saved progress, GoAnime asks whether to resume from where
+you stopped.
+
+### Real-time upscaling
+
+Real-time Upscale, in the menu before playback, applies
+[Anime4K](https://github.com/bloc97/Anime4K) shaders in mpv. The first time,
+choose Setup shaders to download them, then pick a mode. Each mode's label
+says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 
 ## Sources
 
@@ -218,6 +280,22 @@ common needs:
 
 The address variables point a source at a new domain when its site moves,
 without waiting for a new release.
+
+## Files
+
+| What            | Linux                                   | macOS                                                     | Windows                                       |
+| --------------- | --------------------------------------- | --------------------------------------------------------- | --------------------------------------------- |
+| Watch history   | `~/.local/goanime/tracking/progress.db` | `~/.local/goanime/tracking/progress.db`                   | `%LOCALAPPDATA%\GoAnime\tracking\progress.db` |
+| Downloads       | `~/.local/goanime/downloads/`           | `~/.local/goanime/downloads/`                             | `%USERPROFILE%\.local\goanime\downloads\`     |
+| Debug logs      | `~/.local/share/goanime/logs/`          | `~/Library/Logs/GoAnime/`                                 | `%LOCALAPPDATA%\GoAnime\logs\`                 |
+| Anime4K shaders | `~/.config/goanime/anime4k-shaders/`    | `~/Library/Application Support/goanime/anime4k-shaders/`  | `%APPDATA%\goanime\anime4k-shaders\`           |
+| yt-dlp          | `~/.cache/go-ytdlp/`                    | `~/Library/Caches/go-ytdlp/`                              | `%LOCALAPPDATA%\go-ytdlp\`                      |
+
+On Linux, the shader and yt-dlp folders follow `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` when they are set. Deleting the watch history file resets
+all progress. To uninstall GoAnime, remove the executable (or, with the
+Windows installer, uninstall it from Settings) and delete the folders above
+that you no longer need.
 
 ## Troubleshooting
 
@@ -301,6 +379,25 @@ and the rest of the workflow.
   Android version.
 - [goanime.online](https://goanime.online/), the project website, with an
   overview of GoAnime and installation instructions.
+
+## Acknowledgments
+
+GoAnime is built on the work of these projects:
+
+- [mpv](https://mpv.io/) plays every stream.
+- [AniSkip](https://github.com/aniskip) provides the opening timestamps.
+- [AniList](https://anilist.co/) and [Jikan](https://jikan.moe/), an
+  unofficial MyAnimeList API, provide anime metadata.
+- [TMDB](https://www.themoviedb.org/) and [OMDb](https://www.omdbapi.com/)
+  provide movie and TV metadata.
+- [Anime4K](https://github.com/bloc97/Anime4K) provides the upscaling
+  algorithm and shaders.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) handles some downloads.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea),
+  [Huh](https://github.com/charmbracelet/huh) and
+  [Lip Gloss](https://github.com/charmbracelet/lipgloss) build the terminal
+  interface.
+- [ani-cli](https://github.com/pystardust/ani-cli) inspired the project.
 
 ## Disclaimer
 
