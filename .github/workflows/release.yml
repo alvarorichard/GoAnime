@@ -542,27 +542,32 @@ jobs:
           echo "" >> RELEASE_NOTES.md
           echo "### Installation" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
-          echo "#### Linux / macOS" >> RELEASE_NOTES.md
-          echo '```bash' >> RELEASE_NOTES.md
-          echo "# Download the binary for your platform" >> RELEASE_NOTES.md
-          echo "curl -LO https://github.com/alvarorichard/Goanime/releases/download/${VERSION}/goanime-linux-amd64.tar.gz" >> RELEASE_NOTES.md
+          echo "GoAnime needs [mpv](https://mpv.io/installation/). The Windows installer includes it. Full instructions are in the [README](https://github.com/alvarorichard/GoAnime#installation)." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
-          echo "# Extract and install" >> RELEASE_NOTES.md
+          echo "#### Linux" >> RELEASE_NOTES.md
+          echo '```bash' >> RELEASE_NOTES.md
+          echo "curl -LO https://github.com/alvarorichard/GoAnime/releases/download/${VERSION}/goanime-linux-amd64.tar.gz" >> RELEASE_NOTES.md
           echo "tar -xzf goanime-linux-amd64.tar.gz" >> RELEASE_NOTES.md
-          echo "chmod +x goanime-linux-amd64" >> RELEASE_NOTES.md
-          echo "sudo mv goanime-linux-amd64 /usr/local/bin/goanime" >> RELEASE_NOTES.md
+          echo "sudo install goanime-linux-amd64 /usr/local/bin/goanime" >> RELEASE_NOTES.md
+          echo '```' >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "For ARM64, replace \`amd64\` with \`arm64\`." >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "#### macOS" >> RELEASE_NOTES.md
+          echo '```bash' >> RELEASE_NOTES.md
+          echo "curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/download/${VERSION}/goanime-darwin-universal" >> RELEASE_NOTES.md
+          echo "chmod +x goanime" >> RELEASE_NOTES.md
+          echo "sudo mv goanime /usr/local/bin/" >> RELEASE_NOTES.md
           echo '```' >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "#### Windows" >> RELEASE_NOTES.md
-          echo "**Recommended:** Download and run the \`GoAnime-Installer-${VERSION#v}.exe\` for automatic setup with MPV included." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "Or download the portable \`.zip\` file for your architecture and extract it." >> RELEASE_NOTES.md
+          echo "Download and run \`GoAnime-Installer-${VERSION#v}.exe\`, which installs GoAnime and mpv. The \`goanime-windows-amd64.zip\` archive holds only \`goanime-windows-amd64.exe\`; rename it to \`goanime.exe\` and install mpv separately." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### Verification" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
-          echo "Verify your download using the checksums:" >> RELEASE_NOTES.md
+          echo "Check the files you downloaded against the published checksums:" >> RELEASE_NOTES.md
           echo '```bash' >> RELEASE_NOTES.md
-          echo "sha256sum -c checksums-sha256.txt" >> RELEASE_NOTES.md
+          echo "sha256sum -c --ignore-missing checksums-sha256.txt" >> RELEASE_NOTES.md
           echo '```' >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### Supported Platforms" >> RELEASE_NOTES.md
