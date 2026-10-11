@@ -520,7 +520,7 @@ effectively:
 
 ### VS Code Configuration
 
-Create `.vscode/settings.json`:
+Create `.vscode/settings.json` (the directory is ignored by git):
 
 ```json
 {
@@ -530,9 +530,19 @@ Create `.vscode/settings.json`:
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
         "source.organizeImports": true
-    }
+    },
+    "gopls": {
+        "build.buildFlags": ["-tags=sourcehealth"]
+    },
+    "go.buildTags": "sourcehealth",
+    "go.testTags": "sourcehealth"
 }
 ```
+
+The `sourcehealth` tag matters for
+`internal/scraper/source_health_live_test.go`, which is behind
+`//go:build sourcehealth`. Without it gopls skips the file and reports
+"No packages found for open file".
 
 ## Go 1.27 Conventions
 
