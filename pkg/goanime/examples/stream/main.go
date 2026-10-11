@@ -12,10 +12,12 @@ import (
 func main() {
 	client := goanime.NewClient()
 
-	// Search for anime
+	// Episode lists and stream URLs are only available for AnimeFire through
+	// the library, so search that source rather than all of them.
+	source := types.SourceAnimeFire
 	animeName := "Demon Slayer"
 	fmt.Printf("Searching for '%s'...\n", animeName)
-	results, err := client.SearchAnime(animeName, nil)
+	results, err := client.SearchAnime(animeName, &source)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,12 +30,6 @@ func main() {
 	anime := results[0]
 	fmt.Printf("Selected: %s [%s]\n", anime.Name, anime.Source)
 
-	// Parse source
-	source, err := types.ParseSource(anime.Source)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Get episodes
 	fmt.Println("Fetching episodes...")
 	episodes, err := client.GetAnimeEpisodes(anime.URL, source)
@@ -45,15 +41,11 @@ func main() {
 		log.Fatal("No episodes found")
 	}
 
-	// Get stream URL for first episode using the new recommended method
+	// Get the stream URL for the first episode
 	episode := episodes[0]
 	fmt.Printf("\nGetting stream URL for Episode %s...\n", episode.Number)
 
-	// Use GetEpisodeStreamURL with options for best quality and subtitled
-	streamURL, metadata, err := client.GetEpisodeStreamURL(anime, episode, &goanime.StreamOptions{
-		Quality: "best",
-		Mode:    "sub",
-	})
+	streamURL, metadata, err := client.GetEpisodeStreamURL(anime, episode, nil)
 	if err != nil {
 		log.Fatalf("Error getting stream URL: %v", err)
 	}
@@ -69,6 +61,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("\nYou can use this URL with video players like mpv, vlc, or ffmpeg")
-	fmt.Printf("Example: mpv \"%s\"\n", streamURL)
+	// AnimeFire's video host expects this Referer; players must send it too.
+	fmt.Println("\nPlay it with mpv:")
+	fmt.Printf("mpv --referrer=https://animefire.io \"%s\"\n", streamURL)
 }

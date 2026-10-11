@@ -12,9 +12,11 @@ import (
 func main() {
 	client := goanime.NewClient()
 
-	// Search for anime
+	// Episode lists and stream URLs are only available for AnimeFire through
+	// the library, so search that source rather than all of them.
+	source := types.SourceAnimeFire
 	fmt.Println("Searching for 'Naruto'...")
-	results, err := client.SearchAnime("Naruto", nil)
+	results, err := client.SearchAnime("Naruto", &source)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -26,12 +28,6 @@ func main() {
 	// Select first result
 	anime := results[0]
 	fmt.Printf("\nSelected: %s [%s]\n\n", anime.Name, anime.Source)
-
-	// Parse source
-	source, err := types.ParseSource(anime.Source)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Get episodes
 	fmt.Println("Fetching episodes...")

@@ -1,38 +1,33 @@
-# GoAnime Library Integration Guide
+# Using GoAnime as a library
 
-## 📦 O que foi criado
+The `pkg/goanime` package exposes GoAnime's search and scraping code to other
+Go programs. It uses the same source registry as the command-line tool, so it
+searches the same sources and honours the same environment variables, such as
+`GOANIME_ENABLED_SOURCES` and `GOANIME_DISABLED_SOURCES`.
 
-Foi criada uma estrutura completa em `pkg/goanime` que expõe as funcionalidades de scraping e busca do GoAnime como uma biblioteca pública para ser usada em outros projetos Go.
+This guide walks through a search, an episode list and a stream URL. The
+methods and types are listed in [pkg/goanime/README.md](../pkg/goanime/README.md),
+and [pkg/goanime/examples](../pkg/goanime/examples) has complete programs.
 
-## 🎯 Estrutura Criada
+## Current limits
 
-```
-pkg/
-├── README.md                                 # Documentação principal da biblioteca
-└── goanime/                                 # Pacote principal
-    ├── client.go                            # Cliente principal da API
-    ├── client_test.go                       # Testes unitários e de integração
-    ├── doc.go                               # Documentação do pacote
-    ├── README.md                            # Guia completo de uso
-    ├── types/                               # Tipos públicos
-    │   ├── anime.go                         # Tipos Anime, Episode, etc.
-    │   └── source.go                        # Enum Source e helpers
-    └── examples/                            # Exemplos de uso
-        ├── search/main.go                   # Exemplo: busca básica
-        ├── episodes/main.go                 # Exemplo: listar episódios
-        ├── stream/main.go                   # Exemplo: obter URL de stream
-        └── source_specific/main.go          # Exemplo: busca em fonte específica
-```
+- Search covers every enabled source.
+- Episode lists and stream URLs are available for AnimeFire results only.
+  `types.Source` has a single value, `types.SourceAnimeFire`, and passing a
+  result from another source to `GetEpisodeStreamURL` returns an
+  `unknown source` error.
+- `StreamOptions` is accepted but not applied yet: the stream comes back in
+  the source's default quality.
 
-## 🚀 Como Usar em Outros Projetos
+## Installation
 
-### 1. Instalação
+The module requires Go 1.27 or later.
 
 ```bash
 go get github.com/alvarorichard/Goanime
 ```
 
-### 2. Uso Básico
+## Searching
 
 ```go
 package main
@@ -40,225 +35,94 @@ package main
 import (
     "fmt"
     "log"
+
     "github.com/alvarorichard/Goanime/pkg/goanime"
 )
 
 func main() {
-    // Criar cliente
     client := goanime.NewClient()
-    
-    // Buscar anime
-    results, err := client.SearchAnime("Naruto", nil)
+
+    results, err := client.SearchAnime("One Piece", nil)
     if err != nil {
         log.Fatal(err)
     }
-    
-    // Exibir resultados
+
     for _, anime := range results {
         fmt.Printf("%s [%s]\n", anime.Name, anime.Source)
     }
 }
 ```
 
-### 3. Busca em Fonte Específica
+Passing `nil` searches every enabled source. Result names carry a language tag
+such as `[English]` or `[PT-BR]`, and `Source` holds the name of the source the
+result came from.
+
+To search AnimeFire only, pass its source:
 
 ```go
 import "github.com/alvarorichard/Goanime/pkg/goanime/types"
 
-client := goanime.NewClient()
-
-// Buscar apenas no AnimeFire
 source := types.SourceAnimeFire
 results, err := client.SearchAnime("One Piece", &source)
 ```
 
-### 4. Obter Episódios
+## Listing episodes
 
 ```go
-// Após buscar um anime...
-source, _ := types.ParseSource(anime.Source)
-episodes, err := client.GetAnimeEpisodes(anime.URL, source)
+anime := results[0]
+
+episodes, err := client.GetAnimeEpisodes(anime.URL, types.SourceAnimeFire)
+if err != nil {
+    log.Fatal(err)
+}
 
 for _, ep := range episodes {
-    fmt.Printf("Episódio %s: %s\n", ep.Number, ep.Title.English)
+    fmt.Println("Episode", ep.Number)
 }
 ```
 
-### 5. Obter URL de Stream
+`Title`, `SkipTimes` and the other metadata fields are filled in only when the
+source provides them, so check pointer fields for `nil` before using them.
+
+## Getting a stream URL
 
 ```go
-// Após obter episódios...
-streamURL, headers, err := client.GetStreamURL(episode.URL, source)
-
-fmt.Printf("URL: %s\n", streamURL)
-for key, value := range headers {
-    fmt.Printf("Header %s: %s\n", key, value)
+streamURL, metadata, err := client.GetEpisodeStreamURL(anime, episodes[0], nil)
+if err != nil {
+    log.Fatal(err)
 }
+
+fmt.Println(streamURL)
+fmt.Println(metadata["source"]) // "animefire"
 ```
 
-## 📚 API Disponível
-
-### Client
-
-- **`NewClient()`** - Cria um novo cliente
-- **`SearchAnime(query, source)`** - Busca anime por nome
-- **`GetAnimeEpisodes(animeURL, source)`** - Obtém episódios de um anime
-- **`GetStreamURL(episodeURL, source)`** - Obtém URL de streaming
-- **`GetAvailableSources()`** - Lista fontes disponíveis
-
-### Types
-
-#### `types.Anime`
-
-- `Name` - Nome do anime
-- `URL` - URL do anime na fonte
-- `ImageURL` - URL da imagem de capa
-- `Episodes` - Lista de episódios
-- `AnilistID` - ID do AniList
-- `MalID` - ID do MyAnimeList
-- `Source` - Nome da fonte
-- `Details` - Metadados estendidos
-
-#### `types.Episode`
-
-- `Number` - Número do episódio
-- `URL` - URL do episódio
-- `Title` - Título do episódio
-- `Duration` - Duração em segundos
-- `IsFiller` - Se é episódio filler
-- `IsRecap` - Se é episódio recap
-- `SkipTimes` - Timestamps para pular OP/ED
-
-#### `types.Source`
-
-- `SourceAnimeFire` - Fonte AnimeFire
-
-## 🧪 Testes
+Stream URLs expire, so request a new one shortly before playing. AnimeFire's
+video host expects a `Referer` header, which you pass on to the player:
 
 ```bash
-# Executar todos os testes
-go test ./pkg/goanime/...
+mpv --referrer=https://animefire.io "<stream URL>"
+```
 
-# Apenas testes unitários (sem integração)
+## Running the examples
+
+```bash
+go run ./pkg/goanime/examples/search
+go run ./pkg/goanime/examples/source_specific
+go run ./pkg/goanime/examples/episodes
+go run ./pkg/goanime/examples/stream
+```
+
+The examples contact the real sites, so they fail when a source is down.
+
+## Tests
+
+```bash
 go test -short ./pkg/goanime/...
-
-# Com verbose
-go test -v ./pkg/goanime/...
 ```
 
-**Resultado:** ✅ Todos os testes passando
+## Contributing to the library
 
-## 🔨 Compilar Exemplos
-
-```bash
-# Exemplo de busca
-go build -o search ./pkg/goanime/examples/search/
-
-# Exemplo de episódios
-go build -o episodes ./pkg/goanime/examples/episodes/
-
-# Exemplo de stream
-go build -o stream ./pkg/goanime/examples/stream/
-
-# Exemplo de fonte específica
-go build -o source ./pkg/goanime/examples/source_specific/
-```
-
-## ✅ Verificações
-
-- ✅ Código compila sem erros
-- ✅ Todos os testes passam
-- ✅ Linting sem problemas (`golangci-lint run ./pkg/...`)
-- ✅ Exemplos funcionais
-- ✅ Documentação completa
-- ✅ API type-safe
-
-## 📖 Documentação
-
-1. **[pkg/README.md](../pkg/README.md)** - Visão geral e início rápido
-2. **[pkg/goanime/README.md](../pkg/goanime/README.md)** - Documentação detalhada da API
-3. **[pkg/goanime/examples/](../pkg/goanime/examples/)** - Exemplos práticos de uso
-
-## 🎓 Exemplos de Integração
-
-### Integração com MPV
-
-```go
-streamURL, headers, _ := client.GetStreamURL(episode.URL, source)
-
-args := []string{streamURL}
-for key, value := range headers {
-    args = append(args, fmt.Sprintf("--http-header-fields=%s: %s", key, value))
-}
-
-cmd := exec.Command("mpv", args...)
-cmd.Run()
-```
-
-### Integração com HTTP Client
-
-```go
-streamURL, headers, _ := client.GetStreamURL(episode.URL, source)
-
-req, _ := http.NewRequest("GET", streamURL, nil)
-for key, value := range headers {
-    req.Header.Set(key, value)
-}
-
-resp, _ := http.DefaultClient.Do(req)
-defer resp.Body.Close()
-```
-
-### Filtrar Episódios Filler
-
-```go
-episodes, _ := client.GetAnimeEpisodes(anime.URL, source)
-
-mainEpisodes := make([]*types.Episode, 0)
-for _, ep := range episodes {
-    if !ep.IsFiller {
-        mainEpisodes = append(mainEpisodes, ep)
-    }
-}
-```
-
-## 🔒 Segurança
-
-- Todas as funções exportadas são seguras para uso concorrente
-- URLs são validadas antes do uso
-- Tratamento de erros apropriado em todas as operações
-- Headers HTTP são tratados de forma segura
-
-## 📝 Notas Importantes
-
-1. **URLs de Stream expiram** - Obtenha novamente quando necessário
-2. **Rate Limiting** - A biblioteca já lida com isso automaticamente
-3. **Headers** - Alguns streams requerem headers específicos (retornados por `GetStreamURL`)
-4. **Metadados** - Nem todos os animes têm todos os metadados disponíveis
-
-## 🤝 Contribuindo
-
-Ao contribuir com a biblioteca pública:
-
-1. Mantenha a API simples e limpa
-2. Mantenha compatibilidade retroativa
-3. Adicione testes para novos recursos
-4. Atualize a documentação
-5. Siga as convenções Go
-
-## 📄 Licença
-
-MIT License - veja [LICENSE](../LICENSE)
-
-## 🔗 Links Úteis
-
-- Repositório principal: <https://github.com/alvarorichard/GoAnime>
-- Documentação completa: [pkg/goanime/README.md](../pkg/goanime/README.md)
-- Exemplos: [pkg/goanime/examples/](../pkg/goanime/examples/)
-- Issues: <https://github.com/alvarorichard/GoAnime/issues>
-
----
-
-**Criado em:** 19 de Novembro de 2025  
-**Status:** ✅ Pronto para uso  
-**Versão:** 1.0.0
+Keep the API small and backward compatible: other projects depend on it.
+Adding sources to `types.Source` changes the public API, so discuss it in an
+issue first. New behavior needs tests, and this guide and
+[pkg/goanime/README.md](../pkg/goanime/README.md) need to be updated with it.

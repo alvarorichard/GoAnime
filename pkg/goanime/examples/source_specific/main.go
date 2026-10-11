@@ -47,19 +47,4 @@ func main() {
 		}
 		fmt.Println()
 	}
-
-	// Now search in AnimeFire
-	source = types.SourceAnimeFire
-	fmt.Printf("\nSearching for 'Attack on Titan' in %s...\n\n", source.String())
-
-	results, err = client.SearchAnime("Attack on Titan", &source)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Found %d results from %s:\n\n", len(results), source.String())
-	for i, anime := range results {
-		fmt.Printf("%d. %s\n", i+1, anime.Name)
-		fmt.Printf("   URL: %s\n\n", anime.URL)
-	}
 }
