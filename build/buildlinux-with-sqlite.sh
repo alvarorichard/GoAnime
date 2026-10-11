@@ -16,9 +16,9 @@ MAIN_PACKAGE="../cmd/goanime"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Building the goanime binary for Linux with SQLite support..."
-echo "Note: This build enables CGO and requires SQLite development libraries"
+echo "Note: This build enables CGO and requires a C compiler (SQLite is compiled in)"
 
-# Check if gcc and sqlite3 development libraries are installed
+# Check that gcc is installed
 if ! command -v gcc >/dev/null 2>&1; then
     echo "Error: GCC not found. Please install GCC to build with CGO."
     exit 1
