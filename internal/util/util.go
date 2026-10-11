@@ -451,13 +451,13 @@ func FlagParser() (string, error) {
 	downloadFlag := fs.Bool("d", false, "download mode")
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
-	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
+	movieDownloadFlag := fs.Bool("dm", false, "download a movie or TV show")
 	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, startflix, topcine, ptbr; goyabu needs GOANIME_ENABLED_SOURCES)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
-	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
-	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
-	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
-	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
+	mediaTypeFlag := fs.String("type", "", "with -dm, download a single TV episode instead of a movie (movie, tv)")
+	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")
+	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "preferred audio language for movies and TV shows")
+	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
 
 	// Upscale flags
@@ -534,7 +534,7 @@ func FlagParser() (string, error) {
 		return handleDownloadModeWithSmart(fs.Args(), *rangeFlag, *allFlag, *sourceFlag, *qualityFlag)
 	}
 
-	// Handle movie/TV download mode (FlixHQ/SFlix)
+	// Handle movie/TV download mode (StartFlix, TopCine)
 	if *movieDownloadFlag {
 		return handleMovieDownloadMode(fs.Args(), *rangeFlag, *allFlag, *qualityFlag, *subsLanguageFlag, *mediaTypeFlag)
 	}
@@ -866,7 +866,7 @@ func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes 
 	return inputPath, ErrUpscaleRequested
 }
 
-// handleMovieDownloadMode processes movie/TV download arguments for FlixHQ/SFlix
+// handleMovieDownloadMode processes movie/TV download arguments (StartFlix, TopCine)
 func handleMovieDownloadMode(args []string, isRange, isAll bool, quality, subsLanguage, mediaType string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)\n       goanime -dm -a \"TV Show\" (download all seasons and episodes)")

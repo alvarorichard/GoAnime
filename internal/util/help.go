@@ -69,7 +69,7 @@ func ShowBeautifulHelp() {
 	// Program title
 	helpContent.WriteString(titleStyle.Render("GoAnime - Beautiful Anime Streaming CLI"))
 	helpContent.WriteString("\n")
-	helpContent.WriteString(subtitleStyle.Render("Watch your favorite anime directly from the terminal with style and ease."))
+	helpContent.WriteString(subtitleStyle.Render("Search, stream and download anime, movies and TV shows from the terminal."))
 	helpContent.WriteString("\n\n")
 
 	// Usage section
@@ -107,10 +107,14 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
-	addOption(&helpContent, "--source", "Specify source (hianime, animefire, startflix, topcine). Default: search all of them. Goyabu is off by default; see GOANIME_ENABLED_SOURCES.")
+	addOption(&helpContent, "-dm", "Movie and TV download mode. Downloads a movie, or episodes of a TV show with -r, -a or --type tv.")
+	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, startflix or topcine, or ptbr for every Portuguese source. Default: search all of them. Goyabu is off by default; see GOANIME_ENABLED_SOURCES.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
-	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
-	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "--type", "With -dm, set to tv to download one episode of a TV show instead of a movie. Takes the show, the season and the episode.")
+	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")
+	addOption(&helpContent, "--audio", "Preferred audio language for movies and TV shows, such as pt-BR or english.")
+	addOption(&helpContent, "--no-subs", "Disable subtitles.")
+	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Files use Plex naming: Anime - S01E01.mp4.")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -142,7 +146,7 @@ func ShowBeautifulHelp() {
 	addFeature(&helpContent, "Interactive Controls", "Beautiful terminal interface with keyboard navigation.")
 	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
-	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
+	addFeature(&helpContent, "Skip Intro", "Skip the opening from the player menu, using AniSkip timestamps.")
 	addFeature(&helpContent, "Anime4K Upscaling", "Enhance video and image quality using the Anime4K algorithm.")
 	helpContent.WriteString("\n")
 
@@ -164,6 +168,10 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime -d -a \"one piece\"", "Download ALL episodes of One Piece")
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
 	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
+	addExample(&helpContent, "goanime -dm \"interstellar\"", "Download a movie")
+	addExample(&helpContent, "goanime -dm -r \"dark\" 1 1-5", "Download episodes 1-5 of season 1 of a TV show")
+	addExample(&helpContent, "goanime -dm --type tv \"dark\" 1 5", "Download episode 5 of season 1 of a TV show")
+	addExample(&helpContent, "goanime -dm -a \"dark\"", "Download every season of a TV show")
 	addExample(&helpContent, "GOANIME_ENABLED_SOURCES=goyabu goanime \"naruto\"", "Turn on Goyabu (off by default: it sits behind a Cloudflare challenge)")
 	helpContent.WriteString("\n")
 
