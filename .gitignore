@@ -17,8 +17,8 @@ main
 result
 
 # Local build binaries
-goanime
-goanime-test
+/goanime
+/goanime-test
 build/goanime-local
 
 #Ignore vscode AI rules
