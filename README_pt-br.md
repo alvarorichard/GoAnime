@@ -14,6 +14,7 @@
 <p align="center">
   <a href="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml"><img src="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/alvarorichard/GoAnime/releases/latest"><img src="https://img.shields.io/github/v/release/alvarorichard/GoAnime" alt="Última versão"></a>
+  <a href="https://pkg.go.dev/github.com/alvarorichard/Goanime/pkg/goanime"><img src="https://pkg.go.dev/badge/github.com/alvarorichard/Goanime/pkg/goanime.svg" alt="Go Reference"></a>
   <a href="https://aur.archlinux.org/packages/goanime"><img src="https://img.shields.io/aur/version/goanime" alt="AUR"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/alvarorichard/GoAnime" alt="Licença"></a>
 </p>
@@ -264,9 +265,10 @@ go test -short ./...
 ```
 
 O desenvolvimento acontece na branch `dev`. Crie sua branch a partir da `dev`
-e abra os pull requests para a `dev`; a `main` só recebe releases. Estilo de
-código, linters e o restante do fluxo estão descritos em
-[docs/Development.md](docs/Development.md).
+e abra os pull requests para a `dev`; a `main` só recebe releases. O
+[CONTRIBUTING.md](CONTRIBUTING.md) lista as verificações a rodar antes de abrir
+um pull request, e o [docs/Development.md](docs/Development.md) cobre o estilo
+de código e o restante do fluxo.
 
 ## Comunidade
 
@@ -274,7 +276,8 @@ código, linters e o restante do fluxo estão descritos em
   de novas versões.
 - [GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile), a versão
   para Android.
-- [goanime.online](https://goanime.online/)
+- [goanime.online](https://goanime.online/), o site do projeto, com uma
+  apresentação do GoAnime e instruções de instalação.
 
 ## Aviso legal
 
