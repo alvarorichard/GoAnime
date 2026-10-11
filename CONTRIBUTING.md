@@ -72,7 +72,7 @@ go test -short -race -count=1 ./...
 ```
 
 Install instructions for each tool are in
-[docs/Development.md](docs/Development.md#quality-assurance). Any finding you
+[docs/Development.md](docs/Development.md#quality-checks). Any finding you
 leave unfixed must be justified in the pull request description.
 
 New features need tests, and bug fixes need a test that fails without the fix.
