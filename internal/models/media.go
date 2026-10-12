@@ -139,7 +139,7 @@ func AudioLabel(dubbed, subtitled bool) string {
 // title's type.
 // SFlix is a legacy movie/TV label matched the same way.
 func (m *Media) HasInteractiveEpisodeFlow() bool {
-	return m.Source == "SFlix" || m.Source == "StartFlix" || m.Source == "TopCine" ||
+	return m.Source == "SFlix" || m.Source == "StartFlix" || m.Source == "TopCine" || m.Source == "AnimesDigital" ||
 		m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
 }
 

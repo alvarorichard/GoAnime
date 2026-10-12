@@ -197,6 +197,8 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
+	case "animesdigital":
+		registryKinds = []apisource.SourceKind{apisource.AnimesDigital}
 	case "startflix":
 		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
@@ -206,7 +208,7 @@ func searchAnimeEnhanced(
 	case "hianime", "anidb": // "anidb" is what this source was called before 2026-09-22
 		registryKinds = []apisource.SourceKind{apisource.HiAnime}
 	case "ptbr", "pt-br":
-		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.StartFlix, apisource.TopCine}
+		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.AnimesDigital, apisource.StartFlix, apisource.TopCine}
 	}
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
@@ -244,6 +246,8 @@ func searchAnimeEnhanced(
 				anime.Source = "Animefire.io"
 			case "goyabu":
 				anime.Source = "Goyabu"
+			case "animesdigital":
+				anime.Source = "AnimesDigital"
 			case "startflix":
 				anime.Source = "StartFlix"
 			case "topcine":
@@ -258,6 +262,8 @@ func searchAnimeEnhanced(
 					anime.Source = "Animefire.io"
 				case strings.Contains(lowerURL, "goyabu"):
 					anime.Source = "Goyabu"
+				case strings.Contains(lowerURL, "animesdigital.org"):
+					anime.Source = "AnimesDigital"
 				case strings.Contains(lowerURL, "startflix"):
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
@@ -279,6 +285,7 @@ func searchAnimeEnhanced(
 		"StartFlix", breakdown.StartFlix,
 		"TopCine", breakdown.TopCine,
 		"Goyabu", breakdown.Goyabu,
+		"AnimesDigital", breakdown.AnimesDigital,
 		"HiAnime", breakdown.HiAnime,
 	)
 
@@ -417,11 +424,12 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 // diagnostic line. Counted via countSourceBreakdown so the predicate stays
 // testable in isolation.
 type sourceBreakdown struct {
-	AnimeFire int
-	StartFlix int
-	TopCine   int
-	Goyabu    int
-	HiAnime   int
+	AnimeFire     int
+	StartFlix     int
+	TopCine       int
+	Goyabu        int
+	AnimesDigital int
+	HiAnime       int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -443,6 +451,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.TopCine++
 		case anime.Source == "Goyabu":
 			b.Goyabu++
+		case anime.Source == "AnimesDigital":
+			b.AnimesDigital++
 		case anime.Source == "HiAnime":
 			b.HiAnime++
 		}

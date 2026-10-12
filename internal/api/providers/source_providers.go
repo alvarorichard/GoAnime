@@ -29,6 +29,10 @@ var (
 	// play through the StartFlix panel by TMDB id.
 	topCineStreamFn   = api.GetTopCineStreamURL
 	topCineEpisodesFn = api.GetTopCineEpisodes
+
+	// AnimesDigital keeps dubbed and subtitled releases on separate title
+	// pages. The api path owns the one interactive audio choice.
+	animesDigitalEpisodesFn = api.GetAnimesDigitalEpisodes
 )
 
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
@@ -400,6 +404,89 @@ func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 		return "", fmt.Errorf("empty stream URL returned from Goyabu")
 	}
 	return url, nil
+}
+
+// --- AnimesDigital Provider ---
+
+type animesDigitalProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&animesDigitalProvider{})
+}
+
+func (p *animesDigitalProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnimesDigitalType)
+}
+
+func (p *animesDigitalProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.AnimesDigital,
+		Priority:    30,
+		Explicit:    []string{"AnimesDigital"},
+		Tags:        []string{"[animesdigital]"},
+		URLMatchers: []string{"animesdigital.org"},
+		ProbeURL:    "https://animesdigital.org",
+	}
+}
+
+func (p *animesDigitalProvider) HasSeasons() bool { return false }
+
+func (p *animesDigitalProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = contextual.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AnimesDigital)
+	return results, nil
+}
+
+func (p *animesDigitalProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return animesDigitalEpisodesFn(anime)
+}
+
+func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return "", err
+	}
+	var streamURL string
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		streamURL, _, err = contextual.GetStreamURLContext(ctx, episode.URL)
+	} else {
+		streamURL, _, err = adapter.GetStreamURL(episode.URL)
+	}
+	if err != nil {
+		return "", fmt.Errorf("animesdigital stream: %w", err)
+	}
+	if streamURL == "" {
+		return "", fmt.Errorf("empty stream URL returned from AnimesDigital")
+	}
+	return streamURL, nil
 }
 
 // --- StartFlix Provider ---
