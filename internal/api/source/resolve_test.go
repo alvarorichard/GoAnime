@@ -27,7 +27,12 @@ func registerProductionLikeSources(t *testing.T) {
 			d.Tags = []string{"[goyabu]"}
 			d.URLMatchers = []string{"goyabu"}
 		}),
-		newFake(StartFlix, 30, func(d *Descriptor) {
+		newFake(AnimesDigital, 30, func(d *Descriptor) {
+			d.Explicit = []string{"AnimesDigital"}
+			d.Tags = []string{"[animesdigital]"}
+			d.URLMatchers = []string{"animesdigital.org"}
+		}),
+		newFake(StartFlix, 40, func(d *Descriptor) {
 			d.Explicit = []string{"StartFlix"}
 			d.Tags = []string{"[startflix]"}
 			d.URLMatchers = []string{"startflix"}
@@ -53,6 +58,7 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
+		{"AnimesDigital", "AnimesDigital", AnimesDigital},
 		{"StartFlix", "StartFlix", StartFlix},
 	}
 	for _, tt := range tests {
@@ -85,6 +91,7 @@ func TestResolve_NameTags(t *testing.T) {
 		{"english tag", "Naruto [English]", HiAnime},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
+		{"animesdigital tag", "Naruto [AnimesDigital]", AnimesDigital},
 		{"startflix tag", "Naruto [StartFlix]", StartFlix},
 	}
 	for _, tt := range tests {
@@ -104,6 +111,7 @@ func TestResolve_URLPatterns(t *testing.T) {
 	}{
 		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
 		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
+		{"animesdigital URL", "https://animesdigital.org/anime/a/naruto", AnimesDigital},
 		{"removed allanime host resolves to nothing", "https://allanime.to/anime/abc", Unknown},
 		{"startflix URL", "https://startflix.to/naruto", StartFlix},
 	}
@@ -156,6 +164,7 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 	}{
 		{"animefire", "https://animefire.plus/ep/naruto-1", AnimeFire},
 		{"goyabu", "https://goyabu.to/ep/naruto-1", Goyabu},
+		{"animesdigital", "https://animesdigital.org/video/a/123/", AnimesDigital},
 		{"removed allanime host is now unknown", "https://allanime.to/anime/hHjXnUTda", Unknown},
 		{"empty", "", Unknown},
 		{"unknown domain", "https://example.com/video", Unknown},
@@ -179,6 +188,10 @@ func TestScraperTypeFor(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, scraper.AnimefireType, st,
 		"AnimefireType became the iota zero value when AllAnimeType was removed")
+
+	st, ok = ScraperTypeFor(AnimesDigital)
+	require.True(t, ok)
+	assert.Equal(t, scraper.AnimesDigitalType, st)
 
 	_, ok = ScraperTypeFor(Unknown)
 	assert.False(t, ok, "ScraperTypeFor(Unknown) should return false")

@@ -561,7 +561,7 @@ var (
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|startflix|topcine|flixhq|sflix` +
+		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|animesdigital|startflix|topcine|flixhq|sflix` +
 		`).*$`)
 	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)

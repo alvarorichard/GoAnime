@@ -48,6 +48,18 @@ func TestTagResults_TopCineMediaTypeTags(t *testing.T) {
 	assert.Equal(t, "TopCine", res[0].Source)
 }
 
+func TestTagResults_AnimesDigitalAudioVariants(t *testing.T) {
+	t.Parallel()
+	paired := []*models.Anime{{Name: "One Piece", URL: "https://animesdigital.org/anime/a/one-piece#goanime-dub=b3BhcXVl"}}
+	tagResults(paired, source.AnimesDigital)
+	assert.Equal(t, "[PT-BR] One Piece", paired[0].Name, "a merged title defaults to subtitles and must not look dubbed")
+	assert.Equal(t, "AnimesDigital", paired[0].Source)
+
+	dubbedOnly := []*models.Anime{{Name: "One Piece Dublado", URL: "https://animesdigital.org/anime/a/one-piece#goanime-dublado-only=1"}}
+	tagResults(dubbedOnly, source.AnimesDigital)
+	assert.Equal(t, "[PT-BR] One Piece (Dublado)", dubbedOnly[0].Name)
+}
+
 func TestTagResults_DoesNotDoubleTag(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "[English] Naruto"}}

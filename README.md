@@ -241,16 +241,18 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 
 ## Sources
 
-| Source    | Content    | Language                   | Notes                                         |
-| --------- | ---------- | -------------------------- | --------------------------------------------- |
-| HiAnime   | Anime      | English, subbed and dubbed | Subbed by default                             |
-| AnimeFire | Anime      | Portuguese (Brazil)        |                                               |
-| Goyabu    | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
-| StartFlix | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
-| TopCine   | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
+| Source        | Content    | Language                   | Notes                                         |
+| ------------- | ---------- | -------------------------- | --------------------------------------------- |
+| HiAnime       | Anime      | English, subbed and dubbed | Subbed by default                             |
+| AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
+| AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
+| Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
+| StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
+| TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
 
 `--source` limits a search to one source: `hianime`, `animefire`,
-`startflix` or `topcine`, or `ptbr` for all the Portuguese sources.
+`animesdigital`, `startflix` or `topcine`, or `ptbr` for all the Portuguese
+sources.
 
 Goyabu is behind a Cloudflare challenge and is disabled by default. It still
 works on networks that Cloudflare does not challenge; enable it with

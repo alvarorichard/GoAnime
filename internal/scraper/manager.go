@@ -17,6 +17,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/animesdigital"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
@@ -28,11 +29,12 @@ import (
 type ScraperType int
 
 const (
-	AnimefireType ScraperType = iota
-	GoyabuType                // PT-BR anime source
-	HiAnimeType               // hianime.at — subbed/dubbed HLS
-	StartFlixType             // StartFlix PT-BR movies/series
-	TopCineType               // TopCine PT-BR movies/series, played through the StartFlix panel
+	AnimefireType     ScraperType = iota
+	GoyabuType                    // PT-BR anime source
+	HiAnimeType                   // hianime.at — subbed/dubbed HLS
+	StartFlixType                 // StartFlix PT-BR movies/series
+	TopCineType                   // TopCine PT-BR movies/series, played through the StartFlix panel
+	AnimesDigitalType             // AnimesDigital PT-BR anime source
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -75,6 +77,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &StartFlixAdapter{client: startflix.Shared()}, nil
 	case TopCineType:
 		return &TopCineAdapter{client: topcine.Shared(), panel: startflix.Shared()}, nil
+	case AnimesDigitalType:
+		return &AnimesDigitalAdapter{client: animesdigital.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -94,6 +98,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return startflix.SourceName
 	case TopCineType:
 		return topcine.SourceName
+	case AnimesDigitalType:
+		return animesdigital.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -108,7 +114,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType, TopCineType:
+	case StartFlixType, TopCineType, AnimesDigitalType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -224,6 +230,43 @@ func (a *GoyabuAdapter) GetStreamURL(episodeURL string, options ...any) (streamU
 
 func (a *GoyabuAdapter) GetType() ScraperType {
 	return GoyabuType
+}
+
+// AnimesDigitalAdapter adapts the plain-HTTP AnimesDigital client.
+type AnimesDigitalAdapter struct {
+	client *animesdigital.Client
+}
+
+func (a *AnimesDigitalAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
+}
+
+func (a *AnimesDigitalAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
+}
+
+func (a *AnimesDigitalAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	streamURL, err = a.client.GetEpisodeStreamURLContext(ctx, episodeURL)
+	return streamURL, map[string]string{"source": "animesdigital"}, err
+}
+
+func (a *AnimesDigitalAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+func (a *AnimesDigitalAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+func (a *AnimesDigitalAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+func (a *AnimesDigitalAdapter) GetType() ScraperType { return AnimesDigitalType }
+
+// NewAnimesDigitalAdapterWithClient builds an adapter around a test client.
+func NewAnimesDigitalAdapterWithClient(client *animesdigital.Client) *AnimesDigitalAdapter {
+	return &AnimesDigitalAdapter{client: client}
 }
 
 // HiAnimeAdapter adapts hianime.HiAnimeClient to the UnifiedScraper interface.
