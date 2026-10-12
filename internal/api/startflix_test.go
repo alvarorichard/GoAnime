@@ -54,6 +54,8 @@ const fakeSeriesPanel = `<main class="main">
 const fakeDeadSeriesPage = `<html><body><div id="info">
 	<iframe src="https://painel.test/embed/999"></iframe></div></body></html>`
 
+const fakeDeadMoviePage = `<html><body><iframe src="https://painel.test/filme/tt404"></iframe></body></html>`
+
 func fakePlayers(file string) string {
 	return fmt.Sprintf(`<div id="players">
 	<button class="btn" data-show-player="true" data-source="https://playembedapi.site/?v=x" data-subtitles="" data-type="iframe" data-id="1">Player #1</button>
@@ -80,6 +82,13 @@ func newFakeStartFlix(t *testing.T) *fakeStartFlix {
 			_, _ = w.Write([]byte(fakeSeriesPanel))
 		case host == "painel.test" && r.URL.Path == "/filme/tt100":
 			_, _ = w.Write([]byte(fakePlayers("movie.mp4")))
+		case host == "www.startflix.test" && r.URL.Path == "/filmes/deadfilm/":
+			_, _ = w.Write([]byte(fakeDeadMoviePage))
+		case host == "painel.test" && (r.URL.Path == "/filme/tt404" || r.URL.Path == "/episodio/gone"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("Conteúdo não encontrado."))
+		case host == "painel.test" && r.URL.Path == "/episodio/badurl":
+			_, _ = w.Write([]byte(`<div id="players"><button data-show-player="true" data-source="/player/relative" data-type="iframe">Player #1</button></div>`))
 		case host == "painel.test" && strings.HasPrefix(r.URL.Path, "/episodio/"):
 			_, _ = w.Write([]byte(fakePlayers("ep-" + strings.TrimPrefix(r.URL.Path, "/episodio/") + ".mp4")))
 		case host == "files.test":
@@ -465,4 +474,53 @@ func TestSearchHidesDeadPanelTitles(t *testing.T) {
 	assert.Same(t, alive, selected)
 	require.Len(t, shown, 1, "the dead title must not reach the picker")
 	assert.Equal(t, alive.URL, shown[0].URL)
+}
+
+// A movie's listing never opens its panel: the panel is also where its
+// players are listed, so "Conteúdo não encontrado" first shows up when the
+// stream is asked for. There it means the whole title is gone, as it does for
+// a series panel, and the title must be hidden from later searches the same
+// way.
+func TestGetStartFlixStreamURL_DeadMoviePanelMarksTitle(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	media := &models.Anime{Name: "Dead Film", URL: "https://www.startflix.test/filmes/deadfilm/", Source: "StartFlix", MediaType: models.MediaTypeMovie}
+	eps, err := GetStartFlixEpisodes(media)
+	require.NoError(t, err)
+	require.Len(t, eps, 1)
+	assert.False(t, isPanelDead(media.URL), "listing a movie does not reach its panel")
+
+	_, err = GetStartFlixStreamURL(media, &eps[0], "")
+	require.ErrorIs(t, err, startflix.ErrNotOnPanel)
+	assert.True(t, isPanelDead(media.URL), "the dead movie must be remembered")
+}
+
+// One episode the panel has no content for says nothing about the rest of the
+// series: the title stays.
+func TestGetStartFlixStreamURL_DeadEpisodeKeepsTitle(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	media := &models.Anime{Name: "Show", URL: "https://www.startflix.test/series/show/", Source: "StartFlix", MediaType: models.MediaTypeTV}
+	_, err := GetStartFlixStreamURL(media, &models.Episode{Number: "1", Num: 1, URL: "https://painel.test/episodio/gone"}, "")
+	require.ErrorIs(t, err, startflix.ErrNotOnPanel)
+	assert.False(t, isPanelDead(media.URL))
+}
+
+// An episode restored from history walks the panel again; a dead panel found
+// on that walk is the same signal GetStartFlixEpisodes records.
+func TestGetStartFlixStreamURL_HistoryRebuildOfDeadSeriesMarksTitle(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	media := &models.Anime{Name: "Dead", URL: "https://www.startflix.test/series/dead/", Source: "StartFlix", MediaType: models.MediaTypeTV}
+	_, err := GetStartFlixStreamURL(media, &models.Episode{Number: "1", Num: 1, SeasonID: "1"}, "")
+	require.ErrorIs(t, err, startflix.ErrNotOnPanel)
+	assert.True(t, isPanelDead(media.URL))
+}
+
+// A players list whose only entry has an unusable URL used to be described as
+// "servers GoAnime can't play yet ()", an empty host list.
+func TestGetStartFlixStreamURL_UnusablePlayerURLMessage(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	media := &models.Anime{Name: "Show", URL: "https://www.startflix.test/series/show/", Source: "StartFlix", MediaType: models.MediaTypeTV}
+	_, err := GetStartFlixStreamURL(media, &models.Episode{Number: "1", Num: 1, URL: "https://painel.test/episodio/badurl"}, "")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "()")
+	assert.ErrorIs(t, err, startflix.ErrNoPlayers)
 }

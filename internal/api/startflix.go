@@ -517,6 +517,13 @@ func isStartFlixPlayersURL(raw string) bool {
 	return strings.HasPrefix(u.Path, "/episodio/") || strings.HasPrefix(u.Path, "/filme/")
 }
 
+// isMoviePanelURL reports whether a players URL is a movie's panel
+// (/filme/<imdb>) rather than one episode's endpoint.
+func isMoviePanelURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Host != "" && strings.HasPrefix(u.Path, "/filme/")
+}
+
 // startFlixPlayersURL finds where an episode's players are listed. Episodes
 // built by GetStartFlixEpisodes already carry it; one rebuilt from history may
 // only know its season and number, so the panel is walked again.
@@ -579,6 +586,7 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 
 	playersURL, err := startFlixPlayersURL(c, media, episode)
 	if err != nil {
+		markPanelDeadErr(media.URL, err)
 		return "", describeMediaErr(media, err)
 	}
 
@@ -589,6 +597,11 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 		stream, err = c.Stream(ctx, playersURL)
 	})
 	if err != nil {
+		// A movie's players are listed on its panel itself, so "no content"
+		// there is the whole title gone; for an episode it is one episode.
+		if isMoviePanelURL(playersURL) {
+			markPanelDeadErr(media.URL, err)
+		}
 		// No prefix: the player dispatch already wraps this as "failed to get
 		// StartFlix stream URL", and the friendly text should follow it directly.
 		return "", describeMediaErr(media, err)
