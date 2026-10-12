@@ -97,11 +97,15 @@ fmt.Println(metadata["source"]) // "animefire"
 ```
 
 Stream URLs expire, so request a new one shortly before playing. AnimeFire's
-video host expects a `Referer` header, which you pass on to the player:
+video host refuses a request without a `User-Agent`; mpv sends one, so the URL
+plays as is:
 
 ```bash
-mpv --referrer=https://animefire.io "<stream URL>"
+mpv "<stream URL>"
 ```
+
+An episode whose video the host no longer has returns an error ending in
+`the source has no file for this episode` instead of a URL that cannot play.
 
 ## Running the examples
 

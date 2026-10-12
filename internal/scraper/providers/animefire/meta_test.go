@@ -68,15 +68,23 @@ func pristineEpisode() map[string]any {
 		"id": "one-piece-1", "title": "Episódio 1", "number": 1,
 		"streams": []any{map[string]any{
 			"audio": "Legendado", "is_offline": false,
-			"url":       "https://s1.animefire.one/one-piece/1/h.jpg",
+			"url":       cdnPlaceholder + "/one-piece/1/h.jpg",
 			"qualities": []any{"720p"},
 		}},
 	}}
 }
 
-// mutationServer serves one full chain from the (possibly mutated) payloads.
+// cdnPlaceholder stands for the CDN host in the episode payload. The server
+// swaps it for its own address, so the playlist check in the chain is served
+// here too instead of reaching a real host.
+const cdnPlaceholder = "https://cdn.test"
+
+// mutationServer serves one full chain from the (possibly mutated) payloads,
+// the CDN's playlist included. cdnStatus is what the playlist answers; zero
+// serves it.
 type mutationServer struct {
 	search, anime, episode map[string]any
+	cdnStatus              int
 	srv                    *httptest.Server
 }
 
@@ -91,7 +99,14 @@ func newMutationServer(t *testing.T, m mutationServer) *mutationServer {
 		case strings.HasPrefix(r.URL.Path, "/anime/"):
 			_ = json.NewEncoder(w).Encode(s.anime)
 		case strings.HasPrefix(r.URL.Path, "/episode/"):
-			_ = json.NewEncoder(w).Encode(s.episode)
+			raw, _ := json.Marshal(s.episode)
+			_, _ = w.Write([]byte(strings.ReplaceAll(string(raw), cdnPlaceholder, "http://"+r.Host)))
+		case r.URL.Path == "/one-piece/1/h.jpg":
+			if s.cdnStatus != 0 {
+				w.WriteHeader(s.cdnStatus)
+				return
+			}
+			_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-VERSION:6\n"))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -208,6 +223,12 @@ func TestOneBreakIsAlwaysNoticed(t *testing.T) {
 					s.(map[string]any)["url"] = ""
 				}
 			},
+		},
+		{
+			// What the API did on 2026-10-12: a well-formed stream record
+			// whose playlist the CDN answers 404 for.
+			name:   "the CDN no longer has the file",
+			mutate: func(m *mutationServer) { m.cdnStatus = http.StatusNotFound },
 		},
 		{
 			// The shape the original bug wore: a well-formed answer carrying

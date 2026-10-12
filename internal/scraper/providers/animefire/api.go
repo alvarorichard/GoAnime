@@ -338,9 +338,13 @@ func numberAcrossSeasons(episodes []models.Episode, seasons []apiSeason) {
 // offline, and repeat — which is exactly what happened: four episodes tried,
 // four identical refusals, no way to tell it was the whole title.
 //
+// Since 2026-10-12 a probe also counts a URL whose playlist the CDN answers
+// 404 for, which is most of the catalogue on that date (see checkPlaylist).
+//
 // Two probes, not one: a single gap is normal and must not condemn a title
-// that mostly works. Both offline is a strong signal, and it costs ~40ms on a
-// listing that already took one request.
+// that mostly works. Both offline is a strong signal. A title whose first
+// episode plays costs one probe; one with both offline cost about 0.75s on
+// 2026-10-12 (an API call and a playlist check per track, per probe).
 func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
 	if len(episodes) < 2 {
 		return
@@ -350,7 +354,7 @@ func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
 			return // something is playable; nothing to warn about
 		}
 	}
-	util.Warnf("AnimeFire lists this title but has no video files for it — "+
+	util.Warnf("AnimeFire may have no video files for this title — "+
 		"the first and middle episodes are both offline (%d episodes listed).", len(episodes))
 	util.Infof("Try the same title on another source (StartFlix or HiAnime).")
 }
@@ -367,37 +371,89 @@ func (c *AnimefireClient) streamAPI(episodeURL string) (string, error) {
 		return "", err
 	}
 
-	stream, ok := pickStream(out.Data.Streams)
-	if !ok {
-		// The API answered correctly and said there is nothing to play: every
-		// track is is_offline, or carries a null url. That is content state,
-		// not a scraping failure, and the player has to say so rather than
-		// blaming itself.
-		return "", fmt.Errorf("AnimeFire episode %s: %w", id, netx.ErrMediaOffline)
+	// A URL whose check could not tell (network error, 5xx) is kept as a
+	// last resort: it says nothing about the file, and hiding a file that is
+	// there would be worse than letting the player try.
+	var unchecked string
+	for _, s := range orderStreams(out.Data.Streams) {
+		err := c.checkPlaylist(s.URL)
+		if err == nil {
+			return s.URL, nil
+		}
+		util.Debug("AnimeFire track not playable", "episode", id, "audio", s.Audio, "err", err)
+		if !errors.Is(err, errNoPlaylist) && unchecked == "" {
+			unchecked = s.URL
+		}
 	}
-	return stream.URL, nil
+	if unchecked != "" {
+		return unchecked, nil
+	}
+	// The API said there is nothing to play (every track is_offline or with a
+	// null url), or the CDN has no playlist behind the URLs it gave. That is
+	// content state, not a scraping failure, and the player has to say so
+	// rather than blaming itself.
+	return "", fmt.Errorf("AnimeFire episode %s: %w", id, netx.ErrMediaOffline)
 }
 
-// pickStream chooses which audio to play.
+// orderStreams lists the tracks worth trying, in the order to try them.
 //
 // The API returns one entry per audio track, and GoAnime's audience is
-// Brazilian, so a dubbed track wins when both exist — the same preference the
-// language tags elsewhere in the app encode. Offline entries are skipped: the
-// API still lists them, but they have nothing behind them.
-func pickStream(streams []apiStream) (apiStream, bool) {
-	var subbed apiStream
-	var haveSubbed bool
-
+// Brazilian, so a dubbed track comes first when both exist — the same
+// preference the language tags elsewhere in the app encode. Offline entries
+// are dropped: the API still lists them, but they have nothing behind them.
+func orderStreams(streams []apiStream) []apiStream {
+	var dubbed, others []apiStream
 	for _, s := range streams {
 		if s.IsOffline || strings.TrimSpace(s.URL) == "" {
 			continue
 		}
 		if strings.EqualFold(s.Audio, "dublado") {
-			return s, true
-		}
-		if !haveSubbed {
-			subbed, haveSubbed = s, true
+			dubbed = append(dubbed, s)
+		} else {
+			others = append(others, s)
 		}
 	}
-	return subbed, haveSubbed
+	return append(dubbed, others...)
+}
+
+// errNoPlaylist means the CDN answered for the URL and there is no playlist
+// there: 404/410, or a 200 that is not an HLS playlist.
+var errNoPlaylist = errors.New("the video server has no playlist at this URL")
+
+// checkPlaylist asks the CDN for the HLS master playlist a stream URL names.
+//
+// On 2026-10-12 akumast.net answered 404 for nearly every URL the API gave,
+// fresh API answers included, while the API kept is_offline false. The
+// master is a few hundred bytes, so asking for it is cheap. The CDN answers
+// 403 to a request without a User-Agent, so the client's is sent.
+func (c *AnimefireClient) checkPlaylist(rawURL string) error {
+	req, err := http.NewRequest(http.MethodGet, rawURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errNoPlaylist, err)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", siteBase)
+	req.Header.Set("Referer", siteBase+"/")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+		return fmt.Errorf("%w (HTTP %d)", errNoPlaylist, resp.StatusCode)
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return fmt.Errorf("playlist check: HTTP %d", resp.StatusCode)
+	}
+	head, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(head)), "#EXTM3U") {
+		return fmt.Errorf("%w (the answer is not an HLS playlist)", errNoPlaylist)
+	}
+	return nil
 }

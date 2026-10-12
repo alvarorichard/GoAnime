@@ -59,6 +59,10 @@ func retrying[T any](c *AnimefireClient, call func() (T, error)) (T, error) {
 			return got, nil
 		}
 		lastErr = err
+		// Missing content is the source's answer, not a transient failure.
+		if errors.Is(err, netx.ErrMediaOffline) {
+			break
+		}
 		if c.shouldRetry(attempt) {
 			c.sleep()
 			continue

@@ -238,54 +238,48 @@ func TestEpisodesAPI_RefusesAURLWithNoID(t *testing.T) {
 
 func TestStreamAPI_ReturnsThePlayableURL(t *testing.T) {
 	t.Parallel()
-	const hls = "https://akumast.net/i/token/h.jpg"
-	srv := newAPIServer(t, map[string]func(http.ResponseWriter){
-		"/episode/WCrJufyJmQn": writeJSON(map[string]any{"data": map[string]any{
-			"streams": []map[string]any{
-				{"audio": "legendado", "url": "https://akumast.net/i/sub/h.jpg", "qualities": []string{"480p"}},
-				{"audio": "dublado", "url": hls, "qualities": []string{"480p"}},
-			},
-		}}),
-	})
+	f := newCDNFixture(t,
+		cdnTrack{audio: "legendado", status: http.StatusOK},
+		cdnTrack{audio: "dublado", status: http.StatusOK},
+	)
 
-	got, err := NewClientForTest(srv.URL).GetEpisodeStreamURL("https://animefire.one/episode/WCrJufyJmQn")
+	got, err := f.stream(t)
 
 	require.NoError(t, err)
-	assert.Equal(t, hls, got, "a dubbed track wins for a Brazilian audience when both exist")
+	assert.Equal(t, f.url("dublado"), got, "a dubbed track wins for a Brazilian audience when both exist")
+	assert.Equal(t, int32(1), f.cdnHits.Load(), "once a track plays there is nothing left to check")
 }
 
-func TestPickStream_PrefersDubbedAndSkipsOffline(t *testing.T) {
+func TestOrderStreams_DubbedFirstAndSkipsOffline(t *testing.T) {
 	t.Parallel()
 	for name, tt := range map[string]struct {
 		streams []apiStream
-		want    string
-		ok      bool
+		want    []string
 	}{
-		"dubbed wins": {
+		"dubbed first": {
 			streams: []apiStream{{Audio: "legendado", URL: "sub"}, {Audio: "dublado", URL: "dub"}},
-			want:    "dub", ok: true,
+			want:    []string{"dub", "sub"},
 		},
 		"subbed when it is all there is": {
 			streams: []apiStream{{Audio: "legendado", URL: "sub"}},
-			want:    "sub", ok: true,
+			want:    []string{"sub"},
 		},
 		"offline entries are listed but have nothing behind them": {
 			streams: []apiStream{{Audio: "dublado", URL: "dub", IsOffline: true}, {Audio: "legendado", URL: "sub"}},
-			want:    "sub", ok: true,
+			want:    []string{"sub"},
 		},
 		"an entry with no url is not a stream": {
 			streams: []apiStream{{Audio: "dublado", URL: "   "}},
-			ok:      false,
 		},
-		"nothing at all": {streams: nil, ok: false},
+		"nothing at all": {streams: nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := pickStream(tt.streams)
-			assert.Equal(t, tt.ok, ok)
-			if tt.ok {
-				assert.Equal(t, tt.want, got.URL)
+			var got []string
+			for _, s := range orderStreams(tt.streams) {
+				got = append(got, s.URL)
 			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -388,22 +382,20 @@ func TestStreamAPI_OfflineEpisodeIsReportedAsMissingContent(t *testing.T) {
 		"the source answered perfectly — calling it unavailable would send the user to wait for nothing")
 }
 
-// A title with a playable track must not be caught by the same check.
+// A title with a playable track must not be caught by the same check, and the
+// offline track, listed with a null url, needs no playlist check.
 func TestStreamAPI_OnlineEpisodeIsNotReportedAsOffline(t *testing.T) {
 	t.Parallel()
-	srv := newAPIServer(t, map[string]func(http.ResponseWriter){
-		"/episode/ok": writeJSON(map[string]any{"data": map[string]any{
-			"streams": []map[string]any{
-				{"audio": "dublado", "is_offline": true, "url": nil},
-				{"audio": "legendado", "url": "https://akumast.net/i/tok/h.jpg"},
-			},
-		}}),
-	})
+	f := newCDNFixture(t,
+		cdnTrack{audio: "dublado", offline: true},
+		cdnTrack{audio: "legendado", status: http.StatusOK},
+	)
 
-	got, err := NewClientForTest(srv.URL).GetEpisodeStreamURL("https://animefire.one/episode/ok")
+	got, err := f.stream(t)
 
 	require.NoError(t, err, "one offline track among several must not condemn the episode")
-	assert.Equal(t, "https://akumast.net/i/tok/h.jpg", got)
+	assert.Equal(t, f.url("legendado"), got)
+	assert.Equal(t, int32(1), f.cdnHits.Load())
 }
 
 // AnimeFire lists titles it hosts nothing for, and nothing in the anime payload
@@ -448,8 +440,12 @@ func TestEpisodesAPI_StopsProbingAsSoonAsSomethingPlays(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"data":{"episodes":[{"id":"e1","number":1},{"id":"e2","number":2}]}}`)
 			return
 		}
+		if r.URL.Path == "/i/t/h.jpg" {
+			_, _ = fmt.Fprint(w, "#EXTM3U\n")
+			return
+		}
 		probes.Add(1)
-		_, _ = fmt.Fprint(w, `{"data":{"streams":[{"audio":"dublado","url":"https://akumast.net/i/t/h.jpg"}]}}`)
+		_, _ = fmt.Fprintf(w, `{"data":{"streams":[{"audio":"dublado","url":"http://%s/i/t/h.jpg"}]}}`, r.Host)
 	}))
 	defer srv.Close()
 

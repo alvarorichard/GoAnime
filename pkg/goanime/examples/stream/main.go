@@ -61,7 +61,7 @@ func main() {
 		}
 	}
 
-	// AnimeFire's video host expects this Referer; players must send it too.
+	// AnimeFire's video host only needs a User-Agent, which mpv sends.
 	fmt.Println("\nPlay it with mpv:")
-	fmt.Printf("mpv --referrer=https://animefire.io \"%s\"\n", streamURL)
+	fmt.Printf("mpv \"%s\"\n", streamURL)
 }
