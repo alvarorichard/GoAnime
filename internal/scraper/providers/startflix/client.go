@@ -380,6 +380,7 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 	for i, p := range ordered {
 		u, err := url.Parse(p.URL)
 		if err != nil || u.Host == "" {
+			util.Debug("StartFlix player URL unusable", "url", p.URL, "label", p.Label)
 			continue
 		}
 		var resolve func() (*Stream, error)
@@ -429,6 +430,11 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if len(noStream.Unsupported) == 0 && len(noStream.Failures) == 0 {
+		// Every player was skipped above for an unusable URL: nothing usable
+		// was listed, and an empty NoStreamError would name nothing.
+		return nil, fmt.Errorf("%w (no usable URL among %d players)", ErrNoPlayers, len(players))
 	}
 	return nil, noStream
 }

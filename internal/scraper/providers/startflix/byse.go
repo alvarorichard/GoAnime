@@ -90,7 +90,8 @@ type byseSources struct {
 // byseKey selects and joins the key parts the way the player bundle does.
 func byseKey(pb *bysePlayback) ([]byte, error) {
 	parts := pb.KeyParts
-	if v, err := strconv.Atoi(strings.TrimSpace(pb.Version)); err == nil && v >= 1 && v <= 20 && 31-v <= len(parts) {
+	// Parts v and 31-v must both exist: 31-v alone bounds only v <= 15.
+	if v, err := strconv.Atoi(strings.TrimSpace(pb.Version)); err == nil && v >= 1 && v <= 20 && max(v, 31-v) <= len(parts) {
 		parts = []string{parts[v-1], parts[30-v]}
 	}
 	var key []byte

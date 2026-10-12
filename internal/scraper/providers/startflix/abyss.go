@@ -469,7 +469,8 @@ func (c *Client) probeAbyss(ctx context.Context, f *abyssFile) error {
 		var wg sync.WaitGroup
 		wg.Go(func() { head, headErr = readAbyssRange(ctx, c.proxyClient(), f, 0, 15) })
 		if next := min(f.chunk.firstSize, f.size-1); next < f.size-1 {
-			wg.Go(func() { _, partErr = readAbyssRange(ctx, c.proxyClient(), f, next, next+15) })
+			// The last part may be shorter than the 16 bytes read here.
+			wg.Go(func() { _, partErr = readAbyssRange(ctx, c.proxyClient(), f, next, min(next+15, f.size-1)) })
 		}
 		wg.Wait()
 		if headErr != nil {
