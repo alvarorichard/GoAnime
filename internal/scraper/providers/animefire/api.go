@@ -132,8 +132,16 @@ func audioLabel(audio string) string {
 type apiAnimeResponse struct {
 	Data struct {
 		Hero     apiAnime     `json:"hero"`
+		Seasons  []apiSeason  `json:"seasons"`
 		Episodes []apiEpisode `json:"episodes"`
 	} `json:"data"`
+}
+
+// apiSeason is one entry of data.seasons. Episode numbers restart in every
+// season; first_episode_number places the season in the whole run.
+type apiSeason struct {
+	Number             int `json:"number"`
+	FirstEpisodeNumber int `json:"first_episode_number"`
 }
 
 type apiEpisode struct {
@@ -268,7 +276,6 @@ func (c *AnimefireClient) episodesAPI(animeURL string) ([]models.Episode, error)
 			continue
 		}
 		episodes = append(episodes, models.Episode{
-			Number:   strconv.Itoa(e.Number),
 			Num:      e.Number,
 			URL:      episodeURLFor(e.ID),
 			Title:    models.TitleDetails{Romaji: e.Title, English: e.Title},
@@ -276,8 +283,47 @@ func (c *AnimefireClient) episodesAPI(animeURL string) ([]models.Episode, error)
 			SeasonID: strconv.Itoa(e.Season),
 		})
 	}
+	numberAcrossSeasons(episodes, out.Data.Seasons)
 	c.warnIfTitleLooksOffline(episodes)
 	return episodes, nil
+}
+
+// numberAcrossSeasons gives every episode its number in the whole run.
+//
+// The API numbers episodes within their season (One Piece's 1180 episodes
+// repeat 983 numbers), and everything after the picker finds an episode by
+// its number and takes the first match: next episode, resume, ranged
+// downloads. Season 2 episode 1 played season 1 episode 1.
+//
+// Each season's first_episode_number gives the run number. Checked on
+// 2026-10-12 against 24 titles: it numbered every list 1..N, in list order,
+// with no repeat. If the numbers still repeat (a season the list does not
+// describe), the list order, which the API gives by season and number, is
+// used instead.
+func numberAcrossSeasons(episodes []models.Episode, seasons []apiSeason) {
+	first := make(map[string]int, len(seasons))
+	for _, s := range seasons {
+		if s.FirstEpisodeNumber > 0 {
+			first[strconv.Itoa(s.Number)] = s.FirstEpisodeNumber
+		}
+	}
+	seen := make(map[int]bool, len(episodes))
+	unique := true
+	for i := range episodes {
+		if f, ok := first[episodes[i].SeasonID]; ok {
+			episodes[i].Num = f + episodes[i].Num - 1
+		}
+		if seen[episodes[i].Num] {
+			unique = false
+		}
+		seen[episodes[i].Num] = true
+	}
+	for i := range episodes {
+		if !unique {
+			episodes[i].Num = i + 1
+		}
+		episodes[i].Number = strconv.Itoa(episodes[i].Num)
+	}
 }
 
 // warnIfTitleLooksOffline says so BEFORE the user starts picking episodes.
