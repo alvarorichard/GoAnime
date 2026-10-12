@@ -103,8 +103,7 @@ func NewAnimeDriveClientWithContext(timeout time.Duration, maxRetries int) *Anim
 	}
 }
 
-// NewClientForTest returns a client pointed at a test server with retries
-// disabled. Only for tests.
+// NewClientForTest returns a client pointed at a test server with retries only for tests
 func NewClientForTest(serverURL string) *AnimeDriveClient {
 	c := NewAnimeDriveClient()
 	c.baseURL = serverURL
@@ -137,7 +136,7 @@ func (c *AnimeDriveClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
-	req.Header.Set("Referer", c.baseURL)
+	req.Header.Set("Referer", strings.TrimRight(c.baseURL, "/")+"/")
 }
 
 func (c *AnimeDriveClient) shouldRetry(attempt int) bool {
@@ -474,10 +473,11 @@ func (c *AnimeDriveClient) resolveURL(ref string) string {
 	return c.baseURL + "/" + ref
 }
 
-// GetStreamURL gets the streaming URL for a specific episode.
-// Extracts video tracks from the animeq-player and lets user choose between
-// Legendado/Dublado when multiple audio tracks are available.
-func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (videoURL string, metadata map[string]string, err error) {
+func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (string, map[string]string, error) {
+	return c.GetStreamURLWithQuality(episodeURL, "best")
+}
+
+func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (videoURL string, metadata map[string]string, err error) {
 	util.Debug("AnimeDriveClient stream URL extraction", "episodeURL", episodeURL)
 
 	urlStr := c.resolveURL(episodeURL)
@@ -506,25 +506,36 @@ func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (videoURL string, met
 
 	type track struct {
 		src   string
-		label string // legendado ou dublado
+		label string
 	}
 	var tracks []track
 
-	// Find all <source>
-	doc.Find("video.animeq-player__video source[src]").Each(func(i int, s *goquery.Selection) {
-		src, _ := s.Attr("src")
-		if src == "" {
-			return
-		}
-		label := "Legendado"
-		btn := doc.Find("button.animeq-player__server[data-source-name]").Eq(i)
-		if btn.Length() > 0 {
-			if name, ok := btn.Attr("data-source-name"); ok {
-				label = name
-			}
-		}
-		tracks = append(tracks, track{src: src, label: label})
+	names := make(map[string]string)
+	doc.Find("button.animeq-player__server[data-animeq-switch]").Each(func(_ int, button *goquery.Selection) {
+		id := button.AttrOr("data-animeq-switch", "")
+		names[id] = button.AttrOr("data-source-name", "")
 	})
+
+	sources := doc.Find(".animeq-player__source[data-animeq-source]")
+	if sources.Length() > 0 {
+		sources.Each(func(_ int, source *goquery.Selection) {
+			id := source.AttrOr("data-animeq-source", "")
+			label := names[id]
+			streamURL := source.Find("video source[src]").First().AttrOr("src", "")
+			if streamURL == "" {
+				streamURL = source.Find(`iframe[src*="blogger.com/video"]`).First().AttrOr("src", "")
+			}
+			if streamURL != "" {
+				tracks = append(tracks, track{src: streamURL, label: label})
+			}
+		})
+	} else {
+		// Older pages place all video sources in one video element.
+		doc.Find("video.animeq-player__video source[src]").Each(func(i int, source *goquery.Selection) {
+			label := doc.Find("button.animeq-player__server[data-source-name]").Eq(i).AttrOr("data-source-name", "Legendado")
+			tracks = append(tracks, track{src: source.AttrOr("src", ""), label: label})
+		})
+	}
 
 	if len(tracks) == 0 {
 		return "", nil, netx.NewParserError("AnimeDrive", "stream", "no video tracks found in animeq-player", nil)
@@ -535,29 +546,52 @@ func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (videoURL string, met
 		util.Debug("AnimeDrive track", "label", t.label, "src", t.src)
 	}
 
-	selected := tracks[0]
-	for _, t := range tracks {
-		if strings.Contains(strings.ToLower(t.label), "dublado") {
-			selected = t
-			break
+	preferLow := strings.EqualFold(strings.TrimSpace(quality), "worst")
+	sort.SliceStable(tracks, func(i, j int) bool {
+		left, right := animeDriveQualityRank(tracks[i].label), animeDriveQualityRank(tracks[j].label)
+		if preferLow {
+			return left < right
 		}
-	}
+		return left > right
+	})
 
-	validatedURL, err := netx.ValidateStreamURL(selected.src, "AnimeDrive")
-	if err != nil {
-		return "", nil, err
+	var selected *track
+	for i := range tracks {
+		validatedURL, validateErr := netx.ValidateStreamURL(tracks[i].src, "AnimeDrive")
+		if validateErr != nil || !c.isAvailableStreamURL(validatedURL) {
+			continue
+		}
+		tracks[i].src = validatedURL
+		selected = &tracks[i]
+		break
+	}
+	if selected == nil {
+		return "", nil, fmt.Errorf("AnimeDrive: no available video servers found")
 	}
 
 	metadata = map[string]string{
 		"source":      "animedrive",
 		"audio_label": selected.label,
+		"referer":     strings.TrimRight(c.baseURL, "/") + "/",
 	}
 
-	return validatedURL, metadata, nil
+	return selected.src, metadata, nil
 }
 
-// GetStreamURLWithSelection gets the streaming URL with user server selection.
-// For now, delegates to GetStreamURL (selection UI handled at higher level).
+func animeDriveQualityRank(label string) int {
+	lower := strings.ToLower(label)
+	switch {
+	case strings.Contains(lower, "4k"), strings.Contains(lower, "2160"), strings.Contains(lower, "fhd"), strings.Contains(lower, "1080"):
+		return 4
+	case strings.Contains(lower, "hd"), strings.Contains(lower, "720"):
+		return 3
+	case strings.Contains(lower, "sd"), strings.Contains(lower, "480"), strings.Contains(lower, "360"):
+		return 2
+	default:
+		return 1
+	}
+}
+
 func (c *AnimeDriveClient) GetStreamURLWithSelection(episodeURL string) (videoURL string, metadata map[string]string, err error) {
 	return c.GetStreamURL(episodeURL)
 }

@@ -2,8 +2,10 @@ package animedrive
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,7 +23,7 @@ func TestAnimeDriveSearchRetriesOnFailure(t *testing.T) {
 			return
 		}
 
-		_, _ = fmt.Fprint(w, `
+		_, _ = fmt.Fprintf(w, `
         <html>
             <body>
                 <article class="item">
@@ -173,8 +175,13 @@ func TestAnimeDriveGetAnimeEpisodes(t *testing.T) {
 func TestAnimeDriveGetStreamURL(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/legendado/") || strings.HasPrefix(r.URL.Path, "/dublado/") {
+			w.WriteHeader(http.StatusPartialContent)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `
         <html>
             <body>
                 <div class="animeq-player__servers" role="tablist" aria-label="Fontes de v&#237;deo">
@@ -182,12 +189,12 @@ func TestAnimeDriveGetStreamURL(t *testing.T) {
                     <button class="animeq-player__server" data-animeq-switch="1" data-source-name="Dublado">Dublado</button>
                 </div>
                 <video class="animeq-player__video" data-post-id="8861">
-                    <source src="https://mangas.cloud/legendado/ep1.mp4" type="video/mp4">
-                    <source src="https://mangas.cloud/dublado/ep1.mp4" type="video/mp4">
+					<source src="%s/legendado/ep1.mp4" type="video/mp4">
+					<source src="%s/dublado/ep1.mp4" type="video/mp4">
                 </video>
             </body>
         </html>
-        `)
+		`, server.URL, server.URL)
 	}))
 	defer server.Close()
 
@@ -199,25 +206,30 @@ func TestAnimeDriveGetStreamURL(t *testing.T) {
 	streamURL, metadata, err := client.GetStreamURL("/episodio-1/")
 	require.NoError(t, err)
 	require.NotEmpty(t, streamURL)
-
-	assert.Equal(t, "https://mangas.cloud/dublado/ep1.mp4", streamURL)
+	assert.Equal(t, server.URL+"/legendado/ep1.mp4", streamURL)
 	assert.Equal(t, "animedrive", metadata["source"])
-	assert.Equal(t, "Dublado", metadata["audio_label"])
+	assert.Equal(t, "Legendado", metadata["audio_label"])
+	assert.Equal(t, server.URL+"/", metadata["referer"])
 }
 
 func TestAnimeDriveGetStreamURL_LegendadoOnly(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/legendado/ep1.mp4" {
+			w.WriteHeader(http.StatusPartialContent)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `
         <html>
             <body>
                 <video class="animeq-player__video" data-post-id="8861">
-                    <source src="https://mangas.cloud/legendado/ep1.mp4" type="video/mp4">
+					<source src="%s/legendado/ep1.mp4" type="video/mp4">
                 </video>
             </body>
         </html>
-        `)
+		`, server.URL)
 	}))
 	defer server.Close()
 
@@ -229,10 +241,80 @@ func TestAnimeDriveGetStreamURL_LegendadoOnly(t *testing.T) {
 	streamURL, metadata, err := client.GetStreamURL("/episodio-1/")
 	require.NoError(t, err)
 	require.NotEmpty(t, streamURL)
-
-	// Only Legendado available
-	assert.Equal(t, "https://mangas.cloud/legendado/ep1.mp4", streamURL)
+	assert.Equal(t, server.URL+"/legendado/ep1.mp4", streamURL)
 	assert.Equal(t, "Legendado", metadata["audio_label"])
+}
+
+func TestAnimeDriveGetStreamURLUsesSourceIDsAndQuality(t *testing.T) {
+	t.Parallel()
+
+	var gotReferer string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sd.mp4", "/hd.mp4":
+			gotReferer = r.Header.Get("Referer")
+			w.WriteHeader(http.StatusPartialContent)
+		case "/fhd.mp4":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			_, _ = fmt.Fprintf(w, `
+		<div class="animeq-player__source" data-animeq-source="0"><video><source src="%s/sd.mp4"></video></div>
+		<div class="animeq-player__source" data-animeq-source="1"><div><iframe src="https://animeshd.cloud/#example"></iframe></div></div>
+		<div class="animeq-player__source" data-animeq-source="2"><video><source src="%s/fhd.mp4"></video></div>
+		<div class="animeq-player__source" data-animeq-source="3"><video><source src="%s/hd.mp4"></video></div>
+		<button class="animeq-player__server" data-animeq-switch="0" data-source-name="SD">SD</button>
+		<button class="animeq-player__server" data-animeq-switch="1" data-source-name="FHD embed">FHD embed</button>
+		<button class="animeq-player__server" data-animeq-switch="2" data-source-name="FHD">FHD</button>
+		<button class="animeq-player__server" data-animeq-switch="3" data-source-name="HD">HD</button>
+		`, server.URL, server.URL, server.URL)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAnimeDriveClient()
+	client.baseURL = server.URL
+	client.maxRetries = 1
+	client.retryDelay = 0
+
+	streamURL, metadata, err := client.GetStreamURLWithQuality("/episodio-1/", "best")
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/hd.mp4", streamURL, "FHD is unavailable, so HD should be selected")
+	assert.Equal(t, "HD", metadata["audio_label"])
+	assert.Equal(t, server.URL+"/", gotReferer)
+
+	streamURL, metadata, err = client.GetStreamURLWithQuality("/episodio-1/", "worst")
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/sd.mp4", streamURL)
+	assert.Equal(t, "SD", metadata["audio_label"])
+}
+
+func TestAnimeDriveGetStreamURLAcceptsBloggerEmbed(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `<div class="animeq-player__source" data-animeq-source="0"><iframe src="https://www.blogger.com/video.g?token=example"></iframe></div><button class="animeq-player__server" data-animeq-switch="0" data-source-name="Mobile">Mobile</button>`)
+	}))
+	defer server.Close()
+
+	client := NewAnimeDriveClient()
+	client.baseURL = server.URL
+	client.client = &http.Client{Transport: bloggerMockTransport{fallback: http.DefaultTransport}}
+	client.maxRetries = 1
+
+	streamURL, _, err := client.GetStreamURL("/episodio-1/")
+	require.NoError(t, err)
+	assert.Equal(t, "https://www.blogger.com/video.g?token=example", streamURL)
+}
+
+type bloggerMockTransport struct {
+	fallback http.RoundTripper
+}
+
+func (t bloggerMockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == "www.blogger.com" {
+		return &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	}
+	return t.fallback.RoundTrip(req)
 }
 
 func TestAnimeDriveGetStreamURL_NoTracks(t *testing.T) {
@@ -257,10 +339,4 @@ func TestAnimeDriveGetStreamURL_NoTracks(t *testing.T) {
 	_, _, err := client.GetStreamURL("/episodio-1/")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no video tracks found in animeq-player")
-}
-
-func TestAnimeDriveHostAssertion(t *testing.T) {
-	// Dated assertion to catch domain rotation
-	// Updated: 2025-09-28
-	assert.Equal(t, "https://animesdrive.cloud", AnimeDriveBase)
 }

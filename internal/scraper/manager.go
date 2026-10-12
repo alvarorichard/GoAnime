@@ -222,7 +222,14 @@ func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode,
 }
 
 func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
-	url, meta, err := a.client.GetStreamURL(episodeURL)
+	quality := "best"
+	for _, option := range options {
+		if value, ok := option.(string); ok {
+			quality = value
+			break
+		}
+	}
+	url, meta, err := a.client.GetStreamURLWithQuality(episodeURL, quality)
 	metadata = meta
 	if metadata == nil {
 		metadata = make(map[string]string)

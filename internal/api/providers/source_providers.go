@@ -572,12 +572,13 @@ func (p *animeDriveProvider) scraper() (scraper.UnifiedScraper, error) {
 
 func (p *animeDriveProvider) Describe() source.Descriptor {
 	return source.Descriptor{
-		Kind:        source.AnimeDrive,
-		Priority:    25,
-		Explicit:    []string{"AnimeDrive", "Anime Drive"},
-		Tags:        []string{"[animedrive]"},
-		URLMatchers: []string{"animesdrive.cloud"},
-		ProbeURL:    "https://animesdrive.cloud",
+		Kind:            source.AnimeDrive,
+		Priority:        40,
+		DefaultDisabled: true,
+		Explicit:        []string{"AnimeDrive", "Anime Drive"},
+		Tags:            []string{"[animedrive]"},
+		URLMatchers:     []string{"animesdrive.cloud"},
+		ProbeURL:        "https://animesdrive.cloud",
 	}
 }
 
@@ -621,7 +622,7 @@ func (p *animeDriveProvider) FetchStreamURL(
 	ctx context.Context,
 	episode *models.Episode,
 	anime *models.Anime,
-	_ string,
+	quality string,
 ) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -637,9 +638,15 @@ func (p *animeDriveProvider) FetchStreamURL(
 		return "", err
 	}
 
-	streamURL, _, err := adapter.GetStreamURL(episode.URL)
+	if quality == "" {
+		quality = "best"
+	}
+	streamURL, metadata, err := adapter.GetStreamURL(episode.URL, quality)
 	if err != nil {
 		return "", fmt.Errorf("animeDrive stream: %w", err)
+	}
+	if ref := metadata["referer"]; ref != "" {
+		util.SetGlobalReferer(ref)
 	}
 
 	if streamURL == "" {
