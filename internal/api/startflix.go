@@ -72,7 +72,7 @@ func describePanelErr(source string, err error) error {
 	case errors.Is(err, startflix.ErrNoPlayers):
 		return &friendlyError{cause: err, msg: "⚠️  No video sources for this on " + source + " right now. Try another episode, or come back later."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
-		return &friendlyError{cause: err, msg: "⚠️  " + source + " lists this title but has no video for it. Try searching it on another source."}
+		return &friendlyError{cause: err, msg: "⚠️  " + source + " lists this title but has no video for it. Try another result below."}
 	case errors.Is(err, context.DeadlineExceeded):
 		return &friendlyError{cause: err, msg: "⚠️  " + source + " took too long to answer. Please try again."}
 	default:
@@ -104,6 +104,83 @@ var (
 	sfxAudioMu      sync.Mutex
 	sfxAudioChoices = map[string]startflix.Audio{}
 )
+
+// sfxDeadTitles remembers title pages whose video panel answered "no content"
+// (ErrNotOnPanel) or that embed no panel at all (ErrNoPanel) — e.g. StartFlix
+// still lists "Velozes e Furiosos – Espiões do Asfalto" while its panel at
+// /embed/95594 answers 404 "Conteúdo não encontrado". The listing is stale
+// upstream and will not heal on retry, so the title is hidden from later
+// searches in the same session instead of being offered again. Session-scoped
+// like the audio choice above: the panel may come back, and a restart must see
+// the title again.
+var (
+	sfxDeadMu     sync.RWMutex
+	sfxDeadTitles = map[string]bool{}
+)
+
+// markPanelDead records a title page as unplayable: the catalog lists it but
+// its panel carries no video.
+func markPanelDead(titleURL string) {
+	if titleURL == "" {
+		return
+	}
+	sfxDeadMu.Lock()
+	defer sfxDeadMu.Unlock()
+	if !sfxDeadTitles[titleURL] {
+		sfxDeadTitles[titleURL] = true
+		util.Debug("Panel title marked dead, hiding from later searches", "url", titleURL)
+	}
+}
+
+// isPanelDead reports whether a title page was marked dead this session.
+func isPanelDead(titleURL string) bool {
+	if titleURL == "" {
+		return false
+	}
+	sfxDeadMu.RLock()
+	defer sfxDeadMu.RUnlock()
+	return sfxDeadTitles[titleURL]
+}
+
+// isPanelDeadErr reports whether err means "listed but no video": the panel
+// has no content for the title, or the title embeds no panel at all.
+func isPanelDeadErr(err error) bool {
+	return errors.Is(err, startflix.ErrNotOnPanel) || errors.Is(err, startflix.ErrNoPanel)
+}
+
+// markPanelDeadErr marks titleURL dead when err is a panel-missing failure.
+// It unwraps friendlyError layers (describeMediaErr) so callers pass the
+// error they already have.
+func markPanelDeadErr(titleURL string, err error) {
+	if isPanelDeadErr(err) {
+		markPanelDead(titleURL)
+	}
+}
+
+// filterPanelDead drops titles marked dead this session from a search result.
+// When every result is dead the original list is kept: an empty picker reads
+// as "nothing matched" when the truth is "everything matched is gone", and
+// hiding the reason helps nobody.
+func filterPanelDead(animes []*models.Anime) []*models.Anime {
+	sfxDeadMu.RLock()
+	empty := len(sfxDeadTitles) == 0
+	sfxDeadMu.RUnlock()
+	if empty {
+		return animes
+	}
+	kept := make([]*models.Anime, 0, len(animes))
+	for _, a := range animes {
+		if a != nil && isPanelDead(a.URL) {
+			util.Debug("Hiding dead panel title from search results", "title", a.Name, "url", a.URL)
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if len(kept) == 0 {
+		return animes
+	}
+	return kept
+}
 
 func rememberStartFlixAudio(titleURL string, a startflix.Audio) {
 	sfxAudioMu.Lock()
@@ -318,6 +395,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
+		markPanelDeadErr(media.URL, err)
 		return nil, describeMediaErr(media, err)
 	}
 
@@ -332,6 +410,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
+		markPanelDeadErr(media.URL, err)
 		return nil, describeMediaErr(media, err)
 	}
 
@@ -357,6 +436,7 @@ func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Seas
 	c := sfxClientFn()
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
+		markPanelDeadErr(media.URL, err)
 		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	if panel.Kind == startflix.KindMovie {
@@ -364,6 +444,7 @@ func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Seas
 	}
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
+		markPanelDeadErr(media.URL, err)
 		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	return panel, seasons, nil

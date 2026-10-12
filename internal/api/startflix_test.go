@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/api/movie"
+	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -49,6 +51,9 @@ const fakeSeriesPanel = `<main class="main">
 	</ul></div></div>
 </div></main>`
 
+const fakeDeadSeriesPage = `<html><body><div id="info">
+	<iframe src="https://painel.test/embed/999"></iframe></div></body></html>`
+
 func fakePlayers(file string) string {
 	return fmt.Sprintf(`<div id="players">
 	<button class="btn" data-show-player="true" data-source="https://playembedapi.site/?v=x" data-subtitles="" data-type="iframe" data-id="1">Player #1</button>
@@ -63,6 +68,8 @@ func newFakeStartFlix(t *testing.T) *fakeStartFlix {
 		switch {
 		case host == "www.startflix.test" && r.URL.Path == "/series/show/":
 			_, _ = w.Write([]byte(fakeSeriesPage))
+		case host == "www.startflix.test" && r.URL.Path == "/series/dead/":
+			_, _ = w.Write([]byte(fakeDeadSeriesPage))
 		case host == "www.startflix.test" && r.URL.Path == "/filmes/film/":
 			_, _ = w.Write([]byte(fakeMoviePage))
 		case host == "painel.test" && r.URL.Path == "/embed/999":
@@ -130,6 +137,9 @@ func resetStartFlixState() {
 	sfxAudioMu.Lock()
 	sfxAudioChoices = map[string]startflix.Audio{}
 	sfxAudioMu.Unlock()
+	sfxDeadMu.Lock()
+	sfxDeadTitles = map[string]bool{}
+	sfxDeadMu.Unlock()
 	// What the real binary starts with when --audio is not passed: the flag's
 	// default, not an empty string.
 	util.SetGlobalAudioLanguage("pt-BR,pt,english")
@@ -403,4 +413,56 @@ func TestDescribeStartFlixErr(t *testing.T) {
 	assert.NoError(t, describeStartFlixErr(nil))
 	plain := errors.New("plain")
 	assert.Same(t, plain, describeStartFlixErr(plain))
+}
+
+// A title whose panel answers "Conteúdo não encontrado" (the Espiões do
+// Asfalto case: listed at /series/..., panel /embed/95594 404s) is marked dead
+// so later searches in the same session stop offering it.
+func TestGetStartFlixEpisodes_DeadPanelMarksTitle(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	media := &models.Anime{Name: "Dead", URL: "https://www.startflix.test/series/dead/", Source: "StartFlix"}
+	_, err := GetStartFlixEpisodes(media)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, startflix.ErrNotOnPanel)
+	assert.Contains(t, err.Error(), "has no video for it")
+	assert.True(t, isPanelDead(media.URL), "the dead title must be remembered")
+}
+
+func TestFilterPanelDead(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	dead := &models.Anime{Name: "Dead", URL: "https://www.startflix.test/series/dead/"}
+	alive := &models.Anime{Name: "Show", URL: "https://www.startflix.test/series/show/"}
+
+	filtered := filterPanelDead([]*models.Anime{dead, alive})
+	assert.Len(t, filtered, 2, "nothing is marked yet, nothing is hidden")
+
+	markPanelDead(dead.URL)
+	filtered = filterPanelDead([]*models.Anime{dead, alive})
+	require.Len(t, filtered, 1)
+	assert.Equal(t, alive.URL, filtered[0].URL, "the dead title is hidden, the working one stays")
+
+	onlyDead := filterPanelDead([]*models.Anime{dead})
+	assert.Len(t, onlyDead, 1, "when every result is dead the list is kept, not emptied")
+}
+
+// The retry after a dead pick ("Going back to anime selection...") must not
+// offer the same dead title again: searchAnimeEnhanced hides marked titles
+// from the picker.
+func TestSearchHidesDeadPanelTitles(t *testing.T) {
+	useFakeStartFlix(t, 0, 0)
+	dead := &models.Anime{Name: "Dead [PT-BR]", URL: "https://www.startflix.test/series/dead/", Source: "StartFlix"}
+	alive := &models.Anime{Name: "Show [PT-BR]", URL: "https://www.startflix.test/series/show/", Source: "StartFlix"}
+	markPanelDead(dead.URL)
+
+	var shown []*models.Anime
+	selected, err := searchAnimeEnhanced("dead", "", func(context.Context, string, []apisource.SourceKind) ([]*models.Anime, error) {
+		return []*models.Anime{dead, alive}, nil
+	}, func(animes []*models.Anime) (*models.Anime, error) {
+		shown = animes
+		return alive, nil
+	}, nil)
+	require.NoError(t, err)
+	assert.Same(t, alive, selected)
+	require.Len(t, shown, 1, "the dead title must not reach the picker")
+	assert.Equal(t, alive.URL, shown[0].URL)
 }

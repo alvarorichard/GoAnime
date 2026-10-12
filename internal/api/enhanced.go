@@ -229,7 +229,7 @@ func searchAnimeEnhanced(
 			validAnimes = append(validAnimes, anime)
 		}
 	}
-	animes = validAnimes
+	animes = filterPanelDead(validAnimes)
 
 	if len(animes) == 0 {
 		return nil, fmt.Errorf("%w for: %s", ErrNoResults, name)
