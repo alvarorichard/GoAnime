@@ -66,7 +66,7 @@ func defaultRunSpinner(title string, action func()) {
 	wrapped := func() { once.Do(action) }
 
 	_ = tui.RunClean(func() error {
-		return spinner.New().
+		return spinner.New().WithTheme(tui.SpinnerTheme()).
 			Title(title).
 			Type(spinner.Dots).
 			Action(wrapped).
@@ -91,7 +91,7 @@ func defaultPromptForName(_ string) (string, error) {
 			}
 			return nil
 		})
-	if err := tui.RunClean(prompt.Run); err != nil {
+	if err := tui.RunClean(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 		return "", fmt.Errorf("search cancelled by user: %w", api.ErrSearchAborted)
 	}
 	name := strings.TrimSpace(newName)

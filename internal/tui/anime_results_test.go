@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,8 +64,8 @@ func TestAnimeResultItemDescription(t *testing.T) {
 		item animeResultItem
 		want string
 	}{
-		{name: "complete", item: animeResultItem{anime: &models.Anime{Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Subtitled", Quality: "1080p"}}, want: "AnimeFire  •  2023  •  Anime  •  Subtitled  •  1080p"},
-		{name: "tv", item: animeResultItem{anime: &models.Anime{Source: "StartFlix", Year: "2019", MediaType: models.MediaTypeTV}}, want: "StartFlix  •  2019  •  TV"},
+		{name: "complete", item: animeResultItem{anime: &models.Anime{Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Subtitled", Quality: "1080p"}}, want: "AnimeFire · 2023 · Anime · Subtitled · 1080p"},
+		{name: "tv", item: animeResultItem{anime: &models.Anime{Source: "StartFlix", Year: "2019", MediaType: models.MediaTypeTV}}, want: "StartFlix · 2019 · TV"},
 		{name: "partial", item: animeResultItem{anime: &models.Anime{Source: "AllAnime"}}, want: "AllAnime"},
 		{name: "single line", item: animeResultItem{anime: &models.Anime{Source: "Source\r\nInjected\x1b[2J"}}, want: "Source Injected"},
 		{name: "empty", item: animeResultItem{anime: &models.Anime{}}, want: "Information unavailable"},
@@ -121,7 +122,7 @@ func TestNewAnimeResultsModel(t *testing.T) {
 	assert.False(t, model.results.ShowTitle())
 	assert.False(t, model.results.ShowHelp())
 	assert.Equal(t, "Search > Results", model.shell.Breadcrumb)
-	assert.Equal(t, "Filter: ", model.results.FilterInput.Prompt)
+	assert.Equal(t, "❯ ", model.results.FilterInput.Prompt)
 }
 
 func TestAnimeResultsModelInit(t *testing.T) {
@@ -276,7 +277,7 @@ func TestAnimeResultsModelView(t *testing.T) {
 			if tt.width >= 9 {
 				assert.Contains(t, view.Content, "GOANIME")
 			}
-			assert.Equal(t, tt.wantDetails, strings.Contains(view.Content, "Details"))
+			assert.Equal(t, tt.wantDetails, strings.Contains(ansi.Strip(view.Content), "DETAILS"))
 			assert.LessOrEqual(t, lipgloss.Width(view.Content), tt.width)
 			assert.LessOrEqual(t, lipgloss.Height(view.Content), tt.height)
 		})
@@ -305,26 +306,24 @@ func TestAnimeResultsModel_ShowsNoticeOnce(t *testing.T) {
 	assert.NotContains(t, again.View().Content, "has no episodes", "a notice is shown once")
 }
 
-func TestRenderAnimeDetails(t *testing.T) {
+func TestDetailsPanelLines(t *testing.T) {
 	t.Parallel()
 
 	theme := NewTheme(true)
-	fields := []detailField{{"Source", "StartFlix"}, {"Year", "2019"}, {"Type", "TV"}, {"Audio", "Dubbed and subtitled"}}
-	for name, details := range map[string]string{
-		"stacked": renderAnimeDetails(&theme, "The Boys", fields),
-		"compact": renderAnimeDetailsCompact(&theme, "The Boys", fields),
-	} {
-		assert.Contains(t, details, "Details", name)
+	content := &panelContent{
+		label: "Details", gloss: "詳細", title: "The Boys",
+		fields: []detailField{{"Source", "StartFlix"}, {"Year", "2019"}, {"Type", "TV"}, {"Audio", "Dubbed and subtitled"}},
+	}
+	for name, compact := range map[string]bool{"stacked": false, "compact": true} {
+		details := ansi.Strip(strings.Join(panelLines(&theme, content, 40, compact), "\n"))
+		assert.Contains(t, details, "DETAILS  詳細", name)
 		assert.Contains(t, details, "The Boys", name)
 		assert.Contains(t, details, "StartFlix", name)
 		assert.Contains(t, details, "Audio", name)
 		assert.Contains(t, details, "Dubbed and subtitled", name)
 		assert.NotContains(t, details, "Quality", "%s: no source fills it, so the panel does not offer it", name)
-		assert.NotContains(t, details, theme.Primary.Render("Details")+" ", name)
-		for line := range strings.SplitSeq(details, "\n") {
-			assert.False(t, strings.HasSuffix(line, " "), "%s: line has unstyled trailing padding: %q", name, line)
-		}
 	}
+	assert.Len(t, panelLines(&theme, content, 40, true), 6, "compact: heading, title and one line per field")
 }
 
 // On a short terminal the details panel must keep its last field and its
@@ -333,7 +332,6 @@ func TestRenderAnimeDetails(t *testing.T) {
 func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 	anime := &models.Anime{Name: "[PT-BR] Frieren e a Jornada para o Além", Source: "Animefire.io",
 		Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled"}
-	bottomRight := lipgloss.RoundedBorder().BottomRight
 
 	for _, height := range []int{18, 24, 40} {
 		NoticeOnNextResults("A title has no episodes yet.") // not parallel: package-level notice
@@ -342,7 +340,7 @@ func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 		view := model.View().Content
 
 		assert.Contains(t, view, "Audio", "height %d: the last field was cut", height)
-		assert.Contains(t, view, bottomRight, "height %d: the panel lost its bottom border", height)
+		assert.Contains(t, view, "▀▀▀", "height %d: the panel lost its shadow", height)
 		assert.LessOrEqual(t, lipgloss.Height(view), height)
 	}
 
@@ -351,8 +349,8 @@ func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 	NoticeOnNextResults("A title has no episodes yet.")
 	model := newAnimeResultsModel([]*models.Anime{anime})
 	_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: 12})
-	view := model.View().Content
-	assert.NotContains(t, view, "Details")
+	view := ansi.Strip(model.View().Content)
+	assert.NotContains(t, view, "DETAILS")
 	assert.Contains(t, view, "Dubbed and subtitled")
 }
 

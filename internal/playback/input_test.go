@@ -88,3 +88,20 @@ func TestGetUserInput_InvalidIndexQuits(t *testing.T) {
 	})
 	assert.Equal(t, "q", GetUserInput())
 }
+
+func TestGetUserInput_MenuKeys(t *testing.T) {
+	var gotKeys []string
+	swapFindMenu(t, func(items []menuItem) (int, error) {
+		gotKeys = nil
+		for _, it := range items {
+			gotKeys = append(gotKeys, it.Key)
+		}
+		return 0, nil
+	})
+
+	GetUserInput()
+	assert.Equal(t, []string{"n", "p", "e", "c", "esc", "q"}, gotKeys)
+
+	GetUserInput(true)
+	assert.Equal(t, []string{"r", "c", "esc", "q"}, gotKeys)
+}

@@ -167,7 +167,7 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 		prompt := huh.NewInput().
 			Title("Search").
 			Value(&searchQuery)
-		if err := runFormFn(prompt.Run); err != nil {
+		if err := runFormFn(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 			return nil, err
 		}
 		query = searchQuery
@@ -207,7 +207,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 			return nil
 		})
 
-	if err := runFormFn(prompt.Run); err != nil {
+	if err := runFormFn(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 		return nil, err
 	}
 	if episodeNum == "" {

@@ -72,7 +72,7 @@ func runWithSpinner(title string, action func()) {
 	defer restoreConsoleLogs()
 	awaitActionThroughRunner(action, func(wrapped func()) {
 		_ = tui.RunClean(func() error {
-			return spinner.New().
+			return spinner.New().WithTheme(tui.SpinnerTheme()).
 				Title(title).
 				Type(spinner.Dots).
 				Action(wrapped).

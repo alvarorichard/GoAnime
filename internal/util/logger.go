@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/charmbracelet/colorprofile"
@@ -30,19 +29,15 @@ var logFile *os.File
 var LogFilePath string
 
 // PrintSavedLocation prints a colored message showing where a downloaded file
-// or directory was saved. The label is shown in purple and the path in light purple.
+// or directory was saved: the label in the accent color, the path in plain text.
 // Falls back to plain text when the console cannot render ANSI safely.
 func PrintSavedLocation(label, path string) {
 	if !tui.SupportsANSI(os.Stdout) {
 		fmt.Printf("%s %s\n", label, path)
 		return
 	}
-	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6366F1")).
-		Bold(true)
-	pathStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A78BFA"))
-	fmt.Printf("%s %s\n", labelStyle.Render(label), pathStyle.Render(path))
+	theme := tui.NewTheme(true)
+	fmt.Printf("%s %s\n", theme.Primary.Render(label), theme.Text.Render(path))
 }
 
 // getColoredPrefix returns a styled logger prefix, or plain text when the
@@ -58,13 +53,8 @@ func prefixForProfile(p colorprofile.Profile) string {
 	if p <= colorprofile.ASCII {
 		return "GoAnime"
 	}
-	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#6366F1")).
-		Bold(true).
-		Padding(0, 1).
-		MarginRight(1)
-	return style.Render("GoAnime")
+	theme := tui.NewTheme(true)
+	return theme.Header.MarginRight(1).Render("GoAnime")
 }
 
 // GetLogDir returns the platform-specific directory for storing log files.
@@ -235,26 +225,11 @@ func showDebugBanner() {
 		return
 	}
 
-	banner := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#6366F1")).
-		Bold(true).
-		Padding(0, 1).
-		Render(" DEBUG ")
-
-	path := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A78BFA")).
-		Italic(true).
-		Render(LogFilePath)
-
-	tailCmd := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FCD34D")).
-		Bold(true).
-		Render(followCmd)
-
-	hint := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
-		Render("(run in another terminal to follow live)")
+	theme := tui.NewTheme(true)
+	banner := theme.Header.Render(" DEBUG ")
+	path := theme.Soft.Render(LogFilePath)
+	tailCmd := theme.Primary.Render(followCmd)
+	hint := theme.Muted.Render("(run in another terminal to follow live)")
 
 	fmt.Fprintf(os.Stderr, "%s Debug log → %s\n       %s %s\n", banner, path, tailCmd, hint)
 }

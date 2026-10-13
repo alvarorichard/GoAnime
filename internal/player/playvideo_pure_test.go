@@ -555,7 +555,7 @@ func TestHandleUserInput_AliveSocketReturnsBackOnMenuError(t *testing.T) {
 // multiple goroutines race on tcell internals. Keep TUI-touching tests
 // serial.
 func TestShowPlayerMenu_ReturnsErrorOutsideTerminal(t *testing.T) {
-	_, err := showPlayerMenu("Anime", 1)
+	_, err := showPlayerMenu("", "Anime", 1)
 	assert.Error(t, err, "fuzzyfinder must error outside a TTY")
 }
 

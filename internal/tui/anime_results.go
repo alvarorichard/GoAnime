@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -19,6 +20,8 @@ const (
 	wideResultsBreakpoint = 100
 	// resultsGutter separates the result list from the details panel.
 	resultsGutter = 2
+	// maxNoticeLines is how many lines a notice wraps to before it is cut.
+	maxNoticeLines = 2
 )
 
 // resultsListWidth is the column the result list takes on a wide screen; the
@@ -64,17 +67,37 @@ func takeResultsNotice() string {
 	return text
 }
 
-// noticeLines is the height a notice takes above the list: its line and a
-// blank one.
-func noticeLines(notice string) int {
+// renderNotice draws a notice after a crimson "!" block, wrapped to at most
+// maxNoticeLines lines and followed by a blank line. It is "" for no notice.
+func renderNotice(theme *Theme, notice string, width int) string {
 	if notice == "" {
-		return 0
+		return ""
 	}
-	return 2
+	block := theme.Notice.Render("!")
+	indent := lipgloss.Width(block) + 1
+	room := width - indent
+	if room < minTitleWidth {
+		return theme.Primary.Render(ansi.Truncate(notice, width, "…")) + "\n"
+	}
+	wrapped := strings.Split(ansi.Wrap(notice, room, ""), "\n")
+	if len(wrapped) > maxNoticeLines {
+		wrapped = append(wrapped[:maxNoticeLines-1],
+			ansi.Truncate(strings.Join(wrapped[maxNoticeLines-1:], " "), room, "…"))
+	}
+	lines := make([]string, len(wrapped))
+	for i, text := range wrapped {
+		lead := strings.Repeat(" ", indent)
+		if i == 0 {
+			lead = block + " "
+		}
+		lines[i] = lead + theme.Text.Render(text)
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 type animeResultItem struct {
-	anime *models.Anime
+	anime  *models.Anime
+	number string // the result's position, zero padded to the widest one
 }
 
 // FilterValue returns all useful searchable metadata for an anime result.
@@ -133,7 +156,11 @@ func (i animeResultItem) Description() string {
 	if len(parts) == 0 {
 		return "Information unavailable"
 	}
-	return strings.Join(parts, "  •  ")
+	return strings.Join(parts, " · ")
+}
+
+func (i animeResultItem) row() row {
+	return row{number: i.number, title: i.Title(), desc: i.Description()}
 }
 
 // SingleLine strips terminal controls and collapses metadata to one line.
@@ -168,50 +195,41 @@ type animeResultsModel struct {
 func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
 	theme := NewTheme(true)
 	shell := NewShell(&theme, "Search > Results")
-	items := make([]list.Item, 0, len(animes))
+	valid := make([]*models.Anime, 0, len(animes))
 	for _, anime := range animes {
-		if anime == nil {
-			continue
+		if anime != nil {
+			valid = append(valid, anime)
 		}
-		items = append(items, animeResultItem{anime: anime})
+	}
+	digits := max(len(strconv.Itoa(len(valid))), 2)
+	items := make([]list.Item, 0, len(valid))
+	for i, anime := range valid {
+		items = append(items, animeResultItem{anime: anime, number: fmt.Sprintf("%0*d", digits, i+1)})
 	}
 
-	delegate := list.NewDefaultDelegate()
-	delegate.SetSpacing(1)
-	delegate.Styles.NormalTitle = theme.Text.PaddingLeft(2)
-	delegate.Styles.NormalDesc = theme.Muted.PaddingLeft(2)
-	delegate.Styles.SelectedTitle = theme.SelectedTitle
-	delegate.Styles.SelectedDesc = theme.SelectedDescription
-	delegate.Styles.DimmedTitle = theme.Muted.PaddingLeft(2)
-	delegate.Styles.DimmedDesc = theme.Muted.Faint(true).PaddingLeft(2)
-	delegate.Styles.FilterMatch = theme.FilterMatch
+	delegate := rowDelegate{theme: &theme, twoLine: true, spacing: 1}
 
-	notice := takeResultsNotice()
+	m := &animeResultsModel{theme: theme, shell: shell, notice: takeResultsNotice()}
 	width, height := shell.ContentSize()
-	results := list.New(items, delegate, width, max(height-noticeLines(notice), 1))
-	results.SetShowTitle(false)
-	results.SetShowHelp(false)
+	results := list.New(items, delegate, width, max(height-m.noticeHeight(width), 1))
+	styleList(&results, &m.theme, "")
 	results.SetStatusBarItemName("result", "results")
-	results.FilterInput.Prompt = "Filter: "
-	results.Styles.StatusBar = theme.Muted
-	results.Styles.StatusEmpty = theme.Muted
-	results.Styles.StatusBarActiveFilter = theme.Primary
-	results.Styles.StatusBarFilterCount = theme.Muted
-	results.Styles.NoItems = theme.Muted
-	results.Styles.PaginationStyle = theme.Muted
-	results.Styles.ActivePaginationDot = theme.Primary
-	results.Styles.InactivePaginationDot = theme.Muted
-	results.Styles.Filter.Focused.Prompt = theme.Primary
-	results.Styles.Filter.Focused.Text = theme.Text
-	results.Styles.Filter.Focused.Placeholder = theme.Muted
 	results.AdditionalShortHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		}
 	}
+	m.results = results
+	return m
+}
 
-	return &animeResultsModel{theme: theme, shell: shell, results: results, notice: notice}
+// noticeHeight is the rows the notice takes above the list at width.
+func (m *animeResultsModel) noticeHeight(width int) int {
+	if m.notice == "" {
+		return 0
+	}
+	return lipgloss.Height(renderNotice(&m.theme, m.notice, width))
 }
 
 // Init starts the result screen without background work.
@@ -228,10 +246,11 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
 		width, height := m.shell.ContentSize()
+		listWidth := width
 		if width >= wideResultsBreakpoint {
-			width = resultsListWidth(width) - resultsGutter
+			listWidth = resultsListWidth(width) - resultsGutter
 		}
-		m.results.SetSize(width, max(height-noticeLines(m.notice), 1))
+		m.results.SetSize(listWidth, max(height-m.noticeHeight(width), 1))
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -274,87 +293,68 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders compact results or a wide list-and-details layout.
 func (m *animeResultsModel) View() tea.View {
 	width, height := m.shell.ContentSize()
-	height = max(height-noticeLines(m.notice), 1)
+	height = max(height-m.noticeHeight(width), 1)
 	body := m.results.View()
 	if width >= wideResultsBreakpoint {
 		listWidth := resultsListWidth(width)
-		name, source, year, mediaType, audio := "No result selected", "—", "—", "—", "—"
-		if item, ok := m.results.SelectedItem().(animeResultItem); ok && item.anime != nil {
-			name = item.Title()
-			if value := singleLine(item.anime.Source); value != "" {
-				source = value
-			}
-			if value := singleLine(item.anime.Year); value != "" {
-				year = value
-			}
-			if value := mediaTypeLabel(item.anime.MediaType); value != "" {
-				mediaType = value
-			}
-			if value := singleLine(item.anime.Audio); value != "" {
-				audio = value
-			}
-		}
-		fields := []detailField{{"Source", source}, {"Year", year}, {"Type", mediaType}, {"Audio", audio}}
-		if panel := m.renderDetailsPanel(name, fields, width-listWidth, height); panel != "" {
+		if panel := fitPanel(&m.theme, m.detailsContent(), width-listWidth, height); panel != "" {
 			// A fixed-width column keeps the panel in place whatever the
 			// length of the visible rows.
 			column := lipgloss.NewStyle().Width(listWidth).Render(body)
 			body = lipgloss.JoinHorizontal(lipgloss.Top, column, panel)
 		}
 	}
-	if m.notice != "" {
-		body = m.theme.Primary.Render(ansi.Truncate(m.notice, width, "…")) + "\n\n" + body
+	if notice := renderNotice(&m.theme, m.notice, width); notice != "" {
+		body = notice + "\n" + body
 	}
 
-	footer := m.results.Help.ShortHelpView(m.results.ShortHelp())
-	view := tea.NewView(m.shell.Render(body, footer))
+	view := tea.NewView(m.shell.Render(body, m.hints()))
 	view.AltScreen = true
 	view.WindowTitle = "GoAnime - Results"
 	return view
 }
 
-// detailField is one labelled value in the details panel.
-type detailField struct{ label, value string }
-
-// renderDetailsPanel draws the details panel within width x height. Each label
-// sits above its value when that fits; on a shorter screen the panel switches
-// to one "Label  value" line per field rather than lose its last rows, and
-// when even that does not fit it is left out ("") instead of drawn cut off.
-func (m *animeResultsModel) renderDetailsPanel(name string, fields []detailField, width, height int) string {
-	frameWidth, frameHeight := m.theme.Panel.GetFrameSize()
-	style := m.theme.Panel.Width(max(width-frameWidth, 1)).Height(max(height-frameHeight, 1))
-	for _, details := range []string{
-		renderAnimeDetails(&m.theme, name, fields),
-		renderAnimeDetailsCompact(&m.theme, name, fields),
-	} {
-		if panel := style.Render(details); lipgloss.Height(panel) <= height {
-			return panel
+// detailsContent is the details panel for the selected result.
+func (m *animeResultsModel) detailsContent() *panelContent {
+	name, source, year, mediaType, audio := "No result selected", "—", "—", "—", "—"
+	if item, ok := m.results.SelectedItem().(animeResultItem); ok && item.anime != nil {
+		name = item.Title()
+		if value := singleLine(item.anime.Source); value != "" {
+			source = value
+		}
+		if value := singleLine(item.anime.Year); value != "" {
+			year = value
+		}
+		if value := mediaTypeLabel(item.anime.MediaType); value != "" {
+			mediaType = value
+		}
+		if value := singleLine(item.anime.Audio); value != "" {
+			audio = value
 		}
 	}
-	return ""
+	return &panelContent{
+		label:  "Details",
+		gloss:  "詳細",
+		title:  name,
+		fields: []detailField{{"Source", source}, {"Year", year}, {"Type", mediaType}, {"Audio", audio}},
+	}
 }
 
-// renderAnimeDetails composes styled lines without JoinVertical's unstyled padding.
-func renderAnimeDetails(theme *Theme, name string, fields []detailField) string {
-	lines := []string{theme.Primary.Render("Details"), "", theme.Value.Render(name)}
-	for _, f := range fields {
-		lines = append(lines, "", theme.Label.Render(f.label), theme.Value.Render(f.value))
+func (m *animeResultsModel) hints() []Hint {
+	if m.results.FilterState() != list.Unfiltered {
+		return []Hint{
+			{Key: "↑↓", Desc: "move"},
+			{Key: "enter", Desc: "open", Essential: true},
+			{Key: "esc", Desc: "clear filter", Essential: true},
+		}
 	}
-	return strings.Join(lines, "\n")
-}
-
-// renderAnimeDetailsCompact puts each label and its value on one line.
-func renderAnimeDetailsCompact(theme *Theme, name string, fields []detailField) string {
-	labelWidth := 0
-	for _, f := range fields {
-		labelWidth = max(labelWidth, len(f.label))
+	return []Hint{
+		{Key: "↑↓", Desc: "move"},
+		{Key: "/", Desc: "filter"},
+		{Key: "enter", Desc: "open", Essential: true},
+		{Key: "esc", Desc: "back", Essential: true},
+		{Key: "q", Desc: "quit"},
 	}
-	lines := []string{theme.Primary.Render("Details"), theme.Value.Render(name)}
-	for _, f := range fields {
-		label := f.label + strings.Repeat(" ", labelWidth-len(f.label)+2)
-		lines = append(lines, theme.Label.Render(label)+theme.Value.Render(f.value))
-	}
-	return strings.Join(lines, "\n")
 }
 
 type animeResultsRunner func(tea.Model) (tea.Model, error)

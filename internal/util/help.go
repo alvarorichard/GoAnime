@@ -7,59 +7,58 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Help styles using lipgloss
+// Help styles, in the palette of goanime.online that the TUI shares
+// (internal/tui/theme.go): ink ground, crimson as the only accent.
 var (
-	// Professional and modern color palette
-	lightGreen  = lipgloss.Color("#90EE90") // Soft light green
-	gray        = lipgloss.Color("#A9A9A9") // Medium gray
-	darkGray    = lipgloss.Color("#5A5A5A") // Dark gray for details
-	brightGreen = lipgloss.Color("#00FF7F") // Bright green for highlights
-	blue        = lipgloss.Color("#6366F1") // Modern blue (matches logger prefix)
+	helpCrimson = lipgloss.Color("#A3001F") // the title block
+	helpAccent  = lipgloss.Color("#FF5C70") // section titles, commands and options
+	helpText    = lipgloss.Color("#E6EBF0") // descriptions
+	helpMuted   = lipgloss.Color("#8E93A0") // parameters, examples, the subtitle
+	helpLine    = lipgloss.Color("#34343F") // separators
 
 	// Text styles
 	titleStyle = lipgloss.NewStyle().
-			Foreground(blue). // Title in blue (matching GoAnime prefix)
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(helpCrimson).
 			Bold(true).
-			PaddingBottom(1).
+			Padding(0, 1).
+			MarginBottom(1).
 			MarginLeft(2)
 
 	subtitleStyle = lipgloss.NewStyle().
-			Foreground(gray).
-			Italic(true).
+			Foreground(helpMuted).
 			PaddingBottom(1).
 			MarginLeft(2)
 
 	sectionTitleStyle = lipgloss.NewStyle().
-				Foreground(lightGreen). // Section titles in light green
+				Foreground(helpAccent).
 				Bold(true).
 				PaddingLeft(2)
 
 	commandStyle = lipgloss.NewStyle().
-			Foreground(brightGreen). // Commands in bright green
+			Foreground(helpAccent).
 			Bold(true).
 			PaddingLeft(4)
 
 	optionStyle = lipgloss.NewStyle().
-			Foreground(brightGreen). // Options in bright green
+			Foreground(helpAccent).
 			Bold(true).
 			PaddingLeft(4)
 
 	parameterStyle = lipgloss.NewStyle().
-			Foreground(gray). // Parameters in gray to differentiate
-			Italic(true)
+			Foreground(helpMuted)
 
 	descriptionStyle = lipgloss.NewStyle().
-				Foreground(gray). // Descriptions in gray
+				Foreground(helpText).
 				PaddingLeft(6).
 				Width(80 - 6) // Adjust width for line wrapping
 
 	exampleStyle = lipgloss.NewStyle().
-			Foreground(darkGray). // Examples in dark gray
-			Italic(true).
+			Foreground(helpMuted).
 			PaddingLeft(8)
 
 	separatorStyle = lipgloss.NewStyle().
-			Foreground(darkGray) // Separators in dark gray
+			Foreground(helpLine)
 )
 
 // ShowBeautifulHelp displays a beautifully formatted help message

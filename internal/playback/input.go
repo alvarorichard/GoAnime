@@ -7,24 +7,27 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// menuItem maps a display label to the short code returned by GetUserInput.
+// menuItem maps a display label to the short code returned by GetUserInput,
+// and to the key that picks it at once.
 type menuItem struct {
 	Label string
 	Value string
+	Key   string
 }
 
 // findMenuFunc is a package-level indirection over the fancy picker so tests
 // can drive GetUserInput without opening a TTY.
 var findMenuFunc = func(items []menuItem) (int, error) {
-	labels := make([]string, len(items))
+	pickItems := make([]tui.PickItem, len(items))
 	for i, it := range items {
-		labels[i] = it.Label
+		pickItems[i] = tui.PickItem{Label: it.Label, Key: it.Key}
 	}
-	return tui.PickLabels(labels, tui.PickOptions{
+	return tui.Pick(pickItems, tui.PickOptions{
 		Breadcrumb:   "Playback > Next",
 		WindowTitle:  "GoAnime - Menu",
 		ItemSingular: "option",
 		ItemPlural:   "options",
+		Action:       "choose",
 	})
 }
 
@@ -37,20 +40,20 @@ func GetUserInput(isMovie ...bool) string {
 	if movie {
 		// Movie: no episode navigation
 		items = []menuItem{
-			{"Replay movie", "n"},
-			{"Change movie", "c"},
-			{"← Back", "back"},
-			{"Quit", "q"},
+			{"Replay movie", "n", "r"},
+			{"Change movie", "c", "c"},
+			{"← Back", "back", "esc"},
+			{"Quit", "q", "q"},
 		}
 	} else {
 		// TV series / anime: full episode navigation
 		items = []menuItem{
-			{"Next episode", "n"},
-			{"Previous episode", "p"},
-			{"Select episode", "e"},
-			{"Change anime", "c"},
-			{"← Back", "back"},
-			{"Quit", "q"},
+			{"Next episode", "n", "n"},
+			{"Previous episode", "p", "p"},
+			{"Select episode", "e", "e"},
+			{"Change anime", "c", "c"},
+			{"← Back", "back", "esc"},
+			{"Quit", "q", "q"},
 		}
 	}
 

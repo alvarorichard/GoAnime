@@ -342,7 +342,7 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 		),
 	)
 
-	if err := runForm(form.Run); err != nil {
+	if err := runForm(form.WithTheme(tui.FormTheme()).Run); err != nil {
 		return false, fmt.Errorf("failed to show update prompt: %w", err)
 	}
 

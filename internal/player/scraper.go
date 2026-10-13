@@ -246,19 +246,21 @@ func episodeLabel(ep models.Episode) string {
 	return ep.Number + " — " + title
 }
 
-// episodeDetails builds the secondary row: air date and filler/recap badges.
+// episodeDetails is the text at the right of an episode's row: its air date.
 func episodeDetails(ep models.Episode) string {
-	parts := make([]string, 0, 3)
-	if aired := strings.TrimSpace(ep.Aired); aired != "" {
-		parts = append(parts, aired)
-	}
+	return strings.TrimSpace(ep.Aired)
+}
+
+// episodeTags are the badges after an episode's label.
+func episodeTags(ep models.Episode) []string {
+	var tags []string
 	if ep.IsFiller {
-		parts = append(parts, "Filler")
+		tags = append(tags, "Filler")
 	}
 	if ep.IsRecap {
-		parts = append(parts, "Recap")
+		tags = append(tags, "Recap")
 	}
-	return strings.Join(parts, "  •  ")
+	return tags
 }
 
 // episodePickItems converts episodes to generic picker rows.
@@ -268,6 +270,7 @@ func episodePickItems(episodes []models.Episode) []tui.PickItem {
 		items[i] = tui.PickItem{
 			Label:   episodeLabel(ep),
 			Details: episodeDetails(ep),
+			Tags:    episodeTags(ep),
 		}
 	}
 	return items
@@ -279,11 +282,12 @@ type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
 // SelectEpisodeWithFuzzyFinder lets the user pick an episode on the styled
 // fuzzy picker. ESC (or quit) is reported as ErrBackRequested.
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
-	return selectEpisodeWithPicker(tui.Pick, episodes)
+	return selectEpisodeWithPicker(tui.Pick, episodes, loadEpisodeProgress(episodes))
 }
 
 // selectEpisodeWithPicker isolates picker execution for deterministic tests.
-func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
+// watched is the tracker's progress by episode index (see loadEpisodeProgress).
+func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, watched map[int]episodeWatch) (episodeURL, episodeNumber string, err error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -292,12 +296,16 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (e
 	}
 
 	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: opening picker with %d episodes", len(episodes))
-	idx, err := pick(episodePickItems(episodes), tui.PickOptions{
+	items := episodePickItems(episodes)
+	opts := tui.PickOptions{
 		Breadcrumb:   "Search > Episodes",
 		WindowTitle:  "GoAnime - Episodes",
 		ItemSingular: "episode",
 		ItemPlural:   "episodes",
-	})
+		Action:       "play",
+	}
+	applyEpisodeProgress(items, &opts, episodes, watched)
+	idx, err := pick(items, opts)
 	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, err=%v", idx, err)
 	if err != nil {
 		// Treat back/quit as a back request so callers return to the
@@ -1396,11 +1404,16 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			// animefire_quality_menu_test.go.
 			sortedData, qualityLabels := buildAnimeFireQualityItems(videoResponse.Data)
 
-			qIdx, err := tui.PickLabels(qualityLabels, tui.PickOptions{
+			resolutions := make([]int, len(sortedData))
+			for i, v := range sortedData {
+				resolutions[i] = extractResolution(v.Label)
+			}
+			qIdx, err := tui.Pick(qualityPickItems(qualityLabels, resolutions), tui.PickOptions{
 				Breadcrumb:   "Playback > Quality",
 				WindowTitle:  "GoAnime - Quality",
 				ItemSingular: "quality",
 				ItemPlural:   "qualities",
+				Panel:        qualityFlagPanel(),
 			})
 			if err != nil {
 				if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
@@ -1499,6 +1512,40 @@ func buildAnimeFireQualityItems(videoData []VideoData) (sortedSources []VideoDat
 		}
 	}
 	return sorted, labels
+}
+
+// qualityPickItems turns quality labels into picker rows, each with a bar for
+// its resolution against the best one offered. A label without a resolution
+// says so instead.
+func qualityPickItems(labels []string, resolutions []int) []tui.PickItem {
+	best := 0
+	for _, res := range resolutions {
+		best = max(best, res)
+	}
+	items := make([]tui.PickItem, len(labels))
+	for i, label := range labels {
+		items[i] = tui.PickItem{Label: label}
+		switch {
+		case i < len(resolutions) && resolutions[i] > 0 && best > 0:
+			items[i].Meter = float64(resolutions[i]) / float64(best)
+		default:
+			items[i].Details = "resolution not reported"
+		}
+	}
+	return items
+}
+
+// qualityFlagPanel explains how to stop the quality menu from opening. It is
+// only true where the menu honours --quality, which is this AnimeFire path.
+func qualityFlagPanel() *tui.PickPanel {
+	return &tui.PickPanel{
+		Label: "Skip this menu",
+		Gloss: "ヒント",
+		Lines: []string{
+			"Start with a quality and this menu opens only when an episode does not have it. The default, best, always asks.",
+		},
+		Command: "goanime --quality 720p",
+	}
 }
 
 // selectQualityFromOptions selects the best matching quality from available options

@@ -1433,15 +1433,20 @@ func ExtractVideoSourcesWithPrompt(episodeURL string) (string, error) {
 	}
 
 	sorted, items := buildQualityMenu(sources)
+	resolutions := make([]int, len(sorted))
+	for i, s := range sorted {
+		resolutions[i] = s.Quality
+	}
 
 	// Fancy list picker (type-to-filter + arrows/vim). Pure-logic fixes
 	// (descending sort, mirror-N disambiguation, index-based selection)
 	// live in buildQualityMenu and are pinned by quality_menu_test.go.
-	idx, err := tui.PickLabels(items, tui.PickOptions{
+	idx, err := tui.Pick(qualityPickItems(items, resolutions), tui.PickOptions{
 		Breadcrumb:   "Playback > Quality",
 		WindowTitle:  "GoAnime - Quality",
 		ItemSingular: "quality",
 		ItemPlural:   "qualities",
+		Action:       "play",
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
@@ -1960,7 +1965,7 @@ func getEpisodeRange() (startNum, endNum int, err error) {
 		),
 	)
 
-	if err := tui.RunClean(form.Run); err != nil {
+	if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
 		return 0, 0, err
 	}
 	startNum, _ = strconv.Atoi(strings.TrimSpace(startStr))

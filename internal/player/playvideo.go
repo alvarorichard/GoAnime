@@ -375,7 +375,7 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 		Negative("No, start from beginning").
 		Value(&resume)
 
-	if err := tui.RunClean(confirm.Run); err != nil {
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
 		return false, fmt.Errorf("error showing dialog: %w", err)
 	}
 
@@ -1204,58 +1204,114 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 	}
 }
 
-// showPlayerMenu displays an interactive menu for player controls
-func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+// playerMenuOption is one entry of the player menu: its label, the choice
+// handleUserInput acts on, and the key that picks it at once.
+type playerMenuOption struct {
+	Label string
+	Value string
+	Key   string
+}
 
-	// Build title and options based on media type
-	var title string
-
-	type menuOption struct {
-		Label string
-		Value string
-	}
-	var menuItems []menuOption
-
-	isMovie := IsCurrentMediaMovie()
-
+// playerMenuOptions lists the player menu for a movie or a series. The track
+// entries are offered only when mpv has something to choose between.
+func playerMenuOptions(isMovie, audioChoice, subtitleChoice bool) []playerMenuOption {
+	var options []playerMenuOption
 	if isMovie {
-		// Movie: show movie name without episode number
-		title = "GoAnime Player Controls"
-		if animeName != "" {
-			title = fmt.Sprintf("Now playing: %s", animeName)
-		}
-		menuItems = []menuOption{
-			{"← Back", "download_options"},
-			{"Replay movie", "next"},
-			{"Change movie", "change"},
-			{"Exit", "quit"},
+		options = []playerMenuOption{
+			{"Replay movie", "next", "r"},
+			{"Change movie", "change", "c"},
 		}
 	} else {
-		// TV series / anime: show episode navigation
-		title = "GoAnime Player Controls"
-		if animeName != "" {
-			title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
-		}
-		menuItems = []menuOption{
-			{"← Back", "download_options"},
-			{"Next episode", "next"},
-			{"Previous episode", "previous"},
-			{"Select episode", "select"},
-			{"Change anime", "change"},
-			{"Skip intro", "skip"},
-			{"Exit", "quit"},
+		options = []playerMenuOption{
+			{"Next episode", "next", "n"},
+			{"Previous episode", "previous", "p"},
+			{"Select episode", "select", "e"},
+			{"Change anime", "change", "c"},
+			{"Skip intro", "skip", "s"},
 		}
 	}
+	if audioChoice {
+		options = append(options, playerMenuOption{"Audio track", "audio", "a"})
+	}
+	if subtitleChoice {
+		options = append(options, playerMenuOption{"Subtitles", "subtitle", "t"})
+	}
+	return append(options,
+		playerMenuOption{"← Back", "download_options", "esc"},
+		playerMenuOption{"Exit", "quit", "q"},
+	)
+}
 
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
+// playerTrackChoices reports whether mpv has more than one audio track and
+// any subtitle track, which is when choosing one means something.
+func playerTrackChoices(socketPath string) (audio, subtitles bool) {
+	if socketPath == "" {
+		return false, false
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   tui.SingleLine(title),
+	if tracks, err := GetAudioTracks(socketPath); err == nil {
+		audio = len(tracks) > 1
+	}
+	if tracks, err := GetSubtitleTracks(socketPath); err == nil {
+		subtitles = len(tracks) > 0
+	}
+	return audio, subtitles
+}
+
+// mpvProgress asks mpv where playback is, for the player menu's panel.
+func mpvProgress(socketPath string) func() (position, duration float64, ok bool) {
+	return func() (float64, float64, bool) {
+		pos, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
+		if err != nil {
+			return 0, 0, false
+		}
+		dur, err := mpvSendCommand(socketPath, []any{"get_property", "duration"})
+		if err != nil {
+			return 0, 0, false
+		}
+		position, okPos := pos.(float64)
+		duration, okDur := dur.(float64)
+		return position, duration, okPos && okDur
+	}
+}
+
+// nowPlayingPanel is the player menu's panel: what is playing and how far
+// along it is, kept current while the menu is open.
+func nowPlayingPanel(socketPath, animeName string, currentEpisodeNum int, isMovie bool) *tui.PickPanel {
+	panel := &tui.PickPanel{
+		Label: "Now playing",
+		Gloss: "再生中",
+		Title: tui.SingleLine(animeName),
+	}
+	if panel.Title == "" {
+		panel.Title = "mpv"
+	}
+	if !isMovie && currentEpisodeNum > 0 {
+		panel.Lines = []string{fmt.Sprintf("Episode %d · 第%d話", currentEpisodeNum, currentEpisodeNum)}
+	}
+	if socketPath != "" {
+		panel.Progress = mpvProgress(socketPath)
+		panel.Live = true
+	}
+	return panel
+}
+
+// showPlayerMenu displays an interactive menu for player controls
+func showPlayerMenu(socketPath, animeName string, currentEpisodeNum int) (string, error) {
+	isMovie := IsCurrentMediaMovie()
+	audio, subtitles := playerTrackChoices(socketPath)
+	menuItems := playerMenuOptions(isMovie, audio, subtitles)
+
+	items := make([]tui.PickItem, len(menuItems))
+	for i, it := range menuItems {
+		items[i] = tui.PickItem{Label: it.Label, Key: it.Key}
+	}
+	idx, err := tui.Pick(items, tui.PickOptions{
+		Breadcrumb:   "Player",
 		WindowTitle:  "GoAnime - Player",
 		ItemSingular: "option",
 		ItemPlural:   "options",
+		Action:       "choose",
+		Panel:        nowPlayingPanel(socketPath, animeName, currentEpisodeNum, isMovie),
 	})
 
 	if err != nil {
@@ -1283,10 +1339,15 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display
+	// Get anime name for display. The Discord updater only exists while
+	// Discord is running; the name HandleDownloadAndPlay stored is there
+	// either way.
 	var animeName string
 	if updater != nil && updater.GetAnime() != nil {
 		animeName = updater.GetAnime().Name
+	}
+	if animeName == "" {
+		animeName = snapshotMedia().AnimeName
 	}
 
 	for {
@@ -1298,7 +1359,7 @@ func handleUserInput(
 			return ErrBackToDownloadOptions
 		}
 
-		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
+		choice, err := showPlayerMenu(socketPath, animeName, currentEpisodeNum)
 		if err != nil {
 			// If the menu was disrupted (e.g., by a concurrent terminal writer),
 			// treat it as "go back" rather than a fatal error.
@@ -1485,8 +1546,8 @@ func selectAudioTrack(socketPath string) {
 	currentID, _ := GetCurrentAudioTrack(socketPath)
 
 	type trackOption struct {
-		Label string
-		ID    int
+		Item tui.PickItem
+		ID   int
 	}
 	var trackItems []trackOption
 	for _, track := range tracks {
@@ -1538,18 +1599,14 @@ func selectAudioTrack(socketPath string) {
 			parts = append(parts, channels)
 		}
 
-		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
-		if id == currentID {
-			label = "* " + label + " (current)"
-		}
-		trackItems = append(trackItems, trackOption{Label: label, ID: id})
+		trackItems = append(trackItems, trackOption{Item: trackPickItem(id, parts, id == currentID), ID: id})
 	}
 
-	labels := make([]string, len(trackItems))
+	items := make([]tui.PickItem, len(trackItems))
 	for i, it := range trackItems {
-		labels[i] = it.Label
+		items[i] = it.Item
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
+	idx, err := tui.Pick(items, tui.PickOptions{
 		Breadcrumb:   "Player > Audio",
 		WindowTitle:  "GoAnime - Audio Track",
 		ItemSingular: "track",
@@ -1567,6 +1624,21 @@ func selectAudioTrack(socketPath string) {
 	}
 }
 
+// trackPickItem is a track's row: its name (title, else language) as the
+// label, the track number and technical details at the right, and the mark
+// of the track mpv is playing.
+func trackPickItem(id int, parts []string, current bool) tui.PickItem {
+	item := tui.PickItem{Label: fmt.Sprintf("Track %d", id)}
+	if len(parts) > 0 {
+		item.Label = parts[0]
+		item.Details = strings.Join(append([]string{fmt.Sprintf("Track %d", id)}, parts[1:]...), " · ")
+	}
+	if current {
+		item.Status = tui.PickCurrent
+	}
+	return item
+}
+
 // selectSubtitleTrack shows a menu to select subtitle track
 func selectSubtitleTrack(socketPath string) {
 	tracks, err := GetSubtitleTracks(socketPath)
@@ -1578,16 +1650,16 @@ func selectSubtitleTrack(socketPath string) {
 	currentID, _ := GetCurrentSubtitleTrack(socketPath)
 
 	type trackOption struct {
-		Label string
-		ID    int
+		Item tui.PickItem
+		ID   int
 	}
 	var trackItems []trackOption
 	// Add option to disable subtitles
-	disableLabel := "Disable subtitles"
+	disable := tui.PickItem{Label: "Disable subtitles"}
 	if currentID == 0 {
-		disableLabel = "* " + disableLabel + " (current)"
+		disable.Status = tui.PickCurrent
 	}
-	trackItems = append(trackItems, trackOption{Label: disableLabel, ID: 0})
+	trackItems = append(trackItems, trackOption{Item: disable, ID: 0})
 
 	for _, track := range tracks {
 		id := int(track["id"].(float64))
@@ -1617,18 +1689,14 @@ func selectSubtitleTrack(socketPath string) {
 			parts = append(parts, fmt.Sprintf("Subtitle %d", id))
 		}
 
-		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
-		if id == currentID {
-			label = "* " + label + " (current)"
-		}
-		trackItems = append(trackItems, trackOption{Label: label, ID: id})
+		trackItems = append(trackItems, trackOption{Item: trackPickItem(id, parts, id == currentID), ID: id})
 	}
 
-	labels := make([]string, len(trackItems))
+	items := make([]tui.PickItem, len(trackItems))
 	for i, it := range trackItems {
-		labels[i] = it.Label
+		items[i] = it.Item
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
+	idx, err := tui.Pick(items, tui.PickOptions{
 		Breadcrumb:   "Player > Subtitles",
 		WindowTitle:  "GoAnime - Subtitle Track",
 		ItemSingular: "track",

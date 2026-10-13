@@ -329,7 +329,7 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 				return nil
 			})
 
-		if err := tui.RunClean(prompt.Run); err != nil {
+		if err := tui.RunClean(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 			return nil, nil, err
 		}
 
