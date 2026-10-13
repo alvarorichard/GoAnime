@@ -6,6 +6,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/animedrive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -192,18 +193,28 @@ func TestTopCineProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
 	}
 }
 
+func TestAnimeDriveProvider_DefaultDisabledAndPriority(t *testing.T) {
+	t.Parallel()
+	s, ok := source.Registered(source.AnimeDrive)
+	require.True(t, ok)
+	descriptor := s.Describe()
+	assert.Equal(t, 40, descriptor.Priority)
+	assert.True(t, descriptor.DefaultDisabled)
+}
+
 // TestResolve_LiveRegistry resolves against the REAL registry populated by
 // this package's init() — it pins the production descriptors' matching
 // behavior end to end (the source-package tests use mirrored fakes).
 func TestResolve_LiveRegistry(t *testing.T) {
-	t.Parallel()
+	t.Setenv("GOANIME_ENABLED_SOURCES", "AnimeDrive")
+	t.Setenv("GOANIME_DISABLED_SOURCES", "")
 	tests := []struct {
 		name     string
 		anime    *models.Anime
@@ -222,10 +233,12 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		// A TopCine episode plays from the StartFlix panel; the title's Source
 		// still routes it back to TopCine.
 		{"TopCine title, panel URL", &models.Anime{Source: "TopCine", URL: "https://www.painel-aso.sbs/embed/1396"}, source.TopCine},
-		{"topcine URL", &models.Anime{URL: "https://topcine3.site/serie/breaking-bad"}, source.TopCine},
+		{"explicit AnimeDrive", &models.Anime{Source: "AnimeDrive"}, source.AnimeDrive},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
 		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
+		{"animedrive tag", &models.Anime{Name: "Naruto [animedrive]"}, source.AnimeDrive},
+		{"AnimeDrive URL uses registered host", &models.Anime{URL: animedrive.AnimeDriveBase + "/anime/x"}, source.AnimeDrive},
 		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
 		{"startflix URL", &models.Anime{URL: "https://www.startflix.biz/series/naruto/"}, source.StartFlix},
 		{"startflix panel URL", &models.Anime{URL: "https://www.painel-aso.sbs/filme/tt0816692"}, source.StartFlix},
@@ -234,7 +247,6 @@ func TestResolve_LiveRegistry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			src, resolved := source.Resolve(tt.anime)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 			if tt.wantKind != source.Unknown {
@@ -248,7 +260,8 @@ func TestResolve_LiveRegistry(t *testing.T) {
 // TestResolveURL_LiveRegistry mirrors TestResolve_LiveRegistry for URL-only
 // resolution against the real registered descriptors.
 func TestResolveURL_LiveRegistry(t *testing.T) {
-	t.Parallel()
+	t.Setenv("GOANIME_ENABLED_SOURCES", "AnimeDrive")
+	t.Setenv("GOANIME_DISABLED_SOURCES", "")
 	tests := []struct {
 		url      string
 		wantKind source.SourceKind
@@ -259,15 +272,15 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		{"https://animesdigital.org/video/a/139026/", source.AnimesDigital},
 		// The AllAnime host was removed; its URLs now resolve to nothing.
 		{"https://allanime.to/anime/hHjXnUTda", source.Unknown},
-		// The SuperFlix host was removed too.
+		// Previous SuperFlix host was removed too.
 		{"https://superflix.to/naruto", source.Unknown},
 		{"https://www.startflix.biz/series/naruto/", source.StartFlix},
 		{"https://topcine3.site/filme/zona-zero", source.TopCine},
+		{animedrive.AnimeDriveBase + "/anime/naruto", source.AnimeDrive},
 		{"https://example.com/video", source.Unknown},
 	}
 	for _, tt := range tests {
 		t.Run("url="+tt.url, func(t *testing.T) {
-			t.Parallel()
 			_, resolved := source.ResolveURL(tt.url)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 		})

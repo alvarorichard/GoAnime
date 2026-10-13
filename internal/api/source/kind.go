@@ -15,6 +15,7 @@ const (
 	StartFlix     SourceKind = "StartFlix"
 	TopCine       SourceKind = "TopCine"
 	AnimesDigital SourceKind = "AnimesDigital"
+	AnimeDrive    SourceKind = "AnimeDrive"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -36,4 +37,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	StartFlix:     scraper.StartFlixType,
 	TopCine:       scraper.TopCineType,
 	AnimesDigital: scraper.AnimesDigitalType,
+	AnimeDrive:    scraper.AnimeDriveType,
 }

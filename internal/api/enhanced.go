@@ -193,6 +193,8 @@ func searchAnimeEnhanced(
 	var registryKinds []apisource.SourceKind
 	normalizedSource := strings.ToLower(strings.TrimSpace(src))
 	switch normalizedSource {
+	case "hianime":
+		registryKinds = []apisource.SourceKind{apisource.HiAnime}
 	case "animefire":
 		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
@@ -203,12 +205,19 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
 		registryKinds = []apisource.SourceKind{apisource.TopCine}
-	case MovieTVSources:
+	case "movietv":
 		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine}
-	case "hianime", "anidb": // "anidb" is what this source was called before 2026-09-22
-		registryKinds = []apisource.SourceKind{apisource.HiAnime}
+	case "animedrive":
+		registryKinds = []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
-		registryKinds = []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.AnimesDigital, apisource.StartFlix, apisource.TopCine}
+		registryKinds = []apisource.SourceKind{
+			apisource.AnimeFire,
+			apisource.Goyabu,
+			apisource.AnimesDigital,
+			apisource.StartFlix,
+			apisource.TopCine,
+			apisource.AnimeDrive,
+		}
 	}
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
@@ -246,14 +255,16 @@ func searchAnimeEnhanced(
 				anime.Source = "Animefire.io"
 			case "goyabu":
 				anime.Source = "Goyabu"
+			case "hianime":
+				anime.Source = "HiAnime"
 			case "animesdigital":
 				anime.Source = "AnimesDigital"
 			case "startflix":
 				anime.Source = "StartFlix"
 			case "topcine":
 				anime.Source = "TopCine"
-			case "hianime", "anidb":
-				anime.Source = "HiAnime"
+			case "animedrive":
+				anime.Source = "AnimeDrive"
 			}
 			if anime.Source == "" {
 				lowerURL := strings.ToLower(anime.URL)
@@ -262,14 +273,16 @@ func searchAnimeEnhanced(
 					anime.Source = "Animefire.io"
 				case strings.Contains(lowerURL, "goyabu"):
 					anime.Source = "Goyabu"
+				case strings.Contains(lowerURL, "hianime"):
+					anime.Source = "HiAnime"
 				case strings.Contains(lowerURL, "animesdigital.org"):
 					anime.Source = "AnimesDigital"
 				case strings.Contains(lowerURL, "startflix"):
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
 					anime.Source = "TopCine"
-				case strings.Contains(lowerURL, "hianime.at"), strings.Contains(lowerURL, "anidb.app"):
-					anime.Source = "HiAnime"
+				case strings.Contains(lowerURL, "animesdrive"):
+					anime.Source = "AnimeDrive"
 				}
 			}
 		}
@@ -287,6 +300,7 @@ func searchAnimeEnhanced(
 		"Goyabu", breakdown.Goyabu,
 		"AnimesDigital", breakdown.AnimesDigital,
 		"HiAnime", breakdown.HiAnime,
+		"AnimeDrive", breakdown.AnimeDrive,
 	)
 
 	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
@@ -425,11 +439,12 @@ func GetAnimeEpisodesWithSource(anime *models.Anime) ([]models.Episode, error) {
 // testable in isolation.
 type sourceBreakdown struct {
 	AnimeFire     int
-	StartFlix     int
-	TopCine       int
 	Goyabu        int
 	AnimesDigital int
 	HiAnime       int
+	StartFlix     int
+	TopCine       int
+	AnimeDrive    int
 }
 
 // countSourceBreakdown tallies anime results by Source field using
@@ -445,16 +460,18 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 		switch {
 		case strings.Contains(strings.ToLower(anime.Source), "animefire"):
 			b.AnimeFire++
-		case anime.Source == "StartFlix":
-			b.StartFlix++
-		case anime.Source == "TopCine":
-			b.TopCine++
-		case anime.Source == "Goyabu":
+		case strings.EqualFold(anime.Source, "Goyabu"):
 			b.Goyabu++
-		case anime.Source == "AnimesDigital":
+		case strings.EqualFold(anime.Source, "AnimesDigital"):
 			b.AnimesDigital++
-		case anime.Source == "HiAnime":
+		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
+		case strings.EqualFold(anime.Source, "StartFlix"):
+			b.StartFlix++
+		case strings.EqualFold(anime.Source, "TopCine"):
+			b.TopCine++
+		case strings.EqualFold(anime.Source, "AnimeDrive"):
+			b.AnimeDrive++
 		}
 	}
 	return b

@@ -67,14 +67,20 @@ func TestCountSourceBreakdown_AnimeFireCaseInsensitive(t *testing.T) {
 		{Source: "ANIMEFIRE"},
 		{Source: "animefire"},
 		{Source: "Goyabu"},
+		{Source: "HiAnime"},
 		{Source: "StartFlix"},
+		{Source: "TopCine"},
+		{Source: "AnimeDrive"},
 	}
 
 	got := countSourceBreakdown(animes)
 
 	assert.Equal(t, 5, got.AnimeFire, "all AnimeFire spellings must be counted")
 	assert.Equal(t, 1, got.Goyabu)
+	assert.Equal(t, 1, got.HiAnime)
 	assert.Equal(t, 1, got.StartFlix)
+	assert.Equal(t, 1, got.TopCine)
+	assert.Equal(t, 1, got.AnimeDrive)
 }
 
 // TestCountSourceBreakdown_RealisticPayload mirrors the user-reported log:
