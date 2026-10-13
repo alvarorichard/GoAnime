@@ -661,13 +661,12 @@ func (p *animeDriveProvider) scraper() (scraper.UnifiedScraper, error) {
 
 func (p *animeDriveProvider) Describe() source.Descriptor {
 	return source.Descriptor{
-		Kind:            source.AnimeDrive,
-		Priority:        60,
-		DefaultDisabled: true,
-		Explicit:        []string{"AnimeDrive", "Anime Drive"},
-		Tags:            []string{"[animedrive]"},
-		URLMatchers:     []string{"animesdrive.cloud"},
-		ProbeURL:        "https://animesdrive.cloud",
+		Kind:        source.AnimeDrive,
+		Priority:    60,
+		Explicit:    []string{"AnimeDrive", "Anime Drive"},
+		Tags:        []string{"[animedrive]"},
+		URLMatchers: []string{"animesdrive.cloud"},
+		ProbeURL:    "https://animesdrive.cloud",
 	}
 }
 

@@ -96,7 +96,7 @@ func (c *AnimeDriveClient) isAvailableStreamURL(streamURL string) bool {
 func (c *AnimeDriveClient) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	req.Header.Set("Accept-Language", netx.AcceptLanguage)
 	req.Header.Set("Referer", strings.TrimRight(c.baseURL, "/")+"/")
 }
 

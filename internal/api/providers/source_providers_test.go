@@ -200,13 +200,13 @@ func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	}
 }
 
-func TestAnimeDriveProvider_DefaultDisabledAndPriority(t *testing.T) {
+func TestAnimeDriveProvider_EnabledByDefaultAndPriority(t *testing.T) {
 	t.Parallel()
 	s, ok := source.Registered(source.AnimeDrive)
 	require.True(t, ok)
 	descriptor := s.Describe()
 	assert.Equal(t, 60, descriptor.Priority)
-	assert.True(t, descriptor.DefaultDisabled)
+	assert.False(t, descriptor.DefaultDisabled, "AnimeDrive playback is verified live; it ships enabled")
 }
 
 // TestResolve_LiveRegistry resolves against the REAL registry populated by
