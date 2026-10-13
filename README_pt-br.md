@@ -217,22 +217,32 @@ Rode `goanime -h` para ver todas as opções.
 | `Enter`               | Selecionar                |
 | `Esc`                 | Voltar                    |
 
+Num menu que mostra uma letra ao lado de cada opção, essa letra escolhe a
+opção na hora; qualquer outra tecla continua filtrando.
+
+A lista de episódios marca com ✓ os episódios que você terminou e com ◐ o que
+você parou no meio, e abre onde você parou.
+
 ### Durante a reprodução
 
-Enquanto o mpv reproduz, o terminal mostra o menu do player:
+Enquanto o mpv reproduz, o terminal mostra o menu do player, com o quanto do
+episódio já passou:
 
-| Opção                            | O que faz                                              |
-| -------------------------------- | ------------------------------------------------------ |
-| Next episode, Previous episode   | Reproduz o próximo episódio ou o anterior              |
-| Select episode                   | Escolhe outro episódio da lista                        |
-| Change anime                     | Busca outro título                                     |
-| Skip intro                       | Pula a abertura, quando o AniSkip tem os tempos dela   |
-| ← Back                           | Volta ao menu de download e reprodução                 |
-| Exit                             | Fecha o mpv e sai                                      |
+| Tecla | Opção                            | O que faz                                              |
+| ----- | -------------------------------- | ------------------------------------------------------ |
+| `n`   | Next episode                     | Reproduz o próximo episódio                            |
+| `p`   | Previous episode                 | Reproduz o episódio anterior                           |
+| `e`   | Select episode                   | Escolhe outro episódio da lista                        |
+| `c`   | Change anime                     | Busca outro título                                     |
+| `s`   | Skip intro                       | Pula a abertura, quando o AniSkip tem os tempos dela   |
+| `a`   | Audio track                      | Troca a faixa de áudio, quando há mais de uma          |
+| `t`   | Subtitles                        | Troca ou desliga as legendas, quando há alguma         |
+| `Esc` | ← Back                           | Volta ao menu de download e reprodução                 |
+| `q`   | Exit                             | Fecha o mpv e sai                                      |
 
-Em filmes, o menu oferece Replay movie, Change movie e Exit. Quando um
-episódio ou filme tem progresso salvo, o GoAnime pergunta se você quer
-continuar de onde parou.
+Em filmes, o menu oferece Replay movie (`r`), Change movie (`c`), as opções de
+faixa, ← Back e Exit. Quando um episódio ou filme tem progresso salvo, o
+GoAnime pergunta se você quer continuar de onde parou.
 
 ### Upscaling em tempo real
 

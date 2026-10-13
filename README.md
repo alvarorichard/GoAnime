@@ -215,22 +215,32 @@ Run `goanime -h` for the full list of options.
 | `Enter`               | Select                    |
 | `Esc`                 | Go back                   |
 
+In a menu that shows a letter beside each option, that letter picks the
+option at once; any other key still filters.
+
+The episode list marks the episodes you finished with ✓ and the one you
+stopped partway with ◐, and opens where you left off.
+
 ### While watching
 
-While mpv plays, the terminal shows the player menu:
+While mpv plays, the terminal shows the player menu, with how far the episode
+has played:
 
-| Option                           | What it does                                          |
-| -------------------------------- | ----------------------------------------------------- |
-| Next episode, Previous episode   | Play the next or previous episode                     |
-| Select episode                   | Pick another episode from the list                    |
-| Change anime                     | Search for another title                              |
-| Skip intro                       | Jump past the opening, when AniSkip has its timestamps |
-| ← Back                           | Return to the download and playback menu              |
-| Exit                             | Close mpv and quit                                    |
+| Key   | Option                           | What it does                                           |
+| ----- | -------------------------------- | ------------------------------------------------------ |
+| `n`   | Next episode                     | Play the next episode                                  |
+| `p`   | Previous episode                 | Play the previous episode                              |
+| `e`   | Select episode                   | Pick another episode from the list                     |
+| `c`   | Change anime                     | Search for another title                               |
+| `s`   | Skip intro                       | Jump past the opening, when AniSkip has its timestamps |
+| `a`   | Audio track                      | Switch the audio track, when there is more than one    |
+| `t`   | Subtitles                        | Switch or turn off subtitles, when there are any       |
+| `Esc` | ← Back                           | Return to the download and playback menu               |
+| `q`   | Exit                             | Close mpv and quit                                     |
 
-For a movie, the menu offers Replay movie, Change movie and Exit. When an
-episode or movie has saved progress, GoAnime asks whether to resume from where
-you stopped.
+For a movie, the menu offers Replay movie (`r`), Change movie (`c`), the track
+options, ← Back and Exit. When an episode or movie has saved progress, GoAnime
+asks whether to resume from where you stopped.
 
 ### Real-time upscaling
 

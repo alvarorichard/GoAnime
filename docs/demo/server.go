@@ -14,9 +14,13 @@
 //	GET /anime/<id>
 //	GET /episode/<id>
 //
+// and serves the stream itself under /media/. Like the real CDN's, the
+// stream URL names an HLS playlist: the client asks for it and passes over a
+// URL that does not answer with one.
+//
 // Usage:
 //
-//	go run docs/demo/server.go -addr 127.0.0.1:8765 -media demo.mp4
+//	go run docs/demo/server.go -addr 127.0.0.1:8765 -media <dir with index.m3u8>
 package main
 
 import (
@@ -100,7 +104,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8765", "address to listen on")
-	media := flag.String("media", "demo.mp4", "video file served for every episode")
+	media := flag.String("media", "hls", "directory holding the HLS playlist (index.m3u8) every episode plays")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -138,15 +142,13 @@ func main() {
 			"id": r.PathValue("id"),
 			"streams": []stream{{
 				Audio:     "Legendado",
-				URL:       "http://" + r.Host + "/media/demo.mp4",
+				URL:       "http://" + r.Host + "/media/index.m3u8",
 				Qualities: []string{"1080p", "720p"},
 			}},
 		})
 	})
 
-	mux.HandleFunc("GET /media/demo.mp4", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, *media)
-	})
+	mux.Handle("GET /media/", http.StripPrefix("/media/", http.FileServer(http.Dir(*media))))
 
 	for _, a := range catalog {
 		log.Printf("%s (%s, %s), public domain", a.title, a.credit, a.year)

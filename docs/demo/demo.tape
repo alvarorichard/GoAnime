@@ -41,7 +41,7 @@ Sleep 400ms
 Enter
 
 # Results.
-Wait+Screen@30s /Search > Results/
+Wait+Screen@30s /RESULTS/
 Sleep 1.5s
 Down 2
 Sleep 600ms
@@ -56,13 +56,11 @@ Type "G"
 Sleep 1s
 Enter
 
-# The film is playing in mpv; the terminal shows the player controls.
-# Exit, the last entry, stops playback and quits.
-Wait+Screen@60s /Player Controls/
+# The film is playing in mpv; the terminal shows the player menu, with the
+# time played so far. q, the key beside Exit, stops playback and quits.
+Wait+Screen@60s /NOW PLAYING/
 Sleep 3s
-Type "G"
-Sleep 800ms
-Enter
+Type "q"
 Wait+Line@15s /^\$\s*$/
 Sleep 1.5s
 
