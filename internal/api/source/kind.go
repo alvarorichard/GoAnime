@@ -9,11 +9,12 @@ import "github.com/alvarorichard/Goanime/internal/scraper"
 type SourceKind string
 
 const (
-	AnimeFire SourceKind = "AnimeFire"
-	Goyabu    SourceKind = "Goyabu"
-	HiAnime   SourceKind = "HiAnime"
-	StartFlix SourceKind = "StartFlix"
-	TopCine   SourceKind = "TopCine"
+	AnimeFire  SourceKind = "AnimeFire"
+	Goyabu     SourceKind = "Goyabu"
+	HiAnime    SourceKind = "HiAnime"
+	StartFlix  SourceKind = "StartFlix"
+	TopCine    SourceKind = "TopCine"
+	AnimeDrive SourceKind = "AnimeDrive"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -29,9 +30,10 @@ func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
 }
 
 var scraperTypeMap = map[SourceKind]scraper.ScraperType{
-	AnimeFire: scraper.AnimefireType,
-	Goyabu:    scraper.GoyabuType,
-	HiAnime:   scraper.HiAnimeType,
-	StartFlix: scraper.StartFlixType,
-	TopCine:   scraper.TopCineType,
+	AnimeFire:  scraper.AnimefireType,
+	Goyabu:     scraper.GoyabuType,
+	HiAnime:    scraper.HiAnimeType,
+	StartFlix:  scraper.StartFlixType,
+	TopCine:    scraper.TopCineType,
+	AnimeDrive: scraper.AnimeDriveType,
 }

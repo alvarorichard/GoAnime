@@ -554,3 +554,97 @@ func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 	}
 	return topCineStreamFn(anime, episode, quality)
 }
+
+// --- AnimeDrive Provider ---
+
+type animeDriveProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&animeDriveProvider{})
+}
+
+func (p *animeDriveProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnimeDriveType)
+}
+
+func (p *animeDriveProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.AnimeDrive,
+		Priority:    25,
+		Explicit:    []string{"AnimeDrive", "Anime Drive"},
+		Tags:        []string{"[animedrive]"},
+		URLMatchers: []string{"animesdrive.online"},
+		ProbeURL:    "https://animesdrive.online",
+	}
+}
+
+func (p *animeDriveProvider) HasSeasons() bool {
+	return false
+}
+
+func (p *animeDriveProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := adapter.SearchAnime(query)
+	if err != nil {
+		return nil, err
+	}
+
+	tagResults(results, source.AnimeDrive)
+	return results, nil
+}
+
+func (p *animeDriveProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+
+	return adapter.GetAnimeEpisodes(anime.URL)
+}
+
+func (p *animeDriveProvider) FetchStreamURL(
+	ctx context.Context,
+	episode *models.Episode,
+	anime *models.Anime,
+	_ string,
+) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+
+	adapter, err := p.scraper()
+	if err != nil {
+		return "", err
+	}
+
+	streamURL, _, err := adapter.GetStreamURL(episode.URL)
+	if err != nil {
+		return "", fmt.Errorf("animeDrive stream: %w", err)
+	}
+
+	if streamURL == "" {
+		return "", fmt.Errorf("empty stream URL returned from AnimeDrive")
+	}
+
+	return streamURL, nil
+}

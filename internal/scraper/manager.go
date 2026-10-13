@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/animedrive"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
@@ -28,11 +29,12 @@ import (
 type ScraperType int
 
 const (
-	AnimefireType ScraperType = iota
-	GoyabuType                // PT-BR anime source
-	HiAnimeType               // hianime.at — subbed/dubbed HLS
-	StartFlixType             // StartFlix PT-BR movies/series
-	TopCineType               // TopCine PT-BR movies/series, played through the StartFlix panel
+	AnimefireType  ScraperType = iota
+	GoyabuType                 // PT-BR anime source
+	HiAnimeType                // hianime.at — subbed/dubbed HLS
+	StartFlixType              // StartFlix PT-BR movies/series
+	TopCineType                // TopCine PT-BR movies/series, played through the StartFlix panel
+	AnimeDriveType             // AnimeDrive — PT-BR anime source
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -75,6 +77,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &StartFlixAdapter{client: startflix.Shared()}, nil
 	case TopCineType:
 		return &TopCineAdapter{client: topcine.Shared(), panel: startflix.Shared()}, nil
+	case AnimeDriveType:
+		return &AnimeDriveAdapter{client: animedrive.NewAnimeDriveClient()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -94,6 +98,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return startflix.SourceName
 	case TopCineType:
 		return topcine.SourceName
+	case AnimeDriveType:
+		return "AnimeDrive"
 	default:
 		return "Desconhecido"
 	}
@@ -200,6 +206,34 @@ func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...any) (stre
 
 func (a *AnimefireAdapter) GetType() ScraperType {
 	return AnimefireType
+}
+
+// Animedriver adapts animedrive.AnimedriveClient to UnifiedScraper interface
+type AnimeDriveAdapter struct {
+	client *animedrive.AnimeDriveClient
+}
+
+func (a *AnimeDriveAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(query)
+}
+
+func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(animeURL)
+}
+
+func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	url, meta, err := a.client.GetStreamURL(episodeURL)
+	metadata = meta
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["AnimeDrive"] = "animedrive"
+
+	return url, metadata, err
+}
+
+func (a *AnimeDriveAdapter) GetType() ScraperType {
+	return AnimeDriveType
 }
 
 // GoyabuAdapter adapts goyabu.GoyabuClient to UnifiedScraper interface
