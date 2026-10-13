@@ -554,7 +554,7 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 		break
 	}
 	if selected == nil {
-		return "", nil, fmt.Errorf("AnimeDrive: none of the %d servers on this episode responded", len(tracks))
+		return "", nil, fmt.Errorf("none of the %d servers on this episode responded", len(tracks))
 	}
 
 	metadata = map[string]string{
@@ -569,7 +569,7 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 func animeDriveQualityRank(label string) int {
 	lower := strings.ToLower(label)
 	switch {
-	case strings.Contains(lower, "4k"), strings.Contains(lower, "2160"), strings.Contains(lower, "fhd"), strings.Contains(lower, "1080"):
+	case strings.Contains(lower, "4k"), strings.Contains(lower, "2160"), strings.Contains(lower, "fhd"), strings.Contains(lower, "fullhd"), strings.Contains(lower, "full-hd"), strings.Contains(lower, "1080"):
 		return 4
 	case strings.Contains(lower, "hd"), strings.Contains(lower, "720"):
 		return 3

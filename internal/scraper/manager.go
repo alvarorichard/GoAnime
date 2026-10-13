@@ -251,6 +251,14 @@ func (a *AnimeDriveAdapter) GetType() ScraperType {
 	return AnimeDriveType
 }
 
+// NewAnimeDriveAdapterForTest builds an AnimeDrive adapter whose client talks
+// to a test server instead of animesdrive.cloud. It exists so registry-level
+// cascade tests can drive the real adapter glue offline; without it a test can
+// only fake the adapter, and an adapter bug would go unnoticed. Only for tests.
+func NewAnimeDriveAdapterForTest(serverURL string) UnifiedScraper {
+	return &AnimeDriveAdapter{client: animedrive.NewClientForTest(serverURL)}
+}
+
 // GoyabuAdapter adapts goyabu.GoyabuClient to UnifiedScraper interface
 type GoyabuAdapter struct {
 	client *goyabu.GoyabuClient
