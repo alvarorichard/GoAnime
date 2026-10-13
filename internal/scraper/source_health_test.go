@@ -19,6 +19,7 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		{"topcine", TopCineType, "dexter"},
 		{"allanime default", HiAnimeType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
+		{"animesdigital default", AnimesDigitalType, "naruto"},
 		{"animedrive default", AnimeDriveType, "naruto"},
 	}
 	for _, tt := range tests {
@@ -42,6 +43,11 @@ func TestHealthTargets_IncludeEveryMovieTVSource(t *testing.T) {
 	t.Parallel()
 	assert.Contains(t, healthTargets(), StartFlixType)
 	assert.Contains(t, healthTargets(), TopCineType)
+}
+
+func TestHealthTargets_IncludeAnimesDigital(t *testing.T) {
+	t.Parallel()
+	assert.Contains(t, healthTargets(), AnimesDigitalType)
 }
 
 func TestCheckSourceHealth_NilScraperFails(t *testing.T) {

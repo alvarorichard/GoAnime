@@ -244,16 +244,17 @@ SD.
 
 ## Fontes
 
-| Fonte     | Conteúdo         | Idioma                        | Observações                                   |
-| --------- | ---------------- | ----------------------------- | --------------------------------------------- |
-| HiAnime   | Animes           | Inglês, legendado e dublado   | Legendado por padrão                          |
-| AnimeFire | Animes           | Português (Brasil)            |                                               |
-| Goyabu    | Animes           | Português (Brasil)            | Desativada por padrão, veja abaixo            |
-| StartFlix | Filmes, séries   | Português (Brasil)            | Dublado e legendado                           |
-| TopCine   | Filmes, séries   | Português (Brasil)            | Apenas catálogo; a reprodução usa o StartFlix |
+| Fonte         | Conteúdo       | Idioma                      | Observações                                   |
+| ------------- | -------------- | --------------------------- | --------------------------------------------- |
+| HiAnime       | Animes         | Inglês, legendado e dublado | Legendado por padrão                          |
+| AnimeFire     | Animes         | Português (Brasil)          |                                               |
+| AnimesDigital | Animes         | Português (Brasil)          | Legendado e dublado                           |
+| Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
+| StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
+| TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
 
-`--source` limita a busca a uma fonte: `hianime`, `animefire`, `startflix` ou
-`topcine`, ou `ptbr` para todas as fontes em português.
+`--source` limita a busca a uma fonte: `hianime`, `animefire`, `animesdigital`,
+`startflix` ou `topcine`, ou `ptbr` para todas as fontes em português.
 
 O Goyabu fica atrás de uma verificação do Cloudflare e vem desativado. Ele
 ainda funciona em redes que o Cloudflare não verifica; para ativá-lo, use

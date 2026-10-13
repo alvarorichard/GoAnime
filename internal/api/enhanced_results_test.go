@@ -58,12 +58,13 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
 			{src: "animedrive", want: []source.SourceKind{source.AnimeDrive}},
+			{src: "animesdigital", want: []source.SourceKind{source.AnimesDigital}},
 			{src: "superflix", want: nil}, // removed source: no longer a valid selector
 			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
 			{src: "topcine", want: []source.SourceKind{source.TopCine}},
 			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.StartFlix, source.TopCine, source.AnimeDrive}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.StartFlix, source.TopCine, source.AnimeDrive}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}
@@ -95,6 +96,8 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 		}{
 			{name: "explicit hianime source", src: "hianime", url: "opaque", want: "HiAnime"},
 			{name: "explicit goyabu source", src: "goyabu", url: "opaque", want: "Goyabu"},
+			{name: "explicit animesdigital source", src: "animesdigital", url: "opaque", want: "AnimesDigital"},
+			{name: "animesdigital URL", url: "https://animesdigital.org/anime/a/frieren", want: "AnimesDigital"},
 			{name: "explicit startflix source", src: "startflix", url: "https://www.startflix.biz/series/x/", want: "StartFlix"},
 			{name: "removed superflix selector sets nothing", src: "superflix", url: "8143", want: ""},
 			{name: "hianime URL", url: "https://HIANIME.at/frieren-1", want: "HiAnime"},
