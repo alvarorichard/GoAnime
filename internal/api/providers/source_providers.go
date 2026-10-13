@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
@@ -660,7 +662,7 @@ func (p *animeDriveProvider) scraper() (scraper.UnifiedScraper, error) {
 func (p *animeDriveProvider) Describe() source.Descriptor {
 	return source.Descriptor{
 		Kind:            source.AnimeDrive,
-		Priority:        40,
+		Priority:        60,
 		DefaultDisabled: true,
 		Explicit:        []string{"AnimeDrive", "Anime Drive"},
 		Tags:            []string{"[animedrive]"},
@@ -730,11 +732,16 @@ func (p *animeDriveProvider) FetchStreamURL(
 	}
 	streamURL, metadata, err := adapter.GetStreamURL(episode.URL, quality)
 	if err != nil {
-		return "", fmt.Errorf("animeDrive stream: %w", err)
+		// The leaf client already returns classified *netx.SourceDiagnostic
+		// errors ("AnimeDrive stream: ..."); wrapping them again would
+		// duplicate the prefix, so only wrap unclassified errors.
+		var diag *netx.SourceDiagnostic
+		if errors.As(err, &diag) {
+			return "", err
+		}
+		return "", fmt.Errorf("AnimeDrive stream: %w", err)
 	}
-	if ref := metadata["referer"]; ref != "" {
-		util.SetGlobalReferer(ref)
-	}
+	applyPlaybackMetadata(metadata)
 
 	if streamURL == "" {
 		return "", fmt.Errorf("empty stream URL returned from AnimeDrive")

@@ -27,31 +27,11 @@ var (
 	animeDriveDigitRe = regexp.MustCompile(`(\d+)`)
 )
 
-// AnimeDriveGenre represents a genre from AnimeDrive
-type AnimeDriveGenre struct {
-	ID   string
-	Name string
-	URL  string
-}
-
-// AnimeDriveShow represents an anime from AnimeDrive
-type AnimeDriveShow struct {
-	ID        string
-	Title     string
-	URL       string
-	Thumbnail string
-	Rating    string
-	Year      string
-	IsDubbed  bool
-}
-
 // AnimeDriveEpisode represents an episode from AnimeDrive
 type AnimeDriveEpisode struct {
-	Number    string
-	Title     string
-	URL       string
-	Thumbnail string
-	Qualities []string
+	Number string
+	Title  string
+	URL    string
 }
 
 // AnimeDriveDetails represents anime details including episodes
@@ -64,14 +44,13 @@ type AnimeDriveDetails struct {
 	Episodes  []AnimeDriveEpisode
 }
 
-// AnimeDriveClient handles interactions with animesdrive.online
+// AnimeDriveClient handles interactions with animesdrive.cloud
 type AnimeDriveClient struct {
 	client     *http.Client
 	baseURL    string
 	userAgent  string
 	maxRetries int
 	retryDelay time.Duration
-	totalPages int
 }
 
 // NewAnimeDriveClient creates a new AnimeDrive client
@@ -82,24 +61,6 @@ func NewAnimeDriveClient() *AnimeDriveClient {
 		userAgent:  netx.UserAgent,
 		maxRetries: 2,
 		retryDelay: 100 * time.Millisecond,
-		totalPages: 371,
-	}
-}
-
-// NewAnimeDriveClientWithContext creates a new AnimeDrive client with custom
-// settings and SSRF-safe transport for use when the base URL may not be the
-// hardcoded default.
-func NewAnimeDriveClientWithContext(timeout time.Duration, maxRetries int) *AnimeDriveClient {
-	return &AnimeDriveClient{
-		client: &http.Client{
-			Timeout:   timeout,
-			Transport: netx.SafeScraperTransport(timeout),
-		},
-		baseURL:    AnimeDriveBase,
-		userAgent:  netx.UserAgent,
-		maxRetries: maxRetries,
-		retryDelay: 100 * time.Millisecond,
-		totalPages: 371,
 	}
 }
 
@@ -331,6 +292,10 @@ func (c *AnimeDriveClient) GetAnimeDetails(animeURL string) (*AnimeDriveDetails,
 		return nil, netx.NewParserError("AnimeDrive", "details", "failed to parse HTML", err)
 	}
 
+	if err := netx.CheckChallengeDocument(doc, "AnimeDrive details"); err != nil {
+		return nil, err
+	}
+
 	// Extract title - prioritize specific DooPlay selectors over generic h1
 	titleElement := doc.Find(".sheader .data h1, h1.entry-title").First()
 	title := strings.TrimSpace(titleElement.Text())
@@ -473,10 +438,16 @@ func (c *AnimeDriveClient) resolveURL(ref string) string {
 	return c.baseURL + "/" + ref
 }
 
-func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (string, map[string]string, error) {
+// GetStreamURL resolves the episode page to the first playable server URL.
+// The site marks its preferred server with is-active; quality only reorders
+// that list (best prefers FHD > HD > SD, worst reverses it) and never filters
+// by audio, so Legendado/Dublado pages keep the site's order.
+func (c *AnimeDriveClient) GetStreamURL(episodeURL string) (videoURL string, metadata map[string]string, err error) {
 	return c.GetStreamURLWithQuality(episodeURL, "best")
 }
 
+// GetStreamURLWithQuality is GetStreamURL with explicit quality ordering:
+// "worst" prefers the lowest-ranked server, anything else the highest.
 func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (videoURL string, metadata map[string]string, err error) {
 	util.Debug("AnimeDriveClient stream URL extraction", "episodeURL", episodeURL)
 
@@ -504,6 +475,10 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 		return "", nil, netx.NewParserError("AnimeDrive", "stream", "failed to parse HTML", err)
 	}
 
+	if err := netx.CheckChallengeDocument(doc, "AnimeDrive stream"); err != nil {
+		return "", nil, err
+	}
+
 	type track struct {
 		src   string
 		label string
@@ -518,11 +493,20 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 
 	sources := doc.Find(".animeq-player__source[data-animeq-source]")
 	if sources.Length() > 0 {
+		// Each server is a .animeq-player__source block numbered by
+		// data-animeq-source; the button with the same data-animeq-switch
+		// number names it. Blocks mix <video> and <iframe>: only direct
+		// videos and Blogger embeds play, third-party iframes are skipped.
 		sources.Each(func(_ int, source *goquery.Selection) {
 			id := source.AttrOr("data-animeq-source", "")
 			label := names[id]
 			streamURL := source.Find("video source[src]").First().AttrOr("src", "")
 			if streamURL == "" {
+				streamURL = source.Find("video[src]").First().AttrOr("src", "")
+			}
+			if streamURL == "" {
+				// The player resolves Blogger embeds; animeshd/strp2p/rpmplay
+				// iframes are not playable, so only Blogger is collected.
 				streamURL = source.Find(`iframe[src*="blogger.com/video"]`).First().AttrOr("src", "")
 			}
 			if streamURL != "" {
@@ -532,8 +516,12 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 	} else {
 		// Older pages place all video sources in one video element.
 		doc.Find("video.animeq-player__video source[src]").Each(func(i int, source *goquery.Selection) {
+			src := strings.TrimSpace(source.AttrOr("src", ""))
+			if src == "" {
+				return
+			}
 			label := doc.Find("button.animeq-player__server[data-source-name]").Eq(i).AttrOr("data-source-name", "Legendado")
-			tracks = append(tracks, track{src: source.AttrOr("src", ""), label: label})
+			tracks = append(tracks, track{src: src, label: label})
 		})
 	}
 
@@ -566,13 +554,13 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 		break
 	}
 	if selected == nil {
-		return "", nil, fmt.Errorf("AnimeDrive: no available video servers found")
+		return "", nil, fmt.Errorf("AnimeDrive: none of the %d servers on this episode responded", len(tracks))
 	}
 
 	metadata = map[string]string{
-		"source":      "animedrive",
-		"audio_label": selected.label,
-		"referer":     strings.TrimRight(c.baseURL, "/") + "/",
+		"source":     "animedrive",
+		"audio_lang": selected.label,
+		"referer":    strings.TrimRight(c.baseURL, "/") + "/",
 	}
 
 	return selected.src, metadata, nil
@@ -590,8 +578,4 @@ func animeDriveQualityRank(label string) int {
 	default:
 		return 1
 	}
-}
-
-func (c *AnimeDriveClient) GetStreamURLWithSelection(episodeURL string) (videoURL string, metadata map[string]string, err error) {
-	return c.GetStreamURL(episodeURL)
 }

@@ -52,7 +52,7 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 	if referer == "" && isHLSStream {
 		referer = defaultHLSReferer
 	}
-	
+
 	if referer == "" {
 		return mpvArgs, ""
 	}

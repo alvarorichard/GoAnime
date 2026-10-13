@@ -205,7 +205,7 @@ func TestAnimeDriveProvider_DefaultDisabledAndPriority(t *testing.T) {
 	s, ok := source.Registered(source.AnimeDrive)
 	require.True(t, ok)
 	descriptor := s.Describe()
-	assert.Equal(t, 40, descriptor.Priority)
+	assert.Equal(t, 60, descriptor.Priority)
 	assert.True(t, descriptor.DefaultDisabled)
 }
 

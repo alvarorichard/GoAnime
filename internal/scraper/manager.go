@@ -214,7 +214,7 @@ func (a *AnimefireAdapter) GetType() ScraperType {
 	return AnimefireType
 }
 
-// Animedriver adapts animedrive.AnimedriveClient to UnifiedScraper interface
+// AnimeDriveAdapter adapts animedrive.AnimeDriveClient to UnifiedScraper interface
 type AnimeDriveAdapter struct {
 	client *animedrive.AnimeDriveClient
 }
@@ -240,7 +240,7 @@ func (a *AnimeDriveAdapter) GetStreamURL(episodeURL string, options ...any) (str
 	if metadata == nil {
 		metadata = make(map[string]string)
 	}
-	metadata["AnimeDrive"] = "animedrive"
+	metadata["source"] = "animedrive"
 	if err != nil {
 		return url, metadata, err
 	}

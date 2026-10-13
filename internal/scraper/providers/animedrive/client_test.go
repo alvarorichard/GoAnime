@@ -36,8 +36,7 @@ func TestAnimeDriveSearchRetriesOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 2
 	client.retryDelay = 0
 
@@ -58,8 +57,7 @@ func TestAnimeDriveSearchReturnsEmptySliceWhenNoMatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
@@ -89,8 +87,7 @@ func TestAnimeDriveGetAnimeDetails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
@@ -124,8 +121,7 @@ func TestAnimeDriveGetAnimeDetailsParsesEpisodeCardsOnce(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	details, err := client.GetAnimeDetails("/anime/naruto/")
 	require.NoError(t, err)
 	require.Len(t, details.Episodes, 2)
@@ -157,8 +153,7 @@ func TestAnimeDriveGetAnimeEpisodes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
@@ -198,8 +193,7 @@ func TestAnimeDriveGetStreamURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
@@ -208,7 +202,7 @@ func TestAnimeDriveGetStreamURL(t *testing.T) {
 	require.NotEmpty(t, streamURL)
 	assert.Equal(t, server.URL+"/legendado/ep1.mp4", streamURL)
 	assert.Equal(t, "animedrive", metadata["source"])
-	assert.Equal(t, "Legendado", metadata["audio_label"])
+	assert.Equal(t, "Legendado", metadata["audio_lang"])
 	assert.Equal(t, server.URL+"/", metadata["referer"])
 }
 
@@ -233,8 +227,7 @@ func TestAnimeDriveGetStreamURL_LegendadoOnly(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
@@ -242,7 +235,7 @@ func TestAnimeDriveGetStreamURL_LegendadoOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, streamURL)
 	assert.Equal(t, server.URL+"/legendado/ep1.mp4", streamURL)
-	assert.Equal(t, "Legendado", metadata["audio_label"])
+	assert.Equal(t, "Legendado", metadata["audio_lang"])
 }
 
 func TestAnimeDriveGetStreamURLUsesSourceIDsAndQuality(t *testing.T) {
@@ -272,21 +265,20 @@ func TestAnimeDriveGetStreamURLUsesSourceIDsAndQuality(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
 	streamURL, metadata, err := client.GetStreamURLWithQuality("/episodio-1/", "best")
 	require.NoError(t, err)
 	assert.Equal(t, server.URL+"/hd.mp4", streamURL, "FHD is unavailable, so HD should be selected")
-	assert.Equal(t, "HD", metadata["audio_label"])
+	assert.Equal(t, "HD", metadata["audio_lang"])
 	assert.Equal(t, server.URL+"/", gotReferer)
 
 	streamURL, metadata, err = client.GetStreamURLWithQuality("/episodio-1/", "worst")
 	require.NoError(t, err)
 	assert.Equal(t, server.URL+"/sd.mp4", streamURL)
-	assert.Equal(t, "SD", metadata["audio_label"])
+	assert.Equal(t, "SD", metadata["audio_lang"])
 }
 
 func TestAnimeDriveGetStreamURLAcceptsBloggerEmbed(t *testing.T) {
@@ -296,8 +288,7 @@ func TestAnimeDriveGetStreamURLAcceptsBloggerEmbed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.client = &http.Client{Transport: bloggerMockTransport{fallback: http.DefaultTransport}}
 	client.maxRetries = 1
 
@@ -331,8 +322,7 @@ func TestAnimeDriveGetStreamURL_NoTracks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewAnimeDriveClient()
-	client.baseURL = server.URL
+	client := NewClientForTest(server.URL)
 	client.maxRetries = 1
 	client.retryDelay = 0
 
