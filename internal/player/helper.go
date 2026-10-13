@@ -1,13 +1,16 @@
 package player
 
 import (
+	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"github.com/alvarorichard/Goanime/internal/tui"
 )
 
 // Update handles updates to the Bubble Tea model.
@@ -20,7 +23,7 @@ import (
 //
 // 1. `tickMsg`: A periodic message that triggers the progress update. If the download is complete
 // (`m.done` is `true`), the program quits. Otherwise, it calculates the percentage of bytes received
-// and updates the progress bar. It then schedules the next tick.
+// and updates the progress bar, samples the download speed, and schedules the next tick.
 //
 // 2. `statusMsg`: Updates the status string in the model, which can be used to display custom messages
 // to the user, such as "Downloading..." or "Download complete".
@@ -28,7 +31,9 @@ import (
 // 3. `progress.FrameMsg`: Handles frame updates for the progress bar. It delegates the update to the
 // internal `progress.Model` and returns any commands necessary to refresh the UI.
 //
-// 4. `tea.KeyMsg`: Responds to key events, such as quitting the program when "Ctrl+C" is pressed.
+// 4. `tea.WindowSizeMsg`: Fits the progress bar to the terminal's width.
+//
+// 5. `tea.KeyMsg`: Responds to key events, such as quitting the program when "Ctrl+C" is pressed.
 // If the user requests to quit, the program sets `m.done` to `true` and returns the quit command.
 //
 // For unhandled message types, it returns the model unchanged.
@@ -55,6 +60,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tickCmd()
 		}
+		m.rate.Observe(m.received, time.Time(msg))
 		if m.totalBytes > 0 {
 			// Calculate current progress percentage
 			currentProgress := float64(m.received) / float64(m.totalBytes)
@@ -86,6 +92,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 		return m, nil
 
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.progress.SetWidth(tui.TransferBarWidth(msg.Width))
+		return m, nil
+
 	case progress.FrameMsg:
 		var cmd tea.Cmd
 		m.progress, cmd = m.progress.Update(msg)
@@ -103,48 +114,86 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// View renders the Bubble Tea model
-// View renders the user interface for the Bubble Tea model.
+// View renders the download in the GoAnime theme (tui.RenderTransfer): the
+// show and episode, the bar, how much is in and how fast, one row per
+// episode of a batch, and the latest status.
 //
-// This function generates the visual output that is displayed to the user. It includes the status message,
-// the progress bar, and a quit instruction. The layout is formatted with padding for proper alignment.
+// When done successfully, the bar is drawn at exactly 100% through ViewAs, so
+// the spring animation does not leave it short; on error it stays where it
+// stopped.
 //
-// Steps:
-// 1. Adds padding to each line using spaces.
-// 2. Styles the status message (m.status) with an orange color (#FFA500).
-// 3. Displays the progress bar using the progress model.
-// 4. Shows a message instructing the user to press "Ctrl+C" to quit.
-//
-// Returns:
-// - A formatted string that represents the UI for the current state of the model.
+// The download goroutine (downloadAndPlayEpisode) mutates m.done, m.err and
+// m.status under m.mu while this render runs on the Bubble Tea loop goroutine,
+// so they are read under the same lock — otherwise it's a data race.
 func (m *model) View() tea.View {
-	// Creates padding spaces for consistent layout
-	pad := strings.Repeat(" ", padding)
-
-	// Styles the status message with an orange color
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
-
-	// Returns the UI layout: status message, progress bar, and quit instruction
-	// When done successfully, render exactly 100% using ViewAs to bypass spring animation.
-	// On error, show the bar at whatever position it was at.
-	//
-	// The download goroutine (downloadAndPlayEpisode) mutates m.done, m.err and
-	// m.status under m.mu while this render runs on the Bubble Tea loop goroutine,
-	// so we must read them under the same lock — otherwise it's a data race.
 	m.mu.Lock()
-	var bar string
-	if m.done && m.err == nil {
-		bar = m.progress.ViewAs(1.0)
-	} else {
-		bar = m.progress.View()
-	}
-	status := m.status
-	m.mu.Unlock()
+	defer m.mu.Unlock()
 
-	return tea.NewView("\n" +
-		pad + statusStyle.Render(status) + "\n\n" + // Render the styled status message
-		pad + bar + "\n\n" + // Render the progress bar
-		pad + "Press Ctrl+C to quit") // Show quit instruction
+	t := tui.Transfer{
+		Label:   "Download",
+		Gloss:   "ダウンロード",
+		Title:   m.title,
+		Detail:  m.detail,
+		Percent: m.peakPct,
+		Status:  m.status,
+		Tasks:   m.tasks(),
+	}
+	switch {
+	case m.done && m.err == nil:
+		t.State = tui.TransferDone
+		t.Bar = m.progress.ViewAs(1.0)
+		t.Percent = 1
+		t.Stats = tui.DoneStats(max(m.totalBytes, m.received), time.Since(m.started))
+	case m.err != nil:
+		t.State = tui.TransferFailed
+		t.Bar = m.progress.View()
+		t.Stats = tui.ByteStats(m.received, m.totalBytes, 0)
+	default:
+		t.Bar = m.progress.View()
+		t.Stats = tui.ByteStats(m.received, m.totalBytes, m.rate.Rate())
+	}
+	return tea.NewView(tui.RenderTransfer(&t, m.width))
+}
+
+// tasks lists the episodes of a batch, in episode order, from the totals and
+// received bytes its children report under "episode-N". A single download
+// has none.
+func (m *model) tasks() []tui.TransferTask {
+	if len(m.taskTotals) < 2 {
+		return nil
+	}
+	type entry struct {
+		num  int
+		task tui.TransferTask
+	}
+	entries := make([]entry, 0, len(m.taskTotals))
+	for id, total := range m.taskTotals {
+		num, err := strconv.Atoi(strings.TrimPrefix(id, "episode-"))
+		if err != nil {
+			continue
+		}
+		task := tui.TransferTask{Label: fmt.Sprintf("Episode %d", num)}
+		received := m.taskReceived[id]
+		downloaded, ended := m.taskEnded[id]
+		switch {
+		case ended && !downloaded:
+			task.State = tui.TaskFailed
+		case ended, total > 0 && received >= total:
+			task.State, task.Percent = tui.TaskDone, 1
+		case received > 0:
+			task.State = tui.TaskActive
+			if total > 0 {
+				task.Percent = float64(received) / float64(total)
+			}
+		}
+		entries = append(entries, entry{num: num, task: task})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].num < entries[j].num })
+	tasks := make([]tui.TransferTask, len(entries))
+	for i, e := range entries {
+		tasks[i] = e.task
+	}
+	return tasks
 }
 
 // tickCmd returns a command that triggers a "tick" every 25 milliseconds.

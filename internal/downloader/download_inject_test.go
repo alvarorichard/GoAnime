@@ -372,7 +372,7 @@ func TestRunDownloadWithProgress_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.FileExists(t, dest)
-	assert.True(t, sender.hasStatusContaining("Download completed"), "expected success status sent")
+	assert.True(t, sender.hasStatusContaining("Download complete"), "expected success status sent")
 	m.mu.Lock()
 	assert.True(t, m.done, "progress model must be marked done after pipeline")
 	m.mu.Unlock()
@@ -393,7 +393,7 @@ func TestRunDownloadWithProgress_FileTooSmall(t *testing.T) {
 	err := d.runDownloadWithProgress(srv.URL+"/v.mp4", dest, 1, newProgressModelForTest(int64(len(body))), sender)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too small")
-	assert.True(t, sender.hasStatusContaining("Download completed") || sender.hasStatusContaining("Download failed"),
+	assert.True(t, sender.hasStatusContaining("Download complete") || sender.hasStatusContaining("Download failed"),
 		"sender must have received a terminal status")
 }
 
@@ -485,7 +485,7 @@ func TestDownloadWithProgress_FullPath_HTTPSuccess(t *testing.T) {
 	err := d.downloadWithProgress(srv.URL+"/v.mp4", dest, 1)
 	require.NoError(t, err)
 	assert.FileExists(t, dest)
-	assert.True(t, sender.hasStatusContaining("Download completed"))
+	assert.True(t, sender.hasStatusContaining("Download complete"))
 }
 
 func TestDownloadWithProgress_MkdirFailsWhenParentIsFile(t *testing.T) {

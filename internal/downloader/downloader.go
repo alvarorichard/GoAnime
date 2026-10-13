@@ -298,9 +298,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	}
 
 	// Create progress model for overall progress
-	m := &progressModel{
-		progress: progress.New(progress.WithDefaultBlend()),
-	}
+	m := newProgressModel(d.animeTitle(), fmt.Sprintf("%d episodes", len(episodeNums)))
 
 	// Calculate total bytes for all episodes
 	var totalBytes int64
@@ -358,17 +356,23 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	// Start downloads with progress tracking
 	downloadComplete := make(chan error, 1)
 	go func() {
+		var err error
 		defer func() {
 			m.mu.Lock()
 			m.done = true
+			m.failed = err != nil
 			m.mu.Unlock()
 			time.Sleep(500 * time.Millisecond)
-			p.Send(statusMsg("All downloads completed!"))
+			if err != nil {
+				p.Send(statusMsg("Some downloads failed"))
+			} else {
+				p.Send(statusMsg("All downloads complete"))
+			}
 			time.Sleep(200 * time.Millisecond)
 			p.Quit()
 		}()
 
-		err := d.downloadMultipleWithProgress(episodeNums, episodeInfos, m, p)
+		err = d.downloadMultipleWithProgress(episodeNums, episodeInfos, m, p)
 		downloadComplete <- err
 	}()
 
@@ -765,7 +769,7 @@ func (d *EpisodeDownloader) downloadWithProgress(videoURL, episodePath string, e
 	if err := os.MkdirAll(filepath.Dir(episodePath), 0o700); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
-	m := &progressModel{progress: progress.New(progress.WithDefaultBlend())}
+	m := newProgressModel(d.animeTitle(), fmt.Sprintf("Episode %d", episodeNum))
 
 	contentLength, err := d.getContentLength(videoURL)
 	if err != nil {
@@ -790,16 +794,19 @@ func (d *EpisodeDownloader) runDownloadWithProgress(videoURL, episodePath string
 		if err == nil && !d.fileExists(episodePath) {
 			err = fmt.Errorf("download failed: file was not created")
 		}
-		if err == nil {
-			p.Send(statusMsg("Download completed!"))
-			d.sleepFn(1 * time.Second)
-		} else {
-			p.Send(statusMsg(fmt.Sprintf("Download failed: %v", err)))
-			d.sleepFn(500 * time.Millisecond)
+		// The outcome goes into the model together with done, so the
+		// frame drawn when the screen quits already says how it ended.
+		status, linger := "Download complete", 1*time.Second
+		if err != nil {
+			status, linger = fmt.Sprintf("Download failed: %v", err), 500*time.Millisecond
 		}
 		m.mu.Lock()
 		m.done = true
+		m.failed = err != nil
+		m.status = status
 		m.mu.Unlock()
+		p.Send(statusMsg(status))
+		d.sleepFn(linger)
 		p.Quit()
 		downloadComplete <- err
 	}()
@@ -1243,7 +1250,30 @@ type progressModel struct {
 	peakPct    float64 // highest progress percentage ever reached; ensures bar never goes backward
 	status     string
 	done       bool
+	failed     bool // set with done when the download did not succeed
 	mu         sync.Mutex
+
+	// What the screen names and measures: the show, the episode or the
+	// count of episodes, the terminal width, the speed and the start.
+	title   string
+	detail  string
+	width   int
+	rate    tui.RateMeter
+	started time.Time
+}
+
+// newProgressModel is the progress screen of a download: title is the show,
+// detail which part of it ("Episode 3", "12 episodes").
+func newProgressModel(title, detail string) *progressModel {
+	return &progressModel{progress: tui.NewTransferBar(), title: title, detail: detail, started: time.Now()}
+}
+
+// animeTitle is the show's name for the progress screen, "" when unknown.
+func (d *EpisodeDownloader) animeTitle() string {
+	if d.anime == nil {
+		return ""
+	}
+	return d.anime.Name
 }
 
 // tickCmd returns a command that sends a tick message after a delay
@@ -1264,11 +1294,18 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.done = true
 			return m, tea.Quit
 		}
+	case tea.WindowSizeMsg:
+		m.mu.Lock()
+		m.width = msg.Width
+		m.progress.SetWidth(tui.TransferBarWidth(msg.Width))
+		m.mu.Unlock()
+		return m, nil
 	case tickMsg:
 		if m.done {
 			return m, tea.Quit
 		}
 		m.mu.Lock()
+		m.rate.Observe(m.received, time.Time(msg))
 		pct := 0.0
 		if m.totalBytes > 0 && m.received > 0 {
 			pct = float64(m.received) / float64(m.totalBytes)
@@ -1323,22 +1360,28 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the download in the GoAnime theme (tui.RenderTransfer).
 func (m *progressModel) View() tea.View {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	percent := 0.0
-	if m.totalBytes > 0 {
-		percent = float64(m.received) / float64(m.totalBytes) * 100
+	t := tui.Transfer{
+		Label:   "Download",
+		Gloss:   "ダウンロード",
+		Title:   m.title,
+		Detail:  m.detail,
+		Bar:     m.progress.View(),
+		Percent: m.peakPct,
+		Stats:   tui.ByteStats(m.received, m.totalBytes, m.rate.Rate()),
+		Status:  m.status,
 	}
-
-	status := m.status
-	if status == "" {
-		status = fmt.Sprintf("Progress: %.1f%%", percent)
+	switch {
+	case m.done && m.failed:
+		t.State = tui.TransferFailed
+	case m.done:
+		t.State = tui.TransferDone
+		t.Bar, t.Percent = m.progress.ViewAs(1.0), 1
+		t.Stats = tui.DoneStats(max(m.totalBytes, m.received), time.Since(m.started))
 	}
-
-	return tea.NewView(fmt.Sprintf("Source: %s\n%s\n\nPress Ctrl+C to cancel\n%s",
-		"downloading...", // We'll update this with actual URL if needed
-		m.progress.View(),
-		status))
+	return tea.NewView(tui.RenderTransfer(&t, m.width))
 }

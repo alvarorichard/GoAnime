@@ -316,10 +316,11 @@ func (v *VideoUpscaler) upscaleFrames(ctx context.Context, inputDir, outputDir s
 	util.Infof("Processing %d frames with %d workers...", totalFrames, v.config.Workers)
 
 	// Create progress model
-	p := progress.New(progress.WithDefaultBlend())
 	model := &upscaleProgressModel{
-		progress:    p,
+		progress:    tui.NewTransferBar(),
 		totalFrames: totalFrames,
+		title:       filepath.Base(v.config.InputPath),
+		started:     time.Now(),
 	}
 
 	program := tui.NewProgram(model)
@@ -501,6 +502,11 @@ type upscaleProgressModel struct {
 	completed   int
 	done        bool
 	mu          sync.Mutex
+
+	title   string // the input file's name
+	width   int
+	rate    tui.RateMeter
+	started time.Time
 }
 
 type frameProgressMsg struct {
@@ -522,7 +528,12 @@ func (m *upscaleProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case frameProgressMsg:
 		m.mu.Lock()
 		m.completed = msg.completed
+		m.rate.Observe(int64(msg.completed), time.Now())
 		m.mu.Unlock()
+		return m, nil
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.progress.SetWidth(tui.TransferBarWidth(msg.Width))
 		return m, nil
 	case upscaleCompleteMsg:
 		m.done = true
@@ -535,18 +546,33 @@ func (m *upscaleProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the upscale in the GoAnime theme (tui.RenderTransfer).
 func (m *upscaleProgressModel) View() tea.View {
 	m.mu.Lock()
 	completed := m.completed
+	rate := m.rate.Rate()
 	m.mu.Unlock()
 
-	percent := float64(completed) / float64(m.totalFrames)
-	if m.done {
-		return tea.NewView(fmt.Sprintf("\n✓ Upscaled %d/%d frames (100%%)\n\n", m.totalFrames, m.totalFrames))
+	percent := 0.0
+	if m.totalFrames > 0 {
+		percent = float64(completed) / float64(m.totalFrames)
 	}
-	return tea.NewView(fmt.Sprintf("\n%s\nUpscaling: %d/%d frames (%.1f%%)\n",
-		m.progress.ViewAs(percent),
-		completed, m.totalFrames, percent*100))
+	t := tui.Transfer{
+		Label:   "Upscale",
+		Gloss:   "アップスケール",
+		Title:   m.title,
+		Detail:  "Anime4K",
+		Bar:     m.progress.ViewAs(percent),
+		Percent: percent,
+		Stats:   tui.FrameStats(int64(completed), int64(m.totalFrames), rate),
+	}
+	if m.done {
+		t.State = tui.TransferDone
+		t.Bar, t.Percent = m.progress.ViewAs(1.0), 1
+		t.Stats = tui.FormatCount(int64(m.totalFrames)) + " frames in " + tui.FormatClock(time.Since(m.started).Seconds())
+		t.Status = "Upscale complete"
+	}
+	return tea.NewView(tui.RenderTransfer(&t, m.width))
 }
 
 // UpscaleVideoFile is a convenience function to upscale a video file

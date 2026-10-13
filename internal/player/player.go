@@ -217,10 +217,6 @@ func resolveSeasonForEpisode(snap mediaSnapshot, absEp int) (season, ep int) {
 	return last.Season, absEp - last.StartEp + 1
 }
 
-const (
-	padding = 2
-)
-
 // tickMsg is a message for the tick command
 type tickMsg time.Time
 
@@ -244,6 +240,39 @@ type model struct {
 	taskID       string
 	taskTotals   map[string]int64
 	taskReceived map[string]int64
+	// taskEnded holds how each finished task of a batch ended: true when it
+	// was downloaded, false when it failed.
+	taskEnded map[string]bool
+
+	// What the screen names and measures: the show, the episode or the
+	// count of episodes, the terminal width, the speed and the start.
+	title   string
+	detail  string
+	width   int
+	rate    tui.RateMeter
+	started time.Time
+}
+
+// downloadDetail names the episode a single download is for: "Episode 3".
+func downloadDetail(episodeNumberStr string) string {
+	if num := ExtractEpisodeNumber(episodeNumberStr); num != "" {
+		return "Episode " + num
+	}
+	return strings.TrimSpace(episodeNumberStr)
+}
+
+// newDownloadModel is the progress screen of a download: title is the show,
+// detail which part of it ("Episode 3", "12 episodes"), totalBytes the size
+// expected so far (0 when unknown).
+func newDownloadModel(title, detail string, totalBytes int64) *model {
+	return &model{
+		progress:   tui.NewTransferBar(),
+		keys:       keyMap{quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))},
+		totalBytes: totalBytes,
+		title:      title,
+		detail:     detail,
+		started:    time.Now(),
+	}
 }
 
 type keyMap struct {
@@ -274,6 +303,28 @@ func (m *model) childProgress(taskID string, estimatedTotal int64) *model {
 		}
 	}
 	return &model{parent: m, taskID: taskID}
+}
+
+// endTask records how a task of a batch ended. A downloaded task's total
+// becomes what it actually received, since its size was only estimated up
+// front, so the overall bar ends where the bytes do.
+func (m *model) endTask(taskID string, downloaded bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskEnded == nil {
+		m.taskEnded = make(map[string]bool)
+	}
+	m.taskEnded[taskID] = downloaded
+	if received := m.taskReceived[taskID]; downloaded && received > 0 {
+		if m.taskTotals == nil {
+			m.taskTotals = make(map[string]int64)
+		}
+		m.totalBytes += received - m.taskTotals[taskID]
+		m.taskTotals[taskID] = received
+	}
 }
 
 func (m *model) setProgressTotal(total int64) {
@@ -1047,19 +1098,10 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("blogger video URL not available")
 			}
 
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
-			}
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			go func() {
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				dlErr := downloadBloggerDirect(directURL, episodePath, numThreads, m)
 				if dlErr != nil {
 					m.mu.Lock()
@@ -1078,7 +1120,7 @@ func downloadAndPlayEpisode(
 				}
 				m.done = true
 				m.mu.Unlock()
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			if _, err := p.Run(); err != nil {
@@ -1110,15 +1152,7 @@ func downloadAndPlayEpisode(
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com"):
 			// Use yt-dlp with progress bar
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
-			}
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Estimate/obtain total size for progress percentage.
@@ -1137,7 +1171,6 @@ func downloadAndPlayEpisode(
 			}
 
 			go func() {
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
@@ -1196,7 +1229,7 @@ func downloadAndPlayEpisode(
 				}
 				m.done = true
 				m.mu.Unlock()
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			if _, err := p.Run(); err != nil {
@@ -1224,15 +1257,7 @@ func downloadAndPlayEpisode(
 
 		default:
 			// Initialize progress model
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
-			}
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Get content length
@@ -1249,7 +1274,6 @@ func downloadAndPlayEpisode(
 			// Start the download in a separate goroutine
 			go func() {
 				// Update status
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 
 				if dlErr := DownloadVideo(videoURL, episodePath, numThreads, m); dlErr != nil {
 					m.mu.Lock()
@@ -1265,7 +1289,7 @@ func downloadAndPlayEpisode(
 				m.mu.Unlock()
 
 				// Final status update
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			// Run the Bubble Tea program in the main goroutine

@@ -19,8 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -1854,12 +1852,8 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 	}
 
 	if totalBytes > 0 {
-		m = &model{
-			progress:   progress.New(progress.WithDefaultBlend()),
-			keys:       keyMap{quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))},
-			totalBytes: totalBytes,
-			taskTotals: make(map[string]int64),
-		}
+		m = newDownloadModel(anime.Name, fmt.Sprintf("%d episodes", len(episodesToDownload)), totalBytes)
+		m.taskTotals = make(map[string]int64)
 		for _, epNum := range episodesToDownload {
 			m.taskTotals[fmt.Sprintf("episode-%d", epNum)] = estimatedSizes[epNum]
 		}
@@ -1887,6 +1881,7 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 						p.Send(statusMsg(strings.TrimSpace(fmt.Sprintf(format, a...))))
 					}
 				})
+				m.endTask(fmt.Sprintf("episode-%d", be.num), err == nil)
 				if err != nil {
 					util.Error("Failed episode download", "episode", be.num, "error", err)
 					recordBatchDownloadFailure(&failuresMu, &failures, be.num, err)
@@ -1901,7 +1896,7 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 				if batchErr != nil {
 					p.Send(statusMsg(fmt.Sprintf("Downloads completed with %d failure(s)", len(failures))))
 				} else {
-					p.Send(statusMsg("All downloads completed!"))
+					p.Send(statusMsg("All downloads complete"))
 				}
 			}
 			// Small delay to ensure the user sees the completion message
@@ -1925,7 +1920,10 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 	if err := <-downloadErrChan; err != nil {
 		return err
 	}
-	fmt.Println("\nAll episodes downloaded successfully!")
+	if p == nil {
+		// Without a progress screen nothing has said so yet.
+		fmt.Println("\nAll episodes downloaded successfully!")
+	}
 	printBatchDownloadLocation(animeURL, startNum)
 	util.Debug("Batch download completed", "animeURL", animeURL, "duration", time.Since(start))
 	return opts.finish()
