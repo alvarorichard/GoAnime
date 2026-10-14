@@ -1,6 +1,7 @@
 package startflix
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -145,7 +146,7 @@ func TestAbyssTailRecoversViaSlices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tail part: %v", err)
 	}
-	if len(got) != int(tailSize) || string(got) != string(plain[2*part:]) {
+	if len(got) != int(tailSize) || !bytes.Equal(got, plain[2*part:]) {
 		t.Fatalf("tail bytes differ: got %d bytes, want %d", len(got), tailSize)
 	}
 }
@@ -228,7 +229,7 @@ func TestAbyssTailFailsOverToSibling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tail via sibling: %v", err)
 	}
-	if string(got) != string(plain[2*part:]) {
+	if !bytes.Equal(got, plain[2*part:]) {
 		t.Fatalf("sibling tail bytes differ: got %d bytes, want %d", len(got), tailSize)
 	}
 }

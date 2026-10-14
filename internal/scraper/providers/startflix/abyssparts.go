@@ -495,9 +495,11 @@ func (f *abyssFile) abyssFetchPart(ctx context.Context, client *http.Client, idx
 				}
 				altURL := scheme + h + "/sora/" + strconv.FormatInt(f.size, 10) + "/" + token
 				util.Debug("StartFlix chunk part trying sibling host", "part", idx, "host", h)
-				if body, ferr := fetchWhole(ctx, altURL); ferr == nil {
+				body, ferr := fetchWhole(ctx, altURL)
+				switch {
+				case ferr == nil:
 					return decrypt(body)
-				} else if isTruncationError(ferr) {
+				case isTruncationError(ferr):
 					if sliced, serr := f.abyssFetchSliced(ctx, client, altURL, -1, -1, want); serr == nil {
 						util.Debug("StartFlix chunk part recovered via sibling slices", "part", idx, "host", h)
 						return decrypt(sliced)
@@ -505,9 +507,9 @@ func (f *abyssFile) abyssFetchPart(ctx context.Context, client *http.Client, idx
 						util.Debug("StartFlix chunk sibling slices failed", "part", idx, "host", h, "err", serr)
 						err = ferr
 					}
-				} else if !abyssRetryableFailure(ferr) {
+				case !abyssRetryableFailure(ferr):
 					return nil, ferr
-				} else {
+				default:
 					err = ferr
 				}
 			}
@@ -525,7 +527,7 @@ func (f *abyssFile) abyssFetchPart(ctx context.Context, client *http.Client, idx
 // part. For .fd parts the slice maps to absolute file offsets [from, through];
 // for /sora/ parts (from < 0) it maps to part-relative offsets, which the CDN
 // serves as Range over the part.
-func (f *abyssFile) abyssFetchSliced(ctx context.Context, client *http.Client, reqURL string, from, through, want int64) ([]byte, error) {
+func (f *abyssFile) abyssFetchSliced(ctx context.Context, client *http.Client, reqURL string, from, _ /*through*/, want int64) ([]byte, error) {
 	if want <= 0 {
 		return nil, fmt.Errorf("invalid slice fetch of %d bytes", want)
 	}
