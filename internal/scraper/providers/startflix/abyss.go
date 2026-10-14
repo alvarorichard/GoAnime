@@ -19,9 +19,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
 
@@ -358,9 +360,37 @@ type abyssChunkSource struct {
 	chunkURL  string // full base URL (kept for debugging)
 	chunkPath string // URL path the tokens encrypt: /mp4/<md5>/<res>/<size>
 	chunkHost string
+	domains   []string // every host the media list offered, for sibling retries
 	firstURL  string
 	firstSize int64
 	firstSeed string
+}
+
+// orderedChunkHosts returns the hosts to try for /sora/ parts: the resolved
+// primary first, then every other host the media list offered (deduplicated).
+// The token encrypts only the virtual path, so it is valid on each host that
+// serves the same file, letting a part that one host refuses (5xx, transient
+// reset) be retried elsewhere. It does not rescue a permanently short upload:
+// live, every /sora/ host stopped the bad 876 MB rendition at the same byte.
+// That case is handled by selectAbyssFile, not here. Hosts are filtered at
+// file build time (makeAbyssChunkFile keeps only bare host names), so no
+// validation happens here — tests point files at httptest servers directly.
+func (c *abyssChunkSource) orderedChunkHosts() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(h string) {
+		h = strings.TrimSpace(h)
+		if h == "" || seen[h] {
+			return
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	add(c.chunkHost)
+	for _, h := range c.domains {
+		add(h)
+	}
+	return out
 }
 
 // resolveAbyss turns an Abyss embed into a local, plain-MP4 URL.
@@ -377,11 +407,12 @@ func (c *Client) resolveAbyss(ctx context.Context, embed *url.URL, p Player) (*S
 	if err != nil {
 		return nil, netx.NewDecryptError(SourceName, "abyss", "could not open the media list", err)
 	}
-	file, ok := makeAbyssFile(embed, datas, media)
-	if !ok {
+	files := makeAbyssFiles(embed, datas, media)
+	if len(files) == 0 {
 		return nil, fmt.Errorf("abyss %s: no supported MP4 rendition", datas.Slug)
 	}
-	if err := c.probeAbyss(ctx, file); err != nil {
+	file, err := c.selectAbyssFile(ctx, files)
+	if err != nil {
 		return nil, err
 	}
 	local, err := sharedStreamProxy().serve(file, c.proxyClient())
@@ -391,9 +422,26 @@ func (c *Client) resolveAbyss(ctx context.Context, embed *url.URL, p Player) (*S
 	return &Stream{URL: local, Host: embed.Host, Height: file.height}, nil
 }
 
+// makeAbyssFile returns the best Abyss rendition as one file: the first, and
+// until a tail probe says otherwise the only, candidate of makeAbyssFiles.
 func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyssFile, bool) {
+	files := makeAbyssFiles(embed, datas, media)
+	if len(files) == 0 {
+		return nil, false
+	}
+	return files[0], true
+}
+
+// makeAbyssFiles returns every usable rendition as a file, best first, in the
+// order the single-file-or-chunked quality rule always used: tallest picture,
+// H.264 over AV1 at a tie, a single file over a chunked rendition at a tie.
+// resolveAbyss probes them in order rather than prompting the first, because
+// the panel lists renditions the CDN cannot fully serve — live: a 1080p H.264
+// whose final 64 KiB never comes back, stalling a download at 99% while a
+// sibling 1080p of the same episode serves whole.
+func makeAbyssFiles(embed *url.URL, datas *abyssDatas, media *abyssMedia) []*abyssFile {
 	// The CDN only serves media to requests carrying the embed's Origin and
-	// Referer, so the file carries the embed origin like the player does.
+	// Referer, so every file carries the embed origin like the player does.
 	origin := embed.Scheme + "://" + embed.Host
 	single, hasSingle := pickAbyssSource(media.MP4.Sources)
 
@@ -409,22 +457,38 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 	}
 	sort.SliceStable(choices, func(i, j int) bool { return abyssBetter(choices[i], choices[j]) })
 
+	chunked := make([]*abyssFile, 0, len(choices))
+	for _, src := range choices {
+		chunked = append(chunked, makeAbyssChunkFile(media, datas, src, origin))
+	}
+
 	// The best picture wins whichever way it is served; at a tie the single
-	// file does, being one plain request per range.
-	if hasSingle && (len(choices) == 0 || !abyssBetter(choices[0], single)) {
-		upstream := abyssSingleFileURL(single)
-		return &abyssFile{
-			upstream: upstream,
-			size:     single.Size,
-			seed:     upstream[strings.LastIndex(upstream, "/")+1:],
-			origin:   origin,
-			height:   labelHeight(single.Label),
-		}, true
+	// file does, being one plain request per range. The loser still becomes a
+	// candidate, so a first choice the CDN serves badly yields to the rest.
+	out := chunked
+	if hasSingle {
+		file := makeAbyssSingleFile(single, origin)
+		if len(choices) == 0 || !abyssBetter(choices[0], single) {
+			out = append([]*abyssFile{file}, out...)
+		} else {
+			out = append(out, file)
+		}
 	}
-	if len(choices) == 0 {
-		return nil, false
+	return out
+}
+
+func makeAbyssSingleFile(single abyssSource, origin string) *abyssFile {
+	upstream := abyssSingleFileURL(single)
+	return &abyssFile{
+		upstream: upstream,
+		size:     single.Size,
+		seed:     upstream[strings.LastIndex(upstream, "/")+1:],
+		origin:   origin,
+		height:   labelHeight(single.Label),
 	}
-	src := choices[0]
+}
+
+func makeAbyssChunkFile(media *abyssMedia, datas *abyssDatas, src abyssSource, origin string) *abyssFile {
 	// The encrypted head is optional: without a fristData entry — or when its
 	// partSize is not a whole number of parts, which the player refuses to
 	// split — every part goes through the chunk tokens instead.
@@ -441,6 +505,15 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 	domain := abyssChunkDomain(media.MP4.Domains, src.Size, src.Sub)
 	chunkPath := "/mp4/" + strconv.FormatInt(datas.MD5ID, 10) + "/" + strconv.Itoa(src.ResID) + "/" + strconv.FormatInt(src.Size, 10)
 	chunkURL := "https://" + domain + chunkPath
+	// Keep every offered host so a flaky tail chunk can fail over to a
+	// sibling domain (see orderedChunkHosts). Only bare host names ever
+	// reach the network; anything else is dropped here.
+	var domains []string
+	for _, d := range media.MP4.Domains {
+		if isAbyssHostname(d) {
+			domains = append(domains, d)
+		}
+	}
 	return &abyssFile{
 		size:   src.Size,
 		origin: origin,
@@ -449,10 +522,11 @@ func makeAbyssFile(embed *url.URL, datas *abyssDatas, media *abyssMedia) (*abyss
 			md5ID: datas.MD5ID, resID: src.ResID, sub: src.Sub,
 			codec: src.Codec, label: src.Label,
 			chunkURL: chunkURL, chunkPath: chunkPath, chunkHost: domain,
+			domains:  domains,
 			firstURL: firstURL, firstSize: firstSize,
 			firstSeed: firstSeed,
 		},
-	}, true
+	}
 }
 
 // probeAbyss checks the CDN serves the file before mpv is pointed at it, so a
@@ -504,4 +578,76 @@ func (f *abyssFile) decorate(req *http.Request, ua string) {
 	req.Header.Set("Origin", f.origin)
 	req.Header.Set("Referer", f.origin+"/")
 	req.Header.Set("Accept", "*/*")
+}
+
+// abyssTailProbeTimeout bounds the final-chunk check. A rendition the CDN
+// cannot fully serve accepts the request, sends what it has and only then lets
+// the connection reset — live: ~6.5s before "unexpected EOF" — so the check
+// needs enough rope to observe the reset rather than hang forever.
+const abyssTailProbeTimeout = 12 * time.Second
+
+// selectAbyssFile probes candidates best first and returns the first a reader
+// can actually stream: its head and first part come back, and for a chunked
+// rendition so does its final chunk. A rendition whose tail the CDN never
+// serves is skipped instead of being handed to mpv or the downloader, where it
+// would stall at 99% retrying the same part forever.
+func (c *Client) selectAbyssFile(ctx context.Context, files []*abyssFile) (*abyssFile, error) {
+	var lastErr error
+	for _, f := range files {
+		if err := c.probeAbyss(ctx, f); err != nil {
+			lastErr = err
+			continue
+		}
+		if f.chunk != nil {
+			if err := c.probeAbyssTail(ctx, f); err != nil {
+				util.Debug("StartFlix rendition tail unserved", "height", f.height, "size", f.size, "err", err)
+				lastErr = err
+				continue
+			}
+		}
+		return f, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("abyss: no usably served rendition")
+	}
+	return nil, lastErr
+}
+
+// probeAbyssTail fetches the last part's closing window and requires it whole.
+// That window is where a truncated upload shows: the origin answers with the
+// final part's declared length but stops one 64 KiB block short, so a request
+// that must return every byte it asked for fails here in seconds instead of
+// mid-download. Nothing is cached; a healthy part is fetched again when read.
+func (c *Client) probeAbyssTail(ctx context.Context, f *abyssFile) error {
+	part := f.abyssPartSize()
+	if part <= 0 {
+		return nil
+	}
+	last := (f.size - 1) / part
+	lo, hi := f.abyssPartBounds(last)
+	if hi < lo {
+		return nil
+	}
+	want := hi - lo + 1
+	win := min(int64(abyssEncryptedHead), want)
+	urls, err := f.abyssPartURLs()
+	if err != nil {
+		return err
+	}
+	if last >= int64(len(urls)) {
+		return fmt.Errorf("part %d out of range", last)
+	}
+	var from, through int64
+	if f.chunk.firstSize > 0 && lo < f.chunk.firstSize {
+		// .fd parts take absolute file offsets; token parts are part-relative.
+		from, through = hi-win+1, hi
+	} else {
+		from, through = want-win, want-1
+	}
+	pctx, cancel := context.WithTimeout(ctx, abyssTailProbeTimeout)
+	defer cancel()
+	if _, err := abyssPartRequest(pctx, c.proxyClient(), urls[last], from, through, win, f.origin); err != nil {
+		return fmt.Errorf("abyss: final chunk of the %d-byte rendition: %w", f.size, err)
+	}
+	return nil
 }

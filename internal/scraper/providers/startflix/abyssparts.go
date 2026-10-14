@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +40,10 @@ const (
 	abyssReadAhead      = 6         // parts prefetched past a reader's position (12 MiB)
 	abyssPrefetchers    = 3         // concurrent prefetches per file
 	abyssPartRetries    = 2         // beyond the first attempt, transient failures only
-	abyssPartTimeout    = 30 * time.Second
+	// abyssPartTimeout bounds one part fetch, whole-part retries plus the
+	// sliced and sibling fallbacks included. A flaky tail needs the extra
+	// room: three truncated whole reads alone already cost ~20 s live.
+	abyssPartTimeout = 60 * time.Second
 )
 
 // abyssPartKey names one part of one file.
@@ -365,10 +369,33 @@ func (rd *abyssPartReader) copyRange(ctx context.Context, start, end int64, dst 
 	return nil
 }
 
+// abyssFetchSliceBytes is the granularity of the sliced fallback: when a
+// whole 2 MiB part cannot be read in one request because the connection resets
+// mid-body (transient "unexpected EOF"), each part is re-fetched as 512 KiB
+// Range slices that are assembled, so one reset only re-fetches its own slice.
+//
+// This recovers transient truncation only. It cannot recover a rendition the
+// origin uploaded short: there the missing bytes do not exist, a slice over
+// them returns 0 bytes, and the whole read fails again — the live 99% stall of
+// a 876 MB file whose final 64 KiB never came back. That case is handled one
+// level up by selectAbyssFile, which probes each rendition's tail and streams
+// the first the CDN serves whole.
+const (
+	abyssFetchSliceBytes = 512 << 10
+	abyssSliceRetries    = 3
+)
+
 // abyssFetchPart fetches one complete part from the CDN and decrypts what
 // needs it. Transient failures (network errors, 5xx, 429) are retried a
 // couple of times with a short backoff; 404s and 403s fail immediately, as
 // retrying a rejected path would only stall the response.
+//
+// Resilience for transient truncation: when the whole-part request keeps
+// failing with a retryable error (truncated body / unexpected EOF), the part
+// is re-fetched as small Range slices and assembled, and — for /sora/ parts —
+// sibling domains from the media list are tried with the same token before
+// giving up. A permanently short upload is not recoverable here; see
+// abyssFetchSliceBytes.
 func (f *abyssFile) abyssFetchPart(ctx context.Context, client *http.Client, idx int64) ([]byte, error) {
 	c := f.chunk
 	lo, hi := f.abyssPartBounds(idx)
@@ -384,37 +411,212 @@ func (f *abyssFile) abyssFetchPart(ctx context.Context, client *http.Client, idx
 	if idx >= int64(len(urls)) {
 		return nil, fmt.Errorf("part %d out of range", idx)
 	}
-	req := urls[idx]
+	primaryURL := urls[idx]
 	var from, through int64 = -1, -1 // absolute .fd range; -1 sends no Range header
 	var seed string
 	if c.firstSize > 0 && lo < c.firstSize {
 		from, through, seed = lo, min(hi, c.firstSize-1), c.firstSeed
 	}
+	isSora := from < 0
+
+	decrypt := func(body []byte) ([]byte, error) {
+		if seed != "" && from < abyssEncryptedHead {
+			n := min(int64(len(body)), abyssEncryptedHead-from) // #nosec G115 -- from is a file offset
+			if err := abyssXOR(seed, from, body[:n]); err != nil {
+				return nil, err
+			}
+		}
+		return body, nil
+	}
+
+	// Whole-part attempt against one URL, with the bounded retries.
+	fetchWhole := func(ctx context.Context, reqURL string) ([]byte, error) {
+		started := time.Now()
+		var body []byte
+		var err error
+		for attempt := 0; ; attempt++ {
+			body, err = abyssPartRequest(ctx, client, reqURL, from, through, want, f.origin)
+			if err == nil {
+				return body, nil
+			}
+			if ctx.Err() != nil || attempt >= abyssPartRetries || !abyssRetryableFailure(err) {
+				util.Debug("StartFlix chunk part failed", "part", idx, "range", fmt.Sprintf("%d-%d", lo, hi),
+					"attempt", attempt+1, "dur", time.Since(started).Round(time.Millisecond).String(), "err", err)
+				return nil, err
+			}
+			util.Debug("StartFlix chunk part retry", "part", idx, "attempt", attempt+1, "err", err)
+			if err := abyssSleep(ctx, time.Duration(attempt+1)*250*time.Millisecond); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	started := time.Now()
-	var body []byte
-	for attempt := 0; ; attempt++ {
-		body, err = abyssPartRequest(ctx, client, req, from, through, want, f.origin)
-		if err == nil {
-			break
-		}
-		if ctx.Err() != nil || attempt >= abyssPartRetries || !abyssRetryableFailure(err) {
-			util.Debug("StartFlix chunk part failed", "part", idx, "range", fmt.Sprintf("%d-%d", lo, hi),
-				"attempt", attempt+1, "dur", time.Since(started).Round(time.Millisecond).String(), "err", err)
-			return nil, err
-		}
-		util.Debug("StartFlix chunk part retry", "part", idx, "attempt", attempt+1, "err", err)
-		if err := abyssSleep(ctx, time.Duration(attempt+1)*250*time.Millisecond); err != nil {
-			return nil, err
+	body, err := fetchWhole(ctx, primaryURL)
+	if err == nil {
+		return decrypt(body)
+	}
+	// Non-retryable (404/403/416…): the path is rejected, siblings will not
+	// have it either. Fail fast as before.
+	if !abyssRetryableFailure(err) || ctx.Err() != nil {
+		return nil, err
+	}
+
+	// Sliced fallback against the primary URL: small Range slices tolerate a
+	// CDN that resets a whole-part read every time (truncated body /
+	// unexpected EOF). Origin-side statuses (5xx/429) already had their
+	// bounded retries above — slicing them would only multiply requests to
+	// an overloaded origin, so they fail fast as before.
+	if isTruncationError(err) {
+		util.Debug("StartFlix chunk part falling back to slices", "part", idx, "range", fmt.Sprintf("%d-%d", lo, hi), "err", err)
+		if sliced, serr := f.abyssFetchSliced(ctx, client, primaryURL, from, through, want); serr == nil {
+			util.Debug("StartFlix chunk part recovered via slices", "part", idx, "dur", time.Since(started).Round(time.Millisecond).String())
+			return decrypt(sliced)
+		} else {
+			util.Debug("StartFlix chunk sliced fallback failed", "part", idx, "err", serr)
+			err = serr
 		}
 	}
-	if seed != "" && from < abyssEncryptedHead {
-		n := min(int64(len(body)), abyssEncryptedHead-from) // #nosec G115 -- from is a file offset
-		if err := abyssXOR(seed, from, body[:n]); err != nil {
-			return nil, err
+
+	// Sibling-domain fallback for /sora/ parts: same token, different host.
+	// The token encrypts only the virtual path, so it is valid on every host
+	// serving the file.
+	if isSora {
+		part := f.abyssPartSize()
+		token := abyssChunkToken(c.partTokenPath(part, idx), f.size)
+		if token != "" {
+			scheme := "https://"
+			if i := strings.Index(primaryURL, "://"); i > 0 {
+				scheme = primaryURL[:i+3]
+			}
+			for _, h := range c.orderedChunkHosts()[1:] {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				altURL := scheme + h + "/sora/" + strconv.FormatInt(f.size, 10) + "/" + token
+				util.Debug("StartFlix chunk part trying sibling host", "part", idx, "host", h)
+				if body, ferr := fetchWhole(ctx, altURL); ferr == nil {
+					return decrypt(body)
+				} else if isTruncationError(ferr) {
+					if sliced, serr := f.abyssFetchSliced(ctx, client, altURL, -1, -1, want); serr == nil {
+						util.Debug("StartFlix chunk part recovered via sibling slices", "part", idx, "host", h)
+						return decrypt(sliced)
+					} else {
+						util.Debug("StartFlix chunk sibling slices failed", "part", idx, "host", h, "err", serr)
+						err = ferr
+					}
+				} else if !abyssRetryableFailure(ferr) {
+					return nil, ferr
+				} else {
+					err = ferr
+				}
+			}
 		}
 	}
-	return body, nil
+
+	util.Debug("StartFlix chunk part failed", "part", idx, "range", fmt.Sprintf("%d-%d", lo, hi),
+		"dur", time.Since(started).Round(time.Millisecond).String(), "err", err)
+	return nil, err
+}
+
+// abyssFetchSliced fetches want bytes as independent Range slices and
+// assembles them. Each slice is retried on its own, so one truncated
+// connection only re-fetches its 512 KiB instead of failing the whole 2 MiB
+// part. For .fd parts the slice maps to absolute file offsets [from, through];
+// for /sora/ parts (from < 0) it maps to part-relative offsets, which the CDN
+// serves as Range over the part.
+func (f *abyssFile) abyssFetchSliced(ctx context.Context, client *http.Client, reqURL string, from, through, want int64) ([]byte, error) {
+	if want <= 0 {
+		return nil, fmt.Errorf("invalid slice fetch of %d bytes", want)
+	}
+	isSora := from < 0
+	out := make([]byte, 0, want)
+	for off := int64(0); off < want; {
+		n := min(int64(abyssFetchSliceBytes), want-off)
+		var sliceFrom, sliceThrough int64
+		if isSora {
+			sliceFrom, sliceThrough = off, off+n-1
+		} else {
+			sliceFrom, sliceThrough = from+off, from+off+n-1
+		}
+		var slice []byte
+		var err error
+		for attempt := 0; ; attempt++ {
+			slice, err = abyssSliceRequest(ctx, client, reqURL, sliceFrom, sliceThrough, n, want, isSora, f.origin)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil || attempt >= abyssSliceRetries || !abyssRetryableFailure(err) {
+				return nil, fmt.Errorf("slice %d-%d: %w", off, off+n-1, err)
+			}
+			if serr := abyssSleep(ctx, time.Duration(attempt+1)*250*time.Millisecond); serr != nil {
+				return nil, serr
+			}
+		}
+		out = append(out, slice...)
+		off += int64(len(slice))
+		if int64(len(slice)) != n {
+			return nil, fmt.Errorf("slice %d-%d returned %d bytes, expected %d", off, off+n-1, len(slice), n)
+		}
+	}
+	if int64(len(out)) != want {
+		return nil, fmt.Errorf("abyss chunk returned %d bytes, expected %d", len(out), want)
+	}
+	return out, nil
+}
+
+// abyssSliceRequest fetches exactly n bytes from reqURL at the given Range.
+// A 206 must carry exactly n bytes. A 200 means the server ignored the Range:
+// when the body holds the whole part (or, for .fd, the whole head file) the
+// needed window is sliced out of it; otherwise it is rejected like any other
+// wrong-sized body.
+func abyssSliceRequest(ctx context.Context, client *http.Client, rawURL string, from, through, n, partWant int64, isSora bool, origin string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Referer", origin+"/")
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, through))
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, abyssRedactTransportErr(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, n+1)) // #nosec G115 -- n is a slice length
+		if err != nil {
+			return nil, abyssRedactTransportErr(err)
+		}
+		if int64(len(body)) != n { // #nosec G115 -- see above
+			return nil, fmt.Errorf("abyss chunk returned %d bytes, expected %d", len(body), n)
+		}
+		return body, nil
+	case http.StatusOK:
+		// Range ignored. For /sora/ the body is the whole part (partWant
+		// bytes); for .fd it is the whole head file. Slice the window out
+		// when it is in bounds instead of failing the part.
+		limit := partWant + 1
+		if !isSora {
+			limit = 20<<20 + 1 // head files reach ~18 MiB
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, limit)) // #nosec G115 -- bounded above
+		if err != nil {
+			return nil, abyssRedactTransportErr(err)
+		}
+		if int64(len(body)) == n {
+			return body, nil
+		}
+		if from < 0 || from+n > int64(len(body)) {
+			return nil, fmt.Errorf("abyss chunk returned %d bytes, expected %d", len(body), n)
+		}
+		return body[from : from+n], nil
+	default:
+		return nil, netx.NewHTTPStatusError(SourceName, "abyss chunk", resp.StatusCode)
+	}
 }
 
 // abyssPartRequest performs one upstream request for a part. The response
@@ -464,6 +666,19 @@ func abyssRetryableFailure(err error) bool {
 	}
 	// Transport error: retry unless it is our own deadline or cancellation.
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+// isTruncationError reports whether err looks like a truncated body rather
+// than an origin status: a transport reset mid-body ("unexpected EOF") or a
+// short/overlong body ("returned X bytes, expected Y"). Only those fall back
+// to sliced Range re-fetching; a 5xx already had its bounded whole-part
+// retries and must fail fast instead of multiplying requests to an overloaded
+// origin.
+func isTruncationError(err error) bool {
+	if _, ok := errors.AsType[*netx.SourceDiagnostic](err); ok {
+		return false
+	}
+	return abyssRetryableFailure(err)
 }
 
 // abyssRedactTransportErr strips the upstream URL from transport errors: the

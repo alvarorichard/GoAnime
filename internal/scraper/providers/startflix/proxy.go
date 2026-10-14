@@ -72,6 +72,15 @@ func (c *Client) proxyClient() *http.Client {
 
 func newStreamClient() *http.Client {
 	t := netx.SafeScraperTransport(30 * time.Second)
+	// The StartFlix/Abyss CDN repeatedly resets HTTP/2 streams on large
+	// byte-range reads (INTERNAL_ERROR). Keep this proxy on HTTP/1.1 so a
+	// failed multiplexed stream cannot strand a download at its final range.
+	t.ForceAttemptHTTP2 = false
+	tlsConfig := netx.SafeTLSConfig()
+	tlsConfig.NextProtos = []string{"http/1.1"}
+	t.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return netx.SafeDialContext(ctx, network, addr, 30*time.Second, tlsConfig)
+	}
 	t.ResponseHeaderTimeout = 30 * time.Second
 	return &http.Client{Transport: t}
 }

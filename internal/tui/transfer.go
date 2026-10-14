@@ -278,6 +278,11 @@ func withRate(amount string, done, total int64, rate float64, speed string) stri
 	if rate <= 0 {
 		return amount
 	}
+	// Avoid displaying a nonsensical multi-year ETA when the byte/frame rate
+	// is positive only due to smoothing but rounds to zero in the UI.
+	if rate < 1 && total > done {
+		return amount + " · stalled"
+	}
 	parts := []string{amount, speed}
 	if total > done {
 		parts = append(parts, FormatClock(float64(total-done)/rate)+" left")
