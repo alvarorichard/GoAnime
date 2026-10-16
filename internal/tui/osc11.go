@@ -44,7 +44,7 @@ func queryBackgroundIsLight(timeout time.Duration) (light, ok bool) {
 
 // readOSCReply reads until BEL or ST (ESC \) or the timeout. The OSC 11
 // reply looks like "]11;rgb:0000/0000/0000" wrapped in ESC ] ... (BEL|ST).
-func readOSCReply(fd int, timeout time.Duration) (string, bool) {
+func readOSCReply(_ int, timeout time.Duration) (string, bool) {
 	type result struct {
 		data string
 		ok   bool

@@ -354,7 +354,7 @@ func (m *searchingModel) View() tea.View {
 
 // searchView lays out the status line, the live list with skeleton rows for
 // the sources still asking, and the sources panel beside them.
-func (m *searchingModel) searchView(width, height int) string {
+func (m *searchingModel) searchView(width, _ int) string {
 	left := m.statusLine() + "\n" + m.results.View()
 	if m.pendingCount() > 0 {
 		left += "\n" + m.skeletons(width)

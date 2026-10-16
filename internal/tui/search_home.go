@@ -521,7 +521,9 @@ func (m *searchHomeModel) scopeTabs() string {
 			sb.WriteString("   ")
 		}
 	}
-	sb.WriteString("     " + m.theme.Keycap.Render("tab") + m.theme.Footer.Render(" change"))
+	sb.WriteString("     ")
+	sb.WriteString(m.theme.Keycap.Render("tab"))
+	sb.WriteString(m.theme.Footer.Render(" change"))
 	return sb.String()
 }
 

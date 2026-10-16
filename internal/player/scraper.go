@@ -375,7 +375,7 @@ func episodePickOptions(episodes []models.Episode, watched map[int]episodeWatch)
 
 // handleEpisodeAction carries out an episodes-screen action key for the
 // highlighted row, then returns that row's selection for the normal flow.
-func handleEpisodeAction(action string, idx int, episodes []models.Episode, watched map[int]episodeWatch) (string, string, error) {
+func handleEpisodeAction(action string, idx int, episodes []models.Episode, _ map[int]episodeWatch) (string, string, error) {
 	if idx < 0 || idx >= len(episodes) {
 		return "", "", errors.New("invalid index returned by episode picker")
 	}
