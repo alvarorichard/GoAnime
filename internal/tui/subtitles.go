@@ -409,6 +409,12 @@ type subtitleRunner func(tea.Model) (tea.Model, error)
 
 // SelectSubtitleTrack opens the subtitles screen and returns its choice.
 func SelectSubtitleTrack(opts SubtitleOptions) (SubtitleChoice, error) {
+	// Fail fast without a TTY (see PickActioned): Windows blocks on console
+	// input while Linux errors. Headless callers (e.g. batch subtitle choice)
+	// treat any error as "keep current tracks".
+	if !HasTerminal() {
+		return SubtitleChoice{}, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return selectSubtitleWithRunner(opts, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

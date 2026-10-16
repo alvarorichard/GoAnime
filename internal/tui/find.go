@@ -56,6 +56,9 @@ func ResetTerminal() {
 // Find is a drop-in replacement for fuzzyfinder.Find that resets the
 // terminal's cursor key mode after the finder exits.
 func Find[T any](slice []T, itemFunc func(i int) string, opts ...fuzzyfinder.Option) (int, error) {
+	if !HasTerminal() {
+		return -1, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	idx, err := fuzzyfinder.Find(slice, itemFunc, opts...)
 	ResetTerminal()
 	return idx, err

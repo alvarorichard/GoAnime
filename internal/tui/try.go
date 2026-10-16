@@ -441,6 +441,9 @@ type tryRunner func(tea.Model) (tea.Model, error)
 
 // TrySearch opens the no-results screen and returns the retry it chose.
 func TrySearch(opts TryOptions) (TryDecision, error) {
+	if !HasTerminal() {
+		return TryDecision{}, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return trySearchWithRunner(opts, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

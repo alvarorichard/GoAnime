@@ -350,6 +350,10 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 // showResumeDialog displays a compact dialog asking if user wants to resume playback.
 // For movies (single-title playback) the wording avoids "episode N".
 func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
+	// Fail fast without a TTY: huh blocks on Windows console input headless.
+	if !tui.HasTerminal() {
+		return false, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	var resume bool
 
 	// Convert seconds to minutes and seconds for better readability

@@ -1121,6 +1121,11 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("blogger video URL not available")
 			}
 
+			// Fail fast without a TTY: the progress program blocks on Windows
+			// console input headless instead of erroring like Linux.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
+			}
 			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
@@ -1174,6 +1179,10 @@ func downloadAndPlayEpisode(
 			LooksLikeHLS(videoURL) ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com"):
+			// Fail fast without a TTY (see above): progress UI hangs on Windows.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
+			}
 			// Use yt-dlp with progress bar
 			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
@@ -1279,6 +1288,10 @@ func downloadAndPlayEpisode(
 			})
 
 		default:
+			// Fail fast without a TTY (see above): progress UI hangs on Windows.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
+			}
 			// Initialize progress model
 			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)

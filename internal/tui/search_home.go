@@ -755,6 +755,9 @@ type searchHomeRunner func(tea.Model) (tea.Model, error)
 
 // SearchHome opens the SEARCH home screen and returns its decision.
 func SearchHome(opts SearchHomeOptions) (SearchHomeResult, error) {
+	if !HasTerminal() {
+		return SearchHomeResult{}, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return searchHomeWithRunner(opts, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

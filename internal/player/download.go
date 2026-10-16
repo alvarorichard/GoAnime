@@ -1898,6 +1898,11 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 	}
 
 	if totalBytes > 0 {
+		// Fail fast without a TTY: the progress program blocks on Windows
+		// console input headless instead of erroring like Linux.
+		if !tui.HasTerminal() {
+			return fmt.Errorf("no terminal: progress UI requires a TTY")
+		}
 		m = newDownloadModel(anime.Name, fmt.Sprintf("%d episodes", len(episodesToDownload)), totalBytes)
 		m.taskTotals = make(map[string]int64)
 		for _, epNum := range episodesToDownload {

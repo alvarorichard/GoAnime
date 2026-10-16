@@ -580,6 +580,9 @@ type searchLiveRunner func(tea.Model) (tea.Model, error)
 // SearchLiveResults opens the SEARCHING screen over events and returns how
 // it ended: the early pick, the completed wait, or the cancel/back error.
 func SearchLiveResults(opts SearchLiveOptions, events <-chan models.SearchEvent) (SearchLiveOutcome, error) {
+	if !HasTerminal() {
+		return SearchLiveOutcome{}, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return searchLiveWithRunner(opts, events, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

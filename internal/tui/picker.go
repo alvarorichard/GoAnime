@@ -718,6 +718,15 @@ func Pick(items []PickItem, opts PickOptions) (int, error) {
 // PickActioned opens a picker that also offers screen actions (tela 5). It
 // returns the chosen item index, or -1 with the picked action's key.
 func PickActioned(items []PickItem, opts PickOptions) (index int, action string, err error) {
+	if len(items) == 0 {
+		return -1, "", ErrNoPickItems
+	}
+	// Fail fast without a TTY: Bubble Tea blocks on Windows (getConsoleInput)
+	// while it errors on Linux. Without this, headless CI on windows-latest
+	// hangs the full go-test timeout instead of erroring like Linux.
+	if !HasTerminal() {
+		return -1, "", fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return pickActionedWithRunner(items, opts, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

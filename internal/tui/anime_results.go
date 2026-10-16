@@ -743,6 +743,12 @@ func SelectAnime(animes []*models.Anime) (*models.Anime, error) {
 // SelectAnimeWithQuery is SelectAnime with the search query, shown quoted at
 // the right of the header (tela 3).
 func SelectAnimeWithQuery(animes []*models.Anime, query string) (*models.Anime, error) {
+	if len(groupAnimeResults(animes)) == 0 {
+		return nil, ErrNoAnimeResults
+	}
+	if !HasTerminal() {
+		return nil, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	return selectAnimeWithQueryRunner(animes, query, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {

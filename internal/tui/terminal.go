@@ -5,7 +5,20 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"golang.org/x/term"
 )
+
+// HasTerminal reports whether stdin is an interactive terminal.
+//
+// Bubble Tea's input reader blocks on Windows (tcell winTty
+// getConsoleInput syscall) when there is no console, while on Linux it
+// errors fast. Callers that open an interactive screen (pickers, progress
+// bars, huh forms) must check this first and fail fast headless, or CI
+// on windows-latest hangs for the full 10m go-test timeout instead of
+// erroring like Linux.
+func HasTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
 
 // BubbleTeaProgramOptions returns default Bubble Tea options that avoid
 // terminal capability probes known to leak raw responses in some terminals.
