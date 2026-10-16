@@ -113,7 +113,9 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")
 	addOption(&helpContent, "--audio", "Preferred audio language for movies and TV shows, such as pt-BR or english.")
 	addOption(&helpContent, "--no-subs", "Disable subtitles.")
+	addOption(&helpContent, "--download-menu", "Always show the episode options menu before playing (tela 6).")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Must be inside your home folder. Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "--plain", "Plain interface: no colors, no Japanese glosses, ASCII marks (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1).")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section

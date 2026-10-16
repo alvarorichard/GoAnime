@@ -73,7 +73,7 @@ func TestRowDelegate_TwoLineResults(t *testing.T) {
 	t.Parallel()
 	theme := NewTheme(true)
 	d := rowDelegate{theme: &theme, twoLine: true, spacing: 1}
-	items := []list.Item{animeResultItem{number: "01", anime: nil}}
+	items := []list.Item{animeGroupItem{number: "01"}}
 
 	got := renderRow(t, d, items, 0, 40)
 	lines := strings.Split(ansi.Strip(got), "\n")

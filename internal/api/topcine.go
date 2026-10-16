@@ -159,6 +159,57 @@ func fillTopCineEpisodeTitles(media *models.Anime, episodes []models.Episode) {
 			episodes[i].Title.English, episodes[i].Title.Romaji = name, name
 		}
 	}
+	fillFlattenedSeasonTitles(ctx, media, title, episodes)
+}
+
+// fillFlattenedSeasonTitles covers TopCine pages that flatten every episode
+// into season 1 while the panel splits seasons (Solo Leveling lists 25
+// episodes under season 1; the panel carries S1 with 12 and S2 with 13).
+// Without it a later panel season stays untitled. It only runs when the page
+// names exactly one season, and maps a panel episode by its offset across the
+// earlier panel seasons — the widest audio count, so a Legendado-only later
+// season (Solo Leveling S1 has no Legendado) still lands on the right title.
+// Titles only: playback never depends on it.
+func fillFlattenedSeasonTitles(ctx context.Context, media *models.Anime, title topcine.Title, episodes []models.Episode) {
+	need := false
+	for i := range episodes {
+		if episodes[i].Title.English == "" {
+			need = true
+			break
+		}
+	}
+	if !need || len(title.Seasons) != 1 {
+		return
+	}
+	flat := title.Seasons[0].Episodes
+	if len(flat) == 0 {
+		return
+	}
+	panel, err := topCinePanel(ctx, media)
+	if err != nil || panel.Kind != startflix.KindSeries {
+		return
+	}
+	seasons, err := sfxClientFn().Seasons(ctx, panel)
+	if err != nil {
+		return
+	}
+	offset := 0
+	for _, s := range seasons {
+		if s.Number >= media.CurrentSeason {
+			continue
+		}
+		offset += max(len(s.Dubbed), len(s.Subtitled))
+	}
+	for i := range episodes {
+		if episodes[i].Title.English != "" || episodes[i].Num <= 0 {
+			continue
+		}
+		if idx := offset + episodes[i].Num - 1; idx >= 0 && idx < len(flat) {
+			if name := flat[idx].Title; name != "" {
+				episodes[i].Title.English, episodes[i].Title.Romaji = name, name
+			}
+		}
+	}
 }
 
 // GetTopCineEpisodes lists a TopCine title: the movie itself, or the episodes

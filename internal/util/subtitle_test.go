@@ -14,6 +14,7 @@ func resetSubtitleState() {
 	GlobalReferer = ""
 	GlobalSubsLanguage = ""
 	GlobalAudioLanguage = ""
+	resetSubtitleSession()
 }
 
 // ─── Source Detection ────────────────────────────────────────────────────────

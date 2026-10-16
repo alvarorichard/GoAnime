@@ -15,9 +15,10 @@ import (
 // and then fetches the playlist the way the player will, because the CDN's
 // Referer check is the one failure a parser test cannot see.
 //
-// "best" returns the master, which the CDN serves either way; "720p" returns the
-// variant, which is the level where it was measured to enforce the Referer. Both
-// are checked so the stricter one is actually covered.
+// "best" returns the master and "720p" the variant; since 2026-10-16 the CDN
+// enforces the Referer at both levels (it used to serve the master either
+// way), so both fetches below carry the referer the scraper handed out and
+// fail loudly if playback would.
 // Opt in with GOANIME_LIVE=1; never runs in CI.
 func TestLiveHiAnimeChain(t *testing.T) {
 	if os.Getenv("GOANIME_LIVE") == "" || testing.Short() || os.Getenv("CI") != "" {

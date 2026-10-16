@@ -15,38 +15,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAnimeResultItemFilterValue(t *testing.T) {
+func TestAnimeGroupItemFilterValue(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		item animeResultItem
-		want string
-	}{
-		{name: "metadata", item: animeResultItem{anime: &models.Anime{Name: "Frieren", Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled", Quality: "1080p"}}, want: "Frieren AnimeFire 2023 anime Dubbed and subtitled 1080p"},
-		{name: "control sequences", item: animeResultItem{anime: &models.Anime{Name: "Title\nfake\x1b[2J", Source: "Source\rInjected"}}, want: "Title fake Source Injected"},
-		{name: "nil", item: animeResultItem{}, want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, tt.item.FilterValue())
-		})
-	}
+	ptbr := &models.Anime{Name: "[PT-BR] Frieren", Source: "Animefire.io", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Legendado", Quality: "1080p"}
+	en := &models.Anime{Name: "[English] Frieren", Source: "HiAnime", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Sub", Quality: "1080p"}
+	groups := groupAnimeResults([]*models.Anime{ptbr, en})
+	require.Len(t, groups, 1)
+	item := animeGroupItem{group: &groups[0], pos: 0, number: "01"}
+
+	want := "Frieren 2023 Anime AnimeFire PT-BR PT-BR Legendado 1080p HiAnime EN English Sub 1080p"
+	assert.Equal(t, want, item.FilterValue())
+
+	t.Run("nil group", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "", animeGroupItem{}.FilterValue())
+	})
 }
 
-func TestAnimeResultItemTitle(t *testing.T) {
+func TestAnimeGroupItemTitle(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		item animeResultItem
+		item animeGroupItem
 		want string
 	}{
-		{name: "title", item: animeResultItem{anime: &models.Anime{Name: "Frieren"}}, want: "Frieren"},
-		{name: "single line", item: animeResultItem{anime: &models.Anime{Name: "Title\nfake\x1b[2J"}}, want: "Title fake"},
-		{name: "blank", item: animeResultItem{anime: &models.Anime{Name: "  "}}, want: "Unknown title"},
-		{name: "nil", item: animeResultItem{}, want: "Unknown title"},
+		{name: "strips language tag", item: animeGroupItem{group: &animeGroup{title: "Frieren"}}, want: "Frieren"},
+		{name: "nil", item: animeGroupItem{}, want: "Unknown title"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,25 +52,89 @@ func TestAnimeResultItemTitle(t *testing.T) {
 	}
 }
 
-func TestAnimeResultItemDescription(t *testing.T) {
+func TestAnimeGroupItemDescription(t *testing.T) {
 	t.Parallel()
 
+	multi := animeGroup{
+		title: "Namakura Gatana", year: "1917", media: "Anime",
+		versions: []animeVersion{{anime: &models.Anime{}}, {anime: &models.Anime{}}},
+	}
+	single := animeGroup{
+		title: "Momotarou", year: "1918", media: "Anime",
+		versions: []animeVersion{{anime: &models.Anime{Source: "Animefire.io"}}},
+	}
 	tests := []struct {
 		name string
-		item animeResultItem
+		item animeGroupItem
 		want string
 	}{
-		{name: "complete", item: animeResultItem{anime: &models.Anime{Source: "AnimeFire", Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Subtitled", Quality: "1080p"}}, want: "AnimeFire · 2023 · Anime · Subtitled · 1080p"},
-		{name: "tv", item: animeResultItem{anime: &models.Anime{Source: "StartFlix", Year: "2019", MediaType: models.MediaTypeTV}}, want: "StartFlix · 2019 · TV"},
-		{name: "partial", item: animeResultItem{anime: &models.Anime{Source: "AllAnime"}}, want: "AllAnime"},
-		{name: "single line", item: animeResultItem{anime: &models.Anime{Source: "Source\r\nInjected\x1b[2J"}}, want: "Source Injected"},
-		{name: "empty", item: animeResultItem{anime: &models.Anime{}}, want: "Information unavailable"},
-		{name: "nil", item: animeResultItem{}, want: "Information unavailable"},
+		{name: "versions", item: animeGroupItem{group: &multi}, want: "1917 · Anime · 2 versions"},
+		{name: "single shows source", item: animeGroupItem{group: &single}, want: "1918 · Anime · AnimeFire"},
+		{name: "nil", item: animeGroupItem{}, want: "Information unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, tt.item.Description())
+		})
+	}
+}
+
+func TestGroupAnimeResults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("same work across sources is one group", func(t *testing.T) {
+		t.Parallel()
+		ptbr := &models.Anime{Name: "[PT-BR] Namakura Gatana", Source: "Animefire.io", Year: "1917", MediaType: models.MediaTypeAnime, Audio: "Legendado"}
+		en := &models.Anime{Name: "[English] Namakura Gatana", Source: "HiAnime", Year: "1917", MediaType: models.MediaTypeAnime, Audio: "Sub"}
+		other := &models.Anime{Name: "[PT-BR] Saru to Kani no Gassen", Source: "Animefire.io", Year: "1917", MediaType: models.MediaTypeAnime}
+
+		groups := groupAnimeResults([]*models.Anime{ptbr, en, nil, other})
+
+		require.Len(t, groups, 2, "nil entries drop out, the rest group by work")
+		assert.Equal(t, "Namakura Gatana", groups[0].title)
+		require.Len(t, groups[0].versions, 2)
+		assert.Same(t, ptbr, groups[0].versions[0].anime, "first version keeps incoming order")
+		assert.Same(t, en, groups[0].versions[1].anime)
+		assert.Equal(t, []string{"PT-BR", "EN"}, groups[0].badges())
+		assert.Equal(t, "1917", groups[0].year)
+		assert.Equal(t, "Saru to Kani no Gassen", groups[1].title)
+	})
+
+	t.Run("language falls back to source", func(t *testing.T) {
+		t.Parallel()
+		groups := groupAnimeResults([]*models.Anime{
+			{Name: "Frieren", Source: "HiAnime"},
+			{Name: "Naruto", Source: "Goyabu"},
+		})
+		require.Len(t, groups, 2)
+		assert.Equal(t, "EN", groups[0].versions[0].lang)
+		assert.Equal(t, "English", groups[0].versions[0].langWord)
+		assert.Equal(t, "PT-BR", groups[1].versions[0].lang)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
+		assert.Empty(t, groupAnimeResults(nil))
+		assert.Empty(t, groupAnimeResults([]*models.Anime{nil, nil}))
+	})
+}
+
+func TestCleanResultTitle(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name, want string }{
+		{"[PT-BR] Namakura Gatana", "Namakura Gatana"},
+		{"[Movie] [PT-BR] Inception", "Inception"},
+		{"[English] Frieren", "Frieren"},
+		{"Attack on Titan (Legendado)", "Attack on Titan"},
+		{"Black Clover (Shippuuden)", "Black Clover (Shippuuden)"},
+		{"  ", "Unknown title"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, cleanResultTitle(tt.name))
 		})
 	}
 }
@@ -123,6 +183,73 @@ func TestNewAnimeResultsModel(t *testing.T) {
 	assert.False(t, model.results.ShowHelp())
 	assert.Equal(t, "Search > Results", model.shell.Breadcrumb)
 	assert.Equal(t, "❯ ", model.results.FilterInput.Prompt)
+}
+
+func TestNewAnimeResultsModelWithQuery(t *testing.T) {
+	t.Parallel()
+
+	model := newAnimeResultsModelWithQuery([]*models.Anime{{Name: "[PT-BR] Namakura Gatana"}}, "namakura")
+
+	assert.Equal(t, `"namakura"`, model.shell.Context, "the query reads quoted at the right of the header")
+}
+
+func TestAnimeResultsModelGroupsVersions(t *testing.T) {
+	t.Parallel()
+
+	ptbr := &models.Anime{Name: "[PT-BR] Namakura Gatana", Source: "Animefire.io", Year: "1917", MediaType: models.MediaTypeAnime, Audio: "Legendado"}
+	en := &models.Anime{Name: "[English] Namakura Gatana", Source: "HiAnime", Year: "1917", MediaType: models.MediaTypeAnime, Audio: "Sub"}
+	model := newAnimeResultsModel([]*models.Anime{ptbr, en})
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	t.Run("enter opens the first version", func(t *testing.T) {
+		t.Parallel()
+		m := newAnimeResultsModel([]*models.Anime{ptbr, en})
+		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.NotNil(t, cmd)
+		assert.Same(t, ptbr, m.selected)
+	})
+
+	t.Run("right picks the next version", func(t *testing.T) {
+		m := newAnimeResultsModel([]*models.Anime{ptbr, en})
+		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+		assert.Equal(t, 1, m.versionSel[0])
+
+		_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.NotNil(t, cmd)
+		assert.Same(t, en, m.selected, "enter opens the marked version")
+	})
+
+	t.Run("versions wrap around", func(t *testing.T) {
+		m := newAnimeResultsModel([]*models.Anime{ptbr, en})
+		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+		assert.Equal(t, 1, m.versionSel[0], "left from the first wraps to the last")
+	})
+
+	t.Run("single version has nowhere to move", func(t *testing.T) {
+		m := newAnimeResultsModel([]*models.Anime{ptbr})
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+		assert.Nil(t, cmd, "no version to move to: the key reaches the list")
+		assert.Same(t, m, updated)
+		assert.Empty(t, m.versionSel)
+	})
+
+	t.Run("details panel lists versions", func(t *testing.T) {
+		view := ansi.Strip(model.View().Content)
+		assert.Contains(t, view, "VERSIONS 2 · ←→ to choose")
+		assert.Contains(t, view, "▶ AnimeFire PT-BR · Legendado")
+		assert.Contains(t, view, "HiAnime English · Sub")
+		assert.Contains(t, view, "enter opens it on AnimeFire")
+	})
+
+	t.Run("typing filters without slash", func(t *testing.T) {
+		m := newAnimeResultsModel([]*models.Anime{
+			{Name: "[PT-BR] Namakura Gatana", Source: "Animefire.io"},
+			{Name: "[PT-BR] Momotarou", Source: "Animefire.io"},
+		})
+		_, _ = m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+		assert.Equal(t, list.Filtering, m.results.FilterState())
+		assert.Equal(t, "m", m.results.FilterInput.Value())
+	})
 }
 
 func TestAnimeResultsModelInit(t *testing.T) {
@@ -326,12 +453,12 @@ func TestDetailsPanelLines(t *testing.T) {
 	assert.Len(t, panelLines(&theme, content, 40, true), 6, "compact: heading, title and one line per field")
 }
 
-// On a short terminal the details panel must keep its last field and its
+// On a short terminal the details panel must keep its versions and its
 // bottom border instead of running off the screen. A notice above the list
 // takes two rows, which is what first pushed it off.
 func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 	anime := &models.Anime{Name: "[PT-BR] Frieren e a Jornada para o Além", Source: "Animefire.io",
-		Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Dubbed and subtitled"}
+		Year: "2023", MediaType: models.MediaTypeAnime, Audio: "Legendado"}
 
 	for _, height := range []int{18, 24, 40} {
 		NoticeOnNextResults("A title has no episodes yet.") // not parallel: package-level notice
@@ -339,7 +466,8 @@ func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 		_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: height})
 		view := model.View().Content
 
-		assert.Contains(t, view, "Audio", "height %d: the last field was cut", height)
+		assert.Contains(t, view, "VERSIONS", "height %d: the versions were cut", height)
+		assert.Contains(t, view, "Legendado", "height %d: the version audio was cut", height)
 		assert.Contains(t, view, "▀▀▀", "height %d: the panel lost its shadow", height)
 		assert.LessOrEqual(t, lipgloss.Height(view), height)
 	}
@@ -351,7 +479,7 @@ func TestAnimeResultsModel_DetailsPanelFitsAShortScreen(t *testing.T) {
 	_, _ = model.Update(tea.WindowSizeMsg{Width: 110, Height: 12})
 	view := ansi.Strip(model.View().Content)
 	assert.NotContains(t, view, "DETAILS")
-	assert.Contains(t, view, "Dubbed and subtitled")
+	assert.Contains(t, view, "AnimeFire")
 }
 
 func TestSelectAnimeWithRunner(t *testing.T) {

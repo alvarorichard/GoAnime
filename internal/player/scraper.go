@@ -237,13 +237,13 @@ func episodeDisplayTitle(ep models.Episode) string {
 	return ep.Title.English
 }
 
-// episodeLabel builds the picker row label: "Episode 12 — Title".
+// episodeLabel builds the picker row label: "Episode 12 · Title".
 func episodeLabel(ep models.Episode) string {
 	title := episodeDisplayTitle(ep)
 	if title == "" {
 		return ep.Number
 	}
-	return ep.Number + " — " + title
+	return ep.Number + " · " + title
 }
 
 // episodeDetails is the text at the right of an episode's row: its air date.
@@ -276,13 +276,13 @@ func episodePickItems(episodes []models.Episode) []tui.PickItem {
 	return items
 }
 
-// episodePickFunc matches tui.Pick so tests can inject a headless picker.
-type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
+// episodePickFunc matches tui.PickActioned so tests can inject a headless picker.
+type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, string, error)
 
 // SelectEpisodeWithFuzzyFinder lets the user pick an episode on the styled
 // fuzzy picker. ESC (or quit) is reported as ErrBackRequested.
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
-	return selectEpisodeWithPicker(tui.Pick, episodes, loadEpisodeProgress(episodes))
+	return selectEpisodeWithPicker(tui.PickActioned, episodes, loadEpisodeProgress(episodes))
 }
 
 // selectEpisodeWithPicker isolates picker execution for deterministic tests.
@@ -295,18 +295,18 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, wa
 		return "", "", errors.New("episode picker not configured")
 	}
 
+	// A fresh picker means fresh intent: drop any episodes-screen request
+	// the previous flow left behind, and any resume override it set.
+	// (A continue reopen re-derives its position from watched below.)
+	ClearEpisodeMenu()
+	ClearResumeOverride()
+
 	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: opening picker with %d episodes", len(episodes))
 	items := episodePickItems(episodes)
-	opts := tui.PickOptions{
-		Breadcrumb:   "Search > Episodes",
-		WindowTitle:  "GoAnime - Episodes",
-		ItemSingular: "episode",
-		ItemPlural:   "episodes",
-		Action:       "play",
-	}
+	opts := episodePickOptions(episodes, watched)
 	applyEpisodeProgress(items, &opts, episodes, watched)
-	idx, err := pick(items, opts)
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, err=%v", idx, err)
+	idx, action, err := pick(items, opts)
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, action=%q, err=%v", idx, action, err)
 	if err != nil {
 		// Treat back/quit as a back request so callers return to the
 		// previous screen instead of failing.
@@ -315,11 +315,96 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, wa
 		}
 		return "", "", fmt.Errorf("failed to select episode: %w", err)
 	}
+	if action != "" {
+		return handleEpisodeAction(action, idx, episodes, watched)
+	}
 
 	if idx < 0 || idx >= len(episodes) {
 		return "", "", errors.New("invalid index returned by episode picker")
 	}
+	if w, ok := watched[idx]; ok && !w.finished() {
+		// Enter resumes where playback stopped, without asking again.
+		ForceResumeNext(w.position)
+	}
 	return episodes[idx].URL, episodes[idx].Number, nil
+}
+
+// episodePickOptions builds the episodes screen (tela 5): the show in the
+// header, its source and audio at the right, the jump hint, the watched
+// count and the download actions.
+func episodePickOptions(episodes []models.Episode, watched map[int]episodeWatch) tui.PickOptions {
+	listCtx := snapshotEpisodeListContext()
+	breadcrumb := "Search > Episodes"
+	if listCtx.title != "" {
+		breadcrumb = fmt.Sprintf("Search > %s > Episodes", listCtx.title)
+	}
+	header := ""
+	if srcName := displayListSource(listCtx.source); srcName != "" {
+		header = srcName
+		if audio := strings.TrimSpace(listCtx.audio); audio != "" {
+			header += " · " + audio
+		}
+	}
+	done := 0
+	for _, w := range watched {
+		if w.finished() {
+			done++
+		}
+	}
+	return tui.PickOptions{
+		Breadcrumb:        breadcrumb,
+		WindowTitle:       "GoAnime - Episodes",
+		ItemSingular:      "episode",
+		ItemPlural:        fmt.Sprintf("episodes · %d watched", done),
+		Action:            "resume",
+		BackDesc:          "results",
+		HelpHint:          true,
+		FilterPlaceholder: "type a number to jump, / to search titles",
+		Context:           header,
+		Actions: []tui.PickAction{
+			{Key: "r", Label: "from the start", Hint: "from start"},
+			{Key: "d", Label: "this episode", Hint: "download", Section: true},
+			{Key: "D", Label: "a range, from here to ...", Section: true},
+			{Key: "A", Label: fmt.Sprintf("all %d episodes", len(episodes)), Section: true},
+			{Key: "m", Label: "every option, upscale included", Section: true},
+		},
+		ActionsLabel: "Download",
+		ActionsGloss: "ダウンロード",
+	}
+}
+
+// handleEpisodeAction carries out an episodes-screen action key for the
+// highlighted row, then returns that row's selection for the normal flow.
+func handleEpisodeAction(action string, idx int, episodes []models.Episode, watched map[int]episodeWatch) (string, string, error) {
+	if idx < 0 || idx >= len(episodes) {
+		return "", "", errors.New("invalid index returned by episode picker")
+	}
+	switch action {
+	case "r":
+		ForceStartNext()
+	case "m":
+		RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+	case "d":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 1})
+	case "D":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 2, RangeStart: episodePickNum(episodes, idx)})
+	case "A":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 5})
+	default:
+		return "", "", fmt.Errorf("unknown episode action: %q", action)
+	}
+	return episodes[idx].URL, episodes[idx].Number, nil
+}
+
+// episodePickNum is the episode's number for range starts.
+func episodePickNum(episodes []models.Episode, idx int) int {
+	if num := episodes[idx].Num; num > 0 {
+		return num
+	}
+	if num, err := strconv.Atoi(ExtractEpisodeNumber(episodes[idx].Number)); err == nil && num > 0 {
+		return num
+	}
+	return idx + 1
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string

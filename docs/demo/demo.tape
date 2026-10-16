@@ -18,9 +18,9 @@ Set Shell bash
 Set WindowBar Colorful
 Set FontSize 18
 Set Width 1200
-Set Height 640
+Set Height 760
 Set Padding 24
-Set Framerate 24
+Set Framerate 30
 Set TypingSpeed 80ms
 
 Hide
@@ -34,13 +34,21 @@ Type "goanime"
 Sleep 300ms
 Enter
 
-Wait+Screen@10s /anime\/movie name/
+# Tela 1, the SEARCH home screen. The query box placeholder is the text that
+# is always there. setup.sh seeds CONTINUE and RECENT examples, so first
+# drop to the continue list and back: it shows the row highlight and its
+# details panel without leaving the box behind.
+Wait+Screen@10s /title, or/
 Sleep 800ms
-Type "namakura"
+Down
+Sleep 1.2s
+Up
+Sleep 500ms
+Type "momotarou"
 Sleep 400ms
 Enter
 
-# Results.
+# Results: Momotarou matches first, so Down 2 / Up 2 still lands on it.
 Wait+Screen@30s /RESULTS/
 Sleep 1.5s
 Down 2
@@ -49,17 +57,25 @@ Up 2
 Sleep 800ms
 Enter
 
-# Play online instead of downloading.
-Wait+Screen@60s /play online/
+# Episodes (tela 5): Momotarou lists three parts. m opens the OPTIONS menu
+# for the highlighted episode instead of playing it straight away.
+Wait+Screen@60s /EPISODES/
 Sleep 1.5s
-Type "G"
-Sleep 1s
+Down
+Sleep 600ms
+Up
+Sleep 600ms
+Type "m"
+
+# Options (tela 6): Watch now is first.
+Wait+Screen@30s /Watch now/
+Sleep 1.2s
 Enter
 
-# The film is playing in mpv; the terminal shows the player menu, with the
-# time played so far. q, the key beside Exit, stops playback and quits.
+# NOW PLAYING. Linger so the progress bar motion reads instead of
+# flickering past.
 Wait+Screen@60s /NOW PLAYING/
-Sleep 3s
+Sleep 5s
 Type "q"
 Wait+Line@15s /^\$\s*$/
 Sleep 1.5s

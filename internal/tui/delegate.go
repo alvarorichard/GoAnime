@@ -65,8 +65,14 @@ type rowStyles struct {
 func (d rowDelegate) styles(selected, dimmed bool, status PickStatus) rowStyles {
 	t := d.theme
 	if selected {
+		cursor := " ▶ "
+		if Plain() {
+			// Tela 9: without color the cursor is ">" with reverse
+			// video, never a color fill.
+			cursor = "> "
+		}
 		return rowStyles{
-			cursor: " ▶ ",
+			cursor: cursor,
 			fill:   t.Selected.UnsetBold(), title: t.Selected, desc: t.SelectedMuted, gutter: t.SelectedMuted,
 			mark: t.Selected, match: t.Selected.Underline(true), note: t.SelectedMuted, key: t.Selected,
 			tag: t.Tag, meter: t.Selected, meterEmpty: t.SelectedFaint,
@@ -212,7 +218,11 @@ func styleList(l *list.Model, theme *Theme, placeholder string) {
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 
-	l.FilterInput.Prompt = "❯ "
+	prompt := "❯ "
+	if Plain() {
+		prompt = "> "
+	}
+	l.FilterInput.Prompt = prompt
 	l.FilterInput.Placeholder = placeholder
 	input := l.FilterInput.Styles()
 	input.Focused.Prompt = theme.Primary
@@ -235,12 +245,30 @@ func styleList(l *list.Model, theme *Theme, placeholder string) {
 	l.Styles.ArabicPagination = theme.Muted
 	l.Styles.ActivePaginationDot = theme.Primary.SetString("●")
 	l.Styles.InactivePaginationDot = theme.Faint.SetString("○")
+	if Plain() {
+		l.Styles.ActivePaginationDot = theme.Primary.SetString("*")
+		l.Styles.InactivePaginationDot = theme.Faint.SetString("-")
+	}
 	l.Paginator.ActiveDot = l.Styles.ActivePaginationDot.String()
 	l.Paginator.InactiveDot = l.Styles.InactivePaginationDot.String()
 }
 
-// statusMark is the one-cell mark drawn before a title.
+// statusMark is the one-cell mark drawn before a title. In plain mode the
+// marks become ASCII (tela 9): x for watched, ~ for in progress, * for
+// current, so screen readers and dumb terminals read them as text.
 func statusMark(status PickStatus) string {
+	if Plain() {
+		switch status {
+		case PickWatched:
+			return "x"
+		case PickInProgress:
+			return "~"
+		case PickCurrent:
+			return "*"
+		default:
+			return " "
+		}
+	}
 	switch status {
 	case PickWatched:
 		return "✓"

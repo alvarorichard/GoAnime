@@ -128,11 +128,11 @@ func TestSelectEpisodeWithPicker_ProgressReachesThePicker(t *testing.T) {
 	episodes := progressEpisodes()
 	watched := map[int]episodeWatch{1: {position: 60, duration: 1440, updated: time.Unix(1_700_000_000, 0)}}
 
-	_, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, error) {
-		assert.Equal(t, "play", opts.Action)
+	_, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, string, error) {
+		assert.Equal(t, "resume", opts.Action)
 		assert.Equal(t, 1, opts.InitialIndex)
 		assert.Equal(t, tui.PickInProgress, items[1].Status)
-		return opts.InitialIndex, nil
+		return opts.InitialIndex, "", nil
 	}, episodes, watched)
 
 	require.NoError(t, err)

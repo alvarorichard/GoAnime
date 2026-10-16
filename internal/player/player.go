@@ -21,6 +21,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
 	"github.com/alvarorichard/Goanime/internal/discord"
@@ -850,12 +851,20 @@ func HandleDownloadAndPlay(
 		SetAnimeName(animeName, season)
 	}
 
+	// Record the show context for tracking writes: the SEARCH home screen's
+	// CONTINUE list reads the name, source and audio back from the database.
+	if anime != nil {
+		SetMediaContext(tui.SingleLine(animeName), tui.SingleLine(anime.Source), tui.SingleLine(anime.Audio))
+	} else {
+		SetMediaContext(tui.SingleLine(animeName), "", "")
+	}
+
 	// Check if this is an HLS stream (for proper handling later)
 	isHLSStream := LooksLikeHLS(videoURL)
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
-		downloadOption := askForDownload()
+		downloadOption := downloadMenuOption(selectedEpisodeNum, len(episodes), animeName)
 		switch downloadOption {
 		case 0:
 			// User wants to go back to server selection
@@ -878,13 +887,21 @@ func HandleDownloadAndPlay(
 			)
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
-					continue // Go back to download options menu
+					// Go back to download options menu
+					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					continue
 				}
 				return err
 			}
 			return nil
 		case 2:
 			// Download episodes in a range
+			if start := takeRangeStart(); start > 0 {
+				if err := downloadRangeFrom(start, episodes, anime); err != nil {
+					return err
+				}
+				return nil
+			}
 			if err := HandleBatchDownload(episodes, anime); err != nil {
 				return err
 			}
@@ -899,6 +916,9 @@ func HandleDownloadAndPlay(
 			// Download ALL episodes
 			if len(episodes) == 0 {
 				util.Errorf("No episodes available to download")
+				continue
+			}
+			if !confirmDownloadAll(len(episodes)) {
 				continue
 			}
 			if err := HandleDownloadAll(episodes, anime); err != nil {
@@ -988,7 +1008,9 @@ func HandleDownloadAndPlay(
 			)
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
-					continue // Go back to download options menu
+					// Go back to download options menu
+					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					continue
 				}
 				return err
 			}
@@ -1011,6 +1033,7 @@ func downloadAndPlayEpisode(
 	if videoURL == "" {
 		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
 	}
+	util.SetSubtitleContext(snapshotMedia().AnimeName, util.GetGlobalAnimeSource(), "", "")
 
 	// Resolve intermediate URLs (e.g., animefire.io/video/ JSON API) to actual CDN URLs
 	if strings.Contains(videoURL, "animefire.io/video/") {
@@ -1330,61 +1353,115 @@ func downloadAndPlayEpisode(
 	return ErrUserQuit
 }
 
-// askForDownload presents a prompt for the user to choose a download option.
-func askForDownload() int {
+// downloadMenuOption decides how playback proceeds: it plays directly
+// unless the OPTIONS menu was requested (m key, --download-menu) or an
+// episodes-screen download was picked (d/D/A auto-confirm).
+func downloadMenuOption(episodeNum, totalEpisodes int, animeName string) int {
+	req, _ := TakeEpisodeMenu()
+	currentMenuRequest = req
+	if req.DownloadCode != 0 {
+		return req.DownloadCode
+	}
+	if req.ShowMenu || util.GlobalDownloadMenu {
+		return askForDownload(episodeNum, totalEpisodes, animeName)
+	}
+	return 4 // play online
+}
+
+// currentMenuRequest is the request downloadMenuOption consumed for this
+// pass: case 2 reads its range start from it.
+var currentMenuRequest EpisodeMenuRequest
+
+// takeRangeStart consumes the D key's preset range start, if any.
+func takeRangeStart() int {
+	start := currentMenuRequest.RangeStart
+	currentMenuRequest.RangeStart = 0
+	return start
+}
+
+// askForDownload presents the episode options. Enter watches right away:
+// downloading is a shortcut (d/D/A), never the default (tela 6). Return
+// codes: 0 back, 1 this episode, 2 range, 3 upscale, 4 watch now, 5 all.
+func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return 4 // no TTY: default to play online
 	}
 	// Build the upscale option label with current status
 	upscaleStatus := upscaler.GetShaderModeName(upscaler.GetShaderMode())
-	upscaleLabel := fmt.Sprintf("Real-time Upscale [%s]", upscaleStatus)
 
-	type menuOption struct {
-		Label string
-		Value string
+	items := []tui.PickItem{
+		{Label: "Watch now"},
+		{Label: "Download this episode", Key: "d"},
+		{Label: "Download a range...", Key: "D"},
+		{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"},
 	}
-	items := []menuOption{
-		{"← Back", "back"},
-		{"Download ALL episodes", "download_all"},
-		{"Download this episode", "download_single"},
-		{"Download episodes in a range", "download_range"},
-		{upscaleLabel, "upscale"},
-		{"No download (play online)", "play_online"},
+	if totalEpisodes > 1 {
+		items = append(items, tui.PickItem{
+			Label: fmt.Sprintf("Download all %d episodes...", totalEpisodes),
+			Key:   "A",
+		})
 	}
 
-	labels := make([]string, len(items))
-	for i, it := range items {
-		labels[i] = it.Label
+	breadcrumb := "Playback > Options"
+	if episodeNum > 0 {
+		breadcrumb = fmt.Sprintf("Episode %d > Options", episodeNum)
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Playback > Download",
-		WindowTitle:  "GoAnime - Download",
+	context := tui.SingleLine(animeName)
+	if episodeNum > 0 && context != "" {
+		context = fmt.Sprintf("%s · Episode %d", context, episodeNum)
+	}
+
+	idx, err := tui.Pick(items, tui.PickOptions{
+		Breadcrumb:   breadcrumb,
+		WindowTitle:  "GoAnime - Options",
+		Context:      context,
 		ItemSingular: "option",
 		ItemPlural:   "options",
+		Action:       "watch",
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPickBack) {
 			return 0
 		}
-		util.Errorf("Error showing download menu: %v", err)
+		util.Errorf("Error showing options menu: %v", err)
 		return 4 // Default to play online on error
 	}
 
-	// Determines the selected option based on the choice value
-	switch items[idx].Value {
-	case "back":
-		return 0
-	case "download_single":
-		return 1
-	case "download_range":
-		return 2
-	case "upscale":
-		return 3
-	case "download_all":
-		return 5
-	default:
+	// Determines the selected option based on position
+	switch idx {
+	case 0:
 		return 4
+	case 1:
+		return 1
+	case 2:
+		return 2
+	case 3:
+		return 3
+	default:
+		return 5
 	}
+}
+
+// confirmDownloadAll asks before downloading the whole series: the old menu
+// put "Download ALL" one arrow from enter, so one wrong tap fetched the
+// entire series (tela 6).
+func confirmDownloadAll(totalEpisodes int) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return true
+	}
+	var confirmed bool
+	confirm := huh.NewConfirm().
+		Title(fmt.Sprintf("Download all %d episodes?", totalEpisodes)).
+		Description("This downloads the whole series.").
+		Affirmative("Yes, download all").
+		Negative("No, back").
+		Value(&confirmed)
+
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+		util.Errorf("Error showing download confirmation: %v", err)
+		return false
+	}
+	return confirmed
 }
 
 func askForPlayOffline() bool {

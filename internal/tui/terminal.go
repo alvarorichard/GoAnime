@@ -34,7 +34,7 @@ func NewProgram(model tea.Model, extra ...tea.ProgramOption) *tea.Program {
 // stream extraction, which without a TTY must fall back to a default instead of
 // failing, or the extracted URL is lost and mpv receives the raw API endpoint.
 // Prompts that need a real answer validate their own result instead; see
-// getUserInput in internal/util.
+// the SEARCH home screen in internal/tui/search_home.go.
 func RunClean(run func() error) error {
 	restoreEnv := suppressBubbleTeaQueries()
 	defer func() {

@@ -35,7 +35,12 @@ func ResolveColorProfile(w io.Writer, env []string, vtEnabled bool) colorprofile
 
 // ConsoleColorProfile enables VT when possible and returns a safe profile for f.
 // Call once at startup (or from InitLogger) before any colored write.
+// Plain mode (NO_COLOR, TERM=dumb, GOANIME_PLAIN, --plain) always returns
+// ASCII so no library emits color sequences.
 func ConsoleColorProfile(f *os.File) colorprofile.Profile {
+	if Plain() {
+		return colorprofile.ASCII
+	}
 	_ = EnableVirtualTerminal()
 	return ResolveColorProfile(f, os.Environ(), HasVirtualTerminal(f))
 }

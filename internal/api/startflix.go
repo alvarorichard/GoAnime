@@ -243,14 +243,28 @@ func selectStartFlixAudio(titleURL string, season startflix.Season) startflix.Au
 func selectPanelAudio(source, titleURL string, season startflix.Season) startflix.Audio {
 	audios := season.Audios()
 	if len(audios) == 1 {
+		// Live panels are often single-audio (Dexter, Frieren and Round 6 are
+		// Dublado-only): the substitution is silent by design, so it is logged
+		// with the counts instead of looking like a free choice downstream.
+		util.Debug("Panel season has a single audio, taking it without asking",
+			"source", source, "season", season.Number, "audio", audios[0],
+			"dubbed", len(season.Dubbed), "subtitled", len(season.Subtitled))
 		return audios[0]
 	}
 	has := func(a startflix.Audio) bool { return len(season.Episodes(a)) > 0 }
 	if a, ok := recallStartFlixAudio(titleURL); ok && has(a) {
 		return a
 	}
-	if a, ok := pinnedStartFlixAudio(); ok && has(a) {
-		return a
+	if a, ok := pinnedStartFlixAudio(); ok {
+		if has(a) {
+			return a
+		}
+		// A pinned --audio the panel does not carry for this season (Solo
+		// Leveling S1 has no Legendado) must not silently become the other
+		// audio in batch runs: log it so the download manifest is explainable.
+		util.Debug("Pinned audio is not on this panel season, falling through to the picker",
+			"source", source, "season", season.Number, "pinned", a,
+			"dubbed", len(season.Dubbed), "subtitled", len(season.Subtitled))
 	}
 
 	labels := []string{

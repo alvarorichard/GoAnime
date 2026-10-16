@@ -207,7 +207,7 @@ func TestAskForDownload_ReturnsValidMarker(t *testing.T) {
 	if os.Getenv("CI") != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
 		t.Skip("Skipping interactive fuzzy-finder test: requires a real TTY")
 	}
-	got := askForDownload()
+	got := askForDownload(5, 12, "Mukashi Banashi")
 	assert.GreaterOrEqual(t, got, 1)
 }
 

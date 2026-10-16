@@ -250,3 +250,12 @@ func TestSwapRegistryForTesting(t *testing.T) {
 	_, ok := Registered("swap-only-kind")
 	assert.False(t, ok)
 }
+
+func TestKinds(t *testing.T) {
+	restore := SwapRegistryForTesting(newFake("b-kind", 1), newFake("a-kind", 1))
+	t.Cleanup(restore)
+
+	kinds := Kinds()
+	require.Len(t, kinds, 2)
+	assert.Equal(t, []SourceKind{"a-kind", "b-kind"}, kinds, "sorted for deterministic panels")
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,7 @@ type appflowOverrides struct {
 	getEpisodesL  func(string) ([]models.Episode, error)
 	runSpinner    func(string, func())
 	promptForName func(string) (string, error)
+	tryScreen     func(tui.TryOptions) (tui.TryDecision, error)
 }
 
 // withOverrides applies the given overrides for the duration of the test
@@ -51,6 +53,7 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 		getEpisodesL:  getAnimeEpisodesLegacyFn,
 		runSpinner:    runSpinnerFn,
 		promptForName: promptForNameFn,
+		tryScreen:     openTryScreenFn,
 	}
 
 	if o.search != nil {
@@ -77,6 +80,9 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 	if o.promptForName != nil {
 		promptForNameFn = o.promptForName
 	}
+	if o.tryScreen != nil {
+		openTryScreenFn = o.tryScreen
+	}
 
 	t.Cleanup(func() {
 		searchEnhancedFn = prev.search
@@ -87,6 +93,7 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 		getAnimeEpisodesLegacyFn = prev.getEpisodesL
 		runSpinnerFn = prev.runSpinner
 		promptForNameFn = prev.promptForName
+		openTryScreenFn = prev.tryScreen
 		appflowOverrideMu.Unlock()
 	})
 }

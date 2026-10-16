@@ -1504,6 +1504,51 @@ func HandleBatchDownload(episodes []models.Episode, anime *models.Anime) error {
 	})
 }
 
+// downloadRangeFrom downloads startNum and on, asking only for the end.
+// The episodes screen's D key presets the highlighted episode as the start.
+func downloadRangeFrom(startNum int, episodes []models.Episode, anime *models.Anime) error {
+	endNum, err := promptRangeEnd(startNum)
+	if err != nil {
+		return err
+	}
+	return runBatchDownload(episodes, anime, startNum, endNum, batchOptions{
+		finish: func() error { return askAndPlayDownloadedEpisode(episodes, anime.URL, startNum, endNum) },
+	})
+}
+
+// promptRangeEnd asks for the range's end episode, which must not precede
+// its start. Split from getEpisodeRange so the D key presets the start.
+func promptRangeEnd(startNum int) (int, error) {
+	if fd := os.Stdin.Fd(); fd <= uintptr(math.MaxInt) && !term.IsTerminal(int(fd)) {
+		return 0, fmt.Errorf("invalid end episode: stdin is not a terminal")
+	}
+
+	var endStr string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title(fmt.Sprintf("Download from episode %d to...", startNum)).
+				Value(&endStr).
+				Validate(func(v string) error {
+					end, e := strconv.Atoi(strings.TrimSpace(v))
+					if e != nil {
+						return fmt.Errorf("invalid number")
+					}
+					if end < startNum {
+						return fmt.Errorf("end cannot precede episode %d", startNum)
+					}
+					return nil
+				}),
+		),
+	)
+
+	if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
+		return 0, err
+	}
+	endNum, _ := strconv.Atoi(strings.TrimSpace(endStr))
+	return endNum, nil
+}
+
 // HandleBatchDownloadRange downloads the episodes numbered startNum..endNum.
 // A number missing from the list is reported as a failure: the user asked
 // for it by number.
@@ -1732,6 +1777,7 @@ func runBatchDownload(episodes []models.Episode, anime *models.Anime, startNum, 
 	animeURL := anime.URL
 	start := time.Now()
 	util.Debug("Batch download started", "animeURL", animeURL, "source", anime.Source, "start", startNum, "end", endNum)
+	util.SetSubtitleContext(anime.Name, anime.Source, "", "")
 
 	if startNum < 1 || endNum < startNum {
 		return fmt.Errorf("invalid episode range: %d-%d", startNum, endNum)

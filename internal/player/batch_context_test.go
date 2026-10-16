@@ -12,6 +12,8 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/term"
 )
 
 // These tests swap package seams and process globals; none run in parallel.
@@ -285,4 +287,22 @@ func TestBatchReportsEachEpisodeWhilePreparing(t *testing.T) {
 	if strings.Join(status, "|") != strings.Join(want, "|") {
 		t.Errorf("status = %q, want %q", status, want)
 	}
+}
+
+func TestChooseBatchSubtitlesHeadlessKeepsTracks(t *testing.T) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		t.Skip("needs a non-interactive stdin: the real screen would wait for keys")
+	}
+	util.SetGlobalSubtitles([]util.SubtitleInfo{
+		{URL: "u-en", Language: "eng", Label: "English"},
+		{URL: "u-pt", Language: "por", Label: "Portuguese"},
+	})
+	t.Cleanup(util.ClearGlobalSubtitles)
+
+	eps := map[int]*batchEpisode{
+		1: {subtitles: util.GetGlobalSubtitles()},
+		2: {subtitles: nil},
+	}
+	got := chooseBatchSubtitles(eps, []int{1, 2})
+	require.Len(t, got, 2, "headless screen errors fast and keeps every track")
 }

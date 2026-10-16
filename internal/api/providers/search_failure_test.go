@@ -174,18 +174,23 @@ func twoSourceFailure() *SearchFailure {
 func TestFinishSearch_SeparatesEmptyFromFailed(t *testing.T) {
 	t.Parallel()
 
-	_, err := finishSearch("dexter", 2, nil, nil)
+	searchers := []activeSearcher{{kind: source.HiAnime}, {kind: source.Goyabu}}
+
+	_, err := finishSearch("dexter", searchers, nil, nil, nil)
 	require.Error(t, err)
 	var asFailure *SearchFailure
 	assert.False(t, errors.As(err, &asFailure),
 		"every source answered with nothing; that is not a failure to report per source")
 	assert.Contains(t, err.Error(), "no results found for")
+	var noResults *NoResultsInfo
+	require.ErrorAs(t, err, &noResults, "the empty case carries its sources for the TRY panel")
+	assert.Equal(t, []source.SourceKind{source.HiAnime, source.Goyabu}, noResults.AnsweredKinds)
 
-	_, err = finishSearch("dexter", 2, nil, twoSourceFailure().Sources)
+	_, err = finishSearch("dexter", searchers, nil, nil, twoSourceFailure().Sources)
 	require.ErrorAs(t, err, &asFailure)
 	assert.Equal(t, "dexter", asFailure.Query)
 
-	results, err := finishSearch("dexter", 3, []*models.Anime{{Name: "Dexter"}}, twoSourceFailure().Sources)
+	results, err := finishSearch("dexter", searchers, nil, []*models.Anime{{Name: "Dexter"}}, twoSourceFailure().Sources)
 	require.NoError(t, err, "one source answering is a successful search, whatever the others did")
 	assert.Len(t, results, 1)
 }
@@ -202,7 +207,8 @@ func TestFinishSearch_PartialFailureIsReportedNotSwallowed(t *testing.T) {
 	restore := captureWarnings()
 	defer restore()
 
-	results, err := finishSearch("naruto", 3,
+	results, err := finishSearch("naruto", []activeSearcher{{kind: source.Goyabu}},
+		nil,
 		[]*models.Anime{{Name: "Naruto", Source: "Goyabu"}},
 		twoSourceFailure().Sources)
 
@@ -220,7 +226,7 @@ func TestFinishSearch_NoWarningWhenEverySourceAnswered(t *testing.T) {
 	restore := captureWarnings()
 	defer restore()
 
-	_, err := finishSearch("naruto", 1, []*models.Anime{{Name: "Naruto"}}, nil)
+	_, err := finishSearch("naruto", []activeSearcher{{kind: source.Goyabu}}, nil, []*models.Anime{{Name: "Naruto"}}, nil)
 
 	require.NoError(t, err)
 	assert.Empty(t, warnings(), "nothing failed; there is nothing to report")
@@ -288,10 +294,16 @@ func TestSearchFailure_UnsetCountKeepsTheConservativeWording(t *testing.T) {
 func TestFinishSearch_CarriesHowManySourcesWereAsked(t *testing.T) {
 	t.Parallel()
 
-	_, err := finishSearch("o-todo-poderoso", 4, nil, twoSourceFailure().Sources[:1])
+	searchers := []activeSearcher{
+		{kind: source.StartFlix}, {kind: source.HiAnime}, {kind: source.Goyabu}, {kind: source.AnimeFire},
+	}
+	_, err := finishSearch("o-todo-poderoso", searchers, nil, nil, twoSourceFailure().Sources[:1])
 	var f *SearchFailure
 	require.ErrorAs(t, err, &f)
 	assert.Equal(t, 4, f.Searched)
 	assert.False(t, f.AllFailed())
 	assert.Equal(t, 3, f.Answered())
+	assert.Equal(t,
+		[]source.SourceKind{source.HiAnime, source.Goyabu, source.AnimeFire},
+		f.AnsweredKinds, "failed kinds are excluded in fan-out order")
 }

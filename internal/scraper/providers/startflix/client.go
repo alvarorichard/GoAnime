@@ -295,6 +295,13 @@ func (c *Client) Players(ctx context.Context, playersURL string) ([]Player, erro
 		return nil, ErrNotOnPanel
 	}
 	players := parsePlayers(doc)
+	if len(players) == 0 {
+		// An emptied episode answers 200 with an empty chooser (live:
+		// /episodio/1). Returning the sentinel here — instead of an empty
+		// slice and a nil error — keeps callers from misreading a vanished
+		// listing as success; Stream fails the same way through ResolveStream.
+		return nil, ErrNoPlayers
+	}
 	for i := range players {
 		players[i].referer = origin + "/"
 	}

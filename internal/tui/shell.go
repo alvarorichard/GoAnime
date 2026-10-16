@@ -21,6 +21,7 @@ const brandGloss = "ゴーアニメ"
 // sections: the word in capitals, its Japanese beside it.
 var stepGlosses = map[string]string{
 	"search":      "検索",
+	"searching":   "検索中",
 	"results":     "結果",
 	"seasons":     "シーズン",
 	"episodes":    "エピソード",
@@ -99,10 +100,13 @@ func (s *Shell) Render(body string, hints []Hint) string {
 
 // header lays out the GOANIME block, the brand gloss, the breadcrumb trail
 // and the context, dropping the least useful part until the line fits.
+// In plain mode the Japanese glosses are hidden (tela 9): without a CJK
+// font they render as boxes, and screen readers read each one aloud.
 func (s *Shell) header(width int) string {
 	block := s.Theme.Header.Render("GOANIME")
 	steps := breadcrumbSteps(s.Breadcrumb)
 	context := singleLine(s.Context)
+	showGloss := !Plain()
 
 	type layout struct {
 		brandGloss, stepGloss, context bool
@@ -116,6 +120,8 @@ func (s *Shell) header(width int) string {
 		{trail: min(len(steps), 1)},
 	}
 	for _, l := range layouts {
+		l.brandGloss = l.brandGloss && showGloss
+		l.stepGloss = l.stepGloss && showGloss
 		left := block
 		if l.brandGloss {
 			left += s.Theme.Gloss.Render(" " + brandGloss)
@@ -143,9 +149,16 @@ func (s *Shell) header(width int) string {
 // in the accent color. Steps cut from the front become an ellipsis.
 func (s *Shell) renderTrail(steps []string, shown int, gloss bool) string {
 	separator := s.Theme.Faint.Render(" › ")
+	if Plain() {
+		separator = " > "
+	}
 	parts := make([]string, 0, shown+1)
 	if shown < len(steps) {
-		parts = append(parts, s.Theme.Faint.Render("…"))
+		ellipsis := s.Theme.Faint.Render("…")
+		if Plain() {
+			ellipsis = "..."
+		}
+		parts = append(parts, ellipsis)
 	}
 	for i, step := range steps[len(steps)-shown:] {
 		label, jp := stepLabel(step)

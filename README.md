@@ -158,10 +158,13 @@ as `/usr/local/bin`, run `sudo goanime --update`.
 
 ## Usage
 
-Run `goanime` without arguments to start the interactive search. Type a name,
-choose a result and, for a series, an episode. A menu then offers to download
-the episode, a range or the whole series, to turn on real-time upscaling, or
-to play it online in mpv. You can also pass the name directly:
+Run `goanime` without arguments to open search home. Type a name and press
+enter, or press `↓` to pick from the lists below: Continue reopens an
+episode where you stopped (`enter` resumes, `r` starts over, `e` lists
+episodes, `x` removes it) and Recent repeats a past search with its result
+count. `tab` switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
+From a result, choose a version with `←` `→` and, for a series, an episode.
+You can also pass the name directly:
 
 ```bash
 goanime "one piece"
@@ -214,6 +217,10 @@ Run `goanime -h` for the full list of options.
 | `g` `G`               | First or last item        |
 | `Enter`               | Select                    |
 | `Esc`                 | Go back                   |
+| `tab`                 | Switch search scope (search home) |
+| `←` `→`               | Choose a version (results) |
+| `r` `e` `x`           | From start, episodes, remove (Continue list) |
+| `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
 
 In a menu that shows a letter beside each option, that letter picks the
 option at once; any other key still filters.
@@ -283,6 +290,8 @@ common needs:
 | ----------------------------- | ------------------------------------------------------------------------ |
 | `GOANIME_ENABLED_SOURCES`     | Comma-separated sources to enable, such as `goyabu`                      |
 | `GOANIME_DISABLED_SOURCES`    | Comma-separated sources to skip                                          |
+| `GOANIME_THEME`               | `dark`, `light` or `auto` (default): `auto` asks the terminal once for its background |
+| `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
 | `GOANIME_STRICT_SOURCE`       | Set to `1` to report an error instead of guessing an unknown source      |
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |

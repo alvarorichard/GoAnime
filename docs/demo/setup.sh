@@ -1,6 +1,8 @@
 # Sourced by demo.tape before the recording starts; not meant to be run on
 # its own. Leaves the shell ready to run the demo against server.go, with
-# nothing that can reach a real source or play sound. demo_cleanup undoes it.
+# nothing that can reach a real source or play sound, and seeds the
+# throwaway history (seed.go) so the home screen shows CONTINUE and RECENT
+# examples. demo_cleanup undoes it.
 
 DEMO_DIR="$(mktemp -d)"
 mkdir -p "$DEMO_DIR/bin" "$DEMO_DIR/home" "$DEMO_DIR/tmp"
@@ -32,6 +34,10 @@ until curl -sf -o /dev/null http://127.0.0.1:8765/anime/namakura-gatana; do slee
 # A throwaway HOME and TMPDIR: the demo leaves no watch history, logs or
 # caches behind, and does not show up as Discord presence.
 export HOME="$DEMO_DIR/home" TMPDIR="$DEMO_DIR/tmp" PATH="$DEMO_DIR/bin:$PATH"
+
+# Seed the throwaway history (see seed.go): the home screen opens on a
+# lived-in CONTINUE list and a few RECENT searches instead of an empty box.
+go run docs/demo/seed.go || return 1
 
 # Only the stand-in source: AnimeFire, pointed at server.go.
 export GOANIME_ANIMEFIRE_API=http://127.0.0.1:8765

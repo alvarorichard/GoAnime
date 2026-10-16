@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,6 +160,43 @@ func TestGetUserInput_SymbolPin(t *testing.T) {
 func TestChangeAnimeLocal_SymbolPin(t *testing.T) {
 	t.Parallel()
 	_ = ChangeAnimeLocal
+}
+
+func TestChangeAnimeLocal_Propagates(t *testing.T) {
+	prev := appflow.OpenSearchHomeFn
+	t.Cleanup(func() {
+		appflow.OpenSearchHomeFn = prev
+		appflow.PendingHomeResult = nil
+	})
+	appflow.PendingHomeResult = nil
+
+	t.Run("continue pends for the session loop", func(t *testing.T) {
+		entry := tui.HomeContinueEntry{AnimeTitle: "Show", EpisodeNum: 3}
+		appflow.OpenSearchHomeFn = func(string) (tui.SearchHomeResult, error) {
+			return tui.SearchHomeResult{Action: tui.HomeResume, Entry: entry, HasEntry: true}, nil
+		}
+
+		_, _, err := ChangeAnimeLocal()
+		assert.ErrorIs(t, err, appflow.ErrHomeContinue)
+		require.NotNil(t, appflow.PendingHomeResult)
+		appflow.PendingHomeResult = nil
+	})
+
+	t.Run("cancel aborts", func(t *testing.T) {
+		appflow.OpenSearchHomeFn = func(string) (tui.SearchHomeResult, error) {
+			return tui.SearchHomeResult{}, tui.ErrSearchHomeCancelled
+		}
+
+		_, _, err := ChangeAnimeLocal()
+		assert.ErrorIs(t, err, api.ErrSearchAborted)
+		assert.Nil(t, appflow.PendingHomeResult)
+	})
+
+	t.Run("nil opener keeps legacy prompt", func(t *testing.T) {
+		appflow.OpenSearchHomeFn = nil
+		_, _, err := ChangeAnimeLocal()
+		require.Error(t, err, "huh errors without a terminal instead of hanging")
+	})
 }
 
 // helpers

@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/source"
+	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
 )
 
@@ -55,6 +57,12 @@ type SearchFailure struct {
 	// answered normally with no match.
 	Searched int
 	Sources  []SourceFailure
+	// AnsweredKinds are the sources that replied normally with no match, in
+	// fan-out order. The TRY screen lists them with their quiet "none".
+	AnsweredKinds []source.SourceKind
+	// Off are the wanted sources that sat out, with why. The TRY screen
+	// lists them under the answers.
+	Off []models.SearchOffEntry
 }
 
 // AllFailed reports whether nothing answered at all, as opposed to some
@@ -132,9 +140,28 @@ func (f *SearchFailure) Unwrap() []error {
 	return errs
 }
 
-// RateLimited reports whether any source refused us for talking too much. That
-// is the one failure mode with an action attached — wait — so it is worth
-// telling the user apart from a source being broken.
+// NoResultsInfo reports a search where every asked source answered normally
+// with no match. It unwraps to api.ErrNoResults, so errors.Is keeps working;
+// it carries which sources answered for the TRY screen's SOURCES panel.
+type NoResultsInfo struct {
+	Query         string
+	AnsweredKinds []source.SourceKind
+	Off           []models.SearchOffEntry
+}
+
+// Error keeps the historical message so logs and tests read the same.
+func (e *NoResultsInfo) Error() string {
+	return fmt.Sprintf("no results found for: %s", e.Query)
+}
+
+// Unwrap exposes api.ErrNoResults for errors.Is.
+func (e *NoResultsInfo) Unwrap() error {
+	return api.ErrNoResults
+}
+
+// RateLimited reports whether any source refused us for talking too much.
+// That is the one failure mode with an action attached — wait — so it is
+// worth telling the user apart from a source being broken.
 func (f *SearchFailure) RateLimited() bool {
 	if f == nil {
 		return false

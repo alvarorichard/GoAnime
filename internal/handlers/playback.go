@@ -64,6 +64,10 @@ func HandlePlaybackMode(animeName string) {
 		anime, err := appflow.SearchAnimeWithRetry(currentAnimeName)
 		searchTimer.Stop()
 
+		if err == nil && anime == nil && drainPendingHome() {
+			return
+		}
+
 		if err != nil {
 			// The user quit the result screen or the search prompt. That is an
 			// exit, not a failure, so leave without an error banner.
@@ -127,6 +131,9 @@ func HandlePlaybackMode(animeName string) {
 
 		// Check if user wants to go back to anime selection
 		if errors.Is(playbackErr, player.ErrBackToAnimeSelection) {
+			if drainPendingHome() {
+				return
+			}
 			util.Infof("Going back to anime selection...")
 			// Keep the same search term to show the anime list again
 			continue
@@ -135,6 +142,23 @@ func HandlePlaybackMode(animeName string) {
 		// Normal exit or other errors
 		break
 	}
+}
+
+// drainPendingHome reopens a CONTINUE row pended by the retry loop or by
+// change-anime. True means it ran: the caller returns instead of looping.
+func drainPendingHome() bool {
+	res := appflow.PendingHomeResult
+	if res == nil {
+		return false
+	}
+	appflow.PendingHomeResult = nil
+	entry := res.Entry
+	HandleContinue(SearchHomeDecision{
+		Entry: &entry, Title: entry.AnimeTitle, Scope: res.Scope,
+		FromStart:    res.Action == tui.HomeFromStart,
+		EpisodesOnly: res.Action == tui.HomeEpisodes,
+	})
+	return true
 }
 
 // reportEpisodesUnavailable says why a title could not be opened, both in the

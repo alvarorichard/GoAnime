@@ -36,7 +36,7 @@ func PrintSavedLocation(label, path string) {
 		fmt.Printf("%s %s\n", label, path)
 		return
 	}
-	theme := tui.NewTheme(true)
+	theme := tui.CurrentTheme()
 	fmt.Printf("%s %s\n", theme.Primary.Render(label), theme.Text.Render(path))
 }
 
@@ -53,7 +53,7 @@ func prefixForProfile(p colorprofile.Profile) string {
 	if p <= colorprofile.ASCII {
 		return "GoAnime"
 	}
-	theme := tui.NewTheme(true)
+	theme := tui.CurrentTheme()
 	return theme.Header.MarginRight(1).Render("GoAnime")
 }
 
@@ -225,7 +225,7 @@ func showDebugBanner() {
 		return
 	}
 
-	theme := tui.NewTheme(true)
+	theme := tui.CurrentTheme()
 	banner := theme.Header.Render(" DEBUG ")
 	path := theme.Soft.Render(LogFilePath)
 	tailCmd := theme.Primary.Render(followCmd)

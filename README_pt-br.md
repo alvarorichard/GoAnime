@@ -160,10 +160,13 @@ então, se ele estiver em uma pasta onde você não pode escrever, como
 
 ## Uso
 
-Rode `goanime` sem argumentos para abrir a busca interativa. Digite um nome,
-escolha um resultado e, se for uma série, um episódio. Um menu então oferece
-baixar o episódio, um intervalo ou a série inteira, ligar o upscaling em tempo
-real, ou assistir online no mpv. Também dá para passar o nome direto:
+Rode `goanime` sem argumentos para abrir a tela inicial de busca. Digite um
+nome e tecle enter, ou tecle `↓` para escolher nas listas abaixo: Continuar
+reabre um episódio de onde você parou (`enter` retoma, `r` recomeça, `e` lista
+os episódios, `x` remove) e Recentes repete uma busca passada com a contagem
+de resultados. `tab` alterna o escopo entre ALL, PT-BR, ENGLISH e MOVIES/TV.
+No resultado, escolha a versão com `←` `→` e, se for uma série, um episódio.
+Também dá para passar o nome direto:
 
 ```bash
 goanime "one piece"
@@ -216,6 +219,10 @@ Rode `goanime -h` para ver todas as opções.
 | `g` `G`               | Primeiro ou último item   |
 | `Enter`               | Selecionar                |
 | `Esc`                 | Voltar                    |
+| `tab`                 | Trocar o escopo da busca (tela inicial) |
+| `←` `→`               | Escolher uma versão (resultados) |
+| `r` `e` `x`           | Do início, episódios, remover (lista Continuar) |
+| `d` `D` `A` `m`       | Baixar um, intervalo, todos, opções (episódios) |
 
 Num menu que mostra uma letra ao lado de cada opção, essa letra escolhe a
 opção na hora; qualquer outra tecla continua filtrando.
@@ -285,6 +292,8 @@ ambiente cobrem casos menos comuns:
 | ----------------------------- | ------------------------------------------------------------------------ |
 | `GOANIME_ENABLED_SOURCES`     | Fontes a ativar, separadas por vírgula, como `goyabu`                    |
 | `GOANIME_DISABLED_SOURCES`    | Fontes a ignorar, separadas por vírgula                                  |
+| `GOANIME_THEME`               | `dark`, `light` ou `auto` (padrão): `auto` pergunta o fundo ao terminal uma vez |
+| `GOANIME_PLAIN`               | `1` para o modo simples: sem cores, sem glosas em japonês, só ASCII (igual a `--plain`, `NO_COLOR` ou `TERM=dumb`) |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
 | `GOANIME_STRICT_SOURCE`       | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida      |
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |

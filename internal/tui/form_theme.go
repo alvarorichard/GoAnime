@@ -11,9 +11,9 @@ import (
 // focused field, the title in the accent color, buttons drawn like the
 // footer's keys.
 //
-// Like the list screens it is always the dark theme. huh asks the terminal
-// for its background, but RunClean suppresses that query, so huh would guess
-// light and draw crimson text on what is almost always a dark terminal.
+// Like the list screens it follows the detected theme. huh asks the terminal
+// for its background, but RunClean suppresses that query, so without
+// detection huh would guess light on what is almost always a dark terminal.
 func FormTheme() huh.Theme {
 	return huh.ThemeFunc(func(bool) *huh.Styles { return formStyles() })
 }
@@ -21,15 +21,22 @@ func FormTheme() huh.Theme {
 // SpinnerTheme is the matching theme for huh spinners.
 func SpinnerTheme() spinner.Theme {
 	return spinner.ThemeFunc(func(bool) *spinner.Styles {
-		t := NewTheme(true)
+		t := CurrentTheme()
 		return &spinner.Styles{Spinner: t.Primary.UnsetBold(), Title: t.Text}
 	})
 }
 
 func formStyles() *huh.Styles {
-	t := NewTheme(true)
-	s := huh.ThemeBase(true)
+	t := CurrentTheme()
+	s := huh.ThemeBase(IsDark())
 	accent := t.Primary.UnsetBold()
+
+	selector, checked, unchecked := "▶ ", "✓ ", "• "
+	next, prev := "→", "←"
+	if Plain() {
+		selector, checked, unchecked = "> ", "x ", "- "
+		next, prev = ">", "<"
+	}
 
 	s.Focused.Base = s.Focused.Base.BorderForeground(t.Shadow.GetForeground())
 	s.Focused.Card = s.Focused.Base
@@ -38,14 +45,14 @@ func formStyles() *huh.Styles {
 	s.Focused.Description = t.Muted
 	s.Focused.ErrorIndicator = accent.SetString(" *")
 	s.Focused.ErrorMessage = accent.SetString(" *")
-	s.Focused.SelectSelector = accent.SetString("▶ ")
-	s.Focused.NextIndicator = accent.MarginLeft(1).SetString("→")
-	s.Focused.PrevIndicator = accent.MarginRight(1).SetString("←")
+	s.Focused.SelectSelector = accent.SetString(selector)
+	s.Focused.NextIndicator = accent.MarginLeft(1).SetString(next)
+	s.Focused.PrevIndicator = accent.MarginRight(1).SetString(prev)
 	s.Focused.Option = t.Text
-	s.Focused.MultiSelectSelector = accent.SetString("▶ ")
+	s.Focused.MultiSelectSelector = accent.SetString(selector)
 	s.Focused.SelectedOption = accent
-	s.Focused.SelectedPrefix = accent.SetString("✓ ")
-	s.Focused.UnselectedPrefix = t.Muted.SetString("• ")
+	s.Focused.SelectedPrefix = accent.SetString(checked)
+	s.Focused.UnselectedPrefix = t.Muted.SetString(unchecked)
 	s.Focused.UnselectedOption = t.Text
 	s.Focused.FocusedButton = t.Selected.Padding(0, 2).MarginRight(1)
 	s.Focused.Next = s.Focused.FocusedButton

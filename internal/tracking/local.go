@@ -53,9 +53,23 @@ type Anime struct {
 	EpisodeNumber int       `json:"episode_number"`
 	PlaybackTime  int       `json:"playback_time"`
 	Duration      int       `json:"duration"`
-	Title         string    `json:"title"`
+	Title         string    `json:"title"`      // episode title
 	MediaType     string    `json:"media_type"` // "anime" or "movie"
 	LastUpdated   time.Time `json:"last_updated"`
+	// AnimeTitle is the show's name, Source the site it plays from
+	// ("Animefire.io", "HiAnime", ...) and Audio the offered audio word
+	// ("Legendado", "Sub", ...). They feed the SEARCH home screen's
+	// CONTINUE list; rows written before them stay usable with "" values.
+	AnimeTitle string `json:"anime_title"`
+	Source     string `json:"source"`
+	Audio      string `json:"audio"`
+}
+
+// RecentSearch is one past search and how many results it had.
+type RecentSearch struct {
+	Query       string    `json:"query"`
+	ResultCount int       `json:"result_count"`
+	SearchedAt  time.Time `json:"searched_at"`
 }
 
 type LocalTracker struct {
@@ -64,6 +78,9 @@ type LocalTracker struct {
 	getPS    *sql.Stmt
 	allPS    *sql.Stmt
 	deletePS *sql.Stmt
+	// recentUpsertPS records a search; recentAllPS lists past searches.
+	recentUpsertPS *sql.Stmt
+	recentAllPS    *sql.Stmt
 }
 
 /*
@@ -180,11 +197,13 @@ func newLocalTrackerImpl(dbPath string) *LocalTracker {
 	}
 
 	tracker := &LocalTracker{
-		db:       db,
-		upsertPS: statements.upsert,
-		getPS:    statements.get,
-		allPS:    statements.all,
-		deletePS: statements.delete,
+		db:             db,
+		upsertPS:       statements.upsert,
+		getPS:          statements.get,
+		allPS:          statements.all,
+		deletePS:       statements.delete,
+		recentUpsertPS: statements.recentUpsert,
+		recentAllPS:    statements.recentAll,
 	}
 
 	// Cache the tracker globally for reuse
@@ -220,6 +239,19 @@ func initializeDatabase(db *sql.DB) error {
 	// Migrate old data if anime_progress table exists
 	migrateOldData(db)
 
+	// New columns for the SEARCH home screen's CONTINUE list. ALTER TABLE
+	// has no IF NOT EXISTS: probe the table first so reruns are no-ops.
+	migrateProgressColumns(db)
+
+	// Past searches feed the SEARCH home screen's RECENT list.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS recent_searches (
+		query        TEXT PRIMARY KEY NOT NULL,
+		result_count INTEGER NOT NULL DEFAULT 0,
+		searched_at  INTEGER NOT NULL
+	);`); err != nil {
+		return fmt.Errorf("recent searches table creation failed: %w", err)
+	}
+
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_media_lookup 
 		ON media_progress(allanime_id, last_updated DESC)`,
@@ -238,6 +270,41 @@ func initializeDatabase(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+// migrateProgressColumns adds the CONTINUE-list columns to databases
+// created before them. Old rows keep working with empty values.
+func migrateProgressColumns(db *sql.DB) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('media_progress')`)
+	if err != nil {
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	present := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return
+		}
+		present[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return
+	}
+	for _, column := range []string{"anime_title TEXT", "source TEXT", "audio TEXT"} {
+		name := strings.Fields(column)[0]
+		if !present[name] {
+			if _, err := db.Exec(`ALTER TABLE media_progress ADD COLUMN ` + column); err != nil {
+				fmt.Printf("Warning: progress migration failed: %v\n", err)
+				return
+			}
+		}
+	}
+	// Rows from before the columns read as NULL; the scanners want text.
+	_, _ = db.Exec(`UPDATE media_progress SET
+		anime_title = COALESCE(anime_title, ''),
+		source = COALESCE(source, ''),
+		audio = COALESCE(audio, '')`)
 }
 
 // migrateOldData migrates data from old anime_progress table to new media_progress table
@@ -284,6 +351,9 @@ type preparedStatements struct {
 	get    *sql.Stmt
 	all    *sql.Stmt
 	delete *sql.Stmt
+	// recentUpsert records a search; recentAll lists past searches.
+	recentUpsert *sql.Stmt
+	recentAll    *sql.Stmt
 }
 
 func prepareStatements(db *sql.DB) (*preparedStatements, error) {
@@ -296,8 +366,11 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		duration, 
 		title,
 		media_type,
-		last_updated
-	) VALUES (?,?,?,?,?,?,?,?) 
+		last_updated,
+		anime_title,
+		source,
+		audio
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?) 
 	ON CONFLICT(allanime_id) DO UPDATE SET
 		anilist_id = CASE WHEN excluded.anilist_id > 0 THEN excluded.anilist_id ELSE media_progress.anilist_id END,
 		episode_number = excluded.episode_number,
@@ -305,7 +378,10 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		duration = excluded.duration,
 		title = excluded.title,
 		media_type = excluded.media_type,
-		last_updated = excluded.last_updated`)
+		last_updated = excluded.last_updated,
+		anime_title = CASE WHEN excluded.anime_title <> '' THEN excluded.anime_title ELSE media_progress.anime_title END,
+		source = CASE WHEN excluded.source <> '' THEN excluded.source ELSE media_progress.source END,
+		audio = CASE WHEN excluded.audio <> '' THEN excluded.audio ELSE media_progress.audio END`)
 
 	if err != nil {
 		return nil, fmt.Errorf("upsert preparation failed: %w", err)
@@ -317,7 +393,11 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		playback_time, 
 		duration, 
 		title, 
-		last_updated 
+		last_updated,
+		anime_title,
+		source,
+		audio,
+		media_type
 	FROM media_progress 
 	WHERE allanime_id = ?`)
 
@@ -332,7 +412,11 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		playback_time, 
 		duration, 
 		title, 
-		last_updated 
+		last_updated,
+		anime_title,
+		source,
+		audio,
+		media_type
 	FROM media_progress`)
 
 	if err != nil {
@@ -346,11 +430,28 @@ func prepareStatements(db *sql.DB) (*preparedStatements, error) {
 		return nil, fmt.Errorf("delete preparation failed: %w", err)
 	}
 
+	recentUpsert, err := db.Prepare(`INSERT INTO recent_searches (query, result_count, searched_at)
+		VALUES (?,?,?)
+		ON CONFLICT(query) DO UPDATE SET
+			result_count = excluded.result_count,
+			searched_at = excluded.searched_at`)
+	if err != nil {
+		return nil, fmt.Errorf("recent upsert preparation failed: %w", err)
+	}
+
+	recentAll, err := db.Prepare(`SELECT query, result_count, searched_at
+		FROM recent_searches ORDER BY searched_at DESC LIMIT ?`)
+	if err != nil {
+		return nil, fmt.Errorf("recent all preparation failed: %w", err)
+	}
+
 	return &preparedStatements{
-		upsert: upsert,
-		get:    get,
-		all:    all,
-		delete: deleteStmt,
+		upsert:       upsert,
+		get:          get,
+		all:          all,
+		delete:       deleteStmt,
+		recentUpsert: recentUpsert,
+		recentAll:    recentAll,
 	}, nil
 }
 
@@ -394,6 +495,9 @@ func (t *LocalTracker) UpdateProgress(a Anime) error {
 		a.Title,
 		a.MediaType,
 		a.LastUpdated.Unix(),
+		a.AnimeTitle,
+		a.Source,
+		a.Audio,
 	)
 	return err
 }
@@ -416,6 +520,10 @@ func (t *LocalTracker) GetAnime(anilistID int, allanimeID string) (*Anime, error
 		&a.Duration,
 		&a.Title,
 		&ts,
+		&a.AnimeTitle,
+		&a.Source,
+		&a.Audio,
+		&a.MediaType,
 	)
 
 	if err != nil {
@@ -459,6 +567,10 @@ func (t *LocalTracker) GetAllAnime() ([]Anime, error) {
 			&a.Duration,
 			&a.Title,
 			&ts,
+			&a.AnimeTitle,
+			&a.Source,
+			&a.Audio,
+			&a.MediaType,
 		); err != nil {
 			return nil, fmt.Errorf("row scan failed: %w", err)
 		}
@@ -503,6 +615,8 @@ func (t *LocalTracker) Close() error {
 	closeStmt(t.getPS, "get")
 	closeStmt(t.allPS, "all")
 	closeStmt(t.deletePS, "delete")
+	closeStmt(t.recentUpsertPS, "recent upsert")
+	closeStmt(t.recentAllPS, "recent all")
 
 	if err := t.db.Close(); err != nil {
 		finalErr = fmt.Errorf("database close error: %w", err)
@@ -517,6 +631,3 @@ func init() {
 	IsCgoEnabled = isCgoEnabled()
 	NewLocalTracker = newLocalTrackerImpl // Initialize the public variable
 }
-
-// The implementation of isCgoEnabled is defined in local_cgo.go and local_nocgo.go
-// based on build tags. We don't define it here to avoid duplicate declarations.

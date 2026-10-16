@@ -16,6 +16,16 @@ import (
 )
 
 func main() {
+	// Exit code for scripts: 0 is success or a deliberate quit (help,
+	// version, user cancel), 1 is any genuine error. Registered FIRST so
+	// it runs LAST, after the cleanup below.
+	exitCode := 0
+	defer func() { os.Exit(exitCode) }()
+	fail := func(err error) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", util.ErrorHandler(err))
+		exitCode = 1
+	}
+
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
 	// codes like ←[38;2;...m instead of colors. If enable fails, color paths
@@ -61,6 +71,7 @@ func main() {
 			stack := debug.Stack()
 			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
 			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
+			exitCode = 1
 		}
 	}()
 
@@ -101,7 +112,7 @@ func main() {
 		// Check if error is update request
 		if err == util.ErrUpdateRequested {
 			if updateErr := handlers.HandleUpdateRequest(); updateErr != nil {
-				util.Errorf("%v", util.ErrorHandler(updateErr))
+				fail(updateErr)
 			}
 			return
 
@@ -109,7 +120,7 @@ func main() {
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
 			if downloadErr := handlers.HandleDownloadRequest(); downloadErr != nil {
-				util.Errorf("%v", util.ErrorHandler(downloadErr))
+				fail(downloadErr)
 			}
 			return
 		}
@@ -118,13 +129,13 @@ func main() {
 			// Movie/TV download is currently a permanent stub that always
 			// returns an explanatory error (scrapers removed) — log it
 			// unconditionally.
-			util.Errorf("%v", util.ErrorHandler(handlers.HandleMovieDownloadRequest()))
+			fail(handlers.HandleMovieDownloadRequest())
 			return
 		}
 		// Check if error is upscale request
 		if err == util.ErrUpscaleRequested {
 			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {
-				util.Errorf("%v", util.ErrorHandler(upscaleErr))
+				fail(upscaleErr)
 			}
 			return
 		}
@@ -132,10 +143,29 @@ func main() {
 		if err == util.ErrHelpRequested {
 			return
 		}
-		util.Errorf("%v", util.ErrorHandler(err))
+		fail(err)
 		return
 	}
 
-	// Handle normal playback mode
+	// Handle normal playback mode: an empty name opens the SEARCH home
+	// screen (tela 1) instead of searching blank.
+	if animeName == "" {
+		decision, homeErr := handlers.HandleSearchHome()
+		if homeErr != nil {
+			fail(homeErr)
+			return
+		}
+		if decision.Cancelled {
+			return
+		}
+		if decision.Entry != nil {
+			handlers.HandleContinue(decision)
+			return
+		}
+		if decision.Scope != "" {
+			util.GlobalSource = decision.Scope
+		}
+		animeName = util.TreatingAnimeName(decision.Query)
+	}
 	handlers.HandlePlaybackMode(animeName)
 }

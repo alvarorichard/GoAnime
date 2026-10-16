@@ -124,8 +124,11 @@ func resolveRef(base, ref string) string {
 // The CDN enforces it on part of its URLs, not all of them. Sampled 2026-09-22
 // across three titles with freshly resolved links: the master playlist answered
 // 200 either way, while the variant playlist below it answered 403 without a
-// Referer on two of the three. So a player that omits it appears to work and
-// then stalls on the title where it matters; sending it always costs nothing.
+// Referer on two of the three. Re-measured 2026-10-16: the master now 403s
+// without one too (hls.dramahot.top answers nginx 403 to a bare GET), so every
+// playlist fetch — and mpv itself — must carry it. Sending it always costs
+// nothing, and a player that omits it appears to work and then stalls on the
+// title where it matters.
 func originOf(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {

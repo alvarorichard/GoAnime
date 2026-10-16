@@ -10,10 +10,10 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api"
 	"github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/internal/models"
 
 	"charm.land/huh/v2"
 	"charm.land/huh/v2/spinner"
-	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
@@ -51,7 +51,21 @@ var (
 	// promptForNameFn asks the user for a new search name. Default uses
 	// huh.NewInput inside tui.RunClean. Tests inject a scripted sequence.
 	promptForNameFn = defaultPromptForName
+
+	// openTryScreenFn opens the no-results screen (tela 4). Tests inject a
+	// scripted decision; production opens the screen on a terminal and
+	// reports it unavailable without one, keeping the legacy prompt path.
+	openTryScreenFn = defaultOpenTryScreen
 )
+
+// OpenSearchHomeFn opens the SEARCH home screen with the query kept, for
+// the retry loop's way back ("edit search", tela 3). The handlers package
+// assigns it at init; nil keeps the legacy prompt. Tests inject fakes.
+var OpenSearchHomeFn func(query string) (tui.SearchHomeResult, error)
+
+// PendingHomeResult carries a CONTINUE decision out of SearchAnimeWithRetry:
+// the loop returns (nil, nil) with it set, and the caller reopens the row.
+var PendingHomeResult *tui.SearchHomeResult
 
 // defaultRunSpinner is the production spinner wrapper. It is replaced by
 // tests with a synchronous passthrough so the action runs inline.
@@ -132,13 +146,14 @@ func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 // SearchAnimeWithRetry - searches for anime with retry logic on failure
 func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 	currentName := name
+	loopSource := util.GlobalSource
 
 	for {
 		searchStart := time.Now()
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
 		// Respect user's --source flag (e.g. --source hianime) via GlobalSource
-		source := util.GlobalSource
+		source := loopSource
 		if source != "" {
 			util.Debugf("Searching for: %s (source: %s)", currentName, source)
 		} else {
@@ -158,20 +173,52 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 			return nil, searchErr
 		}
 
-		var failure *providers.SearchFailure
 		switch {
 		case errors.Is(searchErr, api.ErrBackToSearch):
+			// Back from the results screen edits the search on the SEARCH
+			// home screen, with the query kept — never the bare prompt.
+			// A CONTINUE decision travels out via PendingHomeResult with a
+			// (nil, nil) return for the caller to reopen.
+			hb, err := backToSearchHome(currentName)
+			if err == nil {
+				if hb.cont != nil {
+					PendingHomeResult = hb.cont
+					return nil, nil
+				}
+				currentName, loopSource = hb.query, hb.scope
+				continue
+			}
+			if !errors.Is(err, errTryUnavailable) {
+				return nil, err
+			}
 			util.Infof("Going back to new search...")
-		case searchErr == nil, errors.Is(searchErr, api.ErrNoResults):
-			// Either every source answered with nothing, or the search
-			// returned no error and no anime — both are "not found".
-			util.Errorf("No anime found with the name: %s", currentName)
-		case errors.As(searchErr, &failure):
-			reportSearchFailure(currentName, failure)
 		default:
-			// A transport/source failure is not the same as an empty result;
-			// saying "no anime found" here hides the real reason.
-			util.Errorf("Search failed for %q: %v", currentName, searchErr)
+			// A failed search opens the TRY screen (tela 4), which keeps
+			// the query, explains the outcome per source and offers
+			// retries: a spelling fix, fewer words, English sources.
+			// Without a terminal it falls back to the legacy prompt below.
+			decision, err := tryAgain(currentName, loopSource, searchErr)
+			if err == nil {
+				currentName = decision.Query
+				loopSource = decision.Scope
+				continue
+			}
+			if !errors.Is(err, errTryUnavailable) {
+				return nil, err
+			}
+			var failure *providers.SearchFailure
+			switch {
+			case errors.As(searchErr, &failure):
+				reportSearchFailure(currentName, failure)
+			case searchErr == nil || errors.Is(searchErr, api.ErrNoResults):
+				// Either every source answered with nothing, or the search
+				// returned no error and no anime — both are "not found".
+				util.Errorf("No anime found with the name: %s", currentName)
+			default:
+				// A transport/source failure is not the same as an empty result;
+				// saying "no anime found" here hides the real reason.
+				util.Errorf("Search failed for %q: %v", currentName, searchErr)
+			}
 		}
 
 		util.Infof("Please enter a new search term.")

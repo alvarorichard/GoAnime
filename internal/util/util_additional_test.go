@@ -40,6 +40,7 @@ func snapshotGlobalRequest(t *testing.T) {
 	prevSub := GlobalSubsLanguage
 	prevAud := GlobalAudioLanguage
 	prevNoSubs := GlobalNoSubs
+	prevDlMenu := GlobalDownloadMenu
 	prevDebug := IsDebug
 	prevPerf := PerfEnabled
 	prevLogPath := LogFilePath
@@ -53,6 +54,7 @@ func snapshotGlobalRequest(t *testing.T) {
 		GlobalSubsLanguage = prevSub
 		GlobalAudioLanguage = prevAud
 		GlobalNoSubs = prevNoSubs
+		GlobalDownloadMenu = prevDlMenu
 		IsDebug = prevDebug
 		PerfEnabled = prevPerf
 		LogFilePath = prevLogPath
@@ -296,6 +298,17 @@ func TestFlagParser_UpscaleStoresRequest(t *testing.T) {
 	assert.Equal(t, tmp, GlobalUpscaleRequest.InputPath)
 }
 
+func TestFlagParser_DownloadMenuFlag(t *testing.T) {
+	snapshotOsArgs(t)
+	snapshotGlobalRequest(t)
+	os.Args = []string{"goanime", "--download-menu", "naruto"}
+
+	name, err := FlagParser()
+	require.NoError(t, err)
+	assert.Equal(t, "naruto", name)
+	assert.True(t, GlobalDownloadMenu)
+}
+
 func TestFlagParser_PerfFlagEnablesPerfAndDebug(t *testing.T) {
 	snapshotOsArgs(t)
 	snapshotGlobalRequest(t)
@@ -307,33 +320,16 @@ func TestFlagParser_PerfFlagEnablesPerfAndDebug(t *testing.T) {
 	assert.True(t, IsDebug)
 }
 
-// getUserInput drives a huh form that requires a TTY. Without one,
-// tui.RunClean returns an error immediately — we use that to verify the
-// function returns (empty name, non-nil error) instead of hanging.
-// This is the only practical way to exercise the function without a real TTY.
-func TestGetUserInput_NoTTYReturnsError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// On Windows, bubbletea uses ReadConsole (the native Windows console
-		// API) rather than reading from os.Stdin. Redirecting os.Stdin to
-		// os.DevNull has no effect — the form still blocks on the real console
-		// handle indefinitely, making the test hang instead of error.
-		t.Skip("Windows console API bypasses os.Stdin redirection; no-TTY error path not testable without process-level console detachment")
-	}
-	if os.Getenv("CI") == "" && os.Getenv("GOANIME_RUN_TTY_TESTS") == "1" {
-		t.Skip("explicit TTY mode requested by env — skipping non-TTY assertion")
-	}
-	// Redirect stdin to /dev/null to guarantee no TTY.
-	devnull, err := os.Open(os.DevNull)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = devnull.Close() })
-	prev := os.Stdin
-	os.Stdin = devnull
-	t.Cleanup(func() { os.Stdin = prev })
+// Without a name FlagParser returns ("", nil): main opens the SEARCH home
+// screen (tela 1) instead of a bare prompt.
+func TestFlagParser_NoArgsOpensHome(t *testing.T) {
+	snapshotOsArgs(t)
+	snapshotGlobalRequest(t)
+	os.Args = []string{"goanime"}
 
-	name, err := getUserInput("Test prompt")
-	// Without a TTY huh.Run typically errors → empty name + non-nil err.
-	assert.Empty(t, name)
-	assert.Error(t, err)
+	name, err := FlagParser()
+	require.NoError(t, err)
+	assert.Equal(t, "", name)
 }
 
 func TestTreatingAnimeName_LowersAndDashes(t *testing.T) {

@@ -26,6 +26,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -132,8 +133,17 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		// Each work is a single short film.
-		eps := []episode{{ID: a.id + ".1", Title: a.title, Audio: "Legendado", Season: 1, Number: 1}}
+		// Momotarou lists three parts so the demo walks through the episodes
+		// picker and the OPTIONS menu; every other work is a single short film
+		// that plays straight away.
+		count := 1
+		if a.id == "momotarou" {
+			count = 3
+		}
+		eps := make([]episode, 0, count)
+		for n := 1; n <= count; n++ {
+			eps = append(eps, episode{ID: fmt.Sprintf("%s.%d", a.id, n), Title: a.title, Audio: "Legendado", Season: 1, Number: n})
+		}
 		writeJSON(w, map[string]any{"hero": a.anime(), "episodes": eps})
 	})
 

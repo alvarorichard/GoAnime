@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -584,6 +583,18 @@ func playVideo(
 	}
 
 	// External subtitle files, from whichever source resolved them.
+	// The screen's header and UP NEXT panel read this context (tela 7).
+	{
+		source := util.GetGlobalAnimeSource()
+		if updater != nil && updater.GetAnime() != nil && updater.GetAnime().Source != "" {
+			source = updater.GetAnime().Source
+		}
+		nextLine := ""
+		if !isMovieOrTV {
+			nextLine = fmt.Sprintf("Episode %d", currentEpisodeNum+1)
+		}
+		util.SetSubtitleContext(titleSnap.AnimeName, source, "", nextLine)
+	}
 	subArgs := externalSubtitleArgs(is9Anime)
 
 	// YtdlpCanImpersonate is only consulted on the 9Anime HLS path; keep the call
@@ -792,21 +803,12 @@ func getTrackerDBPath() string {
 		return cachedDBPath
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		util.Errorf("Failed to locate the home directory: %v", err)
+	path := tracking.DBPath()
+	if path == "" {
+		util.Errorf("Failed to locate the home directory")
 		return ""
 	}
-
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
-			localAppData = filepath.Join(home, "AppData", "Local")
-		}
-		cachedDBPath = filepath.Join(localAppData, "GoAnime", "tracking", "progress.db")
-	} else {
-		cachedDBPath = filepath.Join(home, ".local", "goanime", "tracking", "progress.db")
-	}
+	cachedDBPath = path
 
 	return cachedDBPath
 }
@@ -881,6 +883,15 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 	}
 
 	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
+
+	if position, fromStart, ok := takeResumeOverride(); ok {
+		if fromStart {
+			util.Debugf("Starting from the beginning (requested)")
+			return tracker, 0
+		}
+		util.Debugf("Resuming from %d seconds without asking (requested)", position)
+		return tracker, position
+	}
 
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime, IsCurrentMediaMovie()); ok {
 		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
@@ -1031,12 +1042,16 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 // updateTrackingWithDuration updates the local tracker with episode info and duration
 func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
 	if tracker != nil && dur > 0 {
+		ctx := snapshotMediaContext()
 		anime := tracking.Anime{
 			AnilistID:     anilistID,
 			AllanimeID:    episode.URL,
 			EpisodeNumber: episodeNum,
 			Duration:      int(dur.Seconds()),
 			Title:         getEpisodeTitle(episode.Title),
+			AnimeTitle:    ctx.animeTitle,
+			Source:        ctx.source,
+			Audio:         ctx.audio,
 			LastUpdated:   time.Now(),
 		}
 		if err := tracker.UpdateProgress(anime); err != nil {
@@ -1190,6 +1205,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		duration = 1440 // Fallback to default
 	}
 
+	ctx := snapshotMediaContext()
 	anime := tracking.Anime{
 		AnilistID:     anilistID,
 		AllanimeID:    trackingKey(episode.URL, episodeNum),
@@ -1197,6 +1213,9 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		PlaybackTime:  int(position),
 		Duration:      duration,
 		Title:         getEpisodeTitle(episode.Title),
+		AnimeTitle:    ctx.animeTitle,
+		Source:        ctx.source,
+		Audio:         ctx.audio,
 		LastUpdated:   time.Now(),
 	}
 

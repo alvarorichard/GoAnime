@@ -105,6 +105,10 @@ func TestAnimeDriveFixture_Boruto_AllDead(t *testing.T) {
 	_, _, err := client.GetStreamURL("/episodio-01/")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "none of the 2 servers")
+	// The live Boruto page is Legendado+Dublado with no blogger fallback:
+	// the error must name the labels so triage does not need a refetch.
+	assert.Contains(t, err.Error(), "Legendado")
+	assert.Contains(t, err.Error(), "Dublado")
 }
 
 func TestAnimeDriveFixture_Kimetsu_NoPlayableServer(t *testing.T) {
@@ -117,6 +121,11 @@ func TestAnimeDriveFixture_Kimetsu_NoPlayableServer(t *testing.T) {
 	_, _, err := client.GetStreamURL("/episodio-01/")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no video tracks found in animeq-player")
+	// Kimetsu live shape is 3x FHD third-party embeds: the error must list
+	// the hosts to prove the parser saw them and skipped them on purpose.
+	assert.Contains(t, err.Error(), "animeshd.cloud")
+	assert.Contains(t, err.Error(), "strp2p")
+	assert.Contains(t, err.Error(), "rpmplay")
 }
 
 func TestAnimeDriveStream_ChallengePage(t *testing.T) {

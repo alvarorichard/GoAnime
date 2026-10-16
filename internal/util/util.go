@@ -14,7 +14,6 @@ import (
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/version"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // SubtitleInfo represents a single subtitle track
@@ -39,6 +38,10 @@ var (
 	GlobalReferer       string                         // Global variable to store referer for stream requests
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
+	// GlobalDownloadMenu opens the episode OPTIONS menu before every
+	// playback (--download-menu). Without it enter plays directly and the
+	// menu opens only via the episodes screen's m key (tela 6).
+	GlobalDownloadMenu bool
 
 	// GlobalAudioLanguageExplicit records whether --audio was passed.
 	// GlobalAudioLanguage always holds a value — the flag's default
@@ -141,173 +144,6 @@ func GetGlobalAudioLanguage() string {
 	playbackStateMu.RLock()
 	defer playbackStateMu.RUnlock()
 	return GlobalAudioLanguage
-}
-
-// subtitleOption maps a display label to a sentinel value for subtitle selection.
-type subtitleOption struct {
-	Label string
-	Value int
-}
-
-// SelectSubtitles displays an interactive menu for the user to choose which
-// subtitle tracks to load. It updates GlobalSubtitles in-place so that the
-// subsequent call to GetSubtitleArgs only includes the selected tracks.
-// If there are 0 or 1 subtitles available, no menu is shown.
-func SelectSubtitles() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-
-	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
-		return
-	}
-
-	// Build options: "All", each individual track, "None"
-	var items []subtitleOption
-	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range GlobalSubtitles {
-		label := sub.Label
-		if label == "" {
-			label = sub.Language
-		}
-		if label == "" {
-			label = fmt.Sprintf("Subtitle %d", i+1)
-		}
-		items = append(items, subtitleOption{label, i})
-	}
-	items = append(items, subtitleOption{"No subtitles", -2})
-
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("Subtitles: "))
-	if err != nil {
-		// On error/cancel keep all subtitles
-		return
-	}
-
-	selected := items[idx].Value
-	switch selected {
-	case -1:
-		// Keep all — no change needed
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
-	case -2:
-		// Disable subtitles
-		GlobalSubtitles = nil
-		Debugf("User disabled subtitles")
-	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
-			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
-		}
-	}
-}
-
-// PromptSubtitleLanguage always prompts the user to select a subtitle language
-// for multi-language platforms (e.g., 9Anime). This MUST be called after every
-// episode selection, without exception. Unlike SelectSubtitles, this function
-// always shows the prompt regardless of the number of available tracks.
-// It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
-// the correct arguments for mpv.
-func PromptSubtitleLanguage() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-
-	if GlobalNoSubs {
-		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
-		GlobalSubtitles = nil
-		return
-	}
-
-	tracks := GlobalSubtitles
-
-	// No tracks available — inform the user and continue without subtitles
-	if len(tracks) == 0 {
-		fmt.Println("\nNo subtitle tracks available for this episode.")
-		return
-	}
-
-	// Single track — still ask the user if they want it
-	if len(tracks) == 1 {
-		label := tracks[0].Label
-		if label == "" {
-			label = tracks[0].Language
-		}
-		if label == "" {
-			label = "Unknown"
-		}
-
-		fmt.Printf("\n1 subtitle track available: %s\n", label)
-
-		items := []subtitleOption{
-			{label, 0},
-			{"No subtitles", -2},
-		}
-
-		idx, err := tui.Find(items, func(i int) string {
-			return items[i].Label
-		}, fuzzyfinder.WithPromptString("Select subtitle language: "))
-		if err != nil {
-			// On error/cancel keep the track
-			fmt.Printf("Subtitles: %s\n", label)
-			return
-		}
-
-		if items[idx].Value == -2 {
-			GlobalSubtitles = nil
-			fmt.Println("Subtitles: disabled")
-			Debugf("User disabled subtitles")
-		} else {
-			fmt.Printf("Subtitles: %s\n", label)
-			Debugf("User selected subtitle: %s", label)
-		}
-		return
-	}
-
-	// Multiple tracks — show full selection menu
-	fmt.Printf("\n%d subtitle language(s) available:\n", len(tracks))
-
-	var items []subtitleOption
-	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range tracks {
-		label := sub.Label
-		if label == "" {
-			label = sub.Language
-		}
-		if label == "" {
-			label = fmt.Sprintf("Subtitle %d", i+1)
-		}
-		items = append(items, subtitleOption{label, i})
-	}
-	items = append(items, subtitleOption{"No subtitles", -2})
-
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("Select subtitle language: "))
-	if err != nil {
-		// On error/cancel keep all subtitles
-		fmt.Println("Subtitles: all (default)")
-		return
-	}
-
-	selected := items[idx].Value
-	switch selected {
-	case -1:
-		// Keep all — no change needed
-		fmt.Printf("Subtitles: all (%d tracks)\n", len(GlobalSubtitles))
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
-	case -2:
-		// Disable subtitles
-		GlobalSubtitles = nil
-		fmt.Println("Subtitles: disabled")
-		Debugf("User disabled subtitles")
-	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
-			fmt.Printf("Subtitles: %s\n", kept.Label)
-			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
-		}
-	}
 }
 
 // GetSubtitleArgs returns mpv arguments for subtitles.
@@ -458,7 +294,9 @@ func FlagParser() (string, error) {
 	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")
 	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "preferred audio language for movies and TV shows")
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles")
+	downloadMenuFlag := fs.Bool("download-menu", false, "always show the episode options menu before playing (tela 6)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
+	plainFlag := fs.Bool("plain", false, "plain interface: no colors, no Japanese glosses, ASCII only (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1)")
 
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
@@ -488,6 +326,14 @@ func FlagParser() (string, error) {
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
 
+	// Plain interface asked explicitly: apply before any themed output.
+	if *plainFlag {
+		tui.SetPlain(true)
+	}
+	// Ask the terminal for its background once, before the first RunClean
+	// suppresses capability probes (tela 8). No TTY answers: keeps dark.
+	tui.EnsureThemeDetected()
+
 	// Set performance profiling mode
 	PerfEnabled = *perf
 	if PerfEnabled {
@@ -509,6 +355,7 @@ func FlagParser() (string, error) {
 		}
 	})
 	GlobalNoSubs = *noSubsFlag
+	GlobalDownloadMenu = *downloadMenuFlag
 	GlobalOutputDir = *outputDirFlag
 
 	if *noSubsFlag {
@@ -572,41 +419,9 @@ func FlagParser() (string, error) {
 		}
 		return TreatingAnimeName(animeName), nil
 	}
-	animeName, err := getUserInput("Enter anime/movie name")
-	return TreatingAnimeName(animeName), err
-}
-
-// getUserInput prompts the user for input the anime name and returns it
-func getUserInput(label string) (string, error) {
-	var animeName string
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title(label).
-				Description("Type the anime title and press Enter").
-				Value(&animeName).
-				Validate(func(v string) error {
-					if len(strings.TrimSpace(v)) < minNameLength {
-						return fmt.Errorf("name must have at least %d characters", minNameLength)
-					}
-					return nil
-				}),
-		),
-	)
-
-	if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
-		return "", err
-	}
-	// Without a terminal huh's Run returns nil immediately, WITHOUT displaying
-	// the form or running the Validate above, so animeName stays empty and the
-	// caller would search for "". The form cannot legitimately complete with an
-	// empty value (Validate enforces a minimum length), so an empty result here
-	// always means "the user was never asked".
-	if strings.TrimSpace(animeName) == "" {
-		return "", errors.New("no anime name entered (no interactive terminal available?)")
-	}
-	return animeName, nil
+	// No name: main opens the SEARCH home screen (tela 1) instead of a bare
+	// prompt. Empty means "open home".
+	return "", nil
 }
 
 // TreatingAnimeName removes special characters and spaces from the anime name.

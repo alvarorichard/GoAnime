@@ -68,10 +68,14 @@ const (
 // its own percentage (RenderTransfer prints it). It keeps progress.Model's
 // spring, so the bar glides between updates.
 func NewTransferBar() progress.Model {
-	theme := NewTheme(true)
+	theme := CurrentTheme()
+	fill, empty := '━', '━'
+	if Plain() {
+		fill, empty = '=', '-'
+	}
 	bar := progress.New(
 		progress.WithColors(theme.Meter.GetForeground()),
-		progress.WithFillCharacters('━', '━'),
+		progress.WithFillCharacters(fill, empty),
 		progress.WithoutPercentage(),
 		progress.WithWidth(TransferBarWidth(defaultShellWidth)),
 	)
@@ -89,14 +93,14 @@ func TransferBarWidth(width int) int {
 // line with the terminal's output, not on the alternate screen, so the last
 // frame stays behind as a record of what happened.
 func RenderTransfer(t *Transfer, width int) string {
-	theme := NewTheme(true)
+	theme := CurrentTheme()
 	if width <= 0 {
 		width = defaultShellWidth
 	}
 
 	lines := []string{""}
 	head := theme.Header.Render("GOANIME") + "  " + theme.Primary.Render(strings.ToUpper(singleLine(t.Label)))
-	if gloss := singleLine(t.Gloss); gloss != "" {
+	if gloss := singleLine(t.Gloss); gloss != "" && !Plain() {
 		head += theme.Gloss.Render("  " + gloss)
 	}
 	lines = append(lines, head, "")

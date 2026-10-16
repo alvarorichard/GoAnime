@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
+	"github.com/alvarorichard/Goanime/internal/appflow"
 	"github.com/alvarorichard/Goanime/internal/discord"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
@@ -22,6 +23,7 @@ import (
 func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
 	// Prepare the mpv path while metadata/stream work is in progress.
 	player.PreWarmMPVPath()
+	player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
 
 	for {
 		animeMutex := sync.Mutex{}
@@ -97,6 +99,10 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		// Check if user requested to change anime during video playback
 		if errors.Is(playErr, player.ErrChangeAnime) {
 			newAnime, newEpisodes, changeErr := ChangeAnimeLocal()
+			if errors.Is(changeErr, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if changeErr != nil {
 				log.Printf("Error changing anime: %v", changeErr)
 				continue // Stay with current anime if change fails
@@ -139,6 +145,10 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		// Handle back/change anime for movies - both options allow searching for a new anime
 		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if errors.Is(err, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if err != nil {
 				log.Printf("Error changing anime: %v", err)
 				continue // Stay with current anime if change fails

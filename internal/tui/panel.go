@@ -32,6 +32,9 @@ type panelContent struct {
 	fields   []detailField
 	lines    []string // text, wrapped to the panel
 	command  string   // a command line, drawn on ink
+	// keys are action hints drawn as ink chips, two per line, after lines:
+	// enter to resume, single letters for the rest.
+	keys []Hint
 }
 
 // panelProgress is a position within a known duration, in seconds.
@@ -48,6 +51,11 @@ type detailField struct{ label, value string }
 func fitPanel(theme *Theme, content *panelContent, width, maxHeight int) string {
 	if width < minPanelWidth {
 		return ""
+	}
+	if Plain() {
+		// Tela 9: no paper, no shadow, no braille halftone. The caller
+		// renders the result below the list as plain text instead.
+		return renderPlainPanel(theme, content, width, maxHeight)
 	}
 	panelWidth := width - 1 // the shadow column
 	inner := panelWidth - 4 // two cells of padding each side
@@ -70,7 +78,7 @@ func panelLines(theme *Theme, c *panelContent, inner int, compact bool) []string
 	}
 
 	head := theme.PanelLabel.Render(ansi.Truncate(strings.ToUpper(singleLine(c.label)), inner, "…"))
-	if gloss := singleLine(c.gloss); gloss != "" && lipgloss.Width(head)+2+lipgloss.Width(gloss) <= inner {
+	if gloss := singleLine(c.gloss); gloss != "" && !Plain() && lipgloss.Width(head)+2+lipgloss.Width(gloss) <= inner {
 		head += theme.PanelMuted.Render("  " + gloss)
 	}
 	out = append(out, head)
@@ -128,7 +136,73 @@ func panelLines(theme *Theme, c *panelContent, inner int, compact bool) []string
 		code := ansi.Truncate(" $ "+command, inner, "…")
 		out = append(out, theme.PanelCode.Render(code+strings.Repeat(" ", max(inner-lipgloss.Width(code), 0))))
 	}
+
+	if len(c.keys) > 0 {
+		gap()
+		for i := 0; i < len(c.keys); i += 2 {
+			line := panelKeyChip(theme, c.keys[i])
+			if i+1 < len(c.keys) {
+				line += theme.PanelText.Render("   ") + panelKeyChip(theme, c.keys[i+1])
+			}
+			out = append(out, line)
+		}
+	}
 	return out
+}
+
+// panelKeyChip draws one action hint: the key on ink, what it does beside it.
+func panelKeyChip(theme *Theme, h Hint) string {
+	return theme.PanelCode.Render(" "+singleLine(h.Key)+" ") + theme.PanelText.Render("  "+singleLine(h.Desc))
+}
+
+// renderPlainPanel draws panel content as plain text: the label in capitals,
+// then one line per value, wrapped to width. No paper fill, no shadow, no
+// braille halftone (tela 9: the screen reader would announce every dot).
+// It returns "" when even the compact form does not fit maxHeight, so the
+// caller leaves the panel out rather than drawing it cut off.
+func renderPlainPanel(theme *Theme, c *panelContent, width, maxHeight int) string {
+	_ = theme
+	if width < minPanelWidth {
+		return ""
+	}
+	var lines []string
+	head := strings.ToUpper(singleLine(c.label))
+	if head != "" {
+		lines = append(lines, head)
+	}
+	if title := singleLine(c.title); title != "" {
+		lines = append(lines, ansi.Truncate(title, width, "…"))
+	}
+	if p := c.progress; p != nil {
+		clock := "--:-- / --:--"
+		if p.duration > 0 {
+			clock = FormatClock(p.position) + " / " + FormatClock(p.duration)
+		}
+		lines = append(lines, ansi.Truncate(clock, width, "…"))
+	}
+	for _, f := range c.fields {
+		line := ansi.Truncate(singleLine(f.label)+": "+singleLine(f.value), width, "…")
+		lines = append(lines, line)
+	}
+	for _, text := range c.lines {
+		for line := range strings.SplitSeq(ansi.Wrap(singleLine(text), width, ""), "\n") {
+			lines = append(lines, line)
+		}
+	}
+	if command := singleLine(c.command); command != "" {
+		lines = append(lines, ansi.Truncate("$ "+command, width, "…"))
+	}
+	for i := 0; i < len(c.keys); i += 2 {
+		line := singleLine(c.keys[i].Key) + " " + singleLine(c.keys[i].Desc)
+		if i+1 < len(c.keys) {
+			line += "   " + singleLine(c.keys[i+1].Key) + " " + singleLine(c.keys[i+1].Desc)
+		}
+		lines = append(lines, ansi.Truncate(line, width, "…"))
+	}
+	if len(lines) > maxHeight {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderPanelBlock fills a width-cell paper block around lines, with a row of
@@ -181,7 +255,8 @@ func addShadow(theme *Theme, block string) string {
 	return strings.Join(out, "\n")
 }
 
-// renderBar draws ratio of width cells filled.
+// renderBar draws ratio of width cells filled. Plain mode uses ASCII so a
+// dumb terminal or a pipe still shows the bar (tela 9).
 func renderBar(width int, ratio float64, filled, empty *lipgloss.Style) string {
 	if width <= 0 {
 		return ""
@@ -190,6 +265,9 @@ func renderBar(width int, ratio float64, filled, empty *lipgloss.Style) string {
 		ratio = 0
 	}
 	n := int(math.Round(math.Max(0, math.Min(1, ratio)) * float64(width)))
+	if Plain() {
+		return filled.Render(strings.Repeat("=", n)) + empty.Render(strings.Repeat("-", width-n))
+	}
 	return filled.Render(strings.Repeat("━", n)) + empty.Render(strings.Repeat("━", width-n))
 }
 

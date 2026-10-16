@@ -14,6 +14,7 @@ import (
 	"charm.land/huh/v2/spinner"
 	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/tracking"
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"golang.org/x/term"
@@ -174,7 +175,36 @@ func fetchStreamViaRegistry(episode *models.Episode, anime *models.Anime, qualit
 
 // Enhanced search that supports multiple sources - fans out across every registered source
 func SearchAnimeEnhanced(name, src string) (*models.Anime, error) {
-	return searchAnimeEnhanced(name, src, searchFetchFn, tui.SelectAnime, enrichAnimeData)
+	return searchAnimeEnhanced(name, src, searchFetchFn, func(animes []*models.Anime) (*models.Anime, error) {
+		return tui.SelectAnimeWithQuery(animes, name)
+	}, enrichAnimeData)
+}
+
+// SearchAnimeAuto searches like SearchAnimeEnhanced but picks the result
+// programmatically instead of opening the result screen. pick chooses from
+// the sorted results (nil keeps the first); a nil pick from an empty choice
+// is an error. The SEARCH home screen's CONTINUE list uses it to reopen a
+// tracked title without asking again.
+func SearchAnimeAuto(name, src string, pick func([]*models.Anime) *models.Anime) (*models.Anime, error) {
+	if pick == nil {
+		pick = func(animes []*models.Anime) *models.Anime {
+			if len(animes) == 0 {
+				return nil
+			}
+			return animes[0]
+		}
+	}
+	// A reopen is direct: no SEARCHING screen, no early enter that could
+	// bypass the programmatic pick. Restored on return.
+	prev := searchLiveFetchFn
+	searchLiveFetchFn = nil
+	defer func() { searchLiveFetchFn = prev }()
+	return searchAnimeEnhanced(name, src, searchFetchFn, func(animes []*models.Anime) (*models.Anime, error) {
+		if chosen := pick(animes); chosen != nil {
+			return chosen, nil
+		}
+		return nil, fmt.Errorf("auto selection found no result")
+	}, enrichAnimeData)
 }
 
 // MovieTVSources is the source selector that searches every movie/TV catalog
@@ -223,30 +253,119 @@ func searchAnimeEnhanced(
 
 	var animes []*models.Anime
 	var searchErr error
-	runWithSpinner("Searching for anime...", func() {
-		if search == nil {
-			searchErr = fmt.Errorf("search dispatch not wired: the providers package must be imported")
-			return
+	var liveChosen *models.Anime
+	if canShowLiveSearch() {
+		// The SEARCHING screen streams the fan-out (tela 2). Enter opens
+		// the highlighted title early; otherwise the collected results
+		// continue below exactly as the spinner path returns them.
+		var liveErr error
+		animes, liveChosen, liveErr = runLiveSearch(name, registryKinds)
+		if liveErr != nil {
+			// A deliberate quit or back travels like a selection error so
+			// the retry loop below treats it the same way.
+			if errors.Is(liveErr, tui.ErrSelectionBack) {
+				return nil, ErrBackToSearch
+			}
+			if errors.Is(liveErr, tui.ErrSelectionCancelled) {
+				return nil, fmt.Errorf("%w: %w", ErrSearchAborted, liveErr)
+			}
+			return nil, fmt.Errorf("failed to search: %w", liveErr)
 		}
-		// Model B registry fan-out (providers.SearchAll).
-		animes, searchErr = search(context.Background(), name, registryKinds)
-	})
+	} else {
+		runWithSpinner("Searching for anime...", func() {
+			if search == nil {
+				searchErr = fmt.Errorf("search dispatch not wired: the providers package must be imported")
+				return
+			}
+			// Model B registry fan-out (providers.SearchAll).
+			animes, searchErr = search(context.Background(), name, registryKinds)
+		})
+	}
 	if searchErr != nil {
 		return nil, fmt.Errorf("failed to search: %w", searchErr)
 	}
-	validAnimes := make([]*models.Anime, 0, len(animes))
-	for _, anime := range animes {
-		if anime != nil {
-			validAnimes = append(validAnimes, anime)
+	var selectedAnime *models.Anime
+	if liveChosen != nil {
+		// Enter on the SEARCHING screen opened the highlighted title early:
+		// skip the result pipeline (the fetch may still be running).
+		selectedAnime = liveChosen
+		util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
+	} else {
+		validAnimes := make([]*models.Anime, 0, len(animes))
+		for _, anime := range animes {
+			if anime != nil {
+				validAnimes = append(validAnimes, anime)
+			}
+		}
+		animes = filterPanelDead(validAnimes)
+
+		if len(animes) == 0 {
+			return nil, fmt.Errorf("%w for: %s", ErrNoResults, name)
+		}
+		if err := identifyAnimeSources(animes, normalizedSource); err != nil {
+			return nil, err
+		}
+
+		util.Debug("Search results summary", "total", len(animes))
+
+		breakdown := countSourceBreakdown(animes)
+		util.Debug("Source breakdown",
+			"AnimeFire", breakdown.AnimeFire,
+			"StartFlix", breakdown.StartFlix,
+			"TopCine", breakdown.TopCine,
+			"Goyabu", breakdown.Goyabu,
+			"AnimesDigital", breakdown.AnimesDigital,
+			"HiAnime", breakdown.HiAnime,
+			"AnimeDrive", breakdown.AnimeDrive,
+		)
+
+		// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
+		sort.SliceStable(animes, func(i, j int) bool {
+			return languagePriority(animes[i].Name) < languagePriority(animes[j].Name)
+		})
+
+		if selectAnime == nil {
+			return nil, fmt.Errorf("anime selection not configured")
+		}
+		var err error
+		selectedAnime, err = selectAnime(animes)
+		if errors.Is(err, tui.ErrSelectionBack) {
+			return nil, ErrBackToSearch
+		}
+		if errors.Is(err, tui.ErrSelectionCancelled) {
+			return nil, fmt.Errorf("%w: %w", ErrSearchAborted, err)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("anime selection failed: %w", err)
+		}
+		if selectedAnime == nil {
+			return nil, fmt.Errorf("anime selection returned nil")
+		}
+		util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
+	}
+
+	// Remember the success for the SEARCH home screen's RECENT list.
+	// Best-effort: a missing database never fails the search.
+	if err := tracking.RecordSearch(name, len(animes)); err != nil {
+		util.Debugf("Recent search not recorded: %v", err)
+	}
+
+	// Enrich with AniList data for images and metadata. Best-effort: episodes and
+	// playback work without it, so a failure here is a warning, not an error
+	// (issue #184).
+	if enrich != nil {
+		if err := enrich(selectedAnime); err != nil {
+			util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
 		}
 	}
-	animes = filterPanelDead(validAnimes)
 
-	if len(animes) == 0 {
-		return nil, fmt.Errorf("%w for: %s", ErrNoResults, name)
-	}
+	return selectedAnime, nil
+}
 
-	// Enhance source identification - names already have language tags from unified.go
+// identifyAnimeSources fills a blank Source from the search selector or the
+// result URL. Names already carry language tags from unified.go; this is for
+// internal use only.
+func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error {
 	for _, anime := range animes {
 		// Ensure proper source identification (for internal use only)
 		if anime.Source == "" {
@@ -289,53 +408,16 @@ func searchAnimeEnhanced(
 
 		// Language tags are already added by unified.go, don't duplicate them here
 	}
+	return nil
+}
 
-	util.Debug("Search results summary", "total", len(animes))
-
-	breakdown := countSourceBreakdown(animes)
-	util.Debug("Source breakdown",
-		"AnimeFire", breakdown.AnimeFire,
-		"StartFlix", breakdown.StartFlix,
-		"TopCine", breakdown.TopCine,
-		"Goyabu", breakdown.Goyabu,
-		"AnimesDigital", breakdown.AnimesDigital,
-		"HiAnime", breakdown.HiAnime,
-		"AnimeDrive", breakdown.AnimeDrive,
-	)
-
-	// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
-	sort.SliceStable(animes, func(i, j int) bool {
-		return languagePriority(animes[i].Name) < languagePriority(animes[j].Name)
-	})
-
-	if selectAnime == nil {
-		return nil, fmt.Errorf("anime selection not configured")
+// humanQuery renders a search query the way a person typed it: the CLI
+// slugs names ("namakra-gatana"), but history should not read like a slug.
+func humanQuery(name string) string {
+	if spaced := strings.Join(strings.Fields(strings.ReplaceAll(name, "-", " ")), " "); spaced != "" {
+		return spaced
 	}
-	selectedAnime, err := selectAnime(animes)
-	if errors.Is(err, tui.ErrSelectionBack) {
-		return nil, ErrBackToSearch
-	}
-	if errors.Is(err, tui.ErrSelectionCancelled) {
-		return nil, fmt.Errorf("%w: %w", ErrSearchAborted, err)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("anime selection failed: %w", err)
-	}
-	if selectedAnime == nil {
-		return nil, fmt.Errorf("anime selection returned nil")
-	}
-	util.Debug("Anime selected", "name", selectedAnime.Name, "source", selectedAnime.Source)
-
-	// Enrich with AniList data for images and metadata. Best-effort: episodes and
-	// playback work without it, so a failure here is a warning, not an error
-	// (issue #184).
-	if enrich != nil {
-		if err := enrich(selectedAnime); err != nil {
-			util.Warn("Metadata enrichment unavailable; continuing without it", "anime", selectedAnime.Name, "error", err)
-		}
-	}
-
-	return selectedAnime, nil
+	return name
 }
 
 // Enhanced download support

@@ -3,6 +3,7 @@ package animedrive
 import (
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -71,6 +72,13 @@ func NewClientForTest(serverURL string) *AnimeDriveClient {
 	c.maxRetries = 0
 	c.retryDelay = 0
 	return c
+}
+
+// SetHTTPClientForTest swaps the underlying HTTP client. Only for tests that
+// need to mock transports (e.g. live-like blogger 200 HTML) while driving the
+// real client through adapter/provider cascades.
+func (c *AnimeDriveClient) SetHTTPClientForTest(client *http.Client) {
+	c.client = client
 }
 
 // isAvailableStreamURL rejects stale direct links before handing them to mpv.
@@ -492,11 +500,14 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 	})
 
 	sources := doc.Find(".animeq-player__source[data-animeq-source]")
+	var unsupportedEmbeds []string
 	if sources.Length() > 0 {
 		// Each server is a .animeq-player__source block numbered by
 		// data-animeq-source; the button with the same data-animeq-switch
 		// number names it. Blocks mix <video> and <iframe>: only direct
-		// videos and Blogger embeds play, third-party iframes are skipped.
+		// videos and Blogger embeds play. Third-party iframes (animeshd,
+		// strp2p, rpmplay) are recorded for diagnostics so an embed-only
+		// episode fails with the host list instead of a bare parse error.
 		sources.Each(func(_ int, source *goquery.Selection) {
 			id := source.AttrOr("data-animeq-source", "")
 			label := names[id]
@@ -509,14 +520,24 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 				// iframes are not playable, so only Blogger is collected.
 				streamURL = source.Find(`iframe[src*="blogger.com/video"]`).First().AttrOr("src", "")
 			}
+			// goquery already decodes entities such as &#038; (&) in the
+			// ccdn HLS URLs, but unescape explicitly so a raw-extracted URL
+			// can never reach the probe with entities intact.
+			streamURL = html.UnescapeString(strings.TrimSpace(streamURL))
 			if streamURL != "" {
 				tracks = append(tracks, track{src: streamURL, label: label})
+				return
+			}
+			if embedSrc := strings.TrimSpace(source.Find("iframe[src]").First().AttrOr("src", "")); embedSrc != "" {
+				if host := animeDriveEmbedHost(embedSrc); host != "" {
+					unsupportedEmbeds = append(unsupportedEmbeds, host)
+				}
 			}
 		})
 	} else {
 		// Older pages place all video sources in one video element.
 		doc.Find("video.animeq-player__video source[src]").Each(func(i int, source *goquery.Selection) {
-			src := strings.TrimSpace(source.AttrOr("src", ""))
+			src := html.UnescapeString(strings.TrimSpace(source.AttrOr("src", "")))
 			if src == "" {
 				return
 			}
@@ -526,6 +547,11 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 	}
 
 	if len(tracks) == 0 {
+		if len(unsupportedEmbeds) > 0 {
+			hosts := dedupStrings(unsupportedEmbeds)
+			return "", nil, netx.NewParserError("AnimeDrive", "stream",
+				fmt.Sprintf("no video tracks found in animeq-player (found %d unsupported embeds: %s)", len(unsupportedEmbeds), strings.Join(hosts, ", ")), nil)
+		}
 		return "", nil, netx.NewParserError("AnimeDrive", "stream", "no video tracks found in animeq-player", nil)
 	}
 
@@ -554,6 +580,15 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 		break
 	}
 	if selected == nil {
+		labels := make([]string, 0, len(tracks))
+		for _, t := range tracks {
+			if t.label != "" {
+				labels = append(labels, t.label)
+			}
+		}
+		if len(labels) > 0 {
+			return "", nil, fmt.Errorf("none of the %d servers on this episode responded (labels: %s)", len(tracks), strings.Join(dedupStrings(labels), ", "))
+		}
 		return "", nil, fmt.Errorf("none of the %d servers on this episode responded", len(tracks))
 	}
 
@@ -564,6 +599,30 @@ func (c *AnimeDriveClient) GetStreamURLWithQuality(episodeURL, quality string) (
 	}
 
 	return selected.src, metadata, nil
+}
+
+// animeDriveEmbedHost extracts the host of an unsupported embed iframe so
+// embed-only failures can name the hosts instead of failing opaquely.
+func animeDriveEmbedHost(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Host)
+}
+
+// dedupStrings preserves order while removing duplicates.
+func dedupStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func animeDriveQualityRank(label string) int {

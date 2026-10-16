@@ -37,9 +37,9 @@ func TestEpisodeLabel(t *testing.T) {
 		ep   models.Episode
 		want string
 	}{
-		{"with title", models.Episode{Number: "12", Title: models.TitleDetails{Romaji: "Pilot"}}, "12 — Pilot"},
+		{"with title", models.Episode{Number: "12", Title: models.TitleDetails{Romaji: "Pilot"}}, "12 · Pilot"},
 		{"number only", models.Episode{Number: "Episode 3"}, "Episode 3"},
-		{"english title", models.Episode{Number: "1", Title: models.TitleDetails{English: "Start"}}, "1 — Start"},
+		{"english title", models.Episode{Number: "1", Title: models.TitleDetails{English: "Start"}}, "1 · Start"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestEpisodePickItems(t *testing.T) {
 	}
 	got := episodePickItems(eps)
 	require.Len(t, got, 2)
-	assert.Equal(t, "1 — Start", got[0].Label)
+	assert.Equal(t, "1 · Start", got[0].Label)
 	assert.Equal(t, "2", got[1].Label)
 	assert.Equal(t, "2020-02-02", got[1].Details)
 	assert.Equal(t, []string{"Recap"}, got[1].Tags)
@@ -101,9 +101,9 @@ func TestSelectEpisodeWithPicker(t *testing.T) {
 
 	t.Run("empty episodes", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, error) {
+		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, string, error) {
 			t.Fatal("picker must not open for empty list")
-			return 0, nil
+			return 0, "", nil
 		}, nil, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no episodes provided")
@@ -118,13 +118,13 @@ func TestSelectEpisodeWithPicker(t *testing.T) {
 
 	t.Run("selection returns url and number", func(t *testing.T) {
 		t.Parallel()
-		url, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, error) {
+		url, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, string, error) {
 			require.Len(t, items, 3)
 			assert.Equal(t, "episode", opts.ItemSingular)
-			assert.Equal(t, "episodes", opts.ItemPlural)
-			assert.Equal(t, "1 — Start", items[0].Label)
-			assert.Equal(t, "12 — Climax", items[1].Label)
-			return 1, nil
+			assert.Equal(t, "episodes · 0 watched", opts.ItemPlural)
+			assert.Equal(t, "1 · Start", items[0].Label)
+			assert.Equal(t, "12 · Climax", items[1].Label)
+			return 1, "", nil
 		}, eps, nil)
 		require.NoError(t, err)
 		assert.Equal(t, "http://ep/12", url)
@@ -133,16 +133,16 @@ func TestSelectEpisodeWithPicker(t *testing.T) {
 
 	t.Run("back maps to ErrBackRequested", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, error) {
-			return -1, tui.ErrPickBack
+		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, string, error) {
+			return -1, "", tui.ErrPickBack
 		}, eps, nil)
 		assert.ErrorIs(t, err, ErrBackRequested)
 	})
 
 	t.Run("cancel maps to ErrBackRequested", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, error) {
-			return -1, tui.ErrPickCancelled
+		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, string, error) {
+			return -1, "", tui.ErrPickCancelled
 		}, eps, nil)
 		assert.ErrorIs(t, err, ErrBackRequested)
 	})
@@ -150,8 +150,8 @@ func TestSelectEpisodeWithPicker(t *testing.T) {
 	t.Run("other errors wrap", func(t *testing.T) {
 		t.Parallel()
 		boom := errors.New("terminal failed")
-		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, error) {
-			return -1, boom
+		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, string, error) {
+			return -1, "", boom
 		}, eps, nil)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, boom)
@@ -160,8 +160,8 @@ func TestSelectEpisodeWithPicker(t *testing.T) {
 
 	t.Run("invalid index", func(t *testing.T) {
 		t.Parallel()
-		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, error) {
-			return 99, nil
+		_, _, err := selectEpisodeWithPicker(func([]tui.PickItem, tui.PickOptions) (int, string, error) {
+			return 99, "", nil
 		}, eps, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid index")
@@ -188,8 +188,8 @@ func TestEpisodePickItems_OnePieceScale(t *testing.T) {
 	}
 	items := episodePickItems(eps)
 	require.Len(t, items, n)
-	assert.Equal(t, "1 — One Piece - Episódio 1", items[0].Label)
-	assert.Equal(t, "1169 — One Piece - Episódio 1169", items[n-1].Label)
+	assert.Equal(t, "1 · One Piece - Episódio 1", items[0].Label)
+	assert.Equal(t, "1169 · One Piece - Episódio 1169", items[n-1].Label)
 	// Filter tokens must include the bare episode number for type-to-jump.
 	assert.Contains(t, items[1099].Label, "1100")
 }
@@ -197,13 +197,13 @@ func TestEpisodePickItems_OnePieceScale(t *testing.T) {
 func TestSelectEpisodeWithPicker_OptionsContract(t *testing.T) {
 	t.Parallel()
 	eps := []models.Episode{{Number: "7", URL: "u7", Title: models.TitleDetails{Romaji: "Seven"}}}
-	url, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, error) {
+	url, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, string, error) {
 		assert.Equal(t, "Search > Episodes", opts.Breadcrumb)
 		assert.Equal(t, "GoAnime - Episodes", opts.WindowTitle)
 		assert.Equal(t, "episode", opts.ItemSingular)
-		assert.Equal(t, "episodes", opts.ItemPlural)
-		assert.Equal(t, "7 — Seven", items[0].Label)
-		return 0, nil
+		assert.Equal(t, "episodes · 0 watched", opts.ItemPlural)
+		assert.Equal(t, "7 · Seven", items[0].Label)
+		return 0, "", nil
 	}, eps, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "u7", url)

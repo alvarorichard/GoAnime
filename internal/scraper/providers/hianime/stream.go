@@ -75,8 +75,9 @@ func (c *HiAnimeClient) GetEpisodeStreamURL(ctx context.Context, episodeURL, qua
 		return "", nil, err
 	}
 
-	// Variant selection has to send the Referer too: the variant playlist is
-	// precisely the level where the CDN was measured to enforce it.
+	// Variant selection has to send the Referer too: the playlists are the
+	// level where the CDN enforces it (measured 2026-10-16: the master 403s
+	// without one, where it used to answer 200).
 	referer := embedOrigin + "/"
 	streamURL = payload.Src
 	if v, ok := c.selectVariant(ctx, payload.Src, quality, referer); ok {

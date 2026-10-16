@@ -62,6 +62,7 @@ func init() {
 	api.SetSearchFetch(func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error) {
 		return SearchAll(ctx, query, kinds...)
 	})
+	api.SetSearchLiveFetch(SearchLive)
 	api.SetEpisodesFetch(func(anime *models.Anime) ([]models.Episode, error) {
 		return FetchEpisodes(context.Background(), anime)
 	})
@@ -86,30 +87,10 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 	// multi-word search because of it.
 	query = normalizeSearchQuery(query)
 
-	want := map[source.SourceKind]bool{}
-	for _, k := range kinds {
-		want[k] = true
-	}
-
-	var searchers []activeSearcher
-	for _, s := range source.ActiveSources() {
-		sr, ok := s.(source.Searchable)
-		if !ok {
-			continue
-		}
-		desc := s.Describe()
-		kind := desc.Kind
-		if len(want) > 0 && !want[kind] {
-			continue
-		}
-		// Skip a source whose circuit breaker is open (R5): it has been
-		// failing, so don't hammer it — it auto-recovers after the cooldown.
-		if diag, retry, open := searchBreaker.OpenDiagnostic(string(kind), sourceDisplayName(kind)); open {
-			util.Warn("search source skipped (circuit open)", "source", kind, "retry_after", retry.Round(time.Second), "diagnostic", diag.UserMessage())
-			continue
-		}
-		searchers = append(searchers, activeSearcher{sr: sr, kind: kind, probeURL: desc.ProbeURL})
-	}
+	// The runner/off split is shared with the live fan-out so both agree on
+	// who runs (planLiveSearch classifies exactly like the loop below used
+	// to: enabled, searchable, breaker closed).
+	searchers, _, _ := planLiveSearch(kinds)
 	if len(searchers) == 0 {
 		return nil, fmt.Errorf("no searchable source available for query %q", query)
 	}
@@ -137,7 +118,7 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				return finishSearch(query, len(searchers), all, failures)
+				return finishSearch(query, searchers, nil, all, failures)
 			}
 			if res.err != nil {
 				// Feed the breaker so a repeatedly-failing source opens.
@@ -169,10 +150,10 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 		case <-graceTimer:
 			util.Debug("straggler grace elapsed; returning collected search results")
-			return finishSearch(query, len(searchers), all, failures)
+			return finishSearch(query, searchers, nil, all, failures)
 		case <-ctx.Done():
 			util.Debug("search timeout reached; returning collected results")
-			return finishSearch(query, len(searchers), all, failures)
+			return finishSearch(query, searchers, nil, all, failures)
 		}
 	}
 }
@@ -245,15 +226,25 @@ func reportPartialFailure(failures []SourceFailure) {
 // cannot tell whether GoAnime is broken, the title does not exist, or the host
 // is refusing them — and the third is the only one they can do something about
 // (wait). The raw errors stay in the chain for errors.Is/As and the debug log.
-func finishSearch(query string, searched int, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
+func finishSearch(query string, searchers []activeSearcher, off []models.SearchOffEntry, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
 	if len(all) > 0 {
 		reportPartialFailure(failures)
 		return all, nil
 	}
-	if len(failures) == 0 {
-		return nil, fmt.Errorf("no results found for: %s", query)
+	answered := make([]source.SourceKind, 0, len(searchers))
+	failed := make(map[source.SourceKind]bool, len(failures))
+	for _, f := range failures {
+		failed[f.Kind] = true
 	}
-	return nil, &SearchFailure{Query: query, Searched: searched, Sources: failures}
+	for _, s := range searchers {
+		if !failed[s.kind] {
+			answered = append(answered, s.kind)
+		}
+	}
+	if len(failures) == 0 {
+		return nil, &NoResultsInfo{Query: query, AnsweredKinds: answered, Off: off}
+	}
+	return nil, &SearchFailure{Query: query, Searched: len(searchers), Sources: failures, AnsweredKinds: answered, Off: off}
 }
 
 // FetchEpisodes lists an anime's episodes through the Model B registry — the
