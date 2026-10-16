@@ -251,6 +251,13 @@ func ChangeAnimeHome() (*models.Anime, []models.Episode, error) {
 func legacyChangeAnime() (*models.Anime, []models.Episode, error) {
 	const maxRetries = 3
 
+	// Fail fast without a TTY: huh blocks on Windows console input headless
+	// (ReadConsole) while it errors on Linux. Without this, headless CI on
+	// windows-latest hangs the full go-test timeout instead of erroring.
+	if !tui.HasTerminal() {
+		return nil, nil, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
+
 	for i := range maxRetries {
 		var animeName string
 

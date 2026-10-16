@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
@@ -21,14 +22,17 @@ import (
 // topcineCascadeStub serves a TopCine search hit plus a panel endpoint whose
 // players resolve without any embed host, and records the referers the probes
 // carry.
-func topcineCascadeStub(t *testing.T) (*httptest.Server, *[]string) {
+func topcineCascadeStub(t *testing.T) (*httptest.Server, func() []string) {
 	t.Helper()
+	var mu sync.Mutex
 	var refs []string
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, ".mp4"):
+			mu.Lock()
 			refs = append(refs, r.Header.Get("Referer"))
+			mu.Unlock()
 			if strings.Contains(r.URL.Path, "dead") {
 				w.WriteHeader(http.StatusNotFound)
 				return
@@ -55,7 +59,11 @@ func topcineCascadeStub(t *testing.T) (*httptest.Server, *[]string) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &refs
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), refs...)
+	}
 }
 
 func topcineCascadeAdapter(t *testing.T, srv *httptest.Server) *TopCineAdapter {
@@ -89,7 +97,7 @@ func TestTopCineAdapterCascade_SearchToStream(t *testing.T) {
 	assert.Equal(t, srv.URL+"/ok.mp4", stream, "the dead direct file must be skipped")
 	assert.Equal(t, "topcine", meta["source"], "the panel stamps startflix; the adapter restamps topcine")
 	assert.Equal(t, srv.URL+"/", meta["referer"])
-	require.NotEmpty(t, *refs, "the direct-file probe must reach the server")
+	require.NotEmpty(t, refs(), "the direct-file probe must reach the server")
 }
 
 // TestTopCineAdapterCascade_UnsupportedOnly surfaces the panel's no-resolver

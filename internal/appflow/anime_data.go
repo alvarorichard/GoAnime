@@ -94,6 +94,11 @@ func defaultRunSpinner(title string, action func()) {
 // defaultPromptForName is the production prompt. Returns the user's input
 // trimmed, or an error if cancelled / empty / TTY unavailable.
 func defaultPromptForName(_ string) (string, error) {
+	// Fail fast without a TTY (see legacyChangeAnime): huh blocks on
+	// Windows console input headless instead of erroring like Linux.
+	if !tui.HasTerminal() {
+		return "", fmt.Errorf("search cancelled by user: %w", api.ErrSearchAborted)
+	}
 	var newName string
 	prompt := huh.NewInput().
 		Title("Search Again").
