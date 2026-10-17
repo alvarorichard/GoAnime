@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,15 @@ func queryBackgroundIsLight(timeout time.Duration) (light, ok bool) {
 	}
 	if _, err := stdout.WriteString("\x1b]11;?\x1b\\"); err != nil {
 		return false, false
+	}
+
+	if runtime.GOOS == "windows" {
+		// A Windows console funnels the terminal's answer and the user's
+		// keystrokes through one input queue: the blocking reader below
+		// would steal whatever is typed first, and on a silent terminal it
+		// outlives its own timeout doing so. Probe via peek/consume/restore
+		// instead, which never loses input.
+		return queryBackgroundWindows(timeout)
 	}
 
 	fd := int(os.Stdin.Fd())
