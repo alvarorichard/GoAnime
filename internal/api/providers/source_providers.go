@@ -32,6 +32,11 @@ var (
 	topCineStreamFn   = api.GetTopCineStreamURL
 	topCineEpisodesFn = api.GetTopCineEpisodes
 
+	// pobreflixStreamFn / pobreflixEpisodesFn do the same for Pobreflix, whose
+	// titles play through the StartFlix panel by TMDB id.
+	pobreflixStreamFn   = api.GetPobreflixStreamURL
+	pobreflixEpisodesFn = api.GetPobreflixEpisodes
+
 	// AnimesDigital keeps dubbed and subtitled releases on separate title
 	// pages. The api path owns the one interactive audio choice.
 	animesDigitalEpisodesFn = api.GetAnimesDigitalEpisodes
@@ -642,6 +647,87 @@ func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 		util.SetGlobalAnimeSource(anime.Source)
 	}
 	return topCineStreamFn(anime, episode, quality)
+}
+
+// --- Pobreflix Provider ---
+//
+// Pobreflix is a third movie/TV catalog. It publishes no guest-side search —
+// the scraper indexes the site's sitemap shards for that — and its own player
+// is out of reach, so its titles play by TMDB id through the StartFlix panel;
+// search, seasons and episode names are Pobreflix's.
+
+type pobreflixProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&pobreflixProvider{})
+}
+
+func (p *pobreflixProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.PobreflixType)
+}
+
+func (p *pobreflixProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.Pobreflix,
+		Priority: 48,
+		Explicit: []string{"Pobreflix"},
+		Tags:     []string{"[pobreflix]"},
+		// The title page is the identifier; episode URLs point at the StartFlix
+		// panel, but anime.Source routes them back here through Explicit.
+		URLMatchers: []string{"pobreflixtv"},
+		ProbeURL:    "https://www.pobreflixtv.sale",
+	}
+}
+
+// HasSeasons: Pobreflix is a movie/TV catalog organized into seasons.
+func (p *pobreflixProvider) HasSeasons() bool { return true }
+
+func (p *pobreflixProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Pobreflix)
+	return results, nil
+}
+
+// FetchEpisodes runs the interactive listing (season, then audio) in the api
+// package.
+func (p *pobreflixProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	return pobreflixEpisodesFn(anime)
+}
+
+func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	return pobreflixStreamFn(anime, episode, quality)
 }
 
 // --- AnimeDrive Provider ---

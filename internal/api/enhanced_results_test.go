@@ -62,9 +62,10 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "superflix", want: nil}, // removed source: no longer a valid selector
 			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
 			{src: "topcine", want: []source.SourceKind{source.TopCine}},
-			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive}},
+			{src: "pobreflix", want: []source.SourceKind{source.Pobreflix}},
+			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}

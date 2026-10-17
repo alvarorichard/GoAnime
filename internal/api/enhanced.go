@@ -235,8 +235,10 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
 		registryKinds = []apisource.SourceKind{apisource.TopCine}
+	case "pobreflix":
+		registryKinds = []apisource.SourceKind{apisource.Pobreflix}
 	case "movietv":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine}
+		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix}
 	case "animedrive":
 		registryKinds = []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
@@ -246,6 +248,7 @@ func searchAnimeEnhanced(
 			apisource.AnimesDigital,
 			apisource.StartFlix,
 			apisource.TopCine,
+			apisource.Pobreflix,
 			apisource.AnimeDrive,
 		}
 	}
@@ -393,6 +396,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "StartFlix"
 			case "topcine":
 				anime.Source = "TopCine"
+			case "pobreflix":
+				anime.Source = "Pobreflix"
 			case "animedrive":
 				anime.Source = "AnimeDrive"
 			}
@@ -411,6 +416,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
 					anime.Source = "TopCine"
+				case strings.Contains(lowerURL, "pobreflixtv"):
+					anime.Source = "Pobreflix"
 				case strings.Contains(lowerURL, "animesdrive"):
 					anime.Source = "AnimeDrive"
 				}

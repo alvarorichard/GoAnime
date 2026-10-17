@@ -21,7 +21,8 @@ func topCineSeries() *models.Anime {
 }
 
 // TestDM_SearchesEveryMovieTVSource: the default -dm search fans out over
-// StartFlix and TopCine together, so the user picks from both.
+// StartFlix, TopCine and Pobreflix together, so the user picks from all of
+// them.
 func TestDM_SearchesEveryMovieTVSource(t *testing.T) {
 	var got []apisource.SourceKind
 	api.SetSearchFetch(func(_ context.Context, _ string, kinds []apisource.SourceKind) ([]*models.Anime, error) {
@@ -38,7 +39,7 @@ func TestDM_SearchesEveryMovieTVSource(t *testing.T) {
 	if !errors.Is(err, api.ErrNoResults) {
 		t.Fatalf("err = %v, want ErrNoResults from the stubbed fan-out", err)
 	}
-	want := []apisource.SourceKind{apisource.StartFlix, apisource.TopCine}
+	want := []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix}
 	if !slices.Equal(got, want) {
 		t.Errorf("searched %v, want %v", got, want)
 	}

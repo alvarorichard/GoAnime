@@ -21,6 +21,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/animesdigital"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
@@ -37,6 +38,12 @@ const (
 	TopCineType                   // TopCine PT-BR movies/series, played through the StartFlix panel
 	AnimesDigitalType             // AnimesDigital PT-BR anime source
 	AnimeDriveType                // AnimeDrive — PT-BR anime source
+
+	PobreflixType // Pobreflix PT-BR movies/series; plays through the StartFlix panel
+
+	// NOTE: appended at the end on purpose — the iota values stitch into
+	// serialized/tracked positions; reordering the middle ones would migrate
+	// user history.
 )
 
 // ContextualScraper is the optional capability (Model C: discovered by type
@@ -83,6 +90,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &AnimesDigitalAdapter{client: animesdigital.Shared()}, nil
 	case AnimeDriveType:
 		return &AnimeDriveAdapter{client: animedrive.NewAnimeDriveClient()}, nil
+	case PobreflixType:
+		return &PobreflixAdapter{client: pobreflix.Shared(), panel: startflix.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -106,6 +115,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return animesdigital.SourceName
 	case AnimeDriveType:
 		return "AnimeDrive"
+	case PobreflixType:
+		return pobreflix.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -120,7 +131,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType:
+	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -523,4 +534,72 @@ func (a *TopCineAdapter) GetClient() *topcine.Client {
 // tests that point them at a mock server.
 func NewTopCineAdapterWithClients(client *topcine.Client, panel *startflix.Client) *TopCineAdapter {
 	return &TopCineAdapter{client: client, panel: panel}
+}
+
+// PobreflixAdapter adapts pobreflix.Client to the UnifiedScraper interface.
+//
+// Pobreflix's player is assembled client-side by an obfuscated bundle, so its
+// titles play by TMDB id through the StartFlix panel, exactly as for
+// TopCineAdapter. The catalog side — search over the sitemap corpus, title
+// pages, season and episode names — is Pobreflix's own.
+type PobreflixAdapter struct {
+	client *pobreflix.Client
+	panel  *startflix.Client
+}
+
+func (a *PobreflixAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes PobreflixAdapter a ContextualScraper.
+func (a *PobreflixAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	media, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(media))
+	for _, m := range media {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. Pobreflix lists episodes through the season and audio pickers in
+// the api package, not through this adapter.
+func (a *PobreflixAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *PobreflixAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for Pobreflix, use GetPobreflixEpisodes in the api package")
+}
+
+func (a *PobreflixAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetStreamURLContext resolves the panel player list at episodeURL; the
+// metadata contract is StartFlixAdapter's.
+func (a *PobreflixAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	streamURL, metadata, err = (&StartFlixAdapter{client: a.panel}).GetStreamURLContext(ctx, episodeURL, options...)
+	if metadata != nil {
+		metadata["source"] = "pobreflix"
+	}
+	return streamURL, metadata, err
+}
+
+func (a *PobreflixAdapter) GetType() ScraperType {
+	return PobreflixType
+}
+
+// GetClient returns the underlying Pobreflix client.
+func (a *PobreflixAdapter) GetClient() *pobreflix.Client {
+	return a.client
+}
+
+// NewPobreflixAdapterWithClients builds an adapter around given clients, for
+// tests that point them at a mock server.
+func NewPobreflixAdapterWithClients(client *pobreflix.Client, panel *startflix.Client) *PobreflixAdapter {
+	return &PobreflixAdapter{client: client, panel: panel}
 }

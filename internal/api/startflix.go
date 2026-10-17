@@ -13,6 +13,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/internal/api/movie"
 	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/internal/tui"
@@ -99,6 +100,9 @@ func describeMediaErr(media *models.Anime, err error) error {
 	if isTopCine(media) {
 		return describeTopCineErr(media, err)
 	}
+	if isPobreflix(media) {
+		return describePobreflixErr(media, err)
+	}
 	return describeStartFlixErr(err)
 }
 
@@ -106,6 +110,9 @@ func describeMediaErr(media *models.Anime, err error) error {
 func panelSourceName(media *models.Anime) string {
 	if isTopCine(media) {
 		return topcine.SourceName
+	}
+	if isPobreflix(media) {
+		return pobreflix.SourceName
 	}
 	return startflix.SourceName
 }
@@ -368,10 +375,13 @@ func loadStartFlixPanel(c *startflix.Client, media *models.Anime) (startflix.Pan
 }
 
 // panelForMedia finds a title's panel: from its StartFlix title page, or by
-// the TMDB id a TopCine page names.
+// the TMDB id a TopCine/Pobreflix page names.
 func panelForMedia(ctx context.Context, c *startflix.Client, media *models.Anime) (startflix.Panel, error) {
 	if isTopCine(media) {
 		return topCinePanel(ctx, media)
+	}
+	if isPobreflix(media) {
+		return pobreflixPanel(ctx, media)
 	}
 	return c.Panel(ctx, media.URL)
 }
@@ -542,6 +552,9 @@ func startFlixSeasonEpisodes(media *models.Anime, panel startflix.Panel, season 
 	}
 	if isTopCine(media) {
 		fillTopCineEpisodeTitles(media, episodes)
+	}
+	if isPobreflix(media) {
+		fillPobreflixEpisodeTitles(media, episodes)
 	}
 	util.Debug("Panel episodes loaded", "source", media.Source, "season", season.Number, "audio", audio, "count", len(episodes))
 	return episodes

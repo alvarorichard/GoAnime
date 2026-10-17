@@ -127,7 +127,7 @@ func indexForScope(scope string) int {
 		return 1
 	case "hianime":
 		return 2
-	case "movietv", "startflix", "topcine":
+	case "movietv", "startflix", "topcine", "pobreflix":
 		return 3
 	default:
 		return 0

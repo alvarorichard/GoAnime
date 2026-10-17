@@ -16,6 +16,10 @@ const (
 	TopCine       SourceKind = "TopCine"
 	AnimesDigital SourceKind = "AnimesDigital"
 	AnimeDrive    SourceKind = "AnimeDrive"
+	// Pobreflix is the catalogue that publishes its records as sitemap
+	// shards (no guest search) and plays through the StartFlix panel by
+	// TMDB id, like TopCine.
+	Pobreflix SourceKind = "Pobreflix"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -38,4 +42,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	TopCine:       scraper.TopCineType,
 	AnimesDigital: scraper.AnimesDigitalType,
 	AnimeDrive:    scraper.AnimeDriveType,
+	Pobreflix:     scraper.PobreflixType,
 }
