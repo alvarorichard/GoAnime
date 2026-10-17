@@ -50,6 +50,7 @@ type searchingModel struct {
 	results  list.Model
 	groups   []animeGroup
 	all      []*models.Anime
+	query    string
 	events   <-chan models.SearchEvent
 	searched []string
 	off      []models.SearchOffEntry
@@ -69,11 +70,12 @@ type searchTickMsg struct{}
 func newSearchingModel(query string, events <-chan models.SearchEvent) *searchingModel {
 	theme := CurrentTheme()
 	shell := NewShell(&theme, "Search > Searching")
-	if query = singleLine(query); query != "" {
+	query = singleLine(query)
+	if query != "" {
 		shell.Context = `"` + query + `"`
 	}
 	delegate := rowDelegate{theme: &theme, twoLine: true, spacing: 1}
-	m := &searchingModel{theme: theme, shell: shell, events: events, states: make(map[string]*searchSource)}
+	m := &searchingModel{theme: theme, shell: shell, query: query, events: events, states: make(map[string]*searchSource)}
 	width, height := shell.ContentSize()
 	results := list.New(nil, delegate, width, height-1)
 	keyMap := fancyListKeyMap()
@@ -210,7 +212,25 @@ func (m *searchingModel) rebuildGroups() {
 		selected = item.group.title
 	}
 	m.groups = groupAnimeResults(m.all)
+	groupScore := func(g *animeGroup) int {
+		best := 0
+		for _, v := range g.versions {
+			if v.anime == nil {
+				continue
+			}
+			if s := models.RelevanceScore(m.query, v.anime.Name, v.anime.Year); s > best {
+				best = s
+			}
+		}
+		return best
+	}
 	sort.SliceStable(m.groups, func(i, j int) bool {
+		// Recomputed per comparison (n is small): a precomputed index
+		// table would go stale as sort moves elements mid-sort.
+		si, sj := groupScore(&m.groups[i]), groupScore(&m.groups[j])
+		if si != sj {
+			return si > sj
+		}
 		return liveLanguagePriority(m.groups[i].versions[0].anime.Name) < liveLanguagePriority(m.groups[j].versions[0].anime.Name)
 	})
 	digits := max(len(fmt.Sprintf("%d", len(m.groups))), 2)

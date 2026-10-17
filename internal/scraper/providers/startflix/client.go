@@ -438,6 +438,27 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Generic fallback: yt-dlp extracts direct media URLs from file hosts
+	// GoAnime has no dedicated resolver for. It only runs when the dedicated
+	// resolvers found nothing — a title offered solely on such hosts
+	// otherwise fails unconditionally. Dead hosts (DNS fail) just miss and
+	// the original error below still names them.
+	if len(noStream.Unsupported) > 0 {
+		unsupported := make([]Player, 0, len(noStream.Unsupported))
+		seen := map[string]bool{}
+		for _, p := range ordered {
+			u, err := url.Parse(p.URL)
+			if err != nil || u.Host == "" || !slices.Contains(noStream.Unsupported, u.Host) || seen[p.URL] {
+				continue
+			}
+			seen[p.URL] = true
+			unsupported = append(unsupported, p)
+		}
+		if stream := tryYtDlpFallback(ctx, unsupported); stream != nil {
+			util.Debug("StartFlix stream resolved via yt-dlp", "host", stream.Host)
+			return stream, nil
+		}
+	}
 	if len(noStream.Unsupported) == 0 && len(noStream.Failures) == 0 {
 		// Every player was skipped above for an unusable URL: nothing usable
 		// was listed, and an empty NoStreamError would name nothing.

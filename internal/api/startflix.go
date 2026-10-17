@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,14 @@ import (
 	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
+
+// ytdlpOnPath reports whether the yt-dlp binary is available for the
+// generic server fallback. When it is missing, the unsupported-servers
+// message says so instead of reading as a dead end.
+func ytdlpOnPath() bool {
+	_, err := exec.LookPath("yt-dlp")
+	return err == nil
+}
 
 // StartFlix flow: title page → video panel → season → Dublado/Legendado →
 // episodes. Each episode's URL is the panel endpoint that lists its players, so
@@ -65,8 +74,12 @@ func describePanelErr(source string, err error) error {
 	case err == nil:
 		return nil
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0:
-		return &friendlyError{cause: err, msg: "⚠️  " + source + " only offers this on servers GoAnime can't play yet (" +
-			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."}
+		msg := "⚠️  " + source + " only offers this on servers GoAnime can't play yet (" +
+			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."
+		if !ytdlpOnPath() {
+			msg += " Installing yt-dlp unlocks more servers."
+		}
+		return &friendlyError{cause: err, msg: msg}
 	case errors.Is(err, startflix.ErrNoSupportedServer):
 		return &friendlyError{cause: err, msg: "⚠️  None of " + source + "'s servers worked for this right now. Try again in a moment."}
 	case errors.Is(err, startflix.ErrNoPlayers):
@@ -143,9 +156,22 @@ func isPanelDead(titleURL string) bool {
 }
 
 // isPanelDeadErr reports whether err means "listed but no video": the panel
-// has no content for the title, or the title embeds no panel at all.
+// has no content for the title, the title embeds no panel at all, or the
+// panel lists the title only on hosts GoAnime (including the yt-dlp
+// fallback) cannot play. The last case is also stale upstream — e.g. an old
+// movie whose five player hosts are all long-dead DNS — and retrying it in
+// the same session cannot heal, so the title is hidden like a dead panel.
+// Session-scoped: a restart (possibly with yt-dlp installed or a new
+// resolver released) shows it again.
 func isPanelDeadErr(err error) bool {
-	return errors.Is(err, startflix.ErrNotOnPanel) || errors.Is(err, startflix.ErrNoPanel)
+	if errors.Is(err, startflix.ErrNotOnPanel) || errors.Is(err, startflix.ErrNoPanel) {
+		return true
+	}
+	var noStream *startflix.NoStreamError
+	if errors.As(err, &noStream) && len(noStream.Unsupported) > 0 && len(noStream.Failures) == 0 {
+		return true
+	}
+	return false
 }
 
 // markPanelDeadErr marks titleURL dead when err is a panel-missing failure.

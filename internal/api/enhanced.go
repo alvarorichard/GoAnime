@@ -319,8 +319,19 @@ func searchAnimeEnhanced(
 			"AnimeDrive", breakdown.AnimeDrive,
 		)
 
-		// Sort results by language priority: Portuguese first, then Multilanguage, Movies/TV, English, others
+		// Sort results by query relevance first, then language: the closest
+		// title match opens at the top even when a source's own search is
+		// loose (StartFlix's WordPress ?s matches description text, so "todo
+		// poderoso" returns 15 unrelated titles). Portuguese first within
+		// equal relevance, as before.
+		scores := make(map[*models.Anime]int, len(animes))
+		for _, a := range animes {
+			scores[a] = models.RelevanceScore(name, a.Name, a.Year)
+		}
 		sort.SliceStable(animes, func(i, j int) bool {
+			if scores[animes[i]] != scores[animes[j]] {
+				return scores[animes[i]] > scores[animes[j]]
+			}
 			return languagePriority(animes[i].Name) < languagePriority(animes[j].Name)
 		})
 
