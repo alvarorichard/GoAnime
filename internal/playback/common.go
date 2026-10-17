@@ -15,6 +15,7 @@ import (
 	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/player"
+	"github.com/alvarorichard/Goanime/internal/tui"
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
@@ -69,6 +70,82 @@ func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
 	} else {
 		util.Infof("Press ESC to leave the episode list and search again.")
 	}
+}
+
+// alternateMovieSources lists the movie sources that could still carry the
+// title — the movie-side version of alternateSources. StartFlix, TopCine and
+// Pobreflix playback all resolve the same panel (and the same fallback ids),
+// so a listing is the only thing that differs between them: when this source
+// lost the movie's players, the other listing may still carry it, and when
+// the panel itself is the problem the message already says to wait — the
+// alternates below name where the movie is ALSO listed.
+//
+// TopCine is never offered and folds into StartFlix: it plays through the
+// same panel, so suggesting both reads as two places when there is one.
+// Sources turned off by GOANIME_DISABLED_SOURCES are dropped, the same way
+// alternateSources drops them.
+func alternateMovieSources(current string) []string {
+	if strings.EqualFold(current, string(apisource.TopCine)) {
+		current = string(apisource.StartFlix)
+	}
+	others := make([]string, 0, 2)
+	for _, k := range []apisource.SourceKind{apisource.StartFlix, apisource.Pobreflix} {
+		// Source labels are not always the bare kind ("Animefire.io" exists
+		// for anime), so match on the kind as a prefix rather than equality.
+		if strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
+			continue
+		}
+		s, ok := apisource.Registered(k)
+		if !ok || !apisource.IsSearchEnabled(s.Describe()) {
+			continue
+		}
+		others = append(others, string(k))
+	}
+	return others
+}
+
+// movieFriendlyErr picks the user-facing tail of a movie stream failure: the
+// api layers rephrase the panel-shaped causes into a plain "⚠️ ..." message,
+// and everything left of it is the internal error chain only the debug log
+// needs.
+func movieFriendlyErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if i := strings.Index(msg, "⚠"); i >= 0 {
+		return msg[i:]
+	}
+	return msg
+}
+
+// reportMovieStreamFailed is the movie-side counterpart of the anime flow's
+// dead-episode reporting: the failure is printed once, the sources that still
+// list the title are named, and the next result screen carries the notice
+// above the list — the same title from another source is usually one pick
+// away. After this HandleMovie returns to selection, where that list opens.
+func reportMovieStreamFailed(anime *models.Anime, err error) {
+	util.Warnf("Failed to extract video URL: %v", util.ErrorHandler(err))
+	tui.NoticeOnNextResults(movieStreamFailedNotice(anime, err))
+}
+
+// movieStreamFailedNotice composes the result-screen notice for a movie whose
+// stream failed: the api layer's plain-language wording (everything after the
+// "⚠️" in the error text), plus where the same movie is still listed. No
+// error, no notice.
+func movieStreamFailedNotice(anime *models.Anime, err error) string {
+	if err == nil {
+		return ""
+	}
+	base := movieFriendlyErr(err)
+	if anime == nil {
+		return base
+	}
+	others := alternateMovieSources(anime.Source)
+	if len(others) > 0 {
+		base += " The same movie is also listed on: " + strings.Join(others, ", ") + "."
+	}
+	return base
 }
 
 func PlayEpisode(

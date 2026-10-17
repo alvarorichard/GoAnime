@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
@@ -67,16 +68,36 @@ func pobreflixPanel(ctx context.Context, media *models.Anime) (startflix.Panel, 
 // describePobreflixErr turns a Pobreflix failure into a plain-language
 // message, keeping the cause reachable through Unwrap.
 func describePobreflixErr(media *models.Anime, err error) error {
+	var noStream *startflix.NoStreamError
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrPobreflixNoIMDb):
 		return &friendlyError{cause: err, msg: "⚠️  GoAnime couldn't link this Pobreflix movie to the servers it plays from. Try searching it on StartFlix."}
+	case errors.As(err, &noStream) && len(noStream.Failures) == 0 && len(noStream.Unsupported) > 0:
+		return &friendlyError{cause: err, msg: pobreflixDeadServersMessage(media, noStream.Unsupported)}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
 		return &friendlyError{cause: err, msg: "⚠️  Pobreflix has this title only on servers that don't carry it. Try searching it on StartFlix or another source."}
 	default:
 		return describePanelErr(pobreflix.SourceName, err)
 	}
+}
+
+// pobreflixDeadServersMessage explains a title whose every panel player sits
+// on a host that no longer answers — old titles whose panel record predates
+// the panel's current player lineup ("Todo Poderoso (2003)": actelecup.com,
+// letsupload.co, fembed and friends, all gone as of 2026-10-17). The panel's
+// record is upstream-maintained and gets re-pointed as its players die, so
+// the honest advice is to give up for today, not to follow the generic
+// "try another episode" — which for a movie reads as nonsense. Nothing is
+// hidden here: the title stays in search results (markPanelDeadErr).
+func pobreflixDeadServersMessage(media *models.Anime, unsupported []string) string {
+	what := "title"
+	if media.MediaType == models.MediaTypeMovie {
+		what = "movie"
+	}
+	return "⚠️  Pobreflix has this " + what + " only on servers that no longer answer (" +
+		strings.Join(unsupported, ", ") + "). Try again later, or search it on another source."
 }
 
 // fillPobreflixEpisodeTitles names the episodes the panel lists without a

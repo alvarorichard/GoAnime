@@ -51,7 +51,10 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		}
 
 		if videoErr != nil {
-			util.Warnf("Failed to extract video URL: %v", util.ErrorHandler(videoErr))
+			// The anime-side scheme: say why this copy failed, name the other
+			// sources that list the title, and let the next result screen
+			// open with the notice above the list.
+			reportMovieStreamFailed(anime, videoErr)
 			// Return to anime selection
 			return player.ErrBackToAnimeSelection
 		}

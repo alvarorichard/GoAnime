@@ -181,12 +181,29 @@ func isPanelDeadErr(err error) bool {
 	return false
 }
 
-// markPanelDeadErr marks titleURL dead when err is a panel-missing failure.
-// It unwraps friendlyError layers (describeMediaErr) so callers pass the
-// error they already have.
-func markPanelDeadErr(titleURL string, err error) {
+// markPanelDeadErr marks the title page dead when err is a panel-missing
+// failure. It unwraps friendlyError layers (describeMediaErr) so callers pass
+// the error they already have.
+//
+// Only StartFlix's own listing hides: its stale pages are what this map
+// exists for — "listed here, panel answers no content" describes a page the
+// panel never gained content for. Pobreflix and TopCine instead ride the panel
+// by id (see topcine.go): their pages are third-party catalog entries that
+// keep naming the same TMDB id no matter what the panel serves today. The
+// panel's player records change upstream (its base is even env-repointable,
+// GOANIME_STARTFLIX_PANEL_URL), so hiding their search result over a panel
+// failure would take a still-real title out of search for the session —
+// "Todo Poderoso (2003)" on Pobreflix is exactly that: every server the panel
+// lists for it is dead, and the title must stay visible and re-triable. The
+// describe functions already explain the failure in plain language.
+func markPanelDeadErr(media *models.Anime, err error) {
+	if isPobreflix(media) || isTopCine(media) {
+		util.Debug("Panel failure on a proxy-catalog title, keeping it in the search results",
+			"source", media.Source, "url", media.URL, "err", err)
+		return
+	}
 	if isPanelDeadErr(err) {
-		markPanelDead(titleURL)
+		markPanelDead(media.URL)
 	}
 }
 
@@ -445,7 +462,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
-		markPanelDeadErr(media.URL, err)
+		markPanelDeadErr(media, err)
 		return nil, describeMediaErr(media, err)
 	}
 
@@ -460,7 +477,7 @@ func GetStartFlixEpisodes(media *models.Anime) ([]models.Episode, error) {
 
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
-		markPanelDeadErr(media.URL, err)
+		markPanelDeadErr(media, err)
 		return nil, describeMediaErr(media, err)
 	}
 
@@ -486,7 +503,7 @@ func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Seas
 	c := sfxClientFn()
 	panel, err := loadStartFlixPanel(c, media)
 	if err != nil {
-		markPanelDeadErr(media.URL, err)
+		markPanelDeadErr(media, err)
 		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	if panel.Kind == startflix.KindMovie {
@@ -494,7 +511,7 @@ func loadStartFlixSeries(media *models.Anime) (startflix.Panel, []startflix.Seas
 	}
 	seasons, err := loadStartFlixSeasons(c, panel)
 	if err != nil {
-		markPanelDeadErr(media.URL, err)
+		markPanelDeadErr(media, err)
 		return startflix.Panel{}, nil, describeMediaErr(media, err)
 	}
 	return panel, seasons, nil
@@ -631,6 +648,39 @@ func audioLangForStartFlix(a startflix.Audio) string {
 
 // GetStartFlixStreamURL resolves an episode or movie to a playable URL and
 // hands mpv/the downloader the referer, subtitles and audio preference.
+
+// sfxVIDSRCFallbackFn resolves a panel title by its ids on the independent
+// vidsrc embed API after the panel's players failed. A seam for tests:
+// production reaches the real fallback through the startflix provider.
+// Movies take IMDb → TMDB; series take the TMDB id plus the season the user
+// picked (media.CurrentSeason, set when the episode list was built) and the
+// episode's number.
+var sfxVIDSRCFallbackFn = func(ctx context.Context, media *models.Anime, episode *models.Episode) (*startflix.Stream, error) {
+	if media.MediaType == models.MediaTypeMovie {
+		return startflix.MovieFallback(ctx, media.IMDBID, media.TMDBID)
+	}
+	season := media.CurrentSeason
+	if season <= 0 && episode != nil {
+		if n, err := strconv.Atoi(episode.SeasonID); err == nil {
+			season = n
+		}
+	}
+	return startflix.EpisodeFallback(ctx, media.TMDBID, season, sfxEpisodeNumber(episode))
+}
+
+// sfxEpisodeNumber reads one episode's number, 0 when indeterminate (the
+// fallback then plays whatever the source names as Pilot).
+func sfxEpisodeNumber(episode *models.Episode) int {
+	if episode == nil {
+		return 0
+	}
+	if episode.Num > 0 {
+		return episode.Num
+	}
+	n, _ := strconv.Atoi(episode.Number)
+	return n
+}
+
 func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ string) (string, error) {
 	if media == nil || episode == nil {
 		return "", fmt.Errorf("no %s title or episode to play", panelSourceName(media))
@@ -639,21 +689,44 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 
 	playersURL, err := startFlixPlayersURL(c, media, episode)
 	if err != nil {
-		markPanelDeadErr(media.URL, err)
+		markPanelDeadErr(media, err)
 		return "", describeMediaErr(media, err)
 	}
 
 	var stream *startflix.Stream
+	panelExhausted := false
 	runWithSpinner("Loading stream...", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), sfxStreamBudget)
 		defer cancel()
 		stream, err = c.Stream(ctx, playersURL)
+		if err != nil {
+			panelExhausted = true
+		}
 	})
+	if err != nil && panelExhausted {
+		// The panel could not serve this title's players. The fallback
+		// resolves the same title by its ids on an independent embed API,
+		// so a stale panel record no longer means a dead title.
+		//
+		// It gets its own budget, not what is left of the spinner's: the
+		// panel path self-contains a yt-dlp sweep of every listed host, and
+		// one hanging host can burn most of that budget before the fallback
+		// gets a turn — the fallback then dies on a deadline it never had a
+		// chance to meet. Fresh time, only spent when the panel missed.
+		fsCtx, fsc := context.WithTimeout(context.Background(), sfxStreamBudget)
+		defer fsc()
+		if fs, ferr := sfxVIDSRCFallbackFn(fsCtx, media, episode); ferr == nil && fs != nil {
+			util.Debug("VIDSRC fallback resolved the title", "host", fs.Host)
+			stream, err = fs, nil
+		}
+	}
 	if err != nil {
 		// A movie's players are listed on its panel itself, so "no content"
 		// there is the whole title gone; for an episode it is one episode.
+		// The hiding stays behind the fallback attempt: a title the fallback
+		// saved must stay listed.
 		if isMoviePanelURL(playersURL) {
-			markPanelDeadErr(media.URL, err)
+			markPanelDeadErr(media, err)
 		}
 		// No prefix: the player dispatch already wraps this as "failed to get
 		// StartFlix stream URL", and the friendly text should follow it directly.

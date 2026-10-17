@@ -288,10 +288,17 @@ func (cc *corpus) saveCache() {
 }
 
 // fresh reports a full index fetched within the TTL.
+//
+// "Full" is load-bearing: entries with no completed shard recorded mean the
+// build timed out partway — a partial round that never resumes while it
+// counts as fresh. A shard holds thousands of records, so a missing one is
+// not a niche gap; "todo poderoso" (record 450) was unreachable for two days
+// because the first build died before its shard. An incomplete index keeps
+// answering through refresh's rules and finishes itself on the next search.
 func (cc *corpus) fresh() bool {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
-	return len(cc.entries) > 0 && time.Since(cc.fetchedAt) < corpusTTL
+	return len(cc.entries) > 0 && len(cc.shardsDone) > 0 && time.Since(cc.fetchedAt) < corpusTTL
 }
 
 // entryFromURL parses a record URL into an index entry.
