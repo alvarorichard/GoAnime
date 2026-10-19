@@ -284,6 +284,7 @@ func TestSearchLive_InFlightCancellation(t *testing.T) {
 	t.Cleanup(func() { close(stuck.release) })
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	time.AfterFunc(20*time.Millisecond, cancel)
 
 	events, results, err := collectLiveEvents(t, ctx, "x", nil)
@@ -309,8 +310,8 @@ func TestSearchLive_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-		defer cancel()
 		events, _, err := collectLiveEvents(t, ctx, "x", nil)
+		cancel()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Len(t, events, 2)

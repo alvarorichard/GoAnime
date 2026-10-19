@@ -251,7 +251,7 @@ func TestSearchAll_CancelledPendingSourceIsNotTimeout(t *testing.T) {
 }
 
 func TestSearchOneWithTimeout_CancelledContextPreservesCancellation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Errorf("probe URL should not be requested when context is cancelled")
 	}))
 	defer srv.Close()
@@ -313,8 +313,8 @@ func TestSearchAll_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-		defer cancel()
 		_, err := SearchAll(ctx, "naruto")
+		cancel()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		var failure *SearchFailure
