@@ -248,3 +248,51 @@ func TestSearchLive_LateResultDoesNotChangeCompletedSearch(t *testing.T) {
 	assert.Len(t, events, 2)
 	assert.Equal(t, models.SearchFailed, events[1].State)
 }
+
+func TestSearchLive_CancellationDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		events, _, err := collectLiveEvents(t, ctx, "x", nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		require.Len(t, events, 2)
+		assert.Equal(t, "cancelled", events[1].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "live search cancellations must not trip circuit breaker")
+}
+
+func TestSearchLive_InFlightCancellation(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	events, results, err := collectLiveEvents(t, ctx, "x", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, results)
+	require.Len(t, events, 2)
+	assert.Equal(t, "cancelled", events[1].Reason)
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "in-flight cancellation must not trip circuit breaker")
+}

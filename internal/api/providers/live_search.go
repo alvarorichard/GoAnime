@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -106,6 +107,22 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 			delete(pending, res.kind)
 			display := panelSourceName(res.kind)
 			if res.err != nil {
+				if errors.Is(res.err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					err := res.err
+					if !errors.Is(err, context.Canceled) && ctx.Err() != nil {
+						err = ctx.Err()
+					}
+					failures = append(failures, SourceFailure{
+						Kind:   res.kind,
+						Reason: "cancelled",
+						Err:    fmt.Errorf("%s: %w", res.kind, err),
+					})
+					emit(models.SearchEvent{
+						Name: display, State: models.SearchFailed,
+						Elapsed: time.Since(start), Reason: "cancelled",
+					})
+					continue
+				}
 				diag := netx.DiagnoseError(display, "search", res.err)
 				if searchBreaker.RecordFailure(string(res.kind), diag) {
 					util.Warn("search source circuit opened", "source", res.kind, "diagnostic", diag.UserMessage())
@@ -140,7 +157,7 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 					continue
 				}
 				reason := "timed out"
-				if ctx.Err() == context.Canceled {
+				if errors.Is(ctx.Err(), context.Canceled) {
 					reason = "cancelled"
 				}
 				failures = append(failures, SourceFailure{Kind: a.kind, Reason: reason, Err: fmt.Errorf("%s: %w", a.kind, ctx.Err())})

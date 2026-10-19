@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -126,6 +127,18 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 			delete(pending, res.kind)
 			if res.err != nil {
+				if errors.Is(res.err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					err := res.err
+					if !errors.Is(err, context.Canceled) && ctx.Err() != nil {
+						err = ctx.Err()
+					}
+					failures = append(failures, SourceFailure{
+						Kind:   res.kind,
+						Reason: "cancelled",
+						Err:    fmt.Errorf("%s: %w", res.kind, err),
+					})
+					continue
+				}
 				// Feed the breaker so a repeatedly-failing source opens.
 				diag := netx.DiagnoseError(sourceDisplayName(res.kind), "search", res.err)
 				if searchBreaker.RecordFailure(string(res.kind), diag) {
@@ -159,7 +172,7 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		case <-ctx.Done():
 			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
 			reason := "timed out"
-			if ctx.Err() == context.Canceled {
+			if errors.Is(ctx.Err(), context.Canceled) {
 				reason = "cancelled"
 			}
 			for _, a := range searchers {
@@ -198,8 +211,19 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 
 	select {
 	case o := <-done:
+		if o.err != nil {
+			if errors.Is(parent.Err(), context.Canceled) {
+				return searchOne{kind: a.kind, err: parent.Err()}
+			}
+			if errors.Is(o.err, context.Canceled) {
+				return searchOne{kind: a.kind, err: o.err}
+			}
+		}
 		return searchOne{kind: a.kind, results: o.results, err: o.err}
 	case <-sctx.Done():
+		if parent.Err() != nil {
+			return searchOne{kind: a.kind, err: parent.Err()}
+		}
 		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), perSourceSearchTimeout)
 		err := netx.EnrichTimeoutWithProbe(parent, sourceDisplayName(a.kind), "search", a.probeURL, base, originProbeBudget)
 		return searchOne{kind: a.kind, err: err}
