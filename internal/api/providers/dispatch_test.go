@@ -178,6 +178,15 @@ type hangingSearchSource struct {
 	results []*models.Anime
 }
 
+// setPerSourceSearchTimeout overrides the per-source timeout for one test.
+// Atomic because goroutines abandoned by an earlier, already-returned search
+// can still be reading it.
+func setPerSourceSearchTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := perSourceSearchTimeoutNs.Swap(int64(d))
+	t.Cleanup(func() { perSourceSearchTimeoutNs.Store(prev) })
+}
+
 func (s *hangingSearchSource) Search(context.Context, string) ([]*models.Anime, error) {
 	<-s.release
 	return s.results, nil
@@ -190,9 +199,7 @@ func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prev := perSourceSearchTimeout
-	perSourceSearchTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { perSourceSearchTimeout = prev })
+	setPerSourceSearchTimeout(t, 20*time.Millisecond)
 
 	stub := &hangingSearchSource{
 		desc:    source.Descriptor{Kind: source.Goyabu, Priority: 1},
@@ -442,9 +449,7 @@ func TestSearchAll_IndividualTimeoutTripsCircuitBreaker(t *testing.T) {
 	searchBreaker = netx.NewCircuitBreaker()
 	t.Cleanup(func() { searchBreaker = prevBreaker })
 
-	prevTimeout := perSourceSearchTimeout
-	perSourceSearchTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { perSourceSearchTimeout = prevTimeout })
+	setPerSourceSearchTimeout(t, 10*time.Millisecond)
 
 	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
 	restore := source.SwapRegistryForTesting(stuck)

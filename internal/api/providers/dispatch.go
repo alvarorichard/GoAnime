@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -36,9 +37,16 @@ const (
 // (the underlying clients still issue non-cancelable http.NewRequest calls)
 // cannot hold the fan-out open until searchAllTimeout and, more importantly,
 // trips that source's circuit breaker with an accurate, probe-enriched
-// diagnostic instead of a generic aggregate timeout. A var, not a const, so
-// tests can shorten it.
-var perSourceSearchTimeout = 12 * time.Second
+// diagnostic instead of a generic aggregate timeout. Stored atomically (ns),
+// not as a plain var, so tests can shorten it while goroutines abandoned by an
+// already-returned search may still be reading it.
+var perSourceSearchTimeoutNs atomic.Int64
+
+func init() { perSourceSearchTimeoutNs.Store(int64(12 * time.Second)) }
+
+func perSourceSearchTimeout() time.Duration {
+	return time.Duration(perSourceSearchTimeoutNs.Load())
+}
 
 // searchOne is a single source's search outcome in the fan-out.
 type searchOne struct {
@@ -72,16 +80,6 @@ func init() {
 	})
 }
 
-// SearchAll fans out a query across the enabled, Searchable sources in the
-// Model B registry — the registry-driven replacement for the ScraperManager's
-// hardcoded adapter fan-out. When kinds is non-empty, only those sources are
-// queried (specific-source search); otherwise every Searchable source runs.
-//
-// Each source's Search already applies the circuit breaker, kill-switch and
-// language tagging (via searchViaManager); SearchAll adds only the concurrent
-// collection with a straggler grace window so slow sources don't block fast
-// ones. Per-source failures are logged and tolerated — a result is returned as
-// long as at least one source succeeds.
 // parentContextFailure returns a SourceFailure and true if the provider failure was
 // directly caused by the parent fan-out context ending (cancellation or deadline),
 // rather than an independent provider error. Only parent-caused failures bypass the
@@ -107,6 +105,16 @@ func parentContextFailure(parent context.Context, kind source.SourceKind, resErr
 	}, true
 }
 
+// SearchAll fans out a query across the enabled, Searchable sources in the
+// Model B registry — the registry-driven replacement for the ScraperManager's
+// hardcoded adapter fan-out. When kinds is non-empty, only those sources are
+// queried (specific-source search); otherwise every Searchable source runs.
+//
+// Each source's Search already applies the circuit breaker, kill-switch and
+// language tagging (via searchViaManager); SearchAll adds only the concurrent
+// collection with a straggler grace window so slow sources don't block fast
+// ones. Per-source failures are logged and tolerated — a result is returned as
+// long as at least one source succeeds.
 func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([]*models.Anime, error) {
 	// Undo the slugging both input paths apply before anything sees the query.
 	// See query.go: three of the four sources found nothing for every
@@ -210,7 +218,8 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 // distinguishes "the site's origin is down (5xx / Cloudflare)" from an opaque
 // hang, so the breaker opens with an actionable diagnostic.
 func searchOneWithTimeout(parent context.Context, a activeSearcher, query string) searchOne {
-	sctx, cancel := context.WithTimeout(parent, perSourceSearchTimeout)
+	timeout := perSourceSearchTimeout()
+	sctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	type outcome struct {
@@ -233,7 +242,7 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 		if parent.Err() != nil {
 			return searchOne{kind: a.kind, err: parent.Err()}
 		}
-		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), perSourceSearchTimeout)
+		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), timeout)
 		err := netx.EnrichTimeoutWithProbe(parent, sourceDisplayName(a.kind), "search", a.probeURL, base, originProbeBudget)
 		return searchOne{kind: a.kind, err: err}
 	}
