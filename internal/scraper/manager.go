@@ -240,6 +240,8 @@ func (a *AnimeDriveAdapter) SearchAnime(query string, options ...any) ([]*models
 	return a.client.SearchAnime(query)
 }
 
+// SearchAnimeContext searches AnimeDrive with the supplied context, allowing
+// cancellation of its HTTP requests and retry delays.
 func (a *AnimeDriveAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
 	return a.client.SearchAnimeContext(ctx, query)
 }
