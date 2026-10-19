@@ -93,12 +93,17 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 		all      []*models.Anime
 		failures []SourceFailure
 	)
+	pending := make(map[source.SourceKind]bool, len(searchers))
+	for _, a := range searchers {
+		pending[a.kind] = true
+	}
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
 				return finishSearch(query, searchers, off, all, failures)
 			}
+			delete(pending, res.kind)
 			display := panelSourceName(res.kind)
 			if res.err != nil {
 				diag := netx.DiagnoseError(display, "search", res.err)
@@ -129,7 +134,18 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 				Count: len(res.results), Elapsed: time.Since(start),
 			})
 		case <-ctx.Done():
-			util.Debug("search timeout reached; returning collected results")
+			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
+			for _, a := range searchers {
+				if !pending[a.kind] {
+					continue
+				}
+				reason := "timed out"
+				if ctx.Err() == context.Canceled {
+					reason = "cancelled"
+				}
+				failures = append(failures, SourceFailure{Kind: a.kind, Reason: reason, Err: fmt.Errorf("%s: %w", a.kind, ctx.Err())})
+				emit(models.SearchEvent{Name: panelSourceName(a.kind), State: models.SearchFailed, Elapsed: time.Since(start), Reason: reason})
+			}
 			return finishSearch(query, searchers, off, all, failures)
 		}
 	}

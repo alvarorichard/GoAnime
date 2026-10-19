@@ -174,11 +174,12 @@ func TestSearchAll_AllFailReturnsError(t *testing.T) {
 type hangingSearchSource struct {
 	epStubSource
 	release chan struct{}
+	results []*models.Anime
 }
 
 func (s *hangingSearchSource) Search(context.Context, string) ([]*models.Anime, error) {
 	<-s.release
-	return nil, nil
+	return s.results, nil
 }
 
 func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
@@ -218,4 +219,32 @@ func TestSearchAll_NoSearchableSource(t *testing.T) {
 	_, err := SearchAll(context.Background(), "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no searchable source")
+}
+
+func TestSearchAll_AllPendingTimeoutIsFailure(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	results, err := SearchAll(ctx, "naruto")
+	assert.Empty(t, results)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestSearchAll_CancelledPendingSourceIsNotTimeout(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := SearchAll(ctx, "naruto")
+	var failure *SearchFailure
+	require.ErrorAs(t, err, &failure)
+	require.Len(t, failure.Sources, 1)
+	assert.Equal(t, "cancelled", failure.Sources[0].Reason)
+	assert.ErrorIs(t, err, context.Canceled)
 }

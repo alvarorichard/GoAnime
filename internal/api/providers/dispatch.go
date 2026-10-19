@@ -114,12 +114,17 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		failures   []SourceFailure
 		graceTimer <-chan time.Time
 	)
+	pending := make(map[source.SourceKind]bool, len(searchers))
+	for _, a := range searchers {
+		pending[a.kind] = true
+	}
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
 				return finishSearch(query, searchers, nil, all, failures)
 			}
+			delete(pending, res.kind)
 			if res.err != nil {
 				// Feed the breaker so a repeatedly-failing source opens.
 				diag := netx.DiagnoseError(sourceDisplayName(res.kind), "search", res.err)
@@ -152,7 +157,16 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			util.Debug("straggler grace elapsed; returning collected search results")
 			return finishSearch(query, searchers, nil, all, failures)
 		case <-ctx.Done():
-			util.Debug("search timeout reached; returning collected results")
+			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
+			reason := "timed out"
+			if ctx.Err() == context.Canceled {
+				reason = "cancelled"
+			}
+			for _, a := range searchers {
+				if pending[a.kind] {
+					failures = append(failures, SourceFailure{Kind: a.kind, Reason: reason, Err: fmt.Errorf("%s: %w", a.kind, ctx.Err())})
+				}
+			}
 			return finishSearch(query, searchers, nil, all, failures)
 		}
 	}
