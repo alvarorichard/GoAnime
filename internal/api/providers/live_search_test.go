@@ -296,3 +296,46 @@ func TestSearchLive_InFlightCancellation(t *testing.T) {
 	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
 	assert.False(t, open, "in-flight cancellation must not trip circuit breaker")
 }
+
+func TestSearchLive_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		events, _, err := collectLiveEvents(t, ctx, "x", nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Len(t, events, 2)
+		assert.Equal(t, "timed out", events[1].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "live search parent deadlines must not trip circuit breaker")
+}
+
+func TestSearchLive_ProviderOwnTimeoutTripsCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	failing := newSearchStub(source.AnimeDrive, nil, context.DeadlineExceeded)
+	restore := source.SwapRegistryForTesting(failing)
+	t.Cleanup(restore)
+
+	for i := 0; i < 3; i++ {
+		events, _, err := collectLiveEvents(t, context.Background(), "x", nil)
+		require.Error(t, err)
+		require.Len(t, events, 2)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.True(t, open, "provider's own timeout in live search must trip the circuit breaker")
+}

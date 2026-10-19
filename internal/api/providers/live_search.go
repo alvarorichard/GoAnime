@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -107,19 +106,13 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 			delete(pending, res.kind)
 			display := panelSourceName(res.kind)
 			if res.err != nil {
-				if errors.Is(res.err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-					err := res.err
-					if !errors.Is(err, context.Canceled) && ctx.Err() != nil {
-						err = ctx.Err()
-					}
-					failures = append(failures, SourceFailure{
-						Kind:   res.kind,
-						Reason: "cancelled",
-						Err:    fmt.Errorf("%s: %w", res.kind, err),
-					})
+				if f, ok := parentContextFailure(ctx, res.kind, res.err); ok {
+					failures = append(failures, f)
 					emit(models.SearchEvent{
-						Name: display, State: models.SearchFailed,
-						Elapsed: time.Since(start), Reason: "cancelled",
+						Name:    display,
+						State:   models.SearchFailed,
+						Elapsed: time.Since(start),
+						Reason:  f.Reason,
 					})
 					continue
 				}
@@ -156,12 +149,9 @@ func SearchLive(ctx context.Context, query string, kinds []source.SourceKind, em
 				if !pending[a.kind] {
 					continue
 				}
-				reason := "timed out"
-				if errors.Is(ctx.Err(), context.Canceled) {
-					reason = "cancelled"
-				}
-				failures = append(failures, SourceFailure{Kind: a.kind, Reason: reason, Err: fmt.Errorf("%s: %w", a.kind, ctx.Err())})
-				emit(models.SearchEvent{Name: panelSourceName(a.kind), State: models.SearchFailed, Elapsed: time.Since(start), Reason: reason})
+				f, _ := parentContextFailure(ctx, a.kind, ctx.Err())
+				failures = append(failures, f)
+				emit(models.SearchEvent{Name: panelSourceName(a.kind), State: models.SearchFailed, Elapsed: time.Since(start), Reason: f.Reason})
 			}
 			return finishSearch(query, searchers, off, all, failures)
 		}

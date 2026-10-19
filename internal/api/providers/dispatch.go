@@ -82,6 +82,33 @@ func init() {
 // collection with a straggler grace window so slow sources don't block fast
 // ones. Per-source failures are logged and tolerated — a result is returned as
 // long as at least one source succeeds.
+// parentContextFailure classifies an error when the parent fan-out context has ended
+// (either cancelled by the caller or expired via aggregate deadline).
+// When parent.Err() is non-nil, the failure belongs to the fan-out aggregate rather
+// than a specific provider fault, so it must not trip that source's circuit breaker.
+// If the parent context is still active (parent.Err() == nil), it returns ok=false
+// so individual provider errors continue through normal diagnostic classification.
+func parentContextFailure(parent context.Context, kind source.SourceKind, resErr error) (SourceFailure, bool) {
+	if parent == nil || parent.Err() == nil {
+		return SourceFailure{}, false
+	}
+	var reason string
+	if errors.Is(parent.Err(), context.Canceled) {
+		reason = "cancelled"
+	} else {
+		reason = "timed out"
+	}
+	err := resErr
+	if err == nil || !errors.Is(err, parent.Err()) {
+		err = parent.Err()
+	}
+	return SourceFailure{
+		Kind:   kind,
+		Reason: reason,
+		Err:    fmt.Errorf("%s: %w", kind, err),
+	}, true
+}
+
 func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([]*models.Anime, error) {
 	// Undo the slugging both input paths apply before anything sees the query.
 	// See query.go: three of the four sources found nothing for every
@@ -127,16 +154,8 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 			delete(pending, res.kind)
 			if res.err != nil {
-				if errors.Is(res.err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-					err := res.err
-					if !errors.Is(err, context.Canceled) && ctx.Err() != nil {
-						err = ctx.Err()
-					}
-					failures = append(failures, SourceFailure{
-						Kind:   res.kind,
-						Reason: "cancelled",
-						Err:    fmt.Errorf("%s: %w", res.kind, err),
-					})
+				if f, ok := parentContextFailure(ctx, res.kind, res.err); ok {
+					failures = append(failures, f)
 					continue
 				}
 				// Feed the breaker so a repeatedly-failing source opens.
@@ -171,13 +190,10 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			return finishSearch(query, searchers, nil, all, failures)
 		case <-ctx.Done():
 			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
-			reason := "timed out"
-			if errors.Is(ctx.Err(), context.Canceled) {
-				reason = "cancelled"
-			}
 			for _, a := range searchers {
 				if pending[a.kind] {
-					failures = append(failures, SourceFailure{Kind: a.kind, Reason: reason, Err: fmt.Errorf("%s: %w", a.kind, ctx.Err())})
+					f, _ := parentContextFailure(ctx, a.kind, ctx.Err())
+					failures = append(failures, f)
 				}
 			}
 			return finishSearch(query, searchers, nil, all, failures)
@@ -211,13 +227,8 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 
 	select {
 	case o := <-done:
-		if o.err != nil {
-			if errors.Is(parent.Err(), context.Canceled) {
-				return searchOne{kind: a.kind, err: parent.Err()}
-			}
-			if errors.Is(o.err, context.Canceled) {
-				return searchOne{kind: a.kind, err: o.err}
-			}
+		if o.err != nil && parent.Err() != nil {
+			return searchOne{kind: a.kind, err: parent.Err()}
 		}
 		return searchOne{kind: a.kind, results: o.results, err: o.err}
 	case <-sctx.Done():

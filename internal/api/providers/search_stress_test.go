@@ -45,10 +45,6 @@ func TestSearch_StressCancellationAndTimeout_Race(t *testing.T) {
 	searchBreaker = netx.NewCircuitBreaker()
 	t.Cleanup(func() { searchBreaker = prevBreaker })
 
-	prevTimeout := perSourceSearchTimeout
-	perSourceSearchTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { perSourceSearchTimeout = prevTimeout })
-
 	fastSrc := &contextualStubSource{
 		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeFire, Priority: 1}},
 		results:      []*models.Anime{{Name: "Naruto"}},
