@@ -82,30 +82,28 @@ func init() {
 // collection with a straggler grace window so slow sources don't block fast
 // ones. Per-source failures are logged and tolerated — a result is returned as
 // long as at least one source succeeds.
-// parentContextFailure classifies an error when the parent fan-out context has ended
-// (either cancelled by the caller or expired via aggregate deadline).
-// When parent.Err() is non-nil, the failure belongs to the fan-out aggregate rather
-// than a specific provider fault, so it must not trip that source's circuit breaker.
-// If the parent context is still active (parent.Err() == nil), it returns ok=false
-// so individual provider errors continue through normal diagnostic classification.
+// parentContextFailure returns a SourceFailure and true if the provider failure was
+// directly caused by the parent fan-out context ending (cancellation or deadline),
+// rather than an independent provider error. Only parent-caused failures bypass the
+// circuit breaker.
 func parentContextFailure(parent context.Context, kind source.SourceKind, resErr error) (SourceFailure, bool) {
-	if parent == nil || parent.Err() == nil {
+	if parent == nil {
+		return SourceFailure{}, false
+	}
+	perr := parent.Err()
+	if perr == nil || !errors.Is(resErr, perr) {
 		return SourceFailure{}, false
 	}
 	var reason string
-	if errors.Is(parent.Err(), context.Canceled) {
+	if errors.Is(perr, context.Canceled) {
 		reason = "cancelled"
 	} else {
 		reason = "timed out"
 	}
-	err := resErr
-	if err == nil || !errors.Is(err, parent.Err()) {
-		err = parent.Err()
-	}
 	return SourceFailure{
 		Kind:   kind,
 		Reason: reason,
-		Err:    fmt.Errorf("%s: %w", kind, err),
+		Err:    fmt.Errorf("%s: %w", kind, resErr),
 	}, true
 }
 
@@ -227,7 +225,7 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 
 	select {
 	case o := <-done:
-		if o.err != nil && parent.Err() != nil {
+		if o.err != nil && parent.Err() != nil && errors.Is(o.err, parent.Err()) {
 			return searchOne{kind: a.kind, err: parent.Err()}
 		}
 		return searchOne{kind: a.kind, results: o.results, err: o.err}

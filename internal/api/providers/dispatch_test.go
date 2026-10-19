@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -325,31 +326,79 @@ func TestSearchAll_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
 	assert.False(t, open, "circuit breaker must remain closed across parent deadline expirations")
 }
 
-func TestSearchAll_SelectPath_ResultChanWithParentDeadlineDoesNotTripBreaker(t *testing.T) {
-	prev := searchBreaker
-	searchBreaker = netx.NewCircuitBreaker()
-	t.Cleanup(func() { searchBreaker = prev })
+func TestParentContextFailure(t *testing.T) {
+	t.Run("nil parent context returns false", func(t *testing.T) {
+		_, ok := parentContextFailure(nil, source.AnimeDrive, context.Canceled)
+		assert.False(t, ok)
+	})
 
-	cancellingSrc := &contextualStubSource{
-		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}},
-		delay:        50 * time.Millisecond,
-	}
-	restore := source.SwapRegistryForTesting(cancellingSrc)
-	t.Cleanup(restore)
+	t.Run("active parent context returns false regardless of error", func(t *testing.T) {
+		ctx := context.Background()
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.False(t, ok)
 
-	for i := 0; i < 5; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+	})
+
+	t.Run("parent canceled matches context.Canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		f, ok := parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.True(t, ok)
+		assert.Equal(t, source.AnimeDrive, f.Kind)
+		assert.Equal(t, "cancelled", f.Reason)
+		assert.ErrorIs(t, f.Err, context.Canceled)
+
+		wrapped := fmt.Errorf("provider failed: %w", context.Canceled)
+		f, ok = parentContextFailure(ctx, source.AnimeDrive, wrapped)
+		assert.True(t, ok)
+		assert.Equal(t, "cancelled", f.Reason)
+		assert.ErrorIs(t, f.Err, context.Canceled)
+	})
+
+	t.Run("parent canceled rejects independent provider error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.False(t, ok)
+	})
+
+	t.Run("parent deadline matches context.DeadlineExceeded", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 		defer cancel()
-		_, err := SearchAll(ctx, "naruto")
-		require.Error(t, err)
-		assert.ErrorIs(t, err, context.DeadlineExceeded)
-		var failure *SearchFailure
-		require.ErrorAs(t, err, &failure)
-		assert.Equal(t, "timed out", failure.Sources[0].Reason)
-	}
 
-	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
-	assert.False(t, open, "resultChan delivery on parent deadline must not trip circuit breaker")
+		f, ok := parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.True(t, ok)
+		assert.Equal(t, source.AnimeDrive, f.Kind)
+		assert.Equal(t, "timed out", f.Reason)
+		assert.ErrorIs(t, f.Err, context.DeadlineExceeded)
+
+		wrapped := fmt.Errorf("provider timeout: %w", context.DeadlineExceeded)
+		f, ok = parentContextFailure(ctx, source.AnimeDrive, wrapped)
+		assert.True(t, ok)
+		assert.Equal(t, "timed out", f.Reason)
+		assert.ErrorIs(t, f.Err, context.DeadlineExceeded)
+	})
+
+	t.Run("parent deadline rejects independent provider error", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.False(t, ok)
+	})
 }
 
 func TestSearchAll_ProviderOwnTimeoutTripsCircuitBreaker(t *testing.T) {
