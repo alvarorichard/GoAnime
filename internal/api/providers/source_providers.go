@@ -770,7 +770,12 @@ func (p *animeDriveProvider) Search(ctx context.Context, query string) ([]*model
 		return nil, err
 	}
 
-	results, err := adapter.SearchAnime(query)
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.SearchContextScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
 	if err != nil {
 		return nil, err
 	}

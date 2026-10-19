@@ -1,16 +1,32 @@
 package animedrive
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAnimeDriveSearchContext_CancelsRequest(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	client := NewClientForTest(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := client.SearchAnimeContext(ctx, "naruto")
+	require.True(t, errors.Is(err, context.DeadlineExceeded), "search should stop with its context: %v", err)
+}
 
 func TestAnimeDriveSearchRetriesOnFailure(t *testing.T) {
 	t.Parallel()

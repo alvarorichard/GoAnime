@@ -46,6 +46,12 @@ const (
 	// user history.
 )
 
+// SearchContextScraper is the optional search-only cancellation capability.
+// UnifiedScraper predates context, so providers use this when available.
+type SearchContextScraper interface {
+	SearchAnimeContext(ctx context.Context, query string, options ...any) ([]*models.Anime, error)
+}
+
 // ContextualScraper is the optional capability (Model C: discovered by type
 // assertion, never by a flag) for adapters whose client honours cancellation
 // end to end.
@@ -232,6 +238,10 @@ type AnimeDriveAdapter struct {
 
 func (a *AnimeDriveAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	return a.client.SearchAnime(query)
+}
+
+func (a *AnimeDriveAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
 }
 
 func (a *AnimeDriveAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
