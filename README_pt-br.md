@@ -324,6 +324,14 @@ acima de que você não precisa mais.
 
 ## Solução de problemas
 
+### A busca da AnimeDrive excede o tempo limite
+
+A AnimeDrive pode demorar mais para responder quando o site está ocupado. A
+busca usa todo o prazo da fonte, sem reiniciar uma requisição no limite mais
+curto do cliente HTTP. Se ainda ocorrer timeout, tente novamente mais tarde ou
+use `--source` para buscar em outra fonte e inclua um log de depuração ao
+relatar o problema.
+
 ### Reportando um problema
 
 Abra um

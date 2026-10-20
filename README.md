@@ -322,6 +322,13 @@ that you no longer need.
 
 ## Troubleshooting
 
+### AnimeDrive search times out
+
+AnimeDrive can take longer to answer when the site is busy. Its search uses
+the full source deadline, without restarting a request at the shorter HTTP
+client timeout. If it still times out, try again later or use `--source` to
+search another source, and include a debug log when reporting the problem.
+
 ### Reporting a problem
 
 Open a

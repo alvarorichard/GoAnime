@@ -113,12 +113,6 @@ func (c *AnimeDriveClient) shouldRetry(attempt int) bool {
 	return attempt < c.maxRetries
 }
 
-func (c *AnimeDriveClient) sleep() {
-	if c.retryDelay > 0 {
-		time.Sleep(c.retryDelay)
-	}
-}
-
 func (c *AnimeDriveClient) extractIDFromURL(urlStr string) string {
 	cleanURL := strings.TrimSuffix(urlStr, "/")
 	parts := strings.Split(cleanURL, "/")
@@ -148,6 +142,15 @@ func (c *AnimeDriveClient) SearchAnimeContext(ctx context.Context, query string)
 
 	util.Debug("AnimeDrive search", "query", query, "normalized", normalizedQuery, "url", searchURL)
 
+	// A caller deadline budgets the whole search, including retries and body
+	// reads. Do not let the fast client's shorter timeout abort a slow response
+	// and waste the remaining budget on a fresh request. Copy the client so
+	// concurrent searches and calls without a deadline keep their own timeout.
+	searchClient := *c.client
+	if _, bounded := ctx.Deadline(); bounded {
+		searchClient.Timeout = 0
+	}
+
 	var lastErr error
 	attempts := c.maxRetries + 1
 
@@ -162,7 +165,7 @@ func (c *AnimeDriveClient) SearchAnimeContext(ctx context.Context, query string)
 
 		c.decorateRequest(req)
 
-		resp, err := c.client.Do(req) // #nosec G704
+		resp, err := searchClient.Do(req) // #nosec G704
 		if err != nil {
 			lastErr = fmt.Errorf("failed to make request: %w", err)
 			if c.shouldRetry(attempt) {
