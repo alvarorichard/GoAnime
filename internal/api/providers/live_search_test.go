@@ -184,3 +184,159 @@ func TestSearchLive_PlanCarriesOff(t *testing.T) {
 	assert.Equal(t, "Goyabu", events[0].Off[0].Name)
 	assert.Equal(t, "off by default", events[0].Off[0].Reason)
 }
+
+func TestSearchLive_DeadlineFinishesPendingSourcesAndKeepsResults(t *testing.T) {
+	fast := newSearchStub(source.AnimeFire, []*models.Anime{{Name: "Naruto"}}, nil)
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(fast, stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	events, results, err := collectLiveEvents(t, ctx, "naruto", nil)
+	require.NoError(t, err)
+	require.Less(t, time.Since(start), time.Second)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Naruto", results[0].Name)
+	require.Len(t, events, 3)
+	assert.Equal(t, models.SearchFailed, events[2].State)
+	assert.Equal(t, "AnimeDrive", events[2].Name)
+	assert.Equal(t, "timed out", events[2].Reason)
+}
+
+func TestSearchLive_AllPendingTimeout(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	events, results, err := collectLiveEvents(t, ctx, "x", nil)
+	require.Error(t, err)
+	assert.Empty(t, results)
+	require.Len(t, events, 2)
+	assert.Equal(t, models.SearchFailed, events[1].State)
+}
+
+func TestSearchLive_CancelMarksPending(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	events, _, err := collectLiveEvents(t, ctx, "x", nil)
+	require.Error(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "cancelled", events[1].Reason)
+}
+
+func TestSearchLive_LateResultDoesNotChangeCompletedSearch(t *testing.T) {
+	stuck := &hangingSearchSource{
+		epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}},
+		release:      make(chan struct{}), results: []*models.Anime{{Name: "Late"}},
+	}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	events, results, err := collectLiveEvents(t, ctx, "x", nil)
+	require.Error(t, err)
+	assert.Empty(t, results)
+	close(stuck.release)
+	assert.Len(t, events, 2)
+	assert.Equal(t, models.SearchFailed, events[1].State)
+}
+
+func TestSearchLive_CancellationDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		events, _, err := collectLiveEvents(t, ctx, "x", nil)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		require.Len(t, events, 2)
+		assert.Equal(t, "cancelled", events[1].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "live search cancellations must not trip circuit breaker")
+}
+
+func TestSearchLive_InFlightCancellation(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	events, results, err := collectLiveEvents(t, ctx, "x", nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, results)
+	require.Len(t, events, 2)
+	assert.Equal(t, "cancelled", events[1].Reason)
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "in-flight cancellation must not trip circuit breaker")
+}
+
+func TestSearchLive_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		events, _, err := collectLiveEvents(t, ctx, "x", nil)
+		cancel()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Len(t, events, 2)
+		assert.Equal(t, "timed out", events[1].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "live search parent deadlines must not trip circuit breaker")
+}
+
+func TestSearchLive_ProviderOwnTimeoutTripsCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	failing := newSearchStub(source.AnimeDrive, nil, context.DeadlineExceeded)
+	restore := source.SwapRegistryForTesting(failing)
+	t.Cleanup(restore)
+
+	for i := 0; i < 3; i++ {
+		events, _, err := collectLiveEvents(t, context.Background(), "x", nil)
+		require.Error(t, err)
+		require.Len(t, events, 2)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.True(t, open, "provider's own timeout in live search must trip the circuit breaker")
+}

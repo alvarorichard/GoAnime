@@ -1,6 +1,7 @@
 package animedrive
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html"
@@ -129,6 +130,11 @@ func (c *AnimeDriveClient) extractIDFromURL(urlStr string) string {
 
 // SearchAnime searches for anime on AnimeDrive
 func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
+	return c.SearchAnimeContext(context.Background(), query)
+}
+
+// SearchAnimeContext makes search requests and retries cancellable.
+func (c *AnimeDriveClient) SearchAnimeContext(ctx context.Context, query string) ([]*models.Anime, error) {
 	// Normalize query: replace hyphens/underscores with spaces for WordPress search
 	normalizedQuery := strings.TrimSpace(query)
 	normalizedQuery = strings.ReplaceAll(normalizedQuery, "-", " ")
@@ -146,7 +152,10 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 	attempts := c.maxRetries + 1
 
 	for attempt := range attempts {
-		req, err := http.NewRequest("GET", searchURL, http.NoBody)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, "GET", searchURL, http.NoBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -157,7 +166,9 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 		if err != nil {
 			lastErr = fmt.Errorf("failed to make request: %w", err)
 			if c.shouldRetry(attempt) {
-				c.sleep()
+				if err := c.sleepContext(ctx); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, lastErr
@@ -167,7 +178,9 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 			lastErr = err
 			_ = resp.Body.Close()
 			if c.shouldRetry(attempt) {
-				c.sleep()
+				if err := c.sleepContext(ctx); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, lastErr
@@ -178,7 +191,9 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 		if err != nil {
 			lastErr = fmt.Errorf("failed to parse HTML: %w", err)
 			if c.shouldRetry(attempt) {
-				c.sleep()
+				if err := c.sleepContext(ctx); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, lastErr
@@ -187,7 +202,9 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 		if err := netx.CheckChallengeDocument(doc, "AnimeDrive search"); err != nil {
 			lastErr = err
 			if c.shouldRetry(attempt) {
-				c.sleep()
+				if err := c.sleepContext(ctx); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, lastErr
@@ -202,6 +219,18 @@ func (c *AnimeDriveClient) SearchAnime(query string) ([]*models.Anime, error) {
 		return nil, lastErr
 	}
 	return nil, errors.New("failed to retrieve results from AnimeDrive")
+}
+
+func (c *AnimeDriveClient) sleepContext(ctx context.Context) error {
+	if c.retryDelay <= 0 {
+		return ctx.Err()
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(c.retryDelay):
+		return nil
+	}
 }
 
 func (c *AnimeDriveClient) extractSearchResults(doc *goquery.Document) []*models.Anime {

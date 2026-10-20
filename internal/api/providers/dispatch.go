@@ -2,8 +2,10 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alvarorichard/Goanime/internal/api"
@@ -35,9 +37,16 @@ const (
 // (the underlying clients still issue non-cancelable http.NewRequest calls)
 // cannot hold the fan-out open until searchAllTimeout and, more importantly,
 // trips that source's circuit breaker with an accurate, probe-enriched
-// diagnostic instead of a generic aggregate timeout. A var, not a const, so
-// tests can shorten it.
-var perSourceSearchTimeout = 12 * time.Second
+// diagnostic instead of a generic aggregate timeout. Stored atomically (ns),
+// not as a plain var, so tests can shorten it while goroutines abandoned by an
+// already-returned search may still be reading it.
+var perSourceSearchTimeoutNs atomic.Int64
+
+func init() { perSourceSearchTimeoutNs.Store(int64(12 * time.Second)) }
+
+func perSourceSearchTimeout() time.Duration {
+	return time.Duration(perSourceSearchTimeoutNs.Load())
+}
 
 // searchOne is a single source's search outcome in the fan-out.
 type searchOne struct {
@@ -69,6 +78,31 @@ func init() {
 	api.SetStreamFetch(func(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 		return FetchStreamURL(context.Background(), episode, anime, quality)
 	})
+}
+
+// parentContextFailure returns a SourceFailure and true if the provider failure was
+// directly caused by the parent fan-out context ending (cancellation or deadline),
+// rather than an independent provider error. Only parent-caused failures bypass the
+// circuit breaker.
+func parentContextFailure(parent context.Context, kind source.SourceKind, resErr error) (SourceFailure, bool) {
+	if parent == nil {
+		return SourceFailure{}, false
+	}
+	perr := parent.Err()
+	if perr == nil || !errors.Is(resErr, perr) {
+		return SourceFailure{}, false
+	}
+	var reason string
+	if errors.Is(perr, context.Canceled) {
+		reason = "cancelled"
+	} else {
+		reason = "timed out"
+	}
+	return SourceFailure{
+		Kind:   kind,
+		Reason: reason,
+		Err:    fmt.Errorf("%s: %w", kind, resErr),
+	}, true
 }
 
 // SearchAll fans out a query across the enabled, Searchable sources in the
@@ -114,13 +148,22 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 		failures   []SourceFailure
 		graceTimer <-chan time.Time
 	)
+	pending := make(map[source.SourceKind]bool, len(searchers))
+	for _, a := range searchers {
+		pending[a.kind] = true
+	}
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
 				return finishSearch(query, searchers, nil, all, failures)
 			}
+			delete(pending, res.kind)
 			if res.err != nil {
+				if f, ok := parentContextFailure(ctx, res.kind, res.err); ok {
+					failures = append(failures, f)
+					continue
+				}
 				// Feed the breaker so a repeatedly-failing source opens.
 				diag := netx.DiagnoseError(sourceDisplayName(res.kind), "search", res.err)
 				if searchBreaker.RecordFailure(string(res.kind), diag) {
@@ -152,7 +195,13 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			util.Debug("straggler grace elapsed; returning collected search results")
 			return finishSearch(query, searchers, nil, all, failures)
 		case <-ctx.Done():
-			util.Debug("search timeout reached; returning collected results")
+			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
+			for _, a := range searchers {
+				if pending[a.kind] {
+					f, _ := parentContextFailure(ctx, a.kind, ctx.Err())
+					failures = append(failures, f)
+				}
+			}
 			return finishSearch(query, searchers, nil, all, failures)
 		}
 	}
@@ -169,7 +218,8 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 // distinguishes "the site's origin is down (5xx / Cloudflare)" from an opaque
 // hang, so the breaker opens with an actionable diagnostic.
 func searchOneWithTimeout(parent context.Context, a activeSearcher, query string) searchOne {
-	sctx, cancel := context.WithTimeout(parent, perSourceSearchTimeout)
+	timeout := perSourceSearchTimeout()
+	sctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	type outcome struct {
@@ -184,9 +234,15 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 
 	select {
 	case o := <-done:
+		if o.err != nil && parent.Err() != nil && errors.Is(o.err, parent.Err()) {
+			return searchOne{kind: a.kind, err: parent.Err()}
+		}
 		return searchOne{kind: a.kind, results: o.results, err: o.err}
 	case <-sctx.Done():
-		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), perSourceSearchTimeout)
+		if parent.Err() != nil {
+			return searchOne{kind: a.kind, err: parent.Err()}
+		}
+		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), timeout)
 		err := netx.EnrichTimeoutWithProbe(parent, sourceDisplayName(a.kind), "search", a.probeURL, base, originProbeBudget)
 		return searchOne{kind: a.kind, err: err}
 	}

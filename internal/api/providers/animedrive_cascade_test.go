@@ -318,6 +318,13 @@ func animeDriveProviderWithFake(t *testing.T, fake *animeDriveFakeAdapter) *anim
 	return p
 }
 
+func TestAnimeDriveProvider_SearchSupportsLegacyAdapter(t *testing.T) {
+	p := animeDriveProviderWithFake(t, &animeDriveFakeAdapter{})
+	results, err := p.Search(context.Background(), "naruto")
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
 func TestAnimeDriveProvider_EmptyStreamURLIsAnError(t *testing.T) {
 	// Not parallel: FetchStreamURL stamps process-wide playback globals.
 	p := animeDriveProviderWithFake(t, &animeDriveFakeAdapter{metadata: map[string]string{}})
