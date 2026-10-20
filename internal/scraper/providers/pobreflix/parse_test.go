@@ -2,6 +2,7 @@ package pobreflix
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 // was written down, kept as the regression baseline.
 func fixtureDoc(t *testing.T, name string) *goquery.Document {
 	t.Helper()
-	raw, err := os.ReadFile("testdata" + string(os.PathSeparator) + name)
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err, "fixture %s must be present", name)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(raw)))
 	require.NoError(t, err)

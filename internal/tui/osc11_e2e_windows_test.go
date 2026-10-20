@@ -66,7 +66,7 @@ func e2eStdInput() (windows.Handle, error) {
 func e2eInjectKey(t *testing.T, h windows.Handle, ch uint16) {
 	t.Helper()
 	down := synthKey(ch)
-	down.Data[4] = 1 // wRepeatCount = 1
+	down.Data[4] = 1 // one key repetition
 	up := synthKey(ch)
 	up.Data[0] = 0 // bKeyDown = 0 (release)
 	up.Data[4] = 1
@@ -92,10 +92,7 @@ func e2eInjectString(t *testing.T, h windows.Handle, s string) {
 func e2eQueueChars(t *testing.T, h windows.Handle) string {
 	t.Helper()
 	var sb strings.Builder
-	for {
-		if procGetCount2(h) == 0 {
-			break
-		}
+	for procGetCount2(h) > 0 {
 		recs := readAllPendingRecords(h, 4096)
 		if len(recs) == 0 {
 			break
@@ -108,9 +105,6 @@ func e2eQueueChars(t *testing.T, h windows.Handle) string {
 	}
 	return sb.String()
 }
-
-// e2eRunningUnderHarness reports whether this process is a spawn target.
-func e2eRunningUnderHarness() bool { return os.Getenv("GOANIME_OSC11_E2E") != "" }
 
 // TestOsc11E2EChildProcess is the child payload; never selected in the parent.
 func TestOsc11E2EChildProcess(t *testing.T) {

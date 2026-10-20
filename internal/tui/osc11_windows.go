@@ -4,6 +4,7 @@ package tui
 
 import (
 	"encoding/binary"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -69,32 +70,34 @@ func pendingConsoleEvents(h windows.Handle) uint32 {
 	return n
 }
 
-func peekConsoleRecords(h windows.Handle, max uint32) []windowsInputRecord {
-	if max == 0 {
+func peekConsoleRecords(h windows.Handle, maxRecords uint32) []windowsInputRecord {
+	if maxRecords == 0 {
 		return nil
 	}
-	if max > 256 {
-		max = 256
+	if maxRecords > 256 {
+		maxRecords = 256
 	}
-	buf := make([]windowsInputRecord, max)
+	buf := make([]windowsInputRecord, maxRecords)
 	var n uint32
-	r1, _, _ := procPeekConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(max), uintptr(unsafe.Pointer(&n)))
+	// #nosec G103 -- Synchronous Win32 call fills this bounded input buffer and count during the call.
+	r1, _, _ := procPeekConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n)))
 	if r1 == 0 {
 		return nil
 	}
 	return buf[:n]
 }
 
-func readConsoleRecords(h windows.Handle, max uint32) []windowsInputRecord {
-	if max == 0 {
+func readConsoleRecords(h windows.Handle, maxRecords uint32) []windowsInputRecord {
+	if maxRecords == 0 {
 		return nil
 	}
-	if max > 256 {
-		max = 256
+	if maxRecords > 256 {
+		maxRecords = 256
 	}
-	buf := make([]windowsInputRecord, max)
+	buf := make([]windowsInputRecord, maxRecords)
 	var n uint32
-	r1, _, _ := procReadConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(max), uintptr(unsafe.Pointer(&n)))
+	// #nosec G103 -- Synchronous Win32 call fills this bounded input buffer and count during the call.
+	r1, _, _ := procReadConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n)))
 	if r1 == 0 {
 		return nil
 	}
@@ -102,10 +105,10 @@ func readConsoleRecords(h windows.Handle, max uint32) []windowsInputRecord {
 }
 
 // readAllPendingRecords drains whatever is waiting in the console input
-// queue, up to cap records.
-func readAllPendingRecords(h windows.Handle, cap int) []windowsInputRecord {
+// queue, up to recordLimit records.
+func readAllPendingRecords(h windows.Handle, recordLimit int) []windowsInputRecord {
 	var out []windowsInputRecord
-	for len(out) < cap {
+	for len(out) < recordLimit {
 		n := pendingConsoleEvents(h)
 		if n == 0 {
 			break
@@ -126,6 +129,7 @@ func writeConsoleRecords(h windows.Handle, recs []windowsInputRecord) bool {
 			n = 256
 		}
 		var wrote uint32
+		// #nosec G103 -- Synchronous Win32 call reads the bounded record slice and fills its written count.
 		r1, _, _ := procWriteConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&recs[0])), uintptr(n), uintptr(unsafe.Pointer(&wrote)))
 		if r1 == 0 || wrote == 0 {
 			return false
@@ -205,11 +209,7 @@ func queryBackgroundWindows(timeout time.Duration) (light, ok bool) {
 			writeConsoleRecords(h, held)
 			return false, false
 		}
-		ms := uint32(time.Until(deadline).Milliseconds())
-		if ms < 1 {
-			ms = 1
-		}
-		ev, _ := windows.WaitForSingleObject(h, ms)
+		ev, _ := windows.WaitForSingleObject(h, consoleWaitMilliseconds(time.Until(deadline)))
 		if ev != windows.WAIT_OBJECT_0 {
 			continue
 		}
@@ -233,6 +233,19 @@ func queryBackgroundWindows(timeout time.Duration) (light, ok bool) {
 			return parseBackgroundIsLight(body)
 		}
 	}
+}
+
+// consoleWaitMilliseconds bounds Win32 waits without allowing a negative
+// duration to wrap or a large duration to become the INFINITE sentinel.
+func consoleWaitMilliseconds(remaining time.Duration) uint32 {
+	ms := remaining.Milliseconds()
+	if ms < 1 {
+		return 1
+	}
+	if ms >= math.MaxUint32 {
+		return math.MaxUint32 - 1
+	}
+	return uint32(ms)
 }
 
 // peekConsoleReply looks for a complete OSC 11 answer in the pending input

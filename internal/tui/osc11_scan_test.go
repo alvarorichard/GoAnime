@@ -89,24 +89,24 @@ func TestFindOSC11ReplySpan_NeverMistakesTyping(t *testing.T) {
 		"naruto",
 		"todo poderoso 2003",
 		"one piece ep 1000",
-		"\x07",                         // lone BEL terminates nothing
-		"rgb:ffff/ffff/ffff",            // body without the header
-		"]11;rgb:ffff/ffff/ffff\x07",    // header without the opening ESC
-		"\x1b",                          // lone Escape key
-		"\x1b\x1b",                      // double Escape
-		"\x1bx",                         // Alt+x chord
-		"\x1b[A",                        // up arrow
-		"\x1b[B\x1b[C",                  // arrows
-		"\x1b]11",                       // truncated header
-		"\x1b]11;",                      // header without body
-		"\x1b]11;rgb:0000",              // body without terminator
+		"\x07",                           // lone BEL terminates nothing
+		"rgb:ffff/ffff/ffff",             // body without the header
+		"]11;rgb:ffff/ffff/ffff\x07",     // header without the opening ESC
+		"\x1b",                           // lone Escape key
+		"\x1b\x1b",                       // double Escape
+		"\x1bx",                          // Alt+x chord
+		"\x1b[A",                         // up arrow
+		"\x1b[B\x1b[C",                   // arrows
+		"\x1b]11",                        // truncated header
+		"\x1b]11;",                       // header without body
+		"\x1b]11;rgb:0000",               // body without terminator
 		"\x1b]10;rgb:ffff/ffff/ffff\x07", // OSC 10 (foreground), not 11
-		"\x1b]104\x07",                  // color reset, not 11
-		" conclusions \x1b[G",          // stray CSI
-		"\r\n",                          // enter
-		"\x7f",                          // backspace
-		"açaí",                          // multibyte typing
-		"フリーレン",                        // CJK typing
+		"\x1b]104\x07",                   // color reset, not 11
+		" conclusions \x1b[G",            // stray CSI
+		"\r\n",                           // enter
+		"\x7f",                           // backspace
+		"açaí",                           // multibyte typing
+		"フリーレン",                          // CJK typing
 	}
 	for _, s := range hostile {
 		if _, _, ok := findOSC11ReplySpan(osc11Runes(s)); ok {
@@ -133,7 +133,7 @@ func TestFindOSC11ReplySpan_RandomJunkNeverMatches(t *testing.T) {
 		buf := make([]rune, n)
 		for j := range buf {
 			// Printable ASCII except ESC.
-			buf[j] = rune(0x20 + next()% (0x7E - 0x20))
+			buf[j] = rune(0x20 + next()%(0x7E-0x20))
 			if buf[j] == 0x1B {
 				buf[j] = 'x'
 			}

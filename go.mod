@@ -20,6 +20,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
+	github.com/tetratelabs/wazero v1.9.0
 	github.com/tr1xem/go-discordrpc v1.0.0
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
@@ -62,7 +63,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
-	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/ulikunitz/xz v0.5.17 // indirect
 	github.com/wzshiming/socks5 v0.8.0 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect

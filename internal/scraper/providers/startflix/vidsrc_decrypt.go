@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/tetratelabs/wazero"
@@ -43,15 +44,25 @@ func decryptVIDSRC(wasmBytes []byte, encB64 string) ([]string, error) {
 	if err != nil || len(ptr) == 0 {
 		return nil, fmt.Errorf("vidsrc fallback: decryptor alloc failed: %w", err)
 	}
-	base := uint32(ptr[0])
-	mem.Write(base, enc)
+	address := ptr[0]
+	if address > math.MaxUint32-12 {
+		return nil, fmt.Errorf("vidsrc fallback: decryptor allocation exceeds memory address range")
+	}
+	base := uint32(address)
+	if !mem.Write(base, enc) {
+		return nil, fmt.Errorf("vidsrc fallback: decryptor memory write failed")
+	}
 	out, err := decrypt.Call(ctx, uint64(base), uint64(len(enc)))
 	if err != nil || len(out) == 0 {
 		return nil, fmt.Errorf("vidsrc fallback: decryptor decrypt failed: %w", err)
 	}
+	length := out[0]
+	if length > math.MaxUint32 {
+		return nil, fmt.Errorf("vidsrc fallback: decryptor output exceeds memory address range")
+	}
 	// The plaintext starts after the 12-byte nonce the browser's TextDecoder
 	// slice skips (vsdec.js decryptWith: memory.buffer, ptr + 12, outLen).
-	plain, ok := mem.Read(base+12, uint32(out[0]))
+	plain, ok := mem.Read(base+12, uint32(length))
 	if !ok {
 		return nil, fmt.Errorf("vidsrc fallback: decryptor memory read failed")
 	}

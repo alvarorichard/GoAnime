@@ -182,7 +182,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 	var out []shard
 	for _, m := range locRe.FindAllStringSubmatch(string(body), -1) {
 		name := sitemapShardRe.FindStringSubmatch(m[1])
-		if name == nil || seen[name[1]] {
+		if len(name) < 2 || seen[name[1]] {
 			continue
 		}
 		seen[name[1]] = true
