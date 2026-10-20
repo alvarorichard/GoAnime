@@ -70,7 +70,7 @@ func TestAnimeDriveSearchContext_UsesCallerBudget(t *testing.T) {
 func TestAnimeDriveSearch_WithoutDeadlineKeepsClientTimeout(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewTestServer(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done()
 		}))
 		httpClient := srv.Client()

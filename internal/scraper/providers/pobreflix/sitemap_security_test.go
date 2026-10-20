@@ -29,7 +29,11 @@ func TestCorpusCacheCreatesPrivateFile(t *testing.T) {
 
 func TestCorpusCacheRejectsEscapingSymlink(t *testing.T) {
 	t.Parallel()
-	outside := filepath.Join(t.TempDir(), "outside.json")
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.json")
+	outsideRoot, err := os.OpenRoot(outsideDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = outsideRoot.Close() })
 	raw := []byte(`{"entries":["https://x.test/filmes/online/a-film-dublado-1/"]}`)
 	require.NoError(t, os.WriteFile(outside, raw, 0o600))
 	path := filepath.Join(t.TempDir(), "index.json")
@@ -43,7 +47,7 @@ func TestCorpusCacheRejectsEscapingSymlink(t *testing.T) {
 	require.True(t, ok)
 	cc.entries = []entry{e}
 	cc.saveCache()
-	got, err := os.ReadFile(outside)
+	got, err := outsideRoot.ReadFile("outside.json")
 	require.NoError(t, err)
 	require.Equal(t, raw, got, "a cache cannot overwrite a link target outside its directory")
 }

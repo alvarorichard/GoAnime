@@ -80,7 +80,7 @@ func peekConsoleRecords(h windows.Handle, maxRecords uint32) []windowsInputRecor
 	buf := make([]windowsInputRecord, maxRecords)
 	var n uint32
 	// #nosec G103 -- Synchronous Win32 call fills this bounded input buffer and count during the call.
-	r1, _, _ := procPeekConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n)))
+	r1, _, _ := procPeekConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n))) // nosemgrep: go_unsafe_rule-unsafe
 	if r1 == 0 {
 		return nil
 	}
@@ -97,7 +97,7 @@ func readConsoleRecords(h windows.Handle, maxRecords uint32) []windowsInputRecor
 	buf := make([]windowsInputRecord, maxRecords)
 	var n uint32
 	// #nosec G103 -- Synchronous Win32 call fills this bounded input buffer and count during the call.
-	r1, _, _ := procReadConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n)))
+	r1, _, _ := procReadConsoleInputW.Call(uintptr(h), uintptr(unsafe.Pointer(&buf[0])), uintptr(maxRecords), uintptr(unsafe.Pointer(&n))) // nosemgrep: go_unsafe_rule-unsafe
 	if r1 == 0 {
 		return nil
 	}

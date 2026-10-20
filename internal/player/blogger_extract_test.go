@@ -1,3 +1,5 @@
+//go:build live
+
 package player
 
 import (
@@ -7,6 +9,8 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
+// TestExtractBloggerGoogleVideoURL checks Google's current session and RPC
+// response in the daily source-health workflow; regular CI uses local fixtures.
 func TestExtractBloggerGoogleVideoURL(t *testing.T) {
 	util.IsDebug = true
 
