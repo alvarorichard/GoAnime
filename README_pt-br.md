@@ -121,7 +121,7 @@ Em ARM64, troque `amd64` por `arm64`.
 
 ### A partir do código-fonte
 
-Com Go 1.27 ou mais recente:
+Com Go 1.27.3 ou mais recente:
 
 ```bash
 go install github.com/alvarorichard/Goanime/cmd/goanime@latest

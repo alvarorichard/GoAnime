@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.27.2'
+  GO_VERSION: '1.27.3'
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
 
@@ -255,7 +255,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.2'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Get dependencies
         run: go mod download
@@ -320,7 +320,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.2'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Check out code
         uses: actions/checkout@v7
