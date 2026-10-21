@@ -98,10 +98,10 @@ func TestStartFlixDeadPanelAndFallbackMissKeepsMessage(t *testing.T) {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		switch {
-		case p == "/filmes/deadfilm/":
+		switch p {
+		case "/filmes/deadfilm/":
 			_, _ = w.Write([]byte(`<html><body><iframe src="` + srv.URL + `/filme/tt1900"></iframe></body></html>`))
-		case p == "/filme/tt1900":
+		case "/filme/tt1900":
 			_, _ = w.Write([]byte(deadPlayersPanel))
 		default:
 			http.NotFound(w, r)

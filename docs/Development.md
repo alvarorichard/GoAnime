@@ -33,7 +33,7 @@ Nothing is committed to `main` directly.
 
 ## Setting up
 
-You need Go 1.27 or later and [mpv](https://mpv.io/). Progress tracking uses
+You need Go 1.27.3 or later and [mpv](https://mpv.io/). Progress tracking uses
 SQLite through CGO, so a C compiler is needed for a build that tracks
 progress. Without one, GoAnime builds and runs without tracking. See
 [BUILD_OPTIONS.md](BUILD_OPTIONS.md).

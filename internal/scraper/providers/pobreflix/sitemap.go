@@ -186,7 +186,7 @@ func corpusCachePath() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(base, "GoAnime")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "pobreflix-index.json"), nil
@@ -206,7 +206,14 @@ func (cc *corpus) loadCache(baseURL string) {
 			return
 		}
 	}
-	raw, err := os.ReadFile(path)
+	// Scope access to the cache directory so a substituted symlink cannot
+	// turn the cache into a read of a file outside that directory.
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	raw, err := root.ReadFile(filepath.Base(path))
 	if err != nil {
 		return
 	}
@@ -282,7 +289,28 @@ func (cc *corpus) saveCache() {
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	cacheFile, err := root.OpenFile(filepath.Base(path), os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		util.Debug("Pobreflix corpus cache save failed", "path", path, "err", err)
+		return
+	}
+	// Tighten legacy caches too, using the opened file so a path replacement
+	// cannot redirect chmod. Apply permissions before writing the new index.
+	if err = cacheFile.Chmod(0o600); err == nil {
+		err = cacheFile.Truncate(0)
+	}
+	if err == nil {
+		_, err = cacheFile.Write(raw)
+	}
+	if closeErr := cacheFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		util.Debug("Pobreflix corpus cache save failed", "path", path, "err", err)
 	}
 }
@@ -335,9 +363,9 @@ func (cc *corpus) refresh(ctx context.Context, client *Client) error {
 		// Without a sitemap index a stale cache is still worth reusing
 		// (it covers the catalog minus new uploads).
 		cc.mu.Lock()
-		any := len(cc.entries) > 0
+		hasEntries := len(cc.entries) > 0
 		cc.mu.Unlock()
-		if any {
+		if hasEntries {
 			util.Debug("Pobreflix sitemap index failed, reusing the cache", "err", err)
 			return nil
 		}

@@ -120,7 +120,7 @@ For ARM64, replace `amd64` with `arm64`.
 
 ### From source
 
-With Go 1.27 or later:
+With Go 1.27.3 or later:
 
 ```bash
 go install github.com/alvarorichard/Goanime/cmd/goanime@latest
@@ -321,6 +321,13 @@ Windows installer, uninstall it from Settings) and delete the folders above
 that you no longer need.
 
 ## Troubleshooting
+
+### AnimeDrive search times out
+
+AnimeDrive can take longer to answer when the site is busy. Its search uses
+the full source deadline, without restarting a request at the shorter HTTP
+client timeout. If it still times out, try again later or use `--source` to
+search another source, and include a debug log when reporting the problem.
 
 ### Reporting a problem
 

@@ -71,8 +71,8 @@ const (
 	wasmBodyLimit = 16 << 20
 )
 
-// vidsrcDisabled marks the refusal when the gate keeps the fallback off.
-var vidsrcDisabled = fmt.Errorf("vidsrc fallback disabled")
+// errVIDSRCDisabled marks the refusal when the gate keeps the fallback off.
+var errVIDSRCDisabled = fmt.Errorf("vidsrc fallback disabled")
 
 // vidsrcFallbackAllowed reports whether the id-keyed fallback may run. Under
 // `go test` it is off unless GOANIME_VIDSRC_FALLBACK_TEST=1: regression tests
@@ -122,7 +122,7 @@ var vidsrcBasesFn = func() []string {
 // only one of the two.
 func MovieFallback(ctx context.Context, imdbID string, tmdbID int) (*Stream, error) {
 	if !vidsrcFallbackAllowed() {
-		return nil, vidsrcDisabled
+		return nil, errVIDSRCDisabled
 	}
 	if imdbID == "" && tmdbID == 0 {
 		return nil, fmt.Errorf("no IMDb or TMDB id to resolve on the fallback source")
@@ -136,9 +136,9 @@ func MovieFallback(ctx context.Context, imdbID string, tmdbID int) (*Stream, err
 
 // EpisodeFallback resolves one series episode by its TMDB id on the fallback
 // source. season/episode 0 mean "whatever the source names as Pilot".
-func EpisodeFallback(ctx context.Context, tmdbID int, season, episode int) (*Stream, error) {
+func EpisodeFallback(ctx context.Context, tmdbID, season, episode int) (*Stream, error) {
 	if !vidsrcFallbackAllowed() {
-		return nil, vidsrcDisabled
+		return nil, errVIDSRCDisabled
 	}
 	if tmdbID == 0 {
 		return nil, fmt.Errorf("no TMDB id to resolve an episode on the fallback source")
@@ -590,7 +590,7 @@ func vidsrcTrimedBOM(b []byte) []byte {
 // windowJSON extracts the `<script>window.CFG/CONFIG = {...}</script>` object
 // from a page body. Both objects are flat, so a brace scan is enough.
 func windowJSON(body []byte, windowVar string) map[string]any {
-	start := strings.Index(string(body), windowVar)
+	start := bytes.Index(body, []byte(windowVar))
 	if start < 0 {
 		return nil
 	}

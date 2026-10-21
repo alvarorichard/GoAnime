@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.27.2'
+  GO_VERSION: '1.27.3'
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
 
@@ -42,10 +42,10 @@ jobs:
       - name: Run live diagnostics
         run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
 
-      - name: Run Goyabu Blogger playback diagnostic
+      - name: Run Blogger extraction and Goyabu playback diagnostics
         run: >
           go test -tags live
-          -run '^TestGoyabuBlackCloverEpisode3Live$'
+          -run '^(TestExtractBloggerGoogleVideoURL|TestGoyabuBlackCloverEpisode3Live)$'
           -count=1 -v -timeout=90s
           ./internal/player
 

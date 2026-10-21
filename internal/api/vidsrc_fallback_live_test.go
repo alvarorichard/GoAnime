@@ -83,10 +83,10 @@ func TestLivePobreflixTodoPoderosoPlaysViaFallback(t *testing.T) {
 	liveFallbackSetup(t)
 
 	anime := &models.Anime{
-		Name:       "Todo Poderoso",
-		URL:        "https://www.pobreflixtv.sale/filmes/online/todo-poderoso-dublado-450/",
-		Source:     pobreflix.SourceName,
-		MediaType:  models.MediaTypeMovie,
+		Name:      "Todo Poderoso",
+		URL:       "https://www.pobreflixtv.sale/filmes/online/todo-poderoso-dublado-450/",
+		Source:    pobreflix.SourceName,
+		MediaType: models.MediaTypeMovie,
 	}
 	eps, err := GetPobreflixEpisodes(anime)
 	require.NoError(t, err, "listing")

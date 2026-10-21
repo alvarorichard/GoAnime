@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -56,20 +57,18 @@ const ytdlpTimeout = 20 * time.Second
 // dead host) is just a miss — the caller keeps the original NoStreamError
 // so the user still learns which servers were listed.
 func resolveViaYtDlp(ctx context.Context, playerURL, referer string) string {
+	args := ytdlpArgs(playerURL, referer)
+	if args == nil {
+		return ""
+	}
 	bin := ytdlpBinary()
 	if bin == "" {
 		return ""
 	}
 	pctx, cancel := context.WithTimeout(ctx, ytdlpTimeout)
 	defer cancel()
-	args := []string{
-		"--no-warnings", "--no-playlist",
-		"--get-url", "-f", "best[ext=mp4]/best",
-	}
-	if referer != "" {
-		args = append(args, "--referer", referer)
-	}
-	args = append(args, playerURL)
+	// #nosec G204 -- bin comes only from LookPath("yt-dlp"); no shell is used,
+	// and ytdlpArgs validates the URL and separates it from command options.
 	cmd := exec.CommandContext(pctx, bin, args...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
@@ -83,6 +82,26 @@ func resolveViaYtDlp(ctx context.Context, playerURL, referer string) string {
 		}
 	}
 	return ""
+}
+
+// ytdlpArgs accepts only remote player pages and keeps scraped values out
+// of yt-dlp's option parser, including a referer beginning with a dash.
+func ytdlpArgs(playerURL, referer string) []string {
+	if strings.HasPrefix(playerURL, "//") {
+		playerURL = "https:" + playerURL
+	}
+	u, err := url.Parse(playerURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil
+	}
+	args := []string{
+		"--no-warnings", "--no-playlist",
+		"--get-url", "-f", "best[ext=mp4]/best",
+	}
+	if referer != "" {
+		args = append(args, "--referer="+referer)
+	}
+	return append(args, "--", playerURL)
 }
 
 // ytdlpResolveFn extracts the direct URL for one player; a seam so the

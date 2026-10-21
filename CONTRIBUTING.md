@@ -40,7 +40,7 @@ on before you write the code.
 
 ## Setting up
 
-You need Go 1.27 or later, mpv, and a C compiler if you want progress tracking
+You need Go 1.27.3 or later, mpv, and a C compiler if you want progress tracking
 (SQLite requires CGO).
 
 ```bash

@@ -15,7 +15,10 @@ import (
 // was written down, kept as the regression baseline.
 func fixtureDoc(t *testing.T, name string) *goquery.Document {
 	t.Helper()
-	raw, err := os.ReadFile("testdata" + string(os.PathSeparator) + name)
+	root, err := os.OpenRoot("testdata")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+	raw, err := root.ReadFile(name)
 	require.NoError(t, err, "fixture %s must be present", name)
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(raw)))
 	require.NoError(t, err)

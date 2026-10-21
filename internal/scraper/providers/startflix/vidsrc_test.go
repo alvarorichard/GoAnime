@@ -392,9 +392,9 @@ func TestVIDSRCDecryptFixture(t *testing.T) {
 func TestVIDSRCFallbackGate(t *testing.T) {
 	t.Setenv("GOANIME_VIDSRC_FALLBACK_TEST", "")
 	_, err := MovieFallback(context.Background(), "tt1", 0)
-	require.ErrorIs(t, err, vidsrcDisabled)
+	require.ErrorIs(t, err, errVIDSRCDisabled)
 	_, err = EpisodeFallback(context.Background(), 310, 1, 1)
-	require.ErrorIs(t, err, vidsrcDisabled)
+	require.ErrorIs(t, err, errVIDSRCDisabled)
 }
 
 // TestVIDSRCFallbackSecondBaseRecovers pins the mirror walk: the primary
@@ -525,7 +525,7 @@ func TestVIDSRCLiveTodoPoderoso(t *testing.T) {
 
 	// The catalog entry is "dublado" and the user asked for PT-BR audio:
 	// log what the chain actually serves before promising anything.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stream.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stream.URL, http.NoBody)
 	require.NoError(t, err)
 	req.Header.Set("Referer", stream.Referer)
 	client := vidsrcHTTPFn()

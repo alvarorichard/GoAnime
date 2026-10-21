@@ -48,10 +48,10 @@ const fakeTodoPoderosoPage = `<!DOCTYPE html><html><head><title>Assistir Todo Po
 // whole api flow.
 func TestPobreflixDeadHostsKeepsTitleAndExplains(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/filmes/online/todo-poderoso-dublado-450/":
+		switch r.URL.Path {
+		case "/filmes/online/todo-poderoso-dublado-450/":
 			_, _ = w.Write([]byte(fakeTodoPoderosoPage))
-		case r.URL.Path == "/filme/tt1900": // the movie panel by IMDb id
+		case "/filme/tt1900": // the movie panel by IMDb id
 			_, _ = w.Write([]byte(deadPlayersPanel))
 		default:
 			http.NotFound(w, r)
@@ -133,10 +133,10 @@ func usePanelTransport(t *testing.T, srv *httptest.Server) {
 func TestStartFlixDeadMovieStaysHidden(t *testing.T) {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/filmes/deadfilm/":
+		switch r.URL.Path {
+		case "/filmes/deadfilm/":
 			_, _ = w.Write([]byte(`<html><body><iframe src="` + srv.URL + `/filme/tt1900"></iframe></body></html>`))
-		case r.URL.Path == "/filme/tt1900":
+		case "/filme/tt1900":
 			_, _ = w.Write([]byte(deadPlayersPanel))
 		default:
 			http.NotFound(w, r)

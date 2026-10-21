@@ -81,7 +81,7 @@ var queryStopWords = map[string]bool{
 // queryTokens splits a normalized query into significant tokens: single
 // characters and stopwords are dropped, pure numbers (years) are kept
 // separately so they never force a zero score on their own.
-func queryTokens(normalized string) (words []string, years []string) {
+func queryTokens(normalized string) (words, years []string) {
 	for _, t := range strings.Fields(normalized) {
 		if t == "" {
 			continue
