@@ -33,9 +33,14 @@ func liveFallbackSetup(t *testing.T) context.Context {
 	if os.Getenv("GOANIME_LIVE_DEBUG") != "" {
 		util.IsDebug = true
 	}
-	prevPick := sfxPickFn
+	prevPick, prevSwap := sfxPickFn, sfxAudioSwapFn
 	sfxPickFn = func(string, []string) (int, error) { return 0, nil } // Dublado
-	t.Cleanup(func() { sfxPickFn = prevPick })
+	// The fallback is the original audio: take it, and say what was asked.
+	sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
+		t.Logf("asked: %s instead of %s — %s", swap.Have, swap.Want, strings.Join(swap.Why, " / "))
+		return true, nil
+	}
+	t.Cleanup(func() { sfxPickFn, sfxAudioSwapFn = prevPick, prevSwap })
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	t.Cleanup(cancel)
 	return ctx
@@ -73,6 +78,8 @@ func TestLiveTopCineTodoPoderosoPlaysViaFallback(t *testing.T) {
 
 	require.True(t, strings.HasPrefix(streamURL, "http"), "URL shape: %s", head(streamURL, 100))
 	t.Logf("stream: %s", head(streamURL, 100))
+	// The fallback has no Portuguese track: mpv must not be told otherwise.
+	require.Equal(t, originalALang, util.GetGlobalAudioLanguage())
 }
 
 // TestLivePobreflixTodoPoderosoPlaysViaFallback anchors on the listing page

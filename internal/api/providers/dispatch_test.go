@@ -334,12 +334,6 @@ func TestSearchAll_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
 }
 
 func TestParentContextFailure(t *testing.T) {
-	t.Run("nil parent context returns false", func(t *testing.T) {
-		//nolint:staticcheck // Exercise the nil-parent fallback intentionally.
-		_, ok := parentContextFailure(nil, source.AnimeDrive, context.Canceled)
-		assert.False(t, ok)
-	})
-
 	t.Run("active parent context returns false regardless of error", func(t *testing.T) {
 		ctx := context.Background()
 		_, ok := parentContextFailure(ctx, source.AnimeDrive, context.Canceled)

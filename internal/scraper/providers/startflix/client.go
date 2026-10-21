@@ -363,13 +363,24 @@ func playerRank(p Player) int {
 	}
 }
 
-// ResolveStream returns the best stream the players offer. Every supported
-// player is resolved at once and the tallest stream wins, the player ranking
-// (Byse, Abyss, direct files) breaking ties between equally tall ones. The
-// first host to answer is not necessarily the best one, so all of them are
-// asked; resolving in parallel keeps the wait at the slowest host's, not the
-// sum of them.
+// ResolveStream returns the best stream the players offer, in whichever audio.
+// Every supported player is resolved at once and the tallest stream wins, the
+// player ranking (Byse, Abyss, direct files) breaking ties between equally
+// tall ones. The first host to answer is not necessarily the best one, so all
+// of them are asked; resolving in parallel keeps the wait at the slowest
+// host's, not the sum of them.
 func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, error) {
+	return c.ResolveStreamFor(ctx, players, "")
+}
+
+// ResolveStreamFor is ResolveStream for the audio the user is watching in. A
+// stream in that audio — or from a player whose label names none, which
+// carries the audio of the list it came from — beats any stream in the other
+// audio, however tall: a movie panel lists Dublado and Legendado players side
+// by side, and the tallest one is not the one the user asked for. The other
+// audio is still returned when it is all that plays; Stream.Audio says so,
+// and the caller decides whether the user wants it.
+func (c *Client) ResolveStreamFor(ctx context.Context, players []Player, want Audio) (*Stream, error) {
 	if len(players) == 0 {
 		return nil, ErrNoPlayers
 	}
@@ -426,13 +437,15 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 		if ordered[i].Subtitles != "" {
 			r.stream.Subtitles = append(r.stream.Subtitles, Subtitle{URL: ordered[i].Subtitles, Language: "pt-br", Label: "Português"})
 		}
-		util.Debug("StartFlix stream candidate", "host", r.stream.Host, "label", ordered[i].Label, "height", r.stream.Height)
-		if best == nil || r.stream.Height > best.Height {
+		r.stream.Audio = playerAudio(ordered[i], want)
+		util.Debug("StartFlix stream candidate", "host", r.stream.Host, "label", ordered[i].Label,
+			"height", r.stream.Height, "audio", r.stream.Audio)
+		if best == nil || betterStream(r.stream, best, want) {
 			best = r.stream
 		}
 	}
 	if best != nil {
-		util.Debug("StartFlix stream resolved", "host", best.Host, "height", best.Height)
+		util.Debug("StartFlix stream resolved", "host", best.Host, "height", best.Height, "audio", best.Audio, "want", want)
 		return best, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -443,8 +456,12 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 	// resolvers found nothing — a title offered solely on such hosts
 	// otherwise fails unconditionally. Dead hosts (DNS fail) just miss and
 	// the original error below still names them.
+	//
+	// The first host to answer wins there, so the players in the wanted audio
+	// get their own round first: otherwise the panel's "Legendado" vidsrc
+	// player could outrun a working Dublado one.
 	if len(noStream.Unsupported) > 0 {
-		unsupported := make([]Player, 0, len(noStream.Unsupported))
+		var wanted, others []Player
 		seen := map[string]bool{}
 		for _, p := range ordered {
 			u, err := url.Parse(p.URL)
@@ -452,11 +469,20 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 				continue
 			}
 			seen[p.URL] = true
-			unsupported = append(unsupported, p)
+			if audioMatches(playerAudio(p, want), want) {
+				wanted = append(wanted, p)
+			} else {
+				others = append(others, p)
+			}
 		}
-		if stream := tryYtDlpFallback(ctx, unsupported); stream != nil {
-			util.Debug("StartFlix stream resolved via yt-dlp", "host", stream.Host)
-			return stream, nil
+		for _, round := range [][]Player{wanted, others} {
+			if stream := tryYtDlpFallback(ctx, round); stream != nil {
+				if stream.Audio == "" {
+					stream.Audio = want
+				}
+				util.Debug("StartFlix stream resolved via yt-dlp", "host", stream.Host, "audio", stream.Audio)
+				return stream, nil
+			}
 		}
 	}
 	if len(noStream.Unsupported) == 0 && len(noStream.Failures) == 0 {
@@ -465,6 +491,30 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 		return nil, fmt.Errorf("%w (no usable URL among %d players)", ErrNoPlayers, len(players))
 	}
 	return nil, noStream
+}
+
+// playerAudio is the audio a player's stream carries: its label's, or the
+// list's (want) when the label names none.
+func playerAudio(p Player, want Audio) Audio {
+	if a := p.Audio(); a != "" {
+		return a
+	}
+	return want
+}
+
+// audioMatches reports whether a stream in audio a serves a user watching in
+// want; no preference matches everything.
+func audioMatches(a, want Audio) bool {
+	return want == "" || a == want
+}
+
+// betterStream reports whether a beats b: the wanted audio first, then the
+// taller picture.
+func betterStream(a, b *Stream, want Audio) bool {
+	if am, bm := audioMatches(a.Audio, want), audioMatches(b.Audio, want); am != bm {
+		return am
+	}
+	return a.Height > b.Height
 }
 
 // heightRe finds a picture height in a quality label: "1080p", "720p HD".

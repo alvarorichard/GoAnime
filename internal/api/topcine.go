@@ -95,6 +95,24 @@ var tcLanguagesFn = func(ctx context.Context, playerURL string) (topcine.Languag
 // whether waiting can help.
 func topCineUnplayableMessage(media *models.Anime) string {
 	const fallback = "⚠️  TopCine has this title only on a server that asks for a browser check GoAnime can't pass. Try searching it on another source."
+	langs, err := topCineLanguages(media)
+	switch {
+	case err != nil:
+		util.Debug("TopCine player check failed", "title", media.Name, "err", err)
+		return fallback
+	case !langs.Dubbed && !langs.Subtitled:
+		return "⚠️  TopCine has no video for this title yet. Try again later, or search it on another source."
+	case len(langs.Hosts) > 0:
+		return "⚠️  TopCine plays this title only on " + strings.Join(langs.Hosts, ", ") +
+			", which asks for a browser check GoAnime can't pass. Try searching it on another source."
+	default:
+		return fallback
+	}
+}
+
+// topCineLanguages asks TopCine's own player which audio tracks it has, and
+// on which hosts.
+func topCineLanguages(media *models.Anime) (topcine.Languages, error) {
 	var langs topcine.Languages
 	var err error
 	runWithSpinner("Checking TopCine's player...", func() {
@@ -108,18 +126,28 @@ func topCineUnplayableMessage(media *models.Anime) string {
 		// always a player to ask here.
 		langs, err = tcLanguagesFn(ctx, topCineAnyPlayer(title, media.CurrentSeason))
 	})
-	switch {
-	case err != nil:
-		util.Debug("TopCine player check failed", "title", media.Name, "err", err)
-		return fallback
-	case !langs.Dubbed && !langs.Subtitled:
-		return "⚠️  TopCine has no video for this title yet. Try again later, or search it on another source."
-	case len(langs.Hosts) > 0:
-		return "⚠️  TopCine plays this title only on " + strings.Join(langs.Hosts, ", ") +
-			", which asks for a browser check GoAnime can't pass. Try searching it on another source."
-	default:
-		return fallback
+	return langs, err
+}
+
+// topCineAudioLine says where TopCine's own player keeps the audio the user
+// wanted, when it has it — the Dublado and Legendado of Todo Poderoso both sit
+// on 1take.top, behind a Turnstile GoAnime does not solve (checked
+// 2026-10-21). "" for another source, or when the player cannot tell.
+func topCineAudioLine(media *models.Anime, want startflix.Audio) string {
+	if !isTopCine(media) {
+		return ""
 	}
+	langs, err := topCineLanguages(media)
+	has := langs.Dubbed
+	if want == startflix.AudioSubtitled {
+		has = langs.Subtitled
+	}
+	if err != nil || !has || len(langs.Hosts) == 0 {
+		util.Debug("TopCine player check could not explain the missing audio", "title", media.Name, "want", want, "err", err)
+		return ""
+	}
+	return "TopCine's own player has it " + string(want) + " only on " + strings.Join(langs.Hosts, ", ") +
+		", which asks for a browser check GoAnime can't pass."
 }
 
 // topCineAnyPlayer picks a player to ask about the title: the movie's, or an

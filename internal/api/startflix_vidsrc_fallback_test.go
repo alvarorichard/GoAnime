@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,9 @@ const fakeVIDSRCMaster = `#EXTM3U
 
 // TestPobreflixDeadPanelPlaysThroughVIDSRC is the "Todo Poderoso" scenario:
 // every panel server is dead, the fallback resolves the movie by IMDb id on
-// its own chain, and playback succeeds.
+// its own chain, and playback succeeds — once the user takes the original
+// audio, because the fallback has no Portuguese dub (see
+// topcine_dub_cascade_test.go for what happens when they do not).
 func TestPobreflixDeadPanelPlaysThroughVIDSRC(t *testing.T) {
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +77,8 @@ func TestPobreflixDeadPanelPlaysThroughVIDSRC(t *testing.T) {
 	pbClientFn = func() *pobreflix.Client { return pbTitleClient(t, srv) }
 	t.Cleanup(func() { pbClientFn = prevPB })
 	t.Setenv("GOANIME_STARTFLIX_PANEL_URL", srv.URL)
+	var asked []audioSwap
+	sfxAudioSwapFn = func(swap audioSwap) (bool, error) { asked = append(asked, swap); return true, nil }
 
 	anime := &models.Anime{
 		Name:      "Todo Poderoso",
@@ -89,6 +94,10 @@ func TestPobreflixDeadPanelPlaysThroughVIDSRC(t *testing.T) {
 	require.NoError(t, err, "the fallback must save the title its panel could not")
 	assert.Equal(t, srv.URL+"/pl/master.m3u8?token=testtoken", url, "the resolved master is token-stamped")
 	assert.False(t, isPanelDead(anime.URL), "a title the fallback saved stays listed")
+	require.Len(t, asked, 1, "the original audio never replaces the Dublado unasked")
+	assert.Equal(t, startflix.AudioDubbed, asked[0].Want)
+	assert.Equal(t, startflix.AudioSubtitled, asked[0].Have)
+	assert.Equal(t, originalALang, util.GetGlobalAudioLanguage(), "mpv is told the stream's real audio")
 }
 
 // TestStartFlixDeadPanelAndFallbackMissKeepsMessage covers when BOTH the panel

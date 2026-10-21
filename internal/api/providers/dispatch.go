@@ -85,9 +85,6 @@ func init() {
 // rather than an independent provider error. Only parent-caused failures bypass the
 // circuit breaker.
 func parentContextFailure(parent context.Context, kind source.SourceKind, resErr error) (SourceFailure, bool) {
-	if parent == nil {
-		return SourceFailure{}, false
-	}
 	perr := parent.Err()
 	if perr == nil || !errors.Is(resErr, perr) {
 		return SourceFailure{}, false

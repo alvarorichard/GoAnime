@@ -22,9 +22,13 @@ func TestLiveTopCinePlays(t *testing.T) {
 	t.Setenv("TMDB_API_KEY", "")
 	t.Setenv("OMDB_API_KEY", "")
 	util.InitLogger()
-	prevPick := sfxPickFn
+	prevPick, prevSwap := sfxPickFn, sfxAudioSwapFn
 	sfxPickFn = func(string, []string) (int, error) { return 0, nil } // Dublado
-	t.Cleanup(func() { sfxPickFn = prevPick })
+	sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
+		t.Logf("asked: %s instead of %s — %s", swap.Have, swap.Want, strings.Join(swap.Why, " / "))
+		return true, nil
+	}
+	t.Cleanup(func() { sfxPickFn, sfxAudioSwapFn = prevPick, prevSwap })
 
 	tests := []struct {
 		query, title string

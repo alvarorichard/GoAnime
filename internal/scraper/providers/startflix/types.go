@@ -154,6 +154,45 @@ type Player struct {
 	referer string
 }
 
+// Audio reads the player's audio from its label. Movie panels name it on
+// every button ("HD #1 Dublado", "1 Legendado"), and the panel appends a
+// "Legendado" vidsrc player even to an episode of the Dublado list (checked
+// 2026-10-21). "" means the label does not say — episode buttons read
+// "Player #1 HD" — so the player carries the audio of the list it came from.
+func (p Player) Audio() Audio {
+	label := strings.ToLower(p.Label)
+	switch {
+	case strings.Contains(label, "dublad"):
+		return AudioDubbed
+	case strings.Contains(label, "legendad"):
+		return AudioSubtitled
+	default:
+		return ""
+	}
+}
+
+// ListedAudios lists the audios the players carry, dub first: each player's
+// labelled audio, or listAudio for one whose label names none.
+func ListedAudios(players []Player, listAudio Audio) []Audio {
+	var dub, sub bool
+	for _, p := range players {
+		a := p.Audio()
+		if a == "" {
+			a = listAudio
+		}
+		dub = dub || a == AudioDubbed
+		sub = sub || a == AudioSubtitled
+	}
+	var out []Audio
+	if dub {
+		out = append(out, AudioDubbed)
+	}
+	if sub {
+		out = append(out, AudioSubtitled)
+	}
+	return out
+}
+
 // IsDirectFile reports whether the panel plays this source in its own <video>
 // element, i.e. the URL is the media itself rather than a host's embed page.
 func (p Player) IsDirectFile() bool {
@@ -186,4 +225,8 @@ type Stream struct {
 	// for the same 1920x860 film), so their heights compare fairly.
 	// ResolveStream keeps the tallest stream.
 	Height int
+	// Audio is the track the stream carries as its listing labelled it:
+	// Dublado, Legendado (the original audio), or "" when nothing said. The
+	// vidsrc fallback always serves the original audio.
+	Audio Audio
 }

@@ -246,6 +246,7 @@ func TestVIDSRCMovieChainFixture(t *testing.T) {
 	assert.Contains(t, f.dataFetched[0], "stream_urls=")
 	assert.Equal(t, 1, f.playerRenders, "one render, one single-use token")
 	assert.Equal(t, 1, f.masterHits)
+	assert.Equal(t, AudioSubtitled, stream.Audio, "the fallback is the original audio, never the dub")
 }
 
 // TestVIDSRCPlainEnvelopeArray covers the protection-off shape: URLs as a
@@ -287,6 +288,7 @@ func TestVIDSRCTVSeasonAndEpisode(t *testing.T) {
 	assert.Contains(t, q, "episode=3")
 	assert.Contains(t, q, "stream_urls=")
 	assert.Contains(t, q, "api_token=tok1")
+	assert.Equal(t, AudioSubtitled, stream.Audio, "an episode's fallback is the original audio too")
 }
 
 // TestVIDSRCTVDefaultsFromMap covers a caller without season/episode: the
@@ -540,6 +542,14 @@ func TestVIDSRCLiveTodoPoderoso(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "master status: %d", resp.StatusCode)
 	variants, audios := countMasterEntries(body)
 	t.Logf("master: %d variants, audio groups: %v", variants, audios)
+	// Stream.Audio says Legendado because the master carries only the
+	// original track (2026-10-21: no audio groups at all). A Portuguese
+	// rendition here would make that a lie and the swap question needless.
+	for _, a := range audios {
+		lower := strings.ToLower(a)
+		assert.False(t, strings.Contains(lower, `language="pt`) || strings.Contains(lower, `language="por`),
+			"the vidsrc master now carries Portuguese audio; Stream.Audio must stop saying Legendado: %s", a)
+	}
 }
 
 // countMasterEntries summarizes a master playlist: the variant URL count and

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,6 +231,45 @@ func filterPanelDead(animes []*models.Anime) []*models.Anime {
 		return animes
 	}
 	return kept
+}
+
+// sfxListedAudio remembers, per title page and season, the audio list the
+// episodes were built from — also when the season had a single audio and no
+// choice was asked — so a stream knows what the user is watching in.
+// sfxAudioSwaps remembers the titles whose user accepted another audio after
+// theirs failed, so a binge is asked once. Both session-scoped, like the
+// audio choice.
+var (
+	sfxListedAudio = map[string]startflix.Audio{}
+	sfxAudioSwaps  = map[string]startflix.Audio{}
+)
+
+func listedAudioKey(titleURL, seasonKey string) string { return titleURL + "#" + seasonKey }
+
+func rememberListedAudio(titleURL, seasonKey string, a startflix.Audio) {
+	sfxAudioMu.Lock()
+	defer sfxAudioMu.Unlock()
+	sfxListedAudio[listedAudioKey(titleURL, seasonKey)] = a
+}
+
+func recallListedAudio(titleURL, seasonKey string) (startflix.Audio, bool) {
+	sfxAudioMu.Lock()
+	defer sfxAudioMu.Unlock()
+	a, ok := sfxListedAudio[listedAudioKey(titleURL, seasonKey)]
+	return a, ok
+}
+
+func rememberAudioSwap(titleURL string, a startflix.Audio) {
+	sfxAudioMu.Lock()
+	defer sfxAudioMu.Unlock()
+	sfxAudioSwaps[titleURL] = a
+}
+
+func recallAudioSwap(titleURL string) (startflix.Audio, bool) {
+	sfxAudioMu.Lock()
+	defer sfxAudioMu.Unlock()
+	a, ok := sfxAudioSwaps[titleURL]
+	return a, ok
 }
 
 func rememberStartFlixAudio(titleURL string, a startflix.Audio) {
@@ -554,6 +594,7 @@ func GetStartFlixSeasonEpisodes(media *models.Anime, seasonNum int) ([]models.Ep
 func startFlixSeasonEpisodes(media *models.Anime, panel startflix.Panel, season startflix.Season) []models.Episode {
 	audio := selectPanelAudio(panelSourceName(media), media.URL, season)
 	media.CurrentSeason = season.Number
+	rememberListedAudio(media.URL, season.Key(), audio)
 
 	list := season.Episodes(audio)
 	episodes := make([]models.Episode, 0, len(list))
@@ -638,12 +679,163 @@ func startFlixPlayersURL(c *startflix.Client, media *models.Anime, episode *mode
 
 // audioLangForStartFlix tells mpv which track to prefer. A Dublado list may
 // still be a dual-audio release, and a Legendado one usually is the original
-// with burned-in subtitles; either way the user's list choice decides.
+// with burned-in subtitles; either way the audio the stream carries decides.
 func audioLangForStartFlix(a startflix.Audio) string {
 	if a == startflix.AudioSubtitled {
 		return originalALang
 	}
 	return portugueseALang
+}
+
+// wantedStreamAudio is the audio the user is watching a title in: for a
+// series, the list the episode came from (or the one picked for the title);
+// otherwise the pinned --audio, and the dub when nothing says — what a movie
+// has always been played in.
+func wantedStreamAudio(media *models.Anime, episode *models.Episode) startflix.Audio {
+	if media.MediaType != models.MediaTypeMovie {
+		season := episode.SeasonID
+		if season == "" && media.CurrentSeason > 0 {
+			season = strconv.Itoa(media.CurrentSeason)
+		}
+		if a, ok := recallListedAudio(media.URL, season); ok {
+			return a
+		}
+		if a, ok := recallStartFlixAudio(media.URL); ok {
+			return a
+		}
+	}
+	if a, ok := pinnedStartFlixAudio(); ok {
+		return a
+	}
+	return startflix.AudioDubbed
+}
+
+// ErrAudioUnavailable is returned when no server GoAnime can play carries the
+// audio the user is watching in, and the user did not take the other audio
+// that does play.
+var ErrAudioUnavailable = errors.New("the chosen audio is not on any server GoAnime can play")
+
+// audioSwap is the question asked before a stream in another audio plays.
+type audioSwap struct {
+	Source string
+	Title  string
+	Want   startflix.Audio
+	Have   startflix.Audio
+	// Why explains, one line each, why the wanted audio does not play.
+	Why []string
+}
+
+// sfxAudioSwapFn asks whether to play the other audio; a seam for tests.
+// Without a terminal tui.Pick fails, and the swap is refused.
+var sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
+	idx, err := tui.Pick([]tui.PickItem{
+		{Label: audioSwapPlayLabel(swap.Have)},
+		{Label: "↩ Back"},
+	}, tui.PickOptions{
+		Breadcrumb:   swap.Source + " > " + string(swap.Want) + " unavailable",
+		WindowTitle:  "GoAnime - " + swap.Source,
+		ItemSingular: "option",
+		ItemPlural:   "options",
+		Panel: &tui.PickPanel{
+			Label: string(swap.Want) + " unavailable",
+			Gloss: "音声",
+			Title: tui.SingleLine(swap.Title),
+			Lines: swap.Why,
+		},
+	})
+	if err != nil {
+		return false, err
+	}
+	return idx == 0, nil
+}
+
+func audioSwapPlayLabel(have startflix.Audio) string {
+	if have == startflix.AudioSubtitled {
+		return "💬 Play the original audio"
+	}
+	return "🎙️  Play the Portuguese dub"
+}
+
+// acceptAudioSwap decides whether a stream in another audio than the user's
+// may play. Never silently: Todo Poderoso (2003) on TopCine is listed
+// Dublado, every Dublado server the panel names is dead, and the vidsrc
+// fallback plays its English original — with mpv told to look for a
+// Portuguese track it does not have. So the user is asked, once per title.
+// The one silent case is a listing that proves the wanted audio absent (a
+// Legendado-only movie): there was never a choice, as with a single-audio
+// season.
+func acceptAudioSwap(media *models.Anime, want, have startflix.Audio, offered []startflix.Audio, stream *startflix.Stream, panelErr error) error {
+	if len(offered) > 0 && !slices.Contains(offered, want) {
+		util.Debug("Panel lists this title in another audio only, taking it without asking",
+			"title", media.Name, "want", want, "have", have, "offered", offered)
+		return nil
+	}
+	if a, ok := recallAudioSwap(media.URL); ok && a == have {
+		return nil
+	}
+	tcLine := topCineAudioLine(media, want)
+	swap := audioSwap{
+		Source: panelSourceName(media),
+		Title:  media.Name,
+		Want:   want,
+		Have:   have,
+		Why:    audioSwapReasons(media, want, have, stream, panelErr, tcLine),
+	}
+	ok, err := sfxAudioSwapFn(swap)
+	if err == nil && ok {
+		util.Debug("User took another audio", "title", media.Name, "want", want, "have", have)
+		rememberAudioSwap(media.URL, have)
+		return nil
+	}
+	cause := fmt.Errorf("%w: %s plays, %s does not", ErrAudioUnavailable, have, want)
+	msg := fmt.Sprintf("⚠️  No server GoAnime can play has this title %s right now, so the %s was not played in its place.",
+		want, audioDescription(have))
+	if err != nil && !errors.Is(err, tui.ErrPickBack) && !errors.Is(err, tui.ErrPickCancelled) {
+		util.Debug("Audio swap question unavailable, refusing the swap", "err", err)
+		msg += " Pass --audio " + audioFlagFor(have) + " to play it anyway."
+	}
+	if tcLine != "" {
+		msg += " " + tcLine
+	}
+	return &friendlyError{cause: cause, msg: msg}
+}
+
+// audioSwapReasons explains the swap: what failed, and what plays instead.
+func audioSwapReasons(media *models.Anime, want, have startflix.Audio, stream *startflix.Stream, panelErr error, tcLine string) []string {
+	source := panelSourceName(media)
+	line := fmt.Sprintf("%s lists this title %s, but none of the %s servers GoAnime plays it from worked.", source, want, want)
+	var noStream *startflix.NoStreamError
+	if errors.As(panelErr, &noStream) && len(noStream.Unsupported) > 0 {
+		line += " Listed: " + strings.Join(noStream.Unsupported, ", ") + "."
+	}
+	why := []string{line}
+	if tcLine != "" {
+		why = append(why, tcLine)
+	}
+	what := "What plays is the " + audioDescription(have)
+	if have == startflix.AudioSubtitled {
+		if len(stream.Subtitles) > 0 {
+			what += ", with Portuguese subtitles"
+		} else {
+			what += ", without Portuguese subtitles"
+		}
+	}
+	return append(why, what+".")
+}
+
+func audioDescription(a startflix.Audio) string {
+	if a == startflix.AudioSubtitled {
+		return "original audio"
+	}
+	return "Portuguese dub"
+}
+
+// audioFlagFor is the --audio value that asks for a in advance.
+func audioFlagFor(a startflix.Audio) string {
+	if a == startflix.AudioSubtitled {
+		return "eng"
+	}
+	return "pt-BR"
 }
 
 // GetStartFlixStreamURL resolves an episode or movie to a playable URL and
@@ -693,16 +885,23 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 		return "", describeMediaErr(media, err)
 	}
 
+	want := wantedStreamAudio(media, episode)
 	var stream *startflix.Stream
+	var offered []startflix.Audio
 	panelExhausted := false
 	runWithSpinner("Loading stream...", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), sfxStreamBudget)
 		defer cancel()
-		stream, err = c.Stream(ctx, playersURL)
+		var players []startflix.Player
+		if players, err = c.Players(ctx, playersURL); err == nil {
+			offered = startflix.ListedAudios(players, want)
+			stream, err = c.ResolveStreamFor(ctx, players, want)
+		}
 		if err != nil {
 			panelExhausted = true
 		}
 	})
+	panelErr := err
 	if err != nil && panelExhausted {
 		// The panel could not serve this title's players. The fallback
 		// resolves the same title by its ids on an independent embed API,
@@ -716,7 +915,12 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 		fsCtx, fsc := context.WithTimeout(context.Background(), sfxStreamBudget)
 		defer fsc()
 		if fs, ferr := sfxVIDSRCFallbackFn(fsCtx, media, episode); ferr == nil && fs != nil {
-			util.Debug("VIDSRC fallback resolved the title", "host", fs.Host)
+			// The fallback serves the original audio; a stream that does not
+			// say so is taken as that, never as the dub.
+			if fs.Audio == "" {
+				fs.Audio = startflix.AudioSubtitled
+			}
+			util.Debug("VIDSRC fallback resolved the title", "host", fs.Host, "audio", fs.Audio)
 			stream, err = fs, nil
 		}
 	}
@@ -733,18 +937,26 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 		return "", describeMediaErr(media, err)
 	}
 
+	have := stream.Audio
+	if have == "" {
+		have = want
+	}
+	if have != want {
+		if err := acceptAudioSwap(media, want, have, offered, stream, panelErr); err != nil {
+			return "", err
+		}
+	}
+
 	if stream.Referer != "" {
 		util.SetGlobalReferer(stream.Referer)
 	}
 	// Always set when the user pinned nothing: the preference is a process-wide
 	// global, and leaving it alone would carry the last title's Legendado choice
-	// into the next movie.
+	// into the next movie. It follows the audio the stream carries, not the one
+	// wanted: told to prefer Portuguese, mpv falls back to a lone English track
+	// without a word.
 	if startFlixPinnedAudioLang() == "" {
-		audio := startflix.AudioDubbed
-		if a, ok := recallStartFlixAudio(media.URL); ok && media.MediaType != models.MediaTypeMovie {
-			audio = a
-		}
-		util.SetGlobalAudioLanguage(audioLangForStartFlix(audio))
+		util.SetGlobalAudioLanguage(audioLangForStartFlix(have))
 	}
 	if len(stream.Subtitles) > 0 && !util.GlobalNoSubs {
 		subs := make([]util.SubtitleInfo, 0, len(stream.Subtitles))

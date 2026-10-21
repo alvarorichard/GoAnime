@@ -411,11 +411,15 @@ func resolveVIDSRCMaster(ctx context.Context, raw, referer string) (*Stream, str
 	if height <= 0 || len(served) == 0 {
 		return nil, u.Host, fmt.Errorf("master did not load")
 	}
+	// The master muxes one audio track, the title's original (Todo Poderoso,
+	// 2026-10-21: a single mp4a rendition in English). The panel labels its
+	// own vidsrc player "Legendado" for the same reason.
 	return &Stream{
 		URL:     master,
 		Referer: referer,
 		Host:    u.Host,
 		Height:  height,
+		Audio:   AudioSubtitled,
 	}, u.Host, nil
 }
 

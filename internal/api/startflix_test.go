@@ -120,6 +120,7 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 	client := startflix.NewClientForTest(&http.Client{Transport: routeAll{target}}, "https://www.startflix.test")
 
 	prevClient, prevSeason, prevPick, prevEnrich := sfxClientFn, sfxSeasonPickFn, sfxPickFn, sfxEnrichByIDFn
+	prevSwap := sfxAudioSwapFn
 	prevAudio, prevExplicit := util.GetGlobalAudioLanguage(), util.GlobalAudioLanguageExplicit
 	sfxClientFn = func() *startflix.Client { return client }
 	// No metadata lookups over the network: by default nothing is found and
@@ -132,9 +133,14 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 		return seasonIdx, nil
 	}
 	sfxPickFn = func(string, []string) (int, error) { return audioIdx, nil }
+	// Never the real picker: a test that expects the swap question stubs it.
+	sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
+		return false, fmt.Errorf("test: unexpected audio swap question (%s instead of %s)", swap.Have, swap.Want)
+	}
 	resetStartFlixState()
 	t.Cleanup(func() {
 		sfxClientFn, sfxSeasonPickFn, sfxPickFn, sfxEnrichByIDFn = prevClient, prevSeason, prevPick, prevEnrich
+		sfxAudioSwapFn = prevSwap
 		resetStartFlixState()
 		// Put back what other tests in this package expect to find.
 		util.SetGlobalAudioLanguage(prevAudio)
@@ -145,6 +151,8 @@ func useFakeStartFlix(t *testing.T, seasonIdx, audioIdx int) {
 func resetStartFlixState() {
 	sfxAudioMu.Lock()
 	sfxAudioChoices = map[string]startflix.Audio{}
+	sfxListedAudio = map[string]startflix.Audio{}
+	sfxAudioSwaps = map[string]startflix.Audio{}
 	sfxAudioMu.Unlock()
 	sfxDeadMu.Lock()
 	sfxDeadTitles = map[string]bool{}

@@ -125,6 +125,7 @@ func tryYtDlpFallback(ctx context.Context, players []Player) *Stream {
 	var wg sync.WaitGroup
 	for _, p := range players {
 		u := p.URL
+		audio := p.Audio()
 		ref := p.referer
 		if ref == "" {
 			ref = p.URL
@@ -140,7 +141,7 @@ func tryYtDlpFallback(ctx context.Context, players []Player) *Stream {
 			if direct := ytdlpResolveFn(fctx, u, ref); direct != "" {
 				util.Debug("StartFlix yt-dlp fallback hit", "host", host)
 				select {
-				case winner <- hit{stream: &Stream{URL: direct, Referer: ref, Host: host}}:
+				case winner <- hit{stream: &Stream{URL: direct, Referer: ref, Host: host, Audio: audio}}:
 					cancel()
 				default:
 				}
