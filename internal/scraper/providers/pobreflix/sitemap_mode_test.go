@@ -13,10 +13,16 @@ import (
 
 func TestCorpusCacheTightensExistingFile(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "index.json")
+	dir := filepath.Join(t.TempDir(), "legacy-cache")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	dirInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	require.Zero(t, dirInfo.Mode().Perm()&0o077, "the fixture directory must be private")
+	path := filepath.Join(dir, "index.json")
 	require.NoError(t, os.WriteFile(path, make([]byte, 1024), 0o600))
-	// Reproduce the permissions of an older cache independently of the umask.
-	require.NoError(t, os.Chmod(path, 0o644))
+	// The legacy mode is intentional inside this private temporary directory:
+	// it exercises tightening an older cache independently of the umask.
+	require.NoError(t, os.Chmod(path, 0o644)) // nosemgrep: go_file-permissions_rule-fileperm
 	before, err := os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o644), before.Mode().Perm())
