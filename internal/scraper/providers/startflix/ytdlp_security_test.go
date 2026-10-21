@@ -29,3 +29,14 @@ func TestYtdlpArgsTreatsScrapedValuesAsData(t *testing.T) {
 	require.NotContains(t, args, referer, "the referer must not become an option")
 	require.Equal(t, []string{"--", player}, args[len(args)-2:])
 }
+
+func TestYtdlpArgsNormalizesProtocolRelativePlayers(t *testing.T) {
+	t.Parallel()
+	player := "//video.test/e/1?x=--exec=command"
+	referer := "--exec=command"
+	args := ytdlpArgs(player, referer)
+	require.NotNil(t, args, "protocol-relative players must reach the fallback")
+	require.Contains(t, args, "--referer="+referer)
+	require.NotContains(t, args, referer, "the referer must not become an option")
+	require.Equal(t, []string{"--", "https:" + player}, args[len(args)-2:])
+}

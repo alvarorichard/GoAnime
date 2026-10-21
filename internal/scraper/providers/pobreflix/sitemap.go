@@ -294,7 +294,23 @@ func (cc *corpus) saveCache() {
 		return
 	}
 	defer func() { _ = root.Close() }()
-	if err := root.WriteFile(filepath.Base(path), raw, 0o600); err != nil {
+	cacheFile, err := root.OpenFile(filepath.Base(path), os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		util.Debug("Pobreflix corpus cache save failed", "path", path, "err", err)
+		return
+	}
+	// Tighten legacy caches too, using the opened file so a path replacement
+	// cannot redirect chmod. Apply permissions before writing the new index.
+	if err = cacheFile.Chmod(0o600); err == nil {
+		err = cacheFile.Truncate(0)
+	}
+	if err == nil {
+		_, err = cacheFile.Write(raw)
+	}
+	if closeErr := cacheFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		util.Debug("Pobreflix corpus cache save failed", "path", path, "err", err)
 	}
 }

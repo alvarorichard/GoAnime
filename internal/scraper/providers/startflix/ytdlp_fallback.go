@@ -87,6 +87,9 @@ func resolveViaYtDlp(ctx context.Context, playerURL, referer string) string {
 // ytdlpArgs accepts only remote player pages and keeps scraped values out
 // of yt-dlp's option parser, including a referer beginning with a dash.
 func ytdlpArgs(playerURL, referer string) []string {
+	if strings.HasPrefix(playerURL, "//") {
+		playerURL = "https:" + playerURL
+	}
 	u, err := url.Parse(playerURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 		return nil

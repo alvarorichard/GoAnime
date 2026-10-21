@@ -35,7 +35,7 @@ func TestVIDSRCDecryptRejectsInvalidMemoryRanges(t *testing.T) {
 }
 
 // constantVIDSRCModule builds a tiny module with a single memory page and
-// alloc/decrypt exports that return the selected positive i64 constants.
+// alloc/decrypt exports that return the selected i64 bit patterns.
 func constantVIDSRCModule(ptr, out uint64) []byte {
 	module := []byte("\x00asm\x01\x00\x00\x00")
 	section := func(id byte, body []byte) {
@@ -49,11 +49,28 @@ func constantVIDSRCModule(ptr, out uint64) []byte {
 	section(7, []byte("\x03\x05alloc\x00\x00\x07decrypt\x00\x01\x06memory\x02\x00"))
 	code := []byte{2}
 	for _, value := range []uint64{ptr, out} {
-		body := binary.AppendUvarint([]byte{0, 0x42}, value)
+		body := appendSLEB128([]byte{0, 0x42}, value)
 		body = append(body, 0x0b)
 		code = binary.AppendUvarint(code, uint64(len(body)))
 		code = append(code, body...)
 	}
 	section(10, code)
 	return module
+}
+
+// appendSLEB128 encodes value as the two's-complement bits of an i64. WASM
+// constants use signed LEB128, unlike the section and body lengths above.
+func appendSLEB128(dst []byte, value uint64) []byte {
+	negative := value&(1<<63) != 0
+	for {
+		b := byte(value & 0x7f)
+		value >>= 7
+		if negative {
+			value |= 0x7f << 57 // Sign-extend the seven shifted-out bits.
+		}
+		if (value == 0 && b&0x40 == 0) || (value == math.MaxUint64 && b&0x40 != 0) {
+			return append(dst, b)
+		}
+		dst = append(dst, b|0x80)
+	}
 }
