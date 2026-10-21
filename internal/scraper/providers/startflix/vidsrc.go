@@ -131,7 +131,19 @@ func MovieFallback(ctx context.Context, imdbID string, tmdbID int) (*Stream, err
 	if id == "" {
 		id = strconv.Itoa(tmdbID)
 	}
-	return resolveVIDSRC(ctx, KindMovie, id, 0, 0)
+	stream, err := resolveVIDSRC(ctx, KindMovie, id, 0, 0)
+	if err == nil {
+		return stream, nil
+	}
+	// 2Embed's own player rides behind the vidsrc family (vidsrcbuzz.go): a
+	// wholly different engine on the same id keys, off unless
+	// GOANIME_2EMBED_URL names a base. Its misses stay internal — the vidsrc
+	// error is what explains a panel situation to the caller — so only a
+	// 2Embed success replaces the vidsrc result.
+	if buzzStream, buzzErr := resolve2Embed(ctx, KindMovie, imdbID, tmdbID, 0, 0); buzzErr == nil {
+		return buzzStream, nil
+	}
+	return nil, err
 }
 
 // EpisodeFallback resolves one series episode by its TMDB id on the fallback
@@ -143,7 +155,17 @@ func EpisodeFallback(ctx context.Context, tmdbID, season, episode int) (*Stream,
 	if tmdbID == 0 {
 		return nil, fmt.Errorf("no TMDB id to resolve an episode on the fallback source")
 	}
-	return resolveVIDSRC(ctx, KindSeries, strconv.Itoa(tmdbID), season, episode)
+	stream, err := resolveVIDSRC(ctx, KindSeries, strconv.Itoa(tmdbID), season, episode)
+	if err == nil {
+		return stream, nil
+	}
+	// Same shape as MovieFallback: 2Embed's chain rides behind the vidsrc
+	// family, only when GOANIME_2EMBED_URL names a base, and only its
+	// success replaces the vidsrc outcome.
+	if buzzStream, buzzErr := resolve2Embed(ctx, KindSeries, "", tmdbID, season, episode); buzzErr == nil {
+		return buzzStream, nil
+	}
+	return nil, err
 }
 
 // resolveVIDSRC runs the whole chain for one title, walking the fallback
