@@ -189,7 +189,7 @@ func TestBuildPlaybackArgs(t *testing.T) {
 			UpscalingEnabled: true,
 			ShaderArgs:       []string{"--glsl-shader=/a.glsl"},
 		})
-		assert.Contains(t, args, "--vo=gpu-next")
+		assert.Contains(t, args, defaultVideoOutputArg(), "upscaling keeps the fallbacks too")
 		assert.Contains(t, args, "--hwdec=no")
 		assert.Contains(t, args, "--glsl-shader=/a.glsl")
 		assert.NotContains(t, args, "--no-config", "upscaling must not use the standard profile")

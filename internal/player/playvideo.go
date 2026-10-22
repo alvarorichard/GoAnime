@@ -139,9 +139,10 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	}
 
 	if in.UpscalingEnabled {
-		// Shader-based upscaling: gpu-next (libplacebo) + no hw decode so shaders
-		// can process frames.
-		mpvArgs = append(mpvArgs, "--vo=gpu-next", "--hwdec=no")
+		// Shader-based upscaling: no hw decode so shaders can process frames.
+		// gpu-next leads the chain; a machine it can't start on still plays,
+		// unscaled if only a non-GPU output works.
+		mpvArgs = append(mpvArgs, defaultVideoOutputArg(), "--hwdec=no")
 		mpvArgs = append(mpvArgs, in.ShaderArgs...)
 	} else {
 		mpvArgs = append(mpvArgs,
