@@ -195,7 +195,7 @@ func TestBuildPlaybackArgs(t *testing.T) {
 		assert.NotContains(t, args, "--no-config", "upscaling must not use the standard profile")
 	})
 
-	t.Run("default VO uses Windows fallback chain", func(t *testing.T) {
+	t.Run("default VO is this OS's gpu-next chain", func(t *testing.T) {
 		args := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4"})
 		assert.Contains(t, args, defaultVideoOutputArg())
 		assert.Contains(t, args, "--hwdec=auto-safe")

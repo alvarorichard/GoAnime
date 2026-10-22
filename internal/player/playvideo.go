@@ -101,14 +101,29 @@ type playbackArgsInput struct {
 	ResumeTime       int
 }
 
-// defaultVideoOutputArg picks an mpv --vo chain that survives minimal Windows
-// VMs (no OpenGL / only Basic Display Adapter). Non-Windows keeps plain gpu.
-func defaultVideoOutputArg() string {
-	if runtime.GOOS == "windows" {
-		return "--vo=gpu,direct3d,sdl"
+// videoOutputArg picks the mpv --vo chain for goos. mpv takes the first output
+// in the list that initialises and skips names its build lacks ("Video output
+// gpu-next not found!"), so one chain fits every mpv:
+//   - gpu-next (libplacebo) leads: mpv's own default since 0.41, and since 0.39
+//     macOS has no OpenGL context for the GPU outputs — they render only
+//     through Vulkan on MoltenVK (macvk).
+//   - gpu: mpv before 0.35 has no gpu-next, and it covers drivers gpu-next
+//     can't start on.
+//   - macOS: libmpv, which mpv runs as its OpenGL output (cocoa-cb) on a Mac
+//     without MoltenVK.
+//   - Windows: direct3d and sdl for VMs with no working OpenGL or Direct3D 11.
+func videoOutputArg(goos string) string {
+	switch goos {
+	case "windows":
+		return "--vo=gpu-next,gpu,direct3d,sdl"
+	case "darwin":
+		return "--vo=gpu-next,gpu,libmpv"
+	default:
+		return "--vo=gpu-next,gpu"
 	}
-	return "--vo=gpu"
 }
+
+func defaultVideoOutputArg() string { return videoOutputArg(runtime.GOOS) }
 
 // buildPlaybackArgs assembles the full mpv argument list from resolved inputs.
 // It is pure (no I/O, no globals, no prompts) so the exact argument set — and in
@@ -132,8 +147,9 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs,
 			"--no-config",
 			"--hwdec=auto-safe",
-			// Windows VMs often lack working OpenGL; fall through to Direct3D/SDL
-			// so playback still starts instead of mpv exiting before IPC.
+			// gpu-next first, then outputs for older mpv, Macs without
+			// MoltenVK and Windows VMs, so playback starts instead of mpv
+			// exiting before IPC.
 			defaultVideoOutputArg(),
 			"--profile=fast",
 			"--video-latency-hacks=yes",
