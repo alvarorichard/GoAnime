@@ -157,8 +157,13 @@ func (f *fake2Embed) masterBody(masterID string) string {
 		if width == 0 {
 			width = 1280
 		}
-		b.WriteString("#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1247000,RESOLUTION=" +
-			strconv.Itoa(width) + "x" + strconv.Itoa(v.height) + "\n/_stream?id=" + v.id + "\n")
+		b.WriteString("#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1247000,RESOLUTION=")
+		b.WriteString(strconv.Itoa(width))
+		b.WriteString("x")
+		b.WriteString(strconv.Itoa(v.height))
+		b.WriteString("\n/_stream?id=")
+		b.WriteString(v.id)
+		b.WriteString("\n")
 	}
 	return b.String()
 }

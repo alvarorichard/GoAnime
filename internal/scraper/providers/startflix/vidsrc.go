@@ -63,6 +63,13 @@ const (
 	// stream hosts).
 	DefaultVIDSRCMirrorBase = "https://vsembed.ru"
 
+	// DefaultVIDSRCShBase is the vidsrc front the StartFlix panel itself
+	// embeds as a player (vidsrc.sh/embed/…; resolved by vidsrcsh.go). It
+	// speaks the same vs_src protocol and keys the same ids, and
+	// live-checked 2026-10-21 it resolved one title end to end in about
+	// two seconds, so the fallback walks it third.
+	DefaultVIDSRCShBase = "https://vidsrc.sh"
+
 	// masterBodyLimit caps the master playlist read during the playable
 	// probe. It is a few KiB in practice.
 	masterBodyLimit = 32 << 10
@@ -107,14 +114,15 @@ var vidsrcHTTPFn = vidsrcHTTPDefault
 
 // vidsrcBasesFn names the embed APIs the fallback walks in order. The env
 // override GOANIME_VIDSRC_URL repoints the whole list at one base (mirroring
-// GOANIME_STARTFLIX_URL / GOANIME_STARTFLIX_PANEL_URL); the default walks
-// the primary and its mirror. A seam, also, so tests can stage two fake
-// bases and prove the walk.
+// GOANIME_STARTFLIX_URL / GOANIME_STARTFLIX_PANEL_URL); the default walks the
+// primary, its mirror, and vidsrc.sh — the front the StartFlix panel embeds
+// as a player (vidsrcsh.go), family-checked live on 2026-10-21. A seam, also,
+// so tests can stage fake bases and prove the walk.
 var vidsrcBasesFn = func() []string {
 	if b := strings.TrimRight(strings.TrimSpace(os.Getenv("GOANIME_VIDSRC_URL")), "/"); b != "" {
 		return []string{b}
 	}
-	return []string{DefaultVIDSRCBase, DefaultVIDSRCMirrorBase}
+	return []string{DefaultVIDSRCBase, DefaultVIDSRCMirrorBase, DefaultVIDSRCShBase}
 }
 
 // MovieFallback resolves a movie by its IMDb id (preferred) or TMDB id on the

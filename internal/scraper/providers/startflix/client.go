@@ -407,6 +407,10 @@ func (c *Client) ResolveStreamFor(ctx context.Context, players []Player, want Au
 			resolve = func() (*Stream, error) { return c.resolveByse(ctx, u) }
 		case isAbyssHost(u.Host):
 			resolve = func() (*Stream, error) { return c.resolveAbyss(ctx, u, p) }
+		case isVIDSRCPanelPlayer(u):
+			resolve = func() (*Stream, error) { return resolveVIDSRCPanelPlayer(ctx, u) }
+		case isUPNsPanelPlayer(u):
+			resolve = func() (*Stream, error) { return resolveUPNsPanelPlayer(ctx, u) }
 		case p.IsDirectFile():
 			resolve = func() (*Stream, error) { return c.resolveDirect(ctx, p, u) }
 		default:
