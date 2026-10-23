@@ -152,6 +152,15 @@ func main() {
 		return
 	}
 
+	// Guarantee the Japanese font decision on every real launch. The probes
+	// run once (sync.Once): install GoAnime Glyphs when no Japanese face is
+	// accounted for, and log the note. No handler is trusted to be the only
+	// possible path — the search home, a named search and the download and
+	// update flags all ride through here. Plain mode does not probe, and
+	// help/version already returned above, so a terminal-less or scripted
+	// run pays nothing.
+	tui.EnsureJapaneseDetected()
+
 	// Handle normal playback mode: an empty name opens the SEARCH home
 	// screen (tela 1) instead of searching blank.
 	if animeName == "" {

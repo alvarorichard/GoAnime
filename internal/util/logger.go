@@ -174,12 +174,21 @@ func InitLogger() {
 			Logger.SetLevel(log.DebugLevel)
 			Logger.SetReportCaller(true)
 		}
-		if !tui.Plain() && !tui.ShowJapanese() {
-			note := tui.JapaneseNote()
-			if note == "" {
-				note = "Japanese labels hidden: this terminal cannot draw them (GOANIME_JAPANESE=1 shows them anyway)"
+	}
+	// The fate of the Japanese glosses is not debug gossip. Whatever startup
+	// did about the fonts — installed and machine-verified, could not land,
+	// or the glosses hidden — the user reads the line in any mode. The file
+	// log keeps a copy when there is one.
+	if !tui.Plain() {
+		note := tui.JapaneseNote()
+		if note == "" && !tui.ShowJapanese() {
+			note = "Japanese labels hidden: this terminal cannot draw them (GOANIME_JAPANESE=1 shows them anyway)"
+		}
+		if note != "" {
+			if IsDebug && logFile != nil {
+				Debug(note)
 			}
-			Debug(note)
+			Info(note)
 		}
 	}
 }

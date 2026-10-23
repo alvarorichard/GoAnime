@@ -44,6 +44,7 @@ var (
 	procGetGlyphIndicesW    = gdi32.NewProc("GetGlyphIndicesW")
 	procSelectObject        = gdi32.NewProc("SelectObject")
 	procDeleteObject        = gdi32.NewProc("DeleteObject")
+	procAddFontResourceW    = gdi32.NewProc("AddFontResourceW")
 
 	user32           = windows.NewLazySystemDLL("user32.dll")
 	procGetDC        = user32.NewProc("GetDC")
@@ -52,7 +53,6 @@ var (
 
 	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
 	procGetCurrentConsoleFontEx = kernel32.NewProc("GetCurrentConsoleFontEx")
-	procAddFontResourceW        = kernel32.NewProc("AddFontResourceW")
 )
 
 // logfontW is gdi's LOGFONTW: the description of a font a coverage probe
@@ -350,6 +350,18 @@ func installGlyphFont() string {
 	if err != nil {
 		return "No Japanese font, and no fonts folder to install GoAnime Glyphs into: " + err.Error()
 	}
+	return installGlyphFontInto(dir, true)
+}
+
+// installGlyphFontInto writes and loads GoAnime Glyphs from dir, and owns up
+// to whatever happens in its note. register says whether the per-user Fonts
+// registry key and the fontchange broadcast go with it: the real install
+// registers, while a test installing into a scratch folder keeps register
+// false so the machine's own font registry is never written. After a load
+// that answers, the note is only allowed to say "installed" once gdi itself
+// confirms the face maps every Japanese probe glyph — an install this
+// machine cannot see drawing is recorded as a failure, not a hope.
+func installGlyphFontInto(dir string, register bool) string {
 	if err := writeGlyphFont(dir); err != nil {
 		return "No Japanese font, and installing GoAnime Glyphs failed: " + err.Error()
 	}
@@ -357,18 +369,42 @@ func installGlyphFont() string {
 	if loaded, _, _ := procAddFontResourceW.Call(windowsStringPtr(path)); loaded == 0 {
 		return "No Japanese font, and GoAnime Glyphs in " + dir + " did not load this session; reopen the terminal and GoAnime again"
 	}
-	fonts, err := registry.OpenKey(registry.CURRENT_USER,
-		`Software\Microsoft\Windows NT\CurrentVersion\Fonts`, registry.SET_VALUE)
-	if err == nil {
-		defer func() { _ = fonts.Close() }()
-		_ = fonts.SetStringValue(glyphFontFamily+" (TrueType)", path)
+	if register {
+		fonts, err := registry.OpenKey(registry.CURRENT_USER,
+			`Software\Microsoft\Windows NT\CurrentVersion\Fonts`, registry.SET_VALUE)
+		if err == nil {
+			defer func() { _ = fonts.Close() }()
+			_ = fonts.SetStringValue(glyphFontFamily+" (TrueType)", path)
+		}
+		const (
+			hwndBroadcast uintptr = 0xFFFF
+			wmFontChange  uintptr = 0x001D
+		)
+		_, _, _ = procPostMessageW.Call(hwndBroadcast, wmFontChange, 0, 0)
 	}
-	const (
-		hwndBroadcast uintptr = 0xFFFF
-		wmFontChange  uintptr = 0x001D
-	)
-	_, _, _ = procPostMessageW.Call(hwndBroadcast, wmFontChange, 0, 0)
-	return fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. The Japanese labels appear once the terminal is reopened", dir)
+	note := fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. The Japanese labels appear once the terminal is reopened", dir)
+	drawn, ok := gdiFaceGlyphsOnScreen(glyphFontFamily, glossProbeRunes)
+	switch {
+	case ok && every(drawn):
+		note = fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s, and this session's gdi maps every Japanese glyph it carries. The labels appear once the terminal is reopened", dir)
+	case ok:
+		// The resource loaded, yet the face stays silent: that is an
+		// install that did not take, and the note says so instead of
+		// promising glyphs that will not draw.
+		note = fmt.Sprintf("No Japanese font, and GoAnime Glyphs in %s did not answer this session; reopen the terminal and GoAnime again", dir)
+	}
+	return note
+}
+
+// gdiFaceGlyphsOnScreen borrows the screen's device context and asks face
+// whether it draws each of runes. ok is false when gdi could not answer.
+func gdiFaceGlyphsOnScreen(face string, runes []rune) (map[rune]bool, bool) {
+	dc, done := screenDC()
+	if dc == 0 {
+		return nil, false
+	}
+	defer done()
+	return gdiFaceGlyphs(dc, face, runes)
 }
 
 // windowsStringPtr hands gdi a NUL-terminated utf16 pointer.

@@ -28,13 +28,13 @@ import (
 // GoAnime Glyphs is Noto Sans Mono CJK JP cut down to the characters GoAnime
 // draws (fonts/build.py): 11 KB instead of the 16 MB a Japanese font takes.
 
-//go:embed fonts/GoAnimeGlyphs.otf
+//go:embed fonts/GoAnimeGlyphs.ttf
 var glyphFont []byte
 
 //go:embed fonts/OFL.txt
 var glyphFontLicense []byte
 
-const glyphFontFile = "GoAnimeGlyphs.otf"
+const glyphFontFile = "GoAnimeGlyphs.ttf"
 
 // writeGlyphFont writes GoAnime Glyphs and its license into dir, writing
 // aside and renaming, so a launcher never reads half a font.
@@ -133,8 +133,25 @@ func resolveJapanese(env []string, probes *japaneseProbes) bool {
 		if probes.classicConsole() {
 			// The classic console draws with the one font its settings chose
 			// and never falls back for a missing glyph. The code page is the
-			// age-old guess; the font's own gdi coverage answers it.
-			return probes.cjkCodePage() || probes.consoleFontCovers(glossProbeRunes)
+			// age-old guess; the font's own gdi coverage answers it. While
+			// today's font cannot, this run keeps the glosses hidden — but
+			// GoAnime Glyphs installs unless a Japanese face is already
+			// accounted for, so the console's own font list offers it.
+			show := probes.cjkCodePage() || probes.consoleFontCovers(glossProbeRunes)
+			if !show {
+				switch probes.fonts() {
+				case fontPresent, fontPending:
+					// A Japanese face, or the glyphs font already waiting on
+					// disk, is accounted for: Properties can select the
+					// font, and re-installing would only repeat the note.
+				default:
+					// Missing, or the probe could not answer at all: install
+					// anyway. The install is idempotent, and a probe that
+					// cannot ask is no reason to leave the font out.
+					probes.installFont()
+				}
+			}
+			return show
 		}
 		// Windows Terminal, VS Code and every other ConPTY host fall back
 		// over the Japanese fonts the machine has — a Windows Sandbox ships
@@ -145,7 +162,15 @@ func resolveJapanese(env []string, probes *japaneseProbes) bool {
 			return false
 		case fontPending:
 			return false
+		case fontPresent:
+			// A Japanese face answers; the glosses just draw.
+			return true
 		default:
+			// The probe could not answer at all (fontUnknown). The glosses
+			// show on evidence it cannot refute — and the glyphs install
+			// on the side, so the next open terminal has the font however
+			// the probe behaves.
+			probes.installFont()
 			return true
 		}
 	}

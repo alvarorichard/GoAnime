@@ -8,6 +8,15 @@
 - **Every emoji left the source code**: update prompts, warning messages (`⚠️` prefixes are now plain wording), audio picker labels, perf-report headers and ratings (`★ 8.7` → `8.7/10`) are emoji-free. Scraper-title sanitization still strips the web's emoji source tags — the regexes spell them by code point (`\x{1F525}`) so no emoji glyph appears in the tree.
 - **A rework-proofing scan** (`TestGlyphFontCoversEveryDecorativeGlyph`) fails the build when any future string literal carries a console glyph outside the safe classes (ASCII, latin-1, cp1252 extras, WGL4 shapes, basic arrows) without registering the rune and its ASCII fallback in `flavorRunes`.
 
+## The font actually installs now
+
+- **The install had two bugs and never landed a glyph on Windows**: `AddFontResourceW` was sought in `kernel32.dll` (it lives in `gdi32.dll`), so the first real install panicked instead of installing; and the embedded subset carried **CFF2 outlines**, which the classic font loader refuses — the file was written, the load returned 0, every gloss stayed a box. The font is rebuilt as TrueType (`fonts/build.py` against `NotoSansMonoCJKjp-VF.ttf`): glyf outlines load everywhere.
+- **The install verifies itself on the machine**: after loading, gdi must map every Japanese probe glyph (ゴ ー 検) or the note owns up ("did not answer this session") instead of promising glyphs that will not draw. A verified install says so.
+- **The install runs unless a Japanese face is already accounted for** — missing *or* unknown probe answers trigger it in both ConPTY hosts and classic consoles; pending/present never reinstall, so there is exactly one install across sessions.
+- **The note is not debug gossip**: the install result, or the reason the glosses stay hidden, prints via the info logger in any mode (a copy still lands in the file log under `--debug`).
+- **The guarantee runs at startup, not by handler courtesy**: `cmd/goanime/main.go` calls `tui.EnsureJapaneseDetected()` right after the flags parse — help and version stay silent, plain mode probes nothing — and a meta guard fails when that call disappears. On this machine the external GDI receipt answered `DRAWN DRAWN DRAWN` for the installed face while Consolas and a nonexistent family answer `ABSENT ABSENT ABSENT` — the coverage probe discriminates.
+- **Machine-verified tests**: the Windows install tests run for real in a scratch per-user folder (`LOCALAPPDATA` pointed at a temp dir, registry writes off) — both files land, the freshly loaded face draws ゴ ー 検, a second install changes nothing, the HKCU font registry is never touched by a test, and `TestEveryFontProcLivesInItsDll` pins every font proc to the DLL it is declared in.
+
 ---
 
 # GoAnime Release Notes - Version 1.8.7

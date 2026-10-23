@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Builds GoAnimeGlyphs.otf, the font GoAnime installs on Linux when the
-machine has no Japanese font (see internal/tui/japanese_font_linux.go).
+"""Builds GoAnimeGlyphs.ttf, the font GoAnime installs when the machine has
+no Japanese font (see internal/tui/japanese_font_linux.go and the Windows
+installer).
 
 It is Noto Sans Mono CJK JP cut down to the characters in glyphs.txt and
 renamed, as the SIL Open Font License asks of modified versions, so it never
@@ -9,11 +10,14 @@ new Japanese string is not in the font; add its characters to glyphs.txt and
 run, from this directory:
 
     pip install fonttools
-    python3 build.py NotoSansMonoCJK-VF.ttc
+    python3 build.py NotoSansMonoCJKjp-VF.ttf
 
-The source is Noto Sans Mono CJK JP 2.004, static (NotoSansMonoCJKjp-Regular.otf)
-or variable (NotoSansMonoCJK-VF.ttc, whose first font is JP), from
-https://github.com/notofonts/noto-cjk or a distribution package.
+The source must have TrueType outlines, from
+https://github.com/notofonts/noto-cjk (Sans/Variable/TTF/Mono). CFF-based
+sources would be easy to find, but Windows' classic font loader refuses the
+CFF2 outlines an instanced CFF font keeps — AddFontResourceW returns 0 and
+every gloss stays a box. glyf outlines load everywhere: FreeType, GDI and
+DirectWrite all read TrueType.
 """
 
 import sys
@@ -43,8 +47,15 @@ def main(source):
     subsetter.populate(text=text)
     subsetter.subset(font)
     if "fvar" in font:
-        # Regular only; the outlines stay CFF2, which FreeType reads since 2.8.
+        # Regular only; the outlines stay glyf, which GDI loads where
+        # CFF2 would be refused outright.
         font = instancer.instantiateVariableFont(font, {"wght": 400})
+
+    if "glyf" not in font:
+        sys.exit(
+            f"{source} produced no TrueType outlines; Windows' classic font"
+            " loader refuses CFF2, and the install must answer to it"
+        )
 
     missing = [c for c in text if ord(c) not in font.getBestCmap()]
     if missing:
@@ -59,8 +70,8 @@ def main(source):
         name.setName(version, 5, platform, encoding, language)
         name.setName(POSTSCRIPT, 6, platform, encoding, language)
     font["OS/2"].achVendID = "NONE"
-    font.save("GoAnimeGlyphs.otf")
-    print(f"GoAnimeGlyphs.otf: {len(text)} characters")
+    font.save("GoAnimeGlyphs.ttf")
+    print(f"GoAnimeGlyphs.ttf: {len(text)} characters, TrueType outlines")
 
 
 if __name__ == "__main__":

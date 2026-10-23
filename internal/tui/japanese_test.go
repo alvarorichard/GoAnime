@@ -108,13 +108,20 @@ func TestResolveJapanese(t *testing.T) {
 		{name: "macOS", env: []string{"TERM=xterm-256color"}, machine: fakeMachine{goos: "darwin"}, want: true},
 		{name: "android", env: nil, machine: fakeMachine{goos: "android"}, want: true},
 
-		{name: "windows terminal", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows"}, want: true, wantAsked: true},
+		{name: "windows terminal", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows"}, want: true, wantAsked: true, wantInstalled: true},
 		// A Windows Sandbox or any en-US machine ships no Japanese font at
 		// all for its terminals to fall back on: the probe installs GoAnime
 		// Glyphs and hides the glosses until the terminal is reopened.
 		{name: "windows terminal without a Japanese font", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows", fonts: fontMissing}, want: false, wantAsked: true, wantInstalled: true},
 		{name: "windows terminal whose only Japanese font got installed now", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows", fonts: fontPending}, want: false, wantAsked: true},
-		{name: "classic windows console", env: nil, machine: fakeMachine{goos: "windows", classic: true}, want: false},
+		{name: "windows terminal whose probe cannot answer still gets the glyphs", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows", fonts: fontUnknown}, want: true, wantAsked: true, wantInstalled: true},
+		{name: "classic windows console without coverage asks the fonts", env: nil, machine: fakeMachine{goos: "windows", classic: true, fonts: fontUnknown}, want: false, wantAsked: true, wantInstalled: true},
+		// Classic consoles draw glosses only with the font the console itself
+		// has selected — no fallback — so a machine font the console ignores
+		// is not enough. With no Japanese font anywhere, the glyphs font
+		// installs for the console's own font list.
+		{name: "classic console with no Japanese font installs the glyphs font", env: nil, machine: fakeMachine{goos: "windows", classic: true, fonts: fontMissing}, want: false, wantAsked: true, wantInstalled: true},
+		{name: "classic console over a machine font that cannot help", env: nil, machine: fakeMachine{goos: "windows", classic: true, fonts: fontPending}, want: false, wantAsked: true},
 		{name: "classic console whose font covers the glosses", env: nil, machine: fakeMachine{goos: "windows", classic: true, covers: true}, want: true},
 		{name: "classic console on a japanese windows", env: nil, machine: fakeMachine{goos: "windows", classic: true, cjk: true}, want: true},
 
@@ -267,13 +274,13 @@ func TestGlyphFontCoversEveryGloss(t *testing.T) {
 
 	glyphs, err := os.ReadFile("fonts/glyphs.txt")
 	require.NoError(t, err)
-	font, err := os.ReadFile("fonts/GoAnimeGlyphs.otf")
+	font, err := os.ReadFile("fonts/GoAnimeGlyphs.ttf")
 	require.NoError(t, err)
 	cmap := readCmap(t, font)
 
 	for r, files := range used {
 		assert.Contains(t, string(glyphs), string(r), "%q (in %s) is missing from fonts/glyphs.txt; add it and run fonts/build.py", r, files[0])
-		assert.Contains(t, cmap, r, "%q (in %s) is missing from GoAnimeGlyphs.otf; run fonts/build.py", r, files[0])
+		assert.Contains(t, cmap, r, "%q (in %s) is missing from GoAnimeGlyphs.ttf; run fonts/build.py", r, files[0])
 	}
 	for field := range strings.FieldsSeq(strings.TrimPrefix(japaneseFontPattern, ":charset=")) {
 		code, err := strconv.ParseUint(field, 16, 32)

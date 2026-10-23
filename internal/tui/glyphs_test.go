@@ -80,15 +80,16 @@ func needsRegistration(r rune) bool {
 	return true
 }
 
-// TestGlyphFontCoversEveryDecorativeGlyph fails when a screen draws a flavor
-// glyph the probes do not know: they would keep it on where the console
-// draws a box for it, and never hide it as the ASCII fallback. The same
-// holds drawn from Go's own code as tests already pin (SetGlyphs(true)).
-func TestGlyphFontCoversEveryDecorativeGlyph(t *testing.T) {
-	t.Parallel()
-
+// scanUsedRunes walks dirs relative to this package and maps every
+// needsRegistration rune found in a string literal of their non-test .go
+// files to the files it sits in. testdata trees never count — nothing there
+// draws a screen — and a dir that does not exist is skipped, like a root the
+// module holds per-layout. A file that does not parse fails the run: real
+// trees compile.
+func scanUsedRunes(t testing.TB, dirs ...string) map[rune][]string {
+	t.Helper()
 	used := map[rune][]string{}
-	for _, dir := range []string{"../../internal", "../../pkg", "../../cmd"} {
+	for _, dir := range dirs {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -126,6 +127,17 @@ func TestGlyphFontCoversEveryDecorativeGlyph(t *testing.T) {
 		}
 		require.NoError(t, err)
 	}
+	return used
+}
+
+// TestGlyphFontCoversEveryDecorativeGlyph fails when a screen draws a flavor
+// glyph the probes do not know: they would keep it on where the console
+// draws a box for it, and never hide it as the ASCII fallback. The same
+// holds drawn from Go's own code as tests already pin (SetGlyphs(true)).
+func TestGlyphFontCoversEveryDecorativeGlyph(t *testing.T) {
+	t.Parallel()
+
+	used := scanUsedRunes(t, "../../internal", "../../pkg", "../../cmd")
 	require.NotEmpty(t, used, "the scan found the glyphs")
 	require.Contains(t, used, '❯', "the scan reads the prompt")
 	require.Contains(t, used, '▶', "the scan reads the cursor")
