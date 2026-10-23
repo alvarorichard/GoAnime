@@ -1,5 +1,5 @@
 pkgname=goanime
-pkgver=1.8.7
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="Search, stream and download anime, movies and TV shows from the terminal"
 arch=('x86_64')
