@@ -21,7 +21,7 @@ AllowNoIcons=yes
 ; Output directory is relative to the script location
 OutputDir=..\dist
 OutputBaseFilename=GoAnime-Installer-{#MyAppVersion}
-; SetupIconFile=..\assets\icon.ico  ; Uncomment if icon.ico is available
+SetupIconFile=..\docs\assets\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
@@ -33,7 +33,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "addtopath"; Description: "Add GoAnime and MPV to PATH"; GroupDescription: "System Integration:"; Flags: checkedonce
 
 [Files]

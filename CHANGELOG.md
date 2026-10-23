@@ -1,5 +1,11 @@
 # GoAnime Release Notes - Unreleased
 
+## A real Windows icon
+
+- **The installed program wears the dragon**: a multi-size `docs/assets/logo.ico` (16, 20, 24, 32, 48, 64, 128, 256 — LANCZOS from the transparent profile-dragon art at 2048) is linked into `goanime.exe` through a committed `cmd/goanime/rsrc_windows_amd64.syso`. Explorer, the taskbar and shortcuts now show the crimson sail instead of the blank generic square; the silhouette was chosen because it reads on dark and light desktops alike, down to 16 px, in the console's near-black + crimson identity.
+- **The embedding cannot break the other platforms**: the `.syso` carries the `_windows_amd64` suffix, so `go build` links it only for windows/amd64; linux/darwin/freebsd builds of `cmd/goanime` and per-GOOS `go vet` run green with the file in-tree (machine-checked). Regenerating uses only Pillow: `go run github.com/akavel/rsrc@v0.10.2 -ico docs/assets/logo.ico -o cmd/goanime/rsrc_windows_amd64.syso`.
+- **The Inno Setup installer wears it too**: `build/install.iss` compiles with `SetupIconFile=..\docs\assets\logo.ico` (was commented out — installers used to ship with Inno's generic icon), and the desktop-shortcut task is checked by default so the dragon lands at desktop install time; shortcuts and the uninstall entry already inherit the exe's embedded icon. Receipt: compiled locally with Inno 7.1.0, `ExtractAssociatedIcon` pulled the dragon out of the resulting `GoAnime-Installer-1.8.7.exe`.
+
 ## Console typography
 
 - **CJK renders without boxes everywhere**: Japanese glosses (音声, 続き, 最近…) now go through a font-coverage probe. On a Windows console whose fonts lack Japanese — Windows Sandbox ships none — GoAnime installs an embedded `GoAnime Glyphs` subset of Noto Sans Mono CJK JP into the user's font set and re-checks at the next launch; nothing degrades into tofu boxes.
