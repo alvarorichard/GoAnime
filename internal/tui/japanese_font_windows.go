@@ -382,11 +382,11 @@ func installGlyphFontInto(dir string, register bool) string {
 		)
 		_, _, _ = procPostMessageW.Call(hwndBroadcast, wmFontChange, 0, 0)
 	}
-	note := fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. The Japanese labels appear once the terminal is reopened", dir)
+	note := fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. %s", dir, terminalAdvice())
 	drawn, ok := gdiFaceGlyphsOnScreen(glyphFontFamily, glossProbeRunes)
 	switch {
 	case ok && every(drawn):
-		note = fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s, and this session's gdi maps every Japanese glyph it carries. The labels appear once the terminal is reopened", dir)
+		note = fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s, and this session's gdi maps every Japanese glyph it carries. %s", dir, terminalAdvice())
 	case ok:
 		// The resource loaded, yet the face stays silent: that is an
 		// install that did not take, and the note says so instead of
@@ -405,6 +405,18 @@ func gdiFaceGlyphsOnScreen(face string, runes []rune) (map[rune]bool, bool) {
 	}
 	defer done()
 	return gdiFaceGlyphs(dc, face, runes)
+}
+
+// terminalAdvice names what this terminal must do before the glosses draw,
+// because the two Windows hosts listen differently: a ConPTY host built its
+// font collection at startup, so reopening it is enough, while the classic
+// console only ever draws with the one face its Properties selected — and a
+// console opened after the install lists GoAnime Glyphs there.
+func terminalAdvice() string {
+	if classicConsole() {
+		return "Pick GoAnime Glyphs in this console's Properties — a console opened after the install lists it"
+	}
+	return "The labels appear once the terminal is reopened"
 }
 
 // windowsStringPtr hands gdi a NUL-terminated utf16 pointer.
