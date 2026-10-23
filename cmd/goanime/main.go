@@ -26,6 +26,14 @@ func main() {
 		exitCode = 1
 	}
 
+	// A double-click on Windows lands in conhost, which has no font fallback
+	// and limited VT support; the TUI would degrade to ASCII. Hand a standalone
+	// launch to Windows Terminal (installing it once if needed) and let this
+	// process return. Shells and other ConPTY hosts keep their own terminal.
+	if tui.RelaunchInWindowsTerminal() {
+		return
+	}
+
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
 	// codes like ←[38;2;...m instead of colors. If enable fails, color paths

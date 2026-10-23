@@ -83,6 +83,13 @@ If you prefer not to use the installer, download
 include mpv: [install it](https://mpv.io/installation/) separately. GoAnime
 finds `mpv.exe` on your `PATH` or in the same folder as `goanime.exe`.
 
+When you launch GoAnime on its own (double-click, Start menu or a desktop
+shortcut), it runs in [Windows Terminal](https://aka.ms/terminal) so the
+interface gets color, UTF-8 and font fallback. If it started in the classic
+console and Windows Terminal is missing, GoAnime installs it once with
+`winget`; when `winget` is unavailable it continues in the classic console.
+Set `GOANIME_TERMINAL=conhost` to stay in the classic console.
+
 ### macOS
 
 ```bash
@@ -291,6 +298,7 @@ common needs:
 | `GOANIME_ENABLED_SOURCES`     | Comma-separated sources to enable, such as `goyabu`                      |
 | `GOANIME_DISABLED_SOURCES`    | Comma-separated sources to skip                                          |
 | `GOANIME_THEME`               | `dark`, `light` or `auto` (default): `auto` asks the terminal once for its background |
+| `GOANIME_TERMINAL`            | `conhost` keeps Windows GoAnime in the classic console instead of reopening it in Windows Terminal |
 | `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
 | `GOANIME_JAPANESE`            | `1` always shows the Japanese glosses, `0` always hides them; unset, GoAnime shows them where the terminal has a font for them |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
@@ -373,8 +381,9 @@ of showing boxes:
   terminal to see them. A full Japanese font works too, such as
   `noto-fonts-cjk` on Arch Linux, `fonts-noto-cjk` on Debian and Ubuntu or
   `google-noto-sans-cjk-fonts` on Fedora.
-- **Windows**: the classic console (`cmd.exe` in its own window) has no font
-  fallback, so the Japanese stays hidden there. Windows Terminal shows it.
+- **Windows**: GoAnime opens itself in Windows Terminal, which has font
+  fallback. `GOANIME_TERMINAL=conhost` keeps the classic console, where the
+  Japanese stays hidden.
 - **Linux virtual console** (`TERM=linux`): its font has no Japanese, so it
   stays hidden.
 

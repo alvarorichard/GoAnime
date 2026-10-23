@@ -84,6 +84,13 @@ uma pasta do seu `PATH`. O arquivo não inclui o mpv:
 [instale-o](https://mpv.io/installation/) separadamente. O GoAnime encontra o
 `mpv.exe` no `PATH` ou na mesma pasta do `goanime.exe`.
 
+Quando você inicia o GoAnime sozinho (duplo clique, menu Iniciar ou atalho da
+área de trabalho), ele roda no [Windows Terminal](https://aka.ms/terminal)
+para a interface ter cor, UTF-8 e fallback de fontes. Se ele tiver aberto no
+console clássico e o Windows Terminal não estiver instalado, o GoAnime o
+instala uma vez com o `winget`; sem o `winget`, ele continua no console
+clássico. Defina `GOANIME_TERMINAL=conhost` para ficar no console clássico.
+
 ### macOS
 
 ```bash
@@ -293,6 +300,7 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_ENABLED_SOURCES`     | Fontes a ativar, separadas por vírgula, como `goyabu`                    |
 | `GOANIME_DISABLED_SOURCES`    | Fontes a ignorar, separadas por vírgula                                  |
 | `GOANIME_THEME`               | `dark`, `light` ou `auto` (padrão): `auto` pergunta o fundo ao terminal uma vez |
+| `GOANIME_TERMINAL`            | `conhost` mantém o GoAnime no console clássico do Windows em vez de reabri-lo no Windows Terminal |
 | `GOANIME_PLAIN`               | `1` para o modo simples: sem cores, sem glosas em japonês, só ASCII (igual a `--plain`, `NO_COLOR` ou `TERM=dumb`) |
 | `GOANIME_JAPANESE`            | `1` sempre mostra as glosas em japonês, `0` sempre esconde; sem ela, o GoAnime mostra onde o terminal tem fonte para elas |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
@@ -377,9 +385,9 @@ mostrar quadradinhos:
   terminal de novo para vê-los. Uma fonte japonesa completa também resolve,
   como `noto-fonts-cjk` no Arch Linux, `fonts-noto-cjk` no Debian e Ubuntu ou
   `google-noto-sans-cjk-fonts` no Fedora.
-- **Windows**: o console clássico (`cmd.exe` na própria janela) não tem
-  fonte alternativa, então o japonês continua escondido nele. O Windows
-  Terminal mostra.
+- **Windows**: o GoAnime se abre no Windows Terminal, que tem fallback de
+  fontes. `GOANIME_TERMINAL=conhost` mantém o console clássico, onde o japonês
+  continua escondido.
 - **Console virtual do Linux** (`TERM=linux`): a fonte dele não tem japonês,
   então continua escondido.
 

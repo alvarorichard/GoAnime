@@ -1,5 +1,12 @@
 # GoAnime Release Notes - Unreleased
 
+## Windows Terminal by default
+
+- **A standalone launch reopens in Windows Terminal**: a double-click, Start menu entry or desktop shortcut that lands in a classic conhost now hands the same executable, arguments and working directory to `wt.exe -w -1 new-tab`. The TUI gets color, UTF-8 and font fallback instead of degrading to ASCII. The decision is narrow on purpose: only a classic console window (not a ConPTY host such as Windows Terminal, VS Code or WezTerm) with GoAnime as its sole attached process. A shell keeps its console, because the user already picked a terminal; pipes, CI and scripts stay headless.
+- **A missing Windows Terminal installs itself once**: `winget install --id Microsoft.WindowsTerminal` runs per user and streams its progress, then GoAnime waits for the `wt.exe` app execution alias and reopens. An elevated launch never installs (a setup started as administrator cannot return to the original user, so winget would land the package in the wrong account), a missing `winget` falls back to conhost, and a disabled alias is detected instead of reinstalling on every launch.
+- **Arguments survive the handoff**: `--` keeps option-like GoAnime arguments (`--debug`, `--update`, `-h`) out of wt's parser, and literal semicolons are escaped because wt reads them as command separators even after `--`.
+- **`GOANIME_TERMINAL=conhost` opts out**, documented in both READMEs. Receipt: `wt.exe -w -1 new-tab -d <dir> -- goanime.exe` put the process under `WindowsTerminal.exe` on 1.25.2733.0, and the decision table is pinned by tests.
+
 ## A real Windows icon
 
 - **The installed program wears the dragon**: a multi-size `docs/assets/logo.ico` (16, 20, 24, 32, 48, 64, 128, 256 — LANCZOS from the transparent profile-dragon art at 2048) is linked into `goanime.exe` through a committed `cmd/goanime/rsrc_windows_amd64.syso`. Explorer, the taskbar and shortcuts now show the crimson sail instead of the blank generic square; the silhouette was chosen because it reads on dark and light desktops alike, down to 16 px, in the console's near-black + crimson identity.
