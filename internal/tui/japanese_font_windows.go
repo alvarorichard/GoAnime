@@ -4,14 +4,16 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf16"
-	"unsafe"
 
+	"github.com/zzl/go-win32api/win32"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -29,50 +31,20 @@ import (
 // gdi's enumeration hands it back so the probes can tell our font apart.
 const glyphFontFamily = "GoAnime Glyphs"
 
+// The font and console calls go through typed Win32 bindings: the syscall
+// pointer plumbing stays in that dependency instead of living here.
+//
 // gdi's DEFAULT_CHARSET (1): enumerate every face the fonts register, and
 // GGI_MARK_NONEXISTING_GLYPHS (1): GetGlyphIndices maps a rune the face
 // lacks to FFFF instead of some stand-in glyph.
 const (
 	defaultCharSet           = 1
 	ggiMarkNonexistingGlyphs = 1
+	// maxProbeRunes bounds the fixed UTF-16 buffers gdi maps. Every caller
+	// asks about a handful of glyphs; the bound keeps the count a typed
+	// constant instead of an unchecked int-to-int32 conversion.
+	maxProbeRunes = 32
 )
-
-var (
-	gdi32                   = windows.NewLazySystemDLL("gdi32.dll")
-	procCreateFontIndirectW = gdi32.NewProc("CreateFontIndirectW")
-	procEnumFontFamiliesExW = gdi32.NewProc("EnumFontFamiliesExW")
-	procGetGlyphIndicesW    = gdi32.NewProc("GetGlyphIndicesW")
-	procSelectObject        = gdi32.NewProc("SelectObject")
-	procDeleteObject        = gdi32.NewProc("DeleteObject")
-	procAddFontResourceW    = gdi32.NewProc("AddFontResourceW")
-
-	user32           = windows.NewLazySystemDLL("user32.dll")
-	procGetDC        = user32.NewProc("GetDC")
-	procReleaseDC    = user32.NewProc("ReleaseDC")
-	procPostMessageW = user32.NewProc("PostMessageW")
-
-	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
-	procGetCurrentConsoleFontEx = kernel32.NewProc("GetCurrentConsoleFontEx")
-)
-
-// logfontW is gdi's LOGFONTW: the description of a font a coverage probe
-// selects with, and the messenger of each face name in the enumeration
-// callback.
-type logfontW struct {
-	Height, Width, Escapement, Orientation, Weight                int32
-	Italic, Underline, StrikeOut                                  uint8
-	CharSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily uint8
-	FaceName                                                      [32]uint16
-}
-
-// consoleFontInfo is kernel32's CONSOLE_FONT_INFOEX, read to learn which face
-// the classic console draws with today.
-type consoleFontInfo struct {
-	CBSize, NFont          uint32
-	Width, Height          int16
-	FontFamily, FontWeight uint32
-	FaceName               [32]uint16
-}
 
 // consoleFontFace names the face the classic console draws with today.
 // An empty name means the question lost an answer — the handle is not the
@@ -82,9 +54,12 @@ func consoleFontFace() string {
 	if err != nil || console == windows.InvalidHandle {
 		return ""
 	}
-	var info consoleFontInfo
-	info.CBSize = uint32(unsafe.Sizeof(info))
-	if r1, _, _ := procGetCurrentConsoleFontEx.Call(uintptr(console), 0, uintptr(unsafe.Pointer(&info))); r1 == 0 {
+	size := reflect.TypeOf(win32.CONSOLE_FONT_INFOEX{}).Size()
+	if size > math.MaxUint32 {
+		return ""
+	}
+	info := win32.CONSOLE_FONT_INFOEX{CbSize: uint32(size)}
+	if ok, _ := win32.GetCurrentConsoleFontEx(win32.HANDLE(console), 0, &info); ok == 0 {
 		return ""
 	}
 	return windows.UTF16ToString(info.FaceName[:])
@@ -93,12 +68,12 @@ func consoleFontFace() string {
 // screenDC borrows the screen's device context, where the system's fonts
 // live; the done func hands it back. A borrowed context of 0 means gdi could
 // not answer at all.
-func screenDC() (dc uintptr, done func()) {
-	handle, _, _ := procGetDC.Call(0)
-	if handle == 0 {
+func screenDC() (dc win32.HDC, done func()) {
+	dc = win32.GetDC(0)
+	if dc == 0 {
 		return 0, func() {}
 	}
-	return handle, func() { _, _, _ = procReleaseDC.Call(0, handle) }
+	return dc, func() { win32.ReleaseDC(0, dc) }
 }
 
 // utf16Face copies a face name into a LOGFONTW's fixed buffer.
@@ -115,25 +90,32 @@ func utf16Face(face string) [32]uint16 {
 // gdiFaceGlyphs asks gdi to map each rune of runes with face and says
 // whether that face draws it. ok is false when gdi could not answer at all.
 // Every rune here is in the BMP, so runes and their utf16 words pair up.
-func gdiFaceGlyphs(dc uintptr, face string, runes []rune) (map[rune]bool, bool) {
-	if dc == 0 || face == "" || len(runes) == 0 {
+func gdiFaceGlyphs(dc win32.HDC, face string, runes []rune) (map[rune]bool, bool) {
+	if dc == 0 || face == "" || len(runes) == 0 || len(runes) > maxProbeRunes {
 		return nil, false
 	}
 	drawn := make(map[rune]bool, len(runes))
-	f := logfontW{CharSet: defaultCharSet}
-	f.FaceName = utf16Face(face)
-	hfont, _, _ := procCreateFontIndirectW.Call(uintptr(unsafe.Pointer(&f)))
+	f := win32.LOGFONTW{LfCharSet: defaultCharSet}
+	f.LfFaceName = utf16Face(face)
+	hfont := win32.CreateFontIndirectW(&f)
 	if hfont == 0 {
 		return drawn, false
 	}
-	defer func() { _, _, _ = procDeleteObject.Call(hfont) }()
-	previous, _, _ := procSelectObject.Call(dc, hfont)
-	defer func() { _, _, _ = procSelectObject.Call(dc, previous) }()
+	defer win32.DeleteObject(hfont)
+	previous := win32.SelectObject(dc, hfont)
+	defer win32.SelectObject(dc, previous)
 	chars := utf16.Encode(runes)
-	mapped := make([]uint16, len(chars))
-	r1, _, _ := procGetGlyphIndicesW.Call(dc,
-		uintptr(unsafe.Pointer(&chars[0])), uintptr(len(chars)),
-		uintptr(unsafe.Pointer(&mapped[0])), ggiMarkNonexistingGlyphs)
+	if len(chars) != len(runes) {
+		// The probes ask about BMP runes only, where one rune is one
+		// UTF-16 word; a surrogate pair would break the index match.
+		return drawn, false
+	}
+	var charsBuf [maxProbeRunes]uint16
+	var mapped [maxProbeRunes]uint16
+	copy(charsBuf[:], chars)
+	r1 := win32.GetGlyphIndicesW(dc,
+		&charsBuf[0], maxProbeRunes,
+		&mapped[0], ggiMarkNonexistingGlyphs)
 	if r1 == 0 {
 		return drawn, false
 	}
@@ -154,11 +136,11 @@ var (
 // enumFontFace receives a face per call; 1 keeps enumerating, 0 stops it.
 // NewCallback hands each argument over register-sized, so the LOGFONTW
 // pointer arrives already typed — real pointers, not raw uintptrs to cast.
-func enumFontFace(lfont *logfontW, metric, fontType, lparam uintptr) uintptr {
+func enumFontFace(lfont *win32.LOGFONTW, _, _, _ uintptr) uintptr {
 	if lfont == nil {
 		return 1
 	}
-	if name := windows.UTF16ToString(lfont.FaceName[:]); name != "" {
+	if name := windows.UTF16ToString(lfont.LfFaceName[:]); name != "" {
 		enumFacesTalked = append(enumFacesTalked, name)
 	}
 	return 1
@@ -175,8 +157,8 @@ func enumFontFaces() ([]string, bool) {
 		return nil, false
 	}
 	defer done()
-	f := logfontW{CharSet: defaultCharSet}
-	r1, _, _ := procEnumFontFamiliesExW.Call(dc, uintptr(unsafe.Pointer(&f)), enumFontFacesProc, 0, 0)
+	f := win32.LOGFONTW{LfCharSet: defaultCharSet}
+	r1 := win32.EnumFontFamiliesExW(dc, &f, enumFontFacesProc, 0, 0)
 	if r1 == 0 {
 		return nil, false
 	}
@@ -278,7 +260,11 @@ func consoleHostStart() (time.Time, bool) {
 
 	parentOf := make(map[uint32]windows.ProcessEntry32, 64)
 	var entry windows.ProcessEntry32
-	entry.Size = uint32(unsafe.Sizeof(entry))
+	size := reflect.TypeOf(entry).Size()
+	if size > math.MaxUint32 {
+		return time.Time{}, false
+	}
+	entry.Size = uint32(size)
 	for err := windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
 		parentOf[entry.ProcessID] = entry
 	}
@@ -366,7 +352,8 @@ func installGlyphFontInto(dir string, register bool) string {
 		return "No Japanese font, and installing GoAnime Glyphs failed: " + err.Error()
 	}
 	path := filepath.Join(dir, glyphFontFile)
-	if loaded, _, _ := procAddFontResourceW.Call(windowsStringPtr(path)); loaded == 0 {
+	fontPath, err := windows.UTF16PtrFromString(path)
+	if err != nil || win32.AddFontResourceW(fontPath) == 0 {
 		return "No Japanese font, and GoAnime Glyphs in " + dir + " did not load this session; reopen the terminal and GoAnime again"
 	}
 	if register {
@@ -376,11 +363,7 @@ func installGlyphFontInto(dir string, register bool) string {
 			defer func() { _ = fonts.Close() }()
 			_ = fonts.SetStringValue(glyphFontFamily+" (TrueType)", path)
 		}
-		const (
-			hwndBroadcast uintptr = 0xFFFF
-			wmFontChange  uintptr = 0x001D
-		)
-		_, _, _ = procPostMessageW.Call(hwndBroadcast, wmFontChange, 0, 0)
+		_, _ = win32.PostMessageW(win32.HWND(0xFFFF), win32.WM_FONTCHANGE, 0, 0)
 	}
 	note := fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. %s", dir, terminalAdvice())
 	drawn, ok := gdiFaceGlyphsOnScreen(glyphFontFamily, glossProbeRunes)
@@ -417,15 +400,6 @@ func terminalAdvice() string {
 		return "Pick GoAnime Glyphs in this console's Properties — a console opened after the install lists it"
 	}
 	return "The labels appear once the terminal is reopened"
-}
-
-// windowsStringPtr hands gdi a NUL-terminated utf16 pointer.
-func windowsStringPtr(s string) uintptr {
-	ptr, err := windows.UTF16PtrFromString(s)
-	if err != nil {
-		return 0
-	}
-	return uintptr(unsafe.Pointer(ptr))
 }
 
 // japaneseFontProbe answers on Windows with gdi: which installed faces have

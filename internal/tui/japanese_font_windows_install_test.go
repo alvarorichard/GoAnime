@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -21,28 +20,13 @@ import (
 // (LOCALAPPDATA pointed there), and register stays false so the machine's
 // HKCU font registry is never written by a test.
 
-// TestEveryFontProcLivesInItsDll is the guard that suite's own first failure
-// demanded: AddFontResourceW was sought in kernel32.dll while it lives in
-// gdi32.dll, so the first real install would have panicked instead of
-// installing. Every font proc must be findable on this machine, in the DLL
-// it is declared against.
-func TestEveryFontProcLivesInItsDll(t *testing.T) {
-	procs := []*windows.LazyProc{
-		procCreateFontIndirectW,
-		procEnumFontFamiliesExW,
-		procGetGlyphIndicesW,
-		procSelectObject,
-		procDeleteObject,
-		procAddFontResourceW,
-		procGetDC,
-		procReleaseDC,
-		procPostMessageW,
-		procGetCurrentConsoleFontEx,
-	}
-	for _, proc := range procs {
-		err := proc.Find()
-		assert.NoErrorf(t, err, "%s must live in the DLL it is declared against", proc.Name)
-	}
+// TestFontProbesAnswer is the guard the old hand-rolled proc table needed:
+// the typed Windows bindings behind the probes must resolve and answer on
+// this machine, not merely compile.
+func TestFontProbesAnswer(t *testing.T) {
+	faces, ok := enumFontFaces()
+	require.True(t, ok, "gdi enumerates the faces installed on this machine")
+	require.NotEmpty(t, faces, "a Windows machine has fonts")
 }
 
 func TestInstallGlyphFontLandsAndAnswers(t *testing.T) {
