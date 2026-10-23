@@ -43,7 +43,7 @@ func GetAnimesDigitalEpisodes(media *models.Anime) ([]models.Episode, error) {
 		useDubbed := false
 		if pinned, ok := pinnedStartFlixAudio(); ok {
 			useDubbed = strings.EqualFold(string(pinned), "Dublado")
-		} else if idx, err := animesDigitalPickFn([]string{"💬 Legendado", "🎙️  Dublado"}); err == nil {
+		} else if idx, err := animesDigitalPickFn([]string{"Legendado", "Dublado"}); err == nil {
 			useDubbed = idx == 1
 		} else {
 			util.Debug("AnimesDigital: audio picker unavailable, taking subtitles", "err", err)

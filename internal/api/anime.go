@@ -548,7 +548,10 @@ var (
 	// CleanTitle patterns, applied in order
 	reMediaTags = regexp.MustCompile(`^\s*\[(?:Movies?(?:/TV)?|TV|Anime|Series|Show)\]\s*`)
 	reLangTags  = regexp.MustCompile(`^\s*\[(?:English|PT-BR|Portuguese|Português|Japonês|Japanese|Multilanguage)\]\s*`)
-	reSourceTag = regexp.MustCompile(`(?i)[🔥🌐]?\[(?:animefire|allanime|hianime|anidb|animedrive|9anime)\]\s*`)
+	// AnimeFire and AllAnime prepend an emoji to their tag — fire and globe,
+	// spelled out below as \x{...} code points so no emoji glyph ever lands in
+	// this source tree (plain bracket tags still match too).
+	reSourceTag = regexp.MustCompile(`(?i)[\x{1F525}\x{1F310}]?\[(?:animefire|allanime|hianime|anidb|animedrive|9anime)\]\s*`)
 	reEmDash    = regexp.MustCompile(`\s*[–—]\s+.*$`)
 	// For the regular hyphen ( - ) we cannot strip blindly — it appears inside legitimate
 	// titles such as "Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen" / "- Kouhen" (前編/後編,
@@ -590,7 +593,9 @@ func CleanTitle(title string) string {
 	// Remove language tags like [English], [PT-BR], [Portuguese], [Português], [Multilanguage] at the start
 	cleaned = strings.TrimSpace(reLangTags.ReplaceAllString(cleaned, ""))
 
-	// Remove source tags like 🔥[AnimeFire], 🌐[AllAnime], [AnimeDrive], or [9Anime]
+	// Remove source tags like [AnimeFire], [AllAnime], [AnimeDrive], or
+	// [9Anime] — the first two often carry a leading paint-emoji on the sites'
+	// pretty-printed titles, which reSourceTag strips too (see its comment).
 	cleaned = strings.TrimSpace(reSourceTag.ReplaceAllString(cleaned, ""))
 
 	// Remove everything after em-dash or en-dash (typically subtitles like "– Todos os Episódios").

@@ -83,11 +83,7 @@ func newTryModelWithOptions(opts TryOptions) *tryModel {
 	shell.Context = singleLine(opts.SourcesLine)
 
 	input := textinput.New()
-	if Plain() {
-		input.Prompt = "> "
-	} else {
-		input.Prompt = "❯ "
-	}
+	input.Prompt = drawGlyph("❯ ", "> ")
 	styles := textinput.DefaultStyles(themeIsDark())
 	styles.Focused.Text = theme.Text
 	styles.Focused.Placeholder = theme.Muted

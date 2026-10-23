@@ -31,6 +31,11 @@ func main() {
 	// codes like ←[38;2;...m instead of colors. If enable fails, color paths
 	// fall back to ASCII via tui.ConsoleColorProfile / SupportsANSI.
 	_ = tui.EnableVirtualTerminal()
+	// Decode classic consoles as UTF-8: GoAnime's UTF-8 bytes otherwise meet
+	// the console's OEM code page (850/932/…) and Japanese or accented titles
+	// arrive as mojibake. The restore hands the old page back on exit.
+	restoreConsoleCP := tui.EnableUTF8Console()
+	defer restoreConsoleCP()
 
 	// Save terminal state so we can restore it on exit.
 	// Libraries like promptui (readline) and go-fuzzyfinder (tcell) put the

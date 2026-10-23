@@ -308,16 +308,13 @@ func (m *searchingModel) sizeList() {
 
 // statusLine reads "3 results so far, more arriving · enter opens one now".
 func (m *searchingModel) statusLine() string {
-	mark := "⁖ "
-	if Plain() {
-		mark = "... "
-	}
+	mark := drawGlyph("⁖ ", "... ")
 	n := len(m.groups)
 	if n == 0 {
 		if Plain() {
 			return "... asking the sources..."
 		}
-		return "⁖ asking the sources…"
+		return mark + "asking the sources…"
 	}
 	sep := " · "
 	if Plain() {
@@ -533,6 +530,7 @@ func sourcePanelLines(theme *Theme, row sourcesPanelRow, inner int) []string {
 }
 
 // sourcePanelMark is the panel mark per outcome: ✓ done, ⁖ asking, ! failed.
+// A console without glyphs for the marks takes the plain set, as tela 9 does.
 func sourcePanelMark(theme *Theme, row sourcesPanelRow) (mark string, name, right lipgloss.Style) {
 	if Plain() {
 		switch {
@@ -548,9 +546,9 @@ func sourcePanelMark(theme *Theme, row sourcesPanelRow) (mark string, name, righ
 	case row.Failed:
 		return theme.Notice.Render("!"), theme.PanelText, theme.PanelMuted
 	case row.Done:
-		return theme.PanelLabel.Render("✓"), theme.PanelText, theme.PanelMuted
+		return theme.PanelLabel.Render(drawGlyph("✓", "+")), theme.PanelText, theme.PanelMuted
 	default:
-		return theme.PanelMuted.Render("⁖"), theme.PanelMuted, theme.PanelMuted
+		return theme.PanelMuted.Render(drawGlyph("⁖", "~")), theme.PanelMuted, theme.PanelMuted
 	}
 }
 

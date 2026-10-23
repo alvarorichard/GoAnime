@@ -75,9 +75,9 @@ func describeTopCineErr(media *models.Anime, err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, topcine.ErrNoPlayer):
-		return &friendlyError{cause: err, msg: "⚠️  TopCine has no player for this title yet. Try searching it on another source."}
+		return &friendlyError{cause: err, msg: "TopCine has no player for this title yet. Try searching it on another source."}
 	case errors.Is(err, ErrTopCineNoIMDb):
-		return &friendlyError{cause: err, msg: "⚠️  GoAnime couldn't link this TopCine movie to the servers it plays from. Try searching it on StartFlix."}
+		return &friendlyError{cause: err, msg: "GoAnime couldn't link this TopCine movie to the servers it plays from. Try searching it on StartFlix."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
 		return &friendlyError{cause: err, msg: topCineUnplayableMessage(media)}
 	default:
@@ -94,16 +94,16 @@ var tcLanguagesFn = func(ctx context.Context, playerURL string) (topcine.Languag
 // TopCine's own player whether it has the video at all, so the user learns
 // whether waiting can help.
 func topCineUnplayableMessage(media *models.Anime) string {
-	const fallback = "⚠️  TopCine has this title only on a server that asks for a browser check GoAnime can't pass. Try searching it on another source."
+	const fallback = "TopCine has this title only on a server that asks for a browser check GoAnime can't pass. Try searching it on another source."
 	langs, err := topCineLanguages(media)
 	switch {
 	case err != nil:
 		util.Debug("TopCine player check failed", "title", media.Name, "err", err)
 		return fallback
 	case !langs.Dubbed && !langs.Subtitled:
-		return "⚠️  TopCine has no video for this title yet. Try again later, or search it on another source."
+		return "TopCine has no video for this title yet. Try again later, or search it on another source."
 	case len(langs.Hosts) > 0:
-		return "⚠️  TopCine plays this title only on " + strings.Join(langs.Hosts, ", ") +
+		return "TopCine plays this title only on " + strings.Join(langs.Hosts, ", ") +
 			", which asks for a browser check GoAnime can't pass. Try searching it on another source."
 	default:
 		return fallback

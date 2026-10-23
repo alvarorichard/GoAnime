@@ -23,11 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMain pins the Japanese glosses on: renders must not depend on the fonts
-// of the machine running the tests. Tests about hiding them switch them off
-// and back on.
+// TestMain pins the Japanese glosses and the flavor glyphs on: renders must
+// not depend on the fonts of the machine running the tests. Tests about
+// hiding them switch them off and back on.
 func TestMain(m *testing.M) {
 	SetJapanese(true)
+	SetGlyphs(true)
 	os.Exit(m.Run())
 }
 
@@ -51,6 +52,7 @@ type fakeMachine struct {
 	goos      string
 	classic   bool
 	cjk       bool
+	covers    bool // the classic console font's coverage of the glosses
 	fonts     fontState
 	asked     int
 	installed int
@@ -58,9 +60,10 @@ type fakeMachine struct {
 
 func (f *fakeMachine) probes() *japaneseProbes {
 	return &japaneseProbes{
-		goos:           f.goos,
-		classicConsole: func() bool { return f.classic },
-		cjkCodePage:    func() bool { return f.cjk },
+		goos:              f.goos,
+		classicConsole:    func() bool { return f.classic },
+		cjkCodePage:       func() bool { return f.cjk },
+		consoleFontCovers: func([]rune) bool { return f.covers },
 		fonts: func() fontState {
 			f.asked++
 			return f.fonts
@@ -105,8 +108,14 @@ func TestResolveJapanese(t *testing.T) {
 		{name: "macOS", env: []string{"TERM=xterm-256color"}, machine: fakeMachine{goos: "darwin"}, want: true},
 		{name: "android", env: nil, machine: fakeMachine{goos: "android"}, want: true},
 
-		{name: "windows terminal", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows"}, want: true},
+		{name: "windows terminal", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows"}, want: true, wantAsked: true},
+		// A Windows Sandbox or any en-US machine ships no Japanese font at
+		// all for its terminals to fall back on: the probe installs GoAnime
+		// Glyphs and hides the glosses until the terminal is reopened.
+		{name: "windows terminal without a Japanese font", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows", fonts: fontMissing}, want: false, wantAsked: true, wantInstalled: true},
+		{name: "windows terminal whose only Japanese font got installed now", env: []string{"WT_SESSION=1"}, machine: fakeMachine{goos: "windows", fonts: fontPending}, want: false, wantAsked: true},
 		{name: "classic windows console", env: nil, machine: fakeMachine{goos: "windows", classic: true}, want: false},
+		{name: "classic console whose font covers the glosses", env: nil, machine: fakeMachine{goos: "windows", classic: true, covers: true}, want: true},
 		{name: "classic console on a japanese windows", env: nil, machine: fakeMachine{goos: "windows", classic: true, cjk: true}, want: true},
 
 		{name: "over ssh the client draws", env: with(desktop, "SSH_CONNECTION=10.0.0.2 5000 10.0.0.1 22"), machine: fakeMachine{goos: "linux", fonts: fontMissing}, want: true},

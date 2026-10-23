@@ -65,12 +65,7 @@ type rowStyles struct {
 func (d rowDelegate) styles(selected, dimmed bool, status PickStatus) rowStyles {
 	t := d.theme
 	if selected {
-		cursor := " ▶ "
-		if Plain() {
-			// Tela 9: without color the cursor is ">" with reverse
-			// video, never a color fill.
-			cursor = "> "
-		}
+		cursor := drawGlyph(" ▶ ", "> ")
 		return rowStyles{
 			cursor: cursor,
 			fill:   t.Selected.UnsetBold(), title: t.Selected, desc: t.SelectedMuted, gutter: t.SelectedMuted,
@@ -218,11 +213,7 @@ func styleList(l *list.Model, theme *Theme, placeholder string) {
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 
-	prompt := "❯ "
-	if Plain() {
-		prompt = "> "
-	}
-	l.FilterInput.Prompt = prompt
+	l.FilterInput.Prompt = drawGlyph("❯ ", "> ")
 	l.FilterInput.Placeholder = placeholder
 	input := l.FilterInput.Styles()
 	input.Focused.Prompt = theme.Primary
@@ -243,8 +234,8 @@ func styleList(l *list.Model, theme *Theme, placeholder string) {
 	l.Styles.NoItems = theme.Muted.PaddingLeft(1)
 	l.Styles.PaginationStyle = lipgloss.NewStyle().PaddingLeft(3)
 	l.Styles.ArabicPagination = theme.Muted
-	l.Styles.ActivePaginationDot = theme.Primary.SetString("●")
-	l.Styles.InactivePaginationDot = theme.Faint.SetString("○")
+	l.Styles.ActivePaginationDot = theme.Primary.SetString(drawGlyph("●", "*"))
+	l.Styles.InactivePaginationDot = theme.Faint.SetString(drawGlyph("○", "·"))
 	if Plain() {
 		l.Styles.ActivePaginationDot = theme.Primary.SetString("*")
 		l.Styles.InactivePaginationDot = theme.Faint.SetString("-")
@@ -255,27 +246,16 @@ func styleList(l *list.Model, theme *Theme, placeholder string) {
 
 // statusMark is the one-cell mark drawn before a title. In plain mode the
 // marks become ASCII (tela 9): x for watched, ~ for in progress, * for
-// current, so screen readers and dumb terminals read them as text.
+// current, so screen readers and dumb terminals read them as text. A console
+// whose fonts lack the glyph gets the same ASCII instead of a box.
 func statusMark(status PickStatus) string {
-	if Plain() {
-		switch status {
-		case PickWatched:
-			return "x"
-		case PickInProgress:
-			return "~"
-		case PickCurrent:
-			return "*"
-		default:
-			return " "
-		}
-	}
 	switch status {
 	case PickWatched:
-		return "✓"
+		return drawGlyph("✓", "x")
 	case PickInProgress:
-		return "◐"
+		return drawGlyph("◐", "~")
 	case PickCurrent:
-		return "●"
+		return drawGlyph("●", "*")
 	default:
 		return " "
 	}

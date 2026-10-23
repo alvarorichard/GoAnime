@@ -12,15 +12,29 @@ import (
 // minPanelWidth is the narrowest panel worth drawing, shadow included.
 const minPanelWidth = 24
 
-// halftone is the site's screen tone in braille dots: dense in a panel's top
-// right corner, fading toward the left and down. A row is cut from the left
-// when the panel's text needs the room.
-var halftone = []string{
+// brailleHalftone is the site's screen tone in braille dots: dense in a
+// panel's top right corner, fading toward the left and down. A row is cut
+// from the left when the panel's text needs the room.
+var brailleHalftone = []string{
 	"⠀⠀⠁⠄⠁⠅⠅⠅⠕⢅⠕⢕⢕⢕⢝⢵⢝⢽",
 	"⠀⠀⠁⠀⠁⠅⠁⠅⠕⠅⠕⢕⠕⢕⢝⢕⢝⢕",
 	"⠀⠀⠀⠀⠁⠄⠁⠅⠅⠅⠕⠅⠕⢕⠕⢕⠕⢕",
 	"⠀⠀⠀⠀⠁⠀⠁⠅⠁⠅⠅⠅⠕⠅⠕⠅⠕⢅",
 	"⠀⠀⠀⠀⠀⠀⠁⠀⠁⠅⠁⠅⠁⠅⠅⠅⠕⠅",
+}
+
+// halftone answers with the screen tone when the console has a font for its
+// braille dots. It is one artwork: a console without the dots draws none of
+// it, instead of boxes inside the paper.
+func halftone() []string {
+	for _, row := range brailleHalftone {
+		for _, r := range row {
+			if !GlyphCovered(r) {
+				return nil
+			}
+		}
+	}
+	return brailleHalftone
 }
 
 // panelContent is what a paper panel holds, from its heading down.
@@ -221,9 +235,9 @@ func renderPanelBlock(theme *Theme, lines []string, width int) string {
 		used := lipgloss.Width(left)
 
 		tone := ""
-		if r < len(halftone) {
+		if r < len(halftone()) {
 			if room := width - used - 2; room > 0 {
-				tone = theme.PanelTone.Render(rightCells(halftone[r], room))
+				tone = theme.PanelTone.Render(rightCells(halftone()[r], room))
 			}
 		}
 		pad := width - used - lipgloss.Width(tone)
@@ -265,10 +279,8 @@ func renderBar(width int, ratio float64, filled, empty *lipgloss.Style) string {
 		ratio = 0
 	}
 	n := int(math.Round(math.Max(0, math.Min(1, ratio)) * float64(width)))
-	if Plain() {
-		return filled.Render(strings.Repeat("=", n)) + empty.Render(strings.Repeat("-", width-n))
-	}
-	return filled.Render(strings.Repeat("━", n)) + empty.Render(strings.Repeat("━", width-n))
+	barFill, barEmpty := meterRunes()
+	return filled.Render(strings.Repeat(string(barFill), n)) + empty.Render(strings.Repeat(string(barEmpty), width-n))
 }
 
 // FormatClock renders seconds as mm:ss, or h:mm:ss from an hour up.

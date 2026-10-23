@@ -80,9 +80,13 @@ func defaultRunSpinner(title string, action func()) {
 	wrapped := func() { once.Do(action) }
 
 	_ = tui.RunClean(func() error {
+		kind := spinner.Line // the ASCII frames every console font carries
+		if tui.SpinnerDots() {
+			kind = spinner.Dots
+		}
 		return spinner.New().WithTheme(tui.SpinnerTheme()).
 			Title(title).
-			Type(spinner.Dots).
+			Type(kind).
 			Action(wrapped).
 			Run()
 	})

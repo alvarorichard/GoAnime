@@ -76,20 +76,20 @@ func describePanelErr(source string, err error) error {
 	case err == nil:
 		return nil
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0:
-		msg := "⚠️  " + source + " only offers this on servers GoAnime can't play yet (" +
+		msg := source + " only offers this on servers GoAnime can't play yet (" +
 			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."
 		if !ytdlpOnPath() {
 			msg += " Installing yt-dlp unlocks more servers."
 		}
 		return &friendlyError{cause: err, msg: msg}
 	case errors.Is(err, startflix.ErrNoSupportedServer):
-		return &friendlyError{cause: err, msg: "⚠️  None of " + source + "'s servers worked for this right now. Try again in a moment."}
+		return &friendlyError{cause: err, msg: "None of " + source + "'s servers worked for this right now. Try again in a moment."}
 	case errors.Is(err, startflix.ErrNoPlayers):
-		return &friendlyError{cause: err, msg: "⚠️  No video sources for this on " + source + " right now. Try another episode, or come back later."}
+		return &friendlyError{cause: err, msg: "No video sources for this on " + source + " right now. Try another episode, or come back later."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
-		return &friendlyError{cause: err, msg: "⚠️  " + source + " lists this title but has no video for it. Try another result below."}
+		return &friendlyError{cause: err, msg: source + " lists this title but has no video for it. Try another result below."}
 	case errors.Is(err, context.DeadlineExceeded):
-		return &friendlyError{cause: err, msg: "⚠️  " + source + " took too long to answer. Please try again."}
+		return &friendlyError{cause: err, msg: source + " took too long to answer. Please try again."}
 	default:
 		return err
 	}
@@ -358,8 +358,8 @@ func selectPanelAudio(source, titleURL string, season startflix.Season) startfli
 	}
 
 	labels := []string{
-		fmt.Sprintf("🎙️  Dublado (%s)", episodeCountLabel(len(season.Dubbed))),
-		fmt.Sprintf("💬 Legendado (%s)", episodeCountLabel(len(season.Subtitled))),
+		fmt.Sprintf("Dublado (%s)", episodeCountLabel(len(season.Dubbed))),
+		fmt.Sprintf("Legendado (%s)", episodeCountLabel(len(season.Subtitled))),
 	}
 	choice := startflix.AudioDubbed
 	if idx, err := sfxPickFn(source+" > Você quer assistir dublado ou legendado? ", labels); err == nil && idx == 1 {
@@ -730,7 +730,7 @@ type audioSwap struct {
 var sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
 	idx, err := tui.Pick([]tui.PickItem{
 		{Label: audioSwapPlayLabel(swap.Have)},
-		{Label: "↩ Back"},
+		{Label: "Back"},
 	}, tui.PickOptions{
 		Breadcrumb:   swap.Source + " > " + string(swap.Want) + " unavailable",
 		WindowTitle:  "GoAnime - " + swap.Source,
@@ -751,9 +751,9 @@ var sfxAudioSwapFn = func(swap audioSwap) (bool, error) {
 
 func audioSwapPlayLabel(have startflix.Audio) string {
 	if have == startflix.AudioSubtitled {
-		return "💬 Play the original audio"
+		return "Play the original audio"
 	}
-	return "🎙️  Play the Portuguese dub"
+	return "Play the Portuguese dub"
 }
 
 // acceptAudioSwap decides whether a stream in another audio than the user's
@@ -788,7 +788,7 @@ func acceptAudioSwap(media *models.Anime, want, have startflix.Audio, offered []
 		return nil
 	}
 	cause := fmt.Errorf("%w: %s plays, %s does not", ErrAudioUnavailable, have, want)
-	msg := fmt.Sprintf("⚠️  No server GoAnime can play has this title %s right now, so the %s was not played in its place.",
+	msg := fmt.Sprintf("No server GoAnime can play has this title %s right now, so the %s was not played in its place.",
 		want, audioDescription(have))
 	if err != nil && !errors.Is(err, tui.ErrPickBack) && !errors.Is(err, tui.ErrPickCancelled) {
 		util.Debug("Audio swap question unavailable, refusing the swap", "err", err)

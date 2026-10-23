@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/internal/api"
 	apisource "github.com/alvarorichard/Goanime/internal/api/source"
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/stretchr/testify/assert"
@@ -62,10 +63,17 @@ func TestMovieFriendlyErr(t *testing.T) {
 		want string
 	}{
 		{
-			name: "panel rephrasing rides the tail",
+			name: "friendly wording rides the chain",
 			err: fmt.Errorf("failed to get TopCine stream URL: %w",
-				errors.New("⚠️ TopCine only offers this on servers GoAnime can't play yet. Try it on another source.")),
-			want: "⚠️ TopCine only offers this on servers GoAnime can't play yet. Try it on another source.",
+				api.Friendly(errors.New("dead server"),
+					"TopCine only offers this on servers GoAnime can't play yet. Try it on another source.")),
+			want: "TopCine only offers this on servers GoAnime can't play yet. Try it on another source.",
+		},
+		{
+			name: "chain without friendly wording is returned whole",
+			err: fmt.Errorf("failed to get TopCine stream URL: %w",
+				errors.New("some internal detail")),
+			want: "failed to get TopCine stream URL: some internal detail",
 		},
 		{name: "raw error survives as-is", err: errors.New("context deadline exceeded"),
 			want: "context deadline exceeded"},
@@ -85,7 +93,8 @@ func TestMovieStreamFailedNotice(t *testing.T) {
 
 	t.Run("panel wording plus where else it is listed", func(t *testing.T) {
 		err := fmt.Errorf("failed to get TopCine stream URL: %w",
-			errors.New("⚠️ TopCine only offers this on dead servers. Try it later, or on another source."))
+			api.Friendly(errors.New("actelecup.com is dead"),
+				"TopCine only offers this on dead servers. Try it later, or on another source."))
 		notice := movieStreamFailedNotice(todo, err)
 		assert.Contains(t, notice, "TopCine only offers this on dead servers")
 		assert.Contains(t, notice, "The same movie is also listed on: Pobreflix.", "where the movie is listed now")

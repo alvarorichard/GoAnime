@@ -100,7 +100,7 @@ func TestFitBlock(t *testing.T) {
 }
 
 func FuzzFitBlockRespectsBounds(f *testing.F) {
-	for _, seed := range []string{"plain", "one\ntwo\nthree", "\x1b[31mcolored\x1b[0m", "日本語 🎬"} {
+	for _, seed := range []string{"plain", "one\ntwo\nthree", "\x1b[31mcolored\x1b[0m", "日本語 \U0001F3AC"} {
 		f.Add(seed, uint8(20), uint8(5))
 	}
 	f.Fuzz(func(t *testing.T, content string, rawWidth, rawHeight uint8) {

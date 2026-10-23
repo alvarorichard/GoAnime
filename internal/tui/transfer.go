@@ -69,10 +69,7 @@ const (
 // spring, so the bar glides between updates.
 func NewTransferBar() progress.Model {
 	theme := CurrentTheme()
-	fill, empty := '━', '━'
-	if Plain() {
-		fill, empty = '=', '-'
-	}
+	fill, empty := meterRunes()
 	bar := progress.New(
 		progress.WithColors(theme.Meter.GetForeground()),
 		progress.WithFillCharacters(fill, empty),
@@ -131,7 +128,7 @@ func RenderTransfer(t *Transfer, width int) string {
 		if status == "" {
 			status = "Done"
 		}
-		lines = append(lines, "", " "+theme.Primary.Render("✓ "+status))
+		lines = append(lines, "", " "+theme.Primary.Render(drawGlyph("✓", "x")+" "+status))
 	case TransferFailed:
 		if status == "" {
 			status = "Failed"
@@ -183,18 +180,19 @@ func renderTaskRows(theme *Theme, tasks []TransferTask) []string {
 
 	var rows []string
 	if len(done) > shownDoneTasks {
-		rows = append(rows, theme.Muted.Render(fmt.Sprintf(" ✓ %d more done", len(done)-shownDoneTasks)))
+		rows = append(rows, theme.Muted.Render(fmt.Sprintf(" %s %d more done", drawGlyph("✓", "x"), len(done)-shownDoneTasks)))
 		done = done[len(done)-shownDoneTasks:]
 	}
+	fill, _ := meterRunes()
 	for _, task := range done {
-		rows = append(rows, theme.Muted.Render(" ✓ "+label(task)+strings.Repeat("━", taskBarWidth)+"   done"))
+		rows = append(rows, theme.Muted.Render(" "+drawGlyph("✓", "x")+" "+label(task)+strings.Repeat(string(fill), taskBarWidth)+"   done"))
 	}
 	for _, task := range failed {
 		rows = append(rows, theme.Primary.Render(" ! ")+theme.Text.Render(label(task))+
 			strings.Repeat(" ", taskBarWidth+3)+theme.Primary.UnsetBold().Render("failed"))
 	}
 	for _, task := range active {
-		rows = append(rows, theme.Primary.UnsetBold().Render(" ◐ ")+theme.Text.Render(label(task))+
+		rows = append(rows, theme.Primary.UnsetBold().Render(" "+drawGlyph("◐", "~")+" ")+theme.Text.Render(label(task))+
 			renderBar(taskBarWidth, task.Percent, &theme.Meter, &theme.MeterEmpty)+
 			theme.Soft.Render(fmt.Sprintf("%7.0f%%", clampPercent(task.Percent)*100)))
 	}

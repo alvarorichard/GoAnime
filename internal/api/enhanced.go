@@ -46,6 +46,24 @@ type friendlyError struct {
 func (e *friendlyError) Error() string { return e.msg }
 func (e *friendlyError) Unwrap() error { return e.cause }
 
+// FriendlyMessage returns the plain-language message of a friendly error
+// chain for callers outside this package (playback shows that wording on the
+// result screen), reporting false when err carries no friendlyError.
+func FriendlyMessage(err error) (string, bool) {
+	var fe *friendlyError
+	if errors.As(err, &fe) {
+		return fe.msg, true
+	}
+	return "", false
+}
+
+// Friendly attaches a plain-language message to err while keeping the cause
+// reachable through errors.Is and errors.As, so other packages can produce
+// the same user-friendly failures the api layers do.
+func Friendly(cause error, msg string) error {
+	return &friendlyError{cause: cause, msg: msg}
+}
+
 // runWithSpinner runs the action with a spinner if stdout is a terminal,
 // otherwise runs the action directly. This ensures CI and non-interactive
 // environments work correctly since huh/v2 spinner may skip the Action
@@ -73,9 +91,13 @@ func runWithSpinner(title string, action func()) {
 	defer restoreConsoleLogs()
 	awaitActionThroughRunner(action, func(wrapped func()) {
 		_ = tui.RunClean(func() error {
+			kind := spinner.Line // the ASCII frames every console font carries
+			if tui.SpinnerDots() {
+				kind = spinner.Dots
+			}
 			return spinner.New().WithTheme(tui.SpinnerTheme()).
 				Title(title).
-				Type(spinner.Dots).
+				Type(kind).
 				Action(wrapped).
 				Run()
 		})

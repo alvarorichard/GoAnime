@@ -173,13 +173,8 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 	shell.Context = singleLine(opts.SourcesLine)
 
 	input := textinput.New()
-	if Plain() {
-		input.Prompt = "> "
-		input.Placeholder = "title, or down to pick from the lists below"
-	} else {
-		input.Prompt = "❯ "
-		input.Placeholder = "title, or ↓ to pick from the lists below"
-	}
+	input.Prompt = drawGlyph("❯ ", "> ")
+	input.Placeholder = "title, or " + drawGlyph("↓", "down") + " to pick from the lists below"
 	styles := textinput.DefaultStyles(themeIsDark())
 	styles.Focused.Text = theme.Text
 	styles.Focused.Placeholder = theme.Muted
@@ -635,10 +630,7 @@ func renderHomeRow(theme *Theme, selected bool, item homeRowItem, width int) str
 
 	cursor := "   "
 	if selected {
-		cursor = " ▶ "
-		if Plain() {
-			cursor = "> "
-		}
+		cursor = drawGlyph(" ▶ ", "> ")
 	}
 	rawMark := statusMark(item.status)
 	var mark string

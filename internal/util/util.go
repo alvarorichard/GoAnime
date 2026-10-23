@@ -336,6 +336,9 @@ func FlagParser() (string, error) {
 	// Look for a Japanese font before RunClean rewrites TERM: without one the
 	// glosses are hidden instead of drawn as boxes.
 	tui.EnsureJapaneseDetected()
+	// Ask the fonts what flavor glyphs they draw with (❯ ▶ ✓ …): uncovered
+	// ones degrade to the ASCII forms instead of drawing boxes.
+	tui.EnsureGlyphsDetected()
 
 	// Set performance profiling mode
 	PerfEnabled = *perf

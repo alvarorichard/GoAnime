@@ -327,7 +327,7 @@ func PromptForUpdate(release *GitHubRelease) (bool, error) {
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
-				Title("🚀 Update Available").
+				Title("Update Available").
 				Description(fmt.Sprintf("A new version of GoAnime is available!\n\n"+
 					"Current version: %s\n"+
 					"Latest version: %s\n\n"+
@@ -383,7 +383,7 @@ func CheckForUpdatesQuietly() {
 	}
 
 	if hasUpdate {
-		util.Info(fmt.Sprintf("🚀 New version available: %s (current: %s)",
+		util.Info(fmt.Sprintf("New version available: %s (current: %s)",
 			release.TagName, version.Version))
 		util.Info("Run with --update flag to update")
 	}

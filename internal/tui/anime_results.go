@@ -666,10 +666,7 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 	if len(group.versions) > 1 {
 		versionsLine += " · " + choose
 	}
-	mark, gap := "▶ ", "  "
-	if Plain() {
-		mark = "> "
-	}
+	mark, gap := drawGlyph("▶ ", "> "), "  "
 	lines := []string{versionsLine, ""}
 	for i, v := range group.versions {
 		label := displaySource(v.anime.Source)

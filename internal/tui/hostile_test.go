@@ -33,7 +33,7 @@ var hostileKeys = []tea.KeyPressMsg{
 	{Code: 'r', Text: "r"}, {Code: 'e', Text: "e"}, {Code: 'x', Text: "x"},
 	{Code: '0', Text: "0"}, {Code: '9', Text: "9"}, {Code: '/', Text: "/"},
 	{Code: 'g', Text: "g"}, {Code: 'G', Text: "G"},
-	{Code: -1, Text: "猫🎬\x1b[2J\n\t\x00"},
+	{Code: -1, Text: "猫\U0001F3AC\x1b[2J\n\t\x00"},
 	{Code: -1, Text: strings.Repeat("namakura ", 500)},
 	{Code: -1, Text: ">"},
 	{Code: 'c', Mod: tea.ModCtrl},

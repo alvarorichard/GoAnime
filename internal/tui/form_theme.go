@@ -31,10 +31,9 @@ func formStyles() *huh.Styles {
 	s := huh.ThemeBase(IsDark())
 	accent := t.Primary.UnsetBold()
 
-	selector, checked, unchecked := "▶ ", "✓ ", "• "
+	selector, checked, unchecked := drawGlyph("▶ ", "> "), drawGlyph("✓ ", "x "), drawGlyph("• ", "- ")
 	next, prev := "→", "←"
 	if Plain() {
-		selector, checked, unchecked = "> ", "x ", "- "
 		next, prev = ">", "<"
 	}
 

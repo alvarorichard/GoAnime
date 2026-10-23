@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	_ "embed"
 	"os"
 	"os/exec"
 	"runtime"
@@ -15,15 +16,55 @@ import (
 // row of boxes, as in the Arch Linux recording of #215, so GoAnime hides
 // them there, as plain mode does, instead of printing boxes. On Linux it
 // also installs GoAnime Glyphs, a font with just those characters, for the
-// terminal to use once it is reopened (japanese_font_linux.go).
+// terminal to use once it is reopened (japanese_font_linux.go); Windows
+// installs it under the user's fonts folder (japanese_font_windows.go),
+// because a Windows Sandbox or an en-US machine ships no Japanese font for
+// Windows Terminal to fall back on.
 //
 // resolveJapanese is the pure decision: env and the platform probes are
 // passed in so unit tests cover every branch. ShowJapanese is the cached
 // runtime wrapper every screen asks. GOANIME_JAPANESE=1|0 overrides it.
 
-// japaneseFontPattern asks fontconfig for fonts holding ゴ (U+30B4), the
-// long vowel mark ー (U+30FC) and 検 (U+691C): a katakana, the mark and a
-// kanji from the glosses. A font with all three is a Japanese font.
+// GoAnime Glyphs is Noto Sans Mono CJK JP cut down to the characters GoAnime
+// draws (fonts/build.py): 11 KB instead of the 16 MB a Japanese font takes.
+
+//go:embed fonts/GoAnimeGlyphs.otf
+var glyphFont []byte
+
+//go:embed fonts/OFL.txt
+var glyphFontLicense []byte
+
+const glyphFontFile = "GoAnimeGlyphs.otf"
+
+// writeGlyphFont writes GoAnime Glyphs and its license into dir, writing
+// aside and renaming, so a launcher never reads half a font.
+func writeGlyphFont(dir string) error {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.WriteFile("OFL.txt", glyphFontLicense, 0o600); err != nil {
+		return err
+	}
+	if err := root.WriteFile(glyphFontFile+".tmp", glyphFont, 0o600); err != nil {
+		return err
+	}
+	return root.Rename(glyphFontFile+".tmp", glyphFontFile)
+}
+
+// glossProbeRunes are ゴ (a katakana), the long vowel mark ー and 検 (a
+// kanji): one of each kind the glosses draw. A font answering them is a
+// Japanese font. fontconfig's pattern asks for exactly these, and the
+// Windows gdi probe asks for the same three.
+var glossProbeRunes = []rune{'ゴ', 'ー', '検'}
+
+// japaneseFontPattern asks fontconfig for fonts holding the glossProbeRunes
+// — the katakana ゴ, the mark ー and the kanji 検: a font with all three is a
+// Japanese font.
 const japaneseFontPattern = ":charset=30b4 30fc 691c"
 
 // fontProbeTimeout bounds fc-list at startup. A probe that does not answer
@@ -50,7 +91,11 @@ type japaneseProbes struct {
 	// cjkCodePage reports whether Windows runs a Chinese, Japanese or Korean
 	// code page, whose console fonts carry kana and kanji.
 	cjkCodePage func() bool
-	// fonts asks fontconfig for a font with the glosses' glyphs.
+	// consoleFontCovers asks gdi whether the one font the classic console
+	// draws with today answers every rune — the question cjkCodePage only
+	// guessed at from the code page.
+	consoleFontCovers func([]rune) bool
+	// fonts asks the machine for a font with the glossProbeRunes' glyphs.
 	fonts func() fontState
 	// installFont installs GoAnime Glyphs when no font has the glyphs.
 	installFont func()
@@ -85,9 +130,24 @@ func resolveJapanese(env []string, probes *japaneseProbes) bool {
 		// terminals fall back to them.
 		return true
 	case "windows":
+		if probes.classicConsole() {
+			// The classic console draws with the one font its settings chose
+			// and never falls back for a missing glyph. The code page is the
+			// age-old guess; the font's own gdi coverage answers it.
+			return probes.cjkCodePage() || probes.consoleFontCovers(glossProbeRunes)
+		}
 		// Windows Terminal, VS Code and every other ConPTY host fall back
-		// to the Japanese fonts Windows ships. The classic console does not.
-		return !probes.classicConsole() || probes.cjkCodePage()
+		// over the Japanese fonts the machine has — a Windows Sandbox ships
+		// without any, so the probe must in fact find one.
+		switch probes.fonts() {
+		case fontMissing:
+			probes.installFont()
+			return false
+		case fontPending:
+			return false
+		default:
+			return true
+		}
 	}
 	// The terminal draws with the fonts of the machine it runs on. Under
 	// WSL, over SSH or without a local display, that machine is not this
@@ -175,10 +235,11 @@ func EnsureJapaneseDetected() {
 	}
 	japaneseOnce.Do(func() {
 		japaneseDetected = resolveJapanese(os.Environ(), &japaneseProbes{
-			goos:           runtime.GOOS,
-			classicConsole: classicConsole,
-			cjkCodePage:    cjkCodePage,
-			fonts:          fontconfigState,
+			goos:              runtime.GOOS,
+			classicConsole:    classicConsole,
+			cjkCodePage:       cjkCodePage,
+			consoleFontCovers: probeConsoleFontCovers,
+			fonts:             japaneseFontProbe,
 			installFont: func() {
 				// Only for someone at the terminal: not for a pipe or a script.
 				if HasTerminal() && isStdoutTerminal() {

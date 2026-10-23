@@ -32,3 +32,24 @@ func cjkCodePage() bool {
 	}
 	return false
 }
+
+// probeConsoleFontCovers asks gdi whether the classic console's one chosen
+// font maps every rune of runes — the exact coverage conhost draws with,
+// instead of a guess from the code page. A lost answer keeps ascetics: no
+// gloss, so a misread font never prints boxes.
+func probeConsoleFontCovers(runes []rune) bool {
+	face := consoleFontFace()
+	if face == "" {
+		return false
+	}
+	dc, done := screenDC()
+	if dc == 0 {
+		return false
+	}
+	defer done()
+	drawn, ok := gdiFaceGlyphs(dc, face, runes)
+	if !ok {
+		return false
+	}
+	return every(drawn)
+}

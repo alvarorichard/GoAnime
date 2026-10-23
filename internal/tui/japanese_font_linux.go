@@ -5,7 +5,6 @@ package tui
 import (
 	"bufio"
 	"bytes"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,15 +15,8 @@ import (
 
 // GoAnime Glyphs is Noto Sans Mono CJK JP cut down to the characters GoAnime
 // draws (fonts/build.py): 11 KB instead of the 16 MB a Japanese font takes.
-// Linux terminals use it for those characters once fontconfig finds it.
-
-//go:embed fonts/GoAnimeGlyphs.otf
-var glyphFont []byte
-
-//go:embed fonts/OFL.txt
-var glyphFontLicense []byte
-
-const glyphFontFile = "GoAnimeGlyphs.otf"
+// The font bytes live in japanese.go so the Windows installer shares them.
+// Linux terminals use it for the glosses once fontconfig finds it.
 
 // clockTicks is the kernel's USER_HZ, the unit of a process start time in
 // /proc. Linux fixes it at 100 for user space on every architecture Go
@@ -44,6 +36,9 @@ func glyphFontDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "fonts", "goanime"), nil
 }
 
+// japaneseFontProbe asks fontconfig the question about this machine's fonts.
+func japaneseFontProbe() fontState { return fontconfigState() }
+
 // installGlyphFont writes GoAnime Glyphs and its license into the user's
 // font directory and says so for the debug log. The terminal that is open
 // now loaded its fonts before, so the glosses appear once it is reopened.
@@ -56,25 +51,6 @@ func installGlyphFont() string {
 		return "No Japanese font, and installing GoAnime Glyphs failed: " + err.Error()
 	}
 	return fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. The Japanese labels appear once the terminal is reopened", dir)
-}
-
-func writeGlyphFont(dir string) error {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return err
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
-	if err := root.WriteFile("OFL.txt", glyphFontLicense, 0o600); err != nil {
-		return err
-	}
-	// Written aside and renamed, so fontconfig never reads half a font.
-	if err := root.WriteFile(glyphFontFile+".tmp", glyphFont, 0o600); err != nil {
-		return err
-	}
-	return root.Rename(glyphFontFile+".tmp", glyphFontFile)
 }
 
 // glyphFontState tells fonts that draw the glosses apart. Any font but

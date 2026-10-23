@@ -73,11 +73,11 @@ func describePobreflixErr(media *models.Anime, err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrPobreflixNoIMDb):
-		return &friendlyError{cause: err, msg: "⚠️  GoAnime couldn't link this Pobreflix movie to the servers it plays from. Try searching it on StartFlix."}
+		return &friendlyError{cause: err, msg: "GoAnime couldn't link this Pobreflix movie to the servers it plays from. Try searching it on StartFlix."}
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0 && len(noStream.Unsupported) > 0:
 		return &friendlyError{cause: err, msg: pobreflixDeadServersMessage(media, noStream.Unsupported)}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
-		return &friendlyError{cause: err, msg: "⚠️  Pobreflix has this title only on servers that don't carry it. Try searching it on StartFlix or another source."}
+		return &friendlyError{cause: err, msg: "Pobreflix has this title only on servers that don't carry it. Try searching it on StartFlix or another source."}
 	default:
 		return describePanelErr(pobreflix.SourceName, err)
 	}
@@ -96,7 +96,7 @@ func pobreflixDeadServersMessage(media *models.Anime, unsupported []string) stri
 	if media.MediaType == models.MediaTypeMovie {
 		what = "movie"
 	}
-	return "⚠️  Pobreflix has this " + what + " only on servers that no longer answer (" +
+	return "Pobreflix has this " + what + " only on servers that no longer answer (" +
 		strings.Join(unsupported, ", ") + "). Try again later, or search it on another source."
 }
 

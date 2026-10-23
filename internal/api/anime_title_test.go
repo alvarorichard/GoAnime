@@ -138,10 +138,11 @@ func TestCleanTitle_BrazilianSources(t *testing.T) {
 			expected: "Attack on Titan: The Final Season",
 		},
 
-		// Source tags
+		// Source tags. AnimeFire/AllAnime paint an emoji before the bracket;
+		// spelled here as code-point escapes to keep emoji out of the source.
 		{
-			name:     "removes 🔥[AnimeFire] emoji tag",
-			input:    "🔥[AnimeFire] One Piece",
+			name:     "removes AnimeFire fire-emoji tag",
+			input:    "\U0001F525[AnimeFire] One Piece",
 			expected: "One Piece",
 		},
 		{
@@ -150,8 +151,8 @@ func TestCleanTitle_BrazilianSources(t *testing.T) {
 			expected: "Naruto",
 		},
 		{
-			name:     "removes 🌐[AllAnime] emoji tag",
-			input:    "🌐[AllAnime] Bleach",
+			name:     "removes AllAnime globe-emoji tag",
+			input:    "\U0001F310[AllAnime] Bleach",
 			expected: "Bleach",
 		},
 

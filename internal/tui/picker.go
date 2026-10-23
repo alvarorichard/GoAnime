@@ -239,10 +239,7 @@ func newPickerModel(items []PickItem, opts PickOptions) *pickerModel {
 	if singleLine(opts.FilterPlaceholder) != "" {
 		// Tela 5: the jump hint reads persistently above the list, not
 		// only while filtering.
-		prompt := "❯ "
-		if Plain() {
-			prompt = "> "
-		}
+		prompt := drawGlyph("❯ ", "> ")
 		entries.Title = theme.Primary.Render(prompt) + theme.Muted.Render(placeholder)
 		entries.SetShowTitle(true)
 	}

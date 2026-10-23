@@ -553,5 +553,5 @@ func TestTopCineUnplayableMessage(t *testing.T) {
 	}
 	got := topCineUnplayableMessage(topCineSeries("show"))
 	assert.Contains(t, got, "only on 1take.top, 2take.top")
-	assert.True(t, strings.HasPrefix(got, "⚠️"))
+	assert.True(t, strings.HasPrefix(got, "TopCine"), "the unplayable message is plain language, emoji-free")
 }

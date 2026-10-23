@@ -1,3 +1,15 @@
+# GoAnime Release Notes - Unreleased
+
+## Console typography
+
+- **CJK renders without boxes everywhere**: Japanese glosses (音声, 続き, 最近…) now go through a font-coverage probe. On a Windows console whose fonts lack Japanese — Windows Sandbox ships none — GoAnime installs an embedded `GoAnime Glyphs` subset of Noto Sans Mono CJK JP into the user's font set and re-checks at the next launch; nothing degrades into tofu boxes.
+- **Decorative glyphs degrade to ASCII**: the `❯` prompt, `▶` cursor, `✓`/`◐`/`●` marks, `⁖` and the braille halftone/spinner are now drawn only when the console font verifiably covers them (probed through the console's own font and, under Windows Terminal, any installed face); otherwise their ASCII pair (`> x o -`, `= -`) takes over. Strings with no verifiable font draw nothing but ASCII.
+- **UTF-8 consoles**: GoAnime sets the output code page to 65001 in classic Windows consoles (restoring it on exit), so UTF-8 status lines decode as written regardless of the host's legacy code page.
+- **Every emoji left the source code**: update prompts, warning messages (`⚠️` prefixes are now plain wording), audio picker labels, perf-report headers and ratings (`★ 8.7` → `8.7/10`) are emoji-free. Scraper-title sanitization still strips the web's emoji source tags — the regexes spell them by code point (`\x{1F525}`) so no emoji glyph appears in the tree.
+- **A rework-proofing scan** (`TestGlyphFontCoversEveryDecorativeGlyph`) fails the build when any future string literal carries a console glyph outside the safe classes (ASCII, latin-1, cp1252 extras, WGL4 shapes, basic arrows) without registering the rune and its ASCII fallback in `flavorRunes`.
+
+---
+
 # GoAnime Release Notes - Version 1.8.7
 
 Release date: 2026-09-14

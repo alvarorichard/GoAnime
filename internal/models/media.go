@@ -181,7 +181,7 @@ func (m *Media) OfficialTitle() string {
 // GetRatingDisplay returns a formatted rating string
 func (m *Media) GetRatingDisplay() string {
 	if m.Rating > 0 {
-		return fmt.Sprintf("★ %.1f", m.Rating)
+		return fmt.Sprintf("%.1f/10", m.Rating)
 	}
 	return ""
 }

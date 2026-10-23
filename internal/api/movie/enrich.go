@@ -296,7 +296,7 @@ func FormatMediaInfo(media *models.Media) string {
 	}
 
 	if media.Rating > 0 {
-		parts = append(parts, fmt.Sprintf("★ %.1f", media.Rating))
+		parts = append(parts, fmt.Sprintf("%.1f/10", media.Rating))
 	}
 
 	if media.Runtime > 0 {

@@ -44,7 +44,7 @@ func TestFormatMediaInfo(t *testing.T) {
 		{
 			name:  "rating only",
 			media: &models.Media{Rating: 8.7},
-			want:  "★ 8.7",
+			want:  "8.7/10",
 		},
 		{
 			name:  "runtime hours+mins",
@@ -74,7 +74,7 @@ func TestFormatMediaInfo(t *testing.T) {
 				Runtime: 148,
 				Genres:  []string{"Action", "Sci-Fi"},
 			},
-			want: "2010 | ★ 8.7 | 2h 28m | Action, Sci-Fi",
+			want: "2010 | 8.7/10 | 2h 28m | Action, Sci-Fi",
 		},
 		{
 			name:  "zero rating omitted",

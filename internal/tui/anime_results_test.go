@@ -163,7 +163,7 @@ func TestSingleLine(t *testing.T) {
 }
 
 func FuzzSingleLineNeverReturnsControl(f *testing.F) {
-	for _, seed := range []string{"Frieren", "Title\r\nInjected\x1b[2J", "日本語 🎬", "\x00\x1b]8;;https://example.com\aevil\x1b]8;;\a"} {
+	for _, seed := range []string{"Frieren", "Title\r\nInjected\x1b[2J", "日本語 \U0001F3AC", "\x00\x1b]8;;https://example.com\aevil\x1b]8;;\a"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, value string) {

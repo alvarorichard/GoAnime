@@ -42,7 +42,7 @@ func TestGetAnimesDigitalEpisodesAudioChoice(t *testing.T) {
 
 	t.Run("dubbed can be selected", func(t *testing.T) {
 		animesDigitalPickFn = func(labels []string) (int, error) {
-			if len(labels) != 2 || labels[0] != "💬 Legendado" {
+			if len(labels) != 2 || labels[0] != "Legendado" {
 				t.Fatalf("labels = %v", labels)
 			}
 			return 1, nil

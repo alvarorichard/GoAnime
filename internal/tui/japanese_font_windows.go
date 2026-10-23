@@ -1,0 +1,389 @@
+//go:build windows
+
+package tui
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf16"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
+)
+
+// GoAnime Glyphs is Noto Sans Mono CJK JP cut down to the characters GoAnime
+// draws (fonts/build.py): 11 KB instead of the 16 MB a Japanese font takes.
+// Windows machines without the Japanese supplemental fonts — a Windows
+// Sandbox, an en-US install that never opened any Japanese document — fall
+// back over nothing and draw every gloss as a box, so GoAnime installs its
+// font for the user and Windows Terminal finds it once it is reopened, the
+// way fontconfig finds it on Linux.
+
+// glyphFontFile and the font bytes live in japanese.go, shared with Linux;
+// glyphFontFamily is the family name fonts/build.py stamps into the font;
+// gdi's enumeration hands it back so the probes can tell our font apart.
+const glyphFontFamily = "GoAnime Glyphs"
+
+// gdi's DEFAULT_CHARSET (1): enumerate every face the fonts register, and
+// GGI_MARK_NONEXISTING_GLYPHS (1): GetGlyphIndices maps a rune the face
+// lacks to FFFF instead of some stand-in glyph.
+const (
+	defaultCharSet           = 1
+	ggiMarkNonexistingGlyphs = 1
+)
+
+var (
+	gdi32                   = windows.NewLazySystemDLL("gdi32.dll")
+	procCreateFontIndirectW = gdi32.NewProc("CreateFontIndirectW")
+	procEnumFontFamiliesExW = gdi32.NewProc("EnumFontFamiliesExW")
+	procGetGlyphIndicesW    = gdi32.NewProc("GetGlyphIndicesW")
+	procSelectObject        = gdi32.NewProc("SelectObject")
+	procDeleteObject        = gdi32.NewProc("DeleteObject")
+
+	user32           = windows.NewLazySystemDLL("user32.dll")
+	procGetDC        = user32.NewProc("GetDC")
+	procReleaseDC    = user32.NewProc("ReleaseDC")
+	procPostMessageW = user32.NewProc("PostMessageW")
+
+	kernel32                    = windows.NewLazySystemDLL("kernel32.dll")
+	procGetCurrentConsoleFontEx = kernel32.NewProc("GetCurrentConsoleFontEx")
+	procAddFontResourceW        = kernel32.NewProc("AddFontResourceW")
+)
+
+// logfontW is gdi's LOGFONTW: the description of a font a coverage probe
+// selects with, and the messenger of each face name in the enumeration
+// callback.
+type logfontW struct {
+	Height, Width, Escapement, Orientation, Weight               int32
+	Italic, Underline, StrikeOut                                 uint8
+	CharSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily uint8
+	FaceName                                                     [32]uint16
+}
+
+// consoleFontInfo is kernel32's CONSOLE_FONT_INFOEX, read to learn which face
+// the classic console draws with today.
+type consoleFontInfo struct {
+	CBSize, NFont          uint32
+	Width, Height          int16
+	FontFamily, FontWeight uint32
+	FaceName               [32]uint16
+}
+
+// consoleFontFace names the face the classic console draws with today.
+// An empty name means the question lost an answer — the handle is not the
+// console, or the API refused.
+func consoleFontFace() string {
+	console, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+	if err != nil || console == windows.InvalidHandle {
+		return ""
+	}
+	var info consoleFontInfo
+	info.CBSize = uint32(unsafe.Sizeof(info))
+	if r1, _, _ := procGetCurrentConsoleFontEx.Call(uintptr(console), 0, uintptr(unsafe.Pointer(&info))); r1 == 0 {
+		return ""
+	}
+	return windows.UTF16ToString(info.FaceName[:])
+}
+
+// screenDC borrows the screen's device context, where the system's fonts
+// live; the done func hands it back. A borrowed context of 0 means gdi could
+// not answer at all.
+func screenDC() (dc uintptr, done func()) {
+	handle, _, _ := procGetDC.Call(0)
+	if handle == 0 {
+		return 0, func() {}
+	}
+	return handle, func() { _, _, _ = procReleaseDC.Call(0, handle) }
+}
+
+// utf16Face copies a face name into a LOGFONTW's fixed buffer.
+func utf16Face(face string) [32]uint16 {
+	var name [32]uint16
+	encoded := utf16.Encode([]rune(face))
+	if len(encoded) > 31 {
+		encoded = encoded[:31]
+	}
+	copy(name[:], encoded)
+	return name
+}
+
+// gdiFaceGlyphs asks gdi to map each rune of runes with face and says
+// whether that face draws it. ok is false when gdi could not answer at all.
+// Every rune here is in the BMP, so runes and their utf16 words pair up.
+func gdiFaceGlyphs(dc uintptr, face string, runes []rune) (map[rune]bool, bool) {
+	if dc == 0 || face == "" || len(runes) == 0 {
+		return nil, false
+	}
+	drawn := make(map[rune]bool, len(runes))
+	f := logfontW{CharSet: defaultCharSet}
+	f.FaceName = utf16Face(face)
+	hfont, _, _ := procCreateFontIndirectW.Call(uintptr(unsafe.Pointer(&f)))
+	if hfont == 0 {
+		return drawn, false
+	}
+	defer func() { _, _, _ = procDeleteObject.Call(hfont) }()
+	previous, _, _ := procSelectObject.Call(dc, hfont)
+	defer func() { _, _, _ = procSelectObject.Call(dc, previous) }()
+	chars := utf16.Encode(runes)
+	mapped := make([]uint16, len(chars))
+	r1, _, _ := procGetGlyphIndicesW.Call(dc,
+		uintptr(unsafe.Pointer(&chars[0])), uintptr(len(chars)),
+		uintptr(unsafe.Pointer(&mapped[0])), ggiMarkNonexistingGlyphs)
+	if r1 == 0 {
+		return drawn, false
+	}
+	for i, r := range runes {
+		drawn[r] = mapped[i] != 0xFFFF
+	}
+	return drawn, true
+}
+
+// enumFontState guards the callback's collection: gdi runs it here and now,
+// once per enumeration.
+var (
+	enumMu            sync.Mutex
+	enumFacesTalked   []string
+	enumFontFacesProc = windows.NewCallback(enumFontFace)
+)
+
+// enumFontFace receives a face per call; 1 keeps enumerating, 0 stops it.
+// NewCallback hands each argument over register-sized, so the LOGFONTW
+// pointer arrives already typed — real pointers, not raw uintptrs to cast.
+func enumFontFace(lfont *logfontW, metric, fontType, lparam uintptr) uintptr {
+	if lfont == nil {
+		return 1
+	}
+	if name := windows.UTF16ToString(lfont.FaceName[:]); name != "" {
+		enumFacesTalked = append(enumFacesTalked, name)
+	}
+	return 1
+}
+
+// enumFontFaces lists every face name the system's fonts register, each once,
+// in gdi's own order. ok is false when gdi could not enumerate at all.
+func enumFontFaces() ([]string, bool) {
+	enumMu.Lock()
+	defer enumMu.Unlock()
+	enumFacesTalked = nil
+	dc, done := screenDC()
+	if dc == 0 {
+		return nil, false
+	}
+	defer done()
+	f := logfontW{CharSet: defaultCharSet}
+	r1, _, _ := procEnumFontFamiliesExW.Call(dc, uintptr(unsafe.Pointer(&f)), enumFontFacesProc, 0, 0)
+	if r1 == 0 {
+		return nil, false
+	}
+	faces := make([]string, 0, len(enumFacesTalked))
+	seen := make(map[string]bool, len(enumFacesTalked))
+	for _, face := range enumFacesTalked {
+		if seen[face] {
+			continue
+		}
+		seen[face] = true
+		faces = append(faces, face)
+	}
+	return faces, true
+}
+
+// windowsFontState answers for a ConPTY host: Windows Terminal, VS Code,
+// WezTerm and friends fall back over the fonts the machine actually has —
+// nothing in Windows ships them by itself, so without a Japanese font
+// anywhere they cannot draw a gloss however hard they try. GoAnime Glyphs
+// alone only counts once the terminal host has opened after its install, as
+// on Linux.
+func windowsFontState() fontState {
+	dc, done := screenDC()
+	if dc == 0 {
+		return fontUnknown
+	}
+	defer done()
+	faces, ok := enumFontFaces()
+	if !ok {
+		return fontUnknown
+	}
+	ours := false
+	for _, face := range faces {
+		drawn, askOK := gdiFaceGlyphs(dc, face, glossProbeRunes)
+		if !askOK {
+			continue
+		}
+		if !every(drawn) {
+			continue
+		}
+		if strings.EqualFold(face, glyphFontFamily) {
+			ours = true
+			continue
+		}
+		return fontPresent
+	}
+	if !ours {
+		return fontMissing
+	}
+	return glyphFontReloadedState()
+}
+
+// every reports whether drawn has a glyph for all of its runes.
+func every(drawn map[rune]bool) bool {
+	for _, yes := range drawn {
+		if !yes {
+			return false
+		}
+	}
+	return true
+}
+
+// glyphFontReloadedState decides for GoAnime Glyphs alone: present once the
+// terminal host opened after the install, pending before. An unknown start
+// time counts as present, like every probe that cannot answer.
+func glyphFontReloadedState() fontState {
+	dir, err := userFontDir()
+	if err != nil {
+		return fontPresent
+	}
+	info, err := os.Stat(filepath.Join(dir, glyphFontFile))
+	if err != nil {
+		return fontPresent
+	}
+	started, ok := consoleHostStart()
+	if !ok || started.After(info.ModTime()) {
+		return fontPresent
+	}
+	return fontPending
+}
+
+// consoleHosts are the images standing in for the terminal drawing this
+// process: a ConPTY host walks the ancestor chain to the future-known one
+// and reads its start time.
+var consoleHosts = []string{
+	"WindowsTerminal.exe", "OpenConsole.exe", "Code.exe",
+	"wezterm-gui.exe", "Alacritty.exe", "mintty.exe",
+	"Tabby.exe", "Hyper.exe",
+}
+
+// consoleHostStart reports when the terminal drawing this process started:
+// the start time of the nearest ancestor whose image is a known host.
+func consoleHostStart() (time.Time, bool) {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer func() { _ = windows.CloseHandle(snapshot) }()
+
+	parentOf := make(map[uint32]windows.ProcessEntry32, 64)
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	for err := windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
+		parentOf[entry.ProcessID] = entry
+	}
+
+	// Windows PIDs are 32-bit DWORDs; x/sys hands the current one over natively,
+	// so no int→uint32 conversion (and no overflow doubt) happens here.
+	pid := windows.GetCurrentProcessId()
+	for range 64 {
+		item, ok := parentOf[pid]
+		if !ok {
+			return time.Time{}, false
+		}
+		if isConsoleHost(windows.UTF16ToString(item.ExeFile[:])) {
+			return processStartTime(item.ProcessID)
+		}
+		pid = item.ParentProcessID
+		if pid <= 4 {
+			return time.Time{}, false
+		}
+	}
+	return time.Time{}, false
+}
+
+func isConsoleHost(name string) bool {
+	for _, host := range consoleHosts {
+		if strings.EqualFold(host, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// processStartTime reads when a process started.
+func processStartTime(pid uint32) (time.Time, bool) {
+	const processQueryLimitedInformation = 0x0800
+	handle, err := windows.OpenProcess(processQueryLimitedInformation, false, pid)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(0, creation.Nanoseconds()), true
+}
+
+// userFontDir is the per-user folder Windows reads fonts from — one of the
+// user's own, so GoAnime never touches a system directory.
+func userFontDir() (string, error) {
+	local := os.Getenv("LOCALAPPDATA")
+	if local == "" || !filepath.IsAbs(local) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		local = filepath.Join(home, "AppData", "Local")
+	}
+	return filepath.Join(local, "Microsoft", "Windows", "Fonts"), nil
+}
+
+// installGlyphFont installs GoAnime Glyphs for the user: the license, then
+// the font, then gdi loading it for this session and the per-user Fonts
+// registry key the next login finds it from, and a fontchange broadcast so
+// running apps refresh their lists. The terminal that is open now loaded its
+// fonts before, so the glosses appear once it is reopened.
+func installGlyphFont() string {
+	dir, err := userFontDir()
+	if err != nil {
+		return "No Japanese font, and no fonts folder to install GoAnime Glyphs into: " + err.Error()
+	}
+	if err := writeGlyphFont(dir); err != nil {
+		return "No Japanese font, and installing GoAnime Glyphs failed: " + err.Error()
+	}
+	path := filepath.Join(dir, glyphFontFile)
+	if loaded, _, _ := procAddFontResourceW.Call(windowsStringPtr(path)); loaded == 0 {
+		return "No Japanese font, and GoAnime Glyphs in " + dir + " did not load this session; reopen the terminal and GoAnime again"
+	}
+	fonts, err := registry.OpenKey(registry.CURRENT_USER,
+		`Software\Microsoft\Windows NT\CurrentVersion\Fonts`, registry.SET_VALUE)
+	if err == nil {
+		defer func() { _ = fonts.Close() }()
+		_ = fonts.SetStringValue(glyphFontFamily+" (TrueType)", path)
+	}
+	const (
+		hwndBroadcast uintptr = 0xFFFF
+		wmFontChange  uintptr = 0x001D
+	)
+	_, _, _ = procPostMessageW.Call(hwndBroadcast, wmFontChange, 0, 0)
+	return fmt.Sprintf("No Japanese font: installed GoAnime Glyphs in %s. The Japanese labels appear once the terminal is reopened", dir)
+}
+
+// windowsStringPtr hands gdi a NUL-terminated utf16 pointer.
+func windowsStringPtr(s string) uintptr {
+	ptr, err := windows.UTF16PtrFromString(s)
+	if err != nil {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(ptr))
+}
+
+// japaneseFontProbe answers on Windows with gdi: which installed faces have
+// the glyphs — not with fontconfig, fc-list which nothing here runs.
+func japaneseFontProbe() fontState { return windowsFontState() }
+
+// glyphFontState answers for files an fc-list found. fontconfig never runs on
+// Windows, so this never answers beyond its placeholder.
+func glyphFontState([]string) fontState { return fontPresent }

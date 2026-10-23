@@ -166,10 +166,10 @@ func TestMedia_GetRatingDisplay(t *testing.T) {
 		r    float64
 		want string
 	}{
-		{"positive", 8.5, "★ 8.5"},
+		{"positive", 8.5, "8.5/10"},
 		{"zero", 0.0, ""},
 		{"negative", -1.0, ""},
-		{"one digit", 7.0, "★ 7.0"},
+		{"one digit", 7.0, "7.0/10"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

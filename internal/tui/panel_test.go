@@ -106,7 +106,7 @@ func TestRenderPanelBlock_HalftoneGivesWay(t *testing.T) {
 	theme := NewTheme(true)
 
 	short := strings.Split(ansi.Strip(renderPanelBlock(&theme, []string{"A"}, 40)), "\n")
-	assert.True(t, strings.HasSuffix(short[1], rightCells(halftone[1], 18)), "a short line leaves the whole tone")
+	assert.True(t, strings.HasSuffix(short[1], rightCells(halftone()[1], 18)), "a short line leaves the whole tone")
 
 	long := strings.Split(ansi.Strip(renderPanelBlock(&theme, []string{strings.Repeat("x", 36)}, 40)), "\n")
 	assert.Equal(t, 40, lipgloss.Width(long[1]))

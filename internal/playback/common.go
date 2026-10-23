@@ -105,18 +105,17 @@ func alternateMovieSources(current string) []string {
 }
 
 // movieFriendlyErr picks the user-facing tail of a movie stream failure: the
-// api layers rephrase the panel-shaped causes into a plain "⚠️ ..." message,
-// and everything left of it is the internal error chain only the debug log
-// needs.
+// api layers rephrase the panel-shaped causes into a plain-language
+// friendlyError whose message is all the user needs, while the rest of the
+// chain is internal detail only the debug log needs.
 func movieFriendlyErr(err error) string {
 	if err == nil {
 		return ""
 	}
-	msg := err.Error()
-	if i := strings.Index(msg, "⚠"); i >= 0 {
-		return msg[i:]
+	if msg, ok := api.FriendlyMessage(err); ok {
+		return msg
 	}
-	return msg
+	return err.Error()
 }
 
 // reportMovieStreamFailed is the movie-side counterpart of the anime flow's
@@ -130,9 +129,8 @@ func reportMovieStreamFailed(anime *models.Anime, err error) {
 }
 
 // movieStreamFailedNotice composes the result-screen notice for a movie whose
-// stream failed: the api layer's plain-language wording (everything after the
-// "⚠️" in the error text), plus where the same movie is still listed. No
-// error, no notice.
+// stream failed: the api layer's plain-language friendly wording, plus where
+// the same movie is still listed. No error, no notice.
 func movieStreamFailedNotice(anime *models.Anime, err error) string {
 	if err == nil {
 		return ""

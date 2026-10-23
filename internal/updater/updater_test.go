@@ -1189,7 +1189,7 @@ func TestTruncateText_Unicode(t *testing.T) {
 	}{
 		{
 			name:   "unicode characters - byte-based truncation",
-			text:   "Hello 世界 🌍",
+			text:   "Hello 世界 \U0001F30D",
 			maxLen: 8,
 			// Note: Current implementation uses byte-based truncation which can break UTF-8
 			expected: "Hello 世" + "...", // This might actually be invalid UTF-8

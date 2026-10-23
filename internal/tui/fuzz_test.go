@@ -65,7 +65,7 @@ func FuzzRelativeDay(f *testing.F) {
 
 // FuzzSingleLineConverges hunts control escapes through sanitization.
 func FuzzSingleLineConverges(f *testing.F) {
-	for _, seed := range []string{"", "\x00\x01\x02", "日本語 🎬", "\x1b]8;;https://x\aevil\x1b]8;;\a", " "} {
+	for _, seed := range []string{"", "\x00\x01\x02", "日本語 \U0001F3AC", "\x1b]8;;https://x\aevil\x1b]8;;\a", " "} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
