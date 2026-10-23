@@ -8,14 +8,15 @@ import (
 )
 
 // This cascade plays the Japanese gloss decision through the sessions one
-// machine really walks: a font-less box installs GoAnime Glyphs on the first
-// run; the terminal already open keeps the glosses hidden until it is
-// reopened; and the classic console draws them only once its own Properties
-// picks the glyphs font. Every step feeds the next — what one run installs,
-// the next run's font probe answers — so the steps share one machine and its
-// counters never rewind.
+// machine really walks on Windows: a font-less box installs GoAnime Glyphs
+// on the first run; the terminal already open keeps the glosses hidden until
+// it is reopened; and the classic console draws them only once its own
+// Properties pick the glyphs font. Every step feeds the next — what one run
+// installs, the next run's font probe answers — so the steps share one
+// machine and its counters never rewind. The Linux fontconfig cascade of
+// #215 lives in japanese_font_linux_test.go.
 
-func TestJapaneseFontCascade(t *testing.T) {
+func TestJapaneseFontCascadeAcrossSessions(t *testing.T) {
 	t.Parallel()
 	terminal := []string{"WT_SESSION=1"}
 
