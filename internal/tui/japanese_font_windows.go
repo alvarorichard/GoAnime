@@ -32,7 +32,10 @@ import (
 const glyphFontFamily = "GoAnime Glyphs"
 
 // The font and console calls go through typed Win32 bindings: the syscall
-// pointer plumbing stays in that dependency instead of living here.
+// pointer plumbing stays in that dependency instead of living here. That
+// dependency still uses unsafe.Pointer inside its generated wrappers, so this
+// is not a zero-unsafe build; the G103 remedy keeps unsafe out of this package
+// rather than out of the binary.
 //
 // gdi's DEFAULT_CHARSET (1): enumerate every face the fonts register, and
 // GGI_MARK_NONEXISTING_GLYPHS (1): GetGlyphIndices maps a rune the face
@@ -40,10 +43,6 @@ const glyphFontFamily = "GoAnime Glyphs"
 const (
 	defaultCharSet           = 1
 	ggiMarkNonexistingGlyphs = 1
-	// maxProbeRunes bounds the fixed UTF-16 buffers gdi maps. Every caller
-	// asks about a handful of glyphs; the bound keeps the count a typed
-	// constant instead of an unchecked int-to-int32 conversion.
-	maxProbeRunes = 32
 )
 
 // consoleFontFace names the face the classic console draws with today.
@@ -87,11 +86,21 @@ func utf16Face(face string) [32]uint16 {
 	return name
 }
 
+// glyphProbeCount turns a probe length into GetGlyphIndicesW's int32 count,
+// refusing lengths that cannot fit. Checking both bounds keeps the
+// conversion total on every platform, not only where int is 32-bit.
+func glyphProbeCount(n int) (int32, bool) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, false
+	}
+	return int32(n), true
+}
+
 // gdiFaceGlyphs asks gdi to map each rune of runes with face and says
 // whether that face draws it. ok is false when gdi could not answer at all.
 // Every rune here is in the BMP, so runes and their utf16 words pair up.
 func gdiFaceGlyphs(dc win32.HDC, face string, runes []rune) (map[rune]bool, bool) {
-	if dc == 0 || face == "" || len(runes) == 0 || len(runes) > maxProbeRunes {
+	if dc == 0 || face == "" || len(runes) == 0 {
 		return nil, false
 	}
 	drawn := make(map[rune]bool, len(runes))
@@ -110,13 +119,19 @@ func gdiFaceGlyphs(dc win32.HDC, face string, runes []rune) (map[rune]bool, bool
 		// UTF-16 word; a surrogate pair would break the index match.
 		return drawn, false
 	}
-	var charsBuf [maxProbeRunes]uint16
-	var mapped [maxProbeRunes]uint16
-	copy(charsBuf[:], chars)
+	// The buffers are exactly as long as the request: gdi maps one UTF-16
+	// word to one glyph index, and the return tells whether it answered for
+	// every word. A partial answer leaves the tail of mapped untouched, so
+	// only a full count may be read as glyph coverage.
+	count, countOK := glyphProbeCount(len(chars))
+	if !countOK {
+		return drawn, false
+	}
+	mapped := make([]uint16, len(chars))
 	r1 := win32.GetGlyphIndicesW(dc,
-		&charsBuf[0], maxProbeRunes,
+		&chars[0], count,
 		&mapped[0], ggiMarkNonexistingGlyphs)
-	if r1 == 0 {
+	if int64(r1) != int64(count) {
 		return drawn, false
 	}
 	for i, r := range runes {

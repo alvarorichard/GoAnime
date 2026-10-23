@@ -20,13 +20,59 @@ import (
 // (LOCALAPPDATA pointed there), and register stays false so the machine's
 // HKCU font registry is never written by a test.
 
-// TestFontProbesAnswer is the guard the old hand-rolled proc table needed:
+// TestFontBindingsAnswer is the guard the old hand-rolled proc table needed:
 // the typed Windows bindings behind the probes must resolve and answer on
-// this machine, not merely compile.
-func TestFontProbesAnswer(t *testing.T) {
+// this machine, not merely compile. It makes no claim that a console font
+// exists here: under ConPTY consoleFontFace answers "", which is the
+// documented lost answer, while a classic conhost names the face it draws
+// with and gdi maps the probe runes through it.
+func TestFontBindingsAnswer(t *testing.T) {
 	faces, ok := enumFontFaces()
 	require.True(t, ok, "gdi enumerates the faces installed on this machine")
 	require.NotEmpty(t, faces, "a Windows machine has fonts")
+
+	face := consoleFontFace()
+	if face == "" {
+		// ConPTY, a pipe, or a refused API: the console probe must fail
+		// closed rather than let a missing answer count as coverage.
+		assert.False(t, probeConsoleFontCovers(glossProbeRunes),
+			"an unknown console face never covers the gloss runes")
+		t.Log("consoleFontFace has no face here (ConPTY or no console); the lost answer is the documented one")
+		return
+	}
+
+	dc, done := screenDC()
+	require.NotZero(t, dc, "the screen context backs the console font probe")
+	defer done()
+	drawn, ok := gdiFaceGlyphs(dc, face, glossProbeRunes)
+	require.True(t, ok, "gdi maps glyphs for the console's face %q", face)
+	assert.Len(t, drawn, len(glossProbeRunes), "every console probe rune gets an answer")
+}
+
+// TestGdiFaceGlyphsMapsLongRequests pins the mapping buffers to the request:
+// the old fixed 32-rune window silently stopped at 32, so a long probe needs
+// a whole answer, not a prefix.
+func TestGdiFaceGlyphsMapsLongRequests(t *testing.T) {
+	faces, ok := enumFontFaces()
+	require.True(t, ok, "gdi enumerates the faces installed on this machine")
+	require.NotEmpty(t, faces, "a Windows machine has fonts")
+	dc, done := screenDC()
+	require.NotZero(t, dc, "gdi's screen context is available")
+	defer done()
+
+	// 52 BMP runes, well past the old window. Some faces (symbol and device
+	// fonts) cannot be selected or mapped; the first one that answers must
+	// answer for every rune.
+	runes := []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+	for _, face := range faces {
+		drawn, mapped := gdiFaceGlyphs(dc, face, runes)
+		if !mapped {
+			continue
+		}
+		assert.Len(t, drawn, len(runes), "gdi answers for every rune of %q", face)
+		return
+	}
+	t.Fatal("no installed face answered a 52-rune glyph-mapping request")
 }
 
 func TestInstallGlyphFontLandsAndAnswers(t *testing.T) {
