@@ -87,8 +87,11 @@ When you launch GoAnime on its own (double-click, Start menu or a desktop
 shortcut), it runs in [Windows Terminal](https://aka.ms/terminal) so the
 interface gets color, UTF-8 and font fallback. If it started in the classic
 console and Windows Terminal is missing, GoAnime installs it once with
-`winget`; when `winget` is unavailable it continues in the classic console.
-Set `GOANIME_TERMINAL=conhost` to stay in the classic console.
+`winget`. On images without `winget`, such as Windows Sandbox, it downloads
+Microsoft's official unpackaged build into
+`%LOCALAPPDATA%\GoAnime\WindowsTerminal` and reopens from there; without
+network access it continues in the classic console. Set
+`GOANIME_TERMINAL=conhost` to stay in the classic console.
 
 ### macOS
 

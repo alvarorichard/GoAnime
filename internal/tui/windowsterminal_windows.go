@@ -44,40 +44,67 @@ func RelaunchInWindowsTerminal() bool {
 
 	wt, found := windowsTerminalPath()
 	if !found {
-		// winget installs Windows Terminal per user. An elevated process
-		// (the installer's postinstall launch, or an administrator prompt)
-		// would install it for the wrong account, so leave that to the next
-		// normal launch instead.
+		// Installing Windows Terminal for the wrong account is worse than
+		// waiting one launch: the installer's postinstall and an administrator
+		// prompt run elevated, so they keep conhost and let the next normal
+		// launch install the package.
 		if currentProcessElevated() {
 			return false
 		}
-		if winget, ok := wingetPath(); ok && windowsTerminalInstalled(winget) {
-			// The package is there but its app execution alias is disabled:
-			// installing again would change nothing, and every launch would
-			// pay for the check.
-			fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is installed but its wt.exe alias is disabled; continuing in the classic console.")
-			return false
+
+		fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is missing; installing it for this user...")
+
+		// winget installs the Store package, which updates itself and can be
+		// set as the default terminal. Windows Sandbox and other minimal
+		// images do not ship winget, so a portable copy is the fallback.
+		if winget, ok := wingetPath(); ok {
+			if windowsTerminalInstalled(winget) {
+				// The package is there but its wt.exe alias is disabled.
+				// Reinstalling would change nothing, so use the private copy
+				// instead of paying for a winget check on every launch.
+				fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is installed but its wt.exe alias is disabled; using a private copy.")
+			} else if installWindowsTerminal(winget) {
+				wt, found = waitForWindowsTerminal(10 * time.Second)
+			}
 		}
-		if !installWindowsTerminal() {
-			return false
-		}
-		wt, found = waitForWindowsTerminal(10 * time.Second)
+
 		if !found {
+			wt, found = installPortableWindowsTerminal()
+		}
+		if !found {
+			fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal could not be installed; continuing in the classic console. Set GOANIME_TERMINAL=conhost to skip this check.")
 			return false
 		}
 	}
 
 	cwd, _ := os.Getwd()
-	// #nosec G204 -- wt comes from the per-user WindowsApps alias directory
-	// first; the executable and its arguments are the ones this process
-	// already received.
-	cmd := exec.Command(wt, windowsTerminalArgs(exe, cwd, os.Args[1:])...)
+	if startWindowsTerminal(wt, exe, cwd, os.Args[1:]) {
+		return true
+	}
+	// An app execution alias can be stale even when the file exists. Fall
+	// back to the cached private copy (or download one) and retry once; a
+	// failed start is otherwise indistinguishable from a closed window.
+	if portable, ok := installPortableWindowsTerminal(); ok && portable != wt {
+		if startWindowsTerminal(portable, exe, cwd, os.Args[1:]) {
+			return true
+		}
+	}
+	fmt.Fprintln(os.Stderr, "GoAnime: could not start Windows Terminal; continuing in the classic console.")
+	return false
+}
+
+// startWindowsTerminal launches wt with the current executable and arguments.
+// wt detaches once it has handed the command to the terminal, so the handle is
+// released instead of waiting for a window that outlives this process.
+func startWindowsTerminal(wt, exe, cwd string, args []string) bool {
+	// #nosec G204 -- wt comes from the per-user WindowsApps alias directory or
+	// the app's own install directory, and the executable and arguments are
+	// the ones this process already received.
+	cmd := exec.Command(wt, windowsTerminalArgs(exe, cwd, args)...)
 	cmd.Env = append(os.Environ(), "GOANIME_WT_RELAUNCH=1")
 	if err := cmd.Start(); err != nil {
 		return false
 	}
-	// wt.exe detaches once it has handed the command to the terminal. Release
-	// the handle instead of waiting for a window that outlives this process.
 	_ = cmd.Process.Release()
 	return true
 }
@@ -102,9 +129,10 @@ func soleConsoleProcess() bool {
 	return n == 1
 }
 
-// windowsTerminalPath finds the wt.exe app execution alias. The known alias
-// directory comes first so a stale or planted wt.exe earlier on PATH cannot
-// capture the relaunch; LookPath then covers a terminal that inherited PATH.
+// windowsTerminalPath finds the wt.exe app execution alias or a cached private
+// copy. The known alias directory comes first so a stale or planted wt.exe
+// earlier on PATH cannot capture the relaunch; LookPath then covers a terminal
+// that inherited PATH.
 func windowsTerminalPath() (string, bool) {
 	if local := os.Getenv("LOCALAPPDATA"); local != "" {
 		path := filepath.Join(local, "Microsoft", "WindowsApps", "wt.exe")
@@ -113,6 +141,9 @@ func windowsTerminalPath() (string, bool) {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			return path, true
 		}
+	}
+	if path, ok := portableWindowsTerminalPath(); ok {
+		return path, true
 	}
 	if path, err := exec.LookPath("wt.exe"); err == nil {
 		return path, true
@@ -157,17 +188,11 @@ func waitForWindowsTerminal(timeout time.Duration) (string, bool) {
 }
 
 // installWindowsTerminal installs Windows Terminal through winget, the package
-// manager Windows 10 and 11 ship. It streams winget's own output so a slow
+// manager full Windows images ship. It streams winget's own output so a slow
 // download does not look like a frozen console. Any failure returns false and
-// leaves GoAnime in conhost, where the TUI still works with reduced support.
-func installWindowsTerminal() bool {
-	winget, found := wingetPath()
-	if !found {
-		fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is not installed and winget is unavailable; continuing in the classic console.")
-		return false
-	}
-
-	fmt.Fprintln(os.Stderr, "GoAnime: installing Windows Terminal for the full interface...")
+// the caller falls back to a portable copy.
+func installWindowsTerminal(winget string) bool {
+	fmt.Fprintln(os.Stderr, "GoAnime: installing Windows Terminal with winget...")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	// #nosec G204 -- winget is resolved from PATH or the fixed WindowsApps
@@ -184,7 +209,7 @@ func installWindowsTerminal() bool {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "GoAnime: could not install Windows Terminal: %v\n", err)
+		fmt.Fprintf(os.Stderr, "GoAnime: winget could not install Windows Terminal: %v\n", err)
 		return false
 	}
 	return true
