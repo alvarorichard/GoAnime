@@ -86,10 +86,13 @@ func safeArchivePath(dest, name string) (string, error) {
 func extractWindowsTerminalZip(zipPath, dest string) (string, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return "", fmt.Errorf("open Windows Terminal archive: %w", err)
+		return "", fmt.Errorf("open the Windows Terminal archive: %w", err)
 	}
 	defer func() { _ = reader.Close() }()
+	return extractWindowsTerminalReader(&reader.Reader, dest)
+}
 
+func extractWindowsTerminalReader(reader *zip.Reader, dest string) (string, error) {
 	var wtDir string
 	var total int64
 	for _, file := range reader.File {
@@ -126,6 +129,39 @@ func extractWindowsTerminalZip(zipPath, dest string) (string, error) {
 		return "", errors.New("archive does not contain wt.exe")
 	}
 	return wtDir, nil
+}
+
+// installWindowsTerminalArchive extracts an archive under root and makes it the
+// active private copy, replacing any previous one. Extraction goes to a
+// staging directory first, so a failed download or a full disk never leaves a
+// half-written current copy behind.
+func installWindowsTerminalArchive(reader *zip.Reader, root string) (string, error) {
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		return "", fmt.Errorf("create %s: %w", root, err)
+	}
+	staging, err := os.MkdirTemp(root, "extract-*")
+	if err != nil {
+		return "", fmt.Errorf("create extraction directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+
+	wtDir, err := extractWindowsTerminalReader(reader, staging)
+	if err != nil {
+		return "", err
+	}
+
+	current := filepath.Join(root, "current")
+	if err := os.RemoveAll(current); err != nil {
+		return "", fmt.Errorf("replace previous Windows Terminal copy: %w", err)
+	}
+	if err := os.Rename(wtDir, current); err != nil {
+		return "", fmt.Errorf("activate Windows Terminal: %w", err)
+	}
+	wt := filepath.Join(current, "wt.exe")
+	if info, err := os.Stat(wt); err != nil || info.IsDir() {
+		return "", errors.New("private Windows Terminal copy is missing wt.exe")
+	}
+	return wt, nil
 }
 
 // extractFile copies one entry while enforcing the remaining extraction

@@ -86,12 +86,14 @@ finds `mpv.exe` on your `PATH` or in the same folder as `goanime.exe`.
 When you launch GoAnime on its own (double-click, Start menu or a desktop
 shortcut), it runs in [Windows Terminal](https://aka.ms/terminal) so the
 interface gets color, UTF-8 and font fallback. If it started in the classic
-console and Windows Terminal is missing, GoAnime installs it once with
-`winget`. On images without `winget`, such as Windows Sandbox, it downloads
-Microsoft's official unpackaged build into
-`%LOCALAPPDATA%\GoAnime\WindowsTerminal` and reopens from there; without
-network access it continues in the classic console. Set
-`GOANIME_TERMINAL=conhost` to stay in the classic console.
+console and Windows Terminal is missing, GoAnime tries `winget` once; when
+`winget` is unavailable, as in Windows Sandbox, it unpacks the official x64
+Windows Terminal build embedded in the executable into
+`%LOCALAPPDATA%\GoAnime\WindowsTerminal` and reopens from there. That path
+needs neither network nor administrator rights; builds for other
+architectures download the official archive instead. Without a usable copy
+GoAnime continues in the classic console. Set `GOANIME_TERMINAL=conhost` to
+stay in the classic console.
 
 ### macOS
 

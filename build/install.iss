@@ -56,8 +56,10 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 ; Add to user PATH using setx for immediate effect (works better in Windows Sandbox)
 ; This runs before the postinstall option so PATH is ready when GoAnime starts
 Filename: "{cmd}"; Parameters: "/C setx PATH ""%PATH%;{app};{app}\bin"""; Flags: runhidden runascurrentuser; Tasks: addtopath
-; Option to run GoAnime after installation
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent shellexec
+; Option to run GoAnime after installation. Run it as the original,
+; non-elevated user: the app installs its private Windows Terminal copy under
+; that user's LOCALAPPDATA and must not inherit the installer's admin token.
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Registry]
 ; Note: We use setx in [Run] section for immediate PATH update (works in Windows Sandbox)

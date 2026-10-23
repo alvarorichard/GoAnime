@@ -3,8 +3,11 @@
 package tui
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,18 +37,33 @@ var (
 	windowsTerminalDownloadClient = &http.Client{Timeout: 5 * time.Minute}
 )
 
+// windowsTerminalBundle is the official unpackaged x64 build. It makes the
+// standalone handoff work without winget and without network access, which is
+// what Windows Sandbox needs. See assets/README.md for its version and hash.
+//
+//go:embed assets/WindowsTerminal_x64.zip
+var windowsTerminalBundle []byte
+
 type windowsTerminalRelease struct {
 	TagName string                 `json:"tag_name"`
 	Assets  []windowsTerminalAsset `json:"assets"`
 }
 
-// installPortableWindowsTerminal downloads Microsoft's official unpackaged
+// installPortableWindowsTerminal installs Microsoft's official unpackaged
 // Windows Terminal build into the app's per-user data directory and returns
-// its wt.exe path. It is the fallback for images that do not ship winget, such
-// as Windows Sandbox. The copy is cached, so the download happens once.
+// its wt.exe path. The x64 build is embedded in the executable, so the common
+// case needs neither winget nor network; other architectures download it. The
+// copy is cached, so the work happens once.
 func installPortableWindowsTerminal() (string, bool) {
 	if wt, ok := portableWindowsTerminalPath(); ok {
 		return wt, true
+	}
+	if runtime.GOARCH == "amd64" && len(windowsTerminalBundle) > 0 {
+		wt, err := installBundledWindowsTerminal()
+		if err == nil {
+			return wt, true
+		}
+		fmt.Fprintf(os.Stderr, "GoAnime: the bundled Windows Terminal failed: %v; trying a download...\n", err)
 	}
 	wt, err := downloadPortableWindowsTerminal()
 	if err != nil {
@@ -53,6 +71,24 @@ func installPortableWindowsTerminal() (string, bool) {
 		return "", false
 	}
 	return wt, true
+}
+
+func installBundledWindowsTerminal() (string, error) {
+	root, err := portableWindowsTerminalRoot()
+	if err != nil {
+		return "", err
+	}
+	reader, err := zip.NewReader(bytes.NewReader(windowsTerminalBundle), int64(len(windowsTerminalBundle)))
+	if err != nil {
+		return "", fmt.Errorf("open the bundled Windows Terminal archive: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "GoAnime: installing the bundled Windows Terminal...")
+	wt, err := installWindowsTerminalArchive(reader, root)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is ready.")
+	return wt, nil
 }
 
 func downloadPortableWindowsTerminal() (string, error) {
@@ -95,27 +131,14 @@ func downloadPortableWindowsTerminal() (string, error) {
 		return "", err
 	}
 
-	staging, err := os.MkdirTemp(root, "extract-*")
+	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return "", fmt.Errorf("create extraction directory: %w", err)
+		return "", fmt.Errorf("open the downloaded Windows Terminal archive: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(staging) }()
-
-	wtDir, err := extractWindowsTerminalZip(zipPath, staging)
+	defer func() { _ = reader.Close() }()
+	wt, err := installWindowsTerminalArchive(&reader.Reader, root)
 	if err != nil {
 		return "", err
-	}
-
-	current := filepath.Join(root, "current")
-	if err := os.RemoveAll(current); err != nil {
-		return "", fmt.Errorf("replace previous Windows Terminal copy: %w", err)
-	}
-	if err := os.Rename(wtDir, current); err != nil {
-		return "", fmt.Errorf("activate Windows Terminal: %w", err)
-	}
-	wt := filepath.Join(current, "wt.exe")
-	if info, err := os.Stat(wt); err != nil || info.IsDir() {
-		return "", errors.New("private Windows Terminal copy is missing wt.exe")
 	}
 	fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is ready.")
 	return wt, nil

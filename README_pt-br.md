@@ -87,12 +87,13 @@ uma pasta do seu `PATH`. O arquivo não inclui o mpv:
 Quando você inicia o GoAnime sozinho (duplo clique, menu Iniciar ou atalho da
 área de trabalho), ele roda no [Windows Terminal](https://aka.ms/terminal)
 para a interface ter cor, UTF-8 e fallback de fontes. Se ele tiver aberto no
-console clássico e o Windows Terminal não estiver instalado, o GoAnime o
-instala uma vez com o `winget`. Em imagens sem `winget`, como o Windows
-Sandbox, ele baixa a versão oficial não empacotada do Windows Terminal para
-`%LOCALAPPDATA%\GoAnime\WindowsTerminal` e reabre por ela; sem acesso à rede,
-continua no console clássico. Defina `GOANIME_TERMINAL=conhost` para ficar no
-console clássico.
+console clássico e o Windows Terminal não estiver instalado, o GoAnime tenta o
+`winget` uma vez; quando o `winget` não existe, como no Windows Sandbox, ele
+extrai a versão oficial x64 do Windows Terminal embutida no executável para
+`%LOCALAPPDATA%\GoAnime\WindowsTerminal` e reabre por ela. Esse caminho não
+precisa de rede nem de administrador; builds de outras arquiteturas baixam o
+arquivo oficial. Sem uma cópia utilizável, o GoAnime continua no console
+clássico. Defina `GOANIME_TERMINAL=conhost` para ficar no console clássico.
 
 ### macOS
 

@@ -41,56 +41,26 @@ func RelaunchInWindowsTerminal() bool {
 	if err != nil {
 		return false
 	}
-
-	wt, found := windowsTerminalPath()
-	if !found {
-		// Installing Windows Terminal for the wrong account is worse than
-		// waiting one launch: the installer's postinstall and an administrator
-		// prompt run elevated, so they keep conhost and let the next normal
-		// launch install the package.
-		if currentProcessElevated() {
-			return false
-		}
-
-		fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is missing; installing it for this user...")
-
-		// winget installs the Store package, which updates itself and can be
-		// set as the default terminal. Windows Sandbox and other minimal
-		// images do not ship winget, so a portable copy is the fallback.
-		if winget, ok := wingetPath(); ok {
-			if windowsTerminalInstalled(winget) {
-				// The package is there but its wt.exe alias is disabled.
-				// Reinstalling would change nothing, so use the private copy
-				// instead of paying for a winget check on every launch.
-				fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal is installed but its wt.exe alias is disabled; using a private copy.")
-			} else if installWindowsTerminal(winget) {
-				wt, found = waitForWindowsTerminal(10 * time.Second)
-			}
-		}
-
-		if !found {
-			wt, found = installPortableWindowsTerminal()
-		}
-		if !found {
-			fmt.Fprintln(os.Stderr, "GoAnime: Windows Terminal could not be installed; continuing in the classic console. Set GOANIME_TERMINAL=conhost to skip this check.")
-			return false
-		}
-	}
-
 	cwd, _ := os.Getwd()
-	if startWindowsTerminal(wt, exe, cwd, os.Args[1:]) {
-		return true
-	}
-	// An app execution alias can be stale even when the file exists. Fall
-	// back to the cached private copy (or download one) and retry once; a
-	// failed start is otherwise indistinguishable from a closed window.
-	if portable, ok := installPortableWindowsTerminal(); ok && portable != wt {
-		if startWindowsTerminal(portable, exe, cwd, os.Args[1:]) {
-			return true
-		}
-	}
-	fmt.Fprintln(os.Stderr, "GoAnime: could not start Windows Terminal; continuing in the classic console.")
-	return false
+	args := os.Args[1:]
+
+	return windowsTerminalHandoff(windowsTerminalHandoffSteps{
+		find:      windowsTerminalPath,
+		elevated:  currentProcessElevated,
+		winget:    wingetPath,
+		installed: windowsTerminalInstalled,
+		install:   installWindowsTerminal,
+		await: func() (string, bool) {
+			return waitForWindowsTerminal(10 * time.Second)
+		},
+		portable: installPortableWindowsTerminal,
+		start: func(wt string) bool {
+			return startWindowsTerminal(wt, exe, cwd, args)
+		},
+		notice: func(notice windowsTerminalNotice) {
+			fmt.Fprintln(os.Stderr, windowsTerminalNoticeMessage(notice))
+		},
+	})
 }
 
 // startWindowsTerminal launches wt with the current executable and arguments.
