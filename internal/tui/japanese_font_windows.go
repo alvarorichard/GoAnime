@@ -59,10 +59,10 @@ var (
 // selects with, and the messenger of each face name in the enumeration
 // callback.
 type logfontW struct {
-	Height, Width, Escapement, Orientation, Weight               int32
-	Italic, Underline, StrikeOut                                 uint8
+	Height, Width, Escapement, Orientation, Weight                int32
+	Italic, Underline, StrikeOut                                  uint8
 	CharSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily uint8
-	FaceName                                                     [32]uint16
+	FaceName                                                      [32]uint16
 }
 
 // consoleFontInfo is kernel32's CONSOLE_FONT_INFOEX, read to learn which face
