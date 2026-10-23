@@ -78,7 +78,7 @@ func panelLines(theme *Theme, c *panelContent, inner int, compact bool) []string
 	}
 
 	head := theme.PanelLabel.Render(ansi.Truncate(strings.ToUpper(singleLine(c.label)), inner, "…"))
-	if gloss := singleLine(c.gloss); gloss != "" && !Plain() && lipgloss.Width(head)+2+lipgloss.Width(gloss) <= inner {
+	if gloss := singleLine(c.gloss); gloss != "" && ShowJapanese() && lipgloss.Width(head)+2+lipgloss.Width(gloss) <= inner {
 		head += theme.PanelMuted.Render("  " + gloss)
 	}
 	out = append(out, head)

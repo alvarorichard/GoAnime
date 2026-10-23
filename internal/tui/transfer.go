@@ -100,7 +100,7 @@ func RenderTransfer(t *Transfer, width int) string {
 
 	lines := []string{""}
 	head := theme.Header.Render("GOANIME") + "  " + theme.Primary.Render(strings.ToUpper(singleLine(t.Label)))
-	if gloss := singleLine(t.Gloss); gloss != "" && !Plain() {
+	if gloss := singleLine(t.Gloss); gloss != "" && ShowJapanese() {
 		head += theme.Gloss.Render("  " + gloss)
 	}
 	lines = append(lines, head, "")

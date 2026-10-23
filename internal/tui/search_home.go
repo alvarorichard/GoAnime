@@ -530,7 +530,7 @@ func (m *searchHomeModel) scopeTabs() string {
 // sectionHeader draws a CONTINUE/RECENT heading with its Japanese gloss.
 func (m *searchHomeModel) sectionHeader(label, gloss string) string {
 	head := m.theme.Primary.Render(label)
-	if !Plain() {
+	if ShowJapanese() {
 		head += m.theme.Gloss.Render("  " + gloss)
 	}
 	return head

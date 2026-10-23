@@ -294,6 +294,7 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_DISABLED_SOURCES`    | Fontes a ignorar, separadas por vírgula                                  |
 | `GOANIME_THEME`               | `dark`, `light` ou `auto` (padrão): `auto` pergunta o fundo ao terminal uma vez |
 | `GOANIME_PLAIN`               | `1` para o modo simples: sem cores, sem glosas em japonês, só ASCII (igual a `--plain`, `NO_COLOR` ou `TERM=dumb`) |
+| `GOANIME_JAPANESE`            | `1` sempre mostra as glosas em japonês, `0` sempre esconde; sem ela, o GoAnime mostra onde o terminal tem fonte para elas |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
 | `GOANIME_STRICT_SOURCE`       | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida      |
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
@@ -315,9 +316,11 @@ muda, sem esperar uma nova versão.
 | Logs de depuração       | `~/.local/share/goanime/logs/`          | `~/Library/Logs/GoAnime/`                                 | `%LOCALAPPDATA%\GoAnime\logs\`                 |
 | Shaders do Anime4K      | `~/.config/goanime/anime4k-shaders/`    | `~/Library/Application Support/goanime/anime4k-shaders/`  | `%APPDATA%\goanime\anime4k-shaders\`           |
 | yt-dlp                  | `~/.cache/go-ytdlp/`                    | `~/Library/Caches/go-ytdlp/`                              | `%LOCALAPPDATA%\go-ytdlp\`                      |
+| Fonte japonesa          | `~/.local/share/fonts/goanime/`         | —                                                         | —                                             |
 
 No Linux, as pastas dos shaders e do yt-dlp seguem `XDG_CONFIG_HOME` e
-`XDG_CACHE_HOME` quando estão definidas. Apagar o arquivo de histórico zera
+`XDG_CACHE_HOME` quando estão definidas, e a pasta da fonte segue
+`XDG_DATA_HOME`. Apagar o arquivo de histórico zera
 todo o progresso. Para desinstalar o GoAnime, remova o executável (ou, com o
 instalador do Windows, desinstale pelas Configurações) e apague as pastas
 acima de que você não precisa mais.
@@ -362,6 +365,27 @@ para você.
 Confira se `mpv --version` funciona no mesmo terminal em que você roda o
 GoAnime. No Windows, abra um terminal novo depois de instalar, para que o
 `PATH` atualizado seja carregado.
+
+### Os caracteres japoneses aparecem como quadradinhos
+
+O japonês ao lado de cada título (ゴーアニメ, 検索) é desenhado com as fontes
+do terminal. Quando nenhuma delas tem japonês, o GoAnime o esconde em vez de
+mostrar quadradinhos:
+
+- **Linux**: o GoAnime instala a GoAnime Glyphs, uma fonte de 11 KB só com
+  esses caracteres, em `~/.local/share/fonts/goanime/`. Feche e abra o
+  terminal de novo para vê-los. Uma fonte japonesa completa também resolve,
+  como `noto-fonts-cjk` no Arch Linux, `fonts-noto-cjk` no Debian e Ubuntu ou
+  `google-noto-sans-cjk-fonts` no Fedora.
+- **Windows**: o console clássico (`cmd.exe` na própria janela) não tem
+  fonte alternativa, então o japonês continua escondido nele. O Windows
+  Terminal mostra.
+- **Console virtual do Linux** (`TERM=linux`): a fonte dele não tem japonês,
+  então continua escondido.
+
+`GOANIME_JAPANESE=1` mostra mesmo assim, `GOANIME_JAPANESE=0` esconde em
+todo lugar. A fonte nunca é instalada com `GOANIME_JAPANESE=0` nem no modo
+simples.
 
 ## Usando o GoAnime como biblioteca
 
@@ -431,6 +455,9 @@ O GoAnime se apoia no trabalho destes projetos:
   [Huh](https://github.com/charmbracelet/huh) e
   [Lip Gloss](https://github.com/charmbracelet/lipgloss) constroem a interface
   do terminal.
+- [Noto Sans CJK](https://github.com/notofonts/noto-cjk) é a origem da
+  GoAnime Glyphs, a fonte japonesa que o GoAnime instala no Linux (SIL Open
+  Font License).
 - [ani-cli](https://github.com/pystardust/ani-cli) inspirou o projeto.
 
 ## Aviso legal

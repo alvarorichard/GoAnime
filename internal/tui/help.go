@@ -46,11 +46,6 @@ func RenderHelp(theme *Theme, screen string, this []HelpRow, extra map[string][]
 	if width < minPanelWidth {
 		return ""
 	}
-	label := "KEYS"
-	if !Plain() {
-		label += "  キー"
-	}
-
 	left := []HelpRow{{Key: "EVERY SCREEN", Desc: ""}}
 	left = append(left, everyScreenHelp()...)
 	left = append(left, HelpRow{}, HelpRow{Key: "LISTS", Desc: ""})
@@ -111,7 +106,7 @@ func RenderHelp(theme *Theme, screen string, this []HelpRow, extra map[string][]
 	content := &panelContent{label: "Keys", gloss: "キー", lines: rows}
 	if Plain() {
 		// Tela 9: help is plain text, no paper panel.
-		return label + "\n\n" + strings.Join(rows, "\n")
+		return "KEYS\n\n" + strings.Join(rows, "\n")
 	}
 	if panel := fitPanel(theme, content, width, maxHeight); panel != "" {
 		return panel

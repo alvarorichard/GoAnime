@@ -333,6 +333,9 @@ func FlagParser() (string, error) {
 	// Ask the terminal for its background once, before the first RunClean
 	// suppresses capability probes (tela 8). No TTY answers: keeps dark.
 	tui.EnsureThemeDetected()
+	// Look for a Japanese font before RunClean rewrites TERM: without one the
+	// glosses are hidden instead of drawn as boxes.
+	tui.EnsureJapaneseDetected()
 
 	// Set performance profiling mode
 	PerfEnabled = *perf

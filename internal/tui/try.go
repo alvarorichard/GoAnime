@@ -411,7 +411,7 @@ func (m *tryModel) tryPanel(width int) string {
 // sectionHeader draws a TRY heading with its Japanese gloss.
 func (m *tryModel) sectionHeader(label, gloss string) string {
 	head := m.theme.Primary.Render(label)
-	if !Plain() {
+	if ShowJapanese() {
 		head += m.theme.Gloss.Render("  " + gloss)
 	}
 	return head

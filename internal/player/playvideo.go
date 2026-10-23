@@ -1327,7 +1327,11 @@ func nowPlayingPanel(socketPath, animeName string, currentEpisodeNum int, isMovi
 		panel.Title = "mpv"
 	}
 	if !isMovie && currentEpisodeNum > 0 {
-		panel.Lines = []string{fmt.Sprintf("Episode %d · 第%d話", currentEpisodeNum, currentEpisodeNum)}
+		line := fmt.Sprintf("Episode %d", currentEpisodeNum)
+		if tui.ShowJapanese() {
+			line += fmt.Sprintf(" · 第%d話", currentEpisodeNum)
+		}
+		panel.Lines = []string{line}
 	}
 	if socketPath != "" {
 		panel.Progress = mpvProgress(socketPath)

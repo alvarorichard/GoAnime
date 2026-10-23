@@ -452,7 +452,7 @@ func renderSourcesPanel(theme *Theme, rows []sourcesPanelRow, off []models.Searc
 
 	var lines []string
 	head := theme.PanelLabel.Render("SOURCES")
-	if !Plain() {
+	if ShowJapanese() {
 		head += theme.PanelMuted.Render("  ソース")
 	}
 	lines = append(lines, head)

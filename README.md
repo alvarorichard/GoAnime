@@ -292,6 +292,7 @@ common needs:
 | `GOANIME_DISABLED_SOURCES`    | Comma-separated sources to skip                                          |
 | `GOANIME_THEME`               | `dark`, `light` or `auto` (default): `auto` asks the terminal once for its background |
 | `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
+| `GOANIME_JAPANESE`            | `1` always shows the Japanese glosses, `0` always hides them; unset, GoAnime shows them where the terminal has a font for them |
 | `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
 | `GOANIME_STRICT_SOURCE`       | Set to `1` to report an error instead of guessing an unknown source      |
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
@@ -313,9 +314,11 @@ without waiting for a new release.
 | Debug logs      | `~/.local/share/goanime/logs/`          | `~/Library/Logs/GoAnime/`                                 | `%LOCALAPPDATA%\GoAnime\logs\`                 |
 | Anime4K shaders | `~/.config/goanime/anime4k-shaders/`    | `~/Library/Application Support/goanime/anime4k-shaders/`  | `%APPDATA%\goanime\anime4k-shaders\`           |
 | yt-dlp          | `~/.cache/go-ytdlp/`                    | `~/Library/Caches/go-ytdlp/`                              | `%LOCALAPPDATA%\go-ytdlp\`                      |
+| Japanese font   | `~/.local/share/fonts/goanime/`         | —                                                         | —                                             |
 
 On Linux, the shader and yt-dlp folders follow `XDG_CONFIG_HOME` and
-`XDG_CACHE_HOME` when they are set. Deleting the watch history file resets
+`XDG_CACHE_HOME` when they are set, and the font folder follows
+`XDG_DATA_HOME`. Deleting the watch history file resets
 all progress. To uninstall GoAnime, remove the executable (or, with the
 Windows installer, uninstall it from Settings) and delete the folders above
 that you no longer need.
@@ -358,6 +361,26 @@ include your user name. Read it before attaching if that matters to you.
 Make sure `mpv --version` works in the same terminal you run GoAnime from.
 On Windows, open a new terminal after installing so the updated `PATH` is
 picked up.
+
+### Japanese characters show as boxes
+
+The Japanese beside each heading (ゴーアニメ, 検索) is drawn with the
+terminal's fonts. When none of them has Japanese, GoAnime hides it instead
+of showing boxes:
+
+- **Linux**: GoAnime installs GoAnime Glyphs, an 11 KB font with just those
+  characters, in `~/.local/share/fonts/goanime/`. Close and reopen the
+  terminal to see them. A full Japanese font works too, such as
+  `noto-fonts-cjk` on Arch Linux, `fonts-noto-cjk` on Debian and Ubuntu or
+  `google-noto-sans-cjk-fonts` on Fedora.
+- **Windows**: the classic console (`cmd.exe` in its own window) has no font
+  fallback, so the Japanese stays hidden there. Windows Terminal shows it.
+- **Linux virtual console** (`TERM=linux`): its font has no Japanese, so it
+  stays hidden.
+
+`GOANIME_JAPANESE=1` shows it anyway, `GOANIME_JAPANESE=0` hides it
+everywhere. The font is never installed with `GOANIME_JAPANESE=0` or in the
+plain interface.
 
 ## Using GoAnime as a library
 
@@ -427,6 +450,9 @@ GoAnime is built on the work of these projects:
   [Huh](https://github.com/charmbracelet/huh) and
   [Lip Gloss](https://github.com/charmbracelet/lipgloss) build the terminal
   interface.
+- [Noto Sans CJK](https://github.com/notofonts/noto-cjk) is the source of
+  GoAnime Glyphs, the Japanese font GoAnime installs on Linux (SIL Open Font
+  License).
 - [ani-cli](https://github.com/pystardust/ani-cli) inspired the project.
 
 ## Disclaimer

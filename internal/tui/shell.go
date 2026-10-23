@@ -100,13 +100,14 @@ func (s *Shell) Render(body string, hints []Hint) string {
 
 // header lays out the GOANIME block, the brand gloss, the breadcrumb trail
 // and the context, dropping the least useful part until the line fits.
-// In plain mode the Japanese glosses are hidden (tela 9): without a CJK
-// font they render as boxes, and screen readers read each one aloud.
+// In plain mode the Japanese glosses are hidden (tela 9): screen readers
+// read each one aloud. They are hidden too where no font can draw them
+// (ShowJapanese), since they would render as boxes.
 func (s *Shell) header(width int) string {
 	block := s.Theme.Header.Render("GOANIME")
 	steps := breadcrumbSteps(s.Breadcrumb)
 	context := singleLine(s.Context)
-	showGloss := !Plain()
+	showGloss := ShowJapanese()
 
 	type layout struct {
 		brandGloss, stepGloss, context bool

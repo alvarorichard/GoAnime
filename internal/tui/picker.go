@@ -499,7 +499,7 @@ func (m *pickerModel) actionsSection() string {
 		return ""
 	}
 	head := m.theme.Primary.Render(strings.ToUpper(singleLine(m.options.ActionsLabel)))
-	if gloss := singleLine(m.options.ActionsGloss); gloss != "" && !Plain() {
+	if gloss := singleLine(m.options.ActionsGloss); gloss != "" && ShowJapanese() {
 		head += m.theme.Gloss.Render("  " + gloss)
 	}
 	lines := []string{head}

@@ -53,7 +53,8 @@ func TestPlayerTrackChoices_NoSocket(t *testing.T) {
 }
 
 func TestNowPlayingPanel(t *testing.T) {
-	t.Parallel()
+	tui.SetJapanese(true)
+	t.Cleanup(func() { tui.SetJapanese(true) })
 
 	panel := nowPlayingPanel("/tmp/mpv.sock", "Momotarou", 1, false)
 	assert.Equal(t, "Now playing", panel.Label)
@@ -61,6 +62,10 @@ func TestNowPlayingPanel(t *testing.T) {
 	assert.Equal(t, []string{"Episode 1 · 第1話"}, panel.Lines)
 	assert.True(t, panel.Live)
 	assert.NotNil(t, panel.Progress)
+
+	tui.SetJapanese(false)
+	noFont := nowPlayingPanel("/tmp/mpv.sock", "Momotarou", 1, false)
+	assert.Equal(t, []string{"Episode 1"}, noFont.Lines, "no 第1話 where the terminal would draw boxes")
 
 	movie := nowPlayingPanel("", "", 0, true)
 	assert.Equal(t, "mpv", movie.Title)

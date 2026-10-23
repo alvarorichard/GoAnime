@@ -174,6 +174,13 @@ func InitLogger() {
 			Logger.SetLevel(log.DebugLevel)
 			Logger.SetReportCaller(true)
 		}
+		if !tui.Plain() && !tui.ShowJapanese() {
+			note := tui.JapaneseNote()
+			if note == "" {
+				note = "Japanese labels hidden: this terminal cannot draw them (GOANIME_JAPANESE=1 shows them anyway)"
+			}
+			Debug(note)
+		}
 	}
 }
 
