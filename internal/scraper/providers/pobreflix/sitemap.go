@@ -18,13 +18,16 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// The catalog's search corpus. The site has no search guests can call
-// (/buscar is client-side, the IPS quick-search endpoint is members-only, and
-// its full search page answers every query with the same slider noise —
-// checked 2026-10-16), but it publishes the whole grid as content sitemaps:
-// sitemap.php lists sitemap_content_videobox_Video_<n> shard files, 1000 URLs
-// each, with every URL carrying its audio. A search builds an index of those
-// shards once and ranks the slugs against the query.
+// The catalog's search corpus. Production asks the site's /api catalog first;
+// this index is the browserless fallback when that API is unavailable or the
+// mirror still runs the old theme. The old theme had no guest search guests
+// could call (/buscar is client-side, the IPS quick-search endpoint is
+// members-only, and its full search page answers every query with the same
+// slider noise — checked 2026-10-16), but it publishes the whole grid as
+// content sitemaps: sitemap.php lists sitemap_content_videobox_Video_<n> shard
+// files, 1000 URLs each, with every URL carrying its audio. Current mirrors
+// publish sitemap-movies.xml and sitemap-series.xml instead. A search builds
+// an index of those files once and ranks the slugs against the query.
 
 const (
 	// corpusTTL is how long an in-date cache saves the shard fetches. The
@@ -50,15 +53,93 @@ const (
 	refinementBudget = 500
 )
 
-// videoRecordRe pulls a record URL apart:
+// videoRecordRe pulls an old record URL apart:
 //
 //	https://www.pobreflixtv.sale/filmes/online/verity-dublado-84506/
 //	https://www.pobreflixtv.sale/series/online/ben-hur-a-serie-dublado-83633/
 var videoRecordRe = regexp.MustCompile(
 	`^/(filmes|series|episodios)/online/([^/]+)`)
 
+// Current-site paths: /filme/<slug>.html, /serie/<slug>.html and
+// /assistir/<slug>-t<season>-ep<episode>.html. The slug is the record's
+// identifier; it often ends in a random suffix ("todo-poderoso-53qvb") or the
+// TMDB id ("ben-hur-40360").
+var (
+	newMoviePathRe   = regexp.MustCompile(`^/filme/([^/]+)\.html$`)
+	newSeriesPathRe  = regexp.MustCompile(`^/serie/([^/]+)\.html$`)
+	newEpisodePathRe = regexp.MustCompile(`^/assistir/(.+)-t\d+-ep\d+\.html$`)
+	currentRecordRe  = regexp.MustCompile(`^/(filme|serie)/([^/]+)\.html$`)
+)
+
 // trailingIDRe splits the record id off the end of a slug.
 var trailingIDRe = regexp.MustCompile(`^(.*)-(\d+)$`)
+
+// audioOfSlug reads the audio a slug names, without changing the slug.
+func audioOfSlug(slug string) Audio {
+	am := audioSuffixRe.FindStringSubmatch(slug)
+	if am == nil {
+		return AudioUnknown
+	}
+	if am[2] == "legendado" {
+		return AudioSubtitled
+	}
+	return AudioDubbed
+}
+
+// isRandomSlugSuffix reports whether the last slug token looks like the
+// current site's random disambiguator ("4hsp3", "0vl7bwm", "g6JBa"). The
+// tokens are 5-8 alphanumerics with at least one digit and one letter. A
+// numeric token of any length is the TMDB id the site sometimes appends.
+func isRandomSlugSuffix(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	if n, err := strconv.Atoi(tok); err == nil {
+		// Four-digit years are part of many titles ("Blade Runner 2049");
+		// TMDB ids appended as disambiguators are usually longer or clearly
+		// outside the year range.
+		if n >= 1900 && n <= 2099 {
+			return false
+		}
+		return n > 0
+	}
+	if len(tok) < 5 || len(tok) > 8 {
+		return false
+	}
+	digit, letter := false, false
+	for _, r := range tok {
+		switch {
+		case r >= '0' && r <= '9':
+			digit = true
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			letter = true
+		default:
+			return false
+		}
+	}
+	return digit && letter
+}
+
+// displaySlug removes the record id / random suffix the current site appends
+// to a slug, keeping at least one token. It is for display and matching only;
+// record URLs keep the original slug.
+func displaySlug(slug string) string {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return ""
+	}
+	parts := strings.Split(slug, "-")
+	if len(parts) < 2 {
+		return slug
+	}
+	if isRandomSlugSuffix(parts[len(parts)-1]) {
+		trimmed := strings.Join(parts[:len(parts)-1], "-")
+		if strings.Trim(trimmed, "-") != "" {
+			return trimmed
+		}
+	}
+	return slug
+}
 
 // audioSuffixRe reads the audio a record slug names: the last dash words when
 // they name a known track.
@@ -84,10 +165,36 @@ type entry struct {
 	VideoID int
 }
 
-// parseRecordPath reads the three URL layouts the app routes. An episode URL
-// reports ok=false for the corpus (that is per-episode noise), while title
+// parseRecordPath reads every title-page layout the app routes. An episode
+// URL reports ok=false for the corpus (that is per-episode noise), while title
 // pages keep their raw slug for the episode marker check.
 func parseRecordPath(path string) (kind MediaKind, baseSlug string, audio Audio, videoID int, ok bool) {
+	if m := currentRecordRe.FindStringSubmatch(path); m != nil {
+		kind = KindMovie
+		if m[1] == "serie" {
+			kind = KindSeries
+		}
+		slug := strings.TrimSpace(m[2])
+		audio = audioOfSlug(slug)
+		if am := audioSuffixRe.FindStringSubmatch(slug); am != nil {
+			slug = am[1]
+		}
+		// The trailing id/random suffix is not part of the title. Keep the
+		// original URL; only the display slug is trimmed.
+		if tm := trailingIDRe.FindStringSubmatch(slug); tm != nil {
+			if n, err := strconv.Atoi(tm[2]); err == nil && n > 0 && (n < 1900 || n > 2099) {
+				slug = tm[1]
+			}
+		}
+		slug = displaySlug(slug)
+		if slug == "" {
+			return "", "", AudioUnknown, 0, false
+		}
+		return kind, slug, audio, 0, true
+	}
+	if newEpisodePathRe.MatchString(path) {
+		return "", "", AudioUnknown, 0, false
+	}
 	m := videoRecordRe.FindStringSubmatch(path)
 	if m == nil {
 		return "", "", AudioUnknown, 0, false
@@ -410,14 +517,20 @@ func (cc *corpus) refresh(ctx context.Context, client *Client) error {
 	return nil
 }
 
-// shard is one sitemap_content_videobox_Video_<n> file.
+// shard is one content sitemap file. Old layouts name
+// sitemap_content_videobox_Video_<n>; current ones name sitemap-movies.xml and
+// sitemap-series.xml (with an explicit order).
 type shard struct {
-	name string // sitemap_content_videobox_Video_12
-	url  string
+	name  string // sitemap_content_videobox_Video_12 or movies
+	url   string
+	order int // explicit order for current sitemaps, 0 for old names
 }
 
 // shardNumber orders shards deterministically by their numeric suffix.
 func (s shard) number() int {
+	if s.order != 0 {
+		return s.order
+	}
 	i := strings.LastIndex(s.name, "_")
 	if i < 0 {
 		return 0

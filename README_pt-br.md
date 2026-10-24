@@ -277,16 +277,30 @@ SD.
 | HiAnime       | Animes         | Inglês, legendado e dublado | Legendado por padrão                          |
 | AnimeFire     | Animes         | Português (Brasil)          |                                               |
 | AnimesDigital | Animes         | Português (Brasil)          | Legendado e dublado                           |
+| AnimeDrive    | Animes         | Português (Brasil)          | Endereço configurável: `GOANIME_ANIMEDRIVE_URL` |
 | Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
 | StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
 | TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
+| Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto; painel StartFlix como reserva     |
 
-`--source` limita a busca a uma fonte: `hianime`, `animefire`, `animesdigital`,
-`startflix` ou `topcine`, ou `ptbr` para todas as fontes em português.
+`--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
+`animesdigital`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
+`movietv` cobre StartFlix, TopCine e Pobreflix; `ptbr` cobre todas as fontes
+em português.
 
-O Goyabu fica atrás de uma verificação do Cloudflare e vem desativado. Ele
-ainda funciona em redes que o Cloudflare não verifica; para ativá-lo, use
-`GOANIME_ENABLED_SOURCES=goyabu`.
+O Pobreflix consulta primeiro o catálogo `/api` do site e usa o índice de
+sitemaps como reserva. As páginas atuais de filmes e episódios trazem servidores
+MP4 públicos, então a reprodução é direta e não precisa de navegador. Páginas
+do tema antigo ainda usam o painel do StartFlix.
+
+O endereço da AnimeDrive fica intermitentemente inacessível em algumas redes.
+Se o site mudar ou a sua rede bloquear o endereço, `GOANIME_ANIMEDRIVE_URL`
+aponta a fonte para um espelho acessível.
+
+O Goyabu fica atrás de uma verificação gerenciada do Cloudflare e vem
+desativado. Ele funciona em redes que o Cloudflare não verifica; em uma rede
+verificada, nenhum cliente HTTP sem navegador consegue passar pela verificação.
+Para ativá-lo, use `GOANIME_ENABLED_SOURCES=goyabu`.
 
 O GoAnime depende de sites de terceiros, e esses sites mudam sem aviso. Quando
 isso acontece, a fonte correspondente pode parar de funcionar até ser
@@ -310,6 +324,8 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
 | `GOANIME_STRICT_SOURCE`       | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida      |
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
+| `GOANIME_ANIMEDRIVE_URL`      | Endereço da AnimeDrive                                                   |
+| `GOANIME_POBREFLIX_URL`       | Endereço do Pobreflix                                                    |
 | `GOANIME_STARTFLIX_URL`       | Endereço do StartFlix                                                    |
 | `GOANIME_STARTFLIX_PANEL_URL` | Endereço do painel de vídeo do StartFlix                                 |
 | `GOANIME_TOPCINE_URL`         | Endereço do TopCine                                                      |
@@ -343,9 +359,10 @@ acima de que você não precisa mais.
 
 A AnimeDrive pode demorar mais para responder quando o site está ocupado. A
 busca usa todo o prazo da fonte, sem reiniciar uma requisição no limite mais
-curto do cliente HTTP. Se ainda ocorrer timeout, tente novamente mais tarde ou
-use `--source` para buscar em outra fonte e inclua um log de depuração ao
-relatar o problema.
+curto do cliente HTTP. O endereço também fica intermitentemente inacessível em
+algumas redes. Se ainda ocorrer timeout, aponte `GOANIME_ANIMEDRIVE_URL` para
+um espelho acessível, tente novamente mais tarde ou use `--source` para buscar
+em outra fonte. Inclua um log de depuração ao relatar o problema.
 
 ### Reportando um problema
 

@@ -12,10 +12,10 @@ import (
 	"github.com/alvarorichard/Goanime/internal/util"
 )
 
-// TestLivePobreflixPlays drives Pobreflix search → title page → StartFlix
-// panel by id → stream for a series and a movie, keyless, against the live
-// sites. The catalog comes from Pobreflix's sitemap corpus; the stream from
-// the panel's player hosts. Opt in with GOANIME_LIVE=1; never runs in CI.
+// TestLivePobreflixPlays drives Pobreflix search → title page → embedded MP4
+// for a series and a movie, keyless, against the live site. Current pages
+// answer directly; the old-theme panel path has its own tests. Opt in with
+// GOANIME_LIVE=1; never runs in CI.
 func TestLivePobreflixPlays(t *testing.T) {
 	if os.Getenv("GOANIME_LIVE") == "" || testing.Short() || os.Getenv("CI") != "" {
 		t.Skip("set GOANIME_LIVE=1 to run against the live network")
@@ -27,13 +27,13 @@ func TestLivePobreflixPlays(t *testing.T) {
 	sfxPickFn = func(string, []string) (int, error) { return 0, nil } // Dublado
 	t.Cleanup(func() { sfxPickFn = prevPick })
 
-	// Titles verified present in the site's own sitemap corpus (probe,
-	// 2026-10-16): a series and a movie, exactly as the catalog names them.
+	// Titles verified present in the site's own /api catalog (probe,
+	// 2026-10-24): a series and a movie, exactly as the catalog names them.
 	tests := []struct {
 		query, title string
 		kind         pobreflix.MediaKind
 	}{
-		{"ben hur serie", "Ben Hur A Serie", pobreflix.KindSeries},
+		{"ben hur serie", "Ben-Hur: A Série", pobreflix.KindSeries},
 		{"interestelar", "Interestelar", pobreflix.KindMovie},
 	}
 	for _, tt := range tests {
@@ -70,6 +70,12 @@ func TestLivePobreflixPlays(t *testing.T) {
 			}
 			t.Logf("%s: tmdb %d imdb %q official %q, %d episode(s), first %q at %s",
 				anime.Name, anime.TMDBID, anime.IMDBID, anime.OfficialTitle(), len(eps), eps[0].Title.English, eps[0].URL)
+			if tt.kind == pobreflix.KindSeries && !strings.Contains(eps[0].URL, "/assistir/") {
+				t.Errorf("series episode URL = %q, want a Pobreflix /assistir/ page", eps[0].URL)
+			}
+			if tt.kind == pobreflix.KindMovie && !strings.Contains(eps[0].URL, "/filme/") {
+				t.Errorf("movie episode URL = %q, want its Pobreflix /filme/ page", eps[0].URL)
+			}
 
 			streamURL, err := GetPobreflixStreamURL(anime, &eps[0], "best")
 			if err != nil {

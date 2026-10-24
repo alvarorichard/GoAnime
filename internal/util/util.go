@@ -288,7 +288,7 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download a movie or TV show")
-	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, startflix, topcine, animedrive, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix, animedrive, movietv, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "with -dm, download a single TV episode instead of a movie (movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")

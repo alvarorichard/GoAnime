@@ -82,19 +82,26 @@ func TestLiveTopCineTodoPoderosoPlaysViaFallback(t *testing.T) {
 	require.Equal(t, originalALang, util.GetGlobalAudioLanguage())
 }
 
-// TestLivePobreflixTodoPoderosoPlaysViaFallback anchors on the listing page
-// the user linked. The catalog search index builds from sitemap shards and
-// this title fell outside the cached round, so the direct URL is the
-// deterministic anchor for the same page the app opens.
-func TestLivePobreflixTodoPoderosoPlaysViaFallback(t *testing.T) {
-	liveFallbackSetup(t)
+// TestLivePobreflixTodoPoderosoPlays is the user's original report, re-anchored
+// on the live catalog. The old .sale listing page is gone; current pages embed
+// a direct MP4, so playback no longer depends on the dead StartFlix panel
+// hosts. The panel/vidsrc fallback keeps unit coverage for old-theme pages.
+func TestLivePobreflixTodoPoderosoPlays(t *testing.T) {
+	ctx := liveFallbackSetup(t)
 
-	anime := &models.Anime{
-		Name:      "Todo Poderoso",
-		URL:       "https://www.pobreflixtv.sale/filmes/online/todo-poderoso-dublado-450/",
-		Source:    pobreflix.SourceName,
-		MediaType: models.MediaTypeMovie,
+	results, err := pobreflix.Shared().Search(ctx, "todo poderoso")
+	require.NoError(t, err, "search")
+
+	var anime *models.Anime
+	for _, r := range results {
+		t.Logf("result: %s (%s) %s", r.Title, r.Kind, r.URL)
+		if r.Kind == pobreflix.KindMovie && r.Title == "Todo Poderoso" {
+			anime = r.ToAnimeModel()
+			break
+		}
 	}
+	require.NotNil(t, anime, "Todo Poderoso is not in the live catalog")
+
 	eps, err := GetPobreflixEpisodes(anime)
 	require.NoError(t, err, "listing")
 	require.Len(t, eps, 1)

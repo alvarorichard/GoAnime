@@ -7,6 +7,7 @@ import (
 	"html"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -20,8 +21,20 @@ import (
 )
 
 const (
+	// AnimeDriveBase is the catalog host. The provider's domain has moved
+	// before and is intermittently unreachable from some networks, so
+	// GOANIME_ANIMEDRIVE_URL can repoint it without a release.
 	AnimeDriveBase = "https://animesdrive.cloud"
 )
+
+// animeDriveBaseURL is the catalog host for this process: the env override
+// when set, the compiled default otherwise.
+func animeDriveBaseURL() string {
+	if base := strings.TrimSpace(os.Getenv("GOANIME_ANIMEDRIVE_URL")); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return AnimeDriveBase
+}
 
 // Pre-compiled regexes
 var (
@@ -59,7 +72,7 @@ type AnimeDriveClient struct {
 func NewAnimeDriveClient() *AnimeDriveClient {
 	return &AnimeDriveClient{
 		client:     util.NewFastClient(),
-		baseURL:    AnimeDriveBase,
+		baseURL:    animeDriveBaseURL(),
 		userAgent:  netx.UserAgent,
 		maxRetries: 2,
 		retryDelay: 100 * time.Millisecond,

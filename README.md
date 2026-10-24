@@ -275,16 +275,28 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 | HiAnime       | Anime      | English, subbed and dubbed | Subbed by default                             |
 | AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
 | AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
+| AnimeDrive    | Anime      | Portuguese (Brazil)        | Host override: `GOANIME_ANIMEDRIVE_URL`       |
 | Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
 | StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
 | TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
+| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4 playback; StartFlix panel fallback |
 
-`--source` limits a search to one source: `hianime`, `animefire`,
-`animesdigital`, `startflix` or `topcine`, or `ptbr` for all the Portuguese
-sources.
+`--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
+`animesdigital`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
+`movietv` covers StartFlix, TopCine and Pobreflix; `ptbr` covers every
+Portuguese source.
 
-Goyabu is behind a Cloudflare challenge and is disabled by default. It still
-works on networks that Cloudflare does not challenge; enable it with
+Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
+index. Current movie and episode pages embed public MP4 servers, so playback is
+direct and needs no browser. Old-theme pages still use the StartFlix panel.
+
+AnimeDrive's host is intermittently unreachable from some networks. If the
+site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
+source at a reachable mirror.
+
+Goyabu is behind a Cloudflare managed challenge and is disabled by default. It
+works on networks that Cloudflare does not challenge; on a challenged network
+no browserless HTTP client can clear the challenge. Enable it with
 `GOANIME_ENABLED_SOURCES=goyabu`.
 
 GoAnime depends on third-party websites, and those websites change without
@@ -309,6 +321,8 @@ common needs:
 | `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
 | `GOANIME_STRICT_SOURCE`       | Set to `1` to report an error instead of guessing an unknown source      |
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
+| `GOANIME_ANIMEDRIVE_URL`      | Address of AnimeDrive                                                    |
+| `GOANIME_POBREFLIX_URL`       | Address of Pobreflix                                                     |
 | `GOANIME_STARTFLIX_URL`       | Address of StartFlix                                                     |
 | `GOANIME_STARTFLIX_PANEL_URL` | Address of the StartFlix video panel                                     |
 | `GOANIME_TOPCINE_URL`         | Address of TopCine                                                       |
@@ -342,8 +356,10 @@ that you no longer need.
 
 AnimeDrive can take longer to answer when the site is busy. Its search uses
 the full source deadline, without restarting a request at the shorter HTTP
-client timeout. If it still times out, try again later or use `--source` to
-search another source, and include a debug log when reporting the problem.
+client timeout. The host is also intermittently unreachable from some
+networks. If it still times out, point `GOANIME_ANIMEDRIVE_URL` at a reachable
+mirror, try again later, or use `--source` to search another source. Include a
+debug log when reporting the problem.
 
 ### Reporting a problem
 

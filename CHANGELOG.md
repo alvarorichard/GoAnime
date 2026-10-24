@@ -1,5 +1,13 @@
 # GoAnime Release Notes - Unreleased
 
+## Browserless Pobreflix and source health
+
+- **Pobreflix works end to end without a browser**: search asks the site's `/api` catalog first (the real name and slug), then falls back to the sitemap corpus. Current `/filme/`, `/serie/` and `/assistir/` pages are read from their embedded JSON, and playback picks the embedded public MP4 server by audio, requested quality and resolution. Old-theme pages keep the StartFlix panel fallback.
+- **Pobreflix moved to `pobreflixtv.gay`**: the old `.sale` host is dead. `GOANIME_POBREFLIX_URL` repoints the catalog without a release.
+- **AnimeDrive has a host override**: `GOANIME_ANIMEDRIVE_URL` points the provider at a reachable mirror when its default host is unreachable from the current network.
+- **Source health covers Pobreflix** with a movie/TV query, and the provider probe points at the live catalog host.
+- **Goyabu remains opt-in**: `goyabu.io` serves a Cloudflare managed challenge. No browserless HTTP client can clear it from a challenged network, and no alternate mirror or guest API was found. The source still works where Cloudflare does not challenge; `GOANIME_ENABLED_SOURCES=goyabu` enables it.
+
 ## Windows Terminal by default
 
 - **A standalone launch reopens in Windows Terminal**: a double-click, Start menu entry or desktop shortcut that lands in a classic conhost now hands the same executable, arguments and working directory to `wt.exe -w -1 new-tab`. The TUI gets color, UTF-8 and font fallback instead of degrading to ASCII. The decision is narrow on purpose: only a classic console window (not a ConPTY host such as Windows Terminal, VS Code or WezTerm) with GoAnime as its sole attached process. A shell keeps its console, because the user already picked a terminal; pipes, CI and scripts stay headless.

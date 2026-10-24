@@ -8,17 +8,21 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// Title page anatomy (server-rendered, checked 2026-10-16):
+// Title page anatomy. The current site (checked 2026-10-24) embeds the whole
+// record as JSON in <script id="initialMovieData">, <script id="initialSeriesData">
+// or <script id="initialEpisodeData">; parseEmbeddedTitle reads that first.
+//
+// The old theme, kept as the fallback for captured fixtures and mirrors still
+// running it, was server-rendered:
 //
 //	<div id="view" data-video-id="84752" data-tmdb-id="793002" data-temp="" data-ep="">
 //
 // A movie page mounts one #view; an episode page mounts a #view.eps with
-// data-temp and data-ep filled; a series page adds the vbEpisodes block â€” a
+// data-temp and data-ep filled; a series page adds the vbEpisodes block — a
 // season select (options data-season / data-for-audio) and episode cards
 // (li.vbEpisodeCard, data-title / data-number, linking the episode records).
-// The player itself is assembled client-side by the site's script bundle, so
-// playback rides the StartFlix panel through the TMDB id â€” the api layer's
-// job, never this parser's.
+// The old player was assembled client-side by the site's script bundle, so
+// playback rode the StartFlix panel through the TMDB id.
 
 // parseTitle reads a title page. Two mount shapes exist (checked against the
 // captured pages, 2026-10-16):
@@ -31,6 +35,9 @@ import (
 // ok=false covers a page with no mount or one without a TMDB id, which names
 // nothing to play the title by.
 func parseTitle(doc *goquery.Document, pageURL string) (Title, bool) {
+	if t, ok := parseEmbeddedTitle(doc, pageURL); ok {
+		return t, true
+	}
 	mount := doc.Find(`div#view`).First()
 	if mount.Length() == 0 {
 		mount = doc.Find(`.vbEpisodes`).First()
@@ -54,8 +61,12 @@ func parseTitle(doc *goquery.Document, pageURL string) (Title, bool) {
 		t.VideoID = slugID
 	}
 	t.Audio = audio
+	t.Slug = slug
+	t.InternalID = t.VideoID
 	t.Kind = KindMovie
-	if strings.Contains(pathOfURL(pageURL), "/series/") || strings.Contains(pathOfURL(pageURL), "/episodios/") {
+	path := pathOfURL(pageURL)
+	if strings.Contains(path, "/series/") || strings.Contains(path, "/episodios/") ||
+		strings.HasPrefix(path, "/serie/") || strings.HasPrefix(path, "/assistir/") {
 		t.Kind = KindSeries
 	}
 
@@ -128,6 +139,7 @@ func parseSeries(doc *goquery.Document, t *Title) {
 		s.Episodes = append(s.Episodes, Episode{
 			Number: number,
 			Title:  title,
+			Audio:  s.Audio,
 			URL:    urlResolve(pageURL0(doc), href),
 		})
 	})
@@ -143,10 +155,21 @@ func parseSeries(doc *goquery.Document, t *Title) {
 }
 
 // titleRecordFromPath reads a title page's URL into its audio and record id,
-// accepting the three record layouts — including /episodios/online/, whose
-// slug carries an episode marker ("ben-hur-a-serie-1x1") that stays on the
-// base slug; the corpus filters those pages out, a title page does not.
+// accepting both site layouts. Current paths carry no record id; their slug is
+// the identifier and is kept whole (the episode URLs are built from it). Old
+// /episodios/online/ URLs keep their episode marker on the base slug; the
+// corpus filters those pages out, a title page does not.
 func titleRecordFromPath(path string) (kind MediaKind, baseSlug string, audio Audio, videoID int) {
+	if m := newMoviePathRe.FindStringSubmatch(path); m != nil {
+		return KindMovie, m[1], audioOfSlug(m[1]), 0
+	}
+	if m := newSeriesPathRe.FindStringSubmatch(path); m != nil {
+		return KindSeries, m[1], audioOfSlug(m[1]), 0
+	}
+	if m := newEpisodePathRe.FindStringSubmatch(path); m != nil {
+		return KindSeries, m[1], audioOfSlug(m[1]), 0
+	}
+
 	segment := ""
 	for _, prefix := range []string{"/filmes/online/", "/series/online/", "/episodios/online/"} {
 		if i := strings.Index(path, prefix); i >= 0 {

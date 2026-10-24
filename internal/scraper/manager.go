@@ -39,7 +39,7 @@ const (
 	AnimesDigitalType             // AnimesDigital PT-BR anime source
 	AnimeDriveType                // AnimeDrive — PT-BR anime source
 
-	PobreflixType // Pobreflix PT-BR movies/series; plays through the StartFlix panel
+	PobreflixType // Pobreflix PT-BR movies/series; direct MP4s, panel fallback
 
 	// NOTE: appended at the end on purpose — the iota values stitch into
 	// serialized/tracked positions; reordering the middle ones would migrate

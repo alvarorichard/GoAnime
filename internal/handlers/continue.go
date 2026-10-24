@@ -155,7 +155,7 @@ func continueSourceToken(source string) string {
 	token := strings.ToLower(strings.TrimSpace(source))
 	token = strings.TrimSuffix(token, ".io")
 	switch token {
-	case "animefire", "goyabu", "hianime", "animesdigital", "startflix", "topcine", "animedrive":
+	case "animefire", "goyabu", "hianime", "animesdigital", "startflix", "topcine", "pobreflix", "animedrive":
 		return token
 	default:
 		return ""

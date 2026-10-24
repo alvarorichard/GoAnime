@@ -25,6 +25,17 @@ func TestNewClientForTest_PointsAtServerAndDisablesRetries(t *testing.T) {
 	assert.Equal(t, AnimeDriveBase, NewAnimeDriveClient().baseURL)
 }
 
+func TestAnimeDriveBaseURLEnvOverride(t *testing.T) {
+	t.Setenv("GOANIME_ANIMEDRIVE_URL", "https://mirror.example/")
+	assert.Equal(t, "https://mirror.example", animeDriveBaseURL())
+	assert.Equal(t, "https://mirror.example", NewAnimeDriveClient().baseURL,
+		"the client must honor the override at construction time")
+
+	t.Setenv("GOANIME_ANIMEDRIVE_URL", "   ")
+	assert.Equal(t, AnimeDriveBase, animeDriveBaseURL(),
+		"a blank override falls back to the compiled host")
+}
+
 func TestDecorateRequest_SetsHeaders(t *testing.T) {
 	t.Parallel()
 

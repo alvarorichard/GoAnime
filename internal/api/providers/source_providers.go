@@ -12,6 +12,7 @@ import (
 	"github.com/alvarorichard/Goanime/internal/models"
 	"github.com/alvarorichard/Goanime/internal/scraper"
 	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/internal/util"
 	"github.com/alvarorichard/Goanime/internal/util/jsonx"
 )
@@ -651,10 +652,10 @@ func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 
 // --- Pobreflix Provider ---
 //
-// Pobreflix is a third movie/TV catalog. It publishes no guest-side search —
-// the scraper indexes the site's sitemap shards for that — and its own player
-// is out of reach, so its titles play by TMDB id through the StartFlix panel;
-// search, seasons and episode names are Pobreflix's.
+// Pobreflix is a third movie/TV catalog. Its /api search and embedded watch
+// pages are plain HTTP: current titles play their public MP4 servers directly.
+// Old-theme pages (and current pages whose servers are missing) keep the
+// TMDB-id StartFlix panel fallback.
 
 type pobreflixProvider struct {
 	once    sync.Once
@@ -675,10 +676,11 @@ func (p *pobreflixProvider) Describe() source.Descriptor {
 		Priority: 48,
 		Explicit: []string{"Pobreflix"},
 		Tags:     []string{"[pobreflix]"},
-		// The title page is the identifier; episode URLs point at the StartFlix
-		// panel, but anime.Source routes them back here through Explicit.
+		// The title page is the identifier; current episode URLs point at
+		// /assistir/ pages, old ones at the StartFlix panel. anime.Source
+		// routes both back here through Explicit.
 		URLMatchers: []string{"pobreflixtv"},
-		ProbeURL:    "https://www.pobreflixtv.sale",
+		ProbeURL:    pobreflix.DefaultBase,
 	}
 }
 

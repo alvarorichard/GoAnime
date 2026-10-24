@@ -16,9 +16,9 @@ const (
 	TopCine       SourceKind = "TopCine"
 	AnimesDigital SourceKind = "AnimesDigital"
 	AnimeDrive    SourceKind = "AnimeDrive"
-	// Pobreflix is the catalogue that publishes its records as sitemap
-	// shards (no guest search) and plays through the StartFlix panel by
-	// TMDB id, like TopCine.
+	// Pobreflix is the catalogue whose /api search answers directly and
+	// whose current pages embed public MP4 servers. Old-theme pages keep
+	// the StartFlix panel fallback by TMDB id.
 	Pobreflix SourceKind = "Pobreflix"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
