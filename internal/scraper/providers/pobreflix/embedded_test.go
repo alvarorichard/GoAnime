@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -194,9 +195,9 @@ func TestSitemapShards_CurrentIndex(t *testing.T) {
 // and slug are authoritative and no sitemap fetch is needed.
 func TestSearch_APIUsesRealNames(t *testing.T) {
 	t.Parallel()
-	var requests int
+	var requests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
+		requests.Add(1)
 		if r.URL.Path != "/api" {
 			http.NotFound(w, r)
 			return
@@ -219,5 +220,5 @@ func TestSearch_APIUsesRealNames(t *testing.T) {
 	assert.Equal(t, "Todo Poderoso", results[0].Title)
 	assert.Equal(t, srv.URL+"/filme/todo-poderoso-53qvb.html", results[0].URL)
 	assert.Equal(t, KindMovie, results[0].Kind)
-	assert.Equal(t, 2, requests, "one catalog request per type")
+	assert.Equal(t, int32(2), requests.Load(), "one catalog request per type")
 }
