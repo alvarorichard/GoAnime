@@ -17,7 +17,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 )
 
 func main() {

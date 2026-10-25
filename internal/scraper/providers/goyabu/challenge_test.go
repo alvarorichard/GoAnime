@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/publicsuffix"

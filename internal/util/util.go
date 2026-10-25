@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/version"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/version"
 )
 
 // SubtitleInfo represents a single subtitle track

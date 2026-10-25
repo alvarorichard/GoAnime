@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/appflow"
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/playback"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/playback"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // HandleContinue reopens a CONTINUE row: enter resumes the tracked episode

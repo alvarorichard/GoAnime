@@ -1,7 +1,7 @@
 package startflix
 
 import (
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // jsonAny is a stream envelope field whose shape depends on whether the

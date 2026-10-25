@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

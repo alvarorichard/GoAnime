@@ -5,13 +5,13 @@ For a walkthrough, see [docs/LIBRARY_USAGE.md](../../docs/LIBRARY_USAGE.md).
 Complete programs are in [examples](examples).
 
 ```bash
-go get github.com/alvarorichard/Goanime
+go get github.com/alvarorichard/Goanime/v2
 ```
 
 ```go
 import (
-    "github.com/alvarorichard/Goanime/pkg/goanime"
-    "github.com/alvarorichard/Goanime/pkg/goanime/types"
+    "github.com/alvarorichard/Goanime/v2/pkg/goanime"
+    "github.com/alvarorichard/Goanime/v2/pkg/goanime/types"
 )
 ```
 

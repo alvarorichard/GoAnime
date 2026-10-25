@@ -23,7 +23,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // MediaInfo holds the metadata needed to generate Jellyfin/Plex-compatible paths.

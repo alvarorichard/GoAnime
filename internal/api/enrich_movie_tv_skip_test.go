@@ -13,7 +13,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 func TestEnrichAnimeData_StartFlixNeverQueriesAniList(t *testing.T) {

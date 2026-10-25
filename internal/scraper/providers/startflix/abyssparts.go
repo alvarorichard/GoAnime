@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Chunked Abyss renditions are fetched one player part at a time (2 MiB by

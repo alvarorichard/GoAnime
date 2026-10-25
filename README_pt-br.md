@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml"><img src="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/alvarorichard/GoAnime/releases/latest"><img src="https://img.shields.io/github/v/release/alvarorichard/GoAnime" alt="Última versão"></a>
-  <a href="https://pkg.go.dev/github.com/alvarorichard/Goanime/pkg/goanime"><img src="https://pkg.go.dev/badge/github.com/alvarorichard/Goanime/pkg/goanime.svg" alt="Go Reference"></a>
+  <a href="https://pkg.go.dev/github.com/alvarorichard/Goanime/v2/pkg/goanime"><img src="https://pkg.go.dev/badge/github.com/alvarorichard/Goanime/v2/pkg/goanime.svg" alt="Go Reference"></a>
   <a href="https://aur.archlinux.org/packages/goanime"><img src="https://img.shields.io/aur/version/goanime" alt="AUR"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/alvarorichard/GoAnime" alt="Licença"></a>
 </p>
@@ -135,8 +135,12 @@ Em ARM64, troque `amd64` por `arm64`.
 Com Go 1.27.3 ou mais recente:
 
 ```bash
-go install github.com/alvarorichard/Goanime/cmd/goanime@latest
+go install github.com/alvarorichard/Goanime/v2/cmd/goanime@latest
 ```
+
+O caminho do módulo v2 é `github.com/alvarorichard/Goanime/v2`; imports da
+biblioteca precisam usar esse prefixo. O módulo v1 continua disponível no
+caminho antigo.
 
 O histórico de progresso usa SQLite e depende de CGO, então é preciso ter um
 compilador C disponível na hora do build. Sem ele, o GoAnime compila e

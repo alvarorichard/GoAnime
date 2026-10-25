@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Define a variable for the base site URL for testing purposes

@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"charm.land/log/v2"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

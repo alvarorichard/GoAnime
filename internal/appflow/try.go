@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	apisource "github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"golang.org/x/term"
 )
 

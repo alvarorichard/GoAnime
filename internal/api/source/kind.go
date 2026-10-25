@@ -2,7 +2,7 @@
 // It is the single source of truth for determining which scraper handles a given anime/media.
 package source
 
-import "github.com/alvarorichard/Goanime/internal/scraper"
+import "github.com/alvarorichard/Goanime/v2/internal/scraper"
 
 // SourceKind is the canonical type-safe identifier for a media source.
 // Unlike scraper.ScraperType (iota int), SourceKind is human-readable and safe for logging.

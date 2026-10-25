@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/stretchr/testify/require"
 )
 

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // upns.go resolves the panel's upn player family — the second Dublado embed

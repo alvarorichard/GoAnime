@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	apisource "github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // alternateSources lists the sources that could still carry a title, excluding

@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

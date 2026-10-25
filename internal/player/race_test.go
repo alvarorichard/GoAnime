@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestRaceOnGlobalMediaVars verifies that the mutex-protected media state is

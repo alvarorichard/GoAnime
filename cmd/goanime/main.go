@@ -8,10 +8,10 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"github.com/alvarorichard/Goanime/internal/handlers"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/handlers"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"golang.org/x/term"
 )
 

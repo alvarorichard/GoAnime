@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // Wikidata records a work's TMDB id (P4947 for movies, P4983 for TV series)

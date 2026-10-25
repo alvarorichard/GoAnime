@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLiveHiAnimeThroughRegistry drives the real registry the way the app does:

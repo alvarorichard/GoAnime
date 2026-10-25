@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // This file implements GoAnime's id-keyed fallback video source: when the

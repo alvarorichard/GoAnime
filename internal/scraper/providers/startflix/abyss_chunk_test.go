@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 func mustParseURL(t *testing.T, raw string) *url.URL {

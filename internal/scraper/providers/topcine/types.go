@@ -3,7 +3,7 @@ package topcine
 import (
 	"errors"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // SourceName is the canonical Source string TopCine results carry.

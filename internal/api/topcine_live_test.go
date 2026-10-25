@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/topcine"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLiveTopCinePlays drives TopCine search → title page → StartFlix panel by

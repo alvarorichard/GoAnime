@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tracking"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/upscaler"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/upscaler"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application

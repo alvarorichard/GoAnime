@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // AnimeID extracts the numeric anime id from a permalink, or accepts a bare id.

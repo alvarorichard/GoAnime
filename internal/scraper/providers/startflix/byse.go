@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // Byse is the player behind StartFlix's embedplaybyse.top servers, and the one

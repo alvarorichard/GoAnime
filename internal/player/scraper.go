@@ -18,18 +18,18 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 
 	// Blank import: the providers package self-registers every live Source in
 	// its init(). Without it the registry is empty and dispatch resolves
 	// nothing. Consolidated into a single wiring file in a later phase (S3).
-	_ "github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	_ "github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
 )

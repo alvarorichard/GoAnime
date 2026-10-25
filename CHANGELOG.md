@@ -1,4 +1,10 @@
-# GoAnime Release Notes - Unreleased
+# GoAnime Release Notes - Version 2.0.0
+
+Release date: 2026-10-24
+
+## Breaking Changes
+
+- **The Go module path is now `github.com/alvarorichard/Goanime/v2`.** Go requires the `/v2` suffix for a v2 module, so a `v2.0.0` tag without it would break `go install` and leave `@latest` on 1.8.7. Library users must update imports from `github.com/alvarorichard/Goanime/pkg/goanime` to `github.com/alvarorichard/Goanime/v2/pkg/goanime`, and source installs become `go install github.com/alvarorichard/Goanime/v2/cmd/goanime@latest`. The v1 module stays available at the old path for existing consumers.
 
 ## Browserless Pobreflix and source health
 

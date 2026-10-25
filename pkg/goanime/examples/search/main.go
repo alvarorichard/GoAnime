@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/alvarorichard/Goanime/pkg/goanime"
+	"github.com/alvarorichard/Goanime/v2/pkg/goanime"
 )
 
 func main() {

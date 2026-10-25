@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // retryingClient is a test client that retries like the real one, without

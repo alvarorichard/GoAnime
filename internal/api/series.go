@@ -1,6 +1,6 @@
 package api
 
-import "github.com/alvarorichard/Goanime/internal/models"
+import "github.com/alvarorichard/Goanime/v2/internal/models"
 
 // IsSeries checks if the given anime URL corresponds to a series (multiple episodes).
 // It returns a boolean indicating if the anime has more than one episode, the total number of episodes, and an error if any issues occur.

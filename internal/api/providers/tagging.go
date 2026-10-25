@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // Per-source result tagging (ported from the ScraperManager, re-keyed by

@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // These tests drive resolveAbyss end to end against fake hosts: the embed

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 )
 
 // Subtitle session (tela 7): the first choice is asked once and remembered.

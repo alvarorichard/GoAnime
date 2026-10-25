@@ -3,7 +3,7 @@ package scraper
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

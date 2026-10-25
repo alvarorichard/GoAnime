@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // shaderHTTPClient is the ONLY client used to fetch shader assets. Its

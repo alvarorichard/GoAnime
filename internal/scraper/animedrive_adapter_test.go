@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/animedrive"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

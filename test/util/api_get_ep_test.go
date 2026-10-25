@@ -12,7 +12,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/pkg/errors"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Mock SafeGet function for testing

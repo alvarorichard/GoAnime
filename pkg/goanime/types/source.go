@@ -3,7 +3,7 @@ package types
 import (
 	"fmt"
 
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 )
 
 // Source represents an anime scraper source

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // WriteAniSkipSidecar writes a "<video>.skips.json" file next to a downloaded

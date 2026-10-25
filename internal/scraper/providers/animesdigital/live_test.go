@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLiveAnimesDigitalChain walks search -> episodes -> stream and verifies

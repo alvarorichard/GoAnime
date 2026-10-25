@@ -3,7 +3,7 @@ package source
 import (
 	"slices"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Source enablement (ARCHITECTURE.md §7 S1 — manual kill-switch).

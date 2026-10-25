@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

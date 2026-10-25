@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // The ZokoAnime embed ships its whole player config in one string.

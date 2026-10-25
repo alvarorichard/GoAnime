@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/appflow"
-	"github.com/alvarorichard/Goanime/internal/tracking"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"golang.org/x/term"
 )
 

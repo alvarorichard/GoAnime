@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // One test per client function not already named by another test.

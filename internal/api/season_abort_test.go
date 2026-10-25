@@ -34,7 +34,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/stretchr/testify/assert"
 )
 

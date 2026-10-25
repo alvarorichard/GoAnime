@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 type mockHTTPClient struct {

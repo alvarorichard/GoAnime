@@ -3,8 +3,8 @@ package playback
 import (
 	"errors"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // menuItem maps a display label to the short code returned by GetUserInput,

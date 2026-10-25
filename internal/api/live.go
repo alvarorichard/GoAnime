@@ -5,9 +5,9 @@ import (
 	"math"
 	"os"
 
-	apisource "github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
+	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"golang.org/x/term"
 )
 

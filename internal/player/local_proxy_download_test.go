@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLocalProxyWaitsLongEnoughForHeaders: the StartFlix proxy answers a

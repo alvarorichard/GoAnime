@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // IMDbSuggestionURL is the endpoint behind the search box on imdb.com. Asked

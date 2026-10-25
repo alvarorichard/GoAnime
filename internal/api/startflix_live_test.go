@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLiveStartFlixOfficialNames drives StartFlix search → panel → official

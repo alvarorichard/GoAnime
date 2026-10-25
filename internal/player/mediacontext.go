@@ -3,7 +3,7 @@ package player
 import (
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Media context and resume overrides for tracking writes.

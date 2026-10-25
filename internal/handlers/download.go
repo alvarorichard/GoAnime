@@ -3,8 +3,8 @@ package handlers
 import (
 	"fmt"
 
-	"github.com/alvarorichard/Goanime/internal/download"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/download"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // HandleDownloadRequest processes download requests

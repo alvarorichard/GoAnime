@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // seasonDisplayName renders a season key for humans: "0" is the TVDB/TMDB

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/downloader/hls"
+	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
 )
 
 // TestDirectHTTPRefusesNonMediaBodies pins that the direct-HTTP downloader

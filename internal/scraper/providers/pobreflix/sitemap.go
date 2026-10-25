@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // The catalog's search corpus. Production asks the site's /api catalog first;

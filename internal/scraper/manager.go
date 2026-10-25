@@ -15,16 +15,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/animedrive"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/animesdigital"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/hianime"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/startflix"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/topcine"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animefire"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesdigital"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/topcine"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
 
 // ScraperType represents different scraper types

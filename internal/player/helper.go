@@ -10,7 +10,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 )
 
 // Update handles updates to the Bubble Tea model.

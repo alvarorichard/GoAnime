@@ -1,4 +1,4 @@
-module github.com/alvarorichard/Goanime
+module github.com/alvarorichard/Goanime/v2
 
 go 1.27.3
 

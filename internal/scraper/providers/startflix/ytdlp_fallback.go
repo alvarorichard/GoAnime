@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // ytdlpFallbackAllowed reports whether the generic yt-dlp fallback may run.

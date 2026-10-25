@@ -24,8 +24,13 @@ and [pkg/goanime/examples](../pkg/goanime/examples) has complete programs.
 The module requires Go 1.27 or later.
 
 ```bash
-go get github.com/alvarorichard/Goanime
+go get github.com/alvarorichard/Goanime/v2
 ```
+
+The `/v2` suffix is part of the module path, not a subdirectory. Every import
+in consumer code must use it, for example
+`github.com/alvarorichard/Goanime/v2/pkg/goanime`. The v1 module remains
+available at the old path for projects that have not migrated yet.
 
 ## Searching
 
@@ -36,7 +41,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/alvarorichard/Goanime/pkg/goanime"
+    "github.com/alvarorichard/Goanime/v2/pkg/goanime"
 )
 
 func main() {
@@ -60,7 +65,7 @@ result came from.
 To search AnimeFire only, pass its source:
 
 ```go
-import "github.com/alvarorichard/Goanime/pkg/goanime/types"
+import "github.com/alvarorichard/Goanime/v2/pkg/goanime/types"
 
 source := types.SourceAnimeFire
 results, err := client.SearchAnime("One Piece", &source)

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 )
 
 // Version is set via -ldflags at build time by the CI workflow.

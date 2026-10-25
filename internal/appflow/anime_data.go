@@ -8,14 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 
 	"charm.land/huh/v2"
 	"charm.land/huh/v2/spinner"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Injectable package-level dependencies. Tests swap these via the

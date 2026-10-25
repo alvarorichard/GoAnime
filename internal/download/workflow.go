@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/appflow"
-	"github.com/alvarorichard/Goanime/internal/downloader"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/downloader"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // workflowSearchFn is the anime search function used by HandleDownloadRequest.

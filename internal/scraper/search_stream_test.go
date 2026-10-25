@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/animefire"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animefire"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

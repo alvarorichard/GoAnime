@@ -45,6 +45,34 @@ jobs:
           go mod verify
           go mod download
 
+      - name: Verify version and module path
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          FALLBACK="$(sed -n 's/^var Version = "\(.*\)"/\1/p' internal/version/version.go)"
+          case "$TAG_VERSION" in
+            "$FALLBACK"|"$FALLBACK"-*) ;;
+            *)
+              echo "internal/version.Version is $FALLBACK but the tag is $TAG_VERSION"
+              exit 1
+              ;;
+          esac
+          if [[ "$TAG_VERSION" == 2.* ]] && ! grep -q '^module .*/v2$' go.mod; then
+            echo "a v2 tag requires a /v2 module path in go.mod"
+            exit 1
+          fi
+
+      - name: Install security scanners
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261005092323-d2b649ec0182
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+
+      - name: Scan source for insecure patterns
+        run: gosec -exclude-generated ./...
+
+      - name: Scan reachable dependencies for vulnerabilities
+        run: govulncheck ./...
+
       - name: Run linter
         uses: golangci/golangci-lint-action@v9
         with:
@@ -169,13 +197,13 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           
           LDFLAGS="-s -w"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Version=${VERSION}"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.BuildTime=${BUILD_TIME}"
-          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/internal/version.Commit=${COMMIT}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/v2/internal/version.Version=${VERSION}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/v2/internal/version.BuildTime=${BUILD_TIME}"
+          LDFLAGS="${LDFLAGS} -X github.com/alvarorichard/Goanime/v2/internal/version.Commit=${COMMIT}"
           
           OUTPUT_NAME="${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
           
-          go build -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
+          go build -trimpath -ldflags "${LDFLAGS}" -o "dist/${OUTPUT_NAME}" ./cmd/goanime
           
           echo "Built ${OUTPUT_NAME} with SQLite support"
 
@@ -191,14 +219,14 @@ jobs:
           $COMMIT = git rev-parse --short HEAD
           
           $LDFLAGS = "-s -w"
-          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.Version=$VERSION"
-          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.BuildTime=$BUILD_TIME"
-          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/internal/version.Commit=$COMMIT"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/v2/internal/version.Version=$VERSION"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/v2/internal/version.BuildTime=$BUILD_TIME"
+          $LDFLAGS = "$LDFLAGS -X github.com/alvarorichard/Goanime/v2/internal/version.Commit=$COMMIT"
           
           $OUTPUT_NAME = "${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
           
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          go build -ldflags "$LDFLAGS" -o "dist/$OUTPUT_NAME" ./cmd/goanime
+          go build -trimpath -ldflags "$LDFLAGS" -o "dist/$OUTPUT_NAME" ./cmd/goanime
           
           Write-Host "Built $OUTPUT_NAME with SQLite support"
 
@@ -248,7 +276,7 @@ jobs:
           lipo -info "dist/${OUTPUT_NAME}" | grep -q "arm64" || { echo "arm64 slice missing"; exit 1; }
 
           # Sanity check: the native slice must actually run
-          "dist/${OUTPUT_NAME}" --version || true
+          "dist/${OUTPUT_NAME}" --version
 
           echo "Built ${OUTPUT_NAME} (x86_64 + arm64) with SQLite support"
 
@@ -496,11 +524,23 @@ jobs:
         id: changelog
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
+          VERSION_NUMBER=${{ steps.version.outputs.VERSION_NUMBER }}
           
           # Check if manual CHANGELOG.md exists in repo root
           if [ -f "CHANGELOG.md" ]; then
             echo "Using manual CHANGELOG.md from repository"
-            cp CHANGELOG.md RELEASE_NOTES.md
+            heading="# GoAnime Release Notes - Version ${VERSION_NUMBER}"
+            if grep -Fqx "$heading" CHANGELOG.md; then
+              # Publish only this version's section, not the whole history.
+              awk -v heading="$heading" '
+                $0 == heading { capture = 1 }
+                capture && /^# GoAnime Release Notes - Version / && $0 != heading { exit }
+                capture { print }
+              ' CHANGELOG.md > RELEASE_NOTES.md
+            else
+              echo "No ${heading} section found; publishing the whole CHANGELOG.md"
+              cp CHANGELOG.md RELEASE_NOTES.md
+            fi
           else
             echo "Generating changelog from commits"
             
@@ -603,7 +643,7 @@ jobs:
             release/GoAnime-Installer-*.exe
             release/checksums-sha256.txt
             release/checksums-sha512.txt
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -664,6 +704,18 @@ jobs:
           sed -i "s|goanime-[0-9.]*::|goanime-${{ steps.version.outputs.VERSION_NUMBER }}::|" PKGBUILD
           
           cat PKGBUILD
+
+      - name: Pin release asset checksum
+        if: steps.check-secrets.outputs.has_secrets == 'true'
+        run: |
+          cd aur/goanime
+          asset="goanime-linux-amd64"
+          url="https://github.com/alvarorichard/GoAnime/releases/download/${{ steps.version.outputs.VERSION }}/${asset}"
+          curl -fsSL -o "$asset" "$url"
+          sum="$(sha256sum "$asset" | awk '{print $1}')"
+          sed -i "s/^sha256sums=.*/sha256sums=('$sum')/" PKGBUILD
+          rm -f "$asset"
+          grep '^sha256sums=' PKGBUILD
 
       - name: Generate .SRCINFO
         if: steps.check-secrets.outputs.has_secrets == 'true'

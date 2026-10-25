@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
-	"github.com/alvarorichard/Goanime/internal/version"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
+	"github.com/alvarorichard/Goanime/v2/internal/version"
 )
 
 // maxJSONResponseBytes caps how much of an HTTP response jsonx.Decode will read

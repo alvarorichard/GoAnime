@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/pobreflix"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // TestLivePobreflixPlays drives Pobreflix search → title page → embedded MP4

@@ -10,7 +10,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 func TestParseEpisodes(t *testing.T) {
