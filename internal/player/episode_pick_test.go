@@ -195,7 +195,11 @@ func TestEpisodePickItems_OnePieceScale(t *testing.T) {
 }
 
 func TestSelectEpisodeWithPicker_OptionsContract(t *testing.T) {
-	t.Parallel()
+	// Not parallel: episodeListContext is process-wide. Keep this test
+	// isolated from TestEpisodePickOptionsContract, which sets it.
+	SetEpisodeListContext("", "", "")
+	t.Cleanup(func() { SetEpisodeListContext("", "", "") })
+
 	eps := []models.Episode{{Number: "7", URL: "u7", Title: models.TitleDetails{Romaji: "Seven"}}}
 	url, num, err := selectEpisodeWithPicker(func(items []tui.PickItem, opts tui.PickOptions) (int, string, error) {
 		assert.Equal(t, "Search > Episodes", opts.Breadcrumb)

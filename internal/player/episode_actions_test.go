@@ -146,7 +146,8 @@ func TestSelectEpisodeActions(t *testing.T) {
 }
 
 func TestEpisodePickOptionsContract(t *testing.T) {
-	t.Parallel()
+	// Not parallel: episodeListContext is process-wide, and the picker
+	// contract test below reads it. Parallel tests would race on it.
 	SetEpisodeListContext("Mukashi Banashi", "Animefire.io", "Legendado")
 	t.Cleanup(func() { SetEpisodeListContext("", "", "") })
 

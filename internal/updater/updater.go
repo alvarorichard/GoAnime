@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,11 +39,27 @@ const checksumsAssetName = "checksums-sha256.txt"
 // is under 1 KiB; anything near this size is not a checksums file.
 const maxChecksumsBytes = 1 << 20 // 1 MiB
 
+// Suffixes of the files the updater keeps next to the running executable.
+// They are all replaced or removed before the update finishes, except for the
+// backup, which survives until the new binary has started successfully.
+const (
+	updateBackupSuffix = ".backup"
+	updateStagedSuffix = ".new"
+	updateMarkerSuffix = ".update-pending"
+	updateScriptSuffix = ".update.bat"
+)
+
 const (
 	GitHubOwner = "alvarorichard"
 	GitHubRepo  = "GoAnime"
 	GitHubAPI   = "https://api.github.com/repos/" + GitHubOwner + "/" + GitHubRepo
 )
+
+// errUpdateDeferred means the replacement was handed to a helper process and
+// will only happen after this process exits. It is not a failure and must not
+// trigger a rollback: rolling back while the helper waits would overwrite the
+// new binary as soon as the process ends.
+var errUpdateDeferred = errors.New("update deferred until restart")
 
 // Injectable hooks (overridden by tests).
 var (
@@ -160,36 +177,52 @@ func PerformUpdate(release *GitHubRelease) error {
 		return fmt.Errorf("failed to get current executable path: %w", err)
 	}
 
-	// Create backup of current executable
-	backupFile := currentExe + ".backup"
+	// Hash the update now. On Windows the helper uses the same digest to
+	// verify the staged copy and the installed file; the marker left behind
+	// lets the next start prove that this executable is the one we installed.
+	newHash, err := fileSHA256(updateFile)
+	if err != nil {
+		return fmt.Errorf("failed to hash update: %w", err)
+	}
+
+	// Create a backup of the current executable. It is deliberately not
+	// removed on success: CleanupAfterUpdate deletes it only after the new
+	// binary has actually started, so a crash on startup still leaves a
+	// working copy next to the executable.
+	backupFile := updateBackupPath(currentExe)
 	if err := copyFile(currentExe, backupFile); err != nil {
 		return fmt.Errorf("failed to create backup: %w", err)
 	}
-	defer func() {
-		if removeErr := os.Remove(backupFile); removeErr != nil {
-			util.Debug("Failed to remove backup file:", removeErr)
-		}
-	}()
 
 	// Replace current executable
 	if err := replaceExecutableFn(currentExe, updateFile); err != nil {
-		// Try to restore backup if replacement fails
-		if _, backupErr := os.Stat(backupFile); backupErr == nil {
-			if restoreErr := copyFile(backupFile, currentExe); restoreErr != nil {
-				util.Warn("Failed to restore backup:", restoreErr)
-			} else {
-				util.Info("Successfully restored backup after failed update")
-			}
-		}
-
-		// Check if this is the Windows deferred update case
-		if strings.Contains(err.Error(), "update script created") {
-			// This is not actually an error - the update will complete after restart
+		// The Windows helper will finish after this process exits. Rolling
+		// back here would overwrite the staged file as soon as we terminated.
+		if errors.Is(err, errUpdateDeferred) {
 			util.Info("Update will complete when you restart the application")
 			return nil
 		}
 
+		// Try to restore the backup if replacement fails. If the restore
+		// itself fails, keep the backup: it is the only working copy left.
+		if _, backupErr := os.Stat(backupFile); backupErr == nil {
+			if restoreErr := copyFile(backupFile, currentExe); restoreErr != nil {
+				util.Warn("Failed to restore backup; it was kept at", backupFile+":", restoreErr)
+			} else {
+				util.Info("Successfully restored backup after failed update")
+				if removeErr := os.Remove(backupFile); removeErr != nil {
+					util.Debug("Failed to remove backup after restore:", removeErr)
+				}
+			}
+		}
+
 		return fmt.Errorf("failed to replace executable: %w", err)
+	}
+
+	// Replacement is in place. Record its digest so the next start can clean
+	// up the backup and staged files, and prove the installed binary runs.
+	if err := writeUpdateMarker(currentExe, newHash); err != nil {
+		util.Warn("Update installed, but the post-update marker could not be written:", err)
 	}
 
 	util.Info("Update completed successfully! Please restart the application.")
@@ -776,6 +809,116 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func updateBackupPath(currentExe string) string {
+	return currentExe + updateBackupSuffix
+}
+
+func updateStagedPath(currentExe string) string {
+	return currentExe + updateStagedSuffix
+}
+
+func updateMarkerPath(currentExe string) string {
+	return currentExe + updateMarkerSuffix
+}
+
+func updateScriptPath(currentExe string) string {
+	return currentExe + updateScriptSuffix
+}
+
+// writeUpdateMarker records the digest of the newly installed executable.
+// CleanupAfterUpdate only deletes the backup when the running executable
+// still matches this digest, which means the update actually booted.
+func writeUpdateMarker(currentExe, digest string) error {
+	markerPath := updateMarkerPath(currentExe)
+	if err := os.WriteFile(markerPath, []byte(strings.ToLower(digest)+"\n"), 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", markerPath, err)
+	}
+	return nil
+}
+
+func parseUpdateMarker(data []byte) (string, error) {
+	digest := strings.ToLower(strings.TrimSpace(string(data)))
+	if len(digest) != sha256.Size*2 {
+		return "", fmt.Errorf("marker does not contain a SHA-256 digest")
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return "", fmt.Errorf("marker contains an invalid SHA-256 digest: %w", err)
+	}
+	return digest, nil
+}
+
+// CleanupAfterUpdate removes the backup, staged executable and helper script
+// left by a completed update. It is safe to call on every start: without a
+// marker it does nothing, and it only deletes the backup when the running
+// executable matches the digest recorded by the updater. If anything does not
+// match, the backup is deliberately kept so the user can restore it.
+func CleanupAfterUpdate() {
+	currentExe, err := osExecutableFn()
+	if err != nil {
+		util.Debug("Could not locate the executable for update cleanup:", err)
+		return
+	}
+	if err := cleanupUpdateArtifacts(currentExe); err != nil {
+		util.Warn("Could not finish update cleanup:", err)
+	}
+}
+
+func cleanupUpdateArtifacts(currentExe string) error {
+	markerPath := updateMarkerPath(currentExe)
+	data, err := os.ReadFile(markerPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read update marker: %w", err)
+	}
+
+	expected, err := parseUpdateMarker(data)
+	if err != nil {
+		// A marker we cannot verify must never authorize deleting the backup.
+		removeErr := os.Remove(markerPath)
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return fmt.Errorf("invalid update marker (backup kept at %s); failed to remove it: %w",
+				updateBackupPath(currentExe), removeErr)
+		}
+		return fmt.Errorf("invalid update marker (backup kept at %s): %w",
+			updateBackupPath(currentExe), err)
+	}
+
+	current, err := fileSHA256(currentExe)
+	if err != nil {
+		return fmt.Errorf("failed to hash the running executable: %w", err)
+	}
+	if !strings.EqualFold(current, expected) {
+		// The marker belongs to another build: the update was rolled back or
+		// the binary was replaced by hand. Keep the backup, drop the marker so
+		// the warning is not repeated on every launch.
+		if removeErr := os.Remove(markerPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return fmt.Errorf("running executable does not match the update marker (backup kept at %s); failed to remove the marker: %w",
+				updateBackupPath(currentExe), removeErr)
+		}
+		return fmt.Errorf("running executable does not match the update marker; backup kept at %s",
+			updateBackupPath(currentExe))
+	}
+
+	// Remove the backup first. If it cannot be deleted, keep the marker so the
+	// next start retries instead of leaving an unmarked backup behind.
+	if err := os.Remove(updateBackupPath(currentExe)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove the update backup: %w", err)
+	}
+	if err := os.Remove(updateStagedPath(currentExe)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove the staged update: %w", err)
+	}
+	if err := os.Remove(updateScriptPath(currentExe)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove the update helper script: %w", err)
+	}
+	if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove the update marker: %w", err)
+	}
+
+	return nil
+}
+
 func copyFile(src, dst string) error {
 	// Validate source and destination paths
 	if err := validateFilePath(src); err != nil {
@@ -898,66 +1041,200 @@ func truncateText(text string, maxLen int) string {
 	return text[:maxLen] + "..."
 }
 
-// createWindowsUpdateScript creates a batch script to replace the executable
-// after the current process exits. This is used as a fallback when the
-// executable cannot be moved while running.
+// windowsUpdatePlan describes the files the post-exit helper needs. Paths are
+// passed through environment variables, not interpolated into the batch text,
+// so spaces, ampersands and parentheses in the install path stay intact.
+type windowsUpdatePlan struct {
+	currentExe string
+	stagedExe  string
+	backupFile string
+	markerFile string
+	scriptPath string
+	digest     string
+}
+
+func removeUpdateArtifact(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		util.Debug("Failed to remove update file:", err)
+	}
+}
+
+func prepareWindowsUpdate(currentExe, newExe string) (windowsUpdatePlan, error) {
+	plan := windowsUpdatePlan{
+		currentExe: currentExe,
+		stagedExe:  updateStagedPath(currentExe),
+		backupFile: updateBackupPath(currentExe),
+		markerFile: updateMarkerPath(currentExe),
+		scriptPath: updateScriptPath(currentExe),
+	}
+
+	digest, err := fileSHA256(newExe)
+	if err != nil {
+		return plan, fmt.Errorf("failed to hash the downloaded executable: %w", err)
+	}
+	plan.digest = digest
+
+	if _, err := os.Stat(currentExe); err != nil {
+		return plan, fmt.Errorf("current executable is unavailable: %w", err)
+	}
+
+	// Stage next to the target, not in the temp directory: PerformUpdate
+	// removes the extraction directory before the helper gets to run.
+	if err := copyFile(newExe, plan.stagedExe); err != nil {
+		return plan, fmt.Errorf("failed to stage the update: %w", err)
+	}
+
+	stagedDigest, err := fileSHA256(plan.stagedExe)
+	if err != nil {
+		removeUpdateArtifact(plan.stagedExe)
+		return plan, fmt.Errorf("failed to hash the staged update: %w", err)
+	}
+	if !strings.EqualFold(stagedDigest, digest) {
+		removeUpdateArtifact(plan.stagedExe)
+		return plan, fmt.Errorf("staged update does not match the downloaded executable")
+	}
+
+	return plan, nil
+}
+
+func (p windowsUpdatePlan) environment() []string {
+	return []string{
+		"GOANIME_UPDATE_TARGET=" + p.currentExe,
+		"GOANIME_UPDATE_STAGED=" + p.stagedExe,
+		"GOANIME_UPDATE_BACKUP=" + p.backupFile,
+		"GOANIME_UPDATE_MARKER=" + p.markerFile,
+		"GOANIME_UPDATE_SHA256=" + p.digest,
+		"GOANIME_UPDATE_PID=" + strconv.Itoa(os.Getpid()),
+	}
+}
+
+// windowsUpdateScript is the post-exit helper. It waits for the updater
+// process to disappear, verifies the staged file, copies it over the target,
+// verifies the result and restores the backup if anything fails. Only after a
+// verified copy does it write the marker that authorizes the next start to
+// delete the backup.
+func windowsUpdateScript() string {
+	return `@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+
+set "TARGET=%GOANIME_UPDATE_TARGET%"
+set "STAGED=%GOANIME_UPDATE_STAGED%"
+set "BACKUP=%GOANIME_UPDATE_BACKUP%"
+set "MARKER=%GOANIME_UPDATE_MARKER%"
+set "EXPECTED=%GOANIME_UPDATE_SHA256%"
+set "WAITPID=%GOANIME_UPDATE_PID%"
+
+if not defined TARGET goto :fail
+if not defined STAGED goto :fail
+if not defined BACKUP goto :fail
+if not defined MARKER goto :fail
+if not defined EXPECTED goto :fail
+if not defined WAITPID goto :fail
+
+:wait
+tasklist /FI "PID eq %WAITPID%" 2>nul | find /I "%WAITPID%" >nul
+if not errorlevel 1 (
+    ping -n 2 127.0.0.1 >nul
+    goto wait
+)
+
+call :hash "%STAGED%"
+if /I not "%HASH%"=="%EXPECTED%" goto :staged_mismatch
+
+if not exist "%TARGET%" goto :fail
+if not exist "%BACKUP%" (
+    copy /Y "%TARGET%" "%BACKUP%" >nul 2>&1
+    if errorlevel 1 goto :fail
+)
+
+set /a ATTEMPTS=0
+:replace
+copy /Y "%STAGED%" "%TARGET%" >nul 2>&1
+if not errorlevel 1 goto :verify
+set /a ATTEMPTS+=1
+if %ATTEMPTS% GEQ 15 goto :restore
+ping -n 2 127.0.0.1 >nul
+goto replace
+
+:verify
+call :hash "%TARGET%"
+if /I "%HASH%"=="%EXPECTED%" goto :success
+
+:restore
+copy /Y "%BACKUP%" "%TARGET%" >nul 2>&1
+del /F /Q "%STAGED%" >nul 2>&1
+del /F /Q "%MARKER%" >nul 2>&1
+goto :fail
+
+:success
+> "%MARKER%" echo %EXPECTED%
+del /F /Q "%STAGED%" >nul 2>&1
+call :scheduleSelfDelete
+exit /b 0
+
+:staged_mismatch
+del /F /Q "%STAGED%" >nul 2>&1
+goto :fail
+
+:fail
+call :scheduleSelfDelete
+exit /b 1
+
+:scheduleSelfDelete
+rem Deleting the running batch file before exit makes cmd lose the exit
+rem code (it returns 0 even after "exit /b 1"). Let a detached child wait
+rem for this process to end and remove the script afterwards.
+set "SELF=%~f0"
+start "" /B cmd /C "ping -n 2 127.0.0.1 >nul & del /F /Q "%SELF%" >nul 2>&1"
+exit /b 0
+
+:hash
+set "HASH="
+for /f "skip=1 delims=" %%H in ('certutil -hashfile "%~1" SHA256 2^>nul') do (
+    if not defined HASH set "HASH=%%H"
+)
+set "HASH=%HASH: =%"
+exit /b 0
+`
+}
+
+// createWindowsUpdateScript stages the new binary and starts a helper that
+// replaces the running executable after this process exits.
 func createWindowsUpdateScript(currentExe, newExe string) error {
 	if runtime.GOOS != "windows" {
 		return fmt.Errorf("createWindowsUpdateScript called on non-Windows platform")
 	}
 
-	// Create a batch script that will:
-	// 1. Wait for the current process to exit
-	// 2. Replace the executable
-	// 3. Clean up the temporary files
-	// 4. Restart the application (optional)
+	plan, err := prepareWindowsUpdate(currentExe, newExe)
+	if err != nil {
+		return err
+	}
 
-	scriptPath := filepath.Join(filepath.Dir(currentExe), "update_goanime.bat")
-
-	// Create the batch script content
-	scriptContent := fmt.Sprintf(`@echo off
-echo Updating GoAnime...
-timeout /t 2 /nobreak > nul
-:WAIT
-tasklist /FI "PID eq %d" 2>NUL | find /I /N "%d">NUL
-if "%%ERRORLEVEL%%"=="0" (
-    timeout /t 1 /nobreak > nul
-    goto WAIT
-)
-echo Replacing executable...
-copy /Y "%s" "%s" > nul
-if exist "%s" del "%s"
-echo Update completed!
-del "%%~f0"
-`, os.Getpid(), os.Getpid(), newExe, currentExe, newExe, newExe)
-
-	// Write the script to file
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o600); err != nil {
+	if err := os.WriteFile(plan.scriptPath, []byte(windowsUpdateScript()), 0o600); err != nil {
+		removeUpdateArtifact(plan.stagedExe)
 		return fmt.Errorf("failed to create update script: %w", err)
+	}
+
+	// Validate script path before executing
+	if err := validateFilePath(plan.scriptPath); err != nil {
+		removeUpdateArtifact(plan.scriptPath)
+		removeUpdateArtifact(plan.stagedExe)
+		return fmt.Errorf("script path validation failed: %w", err)
+	}
+
+	// Execute the script in the background. It waits for this PID, so it must
+	// not be waited for here; the process has to exit for the copy to start.
+	// #nosec G204 - scriptPath is validated above for safety
+	cmd := exec.Command("cmd", "/C", "start", "", "/B", plan.scriptPath)
+	cmd.Env = append(os.Environ(), plan.environment()...)
+	if err := cmd.Start(); err != nil {
+		removeUpdateArtifact(plan.scriptPath)
+		removeUpdateArtifact(plan.stagedExe)
+		return fmt.Errorf("failed to execute update script: %w", err)
 	}
 
 	util.Info("Created update script. The application will be updated after exit.")
 	util.Info("Please close the application to complete the update.")
 
-	// Validate script path before executing
-	if err := validateFilePath(scriptPath); err != nil {
-		// Clean up script if path is invalid
-		if removeErr := os.Remove(scriptPath); removeErr != nil {
-			util.Debug("Failed to remove invalid script:", removeErr)
-		}
-		return fmt.Errorf("script path validation failed: %w", err)
-	}
-
-	// Execute the script in the background
-	// Note: We don't wait for it to complete as it needs to run after this process exits
-	// #nosec G204 - scriptPath is validated above for safety
-	if err := exec.Command("cmd", "/C", "start", "/B", scriptPath).Start(); err != nil {
-		// Clean up script if we can't execute it
-		if removeErr := os.Remove(scriptPath); removeErr != nil {
-			util.Debug("Failed to remove script after execution failure:", removeErr)
-		}
-		return fmt.Errorf("failed to execute update script: %w", err)
-	}
-
-	return fmt.Errorf("update script created - please restart the application to complete the update")
+	return fmt.Errorf("%w: helper %s", errUpdateDeferred, plan.scriptPath)
 }

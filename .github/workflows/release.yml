@@ -601,7 +601,9 @@ jobs:
           echo '```' >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "#### Windows" >> RELEASE_NOTES.md
-          echo "Download and run \`GoAnime-Installer-${VERSION#v}.exe\`, which installs GoAnime and mpv. The \`goanime-windows-amd64.zip\` archive holds only \`goanime-windows-amd64.exe\`; rename it to \`goanime.exe\` and install mpv separately." >> RELEASE_NOTES.md
+          echo "Download and run \`GoAnime-Installer-${VERSION#v}.exe\`, which installs GoAnime and mpv. It is a per-user install under \`%LOCALAPPDATA%\\Programs\\GoAnime\`, adds only your user \`PATH\`, and does not request administrator rights. If a 1.x all-users installation is present, uninstall it first. The \`goanime-windows-amd64.zip\` archive holds only \`goanime-windows-amd64.exe\`; rename it to \`goanime.exe\` and install mpv separately." >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "**Unsigned binaries and SmartScreen:** the Windows installer and \`goanime.exe\` are not Authenticode-signed. SmartScreen may show \"Windows protected your PC\". Verify the SHA-256 against \`checksums-sha256.txt\`; only if it matches, choose **More info** → **Run anyway**. Never disable SmartScreen globally." >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "### Verification" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md

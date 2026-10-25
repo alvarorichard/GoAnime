@@ -952,18 +952,39 @@ func TestWindowsTerminalNoticeMessagesAreDistinct(t *testing.T) {
 	}
 }
 
-// TestInstallerLaunchesAsOriginalUser is a meta-test over the Inno Setup
-// script. The installer elevates, so a postinstall launch without
-// runasoriginaluser would leave GoAnime under the administrator token and
-// install the private terminal into the wrong profile.
-func TestInstallerLaunchesAsOriginalUser(t *testing.T) {
+// TestInstallerIsPerUser is a meta-test over the Inno Setup script. The
+// installer must run without elevation, install under LOCALAPPDATA, write PATH
+// only for the current user and never use setx, which truncates PATH and can
+// expand the wrong user's environment.
+func TestInstallerIsPerUser(t *testing.T) {
 	t.Parallel()
 
 	data, err := os.ReadFile("../../build/install.iss")
 	require.NoError(t, err)
 	text := string(data)
-	assert.Contains(t, text, "PrivilegesRequired=admin")
+	assert.Contains(t, text, "PrivilegesRequired=lowest")
+	assert.Contains(t, text, `DefaultDirName={localappdata}\Programs\{#MyAppName}`)
+	assert.Contains(t, text, "ChangesEnvironment=yes")
 	assert.Contains(t, text, "ArchitecturesInstallIn64BitMode=x64compatible")
+	assert.Contains(t, text, `RegQueryStringValue(HKCU, 'Environment', 'Path'`)
+	assert.Contains(t, text, `RegWriteExpandStringValue(HKCU, 'Environment', 'Path'`)
+	assert.Contains(t, text, `StringSplit(OrigPath, [';'], stAll)`,
+		"uninstall must split PATH into entries instead of deleting by offset")
+	assert.Contains(t, text, `SameText(Parts[I], PathToRemove)`,
+		"PATH entries are compared case-insensitively, like Windows does")
+	assert.Contains(t, text, `StringJoin(';', Kept)`)
+	assert.NotContains(t, text, `Delete(NewPath, P`,
+		"the old Pos/Delete loop leaves a stray semicolon after uninstall")
+	assert.Contains(t, text, `Uninstall\{{#MyAppId}}_is1`,
+		"the uninstall key keeps the literal braces around the GUID")
+	assert.Contains(t, text, `RegQueryStringValue(HKLM64`,
+		"1.x used x64compatible, so its uninstall key lives in the 64-bit view")
+	assert.Contains(t, text, `SuppressibleMsgBox('An older all-users installation`,
+		"silent installs and CI must not block on the 1.x warning")
+	assert.NotContains(t, text, "    MsgBox('An older all-users installation",
+		"a plain MsgBox is not suppressed by /SUPPRESSMSGBOXES")
+	assert.NotContains(t, text, "setx", "setx must not rewrite the user PATH")
+	assert.NotContains(t, text, `Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"`)
 
 	var runLine string
 	for _, line := range strings.Split(text, "\n") {
@@ -974,11 +995,13 @@ func TestInstallerLaunchesAsOriginalUser(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, runLine, "install.iss must launch the app after installation")
-	for _, flag := range []string{"nowait", "postinstall", "skipifsilent", "runasoriginaluser"} {
+	for _, flag := range []string{"nowait", "postinstall", "skipifsilent"} {
 		assert.Contains(t, runLine, flag)
 	}
+	assert.NotContains(t, runLine, "runasoriginaluser",
+		"a per-user installer needs no runasoriginaluser")
 	assert.NotContains(t, runLine, "shellexec",
-		"runasoriginaluser cannot be combined with shellexec")
+		"the launch entry must not rely on ShellExec")
 }
 
 type terminalNoticeConstant struct {

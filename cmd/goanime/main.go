@@ -11,6 +11,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/updater"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"golang.org/x/term"
 )
@@ -33,6 +34,11 @@ func main() {
 	if tui.RelaunchInWindowsTerminal() {
 		return
 	}
+
+	// Finish housekeeping from a previous --update: remove the backup and
+	// staged files only after this binary has started and its digest matches
+	// the one recorded by the updater. No marker means nothing to clean up.
+	updater.CleanupAfterUpdate()
 
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape

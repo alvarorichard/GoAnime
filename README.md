@@ -73,15 +73,30 @@ Prebuilt binaries for every platform are available on the
 
 ### Windows
 
+GoAnime ships as a per-user installer and as a portable ZIP. Neither needs
+administrator rights.
+
 Download and run `GoAnime-Installer-<version>.exe` from the
 [latest release](https://github.com/alvarorichard/GoAnime/releases/latest).
-It installs GoAnime and mpv and adds both to your `PATH`.
+It installs GoAnime and mpv under `%LOCALAPPDATA%\Programs\GoAnime` and adds
+that folder and its `bin` subfolder to your **user** `PATH`. It does not ask
+for UAC. If an old 1.x all-users installation is found, the installer asks you
+to uninstall it first, so two copies do not compete in `PATH`.
 
 If you prefer not to use the installer, download
 `goanime-windows-amd64.zip`, extract `goanime-windows-amd64.exe`, rename it to
 `goanime.exe` and put it in a folder on your `PATH`. The archive does not
 include mpv: [install it](https://mpv.io/installation/) separately. GoAnime
 finds `mpv.exe` on your `PATH` or in the same folder as `goanime.exe`.
+
+**Unsigned binaries and SmartScreen.** GoAnime releases are not signed with a
+paid Authenticode certificate, so Windows SmartScreen may show "Windows
+protected your PC" the first time you run the installer or `goanime.exe`. That
+warning is expected for an unsigned project; it does not mean the file is
+known to be malicious or safe. Verify the SHA-256 against
+`checksums-sha256.txt` (see [Verifying a download](#verifying-a-download)).
+Only if it matches, choose **More info** → **Run anyway**. Never disable
+SmartScreen globally, and never run a file whose hash you have not checked.
 
 When you launch GoAnime on its own (double-click, Start menu or a desktop
 shortcut), it runs in [Windows Terminal](https://aka.ms/terminal) so the
@@ -157,19 +172,33 @@ shasum -a 256 goanime                  # macOS, the goanime-darwin-universal lin
 Get-FileHash goanime-windows-amd64.zip # Windows, in PowerShell
 ```
 
+`checksums-sha256.txt` is published in the same release as the binaries, so it
+detects a corrupted or truncated download, not a compromised release. The
+Windows and macOS binaries are not code-signed; the operating system may warn
+on first launch.
+
 ### Updating
 
-| Installed with              | Update with                                       |
-| --------------------------- | ------------------------------------------------- |
-| Windows installer           | The installer of the new version                  |
-| A release binary or archive | `goanime --update`                                |
-| AUR                         | Your AUR helper, for example `yay -Syu`           |
-| `go install`                | The same `go install` command                     |
+| Installed with               | Update with                                                    |
+| ---------------------------- | -------------------------------------------------------------- |
+| Windows installer (2.0.0+)   | `goanime --update`, or the installer of the new version        |
+| Windows installer (1.x)      | The v2.0.0 installer once; after that, `goanime --update`      |
+| Windows portable ZIP         | `goanime --update`                                             |
+| AUR                          | Your AUR helper, for example `yay -Syu`                        |
+| A release binary or archive  | `goanime --update`                                             |
+| `go install`                 | The same `go install` command                                  |
 
 `goanime --update` checks the download against the release's
-`checksums-sha256.txt` and installs nothing if they do not match. It replaces
-the executable in place, so if it lives in a folder you cannot write to, such
-as `/usr/local/bin`, run `sudo goanime --update`.
+`checksums-sha256.txt` and installs nothing if they do not match. On Windows it
+stages the new executable next to the running one, lets a helper finish the
+replacement after GoAnime exits, and keeps the previous binary as
+`goanime.exe.backup` until the new version starts successfully. See
+[docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md) for the full flow.
+
+The per-user Windows installer lives in a folder the user can write to, so
+`goanime --update` does not need elevation. On Linux and macOS, if the
+executable lives in a folder you cannot write to, such as `/usr/local/bin`,
+run `sudo goanime --update`.
 
 ## Usage
 
