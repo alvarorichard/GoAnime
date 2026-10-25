@@ -865,6 +865,7 @@ func CleanupAfterUpdate() {
 
 func cleanupUpdateArtifacts(currentExe string) error {
 	markerPath := updateMarkerPath(currentExe)
+	// #nosec G304 - markerPath is derived from the running executable, not user input.
 	data, err := os.ReadFile(markerPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
