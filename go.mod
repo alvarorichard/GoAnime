@@ -4,37 +4,37 @@ go 1.27.1
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.1.0
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
-	github.com/Microsoft/go-winio v0.6.2
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/charmbracelet/colorprofile v0.4.3
-	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.1.1
 	github.com/enetx/surf v1.0.206
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
-	github.com/lrstanley/go-ytdlp v1.5.2
+	github.com/lrstanley/go-ytdlp v1.5.5
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/mxschmitt/playwright-go v0.6201.1
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tr1xem/go-discordrpc v1.0.0
-	golang.org/x/net v0.59.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/term v0.46.0
+	golang.org/x/net v0.60.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 )
 
 require (
-	github.com/ProtonMail/go-crypto v1.4.1 // indirect
+	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/andybalholm/brotli v1.2.4 // indirect
 	github.com/andybalholm/cascadia v1.3.5 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260910203606-6c9e17dc7a16 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/strings v0.1.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -65,14 +65,14 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
-	github.com/ulikunitz/xz v0.5.16 // indirect
+	github.com/ulikunitz/xz v0.5.17 // indirect
 	github.com/wzshiming/socks5 v0.7.0 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.10 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
