@@ -27,7 +27,7 @@ jobs:
   # =============================================================================
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -131,7 +131,7 @@ jobs:
           # Linux builds (native on ubuntu)
           - os: linux
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             ext: ''
             cc: gcc
           - os: linux
@@ -173,11 +173,12 @@ jobs:
 
       - name: Install GCC (Windows)
         if: matrix.os == 'windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-pkg-config
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkg-config
 
       - name: Get version from tag
         id: version
@@ -212,8 +213,10 @@ jobs:
         shell: pwsh
         env:
           CGO_ENABLED: 1
+          UCRT_BIN: ${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin
         run: |
-          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          $env:PATH = "$env:UCRT_BIN;$env:PATH"
+          gcc --version | Select-Object -First 1
           $VERSION = "${{ steps.version.outputs.VERSION }}"
           $BUILD_TIME = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
           $COMMIT = git rev-parse --short HEAD
@@ -436,7 +439,7 @@ jobs:
   # =============================================================================
   release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build, macos-universal, windows-installer]
     # The environment holds the minisign secret key and requires a reviewer's
     # approval, so nothing is signed or published without a human saying yes.
@@ -702,7 +705,7 @@ jobs:
   # =============================================================================
   aur-publish:
     name: Publish to AUR
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: release
     if: ${{ !contains(github.ref, '-') }}  # Skip pre-releases
     # The AUR SSH key lives in this environment, so it is only readable by a
