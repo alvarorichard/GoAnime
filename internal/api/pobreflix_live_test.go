@@ -33,8 +33,8 @@ func TestLivePobreflixPlays(t *testing.T) {
 		query, title string
 		kind         pobreflix.MediaKind
 	}{
-		{"ben hur serie", "Ben-Hur: A Série", pobreflix.KindSeries},
-		{"interestelar", "Interestelar", pobreflix.KindMovie},
+		{"stranger things", "Stranger Things", pobreflix.KindSeries},
+		{"interestelar", "Interestelar (2014)", pobreflix.KindMovie},
 	}
 	for _, tt := range tests {
 		t.Run(tt.title, func(t *testing.T) {

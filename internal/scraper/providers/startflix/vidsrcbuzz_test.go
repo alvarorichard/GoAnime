@@ -529,13 +529,15 @@ func Test2EmbedEpisodeRidesBehindVIDSRCFallback(t *testing.T) {
 	assert.Equal(t, "/embed/tv/147826/2/7", f.embedPaths[0])
 }
 
-// Test2EmbedLiveShawshank is the opt-in integration check: the chain must
-// resolve The Shawshank Redemption (IMDb tt0111161) against the live
-// videosrc.buzz player. Status note for whoever runs this: on 2026-10-21 the
-// source's renditions were ad-laced and its segment relay answered 500, so
-// the chain reports "all N rendition(s) unusable" — the test starts passing
-// the day the recordings play again, with no code change.
-func Test2EmbedLiveShawshank(t *testing.T) {
+// Test2EmbedLiveTodoPoderoso is the opt-in integration check: the chain must
+// resolve Todo Poderoso (IMDb tt0315327) against the live vidsrc.buzz player.
+// The movie is the one whose dub the sources lost (2026-10-27), and the one
+// the player resolves at 1080p. The player holds copies of some titles only:
+// The Shawshank Redemption, Interstellar and The Dark Knight answer "upstream
+// unavailable with HTTP 502" on every server while Todo Poderoso and The
+// Matrix play (probe, 2026-10-28), so a title with no copy is not a broken
+// chain — change the title before suspecting the code.
+func Test2EmbedLiveTodoPoderoso(t *testing.T) {
 	if os.Getenv("GOANIME_LIVE") != "1" {
 		t.Skip("live test; run with GOANIME_LIVE=1")
 	}
@@ -547,12 +549,12 @@ func Test2EmbedLiveShawshank(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	stream, err := resolve2Embed(ctx, KindMovie, "tt0111161", 278, 0, 0)
-	require.NoError(t, err, "the 2Embed chain must resolve movie/tt0111161 again")
+	stream, err := resolve2Embed(ctx, KindMovie, "tt0315327", 310, 0, 0)
+	require.NoError(t, err, "the 2Embed chain must resolve movie/tt0315327 again")
 
 	assert.NotEmpty(t, stream.Height, "the validated rendition names a real resolution")
 	assert.Equal(t, "vidsrc.buzz", stream.Host)
-	assert.Equal(t, Default2EmbedBase+"/embed/movie/tt0111161", stream.Referer)
+	assert.Equal(t, Default2EmbedBase+"/embed/movie/tt0315327", stream.Referer)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, stream.URL, http.NoBody)
 	require.NoError(t, err)

@@ -61,14 +61,15 @@ var videoRecordRe = regexp.MustCompile(
 	`^/(filmes|series|episodios)/online/([^/]+)`)
 
 // Current-site paths: /filme/<slug>.html, /serie/<slug>.html and
-// /assistir/<slug>-t<season>-ep<episode>.html. The slug is the record's
+// /assistir/<slug>-t<season>-ep<episode>.html. The sitemaps list the same
+// pages without ".html" (2026-10-26), so the suffix is optional here. The slug is the record's
 // identifier; it often ends in a random suffix ("todo-poderoso-53qvb") or the
 // TMDB id ("ben-hur-40360").
 var (
-	newMoviePathRe   = regexp.MustCompile(`^/filme/([^/]+)\.html$`)
-	newSeriesPathRe  = regexp.MustCompile(`^/serie/([^/]+)\.html$`)
-	newEpisodePathRe = regexp.MustCompile(`^/assistir/(.+)-t\d+-ep\d+\.html$`)
-	currentRecordRe  = regexp.MustCompile(`^/(filme|serie)/([^/]+)\.html$`)
+	newMoviePathRe   = regexp.MustCompile(`^/filme/([^/]+?)(?:\.html)?$`)
+	newSeriesPathRe  = regexp.MustCompile(`^/serie/([^/]+?)(?:\.html)?$`)
+	newEpisodePathRe = regexp.MustCompile(`^/assistir/(.+)-t\d+-ep\d+(?:\.html)?$`)
+	currentRecordRe  = regexp.MustCompile(`^/(filme|serie)/([^/]+?)(?:\.html)?$`)
 )
 
 // trailingIDRe splits the record id off the end of a slug.
@@ -449,6 +450,12 @@ func entryFromURL(raw string) (entry, bool) {
 	kind, slug, audio, vid, ok := parseRecordPath(u.Path)
 	if !ok {
 		return entry{}, false
+	}
+	// Every URL the app opens is the ".html" form the catalog API returns.
+	if currentRecordRe.MatchString(u.Path) && !strings.HasSuffix(u.Path, ".html") {
+		u.Path += ".html"
+		u.RawQuery, u.Fragment = "", ""
+		raw = u.String()
 	}
 	return entry{
 		URL:      raw,

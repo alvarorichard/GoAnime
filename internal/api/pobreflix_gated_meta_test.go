@@ -22,6 +22,7 @@ const (
 	pbTypesFile    = "internal/scraper/providers/pobreflix/types.go"
 	pbEmbeddedFile = "internal/scraper/providers/pobreflix/embedded.go"
 	pbAPIFile      = "internal/api/pobreflix.go"
+	pbSitemapFile  = "internal/scraper/providers/pobreflix/sitemap.go"
 )
 
 var pobreflixGateMutants = []mutant{
@@ -74,6 +75,18 @@ var pobreflixGateMutants = []mutant{
 			pobreflixPkg: {"TestServerDirectVersusGated", "TestParseTitle_EmbeddedMovie"},
 			apiPkg:       {"TestPobreflixDirectMovie"},
 		},
+	},
+	{
+		name: "pre-fix: the corpus only knows the .html form",
+		edits: []codeEdit{{pbSitemapFile,
+			"currentRecordRe  = regexp.MustCompile(`^/(filme|serie)/([^/]+?)(?:\\.html)?$`)",
+			"currentRecordRe  = regexp.MustCompile(`^/(filme|serie)/([^/]+)\\.html$`)"}},
+		kills: map[string][]string{pobreflixPkg: {"TestEntryFromURL_BareSitemapURLs", "TestRank_FindsBareSitemapTitles"}},
+	},
+	{
+		name:  "a bare sitemap URL is indexed as it is, not as the .html page the app opens",
+		edits: []codeEdit{{pbSitemapFile, "		u.Path += \".html\"\n", ""}},
+		kills: map[string][]string{pobreflixPkg: {"TestEntryFromURL_BareSitemapURLs", "TestRank_FindsBareSitemapTitles"}},
 	},
 	{
 		// The cascade itself: a hop that breaks early stops it there.

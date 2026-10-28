@@ -32,8 +32,8 @@ func TestLivePobreflixCatalog(t *testing.T) {
 	util.InitLogger()
 	c := NewClient()
 
-	// Titles verified present in the live catalog (probe, 2026-10-24).
-	for _, q := range []string{"ben hur serie", "todo mundo em panico", "crise da meia idade"} {
+	// Titles verified present, with episodes, in the live catalog (probe, 2026-10-28).
+	for _, q := range []string{"stranger things", "todo mundo em panico", "interestelar"} {
 		results, err := c.Search(timeoutCtx(t, 90*time.Second), q)
 		if err != nil {
 			t.Fatalf("search %q: %v", q, err)
@@ -76,4 +76,28 @@ func TestLivePobreflixSearchCorpusReload(t *testing.T) {
 	if err != nil || len(results) == 0 {
 		t.Fatalf("warm search failed: %v (%d results)", err, len(results))
 	}
+}
+
+// TestLivePobreflixDubIsGated is the canary for the 2026-10-27 change: every
+// Pobreflix page lists one "Player Principal" that is a streambetter.lol page
+// behind a Cloudflare Turnstile, not a file. It passes while that holds. It
+// fails the day a page lists a file again — good news: the direct path takes it
+// without a code change, so refresh the notes (CHANGELOG, source docs) and
+// retire this canary.
+func TestLivePobreflixDubIsGated(t *testing.T) {
+	skipUnlessLive(t)
+	util.InitLogger()
+	c := NewClient()
+
+	title, err := c.Title(timeoutCtx(t, 60*time.Second), "https://pobreflixtv.gay/filme/interestelar.html")
+	if err != nil {
+		t.Fatalf("title: %v", err)
+	}
+	if len(title.Servers) == 0 {
+		t.Fatal("the page lists no servers at all; the embedded JSON may have changed shape")
+	}
+	if files := DirectServers(title.Servers); len(files) > 0 {
+		t.Fatalf("Pobreflix lists a file again (%s): the dub can play directly; refresh the notes and retire this canary", files[0].URL)
+	}
+	t.Logf("gated as expected: %v", GatedHosts(title.Servers))
 }

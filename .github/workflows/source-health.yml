@@ -42,6 +42,15 @@ jobs:
       - name: Run live diagnostics
         run: go test -tags sourcehealth -run TestSourceHealthLive -count=1 -v ./internal/scraper
 
+      - name: Run Pobreflix canaries
+        env:
+          GOANIME_LIVE: '1'
+        run: >
+          go test
+          -run '^(TestLivePobreflixDubIsGated|TestLivePobreflixSearchCorpusReload)$'
+          -count=1 -v -timeout=5m
+          ./internal/scraper/providers/pobreflix
+
       - name: Run Blogger extraction and Goyabu playback diagnostics
         run: >
           go test -tags live
