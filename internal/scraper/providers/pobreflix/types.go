@@ -2,6 +2,8 @@ package pobreflix
 
 import (
 	"errors"
+	"net/url"
+	"path"
 	"regexp"
 	"strings"
 
@@ -108,6 +110,73 @@ type Server struct {
 	Name     string
 }
 
+// mediaExts are the file extensions a player can open without a page in
+// between.
+var mediaExts = map[string]bool{
+	".mp4": true, ".m4v": true, ".mkv": true, ".webm": true, ".mov": true, ".m3u8": true,
+}
+
+// isMediaFile reports whether raw names a video file, or the site's own
+// download endpoint (/api?...), which redirects to one. Anything else is a
+// player page: HTML that mpv cannot play.
+func isMediaFile(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if strings.Contains(raw, "/api?") {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return mediaExts[strings.ToLower(path.Ext(u.Path))]
+}
+
+// Direct reports whether the server is a file GoAnime can hand to the player.
+// Since 2026-10-27 the site lists one "Player Principal" per audio whose URL is
+// a streambetter.lol page that answers only after a Cloudflare Turnstile
+// (HTML titled "Verificando..."); that is not a file, and returning it as a
+// stream ends in a player that opens a challenge page.
+func (s Server) Direct() bool {
+	return isMediaFile(s.URL) || isMediaFile(s.Download)
+}
+
+// Gated reports whether the server is a player page rather than a file.
+func (s Server) Gated() bool {
+	return !s.Direct() && strings.TrimSpace(s.URL) != ""
+}
+
+// DirectServers keeps the servers that are files, in order.
+func DirectServers(servers []Server) []Server {
+	var out []Server
+	for _, s := range servers {
+		if s.Direct() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// GatedHosts lists the distinct hosts of the servers that are player pages.
+func GatedHosts(servers []Server) []string {
+	var hosts []string
+	seen := map[string]bool{}
+	for _, s := range servers {
+		if !s.Gated() {
+			continue
+		}
+		u, err := url.Parse(strings.TrimSpace(s.URL))
+		if err != nil || u.Host == "" || seen[u.Host] {
+			continue
+		}
+		seen[u.Host] = true
+		hosts = append(hosts, u.Host)
+	}
+	return hosts
+}
+
 // EpisodeData is one episode page: the series it belongs to, its slot, and
 // the playable files the page embeds.
 type EpisodeData struct {
@@ -133,12 +202,13 @@ type Episode struct {
 	URL    string // the episode's own record page
 }
 
-// HasDirect reports whether the page embeds playable files. Current pages do:
-// a movie lists its servers, a series lists its episodes (whose pages list the
-// servers). Old-theme pages embed neither and play through the StartFlix panel.
+// HasDirect reports whether the page embeds playable files. A movie lists its
+// servers and counts only when one is a file, not a Turnstile-gated player
+// page; a series lists its episodes (whose pages list the servers).
+// Old-theme pages embed neither and play through the StartFlix panel.
 func (t Title) HasDirect() bool {
 	if t.Kind == KindMovie {
-		return len(t.Servers) > 0
+		return len(DirectServers(t.Servers)) > 0
 	}
 	return len(t.Seasons) > 0
 }

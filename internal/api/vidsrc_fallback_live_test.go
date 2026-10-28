@@ -95,7 +95,8 @@ func TestLivePobreflixTodoPoderosoPlays(t *testing.T) {
 	var anime *models.Anime
 	for _, r := range results {
 		t.Logf("result: %s (%s) %s", r.Title, r.Kind, r.URL)
-		if r.Kind == pobreflix.KindMovie && r.Title == "Todo Poderoso" {
+		// The catalog lists the year since 2026-10-27: "Todo Poderoso (2003)".
+		if r.Kind == pobreflix.KindMovie && r.Title == "Todo Poderoso (2003)" {
 			anime = r.ToAnimeModel()
 			break
 		}

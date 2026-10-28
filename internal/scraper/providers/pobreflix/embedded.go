@@ -46,13 +46,15 @@ type embeddedMovie struct {
 }
 
 type embeddedEpisode struct {
-	ID        int    `json:"id"`
-	TMDBID    int    `json:"tmdb_id"`
-	Season    int    `json:"season"`
-	Episode   int    `json:"episode"`
-	Title     string `json:"title"`
-	Available bool   `json:"available"`
-	Audio     string `json:"audio"`
+	// ID was a number until 2026-10-27, when it became "<tmdb>-<season>-<ep>".
+	// Nothing reads it; a typed field made the whole page fail to decode.
+	ID        json.RawMessage `json:"id"`
+	TMDBID    int             `json:"tmdb_id"`
+	Season    int             `json:"season"`
+	Episode   int             `json:"episode"`
+	Title     string          `json:"title"`
+	Available bool            `json:"available"`
+	Audio     string          `json:"audio"`
 }
 
 type embeddedSeason struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
@@ -42,6 +43,56 @@ func isPobreflix(media *models.Anime) bool {
 // page is the authority: enrichment may have guessed another title from the
 // Portuguese name, so a disagreeing guess is dropped along with what it
 // brought in (as adoptStartFlixIDs does).
+// pbGatedHosts remembers, per title page, the hosts whose player page the
+// title's servers all point at. acceptAudioSwap reads it to say why the dub
+// the site lists did not play.
+var (
+	pbGatedMu    sync.Mutex
+	pbGatedHosts = map[string][]string{}
+)
+
+func rememberPobreflixGate(titleURL string, hosts []string) {
+	pbGatedMu.Lock()
+	defer pbGatedMu.Unlock()
+	if len(hosts) == 0 {
+		delete(pbGatedHosts, titleURL)
+		return
+	}
+	pbGatedHosts[titleURL] = hosts
+}
+
+// pobreflixGateLine explains a missing audio when Pobreflix's only servers for
+// the title are player pages behind a browser check. "" otherwise.
+func pobreflixGateLine(titleURL string) string {
+	pbGatedMu.Lock()
+	hosts := pbGatedHosts[titleURL]
+	pbGatedMu.Unlock()
+	if len(hosts) == 0 {
+		return ""
+	}
+	return "Pobreflix's own player (" + strings.Join(hosts, ", ") +
+		") asks for a browser check GoAnime can't pass."
+}
+
+// errPobreflixGated means every server the page lists is a player page, not a
+// file. The caller falls back to the panel instead of playing a challenge page.
+var errPobreflixGated = errors.New("pobreflix: every listed server is a player page behind a browser check")
+
+// pobreflixFiles keeps the servers that are files. When the page lists servers
+// but none is a file, it records why and returns errPobreflixGated.
+func pobreflixFiles(titleURL string, servers []pobreflix.Server) ([]pobreflix.Server, error) {
+	files := pobreflix.DirectServers(servers)
+	if len(files) > 0 {
+		rememberPobreflixGate(titleURL, nil)
+		return files, nil
+	}
+	if hosts := pobreflix.GatedHosts(servers); len(hosts) > 0 {
+		rememberPobreflixGate(titleURL, hosts)
+		return nil, errPobreflixGated
+	}
+	return servers, nil
+}
+
 func loadPobreflixTitle(ctx context.Context, media *models.Anime) (pobreflix.Title, error) {
 	title, err := pbClientFn().Title(ctx, media.URL)
 	if err != nil {
@@ -62,6 +113,9 @@ func loadPobreflixTitle(ctx context.Context, media *models.Anime) (pobreflix.Tit
 	}
 	if title.Name != "" && media.Name == "" {
 		media.Name = title.Name
+	}
+	if title.Kind == pobreflix.KindMovie {
+		_, _ = pobreflixFiles(media.URL, title.Servers)
 	}
 	return title, nil
 }
@@ -361,7 +415,11 @@ func GetPobreflixStreamURL(media *models.Anime, episode *models.Episode, quality
 // public MP4.
 func pobreflixDirectMovieURL(ctx context.Context, media *models.Anime, title pobreflix.Title, quality string) (string, error) {
 	want := pobreflixAudio(wantedStreamAudio(media, nil))
-	server, have, err := choosePobreflixServer(title.Servers, want, quality, media)
+	files, err := pobreflixFiles(media.URL, title.Servers)
+	if err != nil {
+		return "", err
+	}
+	server, have, err := choosePobreflixServer(files, want, quality, media)
 	if err != nil {
 		return "", err
 	}
@@ -409,7 +467,11 @@ func pobreflixDirectEpisodeURL(ctx context.Context, media *models.Anime, title p
 		return "", err
 	}
 	want := pobreflixAudio(wantedStreamAudio(media, episode))
-	server, have, err := choosePobreflixServer(data.Servers, want, quality, media)
+	files, err := pobreflixFiles(media.URL, data.Servers)
+	if err != nil {
+		return "", err
+	}
+	server, have, err := choosePobreflixServer(files, want, quality, media)
 	if err != nil {
 		return "", err
 	}

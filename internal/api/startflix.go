@@ -774,6 +774,9 @@ func acceptAudioSwap(media *models.Anime, want, have startflix.Audio, offered []
 		return nil
 	}
 	tcLine := topCineAudioLine(media, want)
+	if tcLine == "" {
+		tcLine = pobreflixGateLine(media.URL)
+	}
 	swap := audioSwap{
 		Source: panelSourceName(media),
 		Title:  media.Name,
