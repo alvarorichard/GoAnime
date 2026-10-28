@@ -11,17 +11,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
 func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
 	// Prepare the mpv path while metadata/stream work is in progress.
 	player.PreWarmMPVPath()
+	player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
 
 	for {
 		animeMutex := sync.Mutex{}
@@ -31,24 +33,28 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		anime.Episodes = []models.Episode{episodes[0]}
 		animeMutex.Unlock()
 
-		// Only fetch movie data from Jikan API for anime content (not FlixHQ movies/TV)
-		// FlixHQ content already has metadata from TMDB/OMDb
-		if !anime.IsMovieOrTV() && anime.MalID > 0 {
-			if err := api.GetMovieData(anime.MalID, anime); err != nil {
-				log.Printf("Error fetching movie/OVA data: %v", err)
-			}
-		}
-
-		var videoURL string
-		var videoErr error
+		movieData := fetchMovieData(anime)
 
 		// Use static log instead of spinner while fetching video URL
 		// to avoid terminal UI contention if a quality picker opens.
 		util.Infof("Loading video stream...")
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(ctx, &episodes[0], anime)
+		videoURL, videoErr := player.GetVideoURLForEpisodeEnhanced(ctx, &episodes[0], anime)
+
+		// Keep the metadata only if it is already here; playback never waits
+		// for it.
+		select {
+		case eps := <-movieData:
+			animeMutex.Lock()
+			anime.Episodes = eps
+			animeMutex.Unlock()
+		default:
+		}
 
 		if videoErr != nil {
-			log.Printf("Failed to extract video URL: %v", util.ErrorHandler(videoErr))
+			// The anime-side scheme: say why this copy failed, name the other
+			// sources that list the title, and let the next result screen
+			// open with the notice above the list.
+			reportMovieStreamFailed(anime, videoErr)
 			// Return to anime selection
 			return player.ErrBackToAnimeSelection
 		}
@@ -96,8 +102,12 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		// Check if user requested to change anime during video playback
 		if errors.Is(playErr, player.ErrChangeAnime) {
 			newAnime, newEpisodes, changeErr := ChangeAnimeLocal()
+			if errors.Is(changeErr, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if changeErr != nil {
-				log.Printf("Error changing anime: %v", changeErr)
+				log.Printf("Error changing anime: %v", util.LogSafe(changeErr))
 				continue // Stay with current anime if change fails
 			}
 
@@ -111,7 +121,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
+				log.Printf("Switched to series: %s with %d episodes.\n", util.LogSafe(anime.Name), totalEpisodes)
 				if seriesErr := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); seriesErr != nil {
 					if errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
 						return seriesErr
@@ -125,7 +135,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		}
 
 		if playErr != nil {
-			log.Printf("Error during movie playback: %v", playErr)
+			log.Printf("Error during movie playback: %v", util.LogSafe(playErr))
 		}
 
 		// Ask user what to do next after movie finishes
@@ -138,8 +148,12 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		// Handle back/change anime for movies - both options allow searching for a new anime
 		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if errors.Is(err, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -153,7 +167,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
+				log.Printf("Switched to series: %s with %d episodes.\n", util.LogSafe(anime.Name), totalEpisodes)
 				if err := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err
@@ -170,6 +184,40 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		log.Println("Replaying the same movie...")
 	}
 	return nil
+}
+
+// getMovieData is api.GetMovieData; a var so tests can stand in a slow or
+// failing Jikan.
+var getMovieData = api.GetMovieData
+
+// fetchMovieData starts the Jikan lookup for a movie/OVA in the background
+// and returns where its episodes will arrive. Nothing is sent when the lookup
+// does not apply or fails.
+//
+// The lookup is best-effort, and nothing on the way to playback reads it. It
+// used to run before the stream was resolved, so an unreachable Jikan held the
+// screen blank until its request timed out and then printed a raw error. It
+// now runs alongside stream resolution, as the episode lookup in PlayEpisode
+// does, and a failure only reaches the debug log. GetMovieData writes into
+// Episodes, so it works on its own copy.
+func fetchMovieData(anime *models.Anime) <-chan []models.Episode {
+	out := make(chan []models.Episode, 1)
+	// Only anime has Jikan data; movies and TV get theirs from TMDB/OMDb.
+	if anime.IsMovieOrTV() || anime.MalID <= 0 {
+		return out
+	}
+
+	lookup, malID := getMovieData, anime.MalID
+	data := *anime
+	data.Episodes = append([]models.Episode(nil), anime.Episodes...)
+	go func() {
+		if err := lookup(malID, &data); err != nil {
+			util.Debugf("Movie metadata unavailable: %v", err)
+			return
+		}
+		out <- data.Episodes
+	}()
+	return out
 }
 
 // createUpdater cria um atualizador de Discord Rich Presence se estiver habilitado

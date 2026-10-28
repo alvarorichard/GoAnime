@@ -23,7 +23,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // MediaInfo holds the metadata needed to generate Jellyfin/Plex-compatible paths.
@@ -72,7 +72,7 @@ func SanitizeFilename(name string) string {
 }
 
 // tagPattern matches source/language tags stripped by CleanTitle.
-var tagPattern = regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|AniDB|AnimeFire|AnimeDrive|Goyabu|SuperFlix|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
+var tagPattern = regexp.MustCompile(`\s*\[(?:English|PT-BR|Portuguese|Multilanguage|AllAnime|HiAnime|AniDB|AnimeFire|AnimeDrive|Goyabu|AnimesDigital|StartFlix|TopCine|Pobreflix|FlixHQ|SFlix|9Anime|Movie|TV)\]`)
 
 // CleanTitle removes source tags like [English], [PT-BR], [AllAnime] etc. from a title.
 func CleanTitle(title string) string {

@@ -73,19 +73,24 @@ func TestCheckForUpdatesQuietly_APIError(t *testing.T) {
 	assert.NotPanics(t, CheckForUpdatesQuietly)
 }
 
-// withPerformHooks installs stubbed hooks for PerformUpdate.
+// withPerformHooks installs stubbed hooks for PerformUpdate. Checksum
+// verification is stubbed to succeed so these tests exercise the rest of the
+// flow; the verification itself is covered in checksum_test.go, and a test can
+// override verifyDownloadFn after calling this.
 func withPerformHooks(t *testing.T, fa func(*GitHubRelease) (string, string, error),
 	dl func(string, string) (string, error), exeFn func() (string, error),
 	rep func(string, string) error) {
 	t.Helper()
-	pFA, pDL, pEXE, pREP := findAssetFn, downloadFn, osExecutableFn, replaceExecutableFn
+	pFA, pDL, pVER, pEXE, pREP := findAssetFn, downloadFn, verifyDownloadFn, osExecutableFn, replaceExecutableFn
 	findAssetFn = fa
 	downloadFn = dl
+	verifyDownloadFn = func(*GitHubRelease, string, string) error { return nil }
 	osExecutableFn = exeFn
 	replaceExecutableFn = rep
 	t.Cleanup(func() {
 		findAssetFn = pFA
 		downloadFn = pDL
+		verifyDownloadFn = pVER
 		osExecutableFn = pEXE
 		replaceExecutableFn = pREP
 	})
@@ -182,10 +187,153 @@ func TestPerformUpdate_WindowsDeferredUpdate_NoError(t *testing.T) {
 		func(*GitHubRelease) (string, string, error) { return "u", "asset", nil },
 		func(string, string) (string, error) { return src, nil },
 		func() (string, error) { return currentExe, nil },
-		func(string, string) error { return errors.New("update script created - please restart") },
+		func(string, string) error {
+			return fmt.Errorf("helper started: %w", errUpdateDeferred)
+		},
 	)
 	err := PerformUpdate(&GitHubRelease{})
-	assert.NoError(t, err, "deferred Windows update is reported as success")
+	require.NoError(t, err, "deferred Windows update is reported as success")
+	assert.FileExists(t, updateBackupPath(currentExe), "the helper needs the backup until it finishes")
+	assert.NoFileExists(t, updateMarkerPath(currentExe), "the helper writes the marker after a verified copy")
+}
+
+func TestPerformUpdate_ImmediateSuccess_KeepsBackupForNextStart(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "current")
+	require.NoError(t, os.WriteFile(currentExe, []byte("old"), 0o755))
+	src := filepath.Join(dir, "asset")
+	require.NoError(t, os.WriteFile(src, []byte("new"), 0o644))
+
+	withPerformHooks(t,
+		func(*GitHubRelease) (string, string, error) { return "u", "asset", nil },
+		func(string, string) (string, error) { return src, nil },
+		func() (string, error) { return currentExe, nil },
+		func(_, newExe string) error {
+			data, err := os.ReadFile(newExe)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(currentExe, data, 0o755)
+		},
+	)
+	require.NoError(t, PerformUpdate(&GitHubRelease{}))
+
+	backup, err := os.ReadFile(updateBackupPath(currentExe))
+	require.NoError(t, err)
+	assert.Equal(t, "old", string(backup), "backup must survive until the new binary runs")
+
+	installedHash, err := fileSHA256(currentExe)
+	require.NoError(t, err)
+	marker, err := os.ReadFile(updateMarkerPath(currentExe))
+	require.NoError(t, err)
+	assert.Equal(t, installedHash, strings.TrimSpace(string(marker)))
+
+	require.NoError(t, cleanupUpdateArtifacts(currentExe))
+	assert.NoFileExists(t, updateBackupPath(currentExe))
+	assert.NoFileExists(t, updateMarkerPath(currentExe))
+}
+
+func TestCleanupUpdateArtifacts_RemovesVerifiedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "current")
+	require.NoError(t, os.WriteFile(currentExe, []byte("new"), 0o755))
+	require.NoError(t, os.WriteFile(updateBackupPath(currentExe), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(updateStagedPath(currentExe), []byte("staged"), 0o644))
+	require.NoError(t, os.WriteFile(updateScriptPath(currentExe), []byte("@echo off"), 0o644))
+
+	digest, err := fileSHA256(currentExe)
+	require.NoError(t, err)
+	require.NoError(t, writeUpdateMarker(currentExe, digest))
+
+	require.NoError(t, cleanupUpdateArtifacts(currentExe))
+	assert.NoFileExists(t, updateBackupPath(currentExe))
+	assert.NoFileExists(t, updateStagedPath(currentExe))
+	assert.NoFileExists(t, updateScriptPath(currentExe))
+	assert.NoFileExists(t, updateMarkerPath(currentExe))
+}
+
+func TestCleanupUpdateArtifacts_KeepsBackupOnDigestMismatch(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "current")
+	require.NoError(t, os.WriteFile(currentExe, []byte("different"), 0o755))
+	require.NoError(t, os.WriteFile(updateBackupPath(currentExe), []byte("old"), 0o644))
+
+	require.NoError(t, writeUpdateMarker(currentExe, strings.Repeat("a", 64)))
+
+	err := cleanupUpdateArtifacts(currentExe)
+	require.Error(t, err)
+	assert.FileExists(t, updateBackupPath(currentExe), "an unverified update must not delete the backup")
+	assert.NoFileExists(t, updateMarkerPath(currentExe), "the stale marker is removed to avoid repeating the warning")
+}
+
+func TestCleanupUpdateArtifacts_KeepsBackupOnMalformedMarker(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "current")
+	require.NoError(t, os.WriteFile(currentExe, []byte("current"), 0o755))
+	require.NoError(t, os.WriteFile(updateBackupPath(currentExe), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(updateMarkerPath(currentExe), []byte("not-a-digest\n"), 0o600))
+
+	err := cleanupUpdateArtifacts(currentExe)
+	require.Error(t, err)
+	assert.FileExists(t, updateBackupPath(currentExe))
+	assert.NoFileExists(t, updateMarkerPath(currentExe))
+}
+
+func TestCleanupUpdateArtifacts_NoMarkerIsNoop(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "current")
+	require.NoError(t, os.WriteFile(currentExe, []byte("current"), 0o755))
+
+	require.NoError(t, cleanupUpdateArtifacts(currentExe))
+}
+
+func TestPrepareWindowsUpdate_StagesNextToExecutable(t *testing.T) {
+	dir := t.TempDir()
+	currentExe := filepath.Join(dir, "goanime.exe")
+	require.NoError(t, os.WriteFile(currentExe, []byte("old"), 0o755))
+	downloaded := filepath.Join(dir, "downloaded.exe")
+	require.NoError(t, os.WriteFile(downloaded, []byte("new"), 0o644))
+
+	plan, err := prepareWindowsUpdate(currentExe, downloaded)
+	require.NoError(t, err)
+	assert.Equal(t, updateStagedPath(currentExe), plan.stagedExe)
+	assert.Equal(t, updateBackupPath(currentExe), plan.backupFile)
+	assert.Equal(t, updateMarkerPath(currentExe), plan.markerFile)
+	assert.NotEqual(t, downloaded, plan.stagedExe, "the helper must not depend on the temporary extraction directory")
+
+	staged, err := os.ReadFile(plan.stagedExe)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(staged))
+	expected, err := fileSHA256(downloaded)
+	require.NoError(t, err)
+	assert.Equal(t, expected, plan.digest)
+}
+
+func TestWindowsUpdateScript_ContainsSafetySteps(t *testing.T) {
+	script := windowsUpdateScript()
+
+	for _, want := range []string{
+		`tasklist /FI "PID eq %WAITPID%"`,
+		`certutil -hashfile`,
+		`copy /Y "%STAGED%" "%TARGET%"`,
+		`copy /Y "%BACKUP%" "%TARGET%"`,
+		`> "%MARKER%" echo %EXPECTED%`,
+		`ping -n 2 127.0.0.1`,
+	} {
+		assert.Contains(t, script, want)
+	}
+
+	verifyStaged := strings.Index(script, `call :hash "%STAGED%"`)
+	replace := strings.Index(script, `copy /Y "%STAGED%" "%TARGET%"`)
+	verifyTarget := strings.LastIndex(script, `call :hash "%TARGET%"`)
+	success := strings.Index(script, ":success")
+	require.NotEqual(t, -1, verifyStaged)
+	require.NotEqual(t, -1, replace)
+	require.NotEqual(t, -1, verifyTarget)
+	require.NotEqual(t, -1, success)
+	assert.Less(t, verifyStaged, replace, "the staged file is hashed before it can touch the target")
+	assert.Less(t, replace, verifyTarget, "the target is hashed after the copy")
+	assert.Less(t, verifyTarget, success, "success is only reached after the target hash matches")
 }
 
 // findAssetForPlatform wrapper just hits findAssetForPlatformWithInfo for the host OS.

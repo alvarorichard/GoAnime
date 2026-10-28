@@ -14,9 +14,10 @@ import (
 
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -573,15 +574,24 @@ func TestProgressModel_Update(t *testing.T) {
 
 func TestProgressModel_View(t *testing.T) {
 	t.Parallel()
-	m := &progressModel{progress: progress.New(progress.WithDefaultBlend())}
-	v := m.View()
-	s := fmt.Sprintf("%v", v)
-	assert.Contains(t, s, "downloading")
+	m := newProgressModel("[PT-BR] Namakura Gatana", "Episode 1")
+	view := ansi.Strip(m.View().Content)
+	assert.Contains(t, view, "DOWNLOAD")
+	assert.Contains(t, view, "[PT-BR] Namakura Gatana")
+	assert.Contains(t, view, "Episode 1")
+	assert.Contains(t, view, "ctrl+c  cancel")
 
-	m2 := &progressModel{progress: progress.New(progress.WithDefaultBlend()), totalBytes: 200, received: 100, status: "Working"}
-	v2 := m2.View()
-	s2 := fmt.Sprintf("%v", v2)
-	assert.Contains(t, s2, "Working")
+	m2 := newProgressModel("", "Episode 2")
+	m2.totalBytes, m2.received, m2.status = 200, 100, "Working"
+	view2 := ansi.Strip(m2.View().Content)
+	assert.Contains(t, view2, "Working")
+	assert.Contains(t, view2, "100 B of 200 B")
+
+	failed := newProgressModel("", "Episode 3")
+	failed.done, failed.failed, failed.status = true, true, "Download failed: HTTP 404"
+	view3 := ansi.Strip(failed.View().Content)
+	assert.Contains(t, view3, "!  Download failed: HTTP 404")
+	assert.NotContains(t, view3, "ctrl+c", "nothing left to cancel")
 }
 
 // ---------------------------------------------------------------------------

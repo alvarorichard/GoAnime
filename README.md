@@ -1,207 +1,529 @@
-<h4 align="center">
-    <p>
-        <b>English</b> |
-        <a href="https://github.com/alvarorichard/GoAnime/blob/main/README_pt-br.md">Рortuguês</a>
-    </p>
-</h4>
-
 <p align="center">
-  <img src="https://github.com/alvarorichard/GoAnime/assets/102667323/49600255-d5a2-4405-81d1-a08cebae569a" alt="GoAnime Logo" />
+  <b>English</b> | <a href="README_pt-br.md">Português</a>
 </p>
 
 <p align="center">
-    <a href="alvarorichard/GoAnime/blob/master/LICENSE"><img src="https://img.shields.io/github/license/alvarorichard/GoAnime" alt="GitHub license"></a>
-    <img src="https://img.shields.io/github/stars/alvarorichard/GoAnime" alt="GitHub stars">
-    <img src="https://img.shields.io/github/last-commit/alvarorichard/GoAnime" alt="GitHub last commit">
-    <img src="https://img.shields.io/github/forks/alvarorichard/GoAnime?style=social" alt="GitHub forks">
-    <a href="https://github.com/alvarorichard/GoAnime/actions"><img src="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg" alt="Build Status"></a>
-    <img src="https://img.shields.io/github/contributors/alvarorichard/GoAnime" alt="GitHub contributors">
-    <a href="https://discord.gg/FbQuf78D9G"><img src="https://img.shields.io/badge/Discord-Community-7289DA?logo=discord&logoColor=white" alt="Discord"></a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo-light.png" alt="GoAnime logo" width="160">
+  </picture>
 </p>
 
-# GoAnime
+<h1 align="center">GoAnime</h1>
 
-GoAnime is a simple text-based user interface (TUI) built in Go, allowing users
-to search for anime and either play or download episodes directly in mpv. It
-scrapes data from websites to provide a selection of anime and episodes, with
-support for both subbed and dubbed content in English and Portuguese.
+<p align="center">
+  <a href="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml"><img src="https://github.com/alvarorichard/GoAnime/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/alvarorichard/GoAnime/releases/latest"><img src="https://img.shields.io/github/v/release/alvarorichard/GoAnime" alt="Latest release"></a>
+  <a href="https://pkg.go.dev/github.com/alvarorichard/Goanime/v2/pkg/goanime"><img src="https://pkg.go.dev/badge/github.com/alvarorichard/Goanime/v2/pkg/goanime.svg" alt="Go Reference"></a>
+  <a href="https://aur.archlinux.org/packages/goanime"><img src="https://img.shields.io/aur/version/goanime" alt="AUR"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/alvarorichard/GoAnime" alt="License"></a>
+</p>
 
-## Table of contents
+GoAnime is a terminal application for searching, streaming and downloading
+anime, movies and TV shows in English and Brazilian Portuguese. It searches
+several sources at once, plays the selected episode in
+[mpv](https://mpv.io/), and keeps track of where you stopped.
 
-1.  [Features](#features)
-2.  [Prerequisites](#prerequisites)
-3.  [Installation](#installation)
-4.  [How to use](#how-to-use)
-5.  [Advanced usage](#advanced-usage)
-6.  [Troubleshooting](#troubleshooting)
-7.  [Community and mobile](#community-and-mobile)
-8.  [Contributing](#contributing)
+<p align="center">
+  <img src="docs/demo/demo.gif" alt="Searching for a title in GoAnime, picking it from the results and streaming it" width="800">
+</p>
+
+It is a single binary for Linux, macOS and Windows, and mpv is all it needs to
+stream. [FFmpeg](https://ffmpeg.org/) is optional: downloads use it to embed
+subtitles, and upscaling a video requires it.
+
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Sources](#sources)
+- [Configuration](#configuration)
+- [Files](#files)
+- [Troubleshooting](#troubleshooting)
+- [Using GoAnime as a library](#using-goanime-as-a-library)
+- [Contributing](#contributing)
+- [Community](#community)
+- [Acknowledgments](#acknowledgments)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Features
 
-*   Search for anime, movies, and TV shows by name
-*   Simultaneous multi-source searching by default across all active platforms
-*   Support for subbed and dubbed content in English and Portuguese
-*   Play online with quality selection or download episodes
-*   Discord RPC integration to show what you're watching
-*   Progress tracking: Resume playback and track watched episodes
-
-*   Built-in upscaling (Anime4K) for better video quality
-
-## Prerequisites
-
-Before installing GoAnime, ensure you have the following dependency installed:
-*   [mpv](https://mpv.io/) (Media player, latest version recommended)
+- Searches every enabled source in parallel and falls back to another source
+  when one fails.
+- Subbed and dubbed anime in English and Portuguese, plus Portuguese movies
+  and TV shows.
+- Streams with quality selection, or downloads a single episode, a range, or
+  a whole series.
+- Saves downloads with Plex-compatible names (`Anime - S01E01.mp4`).
+- Resumes playback and remembers watched episodes.
+- Skips the opening from the player menu, using timestamps from AniSkip.
+- Discord Rich Presence.
+- Anime4K upscaling in real time while you watch, or of video and image files.
+- Updates itself with `goanime --update`.
 
 ## Installation
 
-Choose the installation method that best fits your system.
+GoAnime uses [mpv](https://mpv.io/) for playback. Install mpv first, unless
+you use the Windows installer, which includes it.
 
-### Universal installation
+Prebuilt binaries for every platform are available on the
+[releases page](https://github.com/alvarorichard/GoAnime/releases/latest).
 
-If you have Go installed on your system, you can install GoAnime via `go install`:
+### Windows
 
-```bash
-go install github.com/alvarorichard/Goanime/cmd/goanime@latest
-```
+GoAnime ships as a per-user installer and as a portable ZIP. Neither needs
+administrator rights.
+
+Download and run `GoAnime-Installer-<version>.exe` from the
+[latest release](https://github.com/alvarorichard/GoAnime/releases/latest).
+It installs GoAnime and mpv under `%LOCALAPPDATA%\Programs\GoAnime` and adds
+that folder and its `bin` subfolder to your **user** `PATH`. It does not ask
+for UAC. If an old 1.x all-users installation is found, the installer asks you
+to uninstall it first, so two copies do not compete in `PATH`.
+
+If you prefer not to use the installer, download
+`goanime-windows-amd64.zip`, extract `goanime-windows-amd64.exe`, rename it to
+`goanime.exe` and put it in a folder on your `PATH`. The archive does not
+include mpv: [install it](https://mpv.io/installation/) separately. GoAnime
+finds `mpv.exe` on your `PATH` or in the same folder as `goanime.exe`.
+
+**Unsigned binaries and SmartScreen.** GoAnime releases are not signed with a
+paid Authenticode certificate, so Windows SmartScreen may show "Windows
+protected your PC" the first time you run the installer or `goanime.exe`. That
+warning is expected for an unsigned project; it does not mean the file is
+known to be malicious or safe. Verify the SHA-256 against
+`checksums-sha256.txt` (see [Verifying a download](#verifying-a-download)).
+Only if it matches, choose **More info** → **Run anyway**. Never disable
+SmartScreen globally, and never run a file whose hash you have not checked.
+
+When you launch GoAnime on its own (double-click, Start menu or a desktop
+shortcut), it runs in [Windows Terminal](https://aka.ms/terminal) so the
+interface gets color, UTF-8 and font fallback. If it started in the classic
+console and Windows Terminal is missing, GoAnime tries `winget` once; when
+`winget` is unavailable, as in Windows Sandbox, it unpacks the official x64
+Windows Terminal build embedded in the executable into
+`%LOCALAPPDATA%\GoAnime\WindowsTerminal` and reopens from there. That path
+needs neither network nor administrator rights; builds for other
+architectures download the official archive instead. Without a usable copy
+GoAnime continues in the classic console. Set `GOANIME_TERMINAL=conhost` to
+stay in the classic console.
 
 ### macOS
 
-Install `mpv` using Homebrew, then download and configure GoAnime:
-
 ```bash
 brew install mpv
-
-curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-apple-darwin
+curl -Lo goanime https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-darwin-universal
 chmod +x goanime
 sudo mv goanime /usr/local/bin/
-
-sudo xattr -d com.apple.quarantine /usr/local/bin/goanime
 ```
 
-### Linux
+The binary is universal and runs on both Apple Silicon and Intel Macs. If you
+download it with a browser instead of `curl`, macOS quarantines it and refuses
+to run it; clear the flag with
+`xattr -d com.apple.quarantine /usr/local/bin/goanime`.
 
-<details>
-<summary><b>Debian / Ubuntu (and derivatives)</b></summary>
+### Arch Linux
 
-```bash
-sudo apt update
-sudo apt install mpv -y
-
-curl -LO https://github.com/alvarorichard/Goanime/releases/latest/download/goanime-linux-amd64.tar.gz
-tar -xzf goanime-linux-amd64.tar.gz
-chmod +x goanime-linux-amd64
-sudo mv goanime-linux-amd64 /usr/local/bin/goanime
-```
-</details>
-
-<details>
-<summary><b>Arch Linux / Manjaro (AUR)</b></summary>
+GoAnime is available in the [AUR](https://aur.archlinux.org/packages/goanime):
 
 ```bash
 yay -S goanime
 ```
-</details>
 
-<details>
-<summary><b>Fedora</b></summary>
+### Debian, Ubuntu, Fedora and other distributions
+
+Install mpv with your package manager (`sudo apt install mpv` or
+`sudo dnf install mpv`), then:
 
 ```bash
-sudo dnf update
-sudo dnf install mpv
-
-curl -LO https://github.com/alvarorichard/Goanime/releases/latest/download/goanime-linux-amd64.tar.gz
+curl -LO https://github.com/alvarorichard/GoAnime/releases/latest/download/goanime-linux-amd64.tar.gz
 tar -xzf goanime-linux-amd64.tar.gz
-chmod +x goanime-linux-amd64
-sudo mv goanime-linux-amd64 /usr/local/bin/goanime
+sudo install goanime-linux-amd64 /usr/local/bin/goanime
 ```
-</details>
 
-### Windows
+For ARM64, replace `amd64` with `arm64`.
 
-**Strongly Recommended:** Use our installer for the best experience.
+### From source
 
-1.  Download and run the [GoAnime Windows Installer](https://github.com/alvarorichard/GoAnime/releases/latest).
-2.  Install `mpv` for Windows and ensure it is available in your system's path.
-
-## How to use
-
-Follow these steps for a simple, interactive watching experience:
-
-1.  **Open your terminal.**
-2.  **Start the app:** Type `goanime` and press `Enter`.
-3.  **Search:** Provide the name of the anime you want to watch.
-4.  **Select:** Navigate the resulting list using your arrow keys and press 
-    `Enter` to pick an anime.
-5.  **Watch:** Select an episode, choose your preferred streaming quality, and 
-    the video will automatically launch in `mpv`.
-
-## Advanced usage
-
-### Direct search
-
-To bypass the initial prompt, directly pass the anime name:
+With Go 1.27.3 or later:
 
 ```bash
-goanime "Naruto"
+go install github.com/alvarorichard/Goanime/v2/cmd/goanime@latest
 ```
 
+The v2 module path is `github.com/alvarorichard/Goanime/v2`; library imports
+must use that prefix. The previous v1 module remains available at the old path.
 
+Progress tracking is backed by SQLite and requires CGO, so a C compiler must
+be available when building. Without one, GoAnime still builds and runs, but
+does not track progress. The release binaries are built with SQLite. See
+[docs/BUILD_OPTIONS.md](docs/BUILD_OPTIONS.md) for details.
 
-### Updating the app
+### Verifying a download
 
-Keep GoAnime updated to the newest features without manual downloads:
+Every release includes `checksums-sha256.txt`. Compute the hash of the file
+you downloaded and compare it with the line for that file:
 
 ```bash
-goanime --update
+sha256sum goanime-linux-amd64.tar.gz   # Linux
+shasum -a 256 goanime                  # macOS, the goanime-darwin-universal line
+Get-FileHash goanime-windows-amd64.zip # Windows, in PowerShell
 ```
 
-### Help
+`checksums-sha256.txt` is published in the same release as the binaries, so it
+detects a corrupted or truncated download, not a compromised release. The
+Windows and macOS binaries are not code-signed; the operating system may warn
+on first launch.
 
-To view all available commands and flags:
+### Updating
+
+| Installed with               | Update with                                                    |
+| ---------------------------- | -------------------------------------------------------------- |
+| Windows installer (2.0.0+)   | `goanime --update`, or the installer of the new version        |
+| Windows installer (1.x)      | The v2.0.0 installer once; after that, `goanime --update`      |
+| Windows portable ZIP         | `goanime --update`                                             |
+| AUR                          | Your AUR helper, for example `yay -Syu`                        |
+| A release binary or archive  | `goanime --update`                                             |
+| `go install`                 | The same `go install` command                                  |
+
+`goanime --update` checks the download against the release's
+`checksums-sha256.txt` and installs nothing if they do not match. On Windows it
+stages the new executable next to the running one, lets a helper finish the
+replacement after GoAnime exits, and keeps the previous binary as
+`goanime.exe.backup` until the new version starts successfully. See
+[docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md) for the full flow.
+
+The per-user Windows installer lives in a folder the user can write to, so
+`goanime --update` does not need elevation. On Linux and macOS, if the
+executable lives in a folder you cannot write to, such as `/usr/local/bin`,
+run `sudo goanime --update`.
+
+## Usage
+
+Run `goanime` without arguments to open search home. Type a name and press
+enter, or press `↓` to pick from the lists below: Continue reopens an
+episode where you stopped (`enter` resumes, `r` starts over, `e` lists
+episodes, `x` removes it) and Recent repeats a past search with its result
+count. `tab` switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
+From a result, choose a version with `←` `→` and, for a series, an episode.
+You can also pass the name directly:
 
 ```bash
-goanime -h
+goanime "one piece"
 ```
+
+Use spaces in the name, not hyphens.
+
+Anime downloads go to `~/.local/goanime/downloads/anime/` unless you pass
+`-o`:
+
+```bash
+goanime -d "one piece" 1                  # episode 1
+goanime -d -r "naruto" 1-12               # episodes 1 to 12
+goanime -d -a "one piece"                 # every episode
+goanime -d --quality 720p "frieren" 1     # a specific quality
+goanime -d -o ~/Anime "bleach" 10         # a custom directory
+```
+
+The directory given to `-o` must be inside your home folder.
+
+Movies and TV shows use `-dm` and go to `~/.local/goanime/downloads/movies/`:
+
+```bash
+goanime -dm "Interstellar"                # a movie
+goanime -dm --type tv "Dark" 1 5          # season 1, episode 5
+goanime -dm -r "Dark" 1 1-5               # season 1, episodes 1 to 5
+goanime -dm -a "Dark"                     # every season
+```
+
+Some streams are downloaded with [yt-dlp](https://github.com/yt-dlp/yt-dlp),
+which GoAnime fetches on its own the first time it needs it.
+
+Other options:
+
+```bash
+goanime --source animefire "jujutsu kaisen"   # search a single source
+goanime --upscale --upscale-hq video.mp4      # upscale a file with Anime4K
+goanime --update                              # update to the latest release
+goanime --debug "naruto"                      # write a debug log
+```
+
+Run `goanime -h` for the full list of options.
+
+### Keys
+
+| Key                   | Action                    |
+| --------------------- | ------------------------- |
+| `↑` `↓` or `k` `j`    | Move                      |
+| Type, or `/`          | Filter the list           |
+| `g` `G`               | First or last item        |
+| `Enter`               | Select                    |
+| `Esc`                 | Go back                   |
+| `tab`                 | Switch search scope (search home) |
+| `←` `→`               | Choose a version (results) |
+| `r` `e` `x`           | From start, episodes, remove (Continue list) |
+| `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
+
+In a menu that shows a letter beside each option, that letter picks the
+option at once; any other key still filters.
+
+The episode list marks the episodes you finished with ✓ and the one you
+stopped partway with ◐, and opens where you left off.
+
+### While watching
+
+While mpv plays, the terminal shows the player menu, with how far the episode
+has played:
+
+| Key   | Option                           | What it does                                           |
+| ----- | -------------------------------- | ------------------------------------------------------ |
+| `n`   | Next episode                     | Play the next episode                                  |
+| `p`   | Previous episode                 | Play the previous episode                              |
+| `e`   | Select episode                   | Pick another episode from the list                     |
+| `c`   | Change anime                     | Search for another title                               |
+| `s`   | Skip intro                       | Jump past the opening, when AniSkip has its timestamps |
+| `a`   | Audio track                      | Switch the audio track, when there is more than one    |
+| `t`   | Subtitles                        | Switch or turn off subtitles, when there are any       |
+| `Esc` | ← Back                           | Return to the download and playback menu               |
+| `q`   | Exit                             | Close mpv and quit                                     |
+
+For a movie, the menu offers Replay movie (`r`), Change movie (`c`), the track
+options, ← Back and Exit. When an episode or movie has saved progress, GoAnime
+asks whether to resume from where you stopped.
+
+### Real-time upscaling
+
+Real-time Upscale, in the menu before playback, applies
+[Anime4K](https://github.com/bloc97/Anime4K) shaders in mpv. The first time,
+choose Setup shaders to download them, then pick a mode. Each mode's label
+says what it is for, from Performance for a weak GPU to Ultra for SD sources.
+
+## Sources
+
+| Source        | Content    | Language                   | Notes                                         |
+| ------------- | ---------- | -------------------------- | --------------------------------------------- |
+| HiAnime       | Anime      | English, subbed and dubbed | Subbed by default                             |
+| AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
+| AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
+| AnimeDrive    | Anime      | Portuguese (Brazil)        | Host override: `GOANIME_ANIMEDRIVE_URL`       |
+| Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
+| StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
+| TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
+| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4 playback; StartFlix panel fallback |
+
+`--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
+`animesdigital`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
+`movietv` covers StartFlix, TopCine and Pobreflix; `ptbr` covers every
+Portuguese source.
+
+Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
+index. Current movie and episode pages embed public MP4 servers, so playback is
+direct and needs no browser. Old-theme pages still use the StartFlix panel.
+
+AnimeDrive's host is intermittently unreachable from some networks. If the
+site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
+source at a reachable mirror.
+
+Goyabu is behind a Cloudflare managed challenge and is disabled by default. It
+works on networks that Cloudflare does not challenge; on a challenged network
+no browserless HTTP client can clear the challenge. Enable it with
+`GOANIME_ENABLED_SOURCES=goyabu`.
+
+GoAnime depends on third-party websites, and those websites change without
+notice. When one does, the corresponding source can stop working until it is
+updated. A [scheduled workflow](.github/workflows/source-health.yml) checks
+every source daily, so breakage is usually visible there before it is
+reported.
+
+## Configuration
+
+GoAnime needs no configuration file. A few environment variables cover less
+common needs:
+
+| Variable                      | Description                                                              |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `GOANIME_ENABLED_SOURCES`     | Comma-separated sources to enable, such as `goyabu`                      |
+| `GOANIME_DISABLED_SOURCES`    | Comma-separated sources to skip                                          |
+| `GOANIME_THEME`               | `dark`, `light` or `auto` (default): `auto` asks the terminal once for its background |
+| `GOANIME_TERMINAL`            | `conhost` keeps Windows GoAnime in the classic console instead of reopening it in Windows Terminal |
+| `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
+| `GOANIME_JAPANESE`            | `1` always shows the Japanese glosses, `0` always hides them; unset, GoAnime shows them where the terminal has a font for them |
+| `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
+| `GOANIME_STRICT_SOURCE`       | Set to `1` to report an error instead of guessing an unknown source      |
+| `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
+| `GOANIME_ANIMEDRIVE_URL`      | Address of AnimeDrive                                                    |
+| `GOANIME_POBREFLIX_URL`       | Address of Pobreflix                                                     |
+| `GOANIME_STARTFLIX_URL`       | Address of StartFlix                                                     |
+| `GOANIME_STARTFLIX_PANEL_URL` | Address of the StartFlix video panel                                     |
+| `GOANIME_TOPCINE_URL`         | Address of TopCine                                                       |
+| `TMDB_API_KEY`                | A [TMDB](https://www.themoviedb.org/settings/api) key for movie, TV and season details |
+| `OMDB_API_KEY`                | An [OMDb](https://www.omdbapi.com/apikey.aspx) key to use instead of the shared demo key |
+
+The address variables point a source at a new domain when its site moves,
+without waiting for a new release.
+
+## Files
+
+| What            | Linux                                   | macOS                                                     | Windows                                       |
+| --------------- | --------------------------------------- | --------------------------------------------------------- | --------------------------------------------- |
+| Watch history   | `~/.local/goanime/tracking/progress.db` | `~/.local/goanime/tracking/progress.db`                   | `%LOCALAPPDATA%\GoAnime\tracking\progress.db` |
+| Downloads       | `~/.local/goanime/downloads/`           | `~/.local/goanime/downloads/`                             | `%USERPROFILE%\.local\goanime\downloads\`     |
+| Debug logs      | `~/.local/share/goanime/logs/`          | `~/Library/Logs/GoAnime/`                                 | `%LOCALAPPDATA%\GoAnime\logs\`                 |
+| Anime4K shaders | `~/.config/goanime/anime4k-shaders/`    | `~/Library/Application Support/goanime/anime4k-shaders/`  | `%APPDATA%\goanime\anime4k-shaders\`           |
+| yt-dlp          | `~/.cache/go-ytdlp/`                    | `~/Library/Caches/go-ytdlp/`                              | `%LOCALAPPDATA%\go-ytdlp\`                      |
+| Japanese font   | `~/.local/share/fonts/goanime/`         | —                                                         | —                                             |
+
+On Linux, the shader and yt-dlp folders follow `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` when they are set, and the font folder follows
+`XDG_DATA_HOME`. Deleting the watch history file resets
+all progress. To uninstall GoAnime, remove the executable (or, with the
+Windows installer, uninstall it from Settings) and delete the folders above
+that you no longer need.
 
 ## Troubleshooting
 
-### TLS errors behind a corporate proxy or custom CA
+### AnimeDrive search times out
 
-If every request fails with a certificate error — typically on a network that
-inspects TLS with its own root CA — point GoAnime at that CA bundle:
+AnimeDrive can take longer to answer when the site is busy. Its search uses
+the full source deadline, without restarting a request at the shorter HTTP
+client timeout. The host is also intermittently unreachable from some
+networks. If it still times out, point `GOANIME_ANIMEDRIVE_URL` at a reachable
+mirror, try again later, or use `--source` to search another source. Include a
+debug log when reporting the problem.
 
-```bash
-export SSL_CERT_FILE=/path/to/corporate-ca.pem   # a single PEM bundle
-export SSL_CERT_DIR=/path/to/ca-certificates.d   # or a directory of PEMs
+### Reporting a problem
+
+Open a
+[bug report](https://github.com/alvarorichard/GoAnime/issues/new?template=bug_report.yml)
+and attach a debug log to it:
+
+1. Run the same command again with `--debug` added, for example
+   `goanime --debug "naruto"`, and repeat what you did until the problem
+   happens.
+2. When it starts, GoAnime prints the path of the log file. Each run writes a
+   new file named `goanime_<date>_<time>.log` in this folder:
+
+   | System  | Folder                         |
+   | ------- | ------------------------------ |
+   | Windows | `%LOCALAPPDATA%\GoAnime\logs`  |
+   | macOS   | `~/Library/Logs/GoAnime`       |
+   | Linux   | `~/.local/share/goanime/logs`  |
+
+3. Attach the newest file to the issue, together with the output of
+   `goanime --version`, your operating system and the command you ran.
+
+The log lists the titles you searched and paths on your computer, which can
+include your user name. Read it before attaching if that matters to you.
+
+### mpv is not found
+
+Make sure `mpv --version` works in the same terminal you run GoAnime from.
+On Windows, open a new terminal after installing so the updated `PATH` is
+picked up.
+
+### Japanese characters show as boxes
+
+The Japanese beside each heading (ゴーアニメ, 検索) is drawn with the
+terminal's fonts. When none of them has Japanese, GoAnime hides it instead
+of showing boxes:
+
+- **Linux**: GoAnime installs GoAnime Glyphs, an 11 KB font with just those
+  characters, in `~/.local/share/fonts/goanime/`. Close and reopen the
+  terminal to see them. A full Japanese font works too, such as
+  `noto-fonts-cjk` on Arch Linux, `fonts-noto-cjk` on Debian and Ubuntu or
+  `google-noto-sans-cjk-fonts` on Fedora.
+- **Windows**: GoAnime opens itself in Windows Terminal, which has font
+  fallback. `GOANIME_TERMINAL=conhost` keeps the classic console, where the
+  Japanese stays hidden.
+- **Linux virtual console** (`TERM=linux`): its font has no Japanese, so it
+  stays hidden.
+
+`GOANIME_JAPANESE=1` shows it anyway, `GOANIME_JAPANESE=0` hides it
+everywhere. The font is never installed with `GOANIME_JAPANESE=0` or in the
+plain interface.
+
+## Using GoAnime as a library
+
+The search and scraping code is exposed as a public Go package:
+
+```go
+client := goanime.NewClient()
+results, err := client.SearchAnime("One Piece", nil)
 ```
 
-Since Go 1.27 these variables are honoured on **Windows and macOS** as well, not
-just Linux: when either is set, GoAnime verifies certificates with Go's own
-verifier against your bundle instead of the platform certificate store. To go
-back to the platform store without unsetting the variables, run with
-`GODEBUG=x509sslcertoverrideplatform=0`.
-
-## Community and mobile
-
-Join our Discord for support, feedback, and updates:
-[Join the Discord server](https://discord.gg/6nZ2SYv3)
-
-A mobile version of GoAnime is also available for Android devices:
-[GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile)
+Search covers every source. Episode lists and stream URLs are available for
+AnimeFire results only for now. [docs/LIBRARY_USAGE.md](docs/LIBRARY_USAGE.md)
+walks through the API, and [pkg/goanime/examples](pkg/goanime/examples) has
+complete programs.
 
 ## Contributing
 
-Contributions to improve or enhance are always welcome.
+Bug reports, fixes and new sources are welcome.
 
-See the [development guide](docs/Development.md).
+Most of the maintenance work in GoAnime is keeping sources working as the
+sites behind them change, and that is also the easiest way to start
+contributing: the [source health workflow](https://github.com/alvarorichard/GoAnime/actions/workflows/source-health.yml)
+shows which sources are failing, and each source is a self-contained package
+under `internal/scraper/providers`. To add a new one, follow
+[docs/ADDING_A_SOURCE.md](docs/ADDING_A_SOURCE.md), which uses Goyabu as the
+reference implementation.
 
-Quick start:
-1.  Fork the project and read the development guide.
-2.  Create your feature branch from `dev` (`git checkout -b feature/foo`).
-3.  Follow formatting standards (`go fmt`).
-4.  Commit your changes (`git commit -m 'feat: add foo'`).
-5.  Push to the branch (`git push origin feature/foo`).
-6.  Open a pull request to the `dev` branch.
+To build and test:
 
-All changes must go through the `dev` branch first.
+```bash
+git clone https://github.com/alvarorichard/GoAnime.git
+cd GoAnime
+git checkout dev
+go build ./cmd/goanime
+go test -short ./...
+```
+
+Development happens on the `dev` branch. Create your branch from `dev` and
+open pull requests against `dev`; `main` only receives releases.
+[CONTRIBUTING.md](CONTRIBUTING.md) lists the checks to run before opening a
+pull request, and [docs/Development.md](docs/Development.md) covers code style
+and the rest of the workflow.
+
+## Community
+
+- [Discord](https://discord.gg/FbQuf78D9G) for questions, feedback and release
+  announcements.
+- [GoAnime Mobile](https://github.com/alvarorichard/goanime-mobile), the
+  Android version.
+- [goanime.online](https://goanime.online/), the project website, with an
+  overview of GoAnime and installation instructions.
+
+## Acknowledgments
+
+GoAnime is built on the work of these projects:
+
+- [mpv](https://mpv.io/) plays every stream.
+- [AniSkip](https://github.com/aniskip) provides the opening timestamps.
+- [AniList](https://anilist.co/) and [Jikan](https://jikan.moe/), an
+  unofficial MyAnimeList API, provide anime metadata.
+- [TMDB](https://www.themoviedb.org/) and [OMDb](https://www.omdbapi.com/)
+  provide movie and TV metadata.
+- [Anime4K](https://github.com/bloc97/Anime4K) provides the upscaling
+  algorithm and shaders.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) handles some downloads.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea),
+  [Huh](https://github.com/charmbracelet/huh) and
+  [Lip Gloss](https://github.com/charmbracelet/lipgloss) build the terminal
+  interface.
+- [Noto Sans CJK](https://github.com/notofonts/noto-cjk) is the source of
+  GoAnime Glyphs, the Japanese font GoAnime installs on Linux (SIL Open Font
+  License).
+- [ani-cli](https://github.com/pystardust/ani-cli) inspired the project.
+
+## Disclaimer
+
+GoAnime does not host, upload or distribute any media. It retrieves content
+that third-party websites make publicly available and is not affiliated with
+any of them. Users are responsible for complying with the laws of their
+country.
+
+## License
+
+GoAnime is released under the [MIT License](LICENSE).

@@ -9,44 +9,51 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
 )
 
-// IsDisallowedIP returns true if the IP is loopback, private, multicast, or
-// unspecified — mirrors api.IsDisallowedIP.
+// IsDisallowedIP returns true if the IP is loopback, private, link-local,
+// multicast, or unspecified — api.IsDisallowedIP's check plus link-local,
+// which covers the 169.254.169.254 cloud metadata endpoint and fe80::/10.
 func IsDisallowedIP(hostIP string) bool {
 	ip := net.ParseIP(hostIP)
 	if ip == nil {
 		return true
 	}
-	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()
+	return ip.IsMulticast() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // SafeDialFunc establishes a connection and rejects disallowed IPs.
 func SafeDialFunc(network, addr string, timeout time.Duration, tlsConfig *tls.Config) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: timeout}
-	var conn net.Conn
-	var err error
+	return SafeDialContext(context.Background(), network, addr, timeout, tlsConfig)
+}
+
+// SafeDialContext establishes a connection unless addr resolves to a
+// disallowed IP. The check runs in the dialer's Control hook: after DNS, on
+// the exact address about to be connected, before connect(2). A forbidden
+// host therefore never sees a SYN, let alone a TLS ClientHello, and a name
+// that re-resolves to an internal address (DNS rebinding) is judged by the
+// address actually used. ctx cancels both the dial and the TLS handshake.
+func SafeDialContext(ctx context.Context, network, addr string, timeout time.Duration, tlsConfig *tls.Config) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout, ControlContext: rejectDisallowedIP}
 	if tlsConfig != nil {
-		conn, err = tls.DialWithDialer(dialer, network, addr, tlsConfig)
-	} else {
-		conn, err = dialer.Dial(network, addr)
+		return (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, network, addr)
 	}
+	return dialer.DialContext(ctx, network, addr)
+}
+
+func rejectDisallowedIP(_ context.Context, _, address string, _ syscall.RawConn) error {
+	ip, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, err
-	}
-	ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
-	if err != nil {
-		_ = conn.Close()
-		return nil, errors.New("failed to parse remote address")
+		return errors.New("failed to parse remote address")
 	}
 	if IsDisallowedIP(ip) {
-		_ = conn.Close()
-		return nil, errors.New("ip address is not allowed")
+		return errors.New("ip address is not allowed")
 	}
-	return conn, nil
+	return nil
 }
 
 // SafeScraperTransport returns an *http.Transport with SSRF-safe dial hooks.
@@ -71,11 +78,11 @@ func SafeScraperTransport(timeout time.Duration) *http.Transport {
 		// Required alongside NextProtos: net/http only upgrades a transport with
 		// custom dial hooks to HTTP/2 when this is set.
 		ForceAttemptHTTP2: true,
-		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-			return SafeDialFunc(network, addr, timeout, nil)
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return SafeDialContext(ctx, network, addr, timeout, nil)
 		},
-		DialTLSContext: func(_ context.Context, network, addr string) (net.Conn, error) {
-			return SafeDialFunc(network, addr, timeout, tlsConfig)
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return SafeDialContext(ctx, network, addr, timeout, tlsConfig)
 		},
 		TLSHandshakeTimeout: timeout,
 		MaxIdleConns:        100,

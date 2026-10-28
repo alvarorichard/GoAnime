@@ -18,18 +18,18 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 
 	// Blank import: the providers package self-registers every live Source in
 	// its init(). Without it the registry is empty and dispatch resolves
 	// nothing. Consolidated into a single wiring file in a later phase (S3).
-	_ "github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	_ "github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 	g "github.com/enetx/g"
 	"github.com/enetx/surf"
 )
@@ -221,6 +221,14 @@ var ErrBackToAnimeSelection = errors.New("back to anime selection")
 // ErrBackToEpisodeSelection is returned when user wants to go back to episode selection
 var ErrBackToEpisodeSelection = errors.New("back to episode selection")
 
+// ErrSourceVideoRemoved marks an episode whose video file no longer exists on
+// the source that listed it — the listing is still there, the media behind it
+// is gone (issue #203: every Bleach episode on Goyabu points at a Blogger token
+// Google answers with NOT_FOUND). Retrying, re-picking the episode or waiting
+// cannot recover it; only a different source can. Exported so the playback
+// layer can tell the user that instead of printing a raw extraction error.
+var ErrSourceVideoRemoved = errors.New("video unavailable on this source")
+
 // episodeDisplayTitle picks the best available episode title.
 func episodeDisplayTitle(ep models.Episode) string {
 	if ep.Title.Romaji != "" {
@@ -229,28 +237,30 @@ func episodeDisplayTitle(ep models.Episode) string {
 	return ep.Title.English
 }
 
-// episodeLabel builds the picker row label: "Episode 12 — Title".
+// episodeLabel builds the picker row label: "Episode 12 · Title".
 func episodeLabel(ep models.Episode) string {
 	title := episodeDisplayTitle(ep)
 	if title == "" {
 		return ep.Number
 	}
-	return ep.Number + " — " + title
+	return ep.Number + " · " + title
 }
 
-// episodeDetails builds the secondary row: air date and filler/recap badges.
+// episodeDetails is the text at the right of an episode's row: its air date.
 func episodeDetails(ep models.Episode) string {
-	parts := make([]string, 0, 3)
-	if aired := strings.TrimSpace(ep.Aired); aired != "" {
-		parts = append(parts, aired)
-	}
+	return strings.TrimSpace(ep.Aired)
+}
+
+// episodeTags are the badges after an episode's label.
+func episodeTags(ep models.Episode) []string {
+	var tags []string
 	if ep.IsFiller {
-		parts = append(parts, "Filler")
+		tags = append(tags, "Filler")
 	}
 	if ep.IsRecap {
-		parts = append(parts, "Recap")
+		tags = append(tags, "Recap")
 	}
-	return strings.Join(parts, "  •  ")
+	return tags
 }
 
 // episodePickItems converts episodes to generic picker rows.
@@ -260,22 +270,24 @@ func episodePickItems(episodes []models.Episode) []tui.PickItem {
 		items[i] = tui.PickItem{
 			Label:   episodeLabel(ep),
 			Details: episodeDetails(ep),
+			Tags:    episodeTags(ep),
 		}
 	}
 	return items
 }
 
-// episodePickFunc matches tui.Pick so tests can inject a headless picker.
-type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, error)
+// episodePickFunc matches tui.PickActioned so tests can inject a headless picker.
+type episodePickFunc func([]tui.PickItem, tui.PickOptions) (int, string, error)
 
 // SelectEpisodeWithFuzzyFinder lets the user pick an episode on the styled
 // fuzzy picker. ESC (or quit) is reported as ErrBackRequested.
 func SelectEpisodeWithFuzzyFinder(episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
-	return selectEpisodeWithPicker(tui.Pick, episodes)
+	return selectEpisodeWithPicker(tui.PickActioned, episodes, loadEpisodeProgress(episodes))
 }
 
 // selectEpisodeWithPicker isolates picker execution for deterministic tests.
-func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (episodeURL, episodeNumber string, err error) {
+// watched is the tracker's progress by episode index (see loadEpisodeProgress).
+func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, watched map[int]episodeWatch) (episodeURL, episodeNumber string, err error) {
 	if len(episodes) == 0 {
 		return "", "", errors.New("no episodes provided")
 	}
@@ -283,14 +295,18 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (e
 		return "", "", errors.New("episode picker not configured")
 	}
 
+	// A fresh picker means fresh intent: drop any episodes-screen request
+	// the previous flow left behind, and any resume override it set.
+	// (A continue reopen re-derives its position from watched below.)
+	ClearEpisodeMenu()
+	ClearResumeOverride()
+
 	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: opening picker with %d episodes", len(episodes))
-	idx, err := pick(episodePickItems(episodes), tui.PickOptions{
-		Breadcrumb:   "Search > Episodes",
-		WindowTitle:  "GoAnime - Episodes",
-		ItemSingular: "episode",
-		ItemPlural:   "episodes",
-	})
-	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, err=%v", idx, err)
+	items := episodePickItems(episodes)
+	opts := episodePickOptions(episodes, watched)
+	applyEpisodeProgress(items, &opts, episodes, watched)
+	idx, action, err := pick(items, opts)
+	util.Debugf("[TRACE] SelectEpisodeWithFuzzyFinder: picker returned idx=%d, action=%q, err=%v", idx, action, err)
 	if err != nil {
 		// Treat back/quit as a back request so callers return to the
 		// previous screen instead of failing.
@@ -299,11 +315,96 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode) (e
 		}
 		return "", "", fmt.Errorf("failed to select episode: %w", err)
 	}
+	if action != "" {
+		return handleEpisodeAction(action, idx, episodes, watched)
+	}
 
 	if idx < 0 || idx >= len(episodes) {
 		return "", "", errors.New("invalid index returned by episode picker")
 	}
+	if w, ok := watched[idx]; ok && !w.finished() {
+		// Enter resumes where playback stopped, without asking again.
+		ForceResumeNext(w.position)
+	}
 	return episodes[idx].URL, episodes[idx].Number, nil
+}
+
+// episodePickOptions builds the episodes screen (tela 5): the show in the
+// header, its source and audio at the right, the jump hint, the watched
+// count and the download actions.
+func episodePickOptions(episodes []models.Episode, watched map[int]episodeWatch) tui.PickOptions {
+	listCtx := snapshotEpisodeListContext()
+	breadcrumb := "Search > Episodes"
+	if listCtx.title != "" {
+		breadcrumb = fmt.Sprintf("Search > %s > Episodes", listCtx.title)
+	}
+	header := ""
+	if srcName := displayListSource(listCtx.source); srcName != "" {
+		header = srcName
+		if audio := strings.TrimSpace(listCtx.audio); audio != "" {
+			header += " · " + audio
+		}
+	}
+	done := 0
+	for _, w := range watched {
+		if w.finished() {
+			done++
+		}
+	}
+	return tui.PickOptions{
+		Breadcrumb:        breadcrumb,
+		WindowTitle:       "GoAnime - Episodes",
+		ItemSingular:      "episode",
+		ItemPlural:        fmt.Sprintf("episodes · %d watched", done),
+		Action:            "resume",
+		BackDesc:          "results",
+		HelpHint:          true,
+		FilterPlaceholder: "type a number to jump, / to search titles",
+		Context:           header,
+		Actions: []tui.PickAction{
+			{Key: "r", Label: "from the start", Hint: "from start"},
+			{Key: "d", Label: "this episode", Hint: "download", Section: true},
+			{Key: "D", Label: "a range, from here to ...", Section: true},
+			{Key: "A", Label: fmt.Sprintf("all %d episodes", len(episodes)), Section: true},
+			{Key: "m", Label: "every option, upscale included", Section: true},
+		},
+		ActionsLabel: "Download",
+		ActionsGloss: "ダウンロード",
+	}
+}
+
+// handleEpisodeAction carries out an episodes-screen action key for the
+// highlighted row, then returns that row's selection for the normal flow.
+func handleEpisodeAction(action string, idx int, episodes []models.Episode, _ map[int]episodeWatch) (string, string, error) {
+	if idx < 0 || idx >= len(episodes) {
+		return "", "", errors.New("invalid index returned by episode picker")
+	}
+	switch action {
+	case "r":
+		ForceStartNext()
+	case "m":
+		RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+	case "d":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 1})
+	case "D":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 2, RangeStart: episodePickNum(episodes, idx)})
+	case "A":
+		RequestEpisodeMenu(EpisodeMenuRequest{DownloadCode: 5})
+	default:
+		return "", "", fmt.Errorf("unknown episode action: %q", action)
+	}
+	return episodes[idx].URL, episodes[idx].Number, nil
+}
+
+// episodePickNum is the episode's number for range starts.
+func episodePickNum(episodes []models.Episode, idx int) int {
+	if num := episodes[idx].Num; num > 0 {
+		return num
+	}
+	if num, err := strconv.Atoi(ExtractEpisodeNumber(episodes[idx].Number)); err == nil && num > 0 {
+		return num
+	}
+	return idx + 1
 }
 
 // ExtractEpisodeNumber extracts the numeric part of an episode string
@@ -424,9 +525,9 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		"reason", resolved.Reason, "seasoned", source.IsSeasoned(src), "browserGated", source.IsBrowserGated(src))
 
 	// Model C capability: warm up a browser-gated source before fetching. For a
-	// non-gated source this is an explicit (logged) no-op; for SuperFlix on a
-	// display-less box it fails fast with a clear reason instead of stalling on
-	// a browser that can never appear.
+	// non-gated source this is an explicit (logged) no-op; a browser-gated one on
+	// a display-less box fails fast with a clear reason instead of stalling on a
+	// browser that can never appear.
 	if err := source.WarmUp(ctx, src); err != nil {
 		return "", err
 	}
@@ -442,10 +543,25 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
 			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		if resolved.Kind == source.AniDB {
+		if resolved.Kind == source.HiAnime {
 			// Registry-backed source: surface the real error instead of falling
 			// back to the legacy scraper, which knows nothing about it. (This
 			// guard used to name AllAnime, which held the same position.)
+			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
+		}
+		// The source answered and said the episode is offline. That is content
+		// state, not a scraping failure: no retry and no other parser can
+		// produce a file that is not there, so it is routed to the message that
+		// tells the user to try the title on a different source.
+		if errors.Is(err, netx.ErrMediaOffline) {
+			return "", fmt.Errorf("%w: %w", ErrSourceVideoRemoved, err)
+		}
+		// AnimeFire is read through its JSON API; its pages are a client-side
+		// app with no markup to scrape. Falling through to the HTML extractor
+		// cannot succeed and actively lies about the cause — an episode the API
+		// correctly reported as offline came back as "no video source found in
+		// the page", pointing at a parser instead of at the source.
+		if resolved.Kind == source.AnimeFire {
 			return "", fmt.Errorf("failed to get %s stream URL: %w", resolved.Kind, err)
 		}
 		// Legacy silent fallback for the remaining sources — removed in Phase 2.
@@ -470,7 +586,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		// up so the caller routes the user back to episode selection instead
 		// of letting the player layer redundantly resolve the same dead URL.
 		if errors.Is(err, errBloggerVideoUnavailable) {
-			return "", fmt.Errorf("video unavailable on this source: %w", err)
+			return "", fmt.Errorf("%w: %w", ErrSourceVideoRemoved, err)
 		}
 		// If resolution failed for an unknown reason, fall back to the original
 		// URL so yt-dlp can have a chance.
@@ -482,14 +598,14 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 
 // Helper function to check if anime is from FlixHQ source (player module)
 // isMovieOrTVSourcePlayer routes any movie/TV content through the enhanced API,
-// which dispatches by anime.Source (SuperFlix, FlixHQ, ...). Despite the legacy
-// name, this is not FlixHQ-specific — SuperFlix selections also reach this
+// which dispatches by anime.Source (StartFlix, FlixHQ, ...). Despite the legacy
+// name, this is not FlixHQ-specific — StartFlix selections also reach this
 // branch because their MediaType is MediaTypeMovie/MediaTypeTV.
 func isMovieOrTVSourcePlayer(anime *models.Anime) bool {
 	if anime == nil {
 		return false
 	}
-	if anime.Source == "SFlix" || anime.Source == "SuperFlix" {
+	if anime.Source == "SFlix" || anime.Source == "StartFlix" || anime.Source == "TopCine" {
 		return true
 	}
 	if anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {
@@ -1373,11 +1489,16 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			// animefire_quality_menu_test.go.
 			sortedData, qualityLabels := buildAnimeFireQualityItems(videoResponse.Data)
 
-			qIdx, err := tui.PickLabels(qualityLabels, tui.PickOptions{
+			resolutions := make([]int, len(sortedData))
+			for i, v := range sortedData {
+				resolutions[i] = extractResolution(v.Label)
+			}
+			qIdx, err := tui.Pick(qualityPickItems(qualityLabels, resolutions), tui.PickOptions{
 				Breadcrumb:   "Playback > Quality",
 				WindowTitle:  "GoAnime - Quality",
 				ItemSingular: "quality",
 				ItemPlural:   "qualities",
+				Panel:        qualityFlagPanel(),
 			})
 			if err != nil {
 				if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
@@ -1476,6 +1597,40 @@ func buildAnimeFireQualityItems(videoData []VideoData) (sortedSources []VideoDat
 		}
 	}
 	return sorted, labels
+}
+
+// qualityPickItems turns quality labels into picker rows, each with a bar for
+// its resolution against the best one offered. A label without a resolution
+// says so instead.
+func qualityPickItems(labels []string, resolutions []int) []tui.PickItem {
+	best := 0
+	for _, res := range resolutions {
+		best = max(best, res)
+	}
+	items := make([]tui.PickItem, len(labels))
+	for i, label := range labels {
+		items[i] = tui.PickItem{Label: label}
+		switch {
+		case i < len(resolutions) && resolutions[i] > 0 && best > 0:
+			items[i].Meter = float64(resolutions[i]) / float64(best)
+		default:
+			items[i].Details = "resolution not reported"
+		}
+	}
+	return items
+}
+
+// qualityFlagPanel explains how to stop the quality menu from opening. It is
+// only true where the menu honours --quality, which is this AnimeFire path.
+func qualityFlagPanel() *tui.PickPanel {
+	return &tui.PickPanel{
+		Label: "Skip this menu",
+		Gloss: "ヒント",
+		Lines: []string{
+			"Start with a quality and this menu opens only when an episode does not have it. The default, best, always asks.",
+		},
+		Command: "goanime --quality 720p",
+	}
 }
 
 // selectQualityFromOptions selects the best matching quality from available options

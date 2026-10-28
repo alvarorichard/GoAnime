@@ -90,6 +90,14 @@ func TestMedia_IsMovieOrTV(t *testing.T) {
 	}
 }
 
+func TestAudioLabel(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "Dubbed and subtitled", AudioLabel(true, true))
+	assert.Equal(t, "Dubbed", AudioLabel(true, false))
+	assert.Equal(t, "Subtitled", AudioLabel(false, true))
+	assert.Empty(t, AudioLabel(false, false), "nothing known, nothing claimed")
+}
+
 func TestMedia_GetDisplayName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -158,10 +166,10 @@ func TestMedia_GetRatingDisplay(t *testing.T) {
 		r    float64
 		want string
 	}{
-		{"positive", 8.5, "★ 8.5"},
+		{"positive", 8.5, "8.5/10"},
 		{"zero", 0.0, ""},
 		{"negative", -1.0, ""},
-		{"one digit", 7.0, "★ 7.0"},
+		{"one digit", 7.0, "7.0/10"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,8 +210,11 @@ func TestMedia_HasInteractiveEpisodeFlow(t *testing.T) {
 		want   bool
 	}{
 		{"sflix by source", "SFlix", MediaTypeAnime, true},
-		{"superflix by source even when tagged anime", "SuperFlix", MediaTypeAnime, true},
-		{"superflix with empty media type", "SuperFlix", "", true},
+		{"startflix by source even when tagged anime", "StartFlix", MediaTypeAnime, true},
+		{"startflix with empty media type", "StartFlix", "", true},
+		{"topcine by source even when tagged anime", "TopCine", MediaTypeAnime, true},
+		{"animesdigital by source", "AnimesDigital", MediaTypeAnime, true},
+		{"removed superflix is no longer special", "SuperFlix", MediaTypeAnime, false},
 		{"movie by media type", "AllAnime", MediaTypeMovie, true},
 		{"tv by media type", "AllAnime", MediaTypeTV, true},
 		{"regular anime source", "AllAnime", MediaTypeAnime, false},

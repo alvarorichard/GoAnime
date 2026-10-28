@@ -170,10 +170,10 @@ func TestFilterMPVArgs_DemuxerLavfOAllowed(t *testing.T) {
 			"otherwise the HLS audio fix never reaches mpv and video plays silent")
 }
 
-func TestFilterMPVArgs_ForcedHLSFormatAllowed(t *testing.T) {
-	filtered := filterMPVArgs([]string{hlsForceLavfFormatArg})
-	assert.Contains(t, filtered, hlsForceLavfFormatArg,
-		"the forced HLS format for SuperFlix master.txt MUST reach mpv")
+func TestFilterMPVArgs_ForcedLavfFormatAllowed(t *testing.T) {
+	filtered := filterMPVArgs([]string{"--demuxer-lavf-format=hls"})
+	assert.Contains(t, filtered, "--demuxer-lavf-format=hls",
+		"a forced lavf demuxer format is on the allowlist and MUST reach mpv")
 }
 
 func TestFilterMPVArgs_Whitelist(t *testing.T) {

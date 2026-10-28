@@ -3,15 +3,16 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +59,7 @@ func TestFetchEpisodes_NilAnime(t *testing.T) {
 func TestFetchEpisodes_UnknownIsReportedNotGuessed(t *testing.T) {
 	// Swaps the global registry — not parallel.
 	only := &epStubSource{
-		desc: source.Descriptor{Kind: source.AniDB, Priority: 1, Explicit: []string{"AniDB"}},
+		desc: source.Descriptor{Kind: source.HiAnime, Priority: 1, Explicit: []string{"HiAnime"}},
 		eps:  []models.Episode{{Number: "1"}},
 	}
 	restore := source.SwapRegistryForTesting(only)
@@ -117,7 +118,7 @@ func newSearchStub(kind source.SourceKind, results []*models.Anime, err error) *
 
 func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "[English] Naruto"}}, nil)
+	a := newSearchStub(source.HiAnime, []*models.Anime{{Name: "[English] Naruto"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "[PT-BR] Naruto"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -131,7 +132,7 @@ func TestSearchAll_FansOutOverRegistry(t *testing.T) {
 
 func TestSearchAll_SpecificKindFilter(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	a := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
+	a := newSearchStub(source.HiAnime, []*models.Anime{{Name: "AA"}}, nil)
 	g := newSearchStub(source.Goyabu, []*models.Anime{{Name: "GY"}}, nil)
 	restore := source.SwapRegistryForTesting(a, g)
 	t.Cleanup(restore)
@@ -146,7 +147,7 @@ func TestSearchAll_SpecificKindFilter(t *testing.T) {
 
 func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	ok := newSearchStub(source.AniDB, []*models.Anime{{Name: "AA"}}, nil)
+	ok := newSearchStub(source.HiAnime, []*models.Anime{{Name: "AA"}}, nil)
 	bad := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(ok, bad)
 	t.Cleanup(restore)
@@ -158,7 +159,7 @@ func TestSearchAll_ToleratesPerSourceFailure(t *testing.T) {
 
 func TestSearchAll_AllFailReturnsError(t *testing.T) {
 	// Swaps the global registry — not parallel.
-	b1 := newSearchStub(source.AniDB, nil, assert.AnError)
+	b1 := newSearchStub(source.HiAnime, nil, assert.AnError)
 	b2 := newSearchStub(source.Goyabu, nil, assert.AnError)
 	restore := source.SwapRegistryForTesting(b1, b2)
 	t.Cleanup(restore)
@@ -174,11 +175,21 @@ func TestSearchAll_AllFailReturnsError(t *testing.T) {
 type hangingSearchSource struct {
 	epStubSource
 	release chan struct{}
+	results []*models.Anime
+}
+
+// setPerSourceSearchTimeout overrides the per-source timeout for one test.
+// Atomic because goroutines abandoned by an earlier, already-returned search
+// can still be reading it.
+func setPerSourceSearchTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := perSourceSearchTimeoutNs.Swap(int64(d))
+	t.Cleanup(func() { perSourceSearchTimeoutNs.Store(prev) })
 }
 
 func (s *hangingSearchSource) Search(context.Context, string) ([]*models.Anime, error) {
 	<-s.release
-	return nil, nil
+	return s.results, nil
 }
 
 func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
@@ -188,9 +199,7 @@ func TestSearchOneWithTimeout_EnrichesWithOriginProbe(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	prev := perSourceSearchTimeout
-	perSourceSearchTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { perSourceSearchTimeout = prev })
+	setPerSourceSearchTimeout(t, 20*time.Millisecond)
 
 	stub := &hangingSearchSource{
 		desc:    source.Descriptor{Kind: source.Goyabu, Priority: 1},
@@ -218,4 +227,235 @@ func TestSearchAll_NoSearchableSource(t *testing.T) {
 	_, err := SearchAll(context.Background(), "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no searchable source")
+}
+
+func TestSearchAll_AllPendingTimeoutIsFailure(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	results, err := SearchAll(ctx, "naruto")
+	assert.Empty(t, results)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestSearchAll_CancelledPendingSourceIsNotTimeout(t *testing.T) {
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := SearchAll(ctx, "naruto")
+	var failure *SearchFailure
+	require.ErrorAs(t, err, &failure)
+	require.Len(t, failure.Sources, 1)
+	assert.Equal(t, "cancelled", failure.Sources[0].Reason)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestSearchOneWithTimeout_CancelledContextPreservesCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Errorf("probe URL should not be requested when context is cancelled")
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	stub := &hangingSearchSource{
+		desc:    source.Descriptor{Kind: source.AnimeDrive, Priority: 1},
+		release: make(chan struct{}),
+	}
+	defer close(stub.release)
+
+	got := searchOneWithTimeout(ctx, activeSearcher{
+		sr:       stub,
+		kind:     source.AnimeDrive,
+		probeURL: srv.URL,
+	}, "naruto")
+
+	require.Error(t, got.err)
+	assert.ErrorIs(t, got.err, context.Canceled)
+	assert.NotContains(t, got.err.Error(), "search timed out after")
+}
+
+func TestSearchAll_ParentCancellationDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := SearchAll(ctx, "naruto")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
+		var failure *SearchFailure
+		require.ErrorAs(t, err, &failure)
+		assert.Equal(t, "cancelled", failure.Sources[0].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "circuit breaker must remain closed across parent cancellations")
+}
+
+func TestSearchAll_ParentDeadlineDoesNotTripCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		_, err := SearchAll(ctx, "naruto")
+		cancel()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		var failure *SearchFailure
+		require.ErrorAs(t, err, &failure)
+		assert.Equal(t, "timed out", failure.Sources[0].Reason)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.False(t, open, "circuit breaker must remain closed across parent deadline expirations")
+}
+
+func TestParentContextFailure(t *testing.T) {
+	t.Run("active parent context returns false regardless of error", func(t *testing.T) {
+		ctx := context.Background()
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+	})
+
+	t.Run("parent canceled matches context.Canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		f, ok := parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.True(t, ok)
+		assert.Equal(t, source.AnimeDrive, f.Kind)
+		assert.Equal(t, "cancelled", f.Reason)
+		assert.ErrorIs(t, f.Err, context.Canceled)
+
+		wrapped := fmt.Errorf("provider failed: %w", context.Canceled)
+		f, ok = parentContextFailure(ctx, source.AnimeDrive, wrapped)
+		assert.True(t, ok)
+		assert.Equal(t, "cancelled", f.Reason)
+		assert.ErrorIs(t, f.Err, context.Canceled)
+	})
+
+	t.Run("parent canceled rejects independent provider error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.False(t, ok)
+	})
+
+	t.Run("parent deadline matches context.DeadlineExceeded", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+
+		f, ok := parentContextFailure(ctx, source.AnimeDrive, context.DeadlineExceeded)
+		assert.True(t, ok)
+		assert.Equal(t, source.AnimeDrive, f.Kind)
+		assert.Equal(t, "timed out", f.Reason)
+		assert.ErrorIs(t, f.Err, context.DeadlineExceeded)
+
+		wrapped := fmt.Errorf("provider timeout: %w", context.DeadlineExceeded)
+		f, ok = parentContextFailure(ctx, source.AnimeDrive, wrapped)
+		assert.True(t, ok)
+		assert.Equal(t, "timed out", f.Reason)
+		assert.ErrorIs(t, f.Err, context.DeadlineExceeded)
+	})
+
+	t.Run("parent deadline rejects independent provider error", func(t *testing.T) {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+
+		_, ok := parentContextFailure(ctx, source.AnimeDrive, assert.AnError)
+		assert.False(t, ok)
+
+		_, ok = parentContextFailure(ctx, source.AnimeDrive, context.Canceled)
+		assert.False(t, ok)
+	})
+}
+
+func TestSearchAll_ProviderOwnTimeoutTripsCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	failing := newSearchStub(source.AnimeDrive, nil, context.DeadlineExceeded)
+	restore := source.SwapRegistryForTesting(failing)
+	t.Cleanup(restore)
+
+	for i := 0; i < 3; i++ {
+		_, err := SearchAll(context.Background(), "naruto")
+		require.Error(t, err)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.True(t, open, "provider's own timeout must trip the circuit breaker after threshold")
+}
+
+func TestSearchAll_ProviderOwnCancellationTripsCircuitBreaker(t *testing.T) {
+	prev := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prev })
+
+	failing := newSearchStub(source.AnimeDrive, nil, context.Canceled)
+	restore := source.SwapRegistryForTesting(failing)
+	t.Cleanup(restore)
+
+	for i := 0; i < 3; i++ {
+		_, err := SearchAll(context.Background(), "naruto")
+		require.Error(t, err)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.True(t, open, "provider's own cancellation must trip the circuit breaker after threshold")
+}
+
+func TestSearchAll_IndividualTimeoutTripsCircuitBreaker(t *testing.T) {
+	prevBreaker := searchBreaker
+	searchBreaker = netx.NewCircuitBreaker()
+	t.Cleanup(func() { searchBreaker = prevBreaker })
+
+	setPerSourceSearchTimeout(t, 10*time.Millisecond)
+
+	stuck := &hangingSearchSource{epStubSource: epStubSource{desc: source.Descriptor{Kind: source.AnimeDrive, Priority: 1}}, release: make(chan struct{})}
+	restore := source.SwapRegistryForTesting(stuck)
+	t.Cleanup(restore)
+	t.Cleanup(func() { close(stuck.release) })
+
+	for i := 0; i < 3; i++ {
+		_, err := SearchAll(context.Background(), "naruto")
+		require.Error(t, err)
+	}
+
+	_, _, open := searchBreaker.IsOpen(string(source.AnimeDrive))
+	assert.True(t, open, "individual provider timeouts must trip the circuit breaker after threshold")
 }

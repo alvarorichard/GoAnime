@@ -27,6 +27,7 @@ type Media struct {
 	MediaType MediaType // Type of media (anime, movie, tv)
 	Year      string    // Release year
 	Quality   string    // Video quality (if available)
+	Audio     string    // Audio the source offers, worded by AudioLabel (if known)
 
 	// Anime-specific fields (AniList)
 	AnilistID int
@@ -113,15 +114,32 @@ func (m *Media) IsMovieOrTV() bool {
 	return m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
 }
 
+// AudioLabel words the audio a source offers for a title, so every source
+// describes it the same way: "Dubbed", "Subtitled", "Dubbed and subtitled",
+// or "" when the source says neither.
+func AudioLabel(dubbed, subtitled bool) string {
+	switch {
+	case dubbed && subtitled:
+		return "Dubbed and subtitled"
+	case dubbed:
+		return "Dubbed"
+	case subtitled:
+		return "Subtitled"
+	default:
+		return ""
+	}
+}
+
 // HasInteractiveEpisodeFlow reports whether fetching this title's episodes may
 // open its own terminal UI (the season-selection fuzzyfinder), meaning callers
 // MUST NOT run a spinner or any other TUI concurrently with the fetch — two
 // programs writing to the terminal at once eat each other's output and corrupt
-// terminal state. SuperFlix/SFlix are matched by SOURCE, not just media type:
-// their catalogs tag western animation (e.g. "Os Simpsons") as anime, which
-// would otherwise slip past the movie/TV check.
+// terminal state. StartFlix, TopCine and Pobreflix are matched by SOURCE, not
+// just media type: their listing always runs the season and audio pickers,
+// whatever the title's type.
+// SFlix is a legacy movie/TV label matched the same way.
 func (m *Media) HasInteractiveEpisodeFlow() bool {
-	return m.Source == "SFlix" || m.Source == "SuperFlix" ||
+	return m.Source == "SFlix" || m.Source == "StartFlix" || m.Source == "TopCine" || m.Source == "Pobreflix" || m.Source == "AnimesDigital" ||
 		m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
 }
 
@@ -163,7 +181,7 @@ func (m *Media) OfficialTitle() string {
 // GetRatingDisplay returns a formatted rating string
 func (m *Media) GetRatingDisplay() string {
 	if m.Rating > 0 {
-		return fmt.Sprintf("★ %.1f", m.Rating)
+		return fmt.Sprintf("%.1f/10", m.Rating)
 	}
 	return ""
 }

@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	neturl "net/url"
 	"os"
-	"os/user"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -15,14 +12,13 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/superflix"
-	"github.com/alvarorichard/Goanime/internal/tracking"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/upscaler"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/upscaler"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // ErrUserQuit is returned when the user chooses to quit the application
@@ -45,7 +41,7 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
-func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, needsCORSOrigin bool) (args []string, refererURL string) {
+func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
 		return mpvArgs, ""
@@ -55,53 +51,17 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream, n
 	if referer == "" && isHLSStream {
 		referer = defaultHLSReferer
 	}
+
 	if referer == "" {
 		return mpvArgs, ""
 	}
-
-	if !needsCORSOrigin {
-		return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
-	}
-
-	// SuperFlix's player CDN serves a signed URL only to a request that repeats
-	// the browser's own fingerprint — Referer alone gets a 403 on a URL the
-	// browser plays fine. superflix.CDNPlaybackHeaderFields owns the exact
-	// contract (and leads with the Referer); Origin is added on top because the
-	// segment hosts validate it separately.
-	//
-	// Each header goes in its own --http-header-fields-append: the contract's
-	// Accept-Language value contains a comma, and the comma-joined
-	// --http-header-fields form would split it into two malformed fields.
-	fields := superflix.CDNPlaybackHeaderFields(referer, util.GetGlobalUserAgent())
-	if origin := corsOriginOf(referer); origin != "" {
-		fields = append(fields, "Origin: "+origin)
-	}
-	for _, f := range fields {
-		mpvArgs = append(mpvArgs, "--http-header-fields-append="+f)
-	}
-	// mpv's own default UA (libmpv) is one of the values the CDN rejects, and
-	// --http-header-fields cannot override it — mpv sends both. --user-agent is
-	// the only option that replaces it.
-	if ua := util.GetGlobalUserAgent(); ua != "" {
-		mpvArgs = append(mpvArgs, "--user-agent="+ua)
-	}
-	return mpvArgs, referer
-}
-
-// corsOriginOf reduces a Referer to its bare scheme://host, the value a browser
-// puts in Origin.
-func corsOriginOf(referer string) string {
-	u, err := neturl.Parse(referer)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
+	return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
 // mpv fetches segments served with disguised extensions (.js/.css/.woff, …).
-// Some providers (e.g. SuperFlix's FirePlayer host) obfuscate their HLS
-// segments this way AND serve the separate alternative-audio rendition's
+// Some providers obfuscate their HLS segments this way AND serve the separate
+// alternative-audio rendition's
 // segments with the same disguised extensions. mpv's builtin ffmpeg only
 // relaxes the check for the main variant (it auto-sets extension_picky=0), so
 // the audio rendition stays blocked by the stricter `allowed_extensions`
@@ -109,7 +69,6 @@ func corsOriginOf(referer string) string {
 // allowed_extensions=ALL lets the audio rendition load too. It only widens a
 // check, never restricts, so it is safe for well-behaved HLS sources as well.
 const hlsAllowAllExtensionsArg = "--demuxer-lavf-o=allowed_extensions=ALL"
-const hlsForceLavfFormatArg = "--demuxer-lavf-format=hls"
 
 // appendHLSDemuxerArgs adds HLS-specific demuxer options to mpvArgs when the
 // stream is HLS, and returns mpvArgs unchanged otherwise.
@@ -124,19 +83,12 @@ func appendHLSDemuxerArgs(mpvArgs []string, isHLSStream bool) []string {
 // list. playVideo gathers these (some via interactive prompts, globals, and
 // tracking side effects) and hands them to buildPlaybackArgs, so the actual
 // argument assembly — including the HLS referer + allowed_extensions wiring that
-// makes SuperFlix audio play — is deterministic and unit-testable without
-// launching mpv.
+// makes alternative-audio renditions play — is deterministic and unit-testable
+// without launching mpv.
 type playbackArgsInput struct {
-	VideoURL string
-	IsHLS    bool
-	Is9Anime bool
-	// IsSuperFlix adds the Origin header to the mpv request. SuperFlix's CDN
-	// serves the HLS segments from rotating third-party hosts and validates the
-	// CORS origin on them: hls.js fetches segments as a cross-origin XHR, so a
-	// real browser attaches Origin, and without it every segment comes back 403
-	// while the playlist itself loads fine. Verified live 2026-08-26 — the same
-	// stream goes from 121 failed segments to 0.
-	IsSuperFlix      bool
+	VideoURL         string
+	IsHLS            bool
+	Is9Anime         bool
 	UpscalingEnabled bool
 	ShaderArgs       []string
 	Wayland          bool
@@ -149,14 +101,29 @@ type playbackArgsInput struct {
 	ResumeTime       int
 }
 
-// defaultVideoOutputArg picks an mpv --vo chain that survives minimal Windows
-// VMs (no OpenGL / only Basic Display Adapter). Non-Windows keeps plain gpu.
-func defaultVideoOutputArg() string {
-	if runtime.GOOS == "windows" {
-		return "--vo=gpu,direct3d,sdl"
+// videoOutputArg picks the mpv --vo chain for goos. mpv takes the first output
+// in the list that initialises and skips names its build lacks ("Video output
+// gpu-next not found!"), so one chain fits every mpv:
+//   - gpu-next (libplacebo) leads: mpv's own default since 0.41, and since 0.39
+//     macOS has no OpenGL context for the GPU outputs — they render only
+//     through Vulkan on MoltenVK (macvk).
+//   - gpu: mpv before 0.35 has no gpu-next, and it covers drivers gpu-next
+//     can't start on.
+//   - macOS: libmpv, which mpv runs as its OpenGL output (cocoa-cb) on a Mac
+//     without MoltenVK.
+//   - Windows: direct3d and sdl for VMs with no working OpenGL or Direct3D 11.
+func videoOutputArg(goos string) string {
+	switch goos {
+	case "windows":
+		return "--vo=gpu-next,gpu,direct3d,sdl"
+	case "darwin":
+		return "--vo=gpu-next,gpu,libmpv"
+	default:
+		return "--vo=gpu-next,gpu"
 	}
-	return "--vo=gpu"
 }
+
+func defaultVideoOutputArg() string { return videoOutputArg(runtime.GOOS) }
 
 // buildPlaybackArgs assembles the full mpv argument list from resolved inputs.
 // It is pure (no I/O, no globals, no prompts) so the exact argument set — and in
@@ -172,16 +139,18 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	}
 
 	if in.UpscalingEnabled {
-		// Shader-based upscaling: gpu-next (libplacebo) + no hw decode so shaders
-		// can process frames.
-		mpvArgs = append(mpvArgs, "--vo=gpu-next", "--hwdec=no")
+		// Shader-based upscaling: no hw decode so shaders can process frames.
+		// gpu-next leads the chain; a machine it can't start on still plays,
+		// unscaled if only a non-GPU output works.
+		mpvArgs = append(mpvArgs, defaultVideoOutputArg(), "--hwdec=no")
 		mpvArgs = append(mpvArgs, in.ShaderArgs...)
 	} else {
 		mpvArgs = append(mpvArgs,
 			"--no-config",
 			"--hwdec=auto-safe",
-			// Windows VMs often lack working OpenGL; fall through to Direct3D/SDL
-			// so playback still starts instead of mpv exiting before IPC.
+			// gpu-next first, then outputs for older mpv, Macs without
+			// MoltenVK and Windows VMs, so playback starts instead of mpv
+			// exiting before IPC.
 			defaultVideoOutputArg(),
 			"--profile=fast",
 			"--video-latency-hacks=yes",
@@ -192,15 +161,10 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		mpvArgs = append(mpvArgs, "--gpu-context=wayland")
 	}
 
-	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS, in.IsSuperFlix)
+	mpvArgs, playbackReferer := appendPlaybackRefererArgs(mpvArgs, in.VideoURL, in.IsHLS)
 	// Relax the HLS segment-extension allowlist so alternative-audio renditions
-	// with disguised segment extensions load (fixes video-plays-but-no-audio on
-	// SuperFlix/FirePlayer streams).
+	// with disguised segment extensions load (fixes video-plays-but-no-audio).
 	mpvArgs = appendHLSDemuxerArgs(mpvArgs, in.IsHLS)
-	forcesHLSFormat := in.IsHLS && strings.Contains(strings.ToLower(in.VideoURL), "master.txt")
-	if forcesHLSFormat {
-		mpvArgs = append(mpvArgs, hlsForceLavfFormatArg)
-	}
 
 	// For 9Anime (Cloudflare-protected CDNs), route playback through yt-dlp with
 	// Chrome TLS impersonation so ffmpeg's TLS fingerprint is not rejected.
@@ -236,26 +200,8 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		)
 	}
 
-	// External subtitle files (already gated + resolved by the caller) — except
-	// when the lavf format is forced, where they must be dropped.
-	//
-	// --demuxer-lavf-format is global in mpv: it applies to every file lavf
-	// opens, external subtitles included, and there is no per-file override. A
-	// WEBVTT file forced through the HLS demuxer cannot open — even a local one
-	// fails with "Can not open external file". For a remote one each failed open
-	// also waits on the network, so SuperFlix's 27 tracks kept mpv stalled for
-	// over two minutes before it showed a window: the "mpv never opens" report on
-	// "O Fim da Rua" (2026-09-14). Measured on that exact stream: 21s to play
-	// without the files, still stuck at a 123s timeout with them.
-	//
-	// Nothing is lost by dropping them. SuperFlix's master.txt declares the same
-	// 27 subtitle renditions (EXT-X-MEDIA TYPE=SUBTITLES, three Portuguese among
-	// them), and mpv exposes those from the stream itself — 27 tracks, zero
-	// failures — so --slang still picks one and the in-player menu still lists
-	// them all.
-	if !forcesHLSFormat {
-		mpvArgs = append(mpvArgs, in.SubArgs...)
-	}
+	// External subtitle files, already gated and resolved by the caller.
+	mpvArgs = append(mpvArgs, in.SubArgs...)
 
 	// HLS resume is handled by seeking after start (--start is unreliable on HLS).
 	if in.ResumeTime > 0 && !in.IsHLS {
@@ -421,6 +367,10 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 // showResumeDialog displays a compact dialog asking if user wants to resume playback.
 // For movies (single-title playback) the wording avoids "episode N".
 func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
+	// Fail fast without a TTY: huh blocks on Windows console input headless.
+	if !tui.HasTerminal() {
+		return false, fmt.Errorf("no terminal: stdin is not a TTY")
+	}
 	var resume bool
 
 	// Convert seconds to minutes and seconds for better readability
@@ -446,7 +396,7 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 		Negative("No, start from beginning").
 		Value(&resume)
 
-	if err := tui.RunClean(confirm.Run); err != nil {
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
 		return false, fmt.Errorf("error showing dialog: %w", err)
 	}
 
@@ -527,6 +477,32 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 // malID is the MyAnimeList ID (used by the AniSkip API).
 // anilistID is the AniList ID (used as the tracking/resume key).
 // They are distinct identifiers — passing one in place of the other
+// externalSubtitleArgs turns the tracks a source resolved into mpv --sub-file
+// arguments, asking the user to choose first when that is warranted.
+//
+// The gate is "did a source give us tracks", not a list of source names. It
+// used to be `wantsLangPrefs || is9Anime` — movies/TV and 9Anime —
+// which meant any other source resolved its subtitles, stored them, and then
+// had them silently dropped: never passed to mpv, with nothing said about it.
+// HiAnime, which ships an English and a Brazilian Portuguese track per episode,
+// hit exactly that. Both download paths already gate on the track count; this
+// is the same rule, in the one place that did not follow it.
+//
+// 9Anime always prompts, per its own contract. Everyone else is only asked when
+// there is an actual choice to make — one track needs no picker.
+func externalSubtitleArgs(is9Anime bool) []string {
+	if is9Anime {
+		util.PromptSubtitleLanguage()
+	} else if len(util.GetGlobalSubtitles()) > 1 {
+		util.SelectSubtitles()
+	}
+	args := util.GetSubtitleArgs()
+	if len(args) > 0 {
+		util.Debugf("Added external subtitles: %v", args)
+	}
+	return args
+}
+
 // causes resume data to collide across sources.
 func playVideo(
 	videoURL string,
@@ -600,26 +576,18 @@ func playVideo(
 		}
 	}
 
-	// Audio/subtitle language preferences apply to movies/TV (FlixHQ) and to
-	// SuperFlix.
-	//
-	// SuperFlix must be matched by SOURCE, not by media type: its streams are
-	// multi-audio HLS with an external Portuguese subtitle track regardless of
-	// whether the entry is a movie, a series, an anime or a dorama. Gating on
-	// IsMovieOrTV alone silently threw away both the audio track the user picked
-	// and the subtitles for every SuperFlix anime.
-	isSuperFlix := util.IsSuperFlixSource()
+	// Audio/subtitle language preferences apply to movies/TV (StartFlix,
+	// FlixHQ).
 	isMovieOrTV := false
 	if updater != nil && updater.GetAnime() != nil {
 		anime := updater.GetAnime()
 		isMovieOrTV = anime.IsMovieOrTV() || strings.Contains(strings.ToLower(anime.Source), "flixhq")
-		isSuperFlix = isSuperFlix || strings.EqualFold(anime.Source, "SuperFlix")
 		// Update exact media type for download path organization.
 		if anime.MediaType != "" && titleSnap.MediaType == "" {
 			SetExactMediaType(string(anime.MediaType))
 		}
 	}
-	wantsLangPrefs := isMovieOrTV || isSuperFlix
+	wantsLangPrefs := isMovieOrTV
 
 	audioLang, subsLang := "", ""
 	if wantsLangPrefs {
@@ -635,20 +603,20 @@ func playVideo(
 		util.Debugf("Applying language preferences: audio=%s, subs=%s", audioLang, subsLang)
 	}
 
-	// External subtitle files (FlixHQ / SuperFlix / 9Anime). For 9Anime, ALWAYS
-	// prompt the user to pick a subtitle language after every episode selection.
-	var subArgs []string
-	if wantsLangPrefs || is9Anime {
-		if is9Anime {
-			util.PromptSubtitleLanguage()
-		} else if len(util.GetGlobalSubtitles()) > 1 {
-			util.SelectSubtitles()
+	// External subtitle files, from whichever source resolved them.
+	// The screen's header and UP NEXT panel read this context (tela 7).
+	{
+		source := util.GetGlobalAnimeSource()
+		if updater != nil && updater.GetAnime() != nil && updater.GetAnime().Source != "" {
+			source = updater.GetAnime().Source
 		}
-		subArgs = util.GetSubtitleArgs()
-		if len(subArgs) > 0 {
-			util.Debugf("Added external subtitles: %v", subArgs)
+		nextLine := ""
+		if !isMovieOrTV {
+			nextLine = fmt.Sprintf("Episode %d", currentEpisodeNum+1)
 		}
+		util.SetSubtitleContext(titleSnap.AnimeName, source, "", nextLine)
 	}
+	subArgs := externalSubtitleArgs(is9Anime)
 
 	// YtdlpCanImpersonate is only consulted on the 9Anime HLS path; keep the call
 	// gated so non-9Anime playback doesn't pay for it.
@@ -672,7 +640,6 @@ func playVideo(
 		VideoURL:         videoURL,
 		IsHLS:            isHLSStream,
 		Is9Anime:         is9Anime,
-		IsSuperFlix:      util.IsSuperFlixSource(),
 		UpscalingEnabled: upscalingEnabled,
 		ShaderArgs:       shaderArgs,
 		Wayland:          wayland,
@@ -842,26 +809,27 @@ func getCurrentEpisode(episodes []models.Episode, num int) (*models.Episode, err
 // 	return tracker, 0
 // }
 
-// cachedDBPath stores the database path to avoid repeated user.Current() calls
+// cachedDBPath stores the database path so it is resolved only once.
 var cachedDBPath string
 
-// getTrackerDBPath returns the cached database path
+// getTrackerDBPath returns the progress database path.
+//
+// The home directory comes from os.UserHomeDir, as it does for the log and
+// download directories, so every file GoAnime writes follows HOME
+// (USERPROFILE on Windows). It used to come from user.Current, which reads
+// the account database and ignores HOME: a run with HOME pointed elsewhere
+// kept writing watch history into the real home directory.
 func getTrackerDBPath() string {
 	if cachedDBPath != "" {
 		return cachedDBPath
 	}
 
-	currentUser, err := user.Current()
-	if err != nil {
-		util.Errorf("Failed to get current user: %v", err)
+	path := tracking.DBPath()
+	if path == "" {
+		util.Errorf("Failed to locate the home directory")
 		return ""
 	}
-
-	if runtime.GOOS == "windows" {
-		cachedDBPath = filepath.Join(os.Getenv("LOCALAPPDATA"), "GoAnime", "tracking", "progress.db")
-	} else {
-		cachedDBPath = filepath.Join(currentUser.HomeDir, ".local", "goanime", "tracking", "progress.db")
-	}
+	cachedDBPath = path
 
 	return cachedDBPath
 }
@@ -936,6 +904,15 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 	}
 
 	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
+
+	if position, fromStart, ok := takeResumeOverride(); ok {
+		if fromStart {
+			util.Debugf("Starting from the beginning (requested)")
+			return tracker, 0
+		}
+		util.Debugf("Resuming from %d seconds without asking (requested)", position)
+		return tracker, position
+	}
 
 	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime, IsCurrentMediaMovie()); ok {
 		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
@@ -1086,12 +1063,16 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 // updateTrackingWithDuration updates the local tracker with episode info and duration
 func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
 	if tracker != nil && dur > 0 {
+		ctx := snapshotMediaContext()
 		anime := tracking.Anime{
 			AnilistID:     anilistID,
 			AllanimeID:    episode.URL,
 			EpisodeNumber: episodeNum,
 			Duration:      int(dur.Seconds()),
 			Title:         getEpisodeTitle(episode.Title),
+			AnimeTitle:    ctx.animeTitle,
+			Source:        ctx.source,
+			Audio:         ctx.audio,
 			LastUpdated:   time.Now(),
 		}
 		if err := tracker.UpdateProgress(anime); err != nil {
@@ -1245,6 +1226,7 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		duration = 1440 // Fallback to default
 	}
 
+	ctx := snapshotMediaContext()
 	anime := tracking.Anime{
 		AnilistID:     anilistID,
 		AllanimeID:    trackingKey(episode.URL, episodeNum),
@@ -1252,6 +1234,9 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 		PlaybackTime:  int(position),
 		Duration:      duration,
 		Title:         getEpisodeTitle(episode.Title),
+		AnimeTitle:    ctx.animeTitle,
+		Source:        ctx.source,
+		Audio:         ctx.audio,
 		LastUpdated:   time.Now(),
 	}
 
@@ -1260,58 +1245,118 @@ func updateTracking(tracker *tracking.LocalTracker, socketPath string, anilistID
 	}
 }
 
-// showPlayerMenu displays an interactive menu for player controls
-func showPlayerMenu(animeName string, currentEpisodeNum int) (string, error) {
+// playerMenuOption is one entry of the player menu: its label, the choice
+// handleUserInput acts on, and the key that picks it at once.
+type playerMenuOption struct {
+	Label string
+	Value string
+	Key   string
+}
 
-	// Build title and options based on media type
-	var title string
-
-	type menuOption struct {
-		Label string
-		Value string
-	}
-	var menuItems []menuOption
-
-	isMovie := IsCurrentMediaMovie()
-
+// playerMenuOptions lists the player menu for a movie or a series. The track
+// entries are offered only when mpv has something to choose between.
+func playerMenuOptions(isMovie, audioChoice, subtitleChoice bool) []playerMenuOption {
+	var options []playerMenuOption
 	if isMovie {
-		// Movie: show movie name without episode number
-		title = "GoAnime Player Controls"
-		if animeName != "" {
-			title = fmt.Sprintf("Now playing: %s", animeName)
-		}
-		menuItems = []menuOption{
-			{"← Back", "download_options"},
-			{"Replay movie", "next"},
-			{"Change movie", "change"},
-			{"Exit", "quit"},
+		options = []playerMenuOption{
+			{"Replay movie", "next", "r"},
+			{"Change movie", "change", "c"},
 		}
 	} else {
-		// TV series / anime: show episode navigation
-		title = "GoAnime Player Controls"
-		if animeName != "" {
-			title = fmt.Sprintf("Now playing: %s - Episode %d", animeName, currentEpisodeNum)
-		}
-		menuItems = []menuOption{
-			{"← Back", "download_options"},
-			{"Next episode", "next"},
-			{"Previous episode", "previous"},
-			{"Select episode", "select"},
-			{"Change anime", "change"},
-			{"Skip intro", "skip"},
-			{"Exit", "quit"},
+		options = []playerMenuOption{
+			{"Next episode", "next", "n"},
+			{"Previous episode", "previous", "p"},
+			{"Select episode", "select", "e"},
+			{"Change anime", "change", "c"},
+			{"Skip intro", "skip", "s"},
 		}
 	}
+	if audioChoice {
+		options = append(options, playerMenuOption{"Audio track", "audio", "a"})
+	}
+	if subtitleChoice {
+		options = append(options, playerMenuOption{"Subtitles", "subtitle", "t"})
+	}
+	return append(options,
+		playerMenuOption{"← Back", "download_options", "esc"},
+		playerMenuOption{"Exit", "quit", "q"},
+	)
+}
 
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
+// playerTrackChoices reports whether mpv has more than one audio track and
+// any subtitle track, which is when choosing one means something.
+func playerTrackChoices(socketPath string) (audio, subtitles bool) {
+	if socketPath == "" {
+		return false, false
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   tui.SingleLine(title),
+	if tracks, err := GetAudioTracks(socketPath); err == nil {
+		audio = len(tracks) > 1
+	}
+	if tracks, err := GetSubtitleTracks(socketPath); err == nil {
+		subtitles = len(tracks) > 0
+	}
+	return audio, subtitles
+}
+
+// mpvProgress asks mpv where playback is, for the player menu's panel.
+func mpvProgress(socketPath string) func() (position, duration float64, ok bool) {
+	return func() (float64, float64, bool) {
+		pos, err := mpvSendCommand(socketPath, []any{"get_property", "time-pos"})
+		if err != nil {
+			return 0, 0, false
+		}
+		dur, err := mpvSendCommand(socketPath, []any{"get_property", "duration"})
+		if err != nil {
+			return 0, 0, false
+		}
+		position, okPos := pos.(float64)
+		duration, okDur := dur.(float64)
+		return position, duration, okPos && okDur
+	}
+}
+
+// nowPlayingPanel is the player menu's panel: what is playing and how far
+// along it is, kept current while the menu is open.
+func nowPlayingPanel(socketPath, animeName string, currentEpisodeNum int, isMovie bool) *tui.PickPanel {
+	panel := &tui.PickPanel{
+		Label: "Now playing",
+		Gloss: "再生中",
+		Title: tui.SingleLine(animeName),
+	}
+	if panel.Title == "" {
+		panel.Title = "mpv"
+	}
+	if !isMovie && currentEpisodeNum > 0 {
+		line := fmt.Sprintf("Episode %d", currentEpisodeNum)
+		if tui.ShowJapanese() {
+			line += fmt.Sprintf(" · 第%d話", currentEpisodeNum)
+		}
+		panel.Lines = []string{line}
+	}
+	if socketPath != "" {
+		panel.Progress = mpvProgress(socketPath)
+		panel.Live = true
+	}
+	return panel
+}
+
+// showPlayerMenu displays an interactive menu for player controls
+func showPlayerMenu(socketPath, animeName string, currentEpisodeNum int) (string, error) {
+	isMovie := IsCurrentMediaMovie()
+	audio, subtitles := playerTrackChoices(socketPath)
+	menuItems := playerMenuOptions(isMovie, audio, subtitles)
+
+	items := make([]tui.PickItem, len(menuItems))
+	for i, it := range menuItems {
+		items[i] = tui.PickItem{Label: it.Label, Key: it.Key}
+	}
+	idx, err := tui.Pick(items, tui.PickOptions{
+		Breadcrumb:   "Player",
 		WindowTitle:  "GoAnime - Player",
 		ItemSingular: "option",
 		ItemPlural:   "options",
+		Action:       "choose",
+		Panel:        nowPlayingPanel(socketPath, animeName, currentEpisodeNum, isMovie),
 	})
 
 	if err != nil {
@@ -1339,10 +1384,15 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display
+	// Get anime name for display. The Discord updater only exists while
+	// Discord is running; the name HandleDownloadAndPlay stored is there
+	// either way.
 	var animeName string
 	if updater != nil && updater.GetAnime() != nil {
 		animeName = updater.GetAnime().Name
+	}
+	if animeName == "" {
+		animeName = snapshotMedia().AnimeName
 	}
 
 	for {
@@ -1354,7 +1404,7 @@ func handleUserInput(
 			return ErrBackToDownloadOptions
 		}
 
-		choice, err := showPlayerMenu(animeName, currentEpisodeNum)
+		choice, err := showPlayerMenu(socketPath, animeName, currentEpisodeNum)
 		if err != nil {
 			// If the menu was disrupted (e.g., by a concurrent terminal writer),
 			// treat it as "go back" rather than a fatal error.
@@ -1541,8 +1591,8 @@ func selectAudioTrack(socketPath string) {
 	currentID, _ := GetCurrentAudioTrack(socketPath)
 
 	type trackOption struct {
-		Label string
-		ID    int
+		Item tui.PickItem
+		ID   int
 	}
 	var trackItems []trackOption
 	for _, track := range tracks {
@@ -1594,18 +1644,14 @@ func selectAudioTrack(socketPath string) {
 			parts = append(parts, channels)
 		}
 
-		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
-		if id == currentID {
-			label = "* " + label + " (current)"
-		}
-		trackItems = append(trackItems, trackOption{Label: label, ID: id})
+		trackItems = append(trackItems, trackOption{Item: trackPickItem(id, parts, id == currentID), ID: id})
 	}
 
-	labels := make([]string, len(trackItems))
+	items := make([]tui.PickItem, len(trackItems))
 	for i, it := range trackItems {
-		labels[i] = it.Label
+		items[i] = it.Item
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
+	idx, err := tui.Pick(items, tui.PickOptions{
 		Breadcrumb:   "Player > Audio",
 		WindowTitle:  "GoAnime - Audio Track",
 		ItemSingular: "track",
@@ -1623,6 +1669,21 @@ func selectAudioTrack(socketPath string) {
 	}
 }
 
+// trackPickItem is a track's row: its name (title, else language) as the
+// label, the track number and technical details at the right, and the mark
+// of the track mpv is playing.
+func trackPickItem(id int, parts []string, current bool) tui.PickItem {
+	item := tui.PickItem{Label: fmt.Sprintf("Track %d", id)}
+	if len(parts) > 0 {
+		item.Label = parts[0]
+		item.Details = strings.Join(append([]string{fmt.Sprintf("Track %d", id)}, parts[1:]...), " · ")
+	}
+	if current {
+		item.Status = tui.PickCurrent
+	}
+	return item
+}
+
 // selectSubtitleTrack shows a menu to select subtitle track
 func selectSubtitleTrack(socketPath string) {
 	tracks, err := GetSubtitleTracks(socketPath)
@@ -1634,16 +1695,16 @@ func selectSubtitleTrack(socketPath string) {
 	currentID, _ := GetCurrentSubtitleTrack(socketPath)
 
 	type trackOption struct {
-		Label string
-		ID    int
+		Item tui.PickItem
+		ID   int
 	}
 	var trackItems []trackOption
 	// Add option to disable subtitles
-	disableLabel := "Disable subtitles"
+	disable := tui.PickItem{Label: "Disable subtitles"}
 	if currentID == 0 {
-		disableLabel = "* " + disableLabel + " (current)"
+		disable.Status = tui.PickCurrent
 	}
-	trackItems = append(trackItems, trackOption{Label: disableLabel, ID: 0})
+	trackItems = append(trackItems, trackOption{Item: disable, ID: 0})
 
 	for _, track := range tracks {
 		id := int(track["id"].(float64))
@@ -1673,18 +1734,14 @@ func selectSubtitleTrack(socketPath string) {
 			parts = append(parts, fmt.Sprintf("Subtitle %d", id))
 		}
 
-		label := fmt.Sprintf("Track %d: %s", id, strings.Join(parts, " | "))
-		if id == currentID {
-			label = "* " + label + " (current)"
-		}
-		trackItems = append(trackItems, trackOption{Label: label, ID: id})
+		trackItems = append(trackItems, trackOption{Item: trackPickItem(id, parts, id == currentID), ID: id})
 	}
 
-	labels := make([]string, len(trackItems))
+	items := make([]tui.PickItem, len(trackItems))
 	for i, it := range trackItems {
-		labels[i] = it.Label
+		items[i] = it.Item
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
+	idx, err := tui.Pick(items, tui.PickOptions{
 		Breadcrumb:   "Player > Subtitles",
 		WindowTitle:  "GoAnime - Subtitle Track",
 		ItemSingular: "track",

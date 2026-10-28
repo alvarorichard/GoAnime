@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/downloader/hls"
+	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
 	"github.com/enetx/surf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,7 +75,7 @@ func TestLooksLikeHLS(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "SuperFlix unsigned master.txt playlist",
+			name: "hls path with a .txt playlist name",
 			url:  "https://cdn.example.com/cdn/hls/abc123/master.txt",
 			want: true,
 		},
@@ -304,7 +304,7 @@ seg.ts
 
 // TestDownloadWithNativeHLS_SeparateAudioTracksError verifies that native HLS
 // correctly returns ErrSeparateAudioTracks for playlists with separate audio.
-// This is the exact scenario from the SuperFlix CDN that caused the original bug.
+// This is the exact scenario from a real CDN that caused the original bug.
 func TestDownloadWithNativeHLS_SeparateAudioTracksError(t *testing.T) {
 	t.Parallel()
 	srv := mockHLSCDN(t)

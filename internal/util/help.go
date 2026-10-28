@@ -7,59 +7,58 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Help styles using lipgloss
+// Help styles, in the palette of goanime.online that the TUI shares
+// (internal/tui/theme.go): ink ground, crimson as the only accent.
 var (
-	// Professional and modern color palette
-	lightGreen  = lipgloss.Color("#90EE90") // Soft light green
-	gray        = lipgloss.Color("#A9A9A9") // Medium gray
-	darkGray    = lipgloss.Color("#5A5A5A") // Dark gray for details
-	brightGreen = lipgloss.Color("#00FF7F") // Bright green for highlights
-	blue        = lipgloss.Color("#6366F1") // Modern blue (matches logger prefix)
+	helpCrimson = lipgloss.Color("#A3001F") // the title block
+	helpAccent  = lipgloss.Color("#FF5C70") // section titles, commands and options
+	helpText    = lipgloss.Color("#E6EBF0") // descriptions
+	helpMuted   = lipgloss.Color("#8E93A0") // parameters, examples, the subtitle
+	helpLine    = lipgloss.Color("#34343F") // separators
 
 	// Text styles
 	titleStyle = lipgloss.NewStyle().
-			Foreground(blue). // Title in blue (matching GoAnime prefix)
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(helpCrimson).
 			Bold(true).
-			PaddingBottom(1).
+			Padding(0, 1).
+			MarginBottom(1).
 			MarginLeft(2)
 
 	subtitleStyle = lipgloss.NewStyle().
-			Foreground(gray).
-			Italic(true).
+			Foreground(helpMuted).
 			PaddingBottom(1).
 			MarginLeft(2)
 
 	sectionTitleStyle = lipgloss.NewStyle().
-				Foreground(lightGreen). // Section titles in light green
+				Foreground(helpAccent).
 				Bold(true).
 				PaddingLeft(2)
 
 	commandStyle = lipgloss.NewStyle().
-			Foreground(brightGreen). // Commands in bright green
+			Foreground(helpAccent).
 			Bold(true).
 			PaddingLeft(4)
 
 	optionStyle = lipgloss.NewStyle().
-			Foreground(brightGreen). // Options in bright green
+			Foreground(helpAccent).
 			Bold(true).
 			PaddingLeft(4)
 
 	parameterStyle = lipgloss.NewStyle().
-			Foreground(gray). // Parameters in gray to differentiate
-			Italic(true)
+			Foreground(helpMuted)
 
 	descriptionStyle = lipgloss.NewStyle().
-				Foreground(gray). // Descriptions in gray
+				Foreground(helpText).
 				PaddingLeft(6).
 				Width(80 - 6) // Adjust width for line wrapping
 
 	exampleStyle = lipgloss.NewStyle().
-			Foreground(darkGray). // Examples in dark gray
-			Italic(true).
+			Foreground(helpMuted).
 			PaddingLeft(8)
 
 	separatorStyle = lipgloss.NewStyle().
-			Foreground(darkGray) // Separators in dark gray
+			Foreground(helpLine)
 )
 
 // ShowBeautifulHelp displays a beautifully formatted help message
@@ -69,7 +68,7 @@ func ShowBeautifulHelp() {
 	// Program title
 	helpContent.WriteString(titleStyle.Render("GoAnime - Beautiful Anime Streaming CLI"))
 	helpContent.WriteString("\n")
-	helpContent.WriteString(subtitleStyle.Render("Watch your favorite anime directly from the terminal with style and ease."))
+	helpContent.WriteString(subtitleStyle.Render("Search, stream and download anime, movies and TV shows from the terminal."))
 	helpContent.WriteString("\n\n")
 
 	// Usage section
@@ -107,25 +106,16 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-d", "Download mode - download specific episodes for offline viewing.")
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
-	addOption(&helpContent, "--source", "Specify source (anidb, animefire, goyabu, superflix). Default: search all sources.")
+	addOption(&helpContent, "-dm", "Movie and TV download mode. Downloads a movie, or episodes of a TV show with -r, -a or --type tv.")
+	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix or animedrive; use movietv for movie/TV sources or ptbr for Portuguese sources. Default: search all enabled sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
-	addOption(&helpContent, "--type", "Specify media type (anime). Default: anime.")
-	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/). Files use Plex naming: Anime - S01E01.mp4.")
-	helpContent.WriteString("\n")
-
-	// SuperFlix / Cloudflare bypass section
-	helpContent.WriteString(separatorStyle.Render(strings.Repeat("─", 80)))
-	helpContent.WriteString("\n")
-	helpContent.WriteString(sectionTitleStyle.Render("Cloudflare Bypass (SuperFlix):"))
-	helpContent.WriteString("\n")
-	helpContent.WriteString(descriptionStyle.Render("    SuperFlix may be behind Cloudflare Turnstile. GoAnime opens a real browser window to clear it automatically; if a checkbox appears, just click it. The first run sets up the browser engine (one-time, may download up to ~150MB). These flags tune that behavior."))
-	helpContent.WriteString("\n")
-	addOption(&helpContent, "--sf-browser", "Browser channel to use for the bypass (e.g. chrome, chrome-beta, msedge). Default: auto-detect system Chrome, else bundled Chromium.")
-	addOption(&helpContent, "--sf-bundled", "Force Playwright's bundled Chromium instead of system Chrome.")
-	addOption(&helpContent, "--sf-headless", "Run the bypass browser headless (advanced; Turnstile usually rejects headless, so leave off unless you know what you're doing).")
-	addOption(&helpContent, "--sf-mask", "Enable browser fingerprint masking (advanced escape hatch; off by default because it usually breaks the challenge).")
-	addOption(&helpContent, "--sf-offscreen", "Default. The bypass browser starts minimized and surfaces only if the challenge actually needs you to solve it; it closes itself either way. It still runs a real browser — unlike --sf-headless, which the challenge rejects. Note: the player page raises the window when it loads, so this hides the start of the solve, not all of it.")
-	addOption(&helpContent, "--sf-window", "Always show the bypass browser window, instead of keeping it minimized until it is needed.")
+	addOption(&helpContent, "--type", "With -dm, set to tv to download one episode of a TV show instead of a movie. Takes the show, the season and the episode.")
+	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")
+	addOption(&helpContent, "--audio", "Preferred audio language for movies and TV shows, such as pt-BR or english.")
+	addOption(&helpContent, "--no-subs", "Disable subtitles.")
+	addOption(&helpContent, "--download-menu", "Always show the episode options menu before playing (tela 6).")
+	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Must be inside your home folder. Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "--plain", "Plain interface: no colors, no Japanese glosses, ASCII marks (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1).")
 	helpContent.WriteString("\n")
 
 	// Upscale Options section
@@ -150,14 +140,14 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from AniDB, AnimeFire, Goyabu, and SuperFlix with automatic fallback.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire, AnimesDigital, AnimeDrive, StartFlix, TopCine and Pobreflix, with direct MP4 playback where the source offers it.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")
 	addFeature(&helpContent, "Interactive Controls", "Beautiful terminal interface with keyboard navigation.")
 	addFeature(&helpContent, "Discord Rich Presence", "Show your friends what you're watching.")
 	addFeature(&helpContent, "Progress Tracking", "Keep track of your watch progress and episode history.")
-	addFeature(&helpContent, "Skip Intros", "Automatically skip anime intros and outros.")
+	addFeature(&helpContent, "Skip Intro", "Skip the opening from the player menu, using AniSkip timestamps.")
 	addFeature(&helpContent, "Anime4K Upscaling", "Enhance video and image quality using the Anime4K algorithm.")
 	helpContent.WriteString("\n")
 
@@ -173,16 +163,17 @@ func ShowBeautifulHelp() {
 	addExample(&helpContent, "goanime --version", "Show version information")
 	addExample(&helpContent, "goanime -d \"one piece\" 1", "Download episode 1 of One Piece")
 	addExample(&helpContent, "goanime -d -r \"naruto\" 1-5", "Download episodes 1-5 of Naruto")
-	addExample(&helpContent, "goanime -d --source anidb \"bleach\" 10", "Download from AniDB specifically")
+	addExample(&helpContent, "goanime -d --source hianime \"bleach\" 10", "Download from HiAnime specifically")
 	addExample(&helpContent, "goanime -d --quality 720p \"demon slayer\" 1", "Download in 720p quality")
 	addExample(&helpContent, "goanime -d --source animefire --quality best \"jujutsu kaisen\" 5", "Use AnimeFire with best quality")
 	addExample(&helpContent, "goanime -d -a \"one piece\"", "Download ALL episodes of One Piece")
 	addExample(&helpContent, "goanime -d -o ~/Anime \"one piece\" 1", "Download to custom directory with Plex naming")
-	addExample(&helpContent, "goanime -d -r -o /media/anime \"naruto\" 1-12", "Download range to custom directory")
-	addExample(&helpContent, "goanime -d --source goyabu \"naruto\" 1", "Download from Goyabu (Portuguese)")
-	addExample(&helpContent, "goanime --sf-browser chrome \"loki\"", "Use system Chrome for the SuperFlix Cloudflare bypass")
-	addExample(&helpContent, "goanime --sf-bundled \"loki\"", "Force the bundled Chromium for the bypass")
-	addExample(&helpContent, "goanime --sf-window \"loki\"", "Watch the bypass browser work, instead of hiding it")
+	addExample(&helpContent, "goanime -d -r -o ~/Videos/anime \"naruto\" 1-12", "Download range to custom directory")
+	addExample(&helpContent, "goanime -dm \"interstellar\"", "Download a movie")
+	addExample(&helpContent, "goanime -dm -r \"dark\" 1 1-5", "Download episodes 1-5 of season 1 of a TV show")
+	addExample(&helpContent, "goanime -dm --type tv \"dark\" 1 5", "Download episode 5 of season 1 of a TV show")
+	addExample(&helpContent, "goanime -dm -a \"dark\"", "Download every season of a TV show")
+	addExample(&helpContent, "GOANIME_ENABLED_SOURCES=goyabu goanime \"naruto\"", "Turn on Goyabu (off by default: it sits behind a Cloudflare challenge)")
 	helpContent.WriteString("\n")
 
 	// Upscale Examples section

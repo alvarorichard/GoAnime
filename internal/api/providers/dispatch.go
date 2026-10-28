@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // searchBreaker is the registry-wide per-source circuit breaker for search.
@@ -36,9 +37,16 @@ const (
 // (the underlying clients still issue non-cancelable http.NewRequest calls)
 // cannot hold the fan-out open until searchAllTimeout and, more importantly,
 // trips that source's circuit breaker with an accurate, probe-enriched
-// diagnostic instead of a generic aggregate timeout. A var, not a const, so
-// tests can shorten it.
-var perSourceSearchTimeout = 12 * time.Second
+// diagnostic instead of a generic aggregate timeout. Stored atomically (ns),
+// not as a plain var, so tests can shorten it while goroutines abandoned by an
+// already-returned search may still be reading it.
+var perSourceSearchTimeoutNs atomic.Int64
+
+func init() { perSourceSearchTimeoutNs.Store(int64(12 * time.Second)) }
+
+func perSourceSearchTimeout() time.Duration {
+	return time.Duration(perSourceSearchTimeoutNs.Load())
+}
 
 // searchOne is a single source's search outcome in the fan-out.
 type searchOne struct {
@@ -63,12 +71,35 @@ func init() {
 	api.SetSearchFetch(func(ctx context.Context, query string, kinds []source.SourceKind) ([]*models.Anime, error) {
 		return SearchAll(ctx, query, kinds...)
 	})
+	api.SetSearchLiveFetch(SearchLive)
 	api.SetEpisodesFetch(func(anime *models.Anime) ([]models.Episode, error) {
 		return FetchEpisodes(context.Background(), anime)
 	})
 	api.SetStreamFetch(func(episode *models.Episode, anime *models.Anime, quality string) (string, error) {
 		return FetchStreamURL(context.Background(), episode, anime, quality)
 	})
+}
+
+// parentContextFailure returns a SourceFailure and true if the provider failure was
+// directly caused by the parent fan-out context ending (cancellation or deadline),
+// rather than an independent provider error. Only parent-caused failures bypass the
+// circuit breaker.
+func parentContextFailure(parent context.Context, kind source.SourceKind, resErr error) (SourceFailure, bool) {
+	perr := parent.Err()
+	if perr == nil || !errors.Is(resErr, perr) {
+		return SourceFailure{}, false
+	}
+	var reason string
+	if errors.Is(perr, context.Canceled) {
+		reason = "cancelled"
+	} else {
+		reason = "timed out"
+	}
+	return SourceFailure{
+		Kind:   kind,
+		Reason: reason,
+		Err:    fmt.Errorf("%s: %w", kind, resErr),
+	}, true
 }
 
 // SearchAll fans out a query across the enabled, Searchable sources in the
@@ -82,30 +113,15 @@ func init() {
 // ones. Per-source failures are logged and tolerated — a result is returned as
 // long as at least one source succeeds.
 func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([]*models.Anime, error) {
-	want := map[source.SourceKind]bool{}
-	for _, k := range kinds {
-		want[k] = true
-	}
+	// Undo the slugging both input paths apply before anything sees the query.
+	// See query.go: three of the four sources found nothing for every
+	// multi-word search because of it.
+	query = normalizeSearchQuery(query)
 
-	var searchers []activeSearcher
-	for _, s := range source.ActiveSources() {
-		sr, ok := s.(source.Searchable)
-		if !ok {
-			continue
-		}
-		desc := s.Describe()
-		kind := desc.Kind
-		if len(want) > 0 && !want[kind] {
-			continue
-		}
-		// Skip a source whose circuit breaker is open (R5): it has been
-		// failing, so don't hammer it — it auto-recovers after the cooldown.
-		if diag, retry, open := searchBreaker.OpenDiagnostic(string(kind), sourceDisplayName(kind)); open {
-			util.Warn("search source skipped (circuit open)", "source", kind, "retry_after", retry.Round(time.Second), "diagnostic", diag.UserMessage())
-			continue
-		}
-		searchers = append(searchers, activeSearcher{sr: sr, kind: kind, probeURL: desc.ProbeURL})
-	}
+	// The runner/off split is shared with the live fan-out so both agree on
+	// who runs (planLiveSearch classifies exactly like the loop below used
+	// to: enabled, searchable, breaker closed).
+	searchers, _, _ := planLiveSearch(kinds)
 	if len(searchers) == 0 {
 		return nil, fmt.Errorf("no searchable source available for query %q", query)
 	}
@@ -126,23 +142,42 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 
 	var (
 		all        []*models.Anime
-		errs       []error
+		failures   []SourceFailure
 		graceTimer <-chan time.Time
 	)
+	pending := make(map[source.SourceKind]bool, len(searchers))
+	for _, a := range searchers {
+		pending[a.kind] = true
+	}
 	for {
 		select {
 		case res, ok := <-resultChan:
 			if !ok {
-				return finishSearch(query, all, errs)
+				return finishSearch(query, searchers, nil, all, failures)
 			}
+			delete(pending, res.kind)
 			if res.err != nil {
+				if f, ok := parentContextFailure(ctx, res.kind, res.err); ok {
+					failures = append(failures, f)
+					continue
+				}
 				// Feed the breaker so a repeatedly-failing source opens.
 				diag := netx.DiagnoseError(sourceDisplayName(res.kind), "search", res.err)
 				if searchBreaker.RecordFailure(string(res.kind), diag) {
 					util.Warn("search source circuit opened", "source", res.kind, "diagnostic", diag.UserMessage())
 				}
 				util.Debug("search source failed", "source", res.kind, "error", res.err)
-				errs = append(errs, fmt.Errorf("%s: %w", res.kind, res.err))
+				// Record the failure as DATA. The raw error stays attached for
+				// errors.Is and the debug log; the short reason is what a person
+				// sees. Flattening both into one string is how the message grew
+				// into three repetitions of the same fact.
+				reason, limited := describeFailure(diag)
+				failures = append(failures, SourceFailure{
+					Kind:        res.kind,
+					Reason:      reason,
+					RateLimited: limited,
+					Err:         fmt.Errorf("%s: %w", res.kind, res.err),
+				})
 				continue
 			}
 			searchBreaker.RecordSuccess(string(res.kind))
@@ -155,10 +190,16 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 			}
 		case <-graceTimer:
 			util.Debug("straggler grace elapsed; returning collected search results")
-			return finishSearch(query, all, errs)
+			return finishSearch(query, searchers, nil, all, failures)
 		case <-ctx.Done():
-			util.Debug("search timeout reached; returning collected results")
-			return finishSearch(query, all, errs)
+			util.Debug("search context ended; returning collected results", "reason", ctx.Err())
+			for _, a := range searchers {
+				if pending[a.kind] {
+					f, _ := parentContextFailure(ctx, a.kind, ctx.Err())
+					failures = append(failures, f)
+				}
+			}
+			return finishSearch(query, searchers, nil, all, failures)
 		}
 	}
 }
@@ -174,7 +215,8 @@ func SearchAll(ctx context.Context, query string, kinds ...source.SourceKind) ([
 // distinguishes "the site's origin is down (5xx / Cloudflare)" from an opaque
 // hang, so the breaker opens with an actionable diagnostic.
 func searchOneWithTimeout(parent context.Context, a activeSearcher, query string) searchOne {
-	sctx, cancel := context.WithTimeout(parent, perSourceSearchTimeout)
+	timeout := perSourceSearchTimeout()
+	sctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	type outcome struct {
@@ -189,22 +231,73 @@ func searchOneWithTimeout(parent context.Context, a activeSearcher, query string
 
 	select {
 	case o := <-done:
+		if o.err != nil && parent.Err() != nil && errors.Is(o.err, parent.Err()) {
+			return searchOne{kind: a.kind, err: parent.Err()}
+		}
 		return searchOne{kind: a.kind, results: o.results, err: o.err}
 	case <-sctx.Done():
-		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), perSourceSearchTimeout)
+		if parent.Err() != nil {
+			return searchOne{kind: a.kind, err: parent.Err()}
+		}
+		base := fmt.Errorf("%s search timed out after %v", sourceDisplayName(a.kind), timeout)
 		err := netx.EnrichTimeoutWithProbe(parent, sourceDisplayName(a.kind), "search", a.probeURL, base, originProbeBudget)
 		return searchOne{kind: a.kind, err: err}
 	}
 }
 
-func finishSearch(query string, all []*models.Anime, errs []error) ([]*models.Anime, error) {
-	if len(all) == 0 {
-		if len(errs) > 0 {
-			return nil, fmt.Errorf("no results for %q (all sources failed): %w", query, errors.Join(errs...))
-		}
-		return nil, fmt.Errorf("no results found for: %s", query)
+// reportPartialFailure says which sources did not answer a search that still
+// returned something.
+//
+// A partial failure used to be invisible: the results were handed back and the
+// per-source reasons dropped on the floor, leaving them only in the debug log.
+// So a search where three of four sources were broken — AnimeFire's site
+// rewritten out from under its parser, another source rate limiting the network,
+// AniDB down — looked exactly like a search that had only ever had one source,
+// and was reported as "it is only searching Goyabu".
+//
+// Warn, not Error: the search worked. But a user comparing what they got
+// against what they expected deserves to know the catalogue was smaller than
+// usual, and why.
+func reportPartialFailure(failures []SourceFailure) {
+	if len(failures) == 0 {
+		return
 	}
-	return all, nil
+	util.Warnf("%d source(s) did not answer; results may be incomplete:", len(failures))
+	for _, f := range failures {
+		util.Warnf("  %s %s", f.Kind, f.Reason)
+	}
+}
+
+// finishSearch turns the fan-out's outcome into one result or one error.
+//
+// When everything failed, the message leads with the per-source DIAGNOSTICS
+// rather than the raw errors. A user staring at
+//
+//	no results for "matrix" (all sources failed): <source>: server returned:
+//	429 Too Many Requests
+//
+// cannot tell whether GoAnime is broken, the title does not exist, or the host
+// is refusing them — and the third is the only one they can do something about
+// (wait). The raw errors stay in the chain for errors.Is/As and the debug log.
+func finishSearch(query string, searchers []activeSearcher, off []models.SearchOffEntry, all []*models.Anime, failures []SourceFailure) ([]*models.Anime, error) {
+	if len(all) > 0 {
+		reportPartialFailure(failures)
+		return all, nil
+	}
+	answered := make([]source.SourceKind, 0, len(searchers))
+	failed := make(map[source.SourceKind]bool, len(failures))
+	for _, f := range failures {
+		failed[f.Kind] = true
+	}
+	for _, s := range searchers {
+		if !failed[s.kind] {
+			answered = append(answered, s.kind)
+		}
+	}
+	if len(failures) == 0 {
+		return nil, &NoResultsInfo{Query: query, AnsweredKinds: answered, Off: off}
+	}
+	return nil, &SearchFailure{Query: query, Searched: len(searchers), Sources: failures, AnsweredKinds: answered, Off: off}
 }
 
 // FetchEpisodes lists an anime's episodes through the Model B registry — the
@@ -213,8 +306,8 @@ func finishSearch(query string, all []*models.Anime, errs []error) ([]*models.An
 // fallback), normalizes anime.Source, then delegates to the resolved Source's
 // FetchEpisodes.
 //
-// Behavior is equivalent to the legacy switch: AniDB/AnimeFire/Goyabu list
-// via their adapters; SuperFlix runs its season picker; an unrecognized source
+// Behavior is equivalent to the legacy switch: HiAnime/AnimeFire/Goyabu list
+// via their adapters; StartFlix runs its season picker; an unrecognized source
 // reports Unknown rather than guessing at a source.
 func FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if anime == nil {

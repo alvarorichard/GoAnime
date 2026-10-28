@@ -739,3 +739,48 @@ func TestSSRFRegression_AllShaderFetchesGoThroughSafeShaderGet(t *testing.T) {
 	assert.Contains(t, ganBody, "safeShaderGet(",
 		"InstallGANShaders must fetch via safeShaderGet")
 }
+
+// TestExtractZip_EntryNamesCannotLeaveTheDirectory: a shader archive is remote
+// input. Whatever an entry's name says, its file lands inside the destination
+// and nothing is written beside or above it.
+func TestExtractZip_EntryNamesCannotLeaveTheDirectory(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "shaders")
+	require.NoError(t, os.MkdirAll(dest, 0o750))
+	zipPath := filepath.Join(tmp, "evil.zip")
+	require.NoError(t, os.WriteFile(zipPath, buildGLSLZip(t, map[string]string{
+		"../escape.glsl":       "x",
+		"a/../../escape2.glsl": "x",
+		"/abs/escape3.glsl":    "x",
+		"ok.glsl":              "ok",
+	}), 0o600))
+
+	require.NoError(t, extractZip(zipPath, dest))
+
+	entries, err := os.ReadDir(tmp)
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.ElementsMatch(t, []string{"evil.zip", "shaders"}, names, "nothing is written outside the destination")
+
+	inside, err := os.ReadDir(dest)
+	require.NoError(t, err)
+	var got []string
+	for _, e := range inside {
+		got = append(got, e.Name())
+	}
+	assert.ElementsMatch(t, []string{"escape.glsl", "escape2.glsl", "escape3.glsl", "ok.glsl"}, got)
+}
+
+// TestExtractZip_MissingDestination: no directory, no extraction.
+func TestExtractZip_MissingDestination(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	zipPath := filepath.Join(tmp, "x.zip")
+	require.NoError(t, os.WriteFile(zipPath, buildGLSLZip(t, map[string]string{"a.glsl": "a"}), 0o600))
+
+	require.Error(t, extractZip(zipPath, filepath.Join(tmp, "does-not-exist")))
+}

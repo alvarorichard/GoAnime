@@ -59,17 +59,18 @@ func TestSelectBestStream_ResolvesRelativeVariant(t *testing.T) {
 	}
 }
 
-func TestSelectBestStream_RelativeVariantWithoutSlashInBaseIsSkipped(t *testing.T) {
+func TestSelectBestStream_RelativeVariantWithoutSlashInBaseIsJoined(t *testing.T) {
 	d := NewDownloader()
 	lines := []string{
 		"#EXTM3U",
 		"#EXT-X-STREAM-INF:BANDWIDTH=800000",
 		"480p.m3u8",
 	}
-	// No "/" in the base URL: the variant cannot be resolved, so nothing is
-	// selected. This matches the pre-1.27 behaviour exactly.
-	if got := d.selectBestStream(lines, "master.m3u8"); got != "" {
-		t.Errorf("selectBestStream() = %q, want empty string", got)
+	// No absolute base to resolve against: variants now follow the same
+	// join as segments (TestParseMediaPlaylistLines_BaseWithoutSlashGetsSuffixed)
+	// instead of being dropped, which the pre-1.27 code did for variants only.
+	if got := d.selectBestStream(lines, "master.m3u8"); got != "master.m3u8/480p.m3u8" {
+		t.Errorf("selectBestStream() = %q, want master.m3u8/480p.m3u8", got)
 	}
 }
 

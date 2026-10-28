@@ -8,14 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 
 	"charm.land/huh/v2"
 	"charm.land/huh/v2/spinner"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // Injectable package-level dependencies. Tests swap these via the
@@ -51,7 +51,21 @@ var (
 	// promptForNameFn asks the user for a new search name. Default uses
 	// huh.NewInput inside tui.RunClean. Tests inject a scripted sequence.
 	promptForNameFn = defaultPromptForName
+
+	// openTryScreenFn opens the no-results screen (tela 4). Tests inject a
+	// scripted decision; production opens the screen on a terminal and
+	// reports it unavailable without one, keeping the legacy prompt path.
+	openTryScreenFn = defaultOpenTryScreen
 )
+
+// OpenSearchHomeFn opens the SEARCH home screen with the query kept, for
+// the retry loop's way back ("edit search", tela 3). The handlers package
+// assigns it at init; nil keeps the legacy prompt. Tests inject fakes.
+var OpenSearchHomeFn func(query string) (tui.SearchHomeResult, error)
+
+// PendingHomeResult carries a CONTINUE decision out of SearchAnimeWithRetry:
+// the loop returns (nil, nil) with it set, and the caller reopens the row.
+var PendingHomeResult *tui.SearchHomeResult
 
 // defaultRunSpinner is the production spinner wrapper. It is replaced by
 // tests with a synchronous passthrough so the action runs inline.
@@ -66,9 +80,13 @@ func defaultRunSpinner(title string, action func()) {
 	wrapped := func() { once.Do(action) }
 
 	_ = tui.RunClean(func() error {
-		return spinner.New().
+		kind := spinner.Line // the ASCII frames every console font carries
+		if tui.SpinnerDots() {
+			kind = spinner.Dots
+		}
+		return spinner.New().WithTheme(tui.SpinnerTheme()).
 			Title(title).
-			Type(spinner.Dots).
+			Type(kind).
 			Action(wrapped).
 			Run()
 	})
@@ -80,6 +98,11 @@ func defaultRunSpinner(title string, action func()) {
 // defaultPromptForName is the production prompt. Returns the user's input
 // trimmed, or an error if cancelled / empty / TTY unavailable.
 func defaultPromptForName(_ string) (string, error) {
+	// Fail fast without a TTY (see legacyChangeAnime): huh blocks on
+	// Windows console input headless instead of erroring like Linux.
+	if !tui.HasTerminal() {
+		return "", fmt.Errorf("search cancelled by user: %w", api.ErrSearchAborted)
+	}
 	var newName string
 	prompt := huh.NewInput().
 		Title("Search Again").
@@ -91,12 +114,12 @@ func defaultPromptForName(_ string) (string, error) {
 			}
 			return nil
 		})
-	if err := tui.RunClean(prompt.Run); err != nil {
-		return "", fmt.Errorf("search cancelled by user")
+	if err := tui.RunClean(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
+		return "", fmt.Errorf("search cancelled by user: %w", api.ErrSearchAborted)
 	}
 	name := strings.TrimSpace(newName)
 	if name == "" {
-		return "", fmt.Errorf("search cancelled: empty name provided")
+		return "", fmt.Errorf("search cancelled: empty name provided: %w", api.ErrSearchAborted)
 	}
 	return name, nil
 }
@@ -132,13 +155,14 @@ func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 // SearchAnimeWithRetry - searches for anime with retry logic on failure
 func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 	currentName := name
+	loopSource := util.GlobalSource
 
 	for {
 		searchStart := time.Now()
 
 		// Attempt to search for anime (spinner is inside api.SearchAnimeEnhanced)
-		// Respect user's --source flag (e.g. --source anidb) via GlobalSource
-		source := util.GlobalSource
+		// Respect user's --source flag (e.g. --source hianime) via GlobalSource
+		source := loopSource
 		if source != "" {
 			util.Debugf("Searching for: %s (source: %s)", currentName, source)
 		} else {
@@ -151,12 +175,59 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 			return anime, nil
 		}
 
-		// Check if user requested to go back to search
-		if errors.Is(searchErr, api.ErrBackToSearch) {
+		// A deliberate quit (q / Ctrl+C on the result screen) is an exit, not a
+		// failed search: stop here instead of claiming nothing was found and
+		// re-prompting (issue #203).
+		if errors.Is(searchErr, api.ErrSearchAborted) {
+			return nil, searchErr
+		}
+
+		switch {
+		case errors.Is(searchErr, api.ErrBackToSearch):
+			// Back from the results screen edits the search on the SEARCH
+			// home screen, with the query kept — never the bare prompt.
+			// A CONTINUE decision travels out via PendingHomeResult with a
+			// (nil, nil) return for the caller to reopen.
+			hb, err := backToSearchHome(currentName)
+			if err == nil {
+				if hb.cont != nil {
+					PendingHomeResult = hb.cont
+					return nil, nil
+				}
+				currentName, loopSource = hb.query, hb.scope
+				continue
+			}
+			if !errors.Is(err, errTryUnavailable) {
+				return nil, err
+			}
 			util.Infof("Going back to new search...")
-		} else {
-			// Display error message to user for other errors
-			util.Errorf("No anime found with the name: %s", currentName)
+		default:
+			// A failed search opens the TRY screen (tela 4), which keeps
+			// the query, explains the outcome per source and offers
+			// retries: a spelling fix, fewer words, English sources.
+			// Without a terminal it falls back to the legacy prompt below.
+			decision, err := tryAgain(currentName, loopSource, searchErr)
+			if err == nil {
+				currentName = decision.Query
+				loopSource = decision.Scope
+				continue
+			}
+			if !errors.Is(err, errTryUnavailable) {
+				return nil, err
+			}
+			var failure *providers.SearchFailure
+			switch {
+			case errors.As(searchErr, &failure):
+				reportSearchFailure(currentName, failure)
+			case searchErr == nil || errors.Is(searchErr, api.ErrNoResults):
+				// Either every source answered with nothing, or the search
+				// returned no error and no anime — both are "not found".
+				util.Errorf("No anime found with the name: %s", currentName)
+			default:
+				// A transport/source failure is not the same as an empty result;
+				// saying "no anime found" here hides the real reason.
+				util.Errorf("Search failed for %q: %v", currentName, searchErr)
+			}
 		}
 
 		util.Infof("Please enter a new search term.")
@@ -167,6 +238,48 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 		}
 		currentName = nextName
 	}
+}
+
+// reportSearchFailure prints one short line per source instead of the error
+// chain.
+//
+// The chain is still what travels through the code and lands in the debug log;
+// what it is not is something to read. Printed whole it said the same thing
+// three times over — the aggregate summary, the per-source diagnostics, and
+// then every raw cause again — for a user whose only real question is "is this
+// me, the title, or the site?".
+func reportSearchFailure(query string, failure *providers.SearchFailure) {
+	// "Every source failed" only when every source did.
+	//
+	// Searching "o-todo-poderoso" on 2026-09-24 had three sources answer
+	// normally with no match and one refuse the connection, and said every
+	// source failed — which reads as "your install is broken" when the truth is
+	// "nobody has this title, and one host is throttling you". Those call for
+	// different reactions from the user, so they get different sentences.
+	if failure.AllFailed() {
+		util.Errorf("No results for %q — every source failed:", query)
+	} else {
+		util.Errorf("No results for %q — %d source(s) had no match and %d could not be reached:",
+			query, failure.Answered(), len(failure.Sources))
+	}
+	for _, src := range failure.Sources {
+		util.Errorf("  %s %s", src.Kind, src.Reason)
+	}
+	if failure.RateLimited() {
+		// Says what to DO, and says it in a way that does not invite the retry.
+		//
+		// The old line ("wait a few minutes") was read as an invitation to try
+		// again shortly, and trying again is the one thing that makes it worse:
+		// this host's guard is renewed by every request sent during a block.
+		// Measured 2026-09-25, /pesquisar stayed refused through three, six and
+		// ten minutes of TOTAL silence — and the user searching every ten
+		// seconds in between is what kept resetting that clock.
+		util.Infof("A source is refusing this network. Every new search restarts its block, so waiting is the fix — about 15 minutes, or switch network/VPN to get it back now.")
+	}
+	if !failure.AllFailed() {
+		util.Infof("The sources that did answer simply do not have %q. Try another spelling, or a different title.", query)
+	}
+	util.Debugf("search failure detail: %s", failure.Detail())
 }
 
 // FetchAnimeDetails enriches anime with metadata from AniList and/or the
@@ -186,13 +299,11 @@ func fetchAnimeDetailsCore(anime *models.Anime) {
 	if anime == nil {
 		return
 	}
-	// For FlixHQ/SuperFlix movies/TV shows: skip AniList, optionally enrich.
+	// For movie/TV catalogs (StartFlix, FlixHQ): skip AniList, enrich from TMDB.
 	if anime.HasInteractiveEpisodeFlow() {
 		util.Debugf("Skipping AniList enrichment for movie/TV content: %s (source: %s)", anime.Name, anime.Source)
-		if anime.Source != "SuperFlix" {
-			if err := sourceDetailsFetchFn(anime); err != nil {
-				util.Debugf("Failed to enrich content with TMDB: %v", err)
-			}
+		if err := sourceDetailsFetchFn(anime); err != nil {
+			util.Debugf("Failed to enrich content with TMDB: %v", err)
 		}
 		return
 	}
@@ -236,8 +347,8 @@ func GetAnimeEpisodes(anime *models.Anime) ([]models.Episode, error) {
 
 	// No spinner when the fetch can open its own UI (season-selection
 	// fuzzyfinder): a spinner animating over the finder eats the prompt text
-	// and corrupts terminal state. HasInteractiveEpisodeFlow matches SuperFlix
-	// by source because its catalog tags western animation as anime.
+	// and corrupts terminal state. HasInteractiveEpisodeFlow matches StartFlix
+	// by source because its listing always runs the season and audio pickers.
 	if anime.HasInteractiveEpisodeFlow() {
 		episodes, fetchErr = getAnimeEpisodesEnhancedFn(anime)
 	} else {

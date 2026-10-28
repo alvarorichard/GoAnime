@@ -6,11 +6,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	apisource "github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
-	"github.com/alvarorichard/Goanime/pkg/goanime/types"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/pkg/goanime/types"
 )
 
 // Manager abstracts the scraper backend used by Client. registryManager (the
@@ -60,8 +60,10 @@ func scraperKind(st scraper.ScraperType) (apisource.SourceKind, bool) {
 		return apisource.AnimeFire, true
 	case scraper.GoyabuType:
 		return apisource.Goyabu, true
-	case scraper.SuperFlixType:
-		return apisource.SuperFlix, true
+	case scraper.StartFlixType:
+		return apisource.StartFlix, true
+	case scraper.TopCineType:
+		return apisource.TopCine, true
 	default:
 		return "", false
 	}
@@ -137,13 +139,14 @@ func DefaultStreamOptions() StreamOptions {
 // Parameters:
 //   - anime: The anime object from SearchAnime
 //   - episode: The episode object from GetAnimeEpisodes
-//   - options: Optional StreamOptions (uses defaults if nil)
+//   - options: Accepted for forward compatibility and not applied yet: the
+//     stream comes back in the source's default quality and audio
 //
 // Returns:
 //   - streamURL: Direct URL for video playback
 //   - metadata: Additional info like quality, source, etc.
 //   - error: Any error that occurred
-func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (streamURL string, metadata map[string]string, err error) {
+func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, _ *StreamOptions) (streamURL string, metadata map[string]string, err error) {
 	source, err := types.ParseSource(anime.Source)
 	if err != nil {
 		return "", nil, err
@@ -152,17 +155,6 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return "", nil, err
-	}
-
-	// Set default options if not provided
-	opts := DefaultStreamOptions()
-	if options != nil {
-		if options.Quality != "" {
-			opts.Quality = options.Quality
-		}
-		if options.Mode != "" {
-			opts.Mode = options.Mode
-		}
 	}
 
 	// The episode URL is the direct episode page. (The AllAnime branch that

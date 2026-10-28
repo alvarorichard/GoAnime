@@ -1,10 +1,10 @@
 package source
 
 import (
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,13 +27,18 @@ func registerProductionLikeSources(t *testing.T) {
 			d.Tags = []string{"[goyabu]"}
 			d.URLMatchers = []string{"goyabu"}
 		}),
-		newFake(SuperFlix, 30, func(d *Descriptor) {
-			d.Explicit = []string{"SuperFlix"}
-			d.Tags = []string{"[superflix]"}
-			d.URLMatchers = []string{"superflix"}
+		newFake(AnimesDigital, 30, func(d *Descriptor) {
+			d.Explicit = []string{"AnimesDigital"}
+			d.Tags = []string{"[animesdigital]"}
+			d.URLMatchers = []string{"animesdigital.org"}
 		}),
-		newFake(AniDB, 40, func(d *Descriptor) {
-			d.Explicit = []string{"AniDB"}
+		newFake(StartFlix, 40, func(d *Descriptor) {
+			d.Explicit = []string{"StartFlix"}
+			d.Tags = []string{"[startflix]"}
+			d.URLMatchers = []string{"startflix"}
+		}),
+		newFake(HiAnime, 40, func(d *Descriptor) {
+			d.Explicit = []string{"HiAnime"}
 			d.Tags = []string{"[english]"}
 			d.URLMatchers = []string{"stubhost"}
 		}),
@@ -49,11 +54,12 @@ func TestResolve_ExplicitSource(t *testing.T) {
 		source   string
 		wantKind SourceKind
 	}{
-		{"AniDB", "AniDB", AniDB},
+		{"HiAnime", "HiAnime", HiAnime},
 		{"AnimeFire via Animefire.io", "Animefire.io", AnimeFire},
 		{"AnimeFire direct", "AnimeFire", AnimeFire},
 		{"Goyabu", "Goyabu", Goyabu},
-		{"SuperFlix", "SuperFlix", SuperFlix},
+		{"AnimesDigital", "AnimesDigital", AnimesDigital},
+		{"StartFlix", "StartFlix", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,10 +88,11 @@ func TestResolve_NameTags(t *testing.T) {
 		animName string
 		wantKind SourceKind
 	}{
-		{"english tag", "Naruto [English]", AniDB},
+		{"english tag", "Naruto [English]", HiAnime},
 		{"animefire tag", "Naruto [AnimeFire]", AnimeFire},
 		{"goyabu tag", "Naruto [Goyabu]", Goyabu},
-		{"superflix tag", "Naruto [SuperFlix]", SuperFlix},
+		{"animesdigital tag", "Naruto [AnimesDigital]", AnimesDigital},
+		{"startflix tag", "Naruto [StartFlix]", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,8 +111,9 @@ func TestResolve_URLPatterns(t *testing.T) {
 	}{
 		{"animefire URL", "https://animefire.plus/naruto", AnimeFire},
 		{"goyabu URL", "https://goyabu.to/naruto", Goyabu},
+		{"animesdigital URL", "https://animesdigital.org/anime/a/naruto", AnimesDigital},
 		{"removed allanime host resolves to nothing", "https://allanime.to/anime/abc", Unknown},
-		{"superflix URL", "https://superflix.to/naruto", SuperFlix},
+		{"startflix URL", "https://startflix.to/naruto", StartFlix},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,6 +164,7 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 	}{
 		{"animefire", "https://animefire.plus/ep/naruto-1", AnimeFire},
 		{"goyabu", "https://goyabu.to/ep/naruto-1", Goyabu},
+		{"animesdigital", "https://animesdigital.org/video/a/123/", AnimesDigital},
 		{"removed allanime host is now unknown", "https://allanime.to/anime/hHjXnUTda", Unknown},
 		{"empty", "", Unknown},
 		{"unknown domain", "https://example.com/video", Unknown},
@@ -171,14 +180,18 @@ func TestResolveURL_ProductionDescriptors(t *testing.T) {
 
 func TestScraperTypeFor(t *testing.T) {
 	t.Parallel()
-	st, ok := ScraperTypeFor(AniDB)
-	require.True(t, ok, "ScraperTypeFor(AniDB) should return true")
-	assert.Equal(t, scraper.AniDBType, st)
+	st, ok := ScraperTypeFor(HiAnime)
+	require.True(t, ok, "ScraperTypeFor(HiAnime) should return true")
+	assert.Equal(t, scraper.HiAnimeType, st)
 
 	st, ok = ScraperTypeFor(AnimeFire)
 	require.True(t, ok)
 	assert.Equal(t, scraper.AnimefireType, st,
 		"AnimefireType became the iota zero value when AllAnimeType was removed")
+
+	st, ok = ScraperTypeFor(AnimesDigital)
+	require.True(t, ok)
+	assert.Equal(t, scraper.AnimesDigitalType, st)
 
 	_, ok = ScraperTypeFor(Unknown)
 	assert.False(t, ok, "ScraperTypeFor(Unknown) should return false")

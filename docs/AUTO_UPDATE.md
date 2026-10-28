@@ -1,165 +1,119 @@
-# Auto-Update Functionality
+# Updating GoAnime
 
-GoAnime now includes built-in auto-update functionality that allows users to
-update to the latest version without manually downloading and installing.
-
-## Features
-
-- **Automatic Update Detection**: Checks GitHub releases for newer versions
-- **Interactive Update Process**: Beautiful interactive prompts using Charm's
-  `huh` library
-- **Cross-Platform Support**: Works on Windows, macOS, and Linux
-- **Safe Updates**: Creates backups and handles rollback if updates fail
-- **Release Notes**: Option to view release notes before updating
-- **Progress Indication**: Shows download progress and status
-
-## Usage
-
-### Check for Updates
+GoAnime can replace itself with the latest release:
 
 ```bash
 goanime --update
 ```
 
-This command will:
+The code lives in `internal/updater`.
 
-1. Check GitHub releases for the latest version
-2. Compare with your current version
-3. If an update is available, show an interactive menu with options:
-   - **Yes, update now**: Downloads and installs the update
-   - **No, maybe later**: Skips the update
-   - **Show release notes**: Displays the changelog for the new version
+## What it does
 
-### Interactive Update Menu
+1. Asks the GitHub API for the latest release and compares its version with
+   the running one.
+2. If the release is newer, shows both versions and the first 300 characters
+   of the release notes, and asks whether to update now.
+3. On yes, downloads the release asset for the current platform:
 
-When an update is available, you'll see a beautiful menu like this:
+   | Platform | Asset                                                                 |
+   | -------- | --------------------------------------------------------------------- |
+   | Windows  | `goanime-windows-<arch>.zip`, from which the executable is extracted   |
+   | macOS    | `goanime-darwin-<arch>` when published, otherwise `goanime-darwin-universal` |
+   | Linux    | `goanime-linux-<arch>`                                                |
 
-```text
-┃ Update Available!
-┃ A new version of GoAnime is available.
-┃
-┃ Current: v1.0.0
-┃ Latest:  v1.1.0 (4.0 MB)
-┃
-┃ Would you like to update now?
-┃ > Yes, update now
-┃   No, maybe later
-┃   Show release notes
-```
+4. Downloads `checksums-sha256.txt` and `checksums-sha256.txt.minisig` from
+   the same release and verifies the minisign signature against the public key
+   embedded in the binary (`trustedPublicKeys` in `internal/updater/minisign.go`).
+   Only then does it read the checksums and compare the asset's SHA-256 digest.
+   If the signature is missing or invalid, the build embeds no key, the asset
+   is not listed, or the digest differs, the update stops and nothing is
+   installed.
+5. Hashes the verified new executable and copies the current one to
+   `<path>.backup`.
+6. Replaces the executable (see the platform differences below).
+7. Writes `<path>.update-pending` with the SHA-256 of the installed binary.
 
-## How It Works
+The backup is **not** deleted when the update command returns. On the next
+start, `updater.CleanupAfterUpdate()` hashes the running executable and
+compares it with the marker. Only a match removes the backup and the temporary
+files. If the new binary does not start, or its hash differs, the backup is
+kept so the previous version can be restored.
 
-### Update Detection
+When there is nothing to update, it prints `You are running the latest
+version!`. When you decline, it prints `Update cancelled by user`.
 
-1. **Version Comparison**: Compares your current version with the latest GitHub release
-2. **Semantic Versioning**: Properly handles version comparison (e.g., 1.0.0 vs 1.1.0)
-3. **Platform Detection**: Automatically selects the correct binary for your platform
+## Platform differences
 
-### Download Process
+On Linux and macOS the running executable is moved aside and the new one is
+copied to the original path, which works while GoAnime is running. The new
+version is used from the next start.
 
-1. **Asset Selection**: Automatically finds the right binary for your OS/architecture
-2. **Safe Download**: Downloads to a temporary location first
-3. **Progress Feedback**: Shows download status and file size
+On Windows a running executable is locked. If GoAnime cannot move it, it hands
+the replacement to a helper that runs after GoAnime exits, and prints `Update
+will complete when you restart the application`.
 
-### Installation Process
+### Windows: the post-exit helper
 
-1. **Backup Creation**: Creates a backup of your current executable
-2. **Safe Replacement**: Uses multiple strategies to replace the executable:
-   - Atomic rename (preferred)
-   - Copy and replace (fallback for cross-device issues)
-   - Gradual replacement for files in use
-3. **Permission Setting**: Ensures the new executable has correct permissions
-4. **Cleanup**: Removes temporary files and old backups
+1. The verified new executable is copied to `goanime.exe.new` **next to the
+   installed `goanime.exe`**. This is a stable path: the temporary download and
+   extraction directory can be deleted before the helper runs.
+2. `goanime.exe.update.bat` is written and started with the paths in
+   `GOANIME_UPDATE_*` environment variables, so spaces, `&` and parentheses in
+   `%LOCALAPPDATA%` do not break the batch file.
+3. The helper waits for the GoAnime process ID to disappear, then:
+   - checks the SHA-256 of `goanime.exe.new` with `certutil -hashfile`;
+   - copies the current executable to `goanime.exe.backup` if no backup exists;
+   - copies `.new` over `goanime.exe`, retrying up to 15 times;
+   - verifies the SHA-256 of the installed file;
+   - on success, writes `goanime.exe.update-pending` and deletes `.new` and
+     itself;
+   - on failure, restores `goanime.exe.backup`, deletes `.new`, and leaves the
+     backup in place.
 
-### Platform-Specific Handling
+The helper deletes itself on success and on failure.
 
-#### Linux/macOS
+## Files next to the executable
 
-- Handles "text file busy" errors when executable is in use
-- Uses atomic operations when possible
-- Falls back to copy+rename for cross-filesystem operations
+| File | Purpose | Removed |
+| --- | --- | --- |
+| `goanime.exe.backup` | Previous working binary | After the new binary starts and its hash matches the marker |
+| `goanime.exe.new` | Staged new binary | By the helper after success or failure |
+| `goanime.exe.update-pending` | SHA-256 of the installed binary | After a verified start |
+| `goanime.exe.update.bat` | Post-exit helper | By the helper |
 
-#### Windows
+If a backup is left behind because the update did not boot, close GoAnime and
+rename `goanime.exe.backup` back to `goanime.exe`. The next start notices that
+the running binary no longer matches the marker, keeps the backup and removes
+the stale marker.
 
-- Handles file locking by renaming current executable first
-- Proper cleanup of old executables
-- Handles Windows-specific path issues
+## Updating from 1.x on Windows
 
-## Error Handling
+The 1.x updater writes the old helper, so it cannot install the corrected one
+by itself. Windows users still on 1.x should download and run the v2.0.0
+installer (or the portable ZIP) once. From v2.0.0 onward, `--update` uses the
+flow above.
 
-The auto-updater includes comprehensive error handling:
+## Safety
 
-- **Network Issues**: Graceful handling of connection problems
-- **Permission Issues**: Clear error messages for permission problems
-- **File System Issues**: Fallback strategies for various file system limitations
-- **Corrupted Downloads**: Validation and retry mechanisms
-- **Rollback Support**: Automatic restoration if update fails
+- The release lookup and every download start at a GitHub address over HTTPS
+  (`github.com`, `api.github.com`, `objects.githubusercontent.com` or
+  `github-releases.githubusercontent.com`); any other starting URL is refused.
+  GitHub redirects asset downloads to its own storage, and that redirect is
+  followed.
+- Every download is checked against the release's `checksums-sha256.txt`
+  before anything is installed, and on Windows before the zip is extracted.
+  The checksums are authenticated by a minisign signature made with an offline
+  key (signed by the `release` job after a reviewer approves it, or by hand with
+  `build/sign-release.sh`), so a compromised GitHub account or release
+  cannot swap the binary and its checksum together. A build with no embedded
+  key refuses every update. Attestations are tracked separately.
+- The Windows binaries are not Authenticode-signed. Windows SmartScreen may
+  warn on first launch. See the README for how to verify a download and what
+  to do with the warning.
 
-## Manual Fallback
+## Installations managed by a package manager
 
-If automatic update fails, the system provides:
-
-- Clear error messages explaining what went wrong
-- Link to the GitHub releases page for manual download
-- Instructions for manual installation
-
-## Security Considerations
-
-- **HTTPS Only**: All downloads use secure HTTPS connections
-- **GitHub Releases**: Only downloads from official GitHub releases
-- **File Validation**: Verifies download integrity where possible
-- **Safe Defaults**: Conservative approach to file operations
-
-## Examples
-
-### Successful Update
-
-```bash
-$ goanime --update
-INFO  GoAnime  : Checking for updates...
-INFO  GoAnime  : Update available: v1.0.0 → v1.1.0
-# Interactive menu appears
-INFO  GoAnime  : Downloading GoAnime v1.1.0...
-INFO  GoAnime  : Downloading update...
-INFO  GoAnime  : Successfully updated to GoAnime v1.1.0!
-INFO  GoAnime  : The update has been installed. Please restart GoAnime to use
-                   the new version.
-```
-
-### No Updates Available
-
-```bash
-$ goanime --update
-INFO  GoAnime  : Checking for updates...
-INFO  GoAnime  : You're already running the latest version of GoAnime (v1.1.0)!
-```
-
-### Update Declined
-
-```bash
-$ goanime --update
-INFO  GoAnime  : Checking for updates...
-INFO  GoAnime  : Update available: v1.0.0 → v1.1.0
-# User selects "No, maybe later"
-INFO  GoAnime  : Update skipped. You can update later by running: goanime --update
-```
-
-## Integration with Help System
-
-The auto-update feature is fully integrated with GoAnime's help system:
-
-```bash
-goanime --help
-```
-
-Shows the `--update` flag in the options section with a clear description.
-
-## Future Enhancements
-
-Potential future improvements:
-
-- Automatic update checks on startup (optional)
-- Update channels (stable, beta, nightly)
-- Delta updates for smaller downloads
-- Digital signature verification
-- Update scheduling
+`--update` replaces the executable in place. If you installed GoAnime from the
+AUR, Scoop, winget or Homebrew, update it through that package manager instead,
+so the manager keeps track of the installed version.

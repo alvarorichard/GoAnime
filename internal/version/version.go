@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/tracking"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 )
 
 // Version is set via -ldflags at build time by the CI workflow.
@@ -16,7 +16,7 @@ import (
 // the version uses a `v%s` format, so without normalization CI builds log
 // `vv1.8.4`. Strip the prefix at init so both injected and fallback values
 // are stored without it.
-var Version = "1.8.7"
+var Version = "2.0.0"
 
 func init() {
 	Version = strings.TrimPrefix(Version, "v")

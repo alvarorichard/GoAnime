@@ -6,7 +6,8 @@
 > deliberately contains no invented example code, because invented code in docs
 > rots without anything failing.
 >
-> Verified against the tree at v1.8.6.
+> Places are named by symbol rather than line number, so search for the symbol
+> (`grep -n`) to find it in the current tree.
 
 ---
 
@@ -34,15 +35,15 @@ Read the Goyabu column as "copy this, rename it".
 | # | File | Where Goyabu does it | Required |
 |---|---|---|:---:|
 | 1 | `internal/scraper/providers/<name>/{doc.go,client.go}` | whole package | ✅ |
-| 2 | `internal/scraper/manager.go` | import `:22` · `ScraperType` const `:32` · `NewAdapter` case `:54` · `scraperDisplayName` `:71` · `scraperLanguageTag` `:87` · adapter type `:253` | ✅ |
-| 3 | `internal/api/source/kind.go` | `SourceKind` const `:14` · `scraperTypeMap` `:32` | ✅ |
-| 4 | `internal/api/providers/source_providers.go` | provider block `:225–299` | ✅ |
-| 5 | `internal/api/providers/tagging.go` | `sourceDisplayName` `:33` · `isPTBR` `:64` (+ `languageTag` if not PT-BR) | ✅ |
-| 6 | `internal/api/providers/naming/naming.go` | `tagPattern` regex `:75` | ✅ |
-| 7 | `internal/scraper/source_health.go` | `healthTargets` `:49` · `DefaultHealthCheckQuery` `:38` | 🟡 |
-| 8 | `internal/api/enhanced.go` | `--source` case `:247` · `ptbr` group `:252` · backfill by name `:290` · backfill by URL `:302` · debug print `:320` · `sourceBreakdown` field `:939` · `countSourceBreakdown` case `:959` | 🟡 |
-| 9 | `internal/api/anime.go` | `reSpaceDashNoise` source alternation `:540` | 🟡 |
-| 10 | `internal/util/util.go` | `--source` help text `:461` — currently stale: lists `flixhq`, omits `goyabu` and `superflix` | ⚪ |
+| 2 | `internal/scraper/manager.go` | import · `ScraperType` const · `NewAdapter` case · `scraperDisplayName` · `scraperLanguageTag` · `GoyabuAdapter` type | ✅ |
+| 3 | `internal/api/source/kind.go` | `SourceKind` const · `scraperTypeMap` | ✅ |
+| 4 | `internal/api/providers/source_providers.go` | the `goyabuProvider` block | ✅ |
+| 5 | `internal/api/providers/tagging.go` | `sourceDisplayName` · `isPTBR` in `tagResults` (+ `languageTag` if not PT-BR) | ✅ |
+| 6 | `internal/api/providers/naming/naming.go` | `tagPattern` regex | ✅ |
+| 7 | `internal/scraper/source_health.go` | `healthTargets` · `DefaultHealthCheckQuery` | 🟡 |
+| 8 | `internal/api/enhanced.go` | `--source` case and `ptbr` group in `searchAnimeEnhanced` · backfill by name · backfill by URL · `Source breakdown` debug print · `sourceBreakdown` field · `countSourceBreakdown` case | 🟡 |
+| 9 | `internal/api/anime.go` | `reSpaceDashNoise` source alternation | 🟡 |
+| 10 | `internal/util/util.go` | `--source` help text in `parseFlags` | ⚪ |
 | 11 | `pkg/goanime/types/source.go` | public SDK enum — **breaking change** | ⚪ |
 | 12 | tests | see [Tests](#tests) | ✅ |
 
@@ -51,7 +52,7 @@ Skip #6 and your tag is never stripped from titles → wrong AniList matches. Sk
 `--source <name>` reports an unknown source.
 
 Nothing to wire for `init()`: the blank import already exists at
-`internal/player/scraper.go:24`, and the provider lives in that same package.
+`internal/player/scraper.go`, and the provider lives in that same package.
 
 ---
 
@@ -64,7 +65,7 @@ Build after each step — every one leaves the tree green.
 `GetAnimeEpisodes`, `GetEpisodeStreamURL`, `NewClientForTest`, plus the
 `decorateRequest` / `shouldRetry` / `sleep` / `resolveURL` helpers.
 Non-negotiable: `util.NewFastClient()` for the HTTP client (SSRF-guarded),
-regexes compiled at package level (`client.go:32`), errors via
+regexes compiled at package level (as in Goyabu's `client.go`), errors via
 `netx.NewParserError` / `NewBlockedChallengeError` / `NewHTTPStatusError` —
 `DiagnoseError` and the circuit breaker classify by type. Import nothing from
 `api/`, `player/`, `playback/`; this is a leaf.
@@ -73,11 +74,13 @@ regexes compiled at package level (`client.go:32`), errors via
 `iota`: **append at the end, never insert.** If your stream needs a referer,
 subtitles or an audio language, put them in `GetStreamURL`'s
 `metadata map[string]string` under `referer` / `subtitles` / `subtitle_labels` /
-`audio_lang` — the contract `SuperFlixAdapter` uses and the player reads.
+`audio_lang`. `providers.applyPlaybackMetadata` reads `referer` and
+`subtitles` (a JSON array of `{"url","language","label"}`); `StartFlixAdapter`
+is the example.
 
 **3. Kind.** `kind.go` — string constant plus the `scraperTypeMap` entry.
 
-**4. Provider.** Copy `source_providers.go:225–298`. The only part that is design
+**4. Provider.** Copy the `goyabuProvider` block in `source_providers.go`. The only part that is design
 rather than boilerplate is the descriptor:
 
 ```go
@@ -104,17 +107,17 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 | `DefaultDisabled` | ships off unless `GOANIME_ENABLED_SOURCES` names it | shipping live |
 | `ProbeURL` | homepage; HEAD-probed on search timeout to tell "site down" from "opaque hang" | GraphQL/opaque APIs, browser-gated sources |
 
-Priorities in use: AnimeFire `10` · Goyabu `20` · SuperFlix `30` · AniDB `50`.
+Priorities in use: AnimeFire `10` · Goyabu `20` · AnimesDigital `30` · StartFlix `40` · TopCine `45` · HiAnime `50` · AnimeDrive `60`.
 Leave gaps of 10. Priority is ignored when `anime.Source` matches an `Explicit`
 entry.
 
 `FetchStreamURL` **must** open with `util.ClearGlobalSubtitles()` and
-`util.SetGlobalAnimeSource(anime.Source)` (`source_providers.go:283–286`) — skip
+`util.SetGlobalAnimeSource(anime.Source)`, as `goyabuProvider.FetchStreamURL` does; skip
 them and the previous episode's subtitles leak into this one.
 
 **Capabilities** are discovered by type assertion, not by a flag. Implement only
 what is true: `HasSeasons() bool` → `source.Seasoned` · `WarmUp(ctx) error` →
-`source.BrowserGated` (called before every stream fetch; see `superFlixProvider`)
+`source.BrowserGated` (called before every stream fetch; no source implements it today)
 · `Search(ctx, query)` → `source.Searchable`. **A source without `Search` is
 silently excluded from the search fan-out** — it can still play by URL.
 
@@ -127,9 +130,8 @@ resolve back to you. (`AnimeFire` returns `"Animefire.io"`, which is why its
 
 One test per function, table-driven, `t.Parallel()`, `httptest.Server` for every
 HTTP mock — never real network. Copy `goyabu/client_test.go`. Add the new kind to
-the enumerating tests: `internal/api/providers/source_providers_test.go:147`,
-`capabilities_test.go:23,39`, `internal/scraper/source_health_test.go:32,51`,
-`internal/api/enhanced_results_test.go:62`. Pin the host with a dated assertion so
+the tests that enumerate every source; list them with
+`grep -rln TopCine --include='*_test.go' internal`. Pin the host with a dated assertion so
 a domain rotation fails loudly. Gate live tests behind
 `testing.Short() || os.Getenv("CI") != ""`.
 
@@ -221,7 +223,7 @@ GOANIME_DISABLED_SOURCES=<Name> go run ./cmd/goanime "naruto" # kill-switch sees
 
 ## Known friction
 
-`ARCHITECTURE.md` §2 (R2) promises "adding a source = one file". Today it is
+The registry was designed so that adding a source means adding one file. Today it is
 **12 files, ~20 edit sites**. Only #1, #3 and #4 are the architecture; the rest is
 migration debt, with four named causes in descending order of cost:
 
@@ -239,10 +241,8 @@ migration debt, with four named causes in descending order of cost:
    backfill switches that duplicate what `source.Resolve` already computes.
 
 Fixing 1–3 reduces adding a source to one new package plus one provider block.
-Until then, trust this table over the architecture doc's ideal.
+Until then, trust this table.
 
 ---
 
-**See also:** [`ARCHITECTURE.md`](ARCHITECTURE.md) ·
-[`architecture/ARCH_STAGES.md`](architecture/ARCH_STAGES.md) ·
-[`Development.md`](Development.md) · [`testing/TEST_STRATEGY.md`](testing/TEST_STRATEGY.md)
+**See also:** [`Development.md`](Development.md)

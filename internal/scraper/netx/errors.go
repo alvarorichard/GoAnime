@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // ErrSourceUnavailable is returned when an upstream source is temporarily
@@ -108,3 +108,23 @@ func ValidateStreamURL(rawURL, source string) (string, error) {
 
 	return parsed.String(), nil
 }
+
+// ErrMediaOffline marks content a source still LISTS but has no file for.
+//
+// It is not a failure of the request, the parser or the network: the source
+// answered correctly and said the episode is offline. AnimeFire reports this
+// per episode (is_offline, with a null url) and whole titles can be in that
+// state — Naruto plays, Naruto Shippuden is offline end to end.
+//
+// It lives here because the scraper that detects it and the player that has to
+// explain it sit in packages that cannot import each other.
+var ErrMediaOffline = errors.New("the source has no file for this episode")
+
+// ErrNoEpisodes marks a title a source lists with no episodes at all, the
+// way HiAnime lists a season that has been announced but has not aired.
+//
+// Like ErrMediaOffline it is content state, not a failure: the source said
+// so explicitly. A scraper must return it only on that explicit word, and
+// keep reporting an empty or unreadable list it cannot account for as a
+// parser error, since that is how a changed layout shows up.
+var ErrNoEpisodes = errors.New("the source has no episodes for this title yet")

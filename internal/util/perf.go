@@ -208,13 +208,13 @@ func (pt *PerfTracker) PrintReport() {
 	report.WriteString("\n")
 	report.WriteString(perfSeparatorStyle.Render(strings.Repeat("═", 80)))
 	report.WriteString("\n")
-	report.WriteString(perfTitleStyle.Render("⚡ PERFORMANCE REPORT"))
+	report.WriteString(perfTitleStyle.Render("PERFORMANCE REPORT"))
 	report.WriteString("\n")
 	report.WriteString(perfSeparatorStyle.Render(strings.Repeat("─", 80)))
 	report.WriteString("\n\n")
 
 	// Uptime
-	report.WriteString(perfHeaderStyle.Render("📊 Session Info"))
+	report.WriteString(perfHeaderStyle.Render("Session Info"))
 	report.WriteString("\n")
 	fmt.Fprintf(&report, "   Uptime: %s\n", perfValueStyle.Render(pt.GetUptime().Round(time.Millisecond).String()))
 	report.WriteString("\n")
@@ -234,7 +234,7 @@ func (pt *PerfTracker) PrintReport() {
 
 	// Print timing metrics
 	if len(entries) > 0 {
-		report.WriteString(perfHeaderStyle.Render("⏱️  Timing Metrics"))
+		report.WriteString(perfHeaderStyle.Render("Timing Metrics"))
 		report.WriteString("\n")
 		fmt.Fprintf(&report, "   %-40s %10s %8s %12s\n",
 			perfMetricStyle.Render("Operation"),
@@ -289,7 +289,7 @@ func (pt *PerfTracker) PrintReport() {
 
 	// Print counters
 	if len(pt.counters) > 0 {
-		report.WriteString(perfHeaderStyle.Render("🔢 Counters"))
+		report.WriteString(perfHeaderStyle.Render("Counters"))
 		report.WriteString("\n")
 		for name, counter := range pt.counters {
 			value := atomic.LoadInt64(counter)
@@ -312,7 +312,7 @@ func (pt *PerfTracker) PrintReport() {
 		totalOps += metric.Count
 	}
 
-	report.WriteString(perfHeaderStyle.Render("📈 Summary"))
+	report.WriteString(perfHeaderStyle.Render("Summary"))
 	report.WriteString("\n")
 	fmt.Fprintf(&report, "   Total Operations: %s\n", perfValueStyle.Render(fmt.Sprintf("%d", totalOps)))
 	fmt.Fprintf(&report, "   Total Time Tracked: %s\n", perfValueStyle.Render(totalTime.Round(time.Millisecond).String()))

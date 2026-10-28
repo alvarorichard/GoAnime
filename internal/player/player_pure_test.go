@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/term"
@@ -179,7 +179,7 @@ func TestDownloadSubtitleFiles_NoSubsIsNoop(t *testing.T) {
 	util.ClearGlobalSubtitles()
 	t.Cleanup(func() { util.GlobalSubtitles = prev })
 
-	assert.NotPanics(t, func() { downloadSubtitleFiles("/tmp/x.mp4", nil) })
+	assert.NotPanics(t, func() { downloadSubtitleFiles("/tmp/x.mp4", nil, nil) })
 }
 
 func TestStartVideo_InvalidLinkReturnsError(t *testing.T) {
@@ -207,7 +207,7 @@ func TestAskForDownload_ReturnsValidMarker(t *testing.T) {
 	if os.Getenv("CI") != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
 		t.Skip("Skipping interactive fuzzy-finder test: requires a real TTY")
 	}
-	got := askForDownload()
+	got := askForDownload(5, 12, "Mukashi Banashi")
 	assert.GreaterOrEqual(t, got, 1)
 }
 

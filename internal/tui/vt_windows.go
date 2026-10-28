@@ -20,6 +20,24 @@ func EnableVirtualTerminal() bool {
 	return outOK || errOK
 }
 
+// EnableUTF8Console tells a classic console to decode the screen as UTF-8
+// (output page 65001) and returns a function restoring the old page.
+// GoAnime writes UTF-8 and conhost reads it back with that page: 65001 keeps
+// Japanese titles and the accented Portuguese ones from arriving as
+// mojibake there. ConPTY hosts (Windows Terminal and friends) read UTF-8
+// always, so the switch stays harmless there; the restore hands cmd.exe and
+// the like their original page back after GoAnime leaves.
+func EnableUTF8Console() (restore func()) {
+	before, err := windows.GetConsoleOutputCP()
+	if err != nil || before == 65001 {
+		return func() {}
+	}
+	if err := windows.SetConsoleOutputCP(65001); err != nil {
+		return func() {}
+	}
+	return func() { _ = windows.SetConsoleOutputCP(before) }
+}
+
 // HasVirtualTerminal reports whether f is a console with VT processing on.
 func HasVirtualTerminal(f *os.File) bool {
 	if f == nil {

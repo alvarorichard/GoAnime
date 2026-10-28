@@ -23,7 +23,7 @@ import (
 // Playlist fixtures — reproduce real-world CDN responses that triggered bugs
 // ---------------------------------------------------------------------------
 
-// masterPlaylistWithSeparateAudio reproduces the SuperFlix CDN response that
+// masterPlaylistWithSeparateAudio reproduces a CDN response that
 // caused ErrSeparateAudioTracks: a master playlist with #EXT-X-MEDIA TYPE=AUDIO
 // pointing to a separate audio track URI.
 const masterPlaylistWithSeparateAudio = `#EXTM3U
@@ -155,7 +155,7 @@ func fakeSegmentData(size int) []byte {
 
 // TestParsePlaylist_SeparateAudioTracks verifies that a master playlist with
 // separate audio tracks (#EXT-X-MEDIA TYPE=AUDIO with URI) returns
-// ErrSeparateAudioTracks. This is the exact scenario from the SuperFlix CDN
+// ErrSeparateAudioTracks. This is the exact scenario from a real CDN
 // that caused the original bug: native HLS would download video-only,
 // producing a silent movie.
 func TestParsePlaylist_SeparateAudioTracks(t *testing.T) {

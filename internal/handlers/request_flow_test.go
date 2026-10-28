@@ -12,10 +12,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/updater"
-	"github.com/alvarorichard/Goanime/internal/upscaler"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/updater"
+	"github.com/alvarorichard/Goanime/v2/internal/upscaler"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,9 +155,10 @@ func TestHandleMovieDownloadRequest_PropagatesError(t *testing.T) {
 	util.GlobalDownloadRequest = &util.DownloadRequest{}
 	t.Cleanup(func() { util.GlobalDownloadRequest = prev })
 
+	// An empty request fails before any search; the handler passes that on.
 	err := HandleMovieDownloadRequest()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no longer supported")
+	assert.Contains(t, err.Error(), "no movie or series name")
 }
 
 // --- SearchMedia ---
@@ -486,7 +487,7 @@ func TestSelectMedia_AllTypeBranches(t *testing.T) {
 
 	results := []*models.Anime{
 		{Name: "Movie Title", MediaType: models.MediaTypeMovie, Source: "AllAnime", Year: "2023"},
-		{Name: "TV Show", MediaType: models.MediaTypeTV, Source: "SuperFlix"},
+		{Name: "TV Show", MediaType: models.MediaTypeTV, Source: "StartFlix"},
 		{Name: "Anime Title", MediaType: models.MediaTypeAnime, Source: "AllAnime"},
 		{Name: "Unknown Type", Source: "AllAnime"}, // empty MediaType → empty typeTag
 	}

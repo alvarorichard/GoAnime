@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/upscaler"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/upscaler"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // HandleUpscaleRequest processes upscale requests

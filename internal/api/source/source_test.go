@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,9 +89,9 @@ func TestRegisteredByPriority(t *testing.T) {
 func TestDescriptorMatchNonExplicit(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
-		Kind:        SuperFlix,
-		Tags:        []string{"[superflix]"},
-		URLMatchers: []string{"superflix"},
+		Kind:        StartFlix,
+		Tags:        []string{"[startflix]"},
+		URLMatchers: []string{"startflix"},
 		MediaTypes:  []models.MediaType{models.MediaTypeMovie},
 	}
 	tests := []struct {
@@ -101,8 +101,8 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 		wantReason string
 	}{
 		{"media type", &models.Anime{MediaType: models.MediaTypeMovie}, true, "MediaType=movie"},
-		{"name tag", &models.Anime{Name: "Filme [SuperFlix]"}, true, "tag [superflix]"},
-		{"url matcher", &models.Anime{URL: "https://superflix.to/x"}, true, "URL contains superflix"},
+		{"name tag", &models.Anime{Name: "Filme [StartFlix]"}, true, "tag [startflix]"},
+		{"url matcher", &models.Anime{URL: "https://startflix.to/x"}, true, "URL contains startflix"},
 		{"no match", &models.Anime{Name: "X", URL: "https://example.com/1"}, false, ""},
 		{"empty anime", &models.Anime{}, false, ""},
 	}
@@ -119,7 +119,7 @@ func TestDescriptorMatchNonExplicit(t *testing.T) {
 func TestDescriptorMatchURL(t *testing.T) {
 	t.Parallel()
 	d := Descriptor{
-		Kind:        AniDB,
+		Kind:        HiAnime,
 		URLMatchers: []string{"stubhost"},
 	}
 	tests := []struct {
@@ -151,8 +151,8 @@ func TestResolve(t *testing.T) {
 		d.Tags = []string{"[goyabu]"}
 		d.URLMatchers = []string{"goyabu"}
 	})
-	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
-		d.Explicit = []string{"AniDB"}
+	allAnime := newFake(HiAnime, 40, func(d *Descriptor) {
+		d.Explicit = []string{"HiAnime"}
 		d.Tags = []string{"[english]"}
 		d.URLMatchers = []string{"stubhost"}
 	})
@@ -169,7 +169,7 @@ func TestResolve(t *testing.T) {
 		{"empty anime", &models.Anime{}, Unknown, nil},
 		{"explicit Source field", &models.Anime{Source: "Goyabu"}, Goyabu, goyabu},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, Goyabu, goyabu},
-		{"name tag", &models.Anime{Name: "Naruto [English]"}, AniDB, allAnime},
+		{"name tag", &models.Anime{Name: "Naruto [English]"}, HiAnime, allAnime},
 		{"URL pattern", &models.Anime{URL: "https://animefire.plus/naruto"}, AnimeFire, animeFire},
 		{"PT-BR fallback to AnimeFire", &models.Anime{Name: "Naruto [PT-BR]"}, AnimeFire, animeFire},
 		{"no match is Unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, Unknown, nil},
@@ -210,7 +210,7 @@ func TestResolve(t *testing.T) {
 
 func TestResolveURL(t *testing.T) {
 	animeFire := newFake(AnimeFire, 10, func(d *Descriptor) { d.URLMatchers = []string{"animefire"} })
-	allAnime := newFake(AniDB, 40, func(d *Descriptor) {
+	allAnime := newFake(HiAnime, 40, func(d *Descriptor) {
 		d.URLMatchers = []string{"stubhost"}
 	})
 	restore := SwapRegistryForTesting(animeFire, allAnime)
@@ -249,4 +249,13 @@ func TestSwapRegistryForTesting(t *testing.T) {
 	assert.Equal(t, len(before), len(after), "restore must bring back the previous registry")
 	_, ok := Registered("swap-only-kind")
 	assert.False(t, ok)
+}
+
+func TestKinds(t *testing.T) {
+	restore := SwapRegistryForTesting(newFake("b-kind", 1), newFake("a-kind", 1))
+	t.Cleanup(restore)
+
+	kinds := Kinds()
+	require.Len(t, kinds, 2)
+	assert.Equal(t, []SourceKind{"a-kind", "b-kind"}, kinds, "sorted for deterministic panels")
 }

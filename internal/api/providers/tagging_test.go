@@ -3,17 +3,17 @@ package providers
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTagResults_AniDBEnglish(t *testing.T) {
+func TestTagResults_HiAnimeEnglish(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "Naruto", URL: "id1"}}
-	tagResults(res, source.AniDB)
+	tagResults(res, source.HiAnime)
 	assert.Equal(t, "[English] Naruto", res[0].Name)
-	assert.Equal(t, "AniDB", res[0].Source)
+	assert.Equal(t, "HiAnime", res[0].Source)
 }
 
 func TestTagResults_AnimeFirePTBRAndSource(t *testing.T) {
@@ -25,21 +25,45 @@ func TestTagResults_AnimeFirePTBRAndSource(t *testing.T) {
 	assert.Equal(t, "Animefire.io", res[0].Source, "AnimeFire stamps the canonical Animefire.io source")
 }
 
-func TestTagResults_SuperFlixMediaTypeTags(t *testing.T) {
+func TestTagResults_StartFlixMediaTypeTags(t *testing.T) {
 	t.Parallel()
 	movie := []*models.Anime{{Name: "Inception", MediaType: models.MediaTypeMovie}}
-	tagResults(movie, source.SuperFlix)
+	tagResults(movie, source.StartFlix)
 	assert.Equal(t, "[Movie] [PT-BR] Inception", movie[0].Name)
 
 	tv := []*models.Anime{{Name: "Breaking Bad", MediaType: models.MediaTypeTV}}
-	tagResults(tv, source.SuperFlix)
+	tagResults(tv, source.StartFlix)
 	assert.Equal(t, "[TV] [PT-BR] Breaking Bad", tv[0].Name)
+}
+
+func TestTagResults_TopCineMediaTypeTags(t *testing.T) {
+	t.Parallel()
+	res := []*models.Anime{
+		{Name: "Zona Zero", MediaType: models.MediaTypeMovie},
+		{Name: "Breaking Bad", MediaType: models.MediaTypeTV},
+	}
+	tagResults(res, source.TopCine)
+	assert.Equal(t, "[Movie] [PT-BR] Zona Zero", res[0].Name)
+	assert.Equal(t, "[TV] [PT-BR] Breaking Bad", res[1].Name)
+	assert.Equal(t, "TopCine", res[0].Source)
+}
+
+func TestTagResults_AnimesDigitalAudioVariants(t *testing.T) {
+	t.Parallel()
+	paired := []*models.Anime{{Name: "One Piece", URL: "https://animesdigital.org/anime/a/one-piece#goanime-dub=b3BhcXVl"}}
+	tagResults(paired, source.AnimesDigital)
+	assert.Equal(t, "[PT-BR] One Piece", paired[0].Name, "a merged title defaults to subtitles and must not look dubbed")
+	assert.Equal(t, "AnimesDigital", paired[0].Source)
+
+	dubbedOnly := []*models.Anime{{Name: "One Piece Dublado", URL: "https://animesdigital.org/anime/a/one-piece#goanime-dublado-only=1"}}
+	tagResults(dubbedOnly, source.AnimesDigital)
+	assert.Equal(t, "[PT-BR] One Piece (Dublado)", dubbedOnly[0].Name)
 }
 
 func TestTagResults_DoesNotDoubleTag(t *testing.T) {
 	t.Parallel()
 	res := []*models.Anime{{Name: "[English] Naruto"}}
-	tagResults(res, source.AniDB)
+	tagResults(res, source.HiAnime)
 	assert.Equal(t, "[English] Naruto", res[0].Name, "an already-tagged name must not be tagged twice")
 }
 

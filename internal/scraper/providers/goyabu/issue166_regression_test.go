@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // realGoyabuEpisodePage returns HTML that mirrors the structure of a real

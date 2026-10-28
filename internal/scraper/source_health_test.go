@@ -15,9 +15,12 @@ func TestDefaultHealthCheckQuery(t *testing.T) {
 		source ScraperType
 		want   string
 	}{
-		{"superflix", SuperFlixType, "dexter"},
-		{"allanime default", AniDBType, "naruto"},
+		{"startflix", StartFlixType, "dexter"},
+		{"topcine", TopCineType, "dexter"},
+		{"allanime default", HiAnimeType, "naruto"},
 		{"animefire default", AnimefireType, "naruto"},
+		{"animesdigital default", AnimesDigitalType, "naruto"},
+		{"animedrive default", AnimeDriveType, "naruto"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,9 +39,20 @@ func TestHealthTargets_DeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestHealthTargets_IncludeEveryMovieTVSource(t *testing.T) {
+	t.Parallel()
+	assert.Contains(t, healthTargets(), StartFlixType)
+	assert.Contains(t, healthTargets(), TopCineType)
+}
+
+func TestHealthTargets_IncludeAnimesDigital(t *testing.T) {
+	t.Parallel()
+	assert.Contains(t, healthTargets(), AnimesDigitalType)
+}
+
 func TestCheckSourceHealth_NilScraperFails(t *testing.T) {
 	t.Parallel()
-	res := checkSourceHealthWith(context.Background(), AniDBType, nil, "naruto")
+	res := checkSourceHealthWith(context.Background(), HiAnimeType, nil, "naruto")
 	assert.Equal(t, SourceHealthFailed, res.Status)
 	assert.NotNil(t, res.Diagnostic)
 }

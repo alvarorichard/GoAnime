@@ -14,14 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.27.1'
+  GO_VERSION: '1.27.3'
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
 
 jobs:
   quality:
     name: Quality gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Check out code
@@ -58,12 +58,12 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.1
+          version: v2.14.0
           args: --timeout=20m
 
   security:
     name: Security gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Check out code
@@ -86,7 +86,9 @@ jobs:
 
       - name: Install security scanners
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          # Pinned to a master commit: v2.29.0 ships x/tools v0.49.0, which can't
+          # read Go 1.27.2 export data. Move back to a tag once one includes x/tools >= v0.50.0.
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261005092323-d2b649ec0182
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
 
       - name: Scan source for insecure patterns
@@ -103,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -226,7 +228,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             goos: linux
             goarch: amd64
             binary_name: goanime-linux
@@ -253,7 +255,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Get dependencies
         run: go mod download
@@ -318,7 +320,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27.1'
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Check out code
         uses: actions/checkout@v7
@@ -531,3 +533,269 @@ jobs:
             dist/GoAnime-Installer-*.exe
             dist/GoAnime-Installer-*.sha256
           retention-days: 30
+
+  # Exercises the real installer on a real Windows runner. Wine covers the
+  # same logic locally, but cannot validate UAC behaviour, SmartScreen,
+  # Authenticode status or the 64-bit registry view.
+  windows-installer-smoke:
+    name: Windows installer smoke test
+    needs: [build-windows-installer]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: goanime-windows-installer
+          path: dist
+
+      - name: Test per-user install, PATH and 1.x blocking
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Assert-True {
+            param([bool]$Condition, [string]$Message)
+            if (-not $Condition) { throw "ASSERTION FAILED: $Message" }
+          }
+
+          function Get-UserPathRaw {
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+            if ($null -eq $key) { return $null }
+            try {
+              return $key.GetValue(
+                'Path',
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+              )
+            } finally {
+              $key.Dispose()
+            }
+          }
+
+          function Set-UserPathRaw {
+            param($Value)
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+            if ($null -eq $key) {
+              $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+            }
+            try {
+              if ($null -eq $Value) {
+                $key.DeleteValue('Path', $false)
+              } else {
+                $key.SetValue(
+                  'Path',
+                  [string]$Value,
+                  [Microsoft.Win32.RegistryValueKind]::ExpandString
+                )
+              }
+            } finally {
+              $key.Dispose()
+            }
+          }
+
+          function Assert-PathEquals {
+            param([string]$Expected, [string]$Label)
+            $actual = Get-UserPathRaw
+            $shown = if ($null -eq $actual) { '<absent>' } else { "[$actual]" }
+            Assert-True -Condition ($actual -ceq $Expected) `
+              -Message "$Label PATH mismatch`n  expected: [$Expected]`n  actual:   $shown"
+          }
+
+          function Invoke-Installer {
+            param([string[]]$InstallerArgs)
+            $proc = Start-Process -FilePath $script:Installer `
+              -ArgumentList $InstallerArgs -Wait -PassThru -NoNewWindow
+            return $proc.ExitCode
+          }
+
+          function Invoke-Uninstaller {
+            param([string]$Uninstaller)
+            $proc = Start-Process -FilePath $Uninstaller `
+              -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') `
+              -Wait -PassThru -NoNewWindow
+            return $proc.ExitCode
+          }
+
+          function Wait-ForRemoval {
+            param([string]$Path, [int]$TimeoutSeconds, [string]$Label)
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            while ((Get-Date) -lt $deadline) {
+              if (-not (Test-Path -LiteralPath $Path)) { return }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "TIMEOUT: $Label still exists at $Path"
+          }
+
+          $installerFile = Get-ChildItem -Path 'dist' `
+            -Filter 'GoAnime-Installer-*.exe' -Recurse | Select-Object -First 1
+          Assert-True -Condition ($null -ne $installerFile) `
+            -Message 'installer artifact not found under dist'
+          $checksumFile = Get-ChildItem -Path 'dist' `
+            -Filter 'GoAnime-Installer-*.sha256' -Recurse | Select-Object -First 1
+          Assert-True -Condition ($null -ne $checksumFile) `
+            -Message 'installer checksum artifact not found under dist'
+
+          $expectedHash = (
+            (Get-Content -LiteralPath $checksumFile.FullName -Raw).Trim() -split '\s+'
+          )[0].ToLowerInvariant()
+          $actualHash = (
+            Get-FileHash -LiteralPath $installerFile.FullName -Algorithm SHA256
+          ).Hash.ToLowerInvariant()
+          Assert-True -Condition ($actualHash -eq $expectedHash) `
+            -Message "installer SHA-256 mismatch: expected $expectedHash, got $actualHash"
+
+          $signature = Get-AuthenticodeSignature -LiteralPath $installerFile.FullName
+          Assert-True -Condition ($signature.Status -eq 'NotSigned') `
+            -Message "installer must be unsigned, got $($signature.Status)"
+
+          # The artifact is trusted after its published checksum matched. Drop
+          # the downloaded-file marker so SmartScreen does not wait for a
+          # human in a non-interactive CI run. This does not change the file.
+          Unblock-File -LiteralPath $installerFile.FullName
+
+          $script:Installer = $installerFile.FullName
+          $installDir = Join-Path $env:LOCALAPPDATA 'Programs\GoAnime'
+          $appExe = Join-Path $installDir 'goanime.exe'
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          $installArgs = @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=addtopath'
+          )
+
+          $originalPath = Get-UserPathRaw
+          try {
+            Write-Host '--- simple PATH: install, reinstall, uninstall ---'
+            $simplePath = 'C:\GoAnimeSmoke\before;C:\GoAnimeSmoke\also'
+            Set-UserPathRaw -Value $simplePath
+            $rc = Invoke-Installer -InstallerArgs $installArgs
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "installer failed with exit code $rc"
+            $simpleExpected = "$simplePath;$installDir;$installDir\bin"
+            Assert-PathEquals -Expected $simpleExpected -Label 'after install'
+            Assert-True -Condition (Test-Path -LiteralPath $appExe) `
+              -Message 'goanime.exe was not installed'
+            $versionOutput = (& $appExe --version 2>&1 | Out-String).Trim()
+            Assert-True -Condition ($versionOutput -match '^GoAnime v2\.0\.0') `
+              -Message "unexpected --version output: $versionOutput"
+            $appSignature = Get-AuthenticodeSignature -LiteralPath $appExe
+            Assert-True -Condition ($appSignature.Status -eq 'NotSigned') `
+              -Message "installed goanime.exe must be unsigned, got $($appSignature.Status)"
+
+            $rc = Invoke-Installer -InstallerArgs $installArgs
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "reinstall failed with exit code $rc"
+            Assert-PathEquals -Expected $simpleExpected -Label 'after reinstall'
+
+            $rc = Invoke-Uninstaller -Uninstaller $uninstaller
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "uninstaller failed with exit code $rc"
+            Assert-PathEquals -Expected $simplePath -Label 'after uninstall'
+            Wait-ForRemoval -Path $appExe -TimeoutSeconds 30 `
+              -Label 'goanime.exe after uninstall'
+            if (Test-Path -LiteralPath $installDir) {
+              Remove-Item -LiteralPath $installDir -Recurse -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            Write-Host '--- long PATH with %USERPROFILE% and %JAVA_HOME% ---'
+            $longEntry = 'C:\GoAnimeSmoke\long\' + ('a' * 1200)
+            $longPath = '%USERPROFILE%\bin;C:\GoAnimeSmoke\custom;' +
+              $longEntry + ';%JAVA_HOME%\bin'
+            Set-UserPathRaw -Value $longPath
+            $rc = Invoke-Installer -InstallerArgs $installArgs
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "installer failed with exit code $rc"
+            $longExpected = "$longPath;$installDir;$installDir\bin"
+            Assert-PathEquals -Expected $longExpected -Label 'after long install'
+            $rawPath = Get-UserPathRaw
+            Assert-True -Condition ($rawPath.Contains('%USERPROFILE%')) `
+              -Message 'installer expanded %USERPROFILE% in PATH'
+            Assert-True -Condition ($rawPath.Contains('%JAVA_HOME%')) `
+              -Message 'installer expanded %JAVA_HOME% in PATH'
+            $savedProcessPath = $env:PATH
+            try {
+              # Use the absolute ComSpec: the PATH under test deliberately
+              # contains only the user entries plus GoAnime, not System32.
+              $env:PATH = [Environment]::ExpandEnvironmentVariables($rawPath)
+              $pathOutput = (& $env:ComSpec /D /C 'goanime.exe --version' 2>&1 |
+                Out-String).Trim()
+              Assert-True -Condition ($pathOutput -match '^GoAnime v2\.0\.0') `
+                -Message "goanime.exe was not found through PATH: $pathOutput"
+            } finally {
+              $env:PATH = $savedProcessPath
+            }
+            $rc = Invoke-Uninstaller -Uninstaller $uninstaller
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "uninstaller failed with exit code $rc"
+            Assert-PathEquals -Expected $longPath -Label 'after long uninstall'
+            Wait-ForRemoval -Path $appExe -TimeoutSeconds 30 `
+              -Label 'goanime.exe after long uninstall'
+            if (Test-Path -LiteralPath $installDir) {
+              Remove-Item -LiteralPath $installDir -Recurse -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            Write-Host '--- absent PATH is created and then emptied ---'
+            Set-UserPathRaw -Value $null
+            $rc = Invoke-Installer -InstallerArgs $installArgs
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "installer failed with exit code $rc"
+            Assert-PathEquals -Expected "$installDir;$installDir\bin" `
+              -Label 'after install with absent PATH'
+            $rc = Invoke-Uninstaller -Uninstaller $uninstaller
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "uninstaller failed with exit code $rc"
+            $afterAbsent = Get-UserPathRaw
+            Assert-True -Condition ($null -eq $afterAbsent -or $afterAbsent -ceq '') `
+              -Message "uninstall should leave PATH empty, got [$afterAbsent]"
+            Wait-ForRemoval -Path $appExe -TimeoutSeconds 30 `
+              -Label 'goanime.exe after absent-PATH uninstall'
+            if (Test-Path -LiteralPath $installDir) {
+              Remove-Item -LiteralPath $installDir -Recurse -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            Write-Host '--- empty entries and trailing separator ---'
+            $weirdPath = 'C:\GoAnimeSmoke\a;;C:\GoAnimeSmoke\b;'
+            Set-UserPathRaw -Value $weirdPath
+            $rc = Invoke-Installer -InstallerArgs $installArgs
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "installer failed with exit code $rc"
+            Assert-PathEquals -Expected "$weirdPath$installDir;$installDir\bin" `
+              -Label 'after install with empty entries'
+            $rc = Invoke-Uninstaller -Uninstaller $uninstaller
+            Assert-True -Condition ($rc -eq 0) `
+              -Message "uninstaller failed with exit code $rc"
+            Assert-PathEquals -Expected 'C:\GoAnimeSmoke\a;;C:\GoAnimeSmoke\b' `
+              -Label 'after uninstall with empty entries'
+            Wait-ForRemoval -Path $appExe -TimeoutSeconds 30 `
+              -Label 'goanime.exe after empty-entry uninstall'
+            if (Test-Path -LiteralPath $installDir) {
+              Remove-Item -LiteralPath $installDir -Recurse -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            Write-Host '--- a 1.x all-users install blocks the per-user install ---'
+            $uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}_is1'
+            New-Item -Path $uninstallKey -Force | Out-Null
+            try {
+              New-ItemProperty -Path $uninstallKey -Name 'UninstallString' `
+                -Value '"C:\Program Files\GoAnime\unins000.exe"' `
+                -PropertyType String -Force | Out-Null
+              Set-UserPathRaw -Value 'C:\GoAnimeSmoke\before-old'
+              $rc = Invoke-Installer -InstallerArgs $installArgs
+              Assert-True -Condition ($rc -ne 0) `
+                -Message "installer should refuse a 1.x all-users install, got exit code $rc"
+              Assert-True -Condition (-not (Test-Path -LiteralPath $appExe)) `
+                -Message 'installer created goanime.exe despite the 1.x install'
+              Assert-PathEquals -Expected 'C:\GoAnimeSmoke\before-old' `
+                -Label 'after refused install'
+            } finally {
+              Remove-Item -Path $uninstallKey -Recurse -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            Write-Host 'All Windows installer smoke tests passed.'
+          } finally {
+            Set-UserPathRaw -Value $originalPath
+          }

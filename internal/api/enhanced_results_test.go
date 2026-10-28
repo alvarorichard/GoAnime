@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +17,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 
 	t.Run("search sort select enrich", func(t *testing.T) {
 		t.Parallel()
-		english := &models.Anime{Name: "Frieren [English]", Source: "AniDB", URL: "frieren"}
+		english := &models.Anime{Name: "Frieren [English]", Source: "HiAnime", URL: "frieren"}
 		portuguese := &models.Anime{Name: "Frieren [PT-BR]", URL: "https://animefire.example/frieren", Year: "2023"}
 		providerResults := []*models.Anime{english, nil, portuguese}
 		var selectedInput []*models.Anime
@@ -54,12 +54,18 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			src  string
 			want []source.SourceKind
 		}{
-			{src: "anidb", want: []source.SourceKind{source.AniDB}},
+			{src: "hianime", want: []source.SourceKind{source.HiAnime}},
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
-			{src: "superflix", want: []source.SourceKind{source.SuperFlix}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.SuperFlix}},
+			{src: "animedrive", want: []source.SourceKind{source.AnimeDrive}},
+			{src: "animesdigital", want: []source.SourceKind{source.AnimesDigital}},
+			{src: "superflix", want: nil}, // removed source: no longer a valid selector
+			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
+			{src: "topcine", want: []source.SourceKind{source.TopCine}},
+			{src: "pobreflix", want: []source.SourceKind{source.Pobreflix}},
+			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}
@@ -89,13 +95,20 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			url  string
 			want string
 		}{
-			{name: "explicit anidb source", src: "anidb", url: "opaque", want: "AniDB"},
+			{name: "explicit hianime source", src: "hianime", url: "opaque", want: "HiAnime"},
 			{name: "explicit goyabu source", src: "goyabu", url: "opaque", want: "Goyabu"},
-			{name: "explicit superflix numeric id", src: "superflix", url: "8143", want: "SuperFlix"},
-			{name: "anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: "AniDB"},
+			{name: "explicit animesdigital source", src: "animesdigital", url: "opaque", want: "AnimesDigital"},
+			{name: "animesdigital URL", url: "https://animesdigital.org/anime/a/frieren", want: "AnimesDigital"},
+			{name: "explicit startflix source", src: "startflix", url: "https://www.startflix.biz/series/x/", want: "StartFlix"},
+			{name: "removed superflix selector sets nothing", src: "superflix", url: "8143", want: ""},
+			{name: "hianime URL", url: "https://HIANIME.at/frieren-1", want: "HiAnime"},
+			// The removed anidb.app host must not be mistaken for HiAnime.
+			{name: "legacy anidb URL", url: "https://ANIDB.app/anime/frieren-1", want: ""},
 			{name: "animefire URL", url: "HTTPS://ANIMEFIRE.PLUS/frieren", want: "Animefire.io"},
 			{name: "goyabu URL", url: "https://GOYABU.example/frieren", want: "Goyabu"},
-			{name: "sflix URL", url: "https://SFLIX.example/tv/1", want: "SuperFlix"},
+			{name: "AnimeDrive URL", url: "https://animesdrive.cloud/anime/frieren", want: "AnimeDrive"},
+			{name: "startflix URL", url: "https://WWW.STARTFLIX.biz/filmes/x/", want: "StartFlix"},
+			{name: "sflix URL matches nothing", url: "https://SFLIX.example/tv/1", want: ""},
 			{name: "bare numeric matches nothing", url: "8143", want: ""},
 			{name: "bare punctuation matches nothing", url: "abc/def", want: ""},
 		}
@@ -126,7 +139,8 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			contains  string
 		}{
 			{name: "back", err: tui.ErrSelectionBack, want: ErrBackToSearch},
-			{name: "cancel", err: tui.ErrSelectionCancelled, want: tui.ErrSelectionCancelled},
+			{name: "cancel", err: tui.ErrSelectionCancelled, want: ErrSearchAborted},
+			{name: "cancel keeps the TUI cause", err: tui.ErrSelectionCancelled, want: tui.ErrSelectionCancelled},
 			{name: "arbitrary", err: context.Canceled, want: context.Canceled},
 			{name: "nil without error", contains: "selection returned nil"},
 		} {

@@ -5,7 +5,6 @@ package player
 import (
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"syscall"
@@ -29,12 +28,8 @@ func findMPVPath() (string, error) {
 	// Common paths where mpv might be installed
 	var commonPaths []string
 
-	// Get current user for home directory paths
-	currentUser, _ := user.Current()
-	homeDir := ""
-	if currentUser != nil {
-		homeDir = currentUser.HomeDir
-	}
+	// Home directory for per-user install locations; empty if unknown.
+	homeDir, _ := os.UserHomeDir()
 
 	if runtime.GOOS == "darwin" {
 		// macOS: Homebrew Intel and Apple Silicon paths

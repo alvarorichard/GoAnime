@@ -12,9 +12,8 @@ import (
 	"sync"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/version"
-	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/version"
 )
 
 // SubtitleInfo represents a single subtitle track
@@ -37,9 +36,18 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
-	GlobalUserAgent     string                         // Global variable to store the User-Agent the stream URL was signed for
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
+	// GlobalDownloadMenu opens the episode OPTIONS menu before every
+	// playback (--download-menu). Without it enter plays directly and the
+	// menu opens only via the episodes screen's m key (tela 6).
+	GlobalDownloadMenu bool
+
+	// GlobalAudioLanguageExplicit records whether --audio was passed.
+	// GlobalAudioLanguage always holds a value — the flag's default
+	// "pt-BR,pt,english" when it was not — so this is the only way to tell a
+	// user's choice from that default.
+	GlobalAudioLanguageExplicit bool
 )
 
 // StrictSourceResolution reports whether the GOANIME_STRICT_SOURCE environment
@@ -102,38 +110,7 @@ func ClearGlobalReferer() {
 	GlobalReferer = ""
 }
 
-// SetGlobalUserAgent stores the User-Agent that the current stream URL was
-// signed for.
-//
-// SuperFlix's player CDN binds a signed URL to the exact User-Agent that
-// obtained it — the same URL answers 200 for that UA and 403 for any other,
-// including a different version of the same browser. mpv therefore cannot use
-// its own default; it has to replay the one recorded here.
-func SetGlobalUserAgent(userAgent string) {
-	playbackStateMu.Lock()
-	GlobalUserAgent = userAgent
-	playbackStateMu.Unlock()
-	if userAgent != "" {
-		Debugf("Stored user agent for stream requests: %s", userAgent)
-	}
-}
-
-// GetGlobalUserAgent returns the stored playback User-Agent, empty when the
-// current source does not pin one.
-func GetGlobalUserAgent() string {
-	playbackStateMu.RLock()
-	defer playbackStateMu.RUnlock()
-	return GlobalUserAgent
-}
-
-// ClearGlobalUserAgent clears the stored playback User-Agent.
-func ClearGlobalUserAgent() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-	GlobalUserAgent = ""
-}
-
-// SetGlobalAnimeSource stores the current anime source (e.g. "AniDB", "Goyabu")
+// SetGlobalAnimeSource stores the current anime source (e.g. "HiAnime", "Goyabu")
 func SetGlobalAnimeSource(source string) {
 	playbackStateMu.Lock()
 	GlobalAnimeSource = source
@@ -155,17 +132,6 @@ func Is9AnimeSource() bool {
 	return GetGlobalAnimeSource() == "9Anime"
 }
 
-// IsSuperFlixSource returns true if the current stream is from SuperFlix.
-//
-// SuperFlix streams are multi-audio HLS with an external Portuguese subtitle
-// track, so they need mpv's audio/subtitle language preferences applied — for
-// EVERY media type, not just movies/TV. Its anime and dorama entries carry the
-// same tracks, and gating those preferences on IsMovieOrTV silently dropped both
-// the chosen audio track and the subtitles for them.
-func IsSuperFlixSource() bool {
-	return GetGlobalAnimeSource() == "SuperFlix"
-}
-
 // SetGlobalAudioLanguage stores the current playback audio preference.
 func SetGlobalAudioLanguage(language string) {
 	playbackStateMu.Lock()
@@ -180,178 +146,11 @@ func GetGlobalAudioLanguage() string {
 	return GlobalAudioLanguage
 }
 
-// subtitleOption maps a display label to a sentinel value for subtitle selection.
-type subtitleOption struct {
-	Label string
-	Value int
-}
-
-// SelectSubtitles displays an interactive menu for the user to choose which
-// subtitle tracks to load. It updates GlobalSubtitles in-place so that the
-// subsequent call to GetSubtitleArgs only includes the selected tracks.
-// If there are 0 or 1 subtitles available, no menu is shown.
-func SelectSubtitles() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-
-	if GlobalNoSubs || len(GlobalSubtitles) <= 1 {
-		return
-	}
-
-	// Build options: "All", each individual track, "None"
-	var items []subtitleOption
-	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range GlobalSubtitles {
-		label := sub.Label
-		if label == "" {
-			label = sub.Language
-		}
-		if label == "" {
-			label = fmt.Sprintf("Subtitle %d", i+1)
-		}
-		items = append(items, subtitleOption{label, i})
-	}
-	items = append(items, subtitleOption{"No subtitles", -2})
-
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("Subtitles: "))
-	if err != nil {
-		// On error/cancel keep all subtitles
-		return
-	}
-
-	selected := items[idx].Value
-	switch selected {
-	case -1:
-		// Keep all — no change needed
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
-	case -2:
-		// Disable subtitles
-		GlobalSubtitles = nil
-		Debugf("User disabled subtitles")
-	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
-			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
-		}
-	}
-}
-
-// PromptSubtitleLanguage always prompts the user to select a subtitle language
-// for multi-language platforms (e.g., 9Anime). This MUST be called after every
-// episode selection, without exception. Unlike SelectSubtitles, this function
-// always shows the prompt regardless of the number of available tracks.
-// It updates GlobalSubtitles in-place so that GetSubtitleArgs returns
-// the correct arguments for mpv.
-func PromptSubtitleLanguage() {
-	playbackStateMu.Lock()
-	defer playbackStateMu.Unlock()
-
-	if GlobalNoSubs {
-		Debugf("Subtitles disabled by user (--no-subs), skipping subtitle prompt")
-		GlobalSubtitles = nil
-		return
-	}
-
-	tracks := GlobalSubtitles
-
-	// No tracks available — inform the user and continue without subtitles
-	if len(tracks) == 0 {
-		fmt.Println("\nNo subtitle tracks available for this episode.")
-		return
-	}
-
-	// Single track — still ask the user if they want it
-	if len(tracks) == 1 {
-		label := tracks[0].Label
-		if label == "" {
-			label = tracks[0].Language
-		}
-		if label == "" {
-			label = "Unknown"
-		}
-
-		fmt.Printf("\n1 subtitle track available: %s\n", label)
-
-		items := []subtitleOption{
-			{label, 0},
-			{"No subtitles", -2},
-		}
-
-		idx, err := tui.Find(items, func(i int) string {
-			return items[i].Label
-		}, fuzzyfinder.WithPromptString("Select subtitle language: "))
-		if err != nil {
-			// On error/cancel keep the track
-			fmt.Printf("Subtitles: %s\n", label)
-			return
-		}
-
-		if items[idx].Value == -2 {
-			GlobalSubtitles = nil
-			fmt.Println("Subtitles: disabled")
-			Debugf("User disabled subtitles")
-		} else {
-			fmt.Printf("Subtitles: %s\n", label)
-			Debugf("User selected subtitle: %s", label)
-		}
-		return
-	}
-
-	// Multiple tracks — show full selection menu
-	fmt.Printf("\n%d subtitle language(s) available:\n", len(tracks))
-
-	var items []subtitleOption
-	items = append(items, subtitleOption{"All subtitles", -1})
-	for i, sub := range tracks {
-		label := sub.Label
-		if label == "" {
-			label = sub.Language
-		}
-		if label == "" {
-			label = fmt.Sprintf("Subtitle %d", i+1)
-		}
-		items = append(items, subtitleOption{label, i})
-	}
-	items = append(items, subtitleOption{"No subtitles", -2})
-
-	idx, err := tui.Find(items, func(i int) string {
-		return items[i].Label
-	}, fuzzyfinder.WithPromptString("Select subtitle language: "))
-	if err != nil {
-		// On error/cancel keep all subtitles
-		fmt.Println("Subtitles: all (default)")
-		return
-	}
-
-	selected := items[idx].Value
-	switch selected {
-	case -1:
-		// Keep all — no change needed
-		fmt.Printf("Subtitles: all (%d tracks)\n", len(GlobalSubtitles))
-		Debugf("User selected all %d subtitle track(s)", len(GlobalSubtitles))
-	case -2:
-		// Disable subtitles
-		GlobalSubtitles = nil
-		fmt.Println("Subtitles: disabled")
-		Debugf("User disabled subtitles")
-	default:
-		if selected >= 0 && selected < len(GlobalSubtitles) {
-			kept := GlobalSubtitles[selected]
-			GlobalSubtitles = []SubtitleInfo{kept}
-			fmt.Printf("Subtitles: %s\n", kept.Label)
-			Debugf("User selected subtitle: %s (%s)", kept.Label, kept.Language)
-		}
-	}
-}
-
 // GetSubtitleArgs returns mpv arguments for subtitles.
 //
 // Always emits one --sub-file=URL per track. Never use --sub-files=URL1:URL2:
 // on Unix the separator is ":", which collides with "https://" and silently
-// corrupts every remote subtitle URL (SuperFlix ships WEBVTT behind .html
+// corrupts every remote subtitle URL (some hosts ship WEBVTT behind .html
 // paths). That made mpv fail to load movie streams with multiple tracks.
 func GetSubtitleArgs() []string {
 	playbackStateMu.RLock()
@@ -488,26 +287,16 @@ func FlagParser() (string, error) {
 	downloadFlag := fs.Bool("d", false, "download mode")
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
-	movieDownloadFlag := fs.Bool("dm", false, "download movie/TV from FlixHQ/SFlix")
-	sourceFlag := fs.String("source", "", "specify source (anidb, animefire, goyabu, superflix, ptbr)")
+	movieDownloadFlag := fs.Bool("dm", false, "download a movie or TV show")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix, animedrive, movietv, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
-	mediaTypeFlag := fs.String("type", "", "specify media type (anime, movie, tv)")
-	subsLanguageFlag := fs.String("subs", "english", "specify subtitle language for movies/TV (FlixHQ only)")
-	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "specify preferred audio language for movies/TV (FlixHQ only)")
-	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles for movies/TV (FlixHQ only)")
+	mediaTypeFlag := fs.String("type", "", "with -dm, download a single TV episode instead of a movie (movie, tv)")
+	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")
+	audioLanguageFlag := fs.String("audio", "pt-BR,pt,english", "preferred audio language for movies and TV shows")
+	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles")
+	downloadMenuFlag := fs.Bool("download-menu", false, "always show the episode options menu before playing (tela 6)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
-
-	// SuperFlix Cloudflare-bypass browser flags. These surface the previously
-	// env-only knobs (GOANIME_SF_*) as discoverable CLI options; each just sets
-	// the corresponding env var so the deeper scraper code keeps reading os.Getenv.
-	sfHeadlessFlag := fs.Bool("sf-headless", false, "run the Cloudflare-bypass browser headless (advanced; Turnstile usually rejects headless)")
-	sfBundledFlag := fs.Bool("sf-bundled", false, "force Playwright's bundled Chromium for the bypass instead of system Chrome")
-	sfBrowserFlag := fs.String("sf-browser", "", "browser channel for the Cloudflare bypass (e.g. chrome, chrome-beta, msedge); default: auto")
-	sfMaskFlag := fs.Bool("sf-mask", false, "enable fingerprint masking for the bypass browser (advanced escape hatch)")
-	// Hiding the bypass browser is the default; this flag stays so existing
-	// commands and scripts that pass it keep working.
-	sfOffscreenFlag := fs.Bool("sf-offscreen", false, "(default) keep the bypass browser minimized; it surfaces only if the challenge needs you, then closes")
-	sfWindowFlag := fs.Bool("sf-window", false, "always show the bypass browser window instead of keeping it minimized")
+	plainFlag := fs.Bool("plain", false, "plain interface: no colors, no Japanese glosses, ASCII only (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1)")
 
 	// Upscale flags
 	upscaleFlag := fs.Bool("upscale", false, "upscale mode - enhance video/image quality using Anime4K algorithm")
@@ -534,33 +323,22 @@ func FlagParser() (string, error) {
 		return "", err
 	}
 
-	// Apply SuperFlix bypass-browser flags by exporting the env vars the scraper
-	// reads. Only set when provided so an unset flag never overrides an env var
-	// the user exported manually.
-	if *sfHeadlessFlag {
-		_ = os.Setenv("GOANIME_SF_HEADLESS", "1")
-	}
-	if *sfBundledFlag {
-		_ = os.Setenv("GOANIME_SF_BUNDLED", "1")
-	}
-	if *sfBrowserFlag != "" {
-		_ = os.Setenv("GOANIME_SF_CHROME_CHANNEL", *sfBrowserFlag)
-	}
-	if *sfMaskFlag {
-		_ = os.Setenv("GOANIME_SF_MASK", "1")
-	}
-	if *sfOffscreenFlag {
-		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "1")
-	}
-	// --sf-window is the opt-out from the hidden default. Checked after
-	// --sf-offscreen so that passing both lands on "show it", the less
-	// surprising outcome of a contradictory pair.
-	if *sfWindowFlag {
-		_ = os.Setenv("GOANIME_SF_OFFSCREEN", "0")
-	}
-
 	// Set debug mode based on flag (set unconditionally for consistency)
 	IsDebug = *debug
+
+	// Plain interface asked explicitly: apply before any themed output.
+	if *plainFlag {
+		tui.SetPlain(true)
+	}
+	// Ask the terminal for its background once, before the first RunClean
+	// suppresses capability probes (tela 8). No TTY answers: keeps dark.
+	tui.EnsureThemeDetected()
+	// Look for a Japanese font before RunClean rewrites TERM: without one the
+	// glosses are hidden instead of drawn as boxes.
+	tui.EnsureJapaneseDetected()
+	// Ask the fonts what flavor glyphs they draw with (❯ ▶ ✓ …): uncovered
+	// ones degrade to the ASCII forms instead of drawing boxes.
+	tui.EnsureGlyphsDetected()
 
 	// Set performance profiling mode
 	PerfEnabled = *perf
@@ -576,7 +354,14 @@ func FlagParser() (string, error) {
 	GlobalMediaType = *mediaTypeFlag
 	GlobalSubsLanguage = *subsLanguageFlag
 	GlobalAudioLanguage = *audioLanguageFlag
+	GlobalAudioLanguageExplicit = false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "audio" {
+			GlobalAudioLanguageExplicit = true
+		}
+	})
 	GlobalNoSubs = *noSubsFlag
+	GlobalDownloadMenu = *downloadMenuFlag
 	GlobalOutputDir = *outputDirFlag
 
 	if *noSubsFlag {
@@ -602,7 +387,7 @@ func FlagParser() (string, error) {
 		return handleDownloadModeWithSmart(fs.Args(), *rangeFlag, *allFlag, *sourceFlag, *qualityFlag)
 	}
 
-	// Handle movie/TV download mode (FlixHQ/SFlix)
+	// Handle movie/TV download mode (StartFlix, TopCine)
 	if *movieDownloadFlag {
 		return handleMovieDownloadMode(fs.Args(), *rangeFlag, *allFlag, *qualityFlag, *subsLanguageFlag, *mediaTypeFlag)
 	}
@@ -640,41 +425,9 @@ func FlagParser() (string, error) {
 		}
 		return TreatingAnimeName(animeName), nil
 	}
-	animeName, err := getUserInput("Enter anime/movie name")
-	return TreatingAnimeName(animeName), err
-}
-
-// getUserInput prompts the user for input the anime name and returns it
-func getUserInput(label string) (string, error) {
-	var animeName string
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title(label).
-				Description("Type the anime title and press Enter").
-				Value(&animeName).
-				Validate(func(v string) error {
-					if len(strings.TrimSpace(v)) < minNameLength {
-						return fmt.Errorf("name must have at least %d characters", minNameLength)
-					}
-					return nil
-				}),
-		),
-	)
-
-	if err := tui.RunClean(form.Run); err != nil {
-		return "", err
-	}
-	// Without a terminal huh's Run returns nil immediately, WITHOUT displaying
-	// the form or running the Validate above, so animeName stays empty and the
-	// caller would search for "". The form cannot legitimately complete with an
-	// empty value (Validate enforces a minimum length), so an empty result here
-	// always means "the user was never asked".
-	if strings.TrimSpace(animeName) == "" {
-		return "", errors.New("no anime name entered (no interactive terminal available?)")
-	}
-	return animeName, nil
+	// No name: main opens the SEARCH home screen (tela 1) instead of a bare
+	// prompt. Empty means "open home".
+	return "", nil
 }
 
 // TreatingAnimeName removes special characters and spaces from the anime name.
@@ -787,7 +540,7 @@ func handleDownloadModeWithSmart(args []string, isRange, isAll bool, source, qua
 			),
 		)
 
-		if err := tui.RunClean(form.Run); err != nil {
+		if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
 			return "", fmt.Errorf("download mode selection cancelled: %w", err)
 		}
 
@@ -818,7 +571,7 @@ func handleDownloadModeWithSmart(args []string, isRange, isAll bool, source, qua
 						}),
 				),
 			)
-			if err := tui.RunClean(inputForm.Run); err != nil {
+			if err := tui.RunClean(inputForm.WithTheme(tui.FormTheme()).Run); err != nil {
 				return "", fmt.Errorf("episode input cancelled: %w", err)
 			}
 			episodeNum, _ := strconv.Atoi(episodeStr)
@@ -858,7 +611,7 @@ func handleDownloadModeWithSmart(args []string, isRange, isAll bool, source, qua
 						}),
 				),
 			)
-			if err := tui.RunClean(rangeForm.Run); err != nil {
+			if err := tui.RunClean(rangeForm.WithTheme(tui.FormTheme()).Run); err != nil {
 				return "", fmt.Errorf("range input cancelled: %w", err)
 			}
 			startEp, _ := strconv.Atoi(startStr)
@@ -934,7 +687,7 @@ func handleUpscaleMode(fs *flag.FlagSet, outputPath string, scaleFactor, passes 
 	return inputPath, ErrUpscaleRequested
 }
 
-// handleMovieDownloadMode processes movie/TV download arguments for FlixHQ/SFlix
+// handleMovieDownloadMode processes movie/TV download arguments (StartFlix, TopCine)
 func handleMovieDownloadMode(args []string, isRange, isAll bool, quality, subsLanguage, mediaType string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("movie download mode requires movie/TV name\nUsage: goanime -dm \"Movie Name\" (for movies)\n       goanime -dm -r \"TV Show\" season episode-range (for TV episodes)\n       goanime -dm -a \"TV Show\" (download all seasons and episodes)")

@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
@@ -40,9 +40,9 @@ func (registryMediaSource) SearchAll(query string) ([]*models.Anime, error) {
 }
 
 func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error) {
-	// AniDB took AllAnime's place as the subbed/dubbed anime source when
-	// AllAnime was removed; AnimeFire stays as the PT-BR anime source.
-	return providers.SearchAll(context.Background(), query, source.AniDB, source.AnimeFire)
+	// HiAnime is the subbed/dubbed anime source, third to hold that slot after
+	// AllAnime and anidb.app both went dark; AnimeFire stays as the PT-BR one.
+	return providers.SearchAll(context.Background(), query, source.HiAnime, source.AnimeFire)
 }
 
 func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (streamURL string, metadata map[string]string, err error) {
@@ -167,7 +167,7 @@ func (mh *MediaHandler) InteractiveMediaFlow(query string) (*PlaybackInfo, error
 		prompt := huh.NewInput().
 			Title("Search").
 			Value(&searchQuery)
-		if err := runFormFn(prompt.Run); err != nil {
+		if err := runFormFn(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 			return nil, err
 		}
 		query = searchQuery
@@ -207,7 +207,7 @@ func (mh *MediaHandler) handleAnimePlayback(anime *models.Anime, info *PlaybackI
 			return nil
 		})
 
-	if err := runFormFn(prompt.Run); err != nil {
+	if err := runFormFn(prompt.WithTheme(tui.FormTheme()).Run); err != nil {
 		return nil, err
 	}
 	if episodeNum == "" {

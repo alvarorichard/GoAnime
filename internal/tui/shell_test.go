@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -99,7 +100,7 @@ func TestFitBlock(t *testing.T) {
 }
 
 func FuzzFitBlockRespectsBounds(f *testing.F) {
-	for _, seed := range []string{"plain", "one\ntwo\nthree", "\x1b[31mcolored\x1b[0m", "日本語 🎬"} {
+	for _, seed := range []string{"plain", "one\ntwo\nthree", "\x1b[31mcolored\x1b[0m", "日本語 \U0001F3AC"} {
 		f.Add(seed, uint8(20), uint8(5))
 	}
 	f.Fuzz(func(t *testing.T, content string, rawWidth, rawHeight uint8) {
@@ -111,18 +112,26 @@ func FuzzFitBlockRespectsBounds(f *testing.F) {
 	})
 }
 
+var testHints = []Hint{
+	{Key: "↑↓", Desc: "move"},
+	{Key: "type", Desc: "filter"},
+	{Key: "enter", Desc: "select", Essential: true},
+	{Key: "esc", Desc: "back", Essential: true},
+}
+
 func TestShellRender(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
-		width          int
-		wantBreadcrumb bool
-		wantFooter     string
+		name        string
+		width       int
+		wantTrail   bool
+		wantFooter  string
+		droppedHint string
 	}{
-		{name: "wide", width: 100, wantBreadcrumb: true, wantFooter: "filter"},
-		{name: "compact", width: 40, wantBreadcrumb: true, wantFooter: "type fzf"},
-		{name: "tiny", width: 20, wantBreadcrumb: false, wantFooter: "enter"},
+		{name: "wide", width: 100, wantTrail: true, wantFooter: "filter"},
+		{name: "compact", width: 40, wantTrail: true, wantFooter: "select", droppedHint: "filter"},
+		{name: "tiny", width: 20, wantTrail: false, wantFooter: "enter", droppedHint: "move"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,12 +140,16 @@ func TestShellRender(t *testing.T) {
 			shell := NewShell(&theme, "Search > Results")
 			shell.Resize(tt.width, 24)
 
-			got := shell.Render("BODY", "↑↓/jk move  type filter")
+			got := shell.Render("BODY", testHints)
+			plain := ansi.Strip(got)
 
-			assert.Contains(t, got, "GOANIME")
-			assert.Contains(t, got, "BODY")
-			assert.Contains(t, got, tt.wantFooter)
-			assert.Equal(t, tt.wantBreadcrumb, strings.Contains(got, "Search > Results"))
+			assert.Contains(t, plain, "GOANIME")
+			assert.Contains(t, plain, "BODY")
+			assert.Contains(t, plain, tt.wantFooter)
+			if tt.droppedHint != "" {
+				assert.NotContains(t, plain, tt.droppedHint)
+			}
+			assert.Equal(t, tt.wantTrail, strings.Contains(plain, "SEARCH › RESULTS"))
 			assert.Contains(t, got, strings.Repeat("─", tt.width))
 			assert.GreaterOrEqual(t, lipgloss.Height(got), 5)
 		})
@@ -149,13 +162,85 @@ func TestShellRender(t *testing.T) {
 			height int
 		}{{1, 5}, {8, 5}, {20, 6}, {33, 8}, {80, 12}} {
 			shell := newTestShell(strings.Repeat("long breadcrumb ", 20))
+			shell.Context = strings.Repeat("context ", 20)
 			shell.Resize(size.width, size.height)
 			body := strings.Repeat("very long body ", 20) + "\n" + strings.Repeat("extra line\n", 20)
 
-			got := shell.Render(body, strings.Repeat("long footer ", 20))
+			got := shell.Render(body, []Hint{{Key: "x", Desc: strings.Repeat("long footer ", 20)}})
 
 			assert.LessOrEqual(t, lipgloss.Width(got), shell.Width)
 			assert.LessOrEqual(t, lipgloss.Height(got), shell.Height)
 		}
 	})
+}
+
+func TestShellHeader(t *testing.T) {
+	t.Parallel()
+
+	header := func(breadcrumb, context string, width int) string {
+		shell := newTestShell(breadcrumb)
+		shell.Context = context
+		return ansi.Strip(shell.header(width))
+	}
+
+	t.Run("everything fits", func(t *testing.T) {
+		t.Parallel()
+		got := header("Search > Results", "Momotarou", 100)
+		assert.True(t, strings.HasPrefix(got, " GOANIME  ゴーアニメ  SEARCH › RESULTS  結果"), got)
+		assert.True(t, strings.HasSuffix(got, "Momotarou"), got)
+		assert.Equal(t, 100, lipgloss.Width(got), "the context is pushed to the right edge")
+	})
+
+	t.Run("context goes first, then the glosses", func(t *testing.T) {
+		t.Parallel()
+		got := header("Search > Results", "Momotarou", 50)
+		assert.NotContains(t, got, "Momotarou")
+		assert.Contains(t, got, "ゴーアニメ")
+
+		got = header("Search > Results", "", 40)
+		assert.NotContains(t, got, "ゴーアニメ")
+		assert.Contains(t, got, "結果")
+	})
+
+	t.Run("the trail keeps its last step", func(t *testing.T) {
+		t.Parallel()
+		got := header("Search > Results > Episodes", "", 30)
+		assert.Equal(t, " GOANIME   … › EPISODES", got)
+	})
+
+	t.Run("a title is not a step name", func(t *testing.T) {
+		t.Parallel()
+		got := header("Search > Saru to Kani > Seasons", "", 120)
+		assert.Contains(t, got, "SEARCH › Saru to Kani › SEASONS  シーズン")
+	})
+}
+
+func TestBreadcrumbSteps(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, []string{"Search", "Results"}, breadcrumbSteps("Search > Results"))
+	assert.Equal(t, []string{"Player"}, breadcrumbSteps("  Player  "))
+	assert.Equal(t, []string{"Search", "Evil"}, breadcrumbSteps("Search >> \x1b[31mEvil\x1b[0m >"))
+	assert.Empty(t, breadcrumbSteps(""))
+}
+
+func TestRenderHints(t *testing.T) {
+	t.Parallel()
+	theme := NewTheme(true)
+
+	full := ansi.Strip(renderHints(&theme, testHints, 200))
+	assert.Equal(t, " ↑↓  move    type  filter    enter  select    esc  back", full)
+
+	// Short of room, the hints that are not essential go first, from the
+	// last one back; enter and esc stay.
+	for width := 60; width >= 1; width-- {
+		got := ansi.Strip(renderHints(&theme, testHints, width))
+		if lipgloss.Width(got) > width {
+			assert.Equal(t, "enter", strings.Fields(got)[0], "width %d: only one hint left", width)
+			continue
+		}
+		if strings.Contains(got, "move") || strings.Contains(got, "filter") {
+			assert.Contains(t, got, "select", "width %d", width)
+			assert.Contains(t, got, "back", "width %d", width)
+		}
+	}
 }

@@ -3,7 +3,7 @@ package scraper
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -66,10 +66,10 @@ func TestScraperDisplayName(t *testing.T) {
 		st   ScraperType
 		want string
 	}{
-		{AniDBType, "AniDB"},
+		{HiAnimeType, "HiAnime"},
 		{AnimefireType, "Animefire.io"},
 		{GoyabuType, "Goyabu"},
-		{SuperFlixType, "SuperFlix"},
+		{StartFlixType, "StartFlix"},
 		{ScraperType(999), "Desconhecido"},
 	}
 	for _, tt := range tests {
@@ -83,10 +83,10 @@ func TestScraperLanguageTag(t *testing.T) {
 		st   ScraperType
 		want string
 	}{
-		{AniDBType, "[English]"},
+		{HiAnimeType, "[English]"},
 		{AnimefireType, "[PT-BR]"},
 		{GoyabuType, "[PT-BR]"},
-		{SuperFlixType, "[PT-BR]"},
+		{StartFlixType, "[PT-BR]"},
 		{ScraperType(999), "[Unknown]"},
 	}
 	for _, tt := range tests {

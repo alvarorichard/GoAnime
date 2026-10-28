@@ -8,13 +8,12 @@ import (
 	"strconv"
 	"sync"
 
-	"charm.land/huh/v2"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // printEpisodeNotFoundMsg prints a user-friendly warning when the selected
@@ -25,6 +24,7 @@ func printEpisodeNotFoundMsg() {
 
 func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
 	tui.ResetTerminal()
+	player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
 	} else {
@@ -81,7 +81,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				}
 				// Keep the previous selection: committing the zero values of a
 				// failed selection made the loop replay a fabricated empty episode.
-				log.Printf("Error selecting episode: %v", selErr)
+				log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
 				continue
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -91,8 +91,12 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 		// Check if user requested to change anime during video playback
 		if errors.Is(err, player.ErrChangeAnime) {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if errors.Is(err, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -122,7 +126,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			// anime), so bounce to anime selection instead of committing zeros.
 			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
 			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", selErr)
+				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
 				return player.ErrBackToAnimeSelection
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -133,7 +137,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 
 		// Handle other errors
 		if err != nil {
-			log.Printf("Error during episode playback: %v", err)
+			log.Printf("Error during episode playback: %v", util.LogSafe(err))
 		}
 
 		userInput := GetUserInput()
@@ -145,8 +149,12 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 		// Handle back/change anime - both options allow searching for a new anime
 		if userInput == "c" || userInput == "back" {
 			newAnime, newEpisodes, err := ChangeAnimeLocal()
+			if errors.Is(err, appflow.ErrHomeContinue) {
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -176,7 +184,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			// anime), so bounce to anime selection instead of committing zeros.
 			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
 			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", selErr)
+				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
 				return player.ErrBackToAnimeSelection
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -192,7 +200,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				// Back or failure: keep the current (valid) selection instead
 				// of committing the zero values of a failed selection.
 				if !errors.Is(selErr, player.ErrBackRequested) {
-					log.Printf("Error selecting episode: %v", selErr)
+					log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
 				}
 				continue
 			}
@@ -233,9 +241,25 @@ var (
 	extractEpisodeNumberFunc extractEpisodeNumberFuncType = player.ExtractEpisodeNumber
 )
 
+// PreselectEpisodeNum skips the episode picker once: the next
+// SelectInitialEpisode opens this episode number directly instead of asking.
+// The SEARCH home screen's CONTINUE list sets it to reopen a tracked episode;
+// a missing episode falls back to the picker. Zero (the default) asks.
+var PreselectEpisodeNum int
+
 // SelectInitialEpisode runs the fuzzy-finder selector then parses the result.
 // The TUI call goes through selectEpisodeFunc, so tests inject a mock.
 func SelectInitialEpisode(episodes []models.Episode) (episodeURL, episodeNumber string, episodeIndex int, err error) {
+	if PreselectEpisodeNum > 0 {
+		num := PreselectEpisodeNum
+		PreselectEpisodeNum = 0
+		url, numStr, epNum, findErr := FindEpisodeByNumber(episodes, num)
+		if findErr == nil {
+			util.Debugf("[TRACE] SelectInitialEpisode: preselected episode %d", num)
+			return url, numStr, epNum, nil
+		}
+		util.Debugf("[TRACE] SelectInitialEpisode: preselected episode %d missing, asking", num)
+	}
 	util.Debugf("[TRACE] SelectInitialEpisode: calling selector with %d episodes", len(episodes))
 	url, numStr, err := selectEpisodeFunc(episodes)
 	util.Debugf("[TRACE] SelectInitialEpisode: returned url=%q, num=%q, err=%v", url, numStr, err)
@@ -275,7 +299,7 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
 	}
 	if err != nil {
-		log.Printf("Navigation error: %v", err)
+		log.Printf("Navigation error: %v", util.LogSafe(err))
 		return "", "", currentNum
 	}
 	return url, numStr, epNum
@@ -295,7 +319,7 @@ func CheckIfSeries(url string) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeries(url)
 	if err != nil {
 		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		log.Printf("Error checking if the anime is a series: %v", util.LogSafe(util.ErrorHandler(err)))
 		return false, 1
 	}
 	return series, totalEpisodes
@@ -305,58 +329,22 @@ func CheckIfSeries(url string) (isSeries bool, episodeCount int) {
 func CheckIfSeriesEnhanced(anime *models.Anime) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
 	if err != nil {
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		log.Printf("Error checking if the anime is a series: %v", util.LogSafe(util.ErrorHandler(err)))
 		return false, 1
 	}
 	return series, totalEpisodes
 }
 
-// ChangeAnimeLocal allows the user to search for and select a new anime (local implementation to avoid circular imports)
+// ChangeAnimeLocal changes the title through the SEARCH home screen (see
+// appflow.ChangeAnimeHome): type a query or pick CONTINUE/RECENT. A CONTINUE
+// row pends for the caller with appflow.ErrHomeContinue.
 func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
-	const maxRetries = 3
-
-	for i := range maxRetries {
-		var animeName string
-
-		prompt := huh.NewInput().
-			Title("Change Anime").
-			Description("Enter the name of the anime you want to watch:").
-			Value(&animeName).
-			Validate(func(v string) error {
-				if len(v) < 2 {
-					return fmt.Errorf("anime name must be at least 2 characters")
-				}
-				return nil
-			})
-
-		if err := tui.RunClean(prompt.Run); err != nil {
-			return nil, nil, err
-		}
-
-		// Use the enhanced API to search for anime
-		anime, err := api.SearchAnimeEnhanced(animeName, "")
-		if err != nil || anime == nil {
-			if i < maxRetries-1 {
-				util.Errorf("No anime found with the name: %s", animeName)
-				util.Infof("Please try again with a different search term. (Attempt %d/%d)", i+2, maxRetries)
-				continue
-			}
-			return nil, nil, fmt.Errorf("failed to find anime after %d attempts", maxRetries)
-		}
-
-		// Get episodes for the new anime via the Model B registry.
-		episodes, err := providers.FetchEpisodes(context.Background(), anime)
-		if err != nil {
-			if i < maxRetries-1 {
-				util.Errorf("Failed to get episodes for: %s", anime.Name)
-				util.Infof("Please try searching for a different anime. (Attempt %d/%d)", i+2, maxRetries)
-				continue
-			}
-			return nil, nil, fmt.Errorf("failed to get episodes after %d attempts", maxRetries)
-		}
-
-		return anime, episodes, nil
+	anime, episodes, err := appflow.ChangeAnimeHome()
+	if err != nil {
+		return nil, nil, err
 	}
-
-	return nil, nil, fmt.Errorf("failed to change anime after %d attempts", maxRetries)
+	if anime != nil {
+		player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
+	}
+	return anime, episodes, nil
 }

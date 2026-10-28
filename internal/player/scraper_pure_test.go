@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -185,7 +185,8 @@ func TestIsMovieOrTVSourcePlayer(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"flixhq source", &models.Anime{Source: "SFlix"}, true},
-		{"superflix source", &models.Anime{Source: "SuperFlix"}, true},
+		{"startflix source", &models.Anime{Source: "StartFlix"}, true},
+		{"topcine source", &models.Anime{Source: "TopCine"}, true},
 		{"movie media type", &models.Anime{MediaType: models.MediaTypeMovie}, true},
 		{"tv media type", &models.Anime{MediaType: models.MediaTypeTV}, true},
 		{"flixhq url", &models.Anime{URL: "https://flixhq.to/x"}, true},

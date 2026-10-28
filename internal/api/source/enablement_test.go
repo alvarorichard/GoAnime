@@ -3,7 +3,7 @@ package source
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,25 +18,31 @@ func TestIsEnabled(t *testing.T) {
 	// Uses t.Setenv — not parallel.
 	t.Run("plain source enabled by default", func(t *testing.T) {
 		t.Setenv(disabledSourcesEnvForTest, "")
-		assert.True(t, IsEnabled(Descriptor{Kind: AniDB}))
+		assert.True(t, IsEnabled(Descriptor{Kind: HiAnime}))
 	})
 
 	t.Run("disabled via config", func(t *testing.T) {
-		t.Setenv(disabledSourcesEnvForTest, "AniDB")
-		assert.False(t, IsEnabled(Descriptor{Kind: AniDB}))
+		t.Setenv(disabledSourcesEnvForTest, "HiAnime")
+		assert.False(t, IsEnabled(Descriptor{Kind: HiAnime}))
 		assert.True(t, IsEnabled(Descriptor{Kind: Goyabu}), "only the listed source is off")
 	})
 
-	t.Run("DefaultDisabled is off unless opted in", func(t *testing.T) {
+	// DefaultDisabled does NOT make a source unusable — it keeps it out of the
+	// search. IsEnabled is about being usable at all, so it stays true.
+	//
+	// Conflating the two is a real bug, not a wording detail: with one predicate
+	// covering both, marking Goyabu DefaultDisabled made an anime saved as
+	// Goyabu resolve to AnimeFire, because the Kind stopped matching and
+	// resolution fell through to the URL. Turning a source off had started
+	// playing another source's links for it.
+	t.Run("DefaultDisabled stays resolvable", func(t *testing.T) {
 		d := Descriptor{Kind: "Experimental", DefaultDisabled: true}
 		t.Setenv(enabledSourcesEnvForTest, "")
-		assert.False(t, IsEnabled(d), "DefaultDisabled source is off by default")
-
-		t.Setenv(enabledSourcesEnvForTest, "Experimental")
-		assert.True(t, IsEnabled(d), "opting in via GOANIME_ENABLED_SOURCES turns it on")
+		assert.True(t, IsEnabled(d),
+			"a source that ships off must still recognise entries already tagged with it")
 	})
 
-	t.Run("explicit disable overrides opt-in", func(t *testing.T) {
+	t.Run("the kill-switch is what makes a source unusable", func(t *testing.T) {
 		d := Descriptor{Kind: "Experimental", DefaultDisabled: true}
 		t.Setenv(disabledSourcesEnvForTest, "Experimental")
 		t.Setenv(enabledSourcesEnvForTest, "Experimental")
@@ -44,21 +50,48 @@ func TestIsEnabled(t *testing.T) {
 	})
 }
 
+// IsSearchEnabled is the other half: it decides who joins the fan-out.
+func TestIsSearchEnabled(t *testing.T) {
+	// Uses t.Setenv — not parallel.
+	t.Run("a plain source searches by default", func(t *testing.T) {
+		t.Setenv(disabledSourcesEnvForTest, "")
+		t.Setenv(enabledSourcesEnvForTest, "")
+		assert.True(t, IsSearchEnabled(Descriptor{Kind: HiAnime}))
+	})
+
+	t.Run("DefaultDisabled is off unless opted in", func(t *testing.T) {
+		d := Descriptor{Kind: "Experimental", DefaultDisabled: true}
+		t.Setenv(disabledSourcesEnvForTest, "")
+		t.Setenv(enabledSourcesEnvForTest, "")
+		assert.False(t, IsSearchEnabled(d), "it must not cost a search nobody asked for")
+
+		t.Setenv(enabledSourcesEnvForTest, "Experimental")
+		assert.True(t, IsSearchEnabled(d), "opting in via GOANIME_ENABLED_SOURCES brings it back")
+	})
+
+	t.Run("the kill-switch beats the opt-in", func(t *testing.T) {
+		d := Descriptor{Kind: "Experimental", DefaultDisabled: true}
+		t.Setenv(disabledSourcesEnvForTest, "Experimental")
+		t.Setenv(enabledSourcesEnvForTest, "Experimental")
+		assert.False(t, IsSearchEnabled(d))
+	})
+}
+
 func TestEnabled(t *testing.T) {
 	// Swaps registry + env — not parallel.
-	restore := SwapRegistryForTesting(newFake(AniDB, 1), newFake(Goyabu, 2))
+	restore := SwapRegistryForTesting(newFake(HiAnime, 1), newFake(Goyabu, 2))
 	t.Cleanup(restore)
 
 	t.Run("enabled source is returned", func(t *testing.T) {
 		t.Setenv(disabledSourcesEnvForTest, "")
-		s, ok := Enabled(AniDB)
+		s, ok := Enabled(HiAnime)
 		require.True(t, ok)
-		assert.Equal(t, AniDB, s.Describe().Kind)
+		assert.Equal(t, HiAnime, s.Describe().Kind)
 	})
 
 	t.Run("disabled source is not returned", func(t *testing.T) {
-		t.Setenv(disabledSourcesEnvForTest, "AniDB")
-		_, ok := Enabled(AniDB)
+		t.Setenv(disabledSourcesEnvForTest, "HiAnime")
+		_, ok := Enabled(HiAnime)
 		assert.False(t, ok, "a disabled source must not be selectable via Enabled")
 		_, ok = Enabled(Goyabu)
 		assert.True(t, ok, "other sources stay enabled")
@@ -92,12 +125,12 @@ func TestResolve_SkipsDisabledSource(t *testing.T) {
 
 func TestDisabledSources(t *testing.T) {
 	// Swaps registry + env — not parallel.
-	restore := SwapRegistryForTesting(newFake(AniDB, 1), newFake(Goyabu, 2), newFake(SuperFlix, 3))
+	restore := SwapRegistryForTesting(newFake(HiAnime, 1), newFake(Goyabu, 2), newFake(StartFlix, 3))
 	t.Cleanup(restore)
 
-	t.Setenv(disabledSourcesEnvForTest, "Goyabu,SuperFlix")
+	t.Setenv(disabledSourcesEnvForTest, "Goyabu,StartFlix")
 	got := DisabledSources()
-	assert.Equal(t, []SourceKind{Goyabu, SuperFlix}, got, "must list disabled registered sources, sorted")
+	assert.Equal(t, []SourceKind{Goyabu, StartFlix}, got, "must list disabled registered sources, sorted")
 
 	t.Setenv(disabledSourcesEnvForTest, "")
 	assert.Empty(t, DisabledSources(), "nothing disabled ⇒ empty")

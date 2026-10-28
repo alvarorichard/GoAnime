@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // EnrichMedia enriches a media item with metadata from TMDB or OMDb
@@ -146,7 +146,7 @@ func EnrichWithOMDb(media *models.Media) error {
 
 	var omdbMedia *OMDbMedia
 
-	// Fast path: if we already have an IMDB ID (e.g. from SuperFlix), look up
+	// Fast path: if we already have an IMDB ID (e.g. from StartFlix), look up
 	// directly by ID. This avoids the problem where OMDb title search fails
 	// for localized names (e.g. "Dois Homens e Meio" → not found).
 	if media.IMDBID != "" {
@@ -296,7 +296,7 @@ func FormatMediaInfo(media *models.Media) string {
 	}
 
 	if media.Rating > 0 {
-		parts = append(parts, fmt.Sprintf("★ %.1f", media.Rating))
+		parts = append(parts, fmt.Sprintf("%.1f/10", media.Rating))
 	}
 
 	if media.Runtime > 0 {

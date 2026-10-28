@@ -1,12 +1,15 @@
+//go:build live
+
 package player
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
+// TestExtractBloggerGoogleVideoURL checks Google's current session and RPC
+// response in the daily source-health workflow; regular CI uses local fixtures.
 func TestExtractBloggerGoogleVideoURL(t *testing.T) {
 	util.IsDebug = true
 
@@ -20,37 +23,4 @@ func TestExtractBloggerGoogleVideoURL(t *testing.T) {
 		t.Fatalf("extractBloggerGoogleVideoURL failed: %v", err)
 	}
 	t.Logf("Extracted video URL: %s", videoURL)
-}
-
-func isTransientBloggerExtractError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := strings.ToLower(err.Error())
-	transient := []string{
-		"no such host",
-		"timeout",
-		"temporary failure",
-		"connection refused",
-		"connection reset",
-		"network is unreachable",
-		"tls handshake timeout",
-		"server returned",
-		"status 403",
-		"status 429",
-		"status 500",
-		"status 502",
-		"status 503",
-		"status 521",
-		"status 522",
-		"status 523",
-		"status 524",
-		"status 530",
-	}
-	for _, marker := range transient {
-		if strings.Contains(errMsg, marker) {
-			return true
-		}
-	}
-	return false
 }

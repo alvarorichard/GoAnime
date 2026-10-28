@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/pkg/goanime"
-	"github.com/alvarorichard/Goanime/pkg/goanime/types"
+	"github.com/alvarorichard/Goanime/v2/pkg/goanime"
+	"github.com/alvarorichard/Goanime/v2/pkg/goanime/types"
 )
 
 func TestNewClient(t *testing.T) {

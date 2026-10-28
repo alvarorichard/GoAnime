@@ -2,17 +2,24 @@
 // It is the single source of truth for determining which scraper handles a given anime/media.
 package source
 
-import "github.com/alvarorichard/Goanime/internal/scraper"
+import "github.com/alvarorichard/Goanime/v2/internal/scraper"
 
 // SourceKind is the canonical type-safe identifier for a media source.
 // Unlike scraper.ScraperType (iota int), SourceKind is human-readable and safe for logging.
 type SourceKind string
 
 const (
-	AnimeFire SourceKind = "AnimeFire"
-	Goyabu    SourceKind = "Goyabu"
-	SuperFlix SourceKind = "SuperFlix"
-	AniDB     SourceKind = "AniDB"
+	AnimeFire     SourceKind = "AnimeFire"
+	Goyabu        SourceKind = "Goyabu"
+	HiAnime       SourceKind = "HiAnime"
+	StartFlix     SourceKind = "StartFlix"
+	TopCine       SourceKind = "TopCine"
+	AnimesDigital SourceKind = "AnimesDigital"
+	AnimeDrive    SourceKind = "AnimeDrive"
+	// Pobreflix is the catalogue whose /api search answers directly and
+	// whose current pages embed public MP4 servers. Old-theme pages keep
+	// the StartFlix panel fallback by TMDB id.
+	Pobreflix SourceKind = "Pobreflix"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -28,8 +35,12 @@ func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
 }
 
 var scraperTypeMap = map[SourceKind]scraper.ScraperType{
-	AnimeFire: scraper.AnimefireType,
-	Goyabu:    scraper.GoyabuType,
-	SuperFlix: scraper.SuperFlixType,
-	AniDB:     scraper.AniDBType,
+	AnimeFire:     scraper.AnimefireType,
+	Goyabu:        scraper.GoyabuType,
+	HiAnime:       scraper.HiAnimeType,
+	StartFlix:     scraper.StartFlixType,
+	TopCine:       scraper.TopCineType,
+	AnimesDigital: scraper.AnimesDigitalType,
+	AnimeDrive:    scraper.AnimeDriveType,
+	Pobreflix:     scraper.PobreflixType,
 }

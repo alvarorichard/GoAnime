@@ -8,8 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,7 @@ type appflowOverrides struct {
 	getEpisodesL  func(string) ([]models.Episode, error)
 	runSpinner    func(string, func())
 	promptForName func(string) (string, error)
+	tryScreen     func(tui.TryOptions) (tui.TryDecision, error)
 }
 
 // withOverrides applies the given overrides for the duration of the test
@@ -51,6 +53,7 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 		getEpisodesL:  getAnimeEpisodesLegacyFn,
 		runSpinner:    runSpinnerFn,
 		promptForName: promptForNameFn,
+		tryScreen:     openTryScreenFn,
 	}
 
 	if o.search != nil {
@@ -77,6 +80,9 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 	if o.promptForName != nil {
 		promptForNameFn = o.promptForName
 	}
+	if o.tryScreen != nil {
+		openTryScreenFn = o.tryScreen
+	}
 
 	t.Cleanup(func() {
 		searchEnhancedFn = prev.search
@@ -87,6 +93,7 @@ func withOverrides(t *testing.T, o appflowOverrides) {
 		getAnimeEpisodesLegacyFn = prev.getEpisodesL
 		runSpinnerFn = prev.runSpinner
 		promptForNameFn = prev.promptForName
+		openTryScreenFn = prev.tryScreen
 		appflowOverrideMu.Unlock()
 	})
 }
@@ -114,7 +121,7 @@ func TestFetchAnimeDetailsCore_NilAnime(t *testing.T) {
 	assert.NotPanics(t, func() { fetchAnimeDetailsCore(nil) })
 }
 
-func TestFetchAnimeDetailsCore_SuperFlixSkipsAll(t *testing.T) {
+func TestFetchAnimeDetailsCore_StartFlixSkipsAniList(t *testing.T) {
 	var aniCount, srcCount int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {
@@ -127,9 +134,9 @@ func TestFetchAnimeDetailsCore_SuperFlixSkipsAll(t *testing.T) {
 		},
 	})
 
-	fetchAnimeDetailsCore(&models.Anime{Name: "Spirited Away", Source: "SuperFlix"})
-	assert.Equal(t, int32(0), atomic.LoadInt32(&aniCount), "SuperFlix must skip AniList")
-	assert.Equal(t, int32(0), atomic.LoadInt32(&srcCount), "SuperFlix must skip source details")
+	fetchAnimeDetailsCore(&models.Anime{Name: "Spirited Away", Source: "StartFlix"})
+	assert.Equal(t, int32(0), atomic.LoadInt32(&aniCount), "StartFlix is a movie/TV catalog: AniList is skipped")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&srcCount), "StartFlix is enriched from TMDB through the source-details path")
 }
 
 func TestFetchAnimeDetailsCore_SFlixCallsSourceOnly(t *testing.T) {
@@ -236,7 +243,7 @@ func TestFetchAnimeDetailsCore_NeedsAniListOnly_NoCoverDoesNotOverwrite(t *testi
 // reached for AllAnime titles, so AniList is now the single anime enrichment
 // path and sourceDetails must never be called.
 func TestFetchAnimeDetailsCore_AniListIsTheOnlyEnricher(t *testing.T) {
-	anime := &models.Anime{Name: "Show", URL: "https://anidb.app/anime/show-1"}
+	anime := &models.Anime{Name: "Show", URL: "https://hianime.at/anime/show-1"}
 	var aniHit, srcHit int32
 	withOverrides(t, appflowOverrides{
 		aniList: func(string) (*models.AniListResponse, error) {

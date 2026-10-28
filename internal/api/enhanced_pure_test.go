@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,6 +56,34 @@ func TestLanguagePriority(t *testing.T) {
 			assert.Equal(t, tt.want, languagePriority(tt.in))
 		})
 	}
+}
+
+// TestFriendlyMessageSticksToTheChain: the typed rephrasing the api layers
+// use keeps the user-facing wording reachable through the whole error chain
+// (playback shows FriendlyMessage's result on the result screen), errors.Is
+// still sees the root cause, and plain errors answer false instead of being
+// mistaken for friendly wording.
+func TestFriendlyMessageSticksToTheChain(t *testing.T) {
+	t.Parallel()
+	root := errors.New("dead server")
+	wrapped := fmt.Errorf("failed to get TopCine stream URL: %w",
+		Friendly(root, "TopCine only offers this on dead servers. Try it later."))
+
+	msg, ok := FriendlyMessage(wrapped)
+	assert.True(t, ok)
+	assert.Equal(t, "TopCine only offers this on dead servers. Try it later.", msg)
+
+	assert.ErrorIs(t, wrapped, root, "the cause stays reachable")
+
+	msg, ok = FriendlyMessage(&friendlyError{msg: "direct"})
+	assert.True(t, ok)
+	assert.Equal(t, "direct", msg)
+
+	_, ok = FriendlyMessage(errors.New("raw failure"))
+	assert.False(t, ok, "plain errors carry no friendly wording")
+
+	_, ok = FriendlyMessage(nil)
+	assert.False(t, ok)
 }
 
 // isStdoutTerminal caches via sync.Once. Test runs in CI where stdout is not

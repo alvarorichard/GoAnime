@@ -2,11 +2,12 @@ package source
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // Descriptor is a source's self-declared identity (Model B).
@@ -30,8 +31,8 @@ type Descriptor struct {
 	// search timeout: after a per-source deadline the dispatcher issues a quick
 	// HEAD against it (netx.EnrichTimeoutWithProbe) so a 5xx / Cloudflare-origin
 	// failure is reported as "site down" instead of a generic timeout. Leave
-	// empty for opaque APIs or browser-gated sources
-	// (SuperFlix) where a homepage probe is not meaningful.
+	// empty for opaque APIs or browser-gated sources, where a homepage probe is
+	// not meaningful.
 	ProbeURL string
 }
 
@@ -120,6 +121,20 @@ func Registered(kind SourceKind) (Source, bool) {
 	defer registryMu.RUnlock()
 	s, ok := registry[kind]
 	return s, ok
+}
+
+// Kinds returns every registered source kind, sorted. The SEARCHING screen
+// lists wanted sources that sit out (off by default, disabled, cooling
+// down), so it needs the full catalogue, not just the active fan-out.
+func Kinds() []SourceKind {
+	registryMu.RLock()
+	kinds := make([]SourceKind, 0, len(registry))
+	for k := range registry {
+		kinds = append(kinds, k)
+	}
+	registryMu.RUnlock()
+	slices.Sort(kinds)
+	return kinds
 }
 
 // registeredByPriority returns a snapshot of the registry ordered by

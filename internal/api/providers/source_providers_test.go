@@ -3,9 +3,10 @@ package providers
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,8 +37,8 @@ func TestEpisodeNumber(t *testing.T) {
 
 func TestAllAnimeProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p := &anidbProvider{}
-	assert.Equal(t, source.AniDB, p.Describe().Kind)
+	p := &hianimeProvider{}
+	assert.Equal(t, source.HiAnime, p.Describe().Kind)
 	assert.False(t, p.HasSeasons())
 }
 
@@ -55,10 +56,24 @@ func TestGoyabuProvider_KindAndHasSeasons(t *testing.T) {
 	assert.False(t, p.HasSeasons())
 }
 
-func TestSuperFlixProvider_KindAndHasSeasons(t *testing.T) {
+func TestAnimesDigitalProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
-	p := &superFlixProvider{}
-	assert.Equal(t, source.SuperFlix, p.Describe().Kind)
+	p := &animesDigitalProvider{}
+	assert.Equal(t, source.AnimesDigital, p.Describe().Kind)
+	assert.False(t, p.HasSeasons())
+}
+
+func TestStartFlixProvider_KindAndHasSeasons(t *testing.T) {
+	t.Parallel()
+	p := &startFlixProvider{}
+	assert.Equal(t, source.StartFlix, p.Describe().Kind)
+	assert.True(t, p.HasSeasons())
+}
+
+func TestTopCineProvider_KindAndHasSeasons(t *testing.T) {
+	t.Parallel()
+	p := &topCineProvider{}
+	assert.Equal(t, source.TopCine, p.Describe().Kind)
 	assert.True(t, p.HasSeasons())
 }
 
@@ -82,24 +97,50 @@ func TestGoyabuProvider_Describe(t *testing.T) {
 	assert.Equal(t, []string{"goyabu"}, d.URLMatchers)
 }
 
-func TestSuperFlixProvider_Describe(t *testing.T) {
+func TestAnimesDigitalProvider_Describe(t *testing.T) {
 	t.Parallel()
-	d := (&superFlixProvider{}).Describe()
-	assert.Equal(t, source.SuperFlix, d.Kind)
+	d := (&animesDigitalProvider{}).Describe()
+	assert.Equal(t, source.AnimesDigital, d.Kind)
 	assert.Equal(t, 30, d.Priority)
-	assert.Equal(t, []string{"SuperFlix"}, d.Explicit)
-	assert.Equal(t, []string{"[superflix]"}, d.Tags)
-	assert.Equal(t, []string{"superflix"}, d.URLMatchers)
+	assert.Equal(t, []string{"AnimesDigital"}, d.Explicit)
+	assert.Equal(t, []string{"[animesdigital]"}, d.Tags)
+	assert.Equal(t, []string{"animesdigital.org"}, d.URLMatchers)
+	assert.Equal(t, "https://animesdigital.org", d.ProbeURL)
+	assert.False(t, d.DefaultDisabled)
+}
+
+func TestStartFlixProvider_Describe(t *testing.T) {
+	t.Parallel()
+	d := (&startFlixProvider{}).Describe()
+	assert.Equal(t, source.StartFlix, d.Kind)
+	assert.Equal(t, 40, d.Priority)
+	assert.Equal(t, []string{"StartFlix"}, d.Explicit)
+	assert.Equal(t, []string{"[startflix]"}, d.Tags)
+	assert.Equal(t, []string{"startflix", "painel-aso"}, d.URLMatchers)
+	assert.False(t, d.DefaultDisabled, "StartFlix is the movie/TV source and must search by default")
+}
+
+func TestTopCineProvider_Describe(t *testing.T) {
+	t.Parallel()
+	d := (&topCineProvider{}).Describe()
+	assert.Equal(t, source.TopCine, d.Kind)
+	assert.Equal(t, 45, d.Priority)
+	assert.Equal(t, []string{"TopCine"}, d.Explicit)
+	assert.Equal(t, []string{"[topcine]"}, d.Tags)
+	assert.Equal(t, []string{"topcine"}, d.URLMatchers)
+	assert.Equal(t, "https://topcine3.site", d.ProbeURL)
+	assert.False(t, d.DefaultDisabled, "TopCine is offered next to StartFlix and must search by default")
+	assert.Equal(t, sourceDisplayName(source.TopCine), d.Explicit[0], "a saved title must route back by its display name")
 }
 
 // Each provider's scraper() builds a standalone, correctly-typed adapter on the
 // Model B path (nil sm) — no ScraperManager involved.
 func TestAllAnimeProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	ad, err := (&anidbProvider{}).scraper()
+	ad, err := (&hianimeProvider{}).scraper()
 	require.NoError(t, err)
 	require.NotNil(t, ad)
-	assert.Equal(t, scraper.AniDBType, ad.GetType())
+	assert.Equal(t, scraper.HiAnimeType, ad.GetType())
 }
 
 func TestAnimeFireProvider_Scraper(t *testing.T) {
@@ -118,30 +159,62 @@ func TestGoyabuProvider_Scraper(t *testing.T) {
 	assert.Equal(t, scraper.GoyabuType, ad.GetType())
 }
 
-func TestSuperFlixProvider_Scraper(t *testing.T) {
+func TestAnimesDigitalProvider_Scraper(t *testing.T) {
 	t.Parallel()
-	ad, err := (&superFlixProvider{}).scraper()
+	ad, err := (&animesDigitalProvider{}).scraper()
 	require.NoError(t, err)
 	require.NotNil(t, ad)
-	assert.Equal(t, scraper.SuperFlixType, ad.GetType())
+	assert.Equal(t, scraper.AnimesDigitalType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual)
+}
+
+func TestStartFlixProvider_Scraper(t *testing.T) {
+	t.Parallel()
+	ad, err := (&startFlixProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.StartFlixType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual, "StartFlix searches must be cancellable by the fan-out deadline")
+}
+
+func TestTopCineProvider_Scraper(t *testing.T) {
+	t.Parallel()
+	ad, err := (&topCineProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.TopCineType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual, "TopCine searches must be cancellable by the fan-out deadline")
 }
 
 // TestSourceRegistry_LiveSourcesRegistered verifies init() populated the
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.AniDB, source.AnimeFire, source.Goyabu, source.SuperFlix, source.AniDB} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
 	}
 }
 
+func TestAnimeDriveProvider_EnabledByDefaultAndPriority(t *testing.T) {
+	t.Parallel()
+	s, ok := source.Registered(source.AnimeDrive)
+	require.True(t, ok)
+	descriptor := s.Describe()
+	assert.Equal(t, 60, descriptor.Priority)
+	assert.False(t, descriptor.DefaultDisabled, "AnimeDrive playback is verified live; it ships enabled")
+}
+
 // TestResolve_LiveRegistry resolves against the REAL registry populated by
 // this package's init() — it pins the production descriptors' matching
 // behavior end to end (the source-package tests use mirrored fakes).
 func TestResolve_LiveRegistry(t *testing.T) {
-	t.Parallel()
+	t.Setenv("GOANIME_ENABLED_SOURCES", "AnimeDrive")
+	t.Setenv("GOANIME_DISABLED_SOURCES", "")
 	tests := []struct {
 		name     string
 		anime    *models.Anime
@@ -151,18 +224,29 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"empty anime", &models.Anime{}, source.Unknown},
 		{"explicit AnimeFire legacy", &models.Anime{Source: "Animefire.io"}, source.AnimeFire},
 		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
-		{"explicit SuperFlix", &models.Anime{Source: "SuperFlix"}, source.SuperFlix},
+		{"explicit AnimesDigital", &models.Anime{Source: "AnimesDigital"}, source.AnimesDigital},
+		{"animesdigital URL", &models.Anime{URL: "https://animesdigital.org/anime/a/one-piece"}, source.AnimesDigital},
+		// SuperFlix was removed; a title saved under it no longer routes.
+		{"removed SuperFlix", &models.Anime{Source: "SuperFlix"}, source.Unknown},
+		{"explicit StartFlix", &models.Anime{Source: "StartFlix"}, source.StartFlix},
+		{"explicit TopCine", &models.Anime{Source: "TopCine"}, source.TopCine},
+		// A TopCine episode plays from the StartFlix panel; the title's Source
+		// still routes it back to TopCine.
+		{"TopCine title, panel URL", &models.Anime{Source: "TopCine", URL: "https://www.painel-aso.sbs/embed/1396"}, source.TopCine},
+		{"explicit AnimeDrive", &models.Anime{Source: "AnimeDrive"}, source.AnimeDrive},
 		{"explicit wins over URL", &models.Anime{Source: "Goyabu", URL: "https://animefire.plus/x"}, source.Goyabu},
-		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.AniDB},
+		{"english tag", &models.Anime{Name: "Naruto [English]"}, source.HiAnime},
 		{"animefire tag", &models.Anime{Name: "Naruto [AnimeFire]"}, source.AnimeFire},
+		{"animedrive tag", &models.Anime{Name: "Naruto [animedrive]"}, source.AnimeDrive},
+		{"AnimeDrive URL uses registered host", &models.Anime{URL: animedrive.AnimeDriveBase + "/anime/x"}, source.AnimeDrive},
 		{"goyabu URL", &models.Anime{URL: "https://goyabu.to/naruto"}, source.Goyabu},
-		{"superflix URL", &models.Anime{URL: "https://superflix.to/naruto"}, source.SuperFlix},
+		{"startflix URL", &models.Anime{URL: "https://www.startflix.biz/series/naruto/"}, source.StartFlix},
+		{"startflix panel URL", &models.Anime{URL: "https://www.painel-aso.sbs/filme/tt0816692"}, source.StartFlix},
 		{"PT-BR fallback", &models.Anime{Name: "Naruto [PT-BR]"}, source.AnimeFire},
 		{"unknown", &models.Anime{Name: "X", URL: "https://example.com/v"}, source.Unknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			src, resolved := source.Resolve(tt.anime)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 			if tt.wantKind != source.Unknown {
@@ -176,7 +260,8 @@ func TestResolve_LiveRegistry(t *testing.T) {
 // TestResolveURL_LiveRegistry mirrors TestResolve_LiveRegistry for URL-only
 // resolution against the real registered descriptors.
 func TestResolveURL_LiveRegistry(t *testing.T) {
-	t.Parallel()
+	t.Setenv("GOANIME_ENABLED_SOURCES", "AnimeDrive")
+	t.Setenv("GOANIME_DISABLED_SOURCES", "")
 	tests := []struct {
 		url      string
 		wantKind source.SourceKind
@@ -184,14 +269,18 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		{"", source.Unknown},
 		{"https://animefire.plus/ep/naruto-1", source.AnimeFire},
 		{"https://goyabu.to/ep/naruto-1", source.Goyabu},
+		{"https://animesdigital.org/video/a/139026/", source.AnimesDigital},
 		// The AllAnime host was removed; its URLs now resolve to nothing.
 		{"https://allanime.to/anime/hHjXnUTda", source.Unknown},
-		{"https://superflix.to/naruto", source.SuperFlix},
+		// Previous SuperFlix host was removed too.
+		{"https://superflix.to/naruto", source.Unknown},
+		{"https://www.startflix.biz/series/naruto/", source.StartFlix},
+		{"https://topcine3.site/filme/zona-zero", source.TopCine},
+		{animedrive.AnimeDriveBase + "/anime/naruto", source.AnimeDrive},
 		{"https://example.com/video", source.Unknown},
 	}
 	for _, tt := range tests {
 		t.Run("url="+tt.url, func(t *testing.T) {
-			t.Parallel()
 			_, resolved := source.ResolveURL(tt.url)
 			assert.Equal(t, tt.wantKind, resolved.Kind, "reason: %s", resolved.Reason)
 		})

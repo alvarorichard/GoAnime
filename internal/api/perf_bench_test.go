@@ -5,7 +5,7 @@ import "testing"
 // Benchmark inputs mirror real titles produced by the PT-BR and English
 // scrapers so the numbers reflect the actual search hot path.
 var benchTitles = []string{
-	"🔥[AnimeFire] Naruto Shippuuden Dublado - Todos os Episódios",
+	"\U0001F525[AnimeFire] Naruto Shippuuden Dublado - Todos os Episódios",
 	"[PT-BR] Jujutsu Kaisen 2ª Temporada (Dublado) 8.39 A16",
 	"[English] Black Clover (170 episodes) N/A",
 	"[Movies/TV] One Piece Film: Red – Todos os Episódios",

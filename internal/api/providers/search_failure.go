@@ -1,0 +1,198 @@
+package providers
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+)
+
+// A failed search has to be reportable without dumping the whole error chain
+// at the user.
+//
+// The chain is genuinely useful — errors.Is/As need it, and the debug log is
+// where a maintainer looks — but rendering it is not. Flattening the
+// diagnostics into the message alongside the raw errors produced exactly one
+// line of signal wrapped in three layers of repetition:
+//
+//	Search failed for "dexter": failed to search: no results for "dexter" (all
+//	sources failed) — <source> blocked the request: HTTP 429/challenge; AniDB
+//	temporarily unavailable: HTTP 503: <source>: server returned: 429 Too Many
+//	Requests
+//	AniDB: AniDB search: upstream unavailable with HTTP 503
+//
+// So the failure is a VALUE, not a string. It keeps one short line per source
+// for display and the untouched causes underneath for errors.Is, and the UI
+// layer decides how much to show.
+
+// SourceFailure is one source's reason for not answering a search.
+type SourceFailure struct {
+	// Kind names the source, e.g. "StartFlix".
+	Kind source.SourceKind
+	// Reason is one short, user-facing clause: "rate limited (HTTP 429)".
+	// It does NOT repeat the source name — the caller prints that.
+	Reason string
+	// RateLimited marks a source that refused us rather than failed, so the
+	// caller can say "wait" instead of "something broke".
+	RateLimited bool
+	// Err is the untouched cause, kept for errors.Is/As.
+	Err error
+}
+
+// SearchFailure reports a search that ended with nothing to show.
+//
+// That is not the same as every source breaking, and the difference is the
+// whole message. Searching "o-todo-poderoso" on 2026-09-24 had three sources
+// answer normally with no match and one refuse the connection, and it was
+// reported as "every source failed" — which tells the user their install is
+// broken when what actually happened is that nobody has that title and one
+// host is throttling. Searched is what makes the two distinguishable.
+type SearchFailure struct {
+	Query string
+	// Searched is how many sources were asked, including the ones that
+	// answered normally with no match.
+	Searched int
+	Sources  []SourceFailure
+	// AnsweredKinds are the sources that replied normally with no match, in
+	// fan-out order. The TRY screen lists them with their quiet "none".
+	AnsweredKinds []source.SourceKind
+	// Off are the wanted sources that sat out, with why. The TRY screen
+	// lists them under the answers.
+	Off []models.SearchOffEntry
+}
+
+// AllFailed reports whether nothing answered at all, as opposed to some
+// sources answering with no match.
+//
+// Searched == 0 means the count was never filled in; treating that as
+// "everything failed" keeps an un-updated caller's message no worse than it
+// was rather than making it claim something new and wrong.
+func (f *SearchFailure) AllFailed() bool {
+	if f == nil {
+		return false
+	}
+	return f.Searched <= len(f.Sources)
+}
+
+// Answered is how many sources replied normally and simply had no match.
+func (f *SearchFailure) Answered() int {
+	if f == nil || f.Searched <= len(f.Sources) {
+		return 0
+	}
+	return f.Searched - len(f.Sources)
+}
+
+// Error is the one-line form, used when something prints the error directly.
+// Callers that can do better should use errors.As and render Sources.
+func (f *SearchFailure) Error() string {
+	if f == nil {
+		return "search failed"
+	}
+	if len(f.Sources) == 0 {
+		return fmt.Sprintf("no results for %q", f.Query)
+	}
+	parts := make([]string, 0, len(f.Sources))
+	for _, s := range f.Sources {
+		parts = append(parts, fmt.Sprintf("%s %s", s.Kind, s.Reason))
+	}
+	if f.AllFailed() {
+		return fmt.Sprintf("no results for %q (all sources failed): %s",
+			f.Query, strings.Join(parts, "; "))
+	}
+	return fmt.Sprintf("no results for %q (%d source(s) had no match, %d could not be reached): %s",
+		f.Query, f.Answered(), len(f.Sources), strings.Join(parts, "; "))
+}
+
+// Detail is the full form for the debug log: every short reason followed by the
+// untouched cause. Error() deliberately omits the causes — they are noise on a
+// terminal — so this is where a maintainer reading the log gets them back.
+func (f *SearchFailure) Detail() string {
+	if f == nil {
+		return "search failed"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "no results for %q", f.Query)
+	for _, s := range f.Sources {
+		fmt.Fprintf(&b, "\n  %s %s", s.Kind, s.Reason)
+		if s.Err != nil {
+			fmt.Fprintf(&b, " | cause: %v", s.Err)
+		}
+	}
+	return b.String()
+}
+
+// Unwrap exposes every cause, so errors.Is and errors.As still reach through a
+// SearchFailure to the original errors.
+func (f *SearchFailure) Unwrap() []error {
+	if f == nil {
+		return nil
+	}
+	errs := make([]error, 0, len(f.Sources))
+	for _, s := range f.Sources {
+		if s.Err != nil {
+			errs = append(errs, s.Err)
+		}
+	}
+	return errs
+}
+
+// NoResultsInfo reports a search where every asked source answered normally
+// with no match. It unwraps to api.ErrNoResults, so errors.Is keeps working;
+// it carries which sources answered for the TRY screen's SOURCES panel.
+type NoResultsInfo struct {
+	Query         string
+	AnsweredKinds []source.SourceKind
+	Off           []models.SearchOffEntry
+}
+
+// Error keeps the historical message so logs and tests read the same.
+func (e *NoResultsInfo) Error() string {
+	return fmt.Sprintf("no results found for: %s", e.Query)
+}
+
+// Unwrap exposes api.ErrNoResults for errors.Is.
+func (e *NoResultsInfo) Unwrap() error {
+	return api.ErrNoResults
+}
+
+// RateLimited reports whether any source refused us for talking too much.
+// That is the one failure mode with an action attached — wait — so it is
+// worth telling the user apart from a source being broken.
+func (f *SearchFailure) RateLimited() bool {
+	if f == nil {
+		return false
+	}
+	for _, s := range f.Sources {
+		if s.RateLimited {
+			return true
+		}
+	}
+	return false
+}
+
+// describeFailure reduces a source's diagnostic to one short clause plus the
+// rate-limited flag. The diagnostic machinery already classifies the error for
+// the circuit breaker; this is the same classification, phrased for a person.
+func describeFailure(diag *netx.SourceDiagnostic) (reason string, rateLimited bool) {
+	if diag == nil {
+		return "failed", false
+	}
+
+	switch {
+	case diag.StatusCode == http.StatusTooManyRequests:
+		return "is refusing this network — retrying keeps it blocked; wait ~15 min or switch network", true
+	case diag.Kind == netx.DiagnosticBlockedChallenge:
+		return "blocked the request (captcha/challenge)", false
+	case diag.Kind == netx.DiagnosticSourceUnavailable && diag.StatusCode > 0:
+		return fmt.Sprintf("is temporarily unavailable (HTTP %d)", diag.StatusCode), false
+	case diag.Kind == netx.DiagnosticSourceUnavailable:
+		return "is temporarily unavailable", false
+	case diag.Kind == netx.DiagnosticParserBroken:
+		return "answered, but GoAnime could not read it", false
+	}
+	return "failed", false
+}

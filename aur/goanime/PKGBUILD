@@ -1,12 +1,13 @@
 pkgname=goanime
-pkgver=1.8.7
+pkgver=2.0.0
 pkgrel=1
-pkgdesc="A command-line tool to browse, play, and download anime."
+pkgdesc="Search, stream and download anime, movies and TV shows from the terminal"
 arch=('x86_64')
 url="https://github.com/alvarorichard/GoAnime"
 license=('MIT')
 depends=('mpv')
-optdepends=('discord-rpc: Discord Rich Presence support')
+optdepends=('ffmpeg: embed subtitles in downloads and upscale videos'
+            'discord: Discord Rich Presence')
 source=("${pkgname}-${pkgver}::https://github.com/alvarorichard/GoAnime/releases/download/v${pkgver}/goanime-linux-amd64")
 sha256sums=('SKIP')
 

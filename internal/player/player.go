@@ -11,7 +11,6 @@ import (
 	neturl "net/url"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -22,15 +21,16 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/downloader/hls"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/upscaler"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/jsonx"
+	"charm.land/huh/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/upscaler"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 	"github.com/pkg/errors"
 	"golang.org/x/term"
 )
@@ -76,6 +76,13 @@ func SetAnimeName(name string, season int) {
 	defer gMedia.mu.Unlock()
 	gMedia.animeName = name
 	gMedia.animeSeason = max(season, 1)
+}
+
+// GetAnimeSeason returns the season downloads are currently filed under.
+func GetAnimeSeason() int {
+	gMedia.mu.Lock()
+	defer gMedia.mu.Unlock()
+	return gMedia.animeSeason
 }
 
 // SetMediaType marks whether the current content is a movie/TV show (true) or anime (false).
@@ -211,10 +218,6 @@ func resolveSeasonForEpisode(snap mediaSnapshot, absEp int) (season, ep int) {
 	return last.Season, absEp - last.StartEp + 1
 }
 
-const (
-	padding = 2
-)
-
 // tickMsg is a message for the tick command
 type tickMsg time.Time
 
@@ -238,6 +241,39 @@ type model struct {
 	taskID       string
 	taskTotals   map[string]int64
 	taskReceived map[string]int64
+	// taskEnded holds how each finished task of a batch ended: true when it
+	// was downloaded, false when it failed.
+	taskEnded map[string]bool
+
+	// What the screen names and measures: the show, the episode or the
+	// count of episodes, the terminal width, the speed and the start.
+	title   string
+	detail  string
+	width   int
+	rate    tui.RateMeter
+	started time.Time
+}
+
+// downloadDetail names the episode a single download is for: "Episode 3".
+func downloadDetail(episodeNumberStr string) string {
+	if num := ExtractEpisodeNumber(episodeNumberStr); num != "" {
+		return "Episode " + num
+	}
+	return strings.TrimSpace(episodeNumberStr)
+}
+
+// newDownloadModel is the progress screen of a download: title is the show,
+// detail which part of it ("Episode 3", "12 episodes"), totalBytes the size
+// expected so far (0 when unknown).
+func newDownloadModel(title, detail string, totalBytes int64) *model {
+	return &model{
+		progress:   tui.NewTransferBar(),
+		keys:       keyMap{quit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit"))},
+		totalBytes: totalBytes,
+		title:      title,
+		detail:     detail,
+		started:    time.Now(),
+	}
 }
 
 type keyMap struct {
@@ -268,6 +304,28 @@ func (m *model) childProgress(taskID string, estimatedTotal int64) *model {
 		}
 	}
 	return &model{parent: m, taskID: taskID}
+}
+
+// endTask records how a task of a batch ended. A downloaded task's total
+// becomes what it actually received, since its size was only estimated up
+// front, so the overall bar ends where the bytes do.
+func (m *model) endTask(taskID string, downloaded bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.taskEnded == nil {
+		m.taskEnded = make(map[string]bool)
+	}
+	m.taskEnded[taskID] = downloaded
+	if received := m.taskReceived[taskID]; downloaded && received > 0 {
+		if m.taskTotals == nil {
+			m.taskTotals = make(map[string]int64)
+		}
+		m.totalBytes += received - m.taskTotals[taskID]
+		m.taskTotals[taskID] = received
+	}
 }
 
 func (m *model) setProgressTotal(total int64) {
@@ -590,10 +648,10 @@ func filterMPVArgs(args []string) []string {
 		"--sub-files=",                 // legacy mpv multi-file form (unused — colon breaks https://)
 		"--audio-file=",                // External audio file
 		"--http-header-fields=",        // HTTP headers for HLS streams
-		"--http-header-fields-append=", // one header per option; required for values containing a comma (SuperFlix's Accept-Language)
+		"--http-header-fields-append=", // one header per option; required for values containing a comma
 		"--stream-lavf-o=",             // FFmpeg/lavf options for streaming protocols
 		"--demuxer-lavf-o=",            // FFmpeg/lavf demuxer options (e.g. allowed_extensions=ALL so HLS audio renditions with disguised segment extensions load)
-		"--demuxer-lavf-format=",       // Force HLS for SuperFlix's valid master.txt fallback
+		"--demuxer-lavf-format=",       // Force a lavf demuxer format (e.g. hls)
 		"--referrer=",                  // HTTP referrer for streaming
 		"--user-agent=",                // HTTP user agent for streaming
 		// Anime4K real-time upscaling shaders
@@ -793,12 +851,20 @@ func HandleDownloadAndPlay(
 		SetAnimeName(animeName, season)
 	}
 
+	// Record the show context for tracking writes: the SEARCH home screen's
+	// CONTINUE list reads the name, source and audio back from the database.
+	if anime != nil {
+		SetMediaContext(tui.SingleLine(animeName), tui.SingleLine(anime.Source), tui.SingleLine(anime.Audio))
+	} else {
+		SetMediaContext(tui.SingleLine(animeName), "", "")
+	}
+
 	// Check if this is an HLS stream (for proper handling later)
 	isHLSStream := LooksLikeHLS(videoURL)
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
-		downloadOption := askForDownload()
+		downloadOption := downloadMenuOption(selectedEpisodeNum, len(episodes), animeName)
 		switch downloadOption {
 		case 0:
 			// User wants to go back to server selection
@@ -821,13 +887,21 @@ func HandleDownloadAndPlay(
 			)
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
-					continue // Go back to download options menu
+					// Go back to download options menu
+					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					continue
 				}
 				return err
 			}
 			return nil
 		case 2:
 			// Download episodes in a range
+			if start := takeRangeStart(); start > 0 {
+				if err := downloadRangeFrom(start, episodes, anime); err != nil {
+					return err
+				}
+				return nil
+			}
 			if err := HandleBatchDownload(episodes, anime); err != nil {
 				return err
 			}
@@ -844,7 +918,10 @@ func HandleDownloadAndPlay(
 				util.Errorf("No episodes available to download")
 				continue
 			}
-			if err := HandleBatchDownloadRange(episodes, anime, 1, len(episodes)); err != nil {
+			if !confirmDownloadAll(len(episodes)) {
+				continue
+			}
+			if err := HandleDownloadAll(episodes, anime); err != nil {
 				if errors.Is(err, ErrUserQuit) {
 					return nil
 				}
@@ -931,7 +1008,9 @@ func HandleDownloadAndPlay(
 			)
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
-					continue // Go back to download options menu
+					// Go back to download options menu
+					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					continue
 				}
 				return err
 			}
@@ -954,6 +1033,7 @@ func downloadAndPlayEpisode(
 	if videoURL == "" {
 		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
 	}
+	util.SetSubtitleContext(snapshotMedia().AnimeName, util.GetGlobalAnimeSource(), "", "")
 
 	// Resolve intermediate URLs (e.g., animefire.io/video/ JSON API) to actual CDN URLs
 	if strings.Contains(videoURL, "animefire.io/video/") {
@@ -966,11 +1046,6 @@ func downloadAndPlayEpisode(
 			util.Debug("Resolved AnimeFire URL", "resolved", resolved)
 			videoURL = resolved
 		}
-	}
-
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get current user: %w", err)
 	}
 
 	// Use Plex-compatible naming when anime name is available
@@ -1009,11 +1084,9 @@ func downloadAndPlayEpisode(
 		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
 	} else {
 		// Fallback: route based on media type even without anime name
-		var fallbackBase string
+		fallbackBase := util.DefaultDownloadDir()
 		if snap.IsMovieOrTV {
 			fallbackBase = util.DefaultMovieDownloadDir()
-		} else {
-			fallbackBase = filepath.Join(currentUser.HomeDir, ".local", "goanime", "downloads", "anime")
 		}
 		downloadPath = filepath.Join(fallbackBase, DownloadFolderFormatter(animeURL))
 		episodePath = filepath.Join(downloadPath, episodeNumberStr+".mp4")
@@ -1048,19 +1121,15 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("blogger video URL not available")
 			}
 
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
+			// Fail fast without a TTY: the progress program blocks on Windows
+			// console input headless instead of erroring like Linux.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			go func() {
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				dlErr := downloadBloggerDirect(directURL, episodePath, numThreads, m)
 				if dlErr != nil {
 					m.mu.Lock()
@@ -1079,7 +1148,7 @@ func downloadAndPlayEpisode(
 				}
 				m.done = true
 				m.mu.Unlock()
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			if _, err := p.Run(); err != nil {
@@ -1102,7 +1171,7 @@ func downloadAndPlayEpisode(
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 
@@ -1110,16 +1179,12 @@ func downloadAndPlayEpisode(
 			LooksLikeHLS(videoURL) ||
 			strings.Contains(videoURL, "wixmp.com") ||
 			strings.Contains(videoURL, "sharepoint.com"):
-			// Use yt-dlp with progress bar
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
+			// Fail fast without a TTY (see above): progress UI hangs on Windows.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
+			// Use yt-dlp with progress bar
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Estimate/obtain total size for progress percentage.
@@ -1129,7 +1194,7 @@ func downloadAndPlayEpisode(
 			if LooksLikeHLS(videoURL) {
 				m.totalBytes = 0 // let download callbacks set the real value
 			} else {
-				httpClient := &http.Client{Transport: api.SafeTransport(10 * time.Second)}
+				httpClient := &http.Client{Transport: downloadTransport(10 * time.Second)}
 				if sz, err := getContentLength(videoURL, httpClient); err == nil && sz > 0 {
 					m.totalBytes = sz
 				} else {
@@ -1138,14 +1203,11 @@ func downloadAndPlayEpisode(
 			}
 
 			go func() {
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
 				var dlErr error
 				switch {
-				case isSuperFlixTextHLS(videoURL):
-					dlErr = downloadWithFFmpegHLS(videoURL, episodePath, m)
 				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
 					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
 					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
@@ -1199,7 +1261,7 @@ func downloadAndPlayEpisode(
 				}
 				m.done = true
 				m.mu.Unlock()
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			if _, err := p.Run(); err != nil {
@@ -1221,26 +1283,22 @@ func downloadAndPlayEpisode(
 			printDownloadLocation(episodePath)
 
 			// Download selected subtitles alongside the video file
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 
 		default:
-			// Initialize progress model
-			m := &model{
-				progress: progress.New(progress.WithDefaultBlend()),
-				keys: keyMap{
-					quit: key.NewBinding(
-						key.WithKeys("ctrl+c"),
-						key.WithHelp("ctrl+c", "quit"),
-					),
-				},
+			// Fail fast without a TTY (see above): progress UI hangs on Windows.
+			if !tui.HasTerminal() {
+				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
+			// Initialize progress model
+			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Get content length
 			httpClient := &http.Client{
-				Transport: api.SafeTransport(10 * time.Second),
+				Transport: downloadTransport(10 * time.Second),
 			}
 			contentLength, err := getContentLength(videoURL, httpClient)
 			if err != nil {
@@ -1252,7 +1310,6 @@ func downloadAndPlayEpisode(
 			// Start the download in a separate goroutine
 			go func() {
 				// Update status
-				p.Send(statusMsg(fmt.Sprintf("Downloading episode %s...", episodeNumberStr)))
 
 				if dlErr := DownloadVideo(videoURL, episodePath, numThreads, m); dlErr != nil {
 					m.mu.Lock()
@@ -1268,7 +1325,7 @@ func downloadAndPlayEpisode(
 				m.mu.Unlock()
 
 				// Final status update
-				p.Send(statusMsg("Download completed!"))
+				p.Send(statusMsg("Download complete"))
 			}()
 
 			// Run the Bubble Tea program in the main goroutine
@@ -1281,7 +1338,7 @@ func downloadAndPlayEpisode(
 
 			// Download selected subtitles alongside the video file
 			printDownloadLocation(episodePath)
-			downloadSubtitleFiles(episodePath, func(format string, a ...any) {
+			downloadSubtitleFiles(episodePath, util.GetGlobalSubtitles(), func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			})
 		}
@@ -1309,61 +1366,115 @@ func downloadAndPlayEpisode(
 	return ErrUserQuit
 }
 
-// askForDownload presents a prompt for the user to choose a download option.
-func askForDownload() int {
+// downloadMenuOption decides how playback proceeds: it plays directly
+// unless the OPTIONS menu was requested (m key, --download-menu) or an
+// episodes-screen download was picked (d/D/A auto-confirm).
+func downloadMenuOption(episodeNum, totalEpisodes int, animeName string) int {
+	req, _ := TakeEpisodeMenu()
+	currentMenuRequest = req
+	if req.DownloadCode != 0 {
+		return req.DownloadCode
+	}
+	if req.ShowMenu || util.GlobalDownloadMenu {
+		return askForDownload(episodeNum, totalEpisodes, animeName)
+	}
+	return 4 // play online
+}
+
+// currentMenuRequest is the request downloadMenuOption consumed for this
+// pass: case 2 reads its range start from it.
+var currentMenuRequest EpisodeMenuRequest
+
+// takeRangeStart consumes the D key's preset range start, if any.
+func takeRangeStart() int {
+	start := currentMenuRequest.RangeStart
+	currentMenuRequest.RangeStart = 0
+	return start
+}
+
+// askForDownload presents the episode options. Enter watches right away:
+// downloading is a shortcut (d/D/A), never the default (tela 6). Return
+// codes: 0 back, 1 this episode, 2 range, 3 upscale, 4 watch now, 5 all.
+func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return 4 // no TTY: default to play online
 	}
 	// Build the upscale option label with current status
 	upscaleStatus := upscaler.GetShaderModeName(upscaler.GetShaderMode())
-	upscaleLabel := fmt.Sprintf("Real-time Upscale [%s]", upscaleStatus)
 
-	type menuOption struct {
-		Label string
-		Value string
+	items := []tui.PickItem{
+		{Label: "Watch now"},
+		{Label: "Download this episode", Key: "d"},
+		{Label: "Download a range...", Key: "D"},
+		{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"},
 	}
-	items := []menuOption{
-		{"← Back", "back"},
-		{"Download ALL episodes", "download_all"},
-		{"Download this episode", "download_single"},
-		{"Download episodes in a range", "download_range"},
-		{upscaleLabel, "upscale"},
-		{"No download (play online)", "play_online"},
+	if totalEpisodes > 1 {
+		items = append(items, tui.PickItem{
+			Label: fmt.Sprintf("Download all %d episodes...", totalEpisodes),
+			Key:   "A",
+		})
 	}
 
-	labels := make([]string, len(items))
-	for i, it := range items {
-		labels[i] = it.Label
+	breadcrumb := "Playback > Options"
+	if episodeNum > 0 {
+		breadcrumb = fmt.Sprintf("Episode %d > Options", episodeNum)
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Playback > Download",
-		WindowTitle:  "GoAnime - Download",
+	context := tui.SingleLine(animeName)
+	if episodeNum > 0 && context != "" {
+		context = fmt.Sprintf("%s · Episode %d", context, episodeNum)
+	}
+
+	idx, err := tui.Pick(items, tui.PickOptions{
+		Breadcrumb:   breadcrumb,
+		WindowTitle:  "GoAnime - Options",
+		Context:      context,
 		ItemSingular: "option",
 		ItemPlural:   "options",
+		Action:       "watch",
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPickBack) {
 			return 0
 		}
-		util.Errorf("Error showing download menu: %v", err)
+		util.Errorf("Error showing options menu: %v", err)
 		return 4 // Default to play online on error
 	}
 
-	// Determines the selected option based on the choice value
-	switch items[idx].Value {
-	case "back":
-		return 0
-	case "download_single":
-		return 1
-	case "download_range":
-		return 2
-	case "upscale":
-		return 3
-	case "download_all":
-		return 5
-	default:
+	// Determines the selected option based on position
+	switch idx {
+	case 0:
 		return 4
+	case 1:
+		return 1
+	case 2:
+		return 2
+	case 3:
+		return 3
+	default:
+		return 5
 	}
+}
+
+// confirmDownloadAll asks before downloading the whole series: the old menu
+// put "Download ALL" one arrow from enter, so one wrong tap fetched the
+// entire series (tela 6).
+func confirmDownloadAll(totalEpisodes int) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return true
+	}
+	var confirmed bool
+	confirm := huh.NewConfirm().
+		Title(fmt.Sprintf("Download all %d episodes?", totalEpisodes)).
+		Description("This downloads the whole series.").
+		Affirmative("Yes, download all").
+		Negative("No, back").
+		Value(&confirmed)
+
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+		util.Errorf("Error showing download confirmation: %v", err)
+		return false
+	}
+	return confirmed
 }
 
 func askForPlayOffline() bool {
@@ -1679,17 +1790,26 @@ func printDownloadLocation(filePath string) {
 	util.PrintSavedLocation("File saved at:", absPath)
 }
 
-// downloadSubtitleFiles downloads the user-selected subtitle tracks alongside
-// the downloaded video file. Uses the subtitles stored in util.GlobalSubtitles
-// (already filtered by util.SelectSubtitles).
-func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...any)) {
+// subtitleHTTPClientFn builds the SSRF-guarded client subtitle tracks are
+// fetched with; a seam for tests.
+var subtitleHTTPClientFn = func() *http.Client {
+	return &http.Client{
+		Transport: api.SafeTransport(30 * time.Second),
+		Timeout:   60 * time.Second,
+	}
+}
+
+// downloadSubtitleFiles fetches the given subtitle tracks and muxes them into
+// the downloaded video file. Single downloads pass util.GlobalSubtitles
+// (already filtered by util.SelectSubtitles); a batch passes each episode's
+// own tracks, captured when that episode's stream was resolved.
+func downloadSubtitleFiles(videoPath string, subs []util.SubtitleInfo, printFn func(format string, a ...any)) {
 	if printFn == nil {
 		printFn = func(format string, a ...any) {
 			fmt.Printf(format, a...)
 		}
 	}
 
-	subs := util.GetGlobalSubtitles()
 	if len(subs) == 0 {
 		return
 	}
@@ -1718,10 +1838,7 @@ func downloadSubtitleFiles(videoPath string, printFn func(format string, a ...an
 	}
 
 	dir := filepath.Dir(videoPath)
-	client := &http.Client{
-		Transport: api.SafeTransport(30 * time.Second),
-		Timeout:   60 * time.Second,
-	}
+	client := subtitleHTTPClientFn()
 
 	// Collect subtitle files to mux
 	type subEntry struct {

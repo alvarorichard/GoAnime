@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,4 +87,21 @@ func TestGetUserInput_InvalidIndexQuits(t *testing.T) {
 		return 99, nil
 	})
 	assert.Equal(t, "q", GetUserInput())
+}
+
+func TestGetUserInput_MenuKeys(t *testing.T) {
+	var gotKeys []string
+	swapFindMenu(t, func(items []menuItem) (int, error) {
+		gotKeys = nil
+		for _, it := range items {
+			gotKeys = append(gotKeys, it.Key)
+		}
+		return 0, nil
+	})
+
+	GetUserInput()
+	assert.Equal(t, []string{"n", "p", "e", "c", "esc", "q"}, gotKeys)
+
+	GetUserInput(true)
+	assert.Equal(t, []string{"r", "c", "esc", "q"}, gotKeys)
 }

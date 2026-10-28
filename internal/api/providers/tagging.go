@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alvarorichard/Goanime/internal/api/source"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 // Per-source result tagging (ported from the ScraperManager, re-keyed by
@@ -30,17 +30,25 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "Animefire.io"
 	case source.Goyabu:
 		return "Goyabu"
-	case source.SuperFlix:
-		return "SuperFlix"
-	case source.AniDB:
-		return "AniDB"
+	case source.HiAnime:
+		return "HiAnime"
+	case source.StartFlix:
+		return "StartFlix"
+	case source.TopCine:
+		return "TopCine"
+	case source.Pobreflix:
+		return "Pobreflix"
+	case source.AnimeDrive:
+		return "AnimeDrive"
+	case source.AnimesDigital:
+		return "AnimesDigital"
 	default:
 		return string(kind)
 	}
 }
 
 func languageTag(kind source.SourceKind) string {
-	if kind == source.AniDB {
+	if kind == source.HiAnime {
 		return "[English]"
 	}
 	return "[PT-BR]"
@@ -61,7 +69,7 @@ func cleanPTBRTitle(title string) string {
 // canonical Source field, matching the legacy ScraperManager.tagResults exactly.
 func tagResults(results []*models.Anime, kind source.SourceKind) {
 	name := sourceDisplayName(kind)
-	isPTBR := kind == source.AnimeFire || kind == source.Goyabu
+	isPTBR := kind == source.AnimeFire || kind == source.Goyabu || kind == source.AnimesDigital || kind == source.AnimeDrive
 
 	for _, anime := range results {
 		if isPTBR {
@@ -77,7 +85,7 @@ func tagResults(results []*models.Anime, kind source.SourceKind) {
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			if kind == source.SuperFlix {
+			if kind == source.StartFlix || kind == source.TopCine || kind == source.Pobreflix {
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
 					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)

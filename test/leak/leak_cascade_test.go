@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/downloader/hls"
-	"github.com/alvarorichard/Goanime/internal/util"
-	"github.com/alvarorichard/Goanime/internal/util/leakcheck"
+	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/util/leakcheck"
 )
 
 // hlsServer serves a small multi-segment playlist.

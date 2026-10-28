@@ -10,12 +10,141 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/api"
-	"github.com/alvarorichard/Goanime/internal/api/providers/metadata"
-	"github.com/alvarorichard/Goanime/internal/models"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/api"
+	"github.com/alvarorichard/Goanime/v2/internal/api/providers/metadata"
+	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
+
+// alternateSources lists the sources that could still carry a title, excluding
+// the one that just failed and any source the search does not reach — turned
+// off via GOANIME_DISABLED_SOURCES, or shipped off by default (Goyabu) and not
+// opted back in. Suggesting a source the user cannot find in
+// the results would only send them looking for it.
+//
+// TopCine is never offered, and a failing TopCine title counts as StartFlix:
+// both play through the same StartFlix panel, so one cannot rescue the other.
+func alternateSources(current string) []string {
+	if strings.EqualFold(current, string(apisource.TopCine)) {
+		current = string(apisource.StartFlix)
+	}
+	others := make([]string, 0, 4)
+	for _, k := range []apisource.SourceKind{apisource.AnimeFire, apisource.Goyabu, apisource.StartFlix} {
+		s, ok := apisource.Registered(k)
+		if !ok || !apisource.IsSearchEnabled(s.Describe()) {
+			continue
+		}
+		// Source labels are not always the bare kind ("Animefire.io"), so match
+		// on the kind as a prefix rather than for equality.
+		if strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
+			continue
+		}
+		others = append(others, string(k))
+	}
+	return others
+}
+
+// reportSourceVideoRemoved explains a dead episode in terms the user can act
+// on: the source still lists it, the host deleted the file, and the way
+// forward is the same title on another source (ESC in the episode list walks
+// back to the search results, where the other sources' entries are waiting).
+func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
+	current := ""
+	if anime != nil {
+		current = anime.Source
+	}
+	src := current
+	if src == "" {
+		src = "this source"
+	}
+	label := strings.TrimSpace(episodeNumberStr)
+	if label == "" {
+		label = "This episode"
+	}
+	util.Errorf("%s is no longer playable on %s: the host deleted the video file (the episode is still listed, the media behind it is gone).", label, src)
+	if others := alternateSources(current); len(others) > 0 {
+		util.Infof("Press ESC to leave the episode list and pick the same title from another source: %s.", strings.Join(others, ", "))
+	} else {
+		util.Infof("Press ESC to leave the episode list and search again.")
+	}
+}
+
+// alternateMovieSources lists the movie sources that could still carry the
+// title — the movie-side version of alternateSources. StartFlix, TopCine and
+// Pobreflix playback all resolve the same panel (and the same fallback ids),
+// so a listing is the only thing that differs between them: when this source
+// lost the movie's players, the other listing may still carry it, and when
+// the panel itself is the problem the message already says to wait — the
+// alternates below name where the movie is ALSO listed.
+//
+// TopCine is never offered and folds into StartFlix: it plays through the
+// same panel, so suggesting both reads as two places when there is one.
+// Sources turned off by GOANIME_DISABLED_SOURCES are dropped, the same way
+// alternateSources drops them.
+func alternateMovieSources(current string) []string {
+	if strings.EqualFold(current, string(apisource.TopCine)) {
+		current = string(apisource.StartFlix)
+	}
+	others := make([]string, 0, 2)
+	for _, k := range []apisource.SourceKind{apisource.StartFlix, apisource.Pobreflix} {
+		// Source labels are not always the bare kind ("Animefire.io" exists
+		// for anime), so match on the kind as a prefix rather than equality.
+		if strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {
+			continue
+		}
+		s, ok := apisource.Registered(k)
+		if !ok || !apisource.IsSearchEnabled(s.Describe()) {
+			continue
+		}
+		others = append(others, string(k))
+	}
+	return others
+}
+
+// movieFriendlyErr picks the user-facing tail of a movie stream failure: the
+// api layers rephrase the panel-shaped causes into a plain-language
+// friendlyError whose message is all the user needs, while the rest of the
+// chain is internal detail only the debug log needs.
+func movieFriendlyErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	if msg, ok := api.FriendlyMessage(err); ok {
+		return msg
+	}
+	return err.Error()
+}
+
+// reportMovieStreamFailed is the movie-side counterpart of the anime flow's
+// dead-episode reporting: the failure is printed once, the sources that still
+// list the title are named, and the next result screen carries the notice
+// above the list — the same title from another source is usually one pick
+// away. After this HandleMovie returns to selection, where that list opens.
+func reportMovieStreamFailed(anime *models.Anime, err error) {
+	util.Warnf("Failed to extract video URL: %v", util.ErrorHandler(err))
+	tui.NoticeOnNextResults(movieStreamFailedNotice(anime, err))
+}
+
+// movieStreamFailedNotice composes the result-screen notice for a movie whose
+// stream failed: the api layer's plain-language friendly wording, plus where
+// the same movie is still listed. No error, no notice.
+func movieStreamFailedNotice(anime *models.Anime, err error) string {
+	if err == nil {
+		return ""
+	}
+	base := movieFriendlyErr(err)
+	if anime == nil {
+		return base
+	}
+	others := alternateMovieSources(anime.Source)
+	if len(others) > 0 {
+		base += " The same movie is also listed on: " + strings.Join(others, ", ") + "."
+	}
+	return base
+}
 
 func PlayEpisode(
 	ctx context.Context,
@@ -116,7 +245,17 @@ func PlayEpisode(
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
 		// Route user back to episode selection so they can pick another one.
-		if !errors.Is(videoErr, player.ErrBackToEpisodeSelection) {
+		switch {
+		case errors.Is(videoErr, player.ErrBackToEpisodeSelection):
+			// User-initiated: nothing to report.
+		case errors.Is(videoErr, player.ErrSourceVideoRemoved):
+			// The listing is alive but the media behind it is gone, so trying
+			// other episodes of the same title usually fails the same way
+			// (issue #203). Say that plainly and point at the only thing that
+			// can work — the same title on a different source — instead of
+			// printing a raw extraction error the user cannot act on.
+			reportSourceVideoRemoved(anime, episodeNumberStr)
+		default:
 			util.Warnf("Failed to extract video URL: %v", videoErr)
 		}
 		return player.ErrBackToEpisodeSelection

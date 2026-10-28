@@ -8,19 +8,48 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"github.com/alvarorichard/Goanime/internal/handlers"
-	"github.com/alvarorichard/Goanime/internal/player"
-	"github.com/alvarorichard/Goanime/internal/tui"
-	"github.com/alvarorichard/Goanime/internal/util"
+	"github.com/alvarorichard/Goanime/v2/internal/handlers"
+	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/updater"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"golang.org/x/term"
 )
 
 func main() {
+	// Exit code for scripts: 0 is success or a deliberate quit (help,
+	// version, user cancel), 1 is any genuine error. Registered FIRST so
+	// it runs LAST, after the cleanup below.
+	exitCode := 0
+	defer func() { os.Exit(exitCode) }()
+	fail := func(err error) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", util.ErrorHandler(err))
+		exitCode = 1
+	}
+
+	// A double-click on Windows lands in conhost, which has no font fallback
+	// and limited VT support; the TUI would degrade to ASCII. Hand a standalone
+	// launch to Windows Terminal (installing it once if needed) and let this
+	// process return. Shells and other ConPTY hosts keep their own terminal.
+	if tui.RelaunchInWindowsTerminal() {
+		return
+	}
+
+	// Finish housekeeping from a previous --update: remove the backup and
+	// staged files only after this binary has started and its digest matches
+	// the one recorded by the updater. No marker means nothing to clean up.
+	updater.CleanupAfterUpdate()
+
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
 	// codes like ←[38;2;...m instead of colors. If enable fails, color paths
 	// fall back to ASCII via tui.ConsoleColorProfile / SupportsANSI.
 	_ = tui.EnableVirtualTerminal()
+	// Decode classic consoles as UTF-8: GoAnime's UTF-8 bytes otherwise meet
+	// the console's OEM code page (850/932/…) and Japanese or accented titles
+	// arrive as mojibake. The restore hands the old page back on exit.
+	restoreConsoleCP := tui.EnableUTF8Console()
+	defer restoreConsoleCP()
 
 	// Save terminal state so we can restore it on exit.
 	// Libraries like promptui (readline) and go-fuzzyfinder (tcell) put the
@@ -61,6 +90,7 @@ func main() {
 			stack := debug.Stack()
 			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
 			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
+			exitCode = 1
 		}
 	}()
 
@@ -101,7 +131,7 @@ func main() {
 		// Check if error is update request
 		if err == util.ErrUpdateRequested {
 			if updateErr := handlers.HandleUpdateRequest(); updateErr != nil {
-				util.Errorf("%v", util.ErrorHandler(updateErr))
+				fail(updateErr)
 			}
 			return
 
@@ -109,7 +139,7 @@ func main() {
 		// Check if error is download request
 		if err == util.ErrDownloadRequested {
 			if downloadErr := handlers.HandleDownloadRequest(); downloadErr != nil {
-				util.Errorf("%v", util.ErrorHandler(downloadErr))
+				fail(downloadErr)
 			}
 			return
 		}
@@ -118,13 +148,13 @@ func main() {
 			// Movie/TV download is currently a permanent stub that always
 			// returns an explanatory error (scrapers removed) — log it
 			// unconditionally.
-			util.Errorf("%v", util.ErrorHandler(handlers.HandleMovieDownloadRequest()))
+			fail(handlers.HandleMovieDownloadRequest())
 			return
 		}
 		// Check if error is upscale request
 		if err == util.ErrUpscaleRequested {
 			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {
-				util.Errorf("%v", util.ErrorHandler(upscaleErr))
+				fail(upscaleErr)
 			}
 			return
 		}
@@ -132,10 +162,38 @@ func main() {
 		if err == util.ErrHelpRequested {
 			return
 		}
-		util.Errorf("%v", util.ErrorHandler(err))
+		fail(err)
 		return
 	}
 
-	// Handle normal playback mode
+	// Guarantee the Japanese font decision on every real launch. The probes
+	// run once (sync.Once): install GoAnime Glyphs when no Japanese face is
+	// accounted for, and log the note. No handler is trusted to be the only
+	// possible path — the search home, a named search and the download and
+	// update flags all ride through here. Plain mode does not probe, and
+	// help/version already returned above, so a terminal-less or scripted
+	// run pays nothing.
+	tui.EnsureJapaneseDetected()
+
+	// Handle normal playback mode: an empty name opens the SEARCH home
+	// screen (tela 1) instead of searching blank.
+	if animeName == "" {
+		decision, homeErr := handlers.HandleSearchHome()
+		if homeErr != nil {
+			fail(homeErr)
+			return
+		}
+		if decision.Cancelled {
+			return
+		}
+		if decision.Entry != nil {
+			handlers.HandleContinue(decision)
+			return
+		}
+		if decision.Scope != "" {
+			util.GlobalSource = decision.Scope
+		}
+		animeName = util.TreatingAnimeName(decision.Query)
+	}
 	handlers.HandlePlaybackMode(animeName)
 }

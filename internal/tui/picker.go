@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -20,11 +22,59 @@ var (
 	ErrNoPickItems = errors.New("no items to pick")
 )
 
+// PickStatus is the mark drawn before a row's label.
+type PickStatus int
+
+const (
+	PickNone       PickStatus = iota
+	PickWatched               // ✓ seen to the end
+	PickInProgress            // ◐ stopped partway
+	PickCurrent               // ● the one in use, such as the playing audio track
+)
+
 // PickItem is one selectable row on a generic picker screen.
 type PickItem struct {
-	Label   string   // primary row text
-	Details string   // secondary row text (optional)
-	Preview []string // side panel lines on wide terminals (optional)
+	Label   string // primary row text
+	Details string // secondary text at the right of the row (optional)
+	// Tags are short badges drawn after the label, such as "Filler".
+	Tags   []string
+	Status PickStatus
+	// Note replaces Details at the right of the row, such as where playback
+	// stopped.
+	Note string
+	// Key is a single character that picks the row at once. Rows with a key
+	// keep type-to-filter for every other character.
+	Key string
+	// Meter, from 0 to 1, draws a bar at the right of the row in place of
+	// Details, such as a resolution against the best one offered.
+	Meter float64
+}
+
+// PickAction is a screen-level single-key shortcut, returned instead of a
+// selection. The episodes screen uses r/d/D/A/m (tela 5): r resumes from the
+// start, d/D/A download, m opens every option. Other screens leave empty.
+type PickAction struct {
+	Key   string // single character, checked before type-to-filter
+	Label string // section and help row: "this episode"
+	Hint  string // footer hint: "download"; "" hides it from the footer
+	// Section lists the action under ActionsLabel ("Download"). r resumes
+	// instead of downloading, so it stays out of the section.
+	Section bool
+}
+
+// PickPanel is a paper panel shown beside the list on a wide terminal and
+// above it on a narrow one.
+type PickPanel struct {
+	Label   string   // heading, drawn in capitals, such as "Now playing"
+	Gloss   string   // the heading's Japanese, such as "再生中"
+	Title   string   // bold first line
+	Lines   []string // text under the title
+	Command string   // a command line drawn on ink, such as a flag to try
+	// Progress reports a position and a duration in seconds; ok false keeps
+	// the last answer. It is asked once when the screen opens, and then every
+	// second when Live is set, so the panel follows what mpv is playing.
+	Progress func() (position, duration float64, ok bool)
+	Live     bool
 }
 
 // PickOptions configure a generic picker screen.
@@ -34,16 +84,47 @@ type PickOptions struct {
 	ItemSingular string // status bar noun, e.g. "season"
 	ItemPlural   string // status bar plural noun, e.g. "seasons"
 	InitialIndex int    // preselected row in the items slice
+	Action       string // what enter does, for the footer: "play", "open"; "select" when empty
+	Context      string // right side of the header, such as the show being played
+	Panel        *PickPanel
+	// Actions are screen-level single-key shortcuts (tela 5).
+	Actions []PickAction
+	// ActionsLabel heads the actions section ("Download"); "" hides it.
+	ActionsLabel string
+	// ActionsGloss is the heading's Japanese ("ダウンロード").
+	ActionsGloss string
+	// FilterPlaceholder is the filter line's hint.
+	FilterPlaceholder string
+	// BackDesc is what esc does, for the footer ("back", "results", ...).
+	BackDesc string
+	// HelpHint adds "? help" to the footer.
+	HelpHint bool
 }
+
+const (
+	// listChromeRows is what a list draws around its rows: the filter line,
+	// the status line and its gap, the page dots and their gap.
+	listChromeRows = 5
+	// minPanelListRows is how many rows a panel above the list leaves visible.
+	minPanelListRows = 6
+)
+
+// narrowPanelWidth caps a panel drawn above the list.
+const narrowPanelWidth = 64
 
 type pickEntry struct {
 	index int
 	item  PickItem
 }
 
-// FilterValue exposes label and details to the fuzzy filter.
+// FilterValue exposes label, details and tags to the fuzzy filter, so typing
+// "filler" finds the filler episodes.
 func (e pickEntry) FilterValue() string {
-	return strings.TrimSpace(singleLine(e.item.Label) + " " + singleLine(e.item.Details))
+	parts := []string{singleLine(e.item.Label), singleLine(e.item.Details)}
+	for _, tag := range e.item.Tags {
+		parts = append(parts, singleLine(tag))
+	}
+	return strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
 }
 
 // Title returns the sanitized primary row text.
@@ -59,19 +140,56 @@ func (e pickEntry) Description() string {
 	return singleLine(e.item.Details)
 }
 
+func (e pickEntry) row() row {
+	return row{
+		status: e.item.Status,
+		title:  e.Title(),
+		desc:   e.Description(),
+		tags:   e.item.Tags,
+		note:   e.item.Note,
+		key:    singleLine(e.item.Key),
+		meter:  e.item.Meter,
+	}
+}
+
 type pickerModel struct {
 	theme         Theme
 	shell         Shell
 	options       PickOptions
 	entries       list.Model
 	selectedIndex int
+	actionKey     string // screen action picked instead of a row
 	err           error
 	filterPending bool
+
+	// shortcuts maps a row's key to its index in the items slice; keys
+	// keeps them in row order for the footer.
+	shortcuts map[string]int
+	keys      []string
+	// actionKeys maps a screen action's key to the actions slice.
+	actionKeys map[string]int
+
+	panel      *PickPanel
+	progress   panelProgress
+	panelSide  bool // beside the list rather than above it
+	panelWidth int  // 0 when the panel does not fit
+	// plainPanel is the panel as plain text below the list (tela 9).
+	plainPanel string
+	// showHelp replaces the list with the KEYS overlay (tela 10).
+	showHelp bool
 }
+
+type (
+	progressTickMsg struct{}
+	progressMsg     struct {
+		position, duration float64
+		ok                 bool
+	}
+)
 
 // newPickerModel creates a styled, filterable picker screen.
 func newPickerModel(items []PickItem, opts PickOptions) *pickerModel {
-	theme := NewTheme(true)
+	theme := CurrentTheme()
 	opts.Breadcrumb = singleLine(opts.Breadcrumb)
 	opts.WindowTitle = singleLine(opts.WindowTitle)
 	if opts.Breadcrumb == "" {
@@ -81,60 +199,94 @@ func newPickerModel(items []PickItem, opts PickOptions) *pickerModel {
 		opts.ItemSingular, opts.ItemPlural = "item", "items"
 	}
 	shell := NewShell(&theme, opts.Breadcrumb)
+	shell.Context = opts.Context
 
 	listItems := make([]list.Item, 0, len(items))
+	shortcuts := make(map[string]int)
+	var keys []string
+	actionKeys := make(map[string]int)
+	marks := false
 	for index, item := range items {
 		listItems = append(listItems, pickEntry{index: index, item: item})
+		if k := singleLine(item.Key); utf8.RuneCountInString(k) == 1 {
+			if _, taken := shortcuts[k]; !taken {
+				shortcuts[k] = index
+				keys = append(keys, k)
+			}
+		}
+		marks = marks || item.Status != PickNone
+	}
+	for i, action := range opts.Actions {
+		if k := singleLine(action.Key); utf8.RuneCountInString(k) == 1 {
+			if _, taken := actionKeys[k]; !taken {
+				actionKeys[k] = i
+			}
+		}
 	}
 
-	delegate := list.NewDefaultDelegate()
 	// Dense rows: long catalogs (One Piece, etc.) show more episodes per screen.
-	delegate.SetSpacing(0)
-	delegate.Styles.NormalTitle = theme.Text.PaddingLeft(2)
-	delegate.Styles.NormalDesc = theme.Muted.PaddingLeft(4)
-	delegate.Styles.SelectedTitle = theme.SelectedTitle
-	delegate.Styles.SelectedDesc = theme.SelectedDescription.PaddingLeft(1)
-	delegate.Styles.DimmedTitle = theme.Muted.PaddingLeft(2)
-	delegate.Styles.DimmedDesc = theme.Muted.Faint(true).PaddingLeft(4)
-	delegate.Styles.FilterMatch = theme.FilterMatch
+	delegate := rowDelegate{theme: &theme, marks: marks}
 
 	width, height := shell.ContentSize()
 	entries := list.New(listItems, delegate, width, height)
 	entries.KeyMap = fancyListKeyMap()
 	entries.DisableQuitKeybindings() // quit/back owned by picker (ctrl+c / esc)
-	entries.SetShowTitle(false)
-	entries.SetShowHelp(false)
+	placeholder := singleLine(opts.FilterPlaceholder)
+	if placeholder == "" {
+		placeholder = "type number or title…"
+	}
+	styleList(&entries, &theme, placeholder)
+	if singleLine(opts.FilterPlaceholder) != "" {
+		// Tela 5: the jump hint reads persistently above the list, not
+		// only while filtering.
+		prompt := drawGlyph("❯ ", "> ")
+		entries.Title = theme.Primary.Render(prompt) + theme.Muted.Render(placeholder)
+		entries.SetShowTitle(true)
+	}
 	entries.SetStatusBarItemName(opts.ItemSingular, opts.ItemPlural)
-	entries.FilterInput.Prompt = "❯ "
-	entries.FilterInput.Placeholder = "type number or title…"
-	entries.Styles.StatusBar = theme.Muted
-	entries.Styles.StatusEmpty = theme.Muted
-	entries.Styles.StatusBarActiveFilter = theme.Primary
-	entries.Styles.StatusBarFilterCount = theme.Muted
-	entries.Styles.NoItems = theme.Muted
-	entries.Styles.PaginationStyle = theme.Muted
-	entries.Styles.ActivePaginationDot = theme.Primary
-	entries.Styles.InactivePaginationDot = theme.Muted
-	entries.Styles.Filter.Focused.Prompt = theme.Primary
-	entries.Styles.Filter.Focused.Text = theme.Text
-	entries.Styles.Filter.Focused.Placeholder = theme.Muted
 	entries.AdditionalShortHelpKeys = fancyListHelpKeys
 	if opts.InitialIndex > 0 && opts.InitialIndex < len(listItems) {
 		entries.Select(opts.InitialIndex)
 	}
 
-	return &pickerModel{
+	m := &pickerModel{
 		theme:         theme,
 		shell:         shell,
 		options:       opts,
 		entries:       entries,
 		selectedIndex: -1,
+		shortcuts:     shortcuts,
+		keys:          keys,
+		actionKeys:    actionKeys,
+		panel:         opts.Panel,
+	}
+	if m.panel != nil && m.panel.Progress != nil && !m.panel.Live {
+		m.setProgress(m.panel.Progress())
+	}
+	m.layout()
+	return m
+}
+
+// Init starts polling the panel's progress when it follows playback.
+func (m *pickerModel) Init() tea.Cmd {
+	if m.panel != nil && m.panel.Progress != nil && m.panel.Live {
+		return m.pollProgress()
+	}
+	return nil
+}
+
+func (m *pickerModel) pollProgress() tea.Cmd {
+	poll := m.panel.Progress
+	return func() tea.Msg {
+		position, duration, ok := poll()
+		return progressMsg{position: position, duration: duration, ok: ok}
 	}
 }
 
-// Init starts the picker screen without background work.
-func (m *pickerModel) Init() tea.Cmd {
-	return nil
+func (m *pickerModel) setProgress(position, duration float64, ok bool) {
+	if ok {
+		m.progress = panelProgress{position: position, duration: duration}
+	}
 }
 
 // Update handles resize, filtering, navigation, selection, and cancellation.
@@ -147,14 +299,37 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
-		width, height := m.shell.ContentSize()
-		// Full-width list — no side preview panel (it only duplicated the row).
-		m.entries.SetSize(width, height)
+		m.layout()
 		return m, nil
 
+	case progressMsg:
+		m.setProgress(msg.position, msg.duration, msg.ok)
+		return m, tea.Tick(time.Second, func(time.Time) tea.Msg { return progressTickMsg{} })
+
+	case progressTickMsg:
+		poll := m.pollProgress()
+		return m, poll
+
 	case tea.KeyPressMsg:
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc":
+				m.showHelp = false
+				return m, nil
+			case "ctrl+c":
+				m.err = ErrPickCancelled
+				return m, tea.Quit
+			default:
+				return m, nil
+			}
+		}
 		filtering := m.entries.FilterState() == list.Filtering
 		switch msg.String() {
+		case "?":
+			if !filtering {
+				m.showHelp = true
+				return m, nil
+			}
 		case "ctrl+c":
 			m.err = ErrPickCancelled
 			return m, tea.Quit
@@ -177,9 +352,24 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		default:
-			// fzf-style: typing while browsing opens the filter with that char.
-			if !filtering && isTypeToFilterKey(msg) {
-				return m.startFilterWithKey(msg)
+			if !filtering {
+				// Screen actions win over row shortcuts and filtering:
+				// on the episodes screen r/d/D/A/m must fire anywhere.
+				if _, ok := m.actionKeys[msg.String()]; ok {
+					m.actionKey = msg.String()
+					if entry, ok := m.entries.SelectedItem().(pickEntry); ok {
+						m.selectedIndex = entry.index
+					}
+					return m, tea.Quit
+				}
+				if index, ok := m.shortcuts[msg.String()]; ok {
+					m.selectedIndex = index
+					return m, tea.Quit
+				}
+				// fzf-style: typing while browsing opens the filter with that char.
+				if isTypeToFilterKey(msg) {
+					return m.startFilterWithKey(msg)
+				}
 			}
 		}
 	}
@@ -193,24 +383,249 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// layout sizes the list around the panel: beside it on a wide terminal,
+// above it on a narrow one when both fit, and the list alone otherwise.
+// In plain mode the panel is always plain text below the list (tela 9).
+func (m *pickerModel) layout() {
+	width, height := m.shell.ContentSize()
+	m.panelSide, m.panelWidth, m.plainPanel = false, 0, ""
+	listWidth, listHeight := width, height
+	if m.panel != nil {
+		if Plain() {
+			if panel := fitPanel(&m.theme, m.panelContent(), width, height); panel != "" {
+				m.panelWidth = width
+				m.plainPanel = panel
+				listWidth, listHeight = width, height-lipgloss.Height(panel)-1
+			}
+		} else if width >= wideResultsBreakpoint {
+			m.panelSide = true
+			m.panelWidth = width - resultsListWidth(width)
+			listWidth = resultsListWidth(width) - resultsGutter
+		} else if panel := fitPanel(&m.theme, m.panelContent(), min(width, narrowPanelWidth), m.panelRoomAbove(height)); panel != "" {
+			m.panelWidth = min(width, narrowPanelWidth)
+			listHeight = height - lipgloss.Height(panel) - 1
+		}
+	}
+	m.entries.SetSize(listWidth, max(listHeight, 1))
+}
+
+// panelRoomAbove is the height a panel above the list may take out of
+// height: what is left once the list keeps its chrome, a blank line, and
+// enough rows to still be a list.
+func (m *pickerModel) panelRoomAbove(height int) int {
+	return height - 1 - listChromeRows - min(len(m.entries.Items()), minPanelListRows)
+}
+
+func (m *pickerModel) panelContent() *panelContent {
+	p := m.panel
+	content := &panelContent{label: p.Label, gloss: p.Gloss, title: p.Title, lines: p.Lines, command: p.Command}
+	if p.Progress != nil {
+		content.progress = &m.progress
+	}
+	return content
+}
+
+// hints lists the footer keys, the shortcuts in place of type-to-filter on
+// a menu that has them. Screens with actions (tela 5) lead with enter and
+// the action hints, like the design's episode footer.
+func (m *pickerModel) hints() []Hint {
+	if m.showHelp {
+		return []Hint{
+			{Key: "?", Desc: "close", Essential: true},
+			{Key: "esc", Desc: "close", Essential: true},
+		}
+	}
+	action := singleLine(m.options.Action)
+	if action == "" {
+		action = "select"
+	}
+	back := singleLine(m.options.BackDesc)
+	if back == "" {
+		back = "back"
+	}
+	if m.entries.FilterState() != list.Unfiltered {
+		return []Hint{
+			{Key: "↑↓", Desc: "move"},
+			{Key: "enter", Desc: action, Essential: true},
+			{Key: "esc", Desc: "clear filter", Essential: true},
+		}
+	}
+	move := "↑↓"
+	if Plain() {
+		move = "up/dn"
+	}
+	if len(m.options.Actions) > 0 {
+		hints := []Hint{{Key: "enter", Desc: action, Essential: true}}
+		for _, a := range m.options.Actions {
+			if a.Hint != "" {
+				hints = append(hints, Hint{Key: singleLine(a.Key), Desc: singleLine(a.Hint)})
+			}
+		}
+		hints = append(hints, Hint{Key: move, Desc: "move"})
+		if m.options.HelpHint {
+			hints = append(hints, Hint{Key: "?", Desc: "help"})
+		}
+		return append(hints, Hint{Key: "esc", Desc: back, Essential: true})
+	}
+	hints := []Hint{{Key: move, Desc: "move"}}
+	if len(m.keys) > 0 {
+		hints = append(hints, Hint{Key: strings.Join(m.keys, " "), Desc: "shortcuts"})
+	} else {
+		hints = append(hints, Hint{Key: "type", Desc: "filter"})
+	}
+	if len(m.entries.Items()) > m.entries.Paginator.PerPage {
+		hints = append(hints, Hint{Key: "g/G", Desc: "first/last"})
+	}
+	hints = append(hints, Hint{Key: "enter", Desc: action, Essential: true})
+	if m.options.HelpHint {
+		hints = append(hints, Hint{Key: "?", Desc: "help"})
+	}
+	return append(hints, Hint{Key: "esc", Desc: back, Essential: true})
+}
+
+// actionsSection draws the actions block under the panel (tela 5's DOWNLOAD
+// section): the heading and one line per section action.
+func (m *pickerModel) actionsSection() string {
+	var labels []PickAction
+	for _, a := range m.options.Actions {
+		if a.Section {
+			labels = append(labels, a)
+		}
+	}
+	if singleLine(m.options.ActionsLabel) == "" || len(labels) == 0 {
+		return ""
+	}
+	head := m.theme.Primary.Render(strings.ToUpper(singleLine(m.options.ActionsLabel)))
+	if gloss := singleLine(m.options.ActionsGloss); gloss != "" && ShowJapanese() {
+		head += m.theme.Gloss.Render("  " + gloss)
+	}
+	lines := []string{head}
+	for _, a := range labels {
+		lines = append(lines, m.theme.Keycap.Render(singleLine(a.Key))+m.theme.Footer.Render("  "+singleLine(a.Label)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// View renders the list, with the panel beside or above it when there is one.
+func (m *pickerModel) View() tea.View {
+	width, height := m.shell.ContentSize()
+	body := m.entries.View()
+	if m.showHelp {
+		if help := RenderHelp(&m.theme, helpScreenName(m.options.Breadcrumb), nil, m.helpExtra(), width, height); help != "" {
+			body = help
+		}
+	} else if m.panelWidth > 0 {
+		if Plain() {
+			// The clock text follows playback; re-render, same height.
+			if panel := fitPanel(&m.theme, m.panelContent(), width, height); panel != "" {
+				body += "\n\n" + panel
+				if section := m.actionsSection(); section != "" {
+					body += "\n\n" + section
+				}
+			}
+		} else if m.panelSide {
+			side := ""
+			if panel := fitPanel(&m.theme, m.panelContent(), m.panelWidth, height); panel != "" {
+				side = panel
+			}
+			if section := m.actionsSection(); section != "" {
+				if side != "" {
+					side += "\n\n"
+				}
+				side += section
+			}
+			if side != "" {
+				column := lipgloss.NewStyle().Width(resultsListWidth(width)).Render(body)
+				body = lipgloss.JoinHorizontal(lipgloss.Top, column, side)
+			}
+		} else if panel := fitPanel(&m.theme, m.panelContent(), m.panelWidth, m.panelRoomAbove(height)); panel != "" {
+			body = panel + "\n\n" + body
+			if section := m.actionsSection(); section != "" {
+				body += "\n\n" + section
+			}
+		} else if section := m.actionsSection(); section != "" {
+			body += "\n\n" + section
+		}
+	} else if section := m.actionsSection(); section != "" {
+		body += "\n\n" + section
+	}
+
+	view := tea.NewView(m.shell.Render(body, m.hints()))
+	view.AltScreen = true
+	title := m.options.WindowTitle
+	if title == "" {
+		title = "GoAnime"
+	}
+	view.WindowTitle = title
+	return view
+}
+
+// helpExtra documents the screen's keys in the KEYS overlay: row shortcuts
+// and, when present, the screen actions under their section heading.
+func (m *pickerModel) helpExtra() map[string][]HelpRow {
+	extra := helpShortcuts(m.keys)
+	for _, a := range m.options.Actions {
+		if a.Label == "" {
+			continue
+		}
+		section := singleLine(m.options.ActionsLabel)
+		if section == "" {
+			section = "Shortcuts"
+		}
+		if extra == nil {
+			extra = make(map[string][]HelpRow)
+		}
+		extra[strings.ToUpper(section)] = append(extra[strings.ToUpper(section)], HelpRow{Key: singleLine(a.Key), Desc: singleLine(a.Label)})
+	}
+	return extra
+}
+
+// helpScreenName is the screen for the KEYS overlay: the last breadcrumb
+// step, uppercased ("Episodes" from "Search > Episodes").
+func helpScreenName(breadcrumb string) string {
+	steps := breadcrumbSteps(breadcrumb)
+	if len(steps) == 0 {
+		return ""
+	}
+	return strings.ToUpper(steps[len(steps)-1])
+}
+
+// helpShortcuts documents a menu's single-key shortcuts in the overlay.
+func helpShortcuts(keys []string) map[string][]HelpRow {
+	if len(keys) == 0 {
+		return nil
+	}
+	return map[string][]HelpRow{
+		"SHORTCUTS": {{Key: strings.Join(keys, " "), Desc: "pick at once"}},
+	}
+}
+
 // startFilterWithKey opens the list filter (as if "/" was pressed) then applies
 // the typed character so "1000" works without a separate filter chord.
 func (m *pickerModel) startFilterWithKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-	var cmd tea.Cmd
-	m.entries, cmd = m.entries.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
 	filterBefore := m.entries.FilterValue()
-	m.entries, cmd = m.entries.Update(msg)
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
+	cmd := feedKeyToFilter(&m.entries, msg)
 	if m.entries.FilterState() == list.Filtering && filterBefore != m.entries.FilterValue() {
 		m.filterPending = true
 	}
-	return m, tea.Batch(cmds...)
+	return m, cmd
+}
+
+// feedKeyToFilter opens a list's filter as if "/" was pressed, then applies
+// the typed key. Shared with the results screen so typing filters every list
+// the same way (tela 3: "type to filter these results").
+func feedKeyToFilter(entries *list.Model, msg tea.KeyPressMsg) tea.Cmd {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+	*entries, cmd = entries.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	*entries, cmd = entries.Update(msg)
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 // fancyListKeyMap is arrows + vim + emacs-style nav, shared with type-to-filter.
@@ -289,24 +704,27 @@ func isTypeToFilterKey(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// View renders the full-width picker list (no side panel).
-func (m *pickerModel) View() tea.View {
-	footer := m.entries.Help.ShortHelpView(m.entries.ShortHelp())
-	view := tea.NewView(m.shell.Render(m.entries.View(), footer))
-	view.AltScreen = true
-	title := m.options.WindowTitle
-	if title == "" {
-		title = "GoAnime"
-	}
-	view.WindowTitle = title
-	return view
-}
-
 type pickRunner func(tea.Model) (tea.Model, error)
 
 // Pick opens a styled fuzzy picker and returns the chosen item index.
 func Pick(items []PickItem, opts PickOptions) (int, error) {
-	return pickWithRunner(items, opts, func(model tea.Model) (tea.Model, error) {
+	index, _, err := PickActioned(items, opts)
+	return index, err
+}
+
+// PickActioned opens a picker that also offers screen actions (tela 5). It
+// returns the chosen item index, or -1 with the picked action's key.
+func PickActioned(items []PickItem, opts PickOptions) (index int, action string, err error) {
+	if len(items) == 0 {
+		return -1, "", ErrNoPickItems
+	}
+	// Fail fast without a TTY: Bubble Tea blocks on Windows (getConsoleInput)
+	// while it errors on Linux. Without this, headless CI on windows-latest
+	// hangs the full go-test timeout instead of erroring like Linux.
+	if !HasTerminal() {
+		return -1, "", fmt.Errorf("no terminal: stdin is not a TTY")
+	}
+	return pickActionedWithRunner(items, opts, func(model tea.Model) (tea.Model, error) {
 		var final tea.Model
 		err := RunClean(func() error {
 			var runErr error
@@ -336,26 +754,35 @@ func PickLabels(labels []string, opts PickOptions) (int, error) {
 
 // pickWithRunner isolates terminal execution for deterministic tests.
 func pickWithRunner(items []PickItem, opts PickOptions, run pickRunner) (int, error) {
+	index, _, err := pickActionedWithRunner(items, opts, run)
+	return index, err
+}
+
+// pickActionedWithRunner is pickWithRunner with the picked screen action.
+func pickActionedWithRunner(items []PickItem, opts PickOptions, run pickRunner) (index int, action string, err error) {
 	if len(items) == 0 {
-		return -1, ErrNoPickItems
+		return -1, "", ErrNoPickItems
 	}
 	if run == nil {
-		return -1, fmt.Errorf("picker runner not configured")
+		return -1, "", fmt.Errorf("picker runner not configured")
 	}
 
 	final, err := run(newPickerModel(items, opts))
 	if err != nil {
-		return -1, fmt.Errorf("run picker screen: %w", err)
+		return -1, "", fmt.Errorf("run picker screen: %w", err)
 	}
 	model, ok := final.(*pickerModel)
 	if !ok || model == nil {
-		return -1, fmt.Errorf("unexpected picker model %T", final)
+		return -1, "", fmt.Errorf("unexpected picker model %T", final)
 	}
 	if model.err != nil {
-		return -1, model.err
+		return -1, "", model.err
+	}
+	if model.actionKey != "" {
+		return model.selectedIndex, model.actionKey, nil
 	}
 	if model.selectedIndex < 0 || model.selectedIndex >= len(items) {
-		return -1, ErrPickCancelled
+		return -1, "", ErrPickCancelled
 	}
-	return model.selectedIndex, nil
+	return model.selectedIndex, "", nil
 }

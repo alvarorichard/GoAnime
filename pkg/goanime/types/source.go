@@ -3,7 +3,7 @@ package types
 import (
 	"fmt"
 
-	"github.com/alvarorichard/Goanime/internal/scraper"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 )
 
 // Source represents an anime scraper source
@@ -13,7 +13,7 @@ const (
 	// SourceAnimeFire represents the AnimeFire source.
 	//
 	// NOTE: this enum predates the registry and still lists only one source.
-	// Goyabu, SuperFlix and AniDB are reachable through the CLI and the
+	// Goyabu, StartFlix and HiAnime are reachable through the CLI and the
 	// registry but were never added here; SourceAllAnime was removed when the
 	// AllAnime source was deleted. Extending this enum is a separate, breaking
 	// SDK change.

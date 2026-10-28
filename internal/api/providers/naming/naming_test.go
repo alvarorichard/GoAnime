@@ -3,7 +3,7 @@ package naming
 import (
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 )
 
 func TestSanitizeFilename(t *testing.T) {
@@ -38,6 +38,7 @@ func TestCleanTitle(t *testing.T) {
 		{"Naruto [PT-BR]", "Naruto"},
 		{"Naruto [AllAnime] [English]", "Naruto"},
 		{"Naruto [AnimeFire]", "Naruto"},
+		{"Naruto [AnimesDigital]", "Naruto"},
 		{"Naruto [Movie]", "Naruto"},
 		{"Naruto", "Naruto"},
 		{"Attack on Titan [Multilanguage]", "Attack on Titan"},

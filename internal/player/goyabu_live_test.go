@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/alvarorichard/Goanime/internal/scraper/providers/goyabu"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 )
 
 // TestGoyabuBlackCloverEpisode3Live reproduces the production failure reported

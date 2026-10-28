@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alvarorichard/Goanime/internal/discord"
-	"github.com/alvarorichard/Goanime/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/discord"
+	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -131,6 +131,24 @@ func TestGetTrackerDBPath_CachesAndReturnsValidPath(t *testing.T) {
 	// Second call returns the cached value without recomputing.
 	again := getTrackerDBPath()
 	assert.Equal(t, got, again)
+}
+
+// TestGetTrackerDBPath_FollowsHome pins that watch history lives under HOME,
+// like the logs and downloads. It used to come from the account database,
+// so a run with HOME pointed elsewhere still wrote into the real home.
+func TestGetTrackerDBPath_FollowsHome(t *testing.T) {
+	// Mutates package-level cachedDBPath and the environment — keep serial.
+	prev := cachedDBPath
+	cachedDBPath = ""
+	t.Cleanup(func() { cachedDBPath = prev })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", "") // Windows falls back to <home>\AppData\Local
+
+	got := getTrackerDBPath()
+	assert.True(t, strings.HasPrefix(got, home), "path %q should be under HOME %q", got, home)
 }
 
 func TestGetCurrentEpisode(t *testing.T) {
@@ -537,7 +555,7 @@ func TestHandleUserInput_AliveSocketReturnsBackOnMenuError(t *testing.T) {
 // multiple goroutines race on tcell internals. Keep TUI-touching tests
 // serial.
 func TestShowPlayerMenu_ReturnsErrorOutsideTerminal(t *testing.T) {
-	_, err := showPlayerMenu("Anime", 1)
+	_, err := showPlayerMenu("", "Anime", 1)
 	assert.Error(t, err, "fuzzyfinder must error outside a TTY")
 }
 

@@ -83,7 +83,8 @@ func ClearViewport(w io.Writer, height int) {
 	// newline count needed to scroll the whole viewport out is exactly height.
 	// \x1b[H\x1b[2J — home the cursor and erase the now-empty screen so no
 	// stray cell survives.
-	_, _ = io.WriteString(w, "\x1b[9999;1H"+strings.Repeat("\n", height)+"\x1b[H\x1b[2J")
+	escape := "\x1b[9999;1H" + strings.Repeat("\n", height) + "\x1b[H\x1b[2J"
+	_, _ = io.WriteString(w, escape)
 }
 
 // ClearViewportStdout clears the visible screen on stdout (preserving
