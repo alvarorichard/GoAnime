@@ -49,7 +49,7 @@ func isDirectBloggerGoogleVideo(u string) bool {
 	if err != nil || !strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".googlevideo.com") {
 		return false
 	}
-	return parsed.Query().Get("source") == "blogger"
+	return parsed.Query().Get("source") == "blogger" // nosemgrep: go_sql_rule-concat-sqli -- URL query comparison, no SQL
 }
 
 func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {

@@ -17,7 +17,7 @@ import (
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", name)) // nosemgrep: go_filesystem_rule-fileread -- fixed testdata directory
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSearchAnimeMergesAudioVariants(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.Query().Get("s")
-		_, _ = w.Write(fixture(t, "search_2026_10_12.html"))
+		_, _ = w.Write(fixture(t, "search_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 	}))
 	defer srv.Close()
 	c := NewClientForTest(srv.Client(), srv.URL)
@@ -52,7 +52,7 @@ func TestSearchAnimeMergesAudioVariants(t *testing.T) {
 func TestGetAnimeEpisodesSortsAllItems(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(fixture(t, "episodes_2026_10_12.html"))
+		_, _ = w.Write(fixture(t, "episodes_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 	}))
 	defer srv.Close()
 	c := NewClientForTest(srv.Client(), srv.URL)
@@ -71,10 +71,10 @@ func TestGetEpisodeStreamDecodesHLSAndSendsIframeHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/68023/":
-			_, _ = w.Write(fixture(t, "episode_hls_2026_10_12.html"))
+			_, _ = w.Write(fixture(t, "episode_hls_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 		case "/token/hv0688292sn4his":
 			iframeHeaders = r.Header.Clone()
-			_, _ = w.Write(fixture(t, "player_hls_2026_10_12.html"))
+			_, _ = w.Write(fixture(t, "player_hls_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 		default:
 			http.NotFound(w, r)
 		}
@@ -106,9 +106,9 @@ func TestGetEpisodeStreamSelectsBestMP4FromJSONLDPlayer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/5831/":
-			_, _ = w.Write(fixture(t, "episode_mp4_2026_10_12.html"))
+			_, _ = w.Write(fixture(t, "episode_mp4_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 		case "/token/oHajlLyOvRJDcl8":
-			_, _ = w.Write(fixture(t, "player_mp4_2026_10_12.html"))
+			_, _ = w.Write(fixture(t, "player_mp4_2026_10_12.html")) // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a local fixture
 		default:
 			http.NotFound(w, r)
 		}

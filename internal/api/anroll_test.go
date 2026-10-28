@@ -53,7 +53,7 @@ func TestGetAnrollEpisodesAudioChoice(t *testing.T) {
 func pairedAnrollURLForTest(t *testing.T, base string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`<article class="anime-card"><a href="` + base + `/anime/show"><img alt="Show"><span class="card-sub">Legendado</span></a></article>` +
+		_, _ = w.Write([]byte(`<article class="anime-card"><a href="` + base + `/anime/show"><img alt="Show"><span class="card-sub">Legendado</span></a></article>` + // nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter -- test server serving a fixed page
 			`<article class="anime-card"><a href="` + base + `/anime/show-dublado"><img alt="Show Dublado"><span class="card-sub">Dublado</span></a></article>`))
 	}))
 	defer srv.Close()
