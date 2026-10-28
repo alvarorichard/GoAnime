@@ -365,6 +365,10 @@ func FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.
 		return "", err
 	}
 
+	// Playback headers belong to one resolved stream. Clear the previous
+	// episode's values before the provider publishes its own metadata.
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
 	util.Debug("Fetching stream via registry", "kind", src.Describe().Kind, "reason", resolved.Reason)
 	return src.FetchStreamURL(ctx, episode, anime, quality)
 }

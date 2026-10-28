@@ -63,6 +63,13 @@ func TestAnimesDigitalProvider_KindAndHasSeasons(t *testing.T) {
 	assert.False(t, p.HasSeasons())
 }
 
+func TestAnrollProvider_KindAndHasSeasons(t *testing.T) {
+	t.Parallel()
+	p := &anrollProvider{}
+	assert.Equal(t, source.Anroll, p.Describe().Kind)
+	assert.False(t, p.HasSeasons())
+}
+
 func TestStartFlixProvider_KindAndHasSeasons(t *testing.T) {
 	t.Parallel()
 	p := &startFlixProvider{}
@@ -106,6 +113,18 @@ func TestAnimesDigitalProvider_Describe(t *testing.T) {
 	assert.Equal(t, []string{"[animesdigital]"}, d.Tags)
 	assert.Equal(t, []string{"animesdigital.org"}, d.URLMatchers)
 	assert.Equal(t, "https://animesdigital.org", d.ProbeURL)
+	assert.False(t, d.DefaultDisabled)
+}
+
+func TestAnrollProvider_Describe(t *testing.T) {
+	t.Parallel()
+	d := (&anrollProvider{}).Describe()
+	assert.Equal(t, source.Anroll, d.Kind)
+	assert.Equal(t, 35, d.Priority)
+	assert.Equal(t, []string{"AnimesROLL"}, d.Explicit)
+	assert.Equal(t, []string{"[animesroll]"}, d.Tags)
+	assert.Equal(t, []string{"anroll.io"}, d.URLMatchers)
+	assert.Equal(t, "https://anroll.io", d.ProbeURL)
 	assert.False(t, d.DefaultDisabled)
 }
 
@@ -169,6 +188,16 @@ func TestAnimesDigitalProvider_Scraper(t *testing.T) {
 	assert.True(t, contextual)
 }
 
+func TestAnrollProvider_Scraper(t *testing.T) {
+	t.Parallel()
+	ad, err := (&anrollProvider{}).scraper()
+	require.NoError(t, err)
+	require.NotNil(t, ad)
+	assert.Equal(t, scraper.AnrollType, ad.GetType())
+	_, contextual := ad.(scraper.ContextualScraper)
+	assert.True(t, contextual)
+}
+
 func TestStartFlixProvider_Scraper(t *testing.T) {
 	t.Parallel()
 	ad, err := (&startFlixProvider{}).scraper()
@@ -193,7 +222,7 @@ func TestTopCineProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -226,6 +255,8 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"explicit Goyabu", &models.Anime{Source: "Goyabu"}, source.Goyabu},
 		{"explicit AnimesDigital", &models.Anime{Source: "AnimesDigital"}, source.AnimesDigital},
 		{"animesdigital URL", &models.Anime{URL: "https://animesdigital.org/anime/a/one-piece"}, source.AnimesDigital},
+		{"explicit AnimesROLL", &models.Anime{Source: "AnimesROLL"}, source.Anroll},
+		{"anroll URL", &models.Anime{URL: "https://anroll.io/anime/one-piece/"}, source.Anroll},
 		// SuperFlix was removed; a title saved under it no longer routes.
 		{"removed SuperFlix", &models.Anime{Source: "SuperFlix"}, source.Unknown},
 		{"explicit StartFlix", &models.Anime{Source: "StartFlix"}, source.StartFlix},
@@ -270,6 +301,7 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		{"https://animefire.plus/ep/naruto-1", source.AnimeFire},
 		{"https://goyabu.to/ep/naruto-1", source.Goyabu},
 		{"https://animesdigital.org/video/a/139026/", source.AnimesDigital},
+		{"https://anroll.io/68023/", source.Anroll},
 		// The AllAnime host was removed; its URLs now resolve to nothing.
 		{"https://allanime.to/anime/hHjXnUTda", source.Unknown},
 		// Previous SuperFlix host was removed too.

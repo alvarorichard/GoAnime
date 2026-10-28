@@ -13,7 +13,7 @@ import (
 // source that needs one should make this test fail on purpose.
 func TestModelC_NoSourceIsBrowserGated(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.StartFlix, source.TopCine, source.AnimeDrive} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.False(t, source.IsBrowserGated(s), "%s is pure-HTTP and must not be browser-gated", kind)
@@ -31,7 +31,7 @@ func TestModelC_MovieTVSourcesAreSeasoned(t *testing.T) {
 		assert.True(t, source.IsSeasoned(s), "%s organizes content into seasons", kind)
 	}
 
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.AnimeDrive} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok)
 		assert.False(t, source.IsSeasoned(s), "%s is a flat anime catalog, not seasoned", kind)

@@ -105,7 +105,7 @@ func scopeIndexForSource(src string) int {
 	switch strings.ToLower(strings.TrimSpace(src)) {
 	case "hianime":
 		return 2
-	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital":
+	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll":
 		return 1
 	case "movietv", "startflix", "topcine", "pobreflix":
 		return 3
@@ -205,6 +205,8 @@ func sourceFromURL(rawURL string) string {
 		return "HiAnime"
 	case strings.Contains(host, "animesdigital"):
 		return "AnimesDigital"
+	case strings.Contains(host, "anroll"):
+		return "AnimesROLL"
 	case strings.Contains(host, "startflix"):
 		return "StartFlix"
 	case strings.Contains(host, "topcine"):

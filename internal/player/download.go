@@ -530,6 +530,19 @@ func (e batchDownloadError) Error() string {
 		return fmt.Sprintf("1 episode failed: episode %d: %v", failure.Episode, failure.Err)
 	}
 
+	// Every episode failed for the same reason (one broken source, typically):
+	// say it once instead of repeating it per episode.
+	same := true
+	for _, failure := range e.Failures[1:] {
+		if fmt.Sprint(failure.Err) != fmt.Sprint(e.Failures[0].Err) {
+			same = false
+			break
+		}
+	}
+	if same {
+		return fmt.Sprintf("%d episodes failed, all with the same error: %v", len(e.Failures), e.Failures[0].Err)
+	}
+
 	const maxDetails = 5
 	parts := make([]string, 0, min(len(e.Failures), maxDetails))
 	for i, failure := range e.Failures {
@@ -1035,7 +1048,11 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 
 	if referer != "" {
 		headers["Referer"] = referer
-		headers["Origin"] = strings.TrimSuffix(referer, "/")
+		origin := util.GetGlobalOrigin()
+		if origin == "" {
+			origin = strings.TrimSuffix(referer, "/")
+		}
+		headers["Origin"] = origin
 	}
 
 	ctx := context.Background()

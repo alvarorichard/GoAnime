@@ -312,13 +312,14 @@ SD.
 | AnimeFire     | Animes         | Português (Brasil)          |                                               |
 | AnimesDigital | Animes         | Português (Brasil)          | Legendado e dublado                           |
 | AnimeDrive    | Animes         | Português (Brasil)          | Endereço configurável: `GOANIME_ANIMEDRIVE_URL` |
+| AnimesROLL    | Animes         | Português (Brasil)          | Legendado e dublado                           |
 | Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
 | StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
 | TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
 | Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto; painel StartFlix como reserva     |
 
 `--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
+`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
 `movietv` cobre StartFlix, TopCine e Pobreflix; `ptbr` cobre todas as fontes
 em português.
 

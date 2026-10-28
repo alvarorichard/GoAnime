@@ -411,11 +411,21 @@ func TestBatchDownloadError_Error_TruncatesAfterFive(t *testing.T) {
 	t.Parallel()
 	failures := make([]batchDownloadFailure, 7)
 	for i := range failures {
-		failures[i] = batchDownloadFailure{Episode: i + 1, Err: errors.New("x")}
+		failures[i] = batchDownloadFailure{Episode: i + 1, Err: errors.New(string(rune('a' + i)))}
 	}
 	got := batchDownloadError{Failures: failures}.Error()
 	assert.Contains(t, got, "7 episodes failed")
 	assert.Contains(t, got, "2 more")
+}
+
+func TestBatchDownloadError_Error_SameErrorSaidOnce(t *testing.T) {
+	t.Parallel()
+	failures := make([]batchDownloadFailure, 13)
+	for i := range failures {
+		failures[i] = batchDownloadFailure{Episode: i + 1, Err: errors.New("locked link")}
+	}
+	got := batchDownloadError{Failures: failures}.Error()
+	assert.Equal(t, "13 episodes failed, all with the same error: locked link", got)
 }
 
 func TestIsHTTPStatusError_MatchesStatus(t *testing.T) {

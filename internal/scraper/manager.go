@@ -19,6 +19,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesdigital"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/anroll"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
@@ -44,6 +45,7 @@ const (
 	// NOTE: appended at the end on purpose — the iota values stitch into
 	// serialized/tracked positions; reordering the middle ones would migrate
 	// user history.
+	AnrollType // AnimesROLL PT-BR anime source
 )
 
 // SearchContextScraper is the optional search-only cancellation capability.
@@ -98,6 +100,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &AnimeDriveAdapter{client: animedrive.NewAnimeDriveClient()}, nil
 	case PobreflixType:
 		return &PobreflixAdapter{client: pobreflix.Shared(), panel: startflix.Shared()}, nil
+	case AnrollType:
+		return &AnrollAdapter{client: anroll.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -123,6 +127,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return "AnimeDrive"
 	case PobreflixType:
 		return pobreflix.SourceName
+	case AnrollType:
+		return anroll.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -137,7 +143,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType:
+	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType:
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -341,6 +347,53 @@ func (a *AnimesDigitalAdapter) GetType() ScraperType { return AnimesDigitalType 
 // NewAnimesDigitalAdapterWithClient builds an adapter around a test client.
 func NewAnimesDigitalAdapterWithClient(client *animesdigital.Client) *AnimesDigitalAdapter {
 	return &AnimesDigitalAdapter{client: client}
+}
+
+// AnrollAdapter adapts the plain-HTTP AnimesROLL client.
+type AnrollAdapter struct {
+	client *anroll.Client
+}
+
+func (a *AnrollAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
+}
+
+func (a *AnrollAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
+}
+
+func (a *AnrollAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.GetEpisodeStreamContext(ctx, episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	metadata = map[string]string{"source": "anroll"}
+	if stream.Referer != "" {
+		metadata["referer"] = stream.Referer
+	}
+	if stream.Origin != "" {
+		metadata["origin"] = stream.Origin
+	}
+	return stream.URL, metadata, nil
+}
+
+func (a *AnrollAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+func (a *AnrollAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+func (a *AnrollAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+func (a *AnrollAdapter) GetType() ScraperType { return AnrollType }
+
+// NewAnrollAdapterWithClient builds an adapter around a test client.
+func NewAnrollAdapterWithClient(client *anroll.Client) *AnrollAdapter {
+	return &AnrollAdapter{client: client}
 }
 
 // HiAnimeAdapter adapts hianime.HiAnimeClient to the UnifiedScraper interface.

@@ -253,6 +253,8 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.Goyabu}
 	case "animesdigital":
 		registryKinds = []apisource.SourceKind{apisource.AnimesDigital}
+	case "anroll":
+		registryKinds = []apisource.SourceKind{apisource.Anroll}
 	case "startflix":
 		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
@@ -268,6 +270,7 @@ func searchAnimeEnhanced(
 			apisource.AnimeFire,
 			apisource.Goyabu,
 			apisource.AnimesDigital,
+			apisource.Anroll,
 			apisource.StartFlix,
 			apisource.TopCine,
 			apisource.Pobreflix,
@@ -414,6 +417,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "HiAnime"
 			case "animesdigital":
 				anime.Source = "AnimesDigital"
+			case "anroll":
+				anime.Source = "AnimesROLL"
 			case "startflix":
 				anime.Source = "StartFlix"
 			case "topcine":
@@ -434,6 +439,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "HiAnime"
 				case strings.Contains(lowerURL, "animesdigital.org"):
 					anime.Source = "AnimesDigital"
+				case strings.Contains(lowerURL, "anroll.io"):
+					anime.Source = "AnimesROLL"
 				case strings.Contains(lowerURL, "startflix"):
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
@@ -563,6 +570,7 @@ type sourceBreakdown struct {
 	AnimeFire     int
 	Goyabu        int
 	AnimesDigital int
+	Anroll        int
 	HiAnime       int
 	StartFlix     int
 	TopCine       int
@@ -586,6 +594,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.Goyabu++
 		case strings.EqualFold(anime.Source, "AnimesDigital"):
 			b.AnimesDigital++
+		case strings.EqualFold(anime.Source, "AnimesROLL"):
+			b.Anroll++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
 		case strings.EqualFold(anime.Source, "StartFlix"):

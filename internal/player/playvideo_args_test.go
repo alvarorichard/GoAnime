@@ -19,6 +19,20 @@ func TestAppendPlaybackRefererArgsAddsGlobalRefererForDirectHTTP(t *testing.T) {
 	assert.Contains(t, args, "--http-header-fields=Referer: https://allmanga.to")
 }
 
+func TestAppendPlaybackRefererArgsAddsExplicitOrigin(t *testing.T) {
+	restore := snapshotGlobalReferer()
+	defer restore()
+	previousOrigin := util.GetGlobalOrigin()
+	defer util.SetGlobalOrigin(previousOrigin)
+	util.SetGlobalReferer("https://anidrive.click/")
+	util.SetGlobalOrigin("https://anidrive.click")
+
+	args, referer := appendPlaybackRefererArgs(nil, "https://static.anidrive.click/hls/x/master.m3u8", true)
+
+	assert.Equal(t, "https://anidrive.click/", referer)
+	assert.Contains(t, args, "--http-header-fields=Referer: https://anidrive.click/,Origin: https://anidrive.click")
+}
+
 func TestAppendPlaybackRefererArgsKeepsHLSFallbackReferer(t *testing.T) {
 	restore := snapshotGlobalReferer()
 	defer restore()

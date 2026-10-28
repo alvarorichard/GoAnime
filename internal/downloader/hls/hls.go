@@ -592,6 +592,43 @@ func (d *Downloader) downloadSegment(ctx context.Context, url string, headers ma
 	return nil, fmt.Errorf("failed to download segment after %d attempts", maxRetries+1)
 }
 
+var pngSignature = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+// unwrapDisguisedSegment removes a valid PNG envelope prepended to MPEG-TS
+// bytes. Some CDNs return HLS segments as a 1x1 PNG followed by the real media;
+// browsers strip the image in a service worker, while the native downloader
+// must do the same before concatenating or decrypting the segment.
+func unwrapDisguisedSegment(data []byte) ([]byte, error) {
+	if !bytes.HasPrefix(data, pngSignature) {
+		return data, nil
+	}
+	for offset := len(pngSignature); offset+12 <= len(data); {
+		length := int(binary.BigEndian.Uint32(data[offset : offset+4]))
+		end := offset + 12 + length
+		if length < 0 || end < offset || end > len(data) {
+			return nil, errors.New("disguised HLS segment has a malformed PNG envelope")
+		}
+		chunkType := string(data[offset+4 : offset+8])
+		offset = end
+		if chunkType != "IEND" {
+			continue
+		}
+		if offset >= len(data) {
+			return nil, errors.New("disguised HLS segment contains PNG data but no media payload")
+		}
+		payload := data[offset:]
+		xorMarker := []byte("TSPXOR1\x00")
+		if len(payload) >= len(xorMarker) && bytes.Equal(payload[:len(xorMarker)], xorMarker) {
+			payload = bytes.Clone(payload[len(xorMarker):])
+			for i := range payload {
+				payload[i] ^= 0xa5
+			}
+		}
+		return payload, nil
+	}
+	return nil, errors.New("disguised HLS segment has no PNG IEND chunk")
+}
+
 // ProgressCallback reports download progress.
 // bytesWritten  = cumulative bytes flushed to the output file (real disk size).
 // segmentsWritten = number of segments sequentially written to disk.
@@ -698,6 +735,9 @@ func (d *Downloader) DownloadWithProgress(ctx context.Context, url, output strin
 				}
 
 				data, err := d.downloadSegment(ctx, j.segment.URL, headers)
+				if err == nil {
+					data, err = unwrapDisguisedSegment(data)
+				}
 				if err == nil && j.segment.Key != nil {
 					data, err = d.decrypt(ctx, data, j.segment.Key, j.segment.Sequence, headers, keys)
 				}

@@ -119,7 +119,7 @@ func indexForScope(scope string) int {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "":
 		return 0
-	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital":
+	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll":
 		return 1
 	case "hianime":
 		return 2

@@ -41,6 +41,7 @@ var (
 	// AnimesDigital keeps dubbed and subtitled releases on separate title
 	// pages. The api path owns the one interactive audio choice.
 	animesDigitalEpisodesFn = api.GetAnimesDigitalEpisodes
+	anrollEpisodesFn        = api.GetAnrollEpisodes
 )
 
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
@@ -277,11 +278,12 @@ func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 // applyPlaybackMetadata moves a scraper's playback hints into the globals mpv
 // and the downloader read.
 //
-// The two keys are a contract on the metadata map, not something specific to
+// These keys are a contract on the metadata map, not something specific to
 // one source, so a future scraper can fill them and be played correctly without
 // touching this function:
 //
 //	referer    the origin to send with every media request
+//	origin     the explicit CORS origin to send with every media request
 //	subtitles  a JSON array of {"url","language","label"}
 //
 // A malformed subtitle payload is logged and dropped rather than failing the
@@ -291,6 +293,7 @@ func applyPlaybackMetadata(metadata map[string]string) {
 	if referer := strings.TrimSpace(metadata["referer"]); referer != "" {
 		util.SetGlobalReferer(referer)
 	}
+	util.SetGlobalOrigin(strings.TrimSpace(metadata["origin"]))
 	raw := strings.TrimSpace(metadata["subtitles"])
 	if raw == "" {
 		return
@@ -494,6 +497,91 @@ func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *mod
 	if streamURL == "" {
 		return "", fmt.Errorf("empty stream URL returned from AnimesDigital")
 	}
+	return streamURL, nil
+}
+
+// --- AnimesROLL Provider ---
+
+type anrollProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() { source.Register(&anrollProvider{}) }
+
+func (p *anrollProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnrollType)
+}
+
+func (p *anrollProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.Anroll,
+		Priority:    35,
+		Explicit:    []string{"AnimesROLL"},
+		Tags:        []string{"[animesroll]"},
+		URLMatchers: []string{"anroll.io"},
+		ProbeURL:    "https://anroll.io",
+	}
+}
+
+func (p *anrollProvider) HasSeasons() bool { return false }
+
+func (p *anrollProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = contextual.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Anroll)
+	return results, nil
+}
+
+func (p *anrollProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return anrollEpisodesFn(anime)
+}
+
+func (p *anrollProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return "", err
+	}
+	var streamURL string
+	var metadata map[string]string
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
+	} else {
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
+	}
+	if err != nil {
+		return "", fmt.Errorf("anroll stream: %w", err)
+	}
+	if streamURL == "" {
+		return "", fmt.Errorf("empty stream URL returned from AnimesROLL")
+	}
+	applyPlaybackMetadata(metadata)
 	return streamURL, nil
 }
 

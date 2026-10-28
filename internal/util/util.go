@@ -36,6 +36,7 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
+	GlobalOrigin        string                         // Global variable to store an explicit Origin header
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 	// GlobalDownloadMenu opens the episode OPTIONS menu before every
@@ -108,6 +109,30 @@ func ClearGlobalReferer() {
 	playbackStateMu.Lock()
 	defer playbackStateMu.Unlock()
 	GlobalReferer = ""
+}
+
+// SetGlobalOrigin stores the CORS origin for stream requests.
+func SetGlobalOrigin(origin string) {
+	playbackStateMu.Lock()
+	GlobalOrigin = origin
+	playbackStateMu.Unlock()
+	if origin != "" {
+		Debugf("Stored origin for stream requests: %s", origin)
+	}
+}
+
+// GetGlobalOrigin returns the explicit CORS origin for stream requests.
+func GetGlobalOrigin() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+	return GlobalOrigin
+}
+
+// ClearGlobalOrigin clears the explicit CORS origin.
+func ClearGlobalOrigin() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+	GlobalOrigin = ""
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "HiAnime", "Goyabu")
@@ -288,7 +313,7 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download a movie or TV show")
-	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix, animedrive, movietv, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, anroll, startflix, topcine, pobreflix, animedrive, movietv, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "with -dm, download a single TV episode instead of a movie (movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")
