@@ -354,14 +354,18 @@ type AnrollAdapter struct {
 	client *anroll.Client
 }
 
+// SearchAnimeContext searches AnimesROLL for query.
 func (a *AnrollAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
 	return a.client.SearchAnimeContext(ctx, query)
 }
 
+// GetAnimeEpisodesContext lists the episodes of an AnimesROLL title.
 func (a *AnrollAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
 	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
 }
 
+// GetStreamURLContext resolves an episode to its stream URL and the
+// Referer/Origin the CDN expects.
 func (a *AnrollAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
 	stream, err := a.client.GetEpisodeStreamContext(ctx, episodeURL)
 	if err != nil {
@@ -377,18 +381,22 @@ func (a *AnrollAdapter) GetStreamURLContext(ctx context.Context, episodeURL stri
 	return stream.URL, metadata, nil
 }
 
+// SearchAnime is SearchAnimeContext with a background context.
 func (a *AnrollAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
 	return a.SearchAnimeContext(context.Background(), query, options...)
 }
 
+// GetAnimeEpisodes is GetAnimeEpisodesContext with a background context.
 func (a *AnrollAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
 	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
 }
 
+// GetStreamURL is GetStreamURLContext with a background context.
 func (a *AnrollAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
 	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
 }
 
+// GetType reports AnrollType.
 func (a *AnrollAdapter) GetType() ScraperType { return AnrollType }
 
 // NewAnrollAdapterWithClient builds an adapter around a test client.

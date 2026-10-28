@@ -1,3 +1,4 @@
+// Package anroll implements the plain-HTTP scraper for anroll.io.
 package anroll
 
 import (
@@ -25,7 +26,9 @@ import (
 )
 
 const (
-	SourceName       = "AnimesROLL"
+	// SourceName is the display name shown for this source.
+	SourceName = "AnimesROLL"
+	// DefaultBase is the site root used by the shared client.
 	DefaultBase      = "https://anroll.io"
 	playerOrigin     = "https://anidrive.click"
 	maxBodySize      = 12 << 20
