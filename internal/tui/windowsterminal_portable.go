@@ -61,23 +61,34 @@ func selectWindowsTerminalAsset(assets []windowsTerminalAsset, goarch string) (w
 	return windowsTerminalAsset{}, fmt.Errorf("no Windows Terminal %s archive in the release", arch)
 }
 
-// safeArchivePath joins an archive entry to dest and refuses anything that
-// would escape it. A release zip is remote input, so "..", absolute paths and
-// drive-relative names never become files outside the install directory.
-func safeArchivePath(dest, name string) (string, error) {
+// localArchiveName cleans an archive entry's name and refuses anything that is
+// not strictly inside the directory it is extracted to: "..", absolute paths,
+// drive-relative names and, on Windows, reserved device names. A release zip is
+// remote input.
+func localArchiveName(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("archive contains an empty path")
 	}
-	clean := filepath.Clean(filepath.FromSlash(name))
-	if clean == "." || clean == ".." || filepath.IsAbs(clean) {
+	native := filepath.FromSlash(name)
+	if !filepath.IsLocal(native) {
 		return "", fmt.Errorf("archive contains an unsafe path %q", name)
 	}
-	target := filepath.Join(dest, clean)
-	rel, err := filepath.Rel(dest, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	clean := filepath.Clean(native)
+	if clean == "." {
 		return "", fmt.Errorf("archive contains an unsafe path %q", name)
 	}
-	return target, nil
+	return clean, nil
+}
+
+// safeArchivePath joins an archive entry to dest, or refuses it when it would
+// escape dest. Extraction itself goes through an os.Root, which confines every
+// file operation to dest even if this check were wrong.
+func safeArchivePath(dest, name string) (string, error) {
+	clean, err := localArchiveName(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dest, clean), nil
 }
 
 // extractWindowsTerminalZip unpacks the official archive into dest and returns
@@ -93,16 +104,22 @@ func extractWindowsTerminalZip(zipPath, dest string) (string, error) {
 }
 
 func extractWindowsTerminalReader(reader *zip.Reader, dest string) (string, error) {
+	root, err := os.OpenRoot(dest)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", dest, err)
+	}
+	defer func() { _ = root.Close() }()
+
 	var wtDir string
 	var total int64
 	for _, file := range reader.File {
-		target, err := safeArchivePath(dest, file.Name)
+		name, err := localArchiveName(file.Name)
 		if err != nil {
 			return "", err
 		}
 		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, 0o750); err != nil {
-				return "", fmt.Errorf("create %s: %w", target, err)
+			if err := root.MkdirAll(name, 0o750); err != nil {
+				return "", fmt.Errorf("create %s: %w", name, err)
 			}
 			continue
 		}
@@ -113,16 +130,16 @@ func extractWindowsTerminalReader(reader *zip.Reader, dest string) (string, erro
 			total+int64(file.UncompressedSize64) > windowsTerminalExtractLimit {
 			return "", errors.New("archive expands beyond the size limit")
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-			return "", fmt.Errorf("create %s: %w", filepath.Dir(target), err)
+		if err := root.MkdirAll(filepath.Dir(name), 0o750); err != nil {
+			return "", fmt.Errorf("create %s: %w", filepath.Dir(name), err)
 		}
-		written, err := extractFile(file, target, windowsTerminalExtractLimit-total)
+		written, err := extractFile(file, root, name, windowsTerminalExtractLimit-total)
 		if err != nil {
 			return "", err
 		}
 		total += written
-		if wtDir == "" && strings.EqualFold(filepath.Base(target), "wt.exe") {
-			wtDir = filepath.Dir(target)
+		if wtDir == "" && strings.EqualFold(filepath.Base(name), "wt.exe") {
+			wtDir = filepath.Join(dest, filepath.Dir(name))
 		}
 	}
 	if wtDir == "" {
@@ -167,16 +184,16 @@ func installWindowsTerminalArchive(reader *zip.Reader, root string) (string, err
 // extractFile copies one entry while enforcing the remaining extraction
 // budget. The header's uncompressed size is not trusted: a malformed archive
 // could understate it and expand on disk.
-func extractFile(file *zip.File, target string, limit int64) (int64, error) {
+func extractFile(file *zip.File, root *os.Root, name string, limit int64) (int64, error) {
 	source, err := file.Open()
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", file.Name, err)
 	}
 	defer func() { _ = source.Close() }()
 
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- target is validated by safeArchivePath.
+	out, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return 0, fmt.Errorf("create %s: %w", target, err)
+		return 0, fmt.Errorf("create %s: %w", name, err)
 	}
 	written, copyErr := io.Copy(out, io.LimitReader(source, limit+1))
 	closeErr := out.Close()
@@ -184,7 +201,7 @@ func extractFile(file *zip.File, target string, limit int64) (int64, error) {
 		return written, fmt.Errorf("extract %s: %w", file.Name, copyErr)
 	}
 	if closeErr != nil {
-		return written, fmt.Errorf("close %s: %w", target, closeErr)
+		return written, fmt.Errorf("close %s: %w", name, closeErr)
 	}
 	if written > limit {
 		return written, errors.New("archive expands beyond the size limit")

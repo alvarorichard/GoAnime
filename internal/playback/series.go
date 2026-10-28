@@ -81,7 +81,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				}
 				// Keep the previous selection: committing the zero values of a
 				// failed selection made the loop replay a fabricated empty episode.
-				log.Printf("Error selecting episode: %v", selErr)
+				log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
 				continue
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -96,7 +96,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				return player.ErrBackToAnimeSelection
 			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -126,7 +126,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			// anime), so bounce to anime selection instead of committing zeros.
 			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
 			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", selErr)
+				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
 				return player.ErrBackToAnimeSelection
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -137,7 +137,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 
 		// Handle other errors
 		if err != nil {
-			log.Printf("Error during episode playback: %v", err)
+			log.Printf("Error during episode playback: %v", util.LogSafe(err))
 		}
 
 		userInput := GetUserInput()
@@ -154,7 +154,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				return player.ErrBackToAnimeSelection
 			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -184,7 +184,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			// anime), so bounce to anime selection instead of committing zeros.
 			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
 			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", selErr)
+				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
 				return player.ErrBackToAnimeSelection
 			}
 			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
@@ -200,7 +200,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 				// Back or failure: keep the current (valid) selection instead
 				// of committing the zero values of a failed selection.
 				if !errors.Is(selErr, player.ErrBackRequested) {
-					log.Printf("Error selecting episode: %v", selErr)
+					log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
 				}
 				continue
 			}
@@ -299,7 +299,7 @@ func handleUserNavigation(input string, episodes []models.Episode, currentNum, t
 		url, numStr, epNum, err = FindEpisodeByNumber(episodes, newNum)
 	}
 	if err != nil {
-		log.Printf("Navigation error: %v", err)
+		log.Printf("Navigation error: %v", util.LogSafe(err))
 		return "", "", currentNum
 	}
 	return url, numStr, epNum
@@ -319,7 +319,7 @@ func CheckIfSeries(url string) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeries(url)
 	if err != nil {
 		// Instead of killing the app, assume series unknown -> treat as single episode (movie)
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		log.Printf("Error checking if the anime is a series: %v", util.LogSafe(util.ErrorHandler(err)))
 		return false, 1
 	}
 	return series, totalEpisodes
@@ -329,7 +329,7 @@ func CheckIfSeries(url string) (isSeries bool, episodeCount int) {
 func CheckIfSeriesEnhanced(anime *models.Anime) (isSeries bool, episodeCount int) {
 	series, totalEpisodes, err := api.IsSeriesEnhanced(anime)
 	if err != nil {
-		log.Printf("Error checking if the anime is a series: %v", util.ErrorHandler(err))
+		log.Printf("Error checking if the anime is a series: %v", util.LogSafe(util.ErrorHandler(err)))
 		return false, 1
 	}
 	return series, totalEpisodes

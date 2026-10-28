@@ -319,6 +319,18 @@ func extractZip(zipPath, destDir string) error {
 		}
 	}()
 
+	// Every write goes through the root, so no entry name can leave destDir
+	// whatever it contains.
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			util.Warnf("Failed to close shader directory: %v", closeErr)
+		}
+	}()
+
 	for _, f := range r.File {
 		// Only extract .glsl files
 		if !strings.HasSuffix(f.Name, ".glsl") {
@@ -327,7 +339,6 @@ func extractZip(zipPath, destDir string) error {
 
 		// Get just the filename (strip any directory path)
 		fileName := filepath.Base(f.Name)
-		destPath := filepath.Join(destDir, fileName)
 
 		// Open source file in zip
 		rc, err := f.Open()
@@ -336,8 +347,7 @@ func extractZip(zipPath, destDir string) error {
 		}
 
 		// Create destination file
-		// #nosec G304 G703 -- destPath is constructed from trusted config directory
-		outFile, err := os.Create(destPath)
+		outFile, err := root.Create(fileName)
 		if err != nil {
 			_ = rc.Close()
 			return err

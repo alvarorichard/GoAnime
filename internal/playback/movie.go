@@ -107,7 +107,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 				return player.ErrBackToAnimeSelection
 			}
 			if changeErr != nil {
-				log.Printf("Error changing anime: %v", changeErr)
+				log.Printf("Error changing anime: %v", util.LogSafe(changeErr))
 				continue // Stay with current anime if change fails
 			}
 
@@ -121,7 +121,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
+				log.Printf("Switched to series: %s with %d episodes.\n", util.LogSafe(anime.Name), totalEpisodes)
 				if seriesErr := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); seriesErr != nil {
 					if errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
 						return seriesErr
@@ -135,7 +135,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		}
 
 		if playErr != nil {
-			log.Printf("Error during movie playback: %v", playErr)
+			log.Printf("Error during movie playback: %v", util.LogSafe(playErr))
 		}
 
 		// Ask user what to do next after movie finishes
@@ -153,7 +153,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 				return player.ErrBackToAnimeSelection
 			}
 			if err != nil {
-				log.Printf("Error changing anime: %v", err)
+				log.Printf("Error changing anime: %v", util.LogSafe(err))
 				continue // Stay with current anime if change fails
 			}
 
@@ -167,7 +167,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			series := !newAnime.IsMovie() && totalEpisodes > 1
 			if series {
 				// If new anime is a series, switch to series handler
-				log.Printf("Switched to series: %s with %d episodes.\n", anime.Name, totalEpisodes)
+				log.Printf("Switched to series: %s with %d episodes.\n", util.LogSafe(anime.Name), totalEpisodes)
 				if err := HandleSeries(ctx, anime, episodes, totalEpisodes, discordEnabled); err != nil {
 					if errors.Is(err, player.ErrBackToAnimeSelection) {
 						return err

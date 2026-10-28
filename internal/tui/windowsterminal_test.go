@@ -450,6 +450,32 @@ func TestInstallWindowsTerminalArchiveRejectsTraversal(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(base, "evil.exe"))
 }
 
+// TestExtractWindowsTerminalReaderStaysInsideThroughSymlinks: a name can be
+// perfectly local and still escape when a directory it passes through is a
+// symlink. Extraction goes through an os.Root, so a pre-planted link cannot
+// carry a file outside the staging directory. Joining the entry to the path and
+// calling os.OpenFile followed the link and wrote the file in "outside".
+func TestExtractWindowsTerminalReaderStaysInsideThroughSymlinks(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	staging := filepath.Join(base, "staging")
+	outside := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(staging, 0o750))
+	require.NoError(t, os.MkdirAll(outside, 0o750))
+	if err := os.Symlink(outside, filepath.Join(staging, "terminal-1.0")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	reader := testZipReader(t, []testZipEntry{
+		{name: "terminal-1.0/wt.exe", body: "planted"},
+	})
+
+	_, err := extractWindowsTerminalReader(reader, staging)
+
+	require.Error(t, err, "an entry that would leave the staging directory must fail")
+	assert.NoFileExists(t, filepath.Join(outside, "wt.exe"), "nothing is written through the link")
+}
+
 func TestInstallWindowsTerminalArchiveRejectsSymlink(t *testing.T) {
 	t.Parallel()
 
