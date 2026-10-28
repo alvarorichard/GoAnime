@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,4 +259,24 @@ func TestVerifyMinisign_RealMinisign(t *testing.T) {
 
 	require.NoError(t, verifyMinisign(msg, sig, []string{string(pub)}))
 	require.Error(t, verifyMinisign([]byte("tampered"), sig, []string{string(pub)}))
+}
+
+func TestEmbeddedPublicKeys(t *testing.T) {
+	t.Parallel()
+	require.NotEmpty(t, trustedPublicKeys, "a build without a key refuses every update")
+
+	for _, text := range trustedPublicKeys {
+		_, err := parseMinisignPublicKey(text)
+		require.NoError(t, err, text)
+	}
+
+	// The id minisign prints for the published key is the little-endian hex of
+	// the id bytes; a mistyped or truncated key would not reproduce it.
+	pk, err := parseMinisignPublicKey(trustedPublicKeys[0])
+	require.NoError(t, err)
+	var id [minisignKeyIDLen]byte
+	for i, b := range pk.id {
+		id[minisignKeyIDLen-1-i] = b
+	}
+	assert.Equal(t, "80C79C899B27D8B2", strings.ToUpper(hex.EncodeToString(id[:])))
 }

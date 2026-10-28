@@ -22,7 +22,9 @@ const checksumsSignatureAssetName = checksumsAssetName + ".minisig"
 // in one release: the new key is added while the old one still signs.
 //
 // With no key listed every update is refused, never accepted unchecked.
-var trustedPublicKeys = []string{}
+var trustedPublicKeys = []string{
+	"RWSy2CebiZzHgMdnf1JU4Ik3QlgVTQ+gpMKjbdE/dovVSgqaSM1N/5D0", // minisign public key 80C79C899B27D8B2
+}
 
 var (
 	errNoTrustedKeys = errors.New("this build embeds no update-signing key, so updates cannot be verified")
