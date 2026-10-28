@@ -438,6 +438,9 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     needs: [build, macos-universal, windows-installer]
+    # The environment holds the minisign secret key and requires a reviewer's
+    # approval, so nothing is signed or published without a human saying yes.
+    environment: release
     permissions:
       contents: write
     steps:
@@ -519,6 +522,36 @@ jobs:
           
           echo "Checksums generated:"
           cat checksums-sha256.txt
+
+      - name: Sign checksums (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          # Fail closed: a release the updater cannot verify must not exist.
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set in the 'release' environment"
+            exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+          keyfile="$(mktemp)"
+          trap 'shred -u "$keyfile" 2>/dev/null || rm -f "$keyfile"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+
+          cd release
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$keyfile" \
+            -m checksums-sha256.txt \
+            -t "goanime ${GITHUB_REF_NAME} file:checksums-sha256.txt"
+
+      - name: Verify signature against the key embedded in the binary
+        run: |
+          # The public key the updater trusts is the one in source. If the
+          # secret key does not match it, shipping would brick every update.
+          pub="$(grep -oE '"RW[A-Za-z0-9+/=]{50,}"' internal/updater/minisign.go | head -1 | tr -d '"')"
+          test -n "$pub"
+          minisign -V -P "$pub" -m release/checksums-sha256.txt
+          test -s release/checksums-sha256.txt.minisig
 
       - name: Generate changelog
         id: changelog
@@ -644,6 +677,7 @@ jobs:
             release/goanime-windows-amd64.zip
             release/GoAnime-Installer-*.exe
             release/checksums-sha256.txt
+            release/checksums-sha256.txt.minisig
             release/checksums-sha512.txt
           fail_on_unmatched_files: true
           generate_release_notes: false
@@ -671,6 +705,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: release
     if: ${{ !contains(github.ref, '-') }}  # Skip pre-releases
+    # The AUR SSH key lives in this environment, so it is only readable by a
+    # job a reviewer has approved. Pushing to the AUR is as hard to undo as a
+    # release.
+    environment: release
     steps:
       - name: Check AUR secrets
         id: check-secrets

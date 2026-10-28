@@ -52,7 +52,7 @@ que é possível, o que não é, e como comunicar isso ao usuário sem enganá-l
 | --- | --- | --- |
 | P0.1 | Processo de release e governança do repositório | Aberto |
 | P0.2 | Confiança na distribuição, sem exigir assinatura paga | Aberto |
-| P0.3 | Assinatura do manifesto de atualização | Verificação no updater pronta; falta gerar a chave, embutir a pública e assinar a release |
+| P0.3 | Assinatura do manifesto de atualização | Pronto no código e no workflow (job `release` assina após aprovação do environment); falta configurar environment e secrets no GitHub |
 | P0.4 | Updater do Windows quebrado no fallback | Resolvido no código; falta E2E em Windows real |
 | P0.5 | Segurança local e robustez do updater | Aberto |
 | P0.6 | Compatibilidade Linux (glibc) | Aberto |

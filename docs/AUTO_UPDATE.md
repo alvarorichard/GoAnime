@@ -104,7 +104,8 @@ flow above.
 - Every download is checked against the release's `checksums-sha256.txt`
   before anything is installed, and on Windows before the zip is extracted.
   The checksums are authenticated by a minisign signature made with an offline
-  key (`build/sign-release.sh`), so a compromised GitHub account or release
+  key (signed by the `release` job after a reviewer approves it, or by hand with
+  `build/sign-release.sh`), so a compromised GitHub account or release
   cannot swap the binary and its checksum together. A build with no embedded
   key refuses every update. Attestations are tracked separately.
 - The Windows binaries are not Authenticode-signed. Windows SmartScreen may
