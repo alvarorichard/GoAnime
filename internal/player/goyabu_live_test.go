@@ -3,10 +3,12 @@
 package player
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 )
 
@@ -18,6 +20,15 @@ func TestGoyabuBlackCloverEpisode3Live(t *testing.T) {
 	client := goyabu.NewGoyabuClient()
 	sourceURL, err := client.GetEpisodeStreamURL("https://goyabu.io/?p=2366")
 	if err != nil {
+		// goyabu.io serves a Cloudflare managed challenge to many networks,
+		// GitHub's runners included. That is a gate, not a broken source: the
+		// source-health test skips it the same way, and this step must not turn
+		// the whole daily run red and skip the checks after it. A parser or
+		// network failure still fails.
+		var diag *netx.SourceDiagnostic
+		if errors.As(err, &diag) && diag.Kind == netx.DiagnosticBlockedChallenge {
+			t.Skipf("Goyabu is behind a Cloudflare challenge from this network: %v", err)
+		}
 		t.Fatalf("resolve Goyabu episode: %v", err)
 	}
 
