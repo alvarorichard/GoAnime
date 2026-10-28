@@ -85,7 +85,7 @@ func TestFindChecksumsAsset(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := findChecksumsAsset(tt.release)
+			got, err := findAssetURL(tt.release, checksumsAssetName)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -360,9 +360,13 @@ func TestVerifyDownload(t *testing.T) {
 	const (
 		asset        = "goanime-linux-amd64"
 		checksumsURL = "https://github.com/alvarorichard/GoAnime/releases/download/v9.9.9/checksums-sha256.txt"
+		sigURL       = checksumsURL + ".minisig"
 	)
 	path := writeTemp(t, asset, "new-bin")
-	published := newRelease("v9.9.9", [2]string{asset, "https://x/bin"}, [2]string{checksumsAssetName, checksumsURL})
+	published := newRelease("v9.9.9", [2]string{asset, "https://x/bin"},
+		[2]string{checksumsAssetName, checksumsURL}, [2]string{checksumsSignatureAssetName, sigURL})
+	unsigned := newRelease("v9.9.9", [2]string{asset, "https://x/bin"}, [2]string{checksumsAssetName, checksumsURL})
+	signer := withTestSigner(t)
 
 	tests := []struct {
 		name      string
@@ -382,6 +386,12 @@ func TestVerifyDownload(t *testing.T) {
 			release: newRelease("v9.9.9", [2]string{asset, "https://x/bin"}),
 			fetch:   func(string) ([]byte, error) { return nil, errors.New("must not be called") },
 			wantErr: "does not publish checksums-sha256.txt",
+		},
+		{
+			name:    "release without a signature",
+			release: unsigned,
+			fetch:   func(string) ([]byte, error) { return nil, errors.New("must not be called") },
+			wantErr: "does not publish checksums-sha256.txt.minisig",
 		},
 		{
 			name:      "checksums file cannot be downloaded",
@@ -417,6 +427,15 @@ func TestVerifyDownload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var fetchedURL string
 			withFetchChecksums(t, func(url string) ([]byte, error) {
+				if url == sigURL {
+					// Sign whatever the case serves as the manifest, so each
+					// case exercises the checksum logic behind a valid signature.
+					data, err := tt.fetch(checksumsURL)
+					if err != nil {
+						return nil, err
+					}
+					return signer.sign(data, sigAlgPrehashed), nil
+				}
 				fetchedURL = url
 				return tt.fetch(url)
 			})
@@ -510,11 +529,18 @@ func TestPerformUpdate_VerifiesAgainstPublishedChecksums(t *testing.T) {
 				},
 			)
 			verifyDownloadFn = verifyDownload // the real check, fed by the mock below
-			withFetchChecksums(t, func(string) ([]byte, error) {
-				return []byte(sha256Hex(tt.published) + "  " + asset + "\n"), nil
+			signer := withTestSigner(t)
+			withFetchChecksums(t, func(url string) ([]byte, error) {
+				manifest := []byte(sha256Hex(tt.published) + "  " + asset + "\n")
+				if strings.HasSuffix(url, ".minisig") {
+					return signer.sign(manifest, sigAlgPrehashed), nil
+				}
+				return manifest, nil
 			})
 
-			err := PerformUpdate(newRelease("v9.9.9", [2]string{checksumsAssetName, "https://x/checksums"}))
+			err := PerformUpdate(newRelease("v9.9.9",
+				[2]string{checksumsAssetName, "https://x/checksums"},
+				[2]string{checksumsSignatureAssetName, "https://x/checksums.minisig"}))
 
 			if tt.wantErr {
 				require.Error(t, err)

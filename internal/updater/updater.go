@@ -670,7 +670,11 @@ func downloadAssetWithTestFlag(url, filename string, allowTestMode bool) (string
 // with no entry for the asset, is refused: installing an unverified executable
 // is never the fallback.
 func verifyDownload(release *GitHubRelease, path, assetName string) error {
-	url, err := findChecksumsAsset(release)
+	url, err := findAssetURL(release, checksumsAssetName)
+	if err != nil {
+		return err
+	}
+	sigURL, err := findAssetURL(release, checksumsSignatureAssetName)
 	if err != nil {
 		return err
 	}
@@ -678,6 +682,17 @@ func verifyDownload(release *GitHubRelease, path, assetName string) error {
 	data, err := fetchChecksumsFn(url)
 	if err != nil {
 		return fmt.Errorf("failed to download %s: %w", checksumsAssetName, err)
+	}
+	sig, err := fetchChecksumsFn(sigURL)
+	if err != nil {
+		return fmt.Errorf("failed to download %s: %w", checksumsSignatureAssetName, err)
+	}
+
+	// The manifest is only read once the maintainer's signature on it holds:
+	// the checksums come from the same release as the asset, so on their own
+	// they prove integrity, not origin.
+	if err := verifyMinisign(data, sig, trustedPublicKeys); err != nil {
+		return fmt.Errorf("%s signature check failed: %w", checksumsAssetName, err)
 	}
 
 	sums, err := parseChecksums(data)
@@ -688,14 +703,14 @@ func verifyDownload(release *GitHubRelease, path, assetName string) error {
 	return verifyAssetChecksum(path, assetName, sums)
 }
 
-// findChecksumsAsset returns the download URL of the release's checksums file.
-func findChecksumsAsset(release *GitHubRelease) (string, error) {
+// findAssetURL returns the download URL of the release asset called name.
+func findAssetURL(release *GitHubRelease, name string) (string, error) {
 	for _, asset := range release.Assets {
-		if strings.EqualFold(asset.Name, checksumsAssetName) {
+		if strings.EqualFold(asset.Name, name) {
 			return asset.BrowserDownloadURL, nil
 		}
 	}
-	return "", fmt.Errorf("release %s does not publish %s", release.TagName, checksumsAssetName)
+	return "", fmt.Errorf("release %s does not publish %s", release.TagName, name)
 }
 
 func fetchChecksums(url string) ([]byte, error) {

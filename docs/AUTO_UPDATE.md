@@ -22,10 +22,13 @@ The code lives in `internal/updater`.
    | macOS    | `goanime-darwin-<arch>` when published, otherwise `goanime-darwin-universal` |
    | Linux    | `goanime-linux-<arch>`                                                |
 
-4. Downloads `checksums-sha256.txt` from the same release and checks the
-   asset's SHA-256 digest against it. If the release does not publish that
-   file, the asset is not listed in it, or the digest differs, the update
-   stops and nothing is installed.
+4. Downloads `checksums-sha256.txt` and `checksums-sha256.txt.minisig` from
+   the same release and verifies the minisign signature against the public key
+   embedded in the binary (`trustedPublicKeys` in `internal/updater/minisign.go`).
+   Only then does it read the checksums and compare the asset's SHA-256 digest.
+   If the signature is missing or invalid, the build embeds no key, the asset
+   is not listed, or the digest differs, the update stops and nothing is
+   installed.
 5. Hashes the verified new executable and copies the current one to
    `<path>.backup`.
 6. Replaces the executable (see the platform differences below).
@@ -100,9 +103,10 @@ flow above.
   followed.
 - Every download is checked against the release's `checksums-sha256.txt`
   before anything is installed, and on Windows before the zip is extracted.
-  This catches a corrupted, truncated or altered download. It does not protect
-  against a compromised release, since the checksums come from the same place
-  as the asset. Release signing and attestations are tracked separately.
+  The checksums are authenticated by a minisign signature made with an offline
+  key (`build/sign-release.sh`), so a compromised GitHub account or release
+  cannot swap the binary and its checksum together. A build with no embedded
+  key refuses every update. Attestations are tracked separately.
 - The Windows binaries are not Authenticode-signed. Windows SmartScreen may
   warn on first launch. See the README for how to verify a download and what
   to do with the warning.
