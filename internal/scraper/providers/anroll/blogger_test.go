@@ -34,6 +34,7 @@ func TestCheckBloggerLink(t *testing.T) {
 		{"playable blogger link", locked, http.StatusPartialContent, false, true},
 		{"not blogger", "https://redirector.googlevideo.com/videoplayback?ip=1.2.3.4&source=youtube", http.StatusForbidden, false, false},
 		{"not googlevideo", "https://static.anidrive.click/master.m3u8", http.StatusForbidden, false, false},
+		{"lookalike googlevideo host", "https://evilgooglevideo.com/videoplayback?source=blogger", http.StatusForbidden, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

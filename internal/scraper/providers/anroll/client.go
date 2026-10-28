@@ -344,8 +344,15 @@ func (c *Client) extractSearchResults(doc *goquery.Document) []*models.Anime {
 			return
 		}
 		audio := strings.TrimSpace(card.Find(".card-sub").First().Text())
+		mediaType := models.MediaTypeAnime
+		kind := strings.ToLower(strings.TrimSpace(card.Find(".card-type").First().Text()))
+		if kind == "filme" || kind == "movie" {
+			mediaType = models.MediaTypeMovie
+		}
 		baseTitle := strings.TrimSpace(dubbedSuffixRe.ReplaceAllString(title, ""))
-		key := strings.ToLower(strings.Join(strings.Fields(baseTitle), " "))
+		// The media type is part of the key: a series and a movie sharing a
+		// title are different works and must not overwrite each other.
+		key := string(mediaType) + "|" + strings.ToLower(strings.Join(strings.Fields(baseTitle), " "))
 		group := groups[key]
 		if group == nil {
 			group = &searchGroup{title: baseTitle}
@@ -353,11 +360,6 @@ func (c *Client) extractSearchResults(doc *goquery.Document) []*models.Anime {
 			order = append(order, key)
 		}
 		imageURL, _ := img.Attr("src")
-		mediaType := models.MediaTypeAnime
-		kind := strings.ToLower(strings.TrimSpace(card.Find(".card-type").First().Text()))
-		if kind == "filme" || kind == "movie" {
-			mediaType = models.MediaTypeMovie
-		}
 		anime := &models.Anime{
 			Name:      title,
 			URL:       href,
@@ -454,7 +456,7 @@ func (c *Client) GetEpisodeStreamContext(ctx context.Context, episodeURL string)
 	playerURL := ""
 	doc.Find("iframe").EachWithBreak(func(_ int, frame *goquery.Selection) bool {
 		src, _ := frame.Attr("src")
-		if strings.Contains(src, "anidrive.click/token/") {
+		if isAniDrivePlayer(src) {
 			playerURL = src
 			return false
 		}
@@ -530,7 +532,7 @@ func (c *Client) checkBloggerLink(ctx context.Context, streamURL string) error {
 // refused link, so the player is left to try.
 func (c *Client) bloggerRefuses(ctx context.Context, streamURL string) bool {
 	u, err := url.Parse(streamURL)
-	if err != nil || !strings.HasSuffix(u.Hostname(), "googlevideo.com") || u.Query().Get("source") != "blogger" {
+	if err != nil || !strings.HasSuffix(strings.ToLower(u.Hostname()), ".googlevideo.com") || u.Query().Get("source") != "blogger" {
 		return false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, http.NoBody)
@@ -560,10 +562,21 @@ func (c *Client) rewritePlayerURL(rawURL string) string {
 	return u.String()
 }
 
+// isAniDrivePlayer reports whether rawURL is an AniDrive player token page:
+// the host must be anidrive.click itself, so a URL that only mentions it in
+// its path or query is not fetched.
+func isAniDrivePlayer(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "anidrive.click") && strings.HasPrefix(u.Path, "/token/")
+}
+
 func findEmbedURL(value any) string {
 	switch v := value.(type) {
 	case map[string]any:
-		if raw, ok := v["embedUrl"].(string); ok && strings.Contains(raw, "anidrive.click/token/") {
+		if raw, ok := v["embedUrl"].(string); ok && isAniDrivePlayer(raw) {
 			return raw
 		}
 		for _, child := range v {

@@ -293,7 +293,9 @@ func applyPlaybackMetadata(metadata map[string]string) {
 	if referer := strings.TrimSpace(metadata["referer"]); referer != "" {
 		util.SetGlobalReferer(referer)
 	}
-	util.SetGlobalOrigin(strings.TrimSpace(metadata["origin"]))
+	if origin := strings.TrimSpace(metadata["origin"]); origin != "" {
+		util.SetGlobalOrigin(origin)
+	}
 	raw := strings.TrimSpace(metadata["subtitles"])
 	if raw == "" {
 		return
