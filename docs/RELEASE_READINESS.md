@@ -50,7 +50,7 @@ que é possível, o que não é, e como comunicar isso ao usuário sem enganá-l
 
 | ID | Bloqueador | Status |
 | --- | --- | --- |
-| P0.1 | Processo de release e governança do repositório | Aberto |
+| P0.1 | Processo de release e governança do repositório | Feito em 2026-10-28, exceto release imutável e pin de Actions por SHA; falta o PR `dev → main` |
 | P0.2 | Confiança na distribuição, sem exigir assinatura paga | Aberto |
 | P0.3 | Assinatura do manifesto de atualização | Pronto no código e no workflow (job `release` assina após aprovação do environment); falta configurar environment e secrets no GitHub |
 | P0.4 | Updater do Windows quebrado no fallback | Resolvido no código; falta E2E em Windows real |
@@ -93,13 +93,13 @@ que é possível, o que não é, e como comunicar isso ao usuário sem enganá-l
 
 | Item | Estado | Evidência |
 | --- | --- | --- |
-| Branch protection | **desligada** | API de proteção da `main` retorna 404 |
-| Ruleset `procted` | **desabilitado** | `enforcement: disabled` |
-| Tags protegidas | **não** | API de tag protection retorna 404 |
-| Secret scanning | **desligado** | `security_and_analysis.secret_scanning.status = disabled` |
-| Push protection | **desligado** | `secret_scanning_push_protection.status = disabled` |
-| Dependabot security updates | **desligado** | `dependabot_security_updates.status = disabled` |
-| Environments | **nenhum** | API retorna `total_count: 0` |
+| Branch protection | **ativa** (ruleset `protect main`: PR + 5 checks, sem force-push nem deleção) | `gh api repos/alvarorichard/GoAnime/rulesets` |
+| Ruleset `procted` | **removido**, substituído por `protect main`, `protect dev` e `protect release tags` | idem |
+| Tags protegidas | **sim** (`v*`: só admin cria; mover, atualizar e apagar bloqueados) | ruleset `protect release tags` |
+| Secret scanning | **ligado** | `security_and_analysis.secret_scanning.status = enabled` |
+| Push protection | **ligado** | `secret_scanning_push_protection.status = enabled` |
+| Dependabot security updates | **ligado** | `dependabot_security_updates.status = enabled` |
+| Environments | **`release`**: reviewer obrigatório, só tags `v*`; guarda a chave minisign e os secrets da AUR | `gh api repos/alvarorichard/GoAnime/environments` |
 | Actions permitidas | **todas**, sem exigência de SHA | `allowed_actions: all`, `sha_pinning_required: false` |
 | Permissões padrão do workflow | `read` | bom |
 | Chave SSH da AUR | secret de repositório | acessível a qualquer workflow; não está em environment protegido |
