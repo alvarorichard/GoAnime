@@ -16,14 +16,14 @@ require (
 	github.com/enetx/g v1.1.1
 	github.com/enetx/surf v1.0.206
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
-	github.com/lrstanley/go-ytdlp v1.5.5
+	github.com/lrstanley/go-ytdlp v1.5.6
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tr1xem/go-discordrpc v1.0.0
 	github.com/zzl/go-win32api v1.2.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 )
