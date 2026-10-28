@@ -20,6 +20,7 @@ const (
 	// whose current pages embed public MP4 servers. Old-theme pages keep
 	// the StartFlix panel fallback by TMDB id.
 	Pobreflix SourceKind = "Pobreflix"
+	Anroll    SourceKind = "AnimesROLL"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -43,4 +44,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimesDigital: scraper.AnimesDigitalType,
 	AnimeDrive:    scraper.AnimeDriveType,
 	Pobreflix:     scraper.PobreflixType,
+	Anroll:        scraper.AnrollType,
 }

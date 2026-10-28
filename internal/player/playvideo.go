@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"regexp"
 	"runtime"
@@ -41,6 +42,16 @@ var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|
 
 const defaultHLSReferer = "https://streameeeeee.site/"
 
+// isDirectBloggerGoogleVideo reports whether u is a Blogger video on the
+// googlevideo CDN itself (not our local proxy in front of one).
+func isDirectBloggerGoogleVideo(u string) bool {
+	parsed, err := neturl.Parse(strings.TrimSpace(u))
+	if err != nil || !strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".googlevideo.com") {
+		return false
+	}
+	return parsed.Query().Get("source") == "blogger" // nosemgrep: go_sql_rule-concat-sqli -- URL query comparison, no SQL
+}
+
 func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
@@ -55,7 +66,11 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 	if referer == "" {
 		return mpvArgs, ""
 	}
-	return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
+	headers := "Referer: " + referer
+	if origin := util.GetGlobalOrigin(); origin != "" {
+		headers += ",Origin: " + origin
+	}
+	return append(mpvArgs, "--http-header-fields="+headers), referer
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
@@ -186,6 +201,12 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	// yt-dlp so mpv fetches from 127.0.0.1 directly.
 	if strings.Contains(in.VideoURL, "127.0.0.1") && strings.Contains(in.VideoURL, "blogger_proxy") {
 		mpvArgs = append(mpvArgs, "--ytdl=no")
+	}
+
+	// A direct Blogger googlevideo link (AnimesROLL) is signed for the
+	// User-Agent that requested it; mpv's own ("libmpv") gets HTTP 403.
+	if isDirectBloggerGoogleVideo(in.VideoURL) {
+		mpvArgs = append(mpvArgs, "--user-agent="+downloadUserAgent)
 	}
 
 	if in.Title != "" {

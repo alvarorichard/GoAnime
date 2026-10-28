@@ -308,13 +308,14 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 | AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
 | AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
 | AnimeDrive    | Anime      | Portuguese (Brazil)        | Host override: `GOANIME_ANIMEDRIVE_URL`       |
+| AnimesROLL    | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
 | Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
 | StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
 | TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
 | Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4 playback; StartFlix panel fallback |
 
 `--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
+`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
 `movietv` covers StartFlix, TopCine and Pobreflix; `ptbr` covers every
 Portuguese source.
 

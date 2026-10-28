@@ -464,6 +464,15 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
+// clearPlaybackHeaders drops the previous stream's Referer/Origin before a
+// source resolves the next one, so one source's CDN headers are never sent to
+// another (AnimeFire, for one, only sets its own Referer when none is set).
+// providers.FetchStreamURL does the same on the download path.
+func clearPlaybackHeaders() {
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
+}
+
 // GetVideoURLForEpisodeEnhanced gets the video URL through the source registry.
 // ctx is honored at entry today; full downstream propagation lands when this
 // becomes a thin wrapper over source.Resolve → FetchStreamURL(ctx, …).
@@ -505,6 +514,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		if episode.Number == "" {
 			episode.Number = "1"
 		}
+		clearPlaybackHeaders()
 		return src.FetchStreamURL(ctx, episode, urlOnlyAnime, util.GlobalQuality)
 	}
 
@@ -532,6 +542,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		return "", err
 	}
 
+	clearPlaybackHeaders()
 	streamURL, err := src.FetchStreamURL(ctx, episode, anime, util.GlobalQuality)
 	if err != nil {
 		// Transitional error policy — mirrors the legacy chain exactly.
