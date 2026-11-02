@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/debugreport"
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
+	"github.com/alvarorichard/Goanime/v2/internal/logview"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
@@ -27,6 +29,15 @@ func main() {
 	fail := func(err error) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", util.ErrorHandler(err))
 		exitCode = 1
+	}
+
+	// "goanime logs" only reads a file: it starts none of what the program
+	// does, so it is answered before any of that is set up.
+	if len(os.Args) > 1 && os.Args[1] == "logs" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		exitCode = logview.Main(ctx, os.Args[2:])
+		return
 	}
 
 	// A double-click on Windows lands in conhost, which has no font fallback

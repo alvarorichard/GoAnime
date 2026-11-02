@@ -91,6 +91,11 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(descriptionStyle.Render("    Direct search for anime (use spaces, not hyphens)"))
 	helpContent.WriteString("\n")
 	helpContent.WriteString(exampleStyle.Render("Example: goanime \"one piece\" (not \"one-piece\")"))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(commandStyle.Render("  goanime logs "))
+	helpContent.WriteString(parameterStyle.Render("[-f] [-n N] [file]"))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(descriptionStyle.Render("    Show the newest debug log in colour; -f follows it live and moves to the next session"))
 	helpContent.WriteString("\n\n")
 
 	// Options section

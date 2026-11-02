@@ -19,6 +19,25 @@ Each run writes a new file; the newest 30 are kept and older ones are removed.
 | macOS   | `~/Library/Logs/GoAnime`       |
 | Linux   | `~/.local/share/goanime/logs`  |
 
+## Reading it: `goanime logs`
+
+The file is plain text. To read it in the interface's colours:
+
+```bash
+goanime logs            # the newest debug log, in colour
+goanime logs -f         # follow it live
+goanime logs -n 50      # only the last 50 lines
+goanime logs goanime_2026-11-02_19-13-38.log   # a particular one
+```
+
+Leave `goanime logs -f` open in one terminal and run `goanime --debug` in
+another: when the new session's log appears, the viewer moves to it by itself.
+Time is muted, `INFO` is the accent, `WARN` an inverted badge and `ERROR` the
+crimson block; `key=value` fields show the key and the value apart, and a
+provider check that went wrong (`result=challenge`, `blocked`, `down`, ...)
+stands out. Piped into another program, or with `NO_COLOR` or `--plain`, it
+prints the text as it is. Colour never changes a character of a line.
+
 ## What the log starts with
 
 Right after the header (which carries a **session id**, so a log and a crash
@@ -89,5 +108,6 @@ the session logs.
 - `internal/util/logger.go` owns the log file. Every write goes through
   `logSink`, which redacts; do not write to the file any other way.
 - `internal/debugreport` wires it to the program (sources, cfsolve, paths).
+- `internal/logview` is `goanime logs`; it colours at display and never writes colour into the file.
 - Register work that should run when a debug session opens with
   `util.OnDebugSession`.
