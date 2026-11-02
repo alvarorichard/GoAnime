@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,12 @@ const testUA = "Mozilla/5.0 (iPhone; test)"
 // fakeTool writes a stand-in for the cfsolve binary that runs script.
 func fakeTool(t *testing.T, script string) *Solver {
 	t.Helper()
+	// The stand-in is a shell script, which Windows cannot execute. What it
+	// stands in for (building argv, parsing output, timeouts) does not depend on
+	// the OS and is covered on Linux and macOS.
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake cfsolve is a shell script")
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "challenge")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o700); err != nil {

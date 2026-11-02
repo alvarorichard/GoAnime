@@ -225,6 +225,8 @@ func TestLockFileNamesAFullCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Windows checkout may have turned the line endings into CRLF.
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 	if !regexp.MustCompile(`(?m)^sha=[0-9a-f]{40}$`).Match(b) || !regexp.MustCompile(`(?m)^repo=https://github\.com/[^/]+/[^/\s]+$`).Match(b) {
 		t.Fatalf("cfsolve.lock must carry repo= and a full sha=:\n%s", b)
 	}
