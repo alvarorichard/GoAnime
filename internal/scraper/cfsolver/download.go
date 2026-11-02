@@ -58,15 +58,25 @@ func releaseTag(ver string) (string, bool) {
 }
 
 // assetName is the release asset for a platform, or false when none is built.
-// These are the platforms the release workflow compiles cfsolve for. Windows
-// and macOS on Intel have none: cfsolve does not build on Windows yet, and the
-// workflow has no Intel Mac build.
+// These are the platforms the release workflow compiles cfsolve for. macOS on
+// Intel has none: the workflow has no Intel Mac build.
 func assetName(goos, goarch string) (string, bool) {
 	switch goos + "/" + goarch {
 	case "linux/amd64", "linux/arm64", "darwin/arm64":
 		return "challenge-" + goos + "-" + goarch, true
+	case "windows/amd64":
+		return "challenge-windows-amd64.exe", true
 	}
 	return "", false
+}
+
+// localBinaryName is the file the downloaded asset is saved as. Windows only
+// runs a file with an executable extension.
+func localBinaryName(goos string) string {
+	if goos == "windows" {
+		return "challenge.exe"
+	}
+	return "challenge"
 }
 
 // Installer downloads the pinned cfsolve binary into Dir.
@@ -231,7 +241,7 @@ func (in *Installer) fetch(ctx context.Context) (string, error) {
 	if err := os.Chmod(tmp.Name(), 0o700); err != nil { // #nosec G302 -- an executable needs its x bit; 0700 is the tightest mode that can run
 		return "", err
 	}
-	final := filepath.Join(in.Dir, "challenge")
+	final := filepath.Join(in.Dir, localBinaryName(runtime.GOOS))
 	if err := os.Rename(tmp.Name(), final); err != nil {
 		return "", err
 	}

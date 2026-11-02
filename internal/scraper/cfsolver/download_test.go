@@ -193,10 +193,16 @@ func TestAssetNames(t *testing.T) {
 	if _, ok := assetName("linux", "amd64"); !ok {
 		t.Error("linux/amd64 must have an asset")
 	}
-	for _, p := range [][2]string{{"windows", "amd64"}, {"darwin", "amd64"}} {
+	if n, ok := assetName("windows", "amd64"); !ok || n != "challenge-windows-amd64.exe" {
+		t.Errorf("windows/amd64 = %q, %v; the release workflow builds challenge-windows-amd64.exe", n, ok)
+	}
+	for _, p := range [][2]string{{"darwin", "amd64"}, {"windows", "arm64"}} {
 		if n, ok := assetName(p[0], p[1]); ok {
 			t.Errorf("%s/%s reported %q, but the release workflow builds nothing for it", p[0], p[1], n)
 		}
+	}
+	if localBinaryName("windows") != "challenge.exe" || localBinaryName("linux") != "challenge" {
+		t.Error("only Windows saves the binary with .exe")
 	}
 	if _, ok := assetName("plan9", "386"); ok {
 		t.Error("unsupported platform reported an asset")

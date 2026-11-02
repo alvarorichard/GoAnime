@@ -16,5 +16,8 @@ The patch is applied on top of the commit pinned in
   notices the patch is already contained and skips it;
 - then delete `windows-build.patch` and this folder.
 
-Not yet shown on a real Windows machine of ours: the CI build, and the solve
-itself. See `.github/workflows/cfsolve-windows-trial.yml`.
+Shown on a real Windows 11 machine of ours (2026-11-02): the
+`challenge-windows-amd64.exe` built by CI cleared Goyabu's gate (HTTP 403, then
+200, with a `cf_clearance`). The release workflow builds it in the
+`cfsolve-windows` job; `.github/workflows/cfsolve-windows-trial.yml` is the
+build-only check that runs when this folder changes.
