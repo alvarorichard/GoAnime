@@ -156,6 +156,40 @@ func TestDiscoverFindsBinaryInConfigFolderWithEmbeddedProfile(t *testing.T) {
 	}
 }
 
+func TestSolveTurnstilePassesTheWidgetAndReturnsTheToken(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "args")
+	s := fakeTool(t, `printf '%s\n' "$@" > `+out+`
+echo "progress" >&2
+echo "0.the-token-value"
+`)
+	tok, err := s.SolveTurnstile(context.Background(), TurnstileRequest{
+		PageURL: "https://site.example/filme/1", SiteKey: "0xKEY", Action: "embed_access", CData: "cd-1",
+	}, time.Minute)
+	if err != nil || tok != "0.the-token-value" {
+		t.Fatalf("token = %q, err = %v", tok, err)
+	}
+	b, _ := os.ReadFile(out)
+	got := string(b)
+	for _, want := range []string{"--blank-page", "--solve", "--sitekey\n0xKEY", "--action\nembed_access", "--cdata\ncd-1", "https://site.example/filme/1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("argv lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSolveTurnstileFailures(t *testing.T) {
+	ctx := context.Background()
+	if _, err := fakeTool(t, "true").SolveTurnstile(ctx, TurnstileRequest{PageURL: "https://x.example/"}, time.Minute); err == nil {
+		t.Error("a missing sitekey must be refused before running anything")
+	}
+	r := TurnstileRequest{PageURL: "https://x.example/", SiteKey: "k"}
+	for name, script := range map[string]string{"exit": "exit 3", "empty": "true", "clearance not token": "echo cf_clearance=abc"} {
+		if _, err := fakeTool(t, script).SolveTurnstile(ctx, r, time.Minute); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
 func TestParseClearance(t *testing.T) {
 	if v, ok := parseClearance("noise\n  cf_clearance=xyz \n"); !ok || v != "xyz" {
 		t.Errorf("got %q %v", v, ok)

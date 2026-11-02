@@ -191,6 +191,56 @@ func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout t
 	}, nil
 }
 
+// TurnstileRequest names a Turnstile widget a page renders from script.
+type TurnstileRequest struct {
+	PageURL string // the address the widget belongs to; the page is not fetched
+	SiteKey string
+	Action  string // optional
+	CData   string // optional
+}
+
+// SolveTurnstile returns a token for one widget without loading its page, so
+// the caller keeps the only session that fetched it (a site may bind its
+// own challenge to that session's address and User-Agent).
+func (s *Solver) SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout time.Duration) (string, error) {
+	if r.SiteKey == "" {
+		return "", errors.New("cfsolve: a sitekey is required")
+	}
+	u, err := url.Parse(r.PageURL)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("cfsolve: bad page %q", r.PageURL)
+	}
+	tmp, err := os.MkdirTemp("", "goanime-cfsolve-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	args := []string{"--page", r.PageURL, filepath.Join(tmp, "run"), "--solve", "--blank-page",
+		"--fingerprint", s.Profile, "--sitekey", r.SiteKey}
+	if r.Action != "" {
+		args = append(args, "--action", r.Action)
+	}
+	if r.CData != "" {
+		args = append(args, "--cdata", r.CData)
+	}
+	cmd := exec.CommandContext(ctx, s.Bin, args...) //nolint:gosec // Bin is operator configuration, args are not shell-interpreted
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("cfsolve: %w: %s", err, lastLine(stderr.String()))
+	}
+	token := lastLine(stdout.String())
+	if token == "" || strings.HasPrefix(token, clearanceName+"=") {
+		return "", fmt.Errorf("cfsolve: no token in output: %q", token)
+	}
+	return token, nil
+}
+
 // parseClearance finds the "cf_clearance=<value>" line cfsolve prints on success.
 func parseClearance(out string) (string, bool) {
 	for _, line := range strings.Split(out, "\n") {
