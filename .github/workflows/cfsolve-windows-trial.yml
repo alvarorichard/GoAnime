@@ -1,0 +1,105 @@
+name: cfsolve Windows trial
+
+# Builds cfsolve for Windows with the temporary patch (third_party/cfsolve) and
+# uploads the .exe as an artifact. It publishes nothing: it only answers "does
+# it build and does the .exe start", so the release is not touched until it does.
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - third_party/cfsolve/**
+      - scripts/apply-cfsolve-patches.sh
+      - internal/scraper/cfsolver/cfsolve.lock
+      - .github/workflows/cfsolve-windows-trial.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfsolve-windows-trial
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build challenge.exe (windows-gnu)
+    if: github.repository == 'alvarorichard/GoAnime'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned cfsolve commit
+        id: pin
+        shell: bash
+        run: |
+          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
+          {
+            echo "repo=${repo#https://github.com/}"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: cfsolve-src
+          persist-credentials: false
+
+      - name: Install MinGW-w64 and the BoringSSL build tools
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            git patch perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-clang
+
+      - name: Apply the temporary Windows patch
+        shell: msys2 {0}
+        run: scripts/apply-cfsolve-patches.sh cfsolve-src
+
+      - name: Install the pinned Rust toolchain and the windows-gnu target
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        env:
+          LIBCLANG_PATH: ${{ steps.msys2.outputs.msys2-location }}\mingw64\bin
+        run: cargo build --release --locked --bin challenge --target x86_64-pc-windows-gnu
+
+      - name: The .exe starts and imports only system DLLs
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          exe=target/x86_64-pc-windows-gnu/release/challenge.exe
+          ls -l "$exe"
+          "$exe" --help | head -3
+          echo "--- imported DLLs:"
+          objdump -p "$exe" | grep 'DLL Name' | sort -u
+          if objdump -p "$exe" | grep -qiE 'libstdc\+\+|libgcc_s|libwinpthread'; then
+            echo "::error::the .exe imports a MinGW runtime DLL that a clean Windows does not have"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: challenge-windows-amd64
+          path: cfsolve-src/target/x86_64-pc-windows-gnu/release/challenge.exe
+          retention-days: 7
