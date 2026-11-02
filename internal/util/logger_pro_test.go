@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -171,6 +172,7 @@ func TestCrashReportsAreKeptApartFromSessionLogs(t *testing.T) {
 // A line names the code that logged it. Before, every line said logger.go,
 // the wrapper, which told a reader nothing.
 func TestLogLinesNameTheCallerNotTheWrapper(t *testing.T) {
+	t.Setenv("GOANIME_LOG_SOURCE", "1") // the caller is off by default
 	snapshotLogger(t)
 	withRedirectedHome(t)
 	IsDebug = true
@@ -304,7 +306,7 @@ func TestTheLogFileHoldsPlainTextWithNoEscapeCodes(t *testing.T) {
 
 	got := readLog(t)
 	assert.NotContains(t, got, "\x1b", "no escape sequence of any kind may reach the file")
-	for _, want := range []string{"DEBUG", "a debug line", "title=Todo", "WARN", "a warning", "source=Goyabu", "ERRO", "subprocess line", "Version  2.0.0"} {
+	for _, want := range []string{"a debug line", "title=Todo", "INFO", "WARN", "a warning", "source=Goyabu", "ERROR", "subprocess line", "Version  2.0.0"} {
 		assert.Contains(t, got, want)
 	}
 }
@@ -329,4 +331,65 @@ func TestEscapeSequencesInLoggedDataNeverReachTheFile(t *testing.T) {
 	assert.Contains(t, got, "Anime", "the library writes control bytes in a value as visible \\x1b text")
 	assert.Contains(t, got, "mpv: playing", "a subprocess's colours are stripped, its words stay")
 	assert.NotContains(t, got, "[1;32m")
+}
+
+// A line of the file is what happened, not where in the code it was logged and
+// not which program logged it (the file is all GoAnime's): a timestamp and the
+// message. Debug lines, nearly all of them, carry no level label; the rare INFO,
+// WARN and ERROR do, so they stand out.
+func TestLogLinesCarryTheTimeAndTheMessageNotThePrefixOrTheCaller(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	Logger = newConsoleLogger(io.Discard, colorprofile.NoTTY, false)
+	setLogFile(initFileLogger())
+
+	Debug("Searching for anime", "query", "naruto")
+	Info("Loading episode...")
+	Warn("4 sources did not answer")
+	Error("something broke", "source", "Goyabu")
+	CloseLogFile()
+
+	lines := map[string]string{}
+	for _, l := range strings.Split(readLog(t), "\n") {
+		for _, key := range []string{"Searching for anime", "Loading episode", "4 sources", "something broke"} {
+			if strings.Contains(l, key) {
+				lines[key] = l
+			}
+		}
+	}
+	timePrefix := regexp.MustCompile(`^\d{2}:\d{2}:\d{2} `)
+	for key, line := range lines {
+		assert.Regexp(t, timePrefix, line, key)
+		assert.NotContains(t, line, "GoAnime:", "the file is all GoAnime's: %s", key)
+		assert.NotRegexp(t, `<[a-z]+/[a-z_.]+:\d+>`, line, "no <file:line> caller tag: %s", key)
+	}
+	require.Len(t, lines, 4)
+	assert.Equal(t, "Searching for anime query=naruto", strings.TrimPrefix(lines["Searching for anime"], lines["Searching for anime"][:9]),
+		"a debug line is the time, then the message and its fields: no DEBUG label")
+	assert.NotContains(t, lines["Searching for anime"], "DEBUG")
+	assert.Contains(t, lines["Loading episode"], " INFO ")
+	assert.Contains(t, lines["4 sources"], " WARN ")
+	assert.Contains(t, lines["something broke"], " ERROR ")
+}
+
+// The code location is still there for whoever debugs GoAnime itself.
+func TestTheCallerCanStillBeSwitchedOnForDevelopment(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	t.Setenv("GOANIME_LOG_SOURCE", "1")
+	IsDebug = true
+	Logger = newConsoleLogger(io.Discard, colorprofile.NoTTY, false)
+	setLogFile(initFileLogger())
+
+	Debug("marker-source ")
+	CloseLogFile()
+
+	var line string
+	for _, l := range strings.Split(readLog(t), "\n") {
+		if strings.Contains(l, "marker-source") {
+			line = l
+		}
+	}
+	assert.Contains(t, line, "logger_pro_test.go", "attributed to whoever logged, not to the wrapper")
 }

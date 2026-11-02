@@ -47,6 +47,11 @@ Provider check source=AnimeDrive result=ok ms=2462 status=200
 `slow`, `dns`, `refused`, `tls` or `error`. A provider that moved to another
 domain also carries `moved_to=`.
 
+Each line is the time and what happened. The few `INFO`, `WARN` and `ERROR`
+lines are labelled so they stand out; the rest (almost all) are not. Set
+`GOANIME_LOG_SOURCE=1` to add the source file and line of each message, which
+helps when debugging GoAnime itself.
+
 At the end of the file there is a one-line summary of the run: how long it
 lasted and how many warnings and errors it logged.
 

@@ -318,11 +318,14 @@ func initFileLogger() *logSink {
 
 	// Create a plain-text logger that writes to the file (no ANSI colors)
 	fileLogger = log.NewWithOptions(sink, log.Options{
-		ReportCaller:    true,
+		// The code location is for whoever debugs GoAnime itself, so it is
+		// off unless asked for; the file is for the person reading what
+		// happened.
+		ReportCaller:    os.Getenv("GOANIME_LOG_SOURCE") != "",
 		ReportTimestamp: true,
 		TimeFormat:      "15:04:05",
-		Prefix:          "GoAnime",
 	})
+	fileLogger.SetStyles(fileLogStyles())
 	fileLogger.SetLevel(log.DebugLevel)
 	// NoTTY, not ASCII: ASCII drops the colours but keeps bold and faint, which
 	// leave "^[[1mDEBUG^[[m" in every line of a file read in an editor or less.
@@ -342,6 +345,26 @@ Log      %s
 This file is safe to attach to a bug report: credentials, one-time tickets and
 your home folder are removed before anything is written.
 `, sessionID, now.Format("2006-01-02 15:04:05 -07:00"), path)
+}
+
+// fileLogStyles is the look of a line in the log file: the time, then the
+// message and its fields. A debug line, which is nearly every line, has no
+// level label and no "GoAnime:" (the file is all GoAnime's); the few INFO,
+// WARN and ERROR lines are labelled so they stand out. No colour: the file
+// holds text.
+func fileLogStyles() *log.Styles {
+	label := func(text string) lipgloss.Style { return lipgloss.NewStyle().SetString(text) }
+	return &log.Styles{
+		Levels: map[log.Level]lipgloss.Style{
+			log.DebugLevel: lipgloss.NewStyle(), // renders as "", which the formatter skips
+			log.InfoLevel:  label("INFO "),
+			log.WarnLevel:  label("WARN "),
+			log.ErrorLevel: label("ERROR"),
+			log.FatalLevel: label("FATAL"),
+		},
+		Keys:   map[string]lipgloss.Style{},
+		Values: map[string]lipgloss.Style{},
+	}
 }
 
 // pruneLogs keeps the newest `keep` files named prefix*.log in dir and removes
