@@ -1,8 +1,9 @@
-package main
+package debugreport
 
 import (
 	"testing"
 
+	_ "github.com/alvarorichard/Goanime/v2/internal/api/providers" // registers the sources, as the program does at start-up
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

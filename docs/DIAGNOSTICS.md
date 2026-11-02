@@ -83,5 +83,6 @@ the session logs.
   redaction rules (`Redact`). It imports nothing from the app.
 - `internal/util/logger.go` owns the log file. Every write goes through
   `logSink`, which redacts; do not write to the file any other way.
+- `internal/debugreport` wires it to the program (sources, cfsolve, paths).
 - Register work that should run when a debug session opens with
   `util.OnDebugSession`.

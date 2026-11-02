@@ -1,4 +1,8 @@
-package main
+// Package debugreport records, in the debug log, what a maintainer needs to
+// diagnose a bug: the machine, the terminal, the tools and how each provider
+// answers. It lives outside cmd/goanime so that main.go stays self-contained
+// and "go run cmd/goanime/main.go" keeps working.
+package debugreport
 
 import (
 	"context"
@@ -26,10 +30,10 @@ var debugTools = []diag.Tool{
 	{Name: "ffprobe", VersionArgs: []string{"-version"}},
 }
 
-// startDebugDiagnostics writes the environment report into the debug log and
+// Start writes the environment report into the debug log and
 // then checks each provider, all in the background: --debug must not make the
 // program slower to open. Nothing here runs without --debug.
-func startDebugDiagnostics() {
+func Start() {
 	if !util.IsDebug {
 		return
 	}

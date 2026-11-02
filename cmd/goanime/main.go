@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"github.com/alvarorichard/Goanime/v2/internal/debugreport"
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
@@ -51,7 +52,7 @@ func main() {
 	// With --debug, record the machine, the terminal, the tools and each
 	// provider's state in the log once it is open. Background: it never
 	// delays the start.
-	util.OnDebugSession(startDebugDiagnostics)
+	util.OnDebugSession(debugreport.Start)
 
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
