@@ -137,4 +137,4 @@ jobs:
           git push -q origin "$branch"
           gh pr create --base dev --head "$branch" \
             --title "chore(cfsolve): move to upstream ${sha:0:12}" \
-            --body "Automated. Upstream's latest cfsolve commit built and cleared Goyabu's gate in CI (TestGoyabuThroughCfsolveLive), so the pin and the embedded profile now follow it. Merging makes the cfsolve-build workflow publish the new binaries once the release environment is approved; until then GoAnime keeps downloading the previous pin."
+            --body "Automated. Upstream's latest cfsolve commit built and cleared Goyabu's gate in CI (TestGoyabuThroughCfsolveLive), so the pin and the embedded profile now follow it. Linux and macOS only: Windows is not built. The next GoAnime release builds and ships the new commit; releases already published keep the one they were built with."

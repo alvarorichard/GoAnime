@@ -330,15 +330,15 @@ source at a reachable mirror.
 Goyabu is behind a Cloudflare managed challenge. On a network Cloudflare does not
 challenge it just works; elsewhere it needs the [cfsolve](https://github.com/chris124567/cfsolve)
 tool, which clears the challenge from plain requests with no browser. There is
-nothing to install: GoAnime downloads the build its CI published for the pinned
-cfsolve commit on first run (checksums signed with the same key as GoAnime's
-updates), and Goyabu joins the search once it is in place. The Windows installer
-bundles it. If the download fails or is blocked, Goyabu just stays out of the
-search. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns the download off,
-`GOANIME_CFSOLVE_BIN` points at a binary of your own, `GOANIME_ENABLED_SOURCES=goyabu`
-forces the source on and `GOANIME_DISABLED_SOURCES=goyabu` turns it off. To get the
-binary yourself: `scripts/get-cfsolve.sh` (or `--build` to compile it; needs Rust,
-cmake and libclang). Maintainers: see [docs/CFSOLVE.md](docs/CFSOLVE.md).
+nothing to install on Linux and Apple Silicon Macs: a release build downloads
+the binary shipped with its own release on first run (verified against the
+release's signed checksums) and Goyabu joins the search once it is in place. If
+the download fails, Goyabu just stays out of the search. **Windows and Intel
+Macs have no cfsolve build yet**, so Goyabu only works there on networks that
+are not challenged (`GOANIME_ENABLED_SOURCES=goyabu`). `GOANIME_CFSOLVE_AUTODOWNLOAD=0`
+turns the download off, `GOANIME_CFSOLVE_BIN` points at a binary of your own and
+`GOANIME_DISABLED_SOURCES=goyabu` turns the source off. Developers and
+maintainers: see [docs/CFSOLVE.md](docs/CFSOLVE.md).
 
 GoAnime depends on third-party websites, and those websites change without
 notice. When one does, the corresponding source can stop working until it is

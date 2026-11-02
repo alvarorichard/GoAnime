@@ -10,16 +10,19 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alvarorichard/Goanime/v2/internal/version"
 )
 
 const (
 	goodSig   = "signed-by-the-maintainer"
-	testTag   = "cfsolve-abc"
+	testTag   = "v9.9.9"
 	testAsset = "challenge-linux-amd64"
 )
 
@@ -171,22 +174,59 @@ func TestInstallRefusesPlainHTTPToTheInternet(t *testing.T) {
 	}
 }
 
-func TestPinnedSHAAndTag(t *testing.T) {
-	sha := pinnedSHA()
-	if len(sha) != 40 {
-		t.Fatalf("cfsolve.lock sha = %q, want a full commit hash", sha)
+func TestReleaseTag(t *testing.T) {
+	for in, want := range map[string]string{
+		"2.0.1": "v2.0.1", "v2.0.1": "v2.0.1", "2.1": "v2.1", "2.0.0-rc.1": "v2.0.0-rc.1",
+	} {
+		if got, ok := releaseTag(in); !ok || got != want {
+			t.Errorf("releaseTag(%q) = %q, %v; want %q", in, got, ok, want)
+		}
 	}
-	if got := releaseTag(sha); got != "cfsolve-"+sha[:12] {
-		t.Errorf("tag = %q", got)
+	for _, in := range []string{"", "dev", "unknown", "3013659", "2.0.0+local", "../2.0", "2.0/x"} {
+		if got, ok := releaseTag(in); ok {
+			t.Errorf("releaseTag(%q) = %q; a build that is not a release has nothing to download", in, got)
+		}
 	}
+}
+
+func TestAssetNames(t *testing.T) {
 	if _, ok := assetName("linux", "amd64"); !ok {
 		t.Error("linux/amd64 must have an asset")
 	}
-	if n, _ := assetName("windows", "amd64"); !strings.HasSuffix(n, ".exe") {
-		t.Errorf("windows asset = %q", n)
+	for _, p := range [][2]string{{"windows", "amd64"}, {"darwin", "amd64"}} {
+		if n, ok := assetName(p[0], p[1]); ok {
+			t.Errorf("%s/%s reported %q, but the release workflow builds nothing for it", p[0], p[1], n)
+		}
 	}
 	if _, ok := assetName("plan9", "386"); ok {
 		t.Error("unsupported platform reported an asset")
+	}
+}
+
+// A development build must not download anything: there is no release whose
+// binary matches the profile it embeds.
+func TestDefaultInstallerNeedsAReleaseBuild(t *testing.T) {
+	old := version.Version
+	t.Cleanup(func() { version.Version = old })
+	version.Version = "dev"
+	if _, ok := DefaultInstaller(); ok {
+		t.Fatal("a development build got an installer")
+	}
+	version.Version = "2.0.1"
+	if in, ok := DefaultInstaller(); ok && in.Tag != "v2.0.1" {
+		t.Fatalf("tag = %q, want v2.0.1", in.Tag)
+	}
+}
+
+// cfsolve.lock is read by the release workflow and the scripts, not by Go; keep
+// its shape honest.
+func TestLockFileNamesAFullCommit(t *testing.T) {
+	b, err := os.ReadFile("cfsolve.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^sha=[0-9a-f]{40}$`).Match(b) || !regexp.MustCompile(`(?m)^repo=https://github\.com/[^/]+/[^/\s]+$`).Match(b) {
+		t.Fatalf("cfsolve.lock must carry repo= and a full sha=:\n%s", b)
 	}
 }
 

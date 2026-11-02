@@ -84,12 +84,12 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # What users get: the signed binary GoAnime downloads by itself. Building
-      # the pinned commit is only the fallback for a release not published yet.
+      # What users get: the binary attached to GoAnime's latest release. Building
+      # the pinned commit is only the fallback for a release that has none.
       - name: Install the pinned cfsolve
         run: |
           if ! scripts/get-cfsolve.sh; then
-            echo "::warning::no published binary for the pinned commit yet; building it"
+            echo "::warning::the latest release has no cfsolve binary; building the pinned commit"
             sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
             scripts/get-cfsolve.sh --build
           fi

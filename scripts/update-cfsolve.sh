@@ -4,9 +4,9 @@
 #
 #   scripts/update-cfsolve.sh <sha|HEAD> [--no-build]
 #
-# Commit the result; the cfsolve-build workflow then publishes the binaries
-# for the new commit. The profile and the binary must come from the same
-# commit, which is why one script changes both.
+# Commit the result; the next GoAnime release builds the new commit and attaches
+# its binaries. The profile and the binary must come from the same commit,
+# which is why one script changes both.
 set -euo pipefail
 
 target="${1:?usage: update-cfsolve.sh <sha|HEAD> [--no-build]}"
@@ -30,8 +30,8 @@ cp "$work/src/LICENSE" "$pkg/profile/LICENSE-cfsolve"
 cat > "$pkg/cfsolve.lock" <<LOCK
 # The cfsolve commit GoAnime is built and tested against. Never track upstream's
 # HEAD: bump this with scripts/update-cfsolve.sh, which also refreshes the
-# embedded profile from the same commit. The cfsolve-build workflow publishes
-# the binaries for this commit as release tag cfsolve-<first 12 of sha>.
+# embedded profile from the same commit. The release workflow builds this
+# commit and attaches the binaries to each GoAnime release.
 repo=$repo
 sha=$sha
 LOCK

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Installs the cfsolve binary Goyabu needs, where GoAnime looks for it.
 #
-#   scripts/get-cfsolve.sh           download the CI-built binary and verify its SHA-256
-#   scripts/get-cfsolve.sh --build   build the pinned commit from source (Rust, cmake, libclang)
+#   scripts/get-cfsolve.sh           download the binary from GoAnime's latest release and verify it
+#   scripts/get-cfsolve.sh --build   build the commit pinned in cfsolve.lock (Rust, cmake, libclang)
 #
-# The commit is pinned in internal/scraper/cfsolver/cfsolve.lock.
+# Release binaries are built from the commit pinned in
+# internal/scraper/cfsolver/cfsolve.lock at the time of that release. Use --build
+# to get exactly the commit of the checkout you are on.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,25 +42,29 @@ case "$(uname -m)" in
   *) echo "no prebuilt cfsolve for $(uname -m); try --build" >&2; exit 1 ;;
 esac
 asset="challenge-$os-$arch"
-base="https://github.com/alvarorichard/GoAnime/releases/download/cfsolve-${sha:0:12}"
+case "$asset" in
+  challenge-linux-amd64|challenge-linux-arm64|challenge-darwin-arm64) ;;
+  *) echo "releases carry no cfsolve for $os/$arch (Windows and Intel Macs are not built); try --build" >&2; exit 1 ;;
+esac
+base="https://github.com/alvarorichard/GoAnime/releases/latest/download"
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
-curl -fsSL "$base/SHA256SUMS" -o "$work/SHA256SUMS"
-curl -fsSL "$base/SHA256SUMS.minisig" -o "$work/SHA256SUMS.minisig"
+curl -fsSL "$base/checksums-sha256.txt" -o "$work/checksums-sha256.txt"
+curl -fsSL "$base/checksums-sha256.txt.minisig" -o "$work/checksums-sha256.txt.minisig"
 curl -fsSL "$base/$asset" -o "$work/$asset"
 # The checksum list is signed with the key GoAnime's updater trusts. Check it
 # when minisign is installed; the checksum below still has to match either way.
 if command -v minisign >/dev/null; then
   pub="$(grep -oE '"RW[A-Za-z0-9+/=]{50,}"' "$root/internal/updater/minisign.go" | head -1 | tr -d '"')"
-  minisign -V -P "$pub" -m "$work/SHA256SUMS" -x "$work/SHA256SUMS.minisig" >/dev/null \
-    || { echo "SHA256SUMS signature does not verify" >&2; exit 1; }
+  minisign -V -P "$pub" -m "$work/checksums-sha256.txt" -x "$work/checksums-sha256.txt.minisig" >/dev/null \
+    || { echo "checksums-sha256.txt signature does not verify" >&2; exit 1; }
 else
   echo "note: minisign not installed; skipping the signature check (GoAnime itself always checks it)" >&2
 fi
-want="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1}' "$work/SHA256SUMS")"
-[ -n "$want" ] || { echo "SHA256SUMS lists no $asset" >&2; exit 1; }
+want="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1}' "$work/checksums-sha256.txt")"
+[ -n "$want" ] || { echo "the latest release lists no $asset (it may predate cfsolve support); try --build" >&2; exit 1; }
 if command -v sha256sum >/dev/null; then got="$(sha256sum "$work/$asset" | cut -d' ' -f1)"
 else got="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"; fi
 [ "$got" = "$want" ] || { echo "checksum mismatch for $asset" >&2; exit 1; }
 install -m 0755 "$work/$asset" "$dest/challenge"
-echo "installed cfsolve ${sha:0:12} -> $dest/challenge"
+echo "installed $asset from the latest GoAnime release -> $dest/challenge"
