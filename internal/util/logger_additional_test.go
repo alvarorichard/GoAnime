@@ -22,7 +22,7 @@ import (
 type loggerSnapshot struct {
 	logger      *log.Logger
 	fileLogger  *log.Logger
-	logFile     *os.File
+	logFile     *logSink
 	logFilePath string
 	isDebug     bool
 	cleanups    []func()
@@ -110,14 +110,14 @@ func TestInitFileLogger_CreatesFileWithHeader(t *testing.T) {
 
 	f := initFileLogger()
 	require.NotNil(t, f)
-	t.Cleanup(func() { _ = f.Close() })
+	t.Cleanup(f.close)
 
 	require.NotEmpty(t, LogFilePath)
 	assert.True(t, strings.HasPrefix(LogFilePath, dir), "log path %q should be in %q", LogFilePath, dir)
 
 	data, err := os.ReadFile(LogFilePath) // #nosec G304
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "GoAnime Debug Session")
+	assert.Contains(t, string(data), "GoAnime debug session")
 }
 
 func TestInitFileLogger_FailsWhenDirUncreatable(t *testing.T) {
@@ -225,7 +225,7 @@ func TestCloseLogFile_FlushesAndClears(t *testing.T) {
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304
 	require.NoError(t, err)
 	_, _ = f.WriteString("hello")
-	logFile = f
+	logFile = &logSink{f: f}
 
 	CloseLogFile()
 	assert.Nil(t, logFile)
@@ -244,7 +244,7 @@ func TestGetLogFileWriter_ReturnsFileWhenActive(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "y.log")
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304
 	require.NoError(t, err)
-	logFile = f
+	logFile = &logSink{f: f}
 	t.Cleanup(func() { _ = f.Close() })
 
 	w := GetLogFileWriter()
@@ -335,7 +335,7 @@ func TestFatal_ExitsProcess(t *testing.T) {
 		}
 		fileLogger = log.NewWithOptions(f, log.Options{Prefix: "file"})
 		fileLogger.SetLevel(log.DebugLevel)
-		logFile = f
+		logFile = &logSink{f: f}
 		Fatal("fatal-msg-from-child")
 		// Should never reach here.
 		os.Exit(0)

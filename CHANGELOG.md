@@ -2,6 +2,14 @@
 
 ## Features
 
+### Diagnostics
+
+- **`--debug` captures the machine, not just the run.** The log opens with an environment report: OS, distribution, kernel, memory, terminal and colour support, locale, every `GOANIME_*` variable and proxy, the versions of mpv, yt-dlp, ffmpeg and ffprobe, which sources are on and why one is off, and whether cfsolve is installed. In the background it then asks each provider's homepage how it answers (`ok`, `challenge`, `blocked`, `down`, `slow`, `dns`, `refused`, `tls`, and `moved_to=` when a site changed domain). See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).
+- **Logs are safe to attach as they are.** Everything written to the log file passes one filter that removes credentials in URLs and headers, secret-named parameters and fields (`token`, `signature`, `ticket`, `password`, `clearance`, ...), the RedeFlix one-time tickets, JSON web tokens and your home folder.
+- **A more professional log.** Each run has a session id, the file says it is safe to share, ends with a one-line summary (duration, warnings, errors), names the code that logged each line instead of the logger's own file, and only the newest 30 session logs are kept.
+- **Crash reports.** A panic saves `crash_<date>_<time>_<id>.log` (the panic, the stack and the environment) whether or not `--debug` was on, and prints its path. The newest 10 are kept.
+- **The debug screen follows the new design.** The `--debug` notice is a paper panel with the crimson shadow, and the console log levels use the site's palette (crimson `INFO`, an inverted `WARN` badge, a crimson `ERROR` block) instead of the library's cyan, yellow, pink and violet.
+
 ### Sources
 
 - **Pobreflix plays its RedeFlixApi player without cfsolve.** On 2026-11-02 the site began listing `redeflixapi.bar` players, which have no Turnstile: the page hands out a ticket that the player's own script trades in two POSTs (`playback-resolve.php`, then `playerkys/source.php`) for the media URL. GoAnime now does the same, sending the player's own origin and never another site's, and the title plays with no solver installed. The Turnstile player and the cfsolve path are unchanged and are tried when the page is in the old format. `GOANIME_POBREFLIX_OPEN_PLAYER_HOSTS` adds hosts that serve this player when the site moves it. The client also follows the catalog's redirect to its current mirror domain (`pobreflixtv.christmas` now) instead of paying a hop on every request.

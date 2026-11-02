@@ -427,8 +427,15 @@ and attach a debug log to it:
    | macOS   | `~/Library/Logs/GoAnime`       |
    | Linux   | `~/.local/share/goanime/logs`  |
 
-3. Attach the newest file to the issue, together with the output of
-   `goanime --version`, your operating system and the command you ran.
+3. Attach the newest file to the issue, together with the command you ran.
+   The log already starts with your operating system, terminal, the versions
+   of mpv, yt-dlp and ffmpeg, which sources are on, and how each provider
+   answered. Passwords, tokens, one-time tickets and your home folder are
+   removed before anything is written, so it is safe to attach as it is.
+
+If GoAnime crashes, it saves a `crash_<date>_<time>_<id>.log` in the same
+folder without needing `--debug`, and prints its path. Attach that file.
+[What is collected, and what never is](docs/DIAGNOSTICS.md).
 
 The log lists the titles you searched and paths on your computer, which can
 include your user name. Read it before attaching if that matters to you.

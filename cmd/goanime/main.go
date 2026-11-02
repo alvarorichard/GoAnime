@@ -48,6 +48,11 @@ func main() {
 		cfsolver.InstallInBackground()
 	}
 
+	// With --debug, record the machine, the terminal, the tools and each
+	// provider's state in the log once it is open. Background: it never
+	// delays the start.
+	util.OnDebugSession(startDebugDiagnostics)
+
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
 	// codes like ←[38;2;...m instead of colors. If enable fails, color paths
@@ -97,7 +102,14 @@ func main() {
 			restoreTerminal()
 			stack := debug.Stack()
 			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
-			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
+			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\n", util.LogSafe(r))
+			// Always saved, with or without --debug: the person who hit the
+			// crash did not know to ask for a log.
+			if path, err := util.WriteCrashReport(r, stack); err == nil {
+				fmt.Fprintf(os.Stderr, "A crash report was saved to:\n  %s\nIt has no passwords or personal paths; please attach it to a bug report.\n", path)
+			} else {
+				fmt.Fprintf(os.Stderr, "The crash report could not be saved (%v).\n", err)
+			}
 			exitCode = 1
 		}
 	}()

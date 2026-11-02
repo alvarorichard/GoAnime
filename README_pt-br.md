@@ -432,8 +432,15 @@ e anexe um log de depuração:
    | macOS   | `~/Library/Logs/GoAnime`       |
    | Linux   | `~/.local/share/goanime/logs`  |
 
-3. Anexe o arquivo mais recente à issue, junto com a saída de
-   `goanime --version`, o seu sistema operacional e o comando que você usou.
+3. Anexe o arquivo mais recente à issue, junto com o comando que você usou.
+   O log já começa com o seu sistema operacional, o terminal, as versões do
+   mpv, yt-dlp e ffmpeg, quais fontes estão ligadas e como cada provider
+   respondeu. Senhas, tokens, tickets de uso único e a sua pasta pessoal são
+   removidos antes de qualquer gravação, então é seguro anexar como está.
+
+Se o GoAnime travar, ele grava um `crash_<data>_<hora>_<id>.log` na mesma
+pasta, sem precisar de `--debug`, e mostra o caminho. Anexe esse arquivo.
+[O que é coletado, e o que nunca é](docs/DIAGNOSTICS.md).
 
 O log lista os títulos que você buscou e caminhos do seu computador, que podem
 incluir o seu nome de usuário. Leia antes de anexar, se isso for importante
