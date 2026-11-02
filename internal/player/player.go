@@ -742,6 +742,12 @@ func sanitizeOutputPath(p string) (string, error) {
 	return cleaned, nil
 }
 
+// mpvDebugf is where the mpv conversation writes its diagnostics; tests replace
+// it. Only an unexpected answer is written: the position, duration, pause state
+// and speed are asked for several times a second, and logging each answer put
+// 70 lines (and as many blank ones) in a 15 second session.
+var mpvDebugf = util.Debugf
+
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
 func mpvSendCommand(socketPath string, command []any) (any, error) {
 	conn, err := dialMPVSocket(socketPath)
@@ -773,8 +779,6 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 		return nil, err
 	}
 
-	util.Debugf("Raw response from mpv: %s", string(buffer[:n]))
-
 	// Tratar múltiplos JSONs na mesma resposta
 	responses := bytes.SplitSeq(buffer[:n], []byte("\n"))
 	for resp := range responses {
@@ -788,9 +792,12 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 			continue
 		}
 		if errStr, ok := response["error"].(string); ok && errStr == "property unavailable" {
-			// Propriedade ainda não disponível, ignore sem erro
-			util.Debugf("Property not yet available, ignoring...")
+			// Propriedade ainda não disponível, ignore sem erro. Expected
+			// before a file is loaded, so it is not logged.
 			continue
+		}
+		if errStr, ok := response["error"].(string); ok && errStr != "success" {
+			mpvDebugf("mpv answered %q to %v", errStr, command)
 		}
 		// Check for success response (set_property returns {"error":"success"} without data)
 		if errStr, ok := response["error"].(string); ok && errStr == "success" {
