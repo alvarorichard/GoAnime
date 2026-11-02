@@ -280,3 +280,53 @@ func TestCrashReportSurvivesAFailingCollectorAndUsesAGoodOne(t *testing.T) {
 	b, _ = os.ReadFile(path) // #nosec G304 -- a file the test just made
 	assert.Contains(t, string(b), "mpv v0.41.0", "the full report, with the tools, is what a maintainer needs")
 }
+
+// The file is read in editors, in less, in a bug report and by tools that do
+// not interpret colour: it holds text. The colour profile ASCII keeps bold and
+// faint, so it left "^[[1mDEBUG^[[m" in every line; only NoTTY emits nothing.
+func TestTheLogFileHoldsPlainTextWithNoEscapeCodes(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	Logger = newConsoleLogger(io.Discard, colorprofile.NoTTY, false)
+	setLogFile(initFileLogger())
+	require.NotNil(t, currentLogFile())
+
+	Debug("a debug line", "title", "Todo", "n", 3)
+	Debugf("formatted %d", 1)
+	Info("an info line")
+	Warn("a warning", "source", "Goyabu")
+	Error("an error")
+	WriteSessionReport("Application\n  Version  2.0.0\n")
+	_, err := GetLogFileWriter().Write([]byte("subprocess line\n"))
+	require.NoError(t, err)
+	CloseLogFile()
+
+	got := readLog(t)
+	assert.NotContains(t, got, "\x1b", "no escape sequence of any kind may reach the file")
+	for _, want := range []string{"DEBUG", "a debug line", "title=Todo", "WARN", "a warning", "source=Goyabu", "ERRO", "subprocess line", "Version  2.0.0"} {
+		assert.Contains(t, got, want)
+	}
+}
+
+// Escape sequences also arrive as data: mpv colours its status line and a
+// scraped title can carry any byte. The file stays text whatever is logged.
+func TestEscapeSequencesInLoggedDataNeverReachTheFile(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	Logger = newConsoleLogger(io.Discard, colorprofile.NoTTY, false)
+	setLogFile(initFileLogger())
+
+	Debug("title from a source", "name", "\x1b[31mRed\x1b[0m Anime \x1b]0;pwned\x07")
+	_, err := GetLogFileWriter().Write([]byte("\x1b[1;32mmpv: playing\x1b[0m\n"))
+	require.NoError(t, err)
+	CloseLogFile()
+
+	got := readLog(t)
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\x07")
+	assert.Contains(t, got, "Anime", "the library writes control bytes in a value as visible \\x1b text")
+	assert.Contains(t, got, "mpv: playing", "a subprocess's colours are stripped, its words stay")
+	assert.NotContains(t, got, "[1;32m")
+}

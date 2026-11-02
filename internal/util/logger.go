@@ -20,6 +20,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/diag"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -120,7 +121,9 @@ type logSink struct {
 }
 
 func (s *logSink) Write(p []byte) (int, error) {
-	clean := diag.Redact(string(p))
+	// Text only: no escape sequence reaches the file, whether the logger put it
+	// there or it came in with the data (mpv's colours, a scraped title).
+	clean := ansi.Strip(diag.Redact(string(p)))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -321,7 +324,9 @@ func initFileLogger() *logSink {
 		Prefix:          "GoAnime",
 	})
 	fileLogger.SetLevel(log.DebugLevel)
-	fileLogger.SetColorProfile(colorprofile.ASCII) // no colors in the file
+	// NoTTY, not ASCII: ASCII drops the colours but keeps bold and faint, which
+	// leave "^[[1mDEBUG^[[m" in every line of a file read in an editor or less.
+	fileLogger.SetColorProfile(colorprofile.NoTTY)
 
 	return sink
 }
