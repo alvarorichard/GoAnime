@@ -20,6 +20,8 @@ env:
 jobs:
   live-diagnostics:
     name: Live source diagnostics
+    # A scheduled run on a fork can only fail and bill the fork's owner.
+    if: github.repository == 'alvarorichard/GoAnime'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -60,3 +62,41 @@ jobs:
 
       - name: Run public SDK integration tests
         run: go test -run Integration -count=1 -v ./pkg/goanime
+
+  # Manual only (Actions > Source Health > Run workflow). Daily it would build
+  # Rust until the pinned release exists and could go red for reasons that are
+  # the runner's network, not the code; the weekly "Update cfsolve" workflow
+  # already exercises the gate when upstream moves.
+  goyabu-cfsolve:
+    name: Goyabu through the pinned cfsolve
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # What users get: the signed binary GoAnime downloads by itself. Building
+      # the pinned commit is only the fallback for a release not published yet.
+      - name: Install the pinned cfsolve
+        run: |
+          if ! scripts/get-cfsolve.sh; then
+            echo "::warning::no published binary for the pinned commit yet; building it"
+            sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
+            scripts/get-cfsolve.sh --build
+          fi
+
+      # Red here with a published pin means Cloudflare changed the gate. The
+      # weekly "Update cfsolve" workflow then shows whether upstream fixed it.
+      - name: Clear Goyabu's gate and reach a stream
+        run: >
+          go test -tags live -run '^TestGoyabuThroughCfsolveLive$'
+          -count=1 -v -timeout=5m ./internal/scraper/providers/goyabu

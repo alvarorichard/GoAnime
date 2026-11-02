@@ -323,6 +323,22 @@ jobs:
         run: |
           mv build/staging/goanime-windows-amd64.exe build/staging/goanime.exe
 
+      # Best effort: the cfsolve release for the pinned commit may not exist yet,
+      # and GoAnime downloads the same binary by itself on first use anyway.
+      - name: Bundle cfsolve (Goyabu)
+        continue-on-error: true
+        shell: bash
+        run: |
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/cfsolve-${sha:0:12}"
+          asset=challenge-windows-amd64.exe
+          mkdir -p build/staging/cfsolve
+          curl -fsSL "$base/SHA256SUMS" -o sums.txt
+          curl -fsSL "$base/$asset" -o "build/staging/cfsolve/challenge.exe"
+          want="$(awk -v a="$asset" '$2 == a {print $1}' sums.txt)"
+          got="$(sha256sum build/staging/cfsolve/challenge.exe | cut -d' ' -f1)"
+          [ -n "$want" ] && [ "$got" = "$want" ] || { rm -rf build/staging/cfsolve; echo "::warning::cfsolve checksum mismatch; not bundled"; exit 1; }
+
       - name: Download MPV for Windows
         shell: pwsh
         env:

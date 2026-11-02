@@ -1,0 +1,184 @@
+name: Build cfsolve
+
+# Builds the cfsolve commit pinned in internal/scraper/cfsolver/cfsolve.lock and
+# publishes the binaries as release `cfsolve-<first 12 of sha>`, signed with the
+# same minisign key (and behind the same approval) as GoAnime's own releases.
+# GoAnime downloads them on first use; see internal/scraper/cfsolver/download.go.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - internal/scraper/cfsolver/cfsolve.lock
+      - .github/workflows/cfsolve-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfsolve-build
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    name: Read the pinned commit
+    runs-on: ubuntu-24.04
+    outputs:
+      repo: ${{ steps.lock.outputs.repo }}
+      sha: ${{ steps.lock.outputs.sha }}
+      tag: ${{ steps.lock.outputs.tag }}
+      exists: ${{ steps.exists.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: lock
+        run: |
+          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
+          {
+            echo "repo=${repo#https://github.com/}"
+            echo "sha=$sha"
+            echo "tag=cfsolve-${sha:0:12}"
+          } >> "$GITHUB_OUTPUT"
+      - id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.lock.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: pin
+    if: needs.pin.outputs.exists == 'false'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    # Only linux/amd64 has been verified. The others are best effort: a failure
+    # there leaves that platform without an asset (GoAnime then simply keeps
+    # Goyabu out of the search) instead of blocking the rest.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { asset: challenge-linux-amd64,       runner: ubuntu-24.04,     exe: challenge,     experimental: false }
+          - { asset: challenge-linux-arm64,       runner: ubuntu-24.04-arm, exe: challenge,     experimental: true }
+          - { asset: challenge-darwin-arm64,      runner: macos-latest,     exe: challenge,     experimental: true }
+          - { asset: challenge-windows-amd64.exe, runner: windows-latest,   exe: challenge.exe, experimental: true }
+    steps:
+      - name: Check out cfsolve at the pinned commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.pin.outputs.repo }}
+          ref: ${{ needs.pin.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Install build tools (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y cmake ninja nasm llvm --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: rustup toolchain install
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --bin challenge
+
+      - name: Smoke test
+        shell: bash
+        run: ./target/release/${{ matrix.exe }} --help >/dev/null
+
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/release/${{ matrix.exe }}" "dist/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 1
+
+  publish:
+    name: Sign and publish
+    needs: [pin, build]
+    if: ${{ !cancelled() && needs.pin.outputs.exists == 'false' && needs.build.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    # Same environment as GoAnime's release: it holds the minisign key and needs
+    # a reviewer's approval, so nothing is signed or published unattended.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          pattern: challenge-*
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd assets
+          ls -l
+          test -f challenge-linux-amd64 || { echo "::error::the verified linux/amd64 build is missing"; exit 1; }
+          sha256sum challenge-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Sign the checksums
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          TAG: ${{ needs.pin.outputs.tag }}
+        run: |
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "::error::MINISIGN_SECRET_KEY is not set in the 'release' environment"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          keyfile="$(mktemp)"
+          trap 'shred -u "$keyfile" 2>/dev/null || rm -f "$keyfile"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$keyfile"
+          cd assets
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$keyfile" -m SHA256SUMS -t "cfsolve $TAG file:SHA256SUMS"
+          # GoAnime only trusts the key embedded in its source.
+          cd ..
+          pub="$(grep -oE '"RW[A-Za-z0-9+/=]{50,}"' internal/updater/minisign.go | head -1 | tr -d '"')"
+          test -n "$pub"
+          minisign -V -P "$pub" -m assets/SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.pin.outputs.tag }}
+          SHA: ${{ needs.pin.outputs.sha }}
+          REPO: ${{ needs.pin.outputs.repo }}
+        run: |
+          gh release create "$TAG" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "cfsolve ${SHA:0:12}" \
+            --notes "Binaries of https://github.com/$REPO at commit $SHA, built by CI for GoAnime. GoAnime downloads these by itself; there is nothing to do here." \
+            --prerelease --latest=false

@@ -1,0 +1,140 @@
+name: Update cfsolve
+
+# Weekly: try cfsolve's latest commit. If it builds and still clears Goyabu's
+# gate, open a PR moving internal/scraper/cfsolver/cfsolve.lock (and the embedded
+# profile) to it. GoAnime never follows upstream unattended; a person merges.
+#
+# Two jobs on purpose. `try` compiles and runs code from another repository, so
+# it has a read-only token and no stored credentials. `pull-request` holds the
+# write token but only applies a patch limited to the cfsolver folder; it never
+# executes anything from upstream.
+
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfsolve-update
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.27.3'
+  GOFLAGS: -mod=readonly
+  GOTOOLCHAIN: local
+
+jobs:
+  try:
+    name: Try upstream HEAD
+    if: github.repository == 'alvarorichard/GoAnime'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      changed: ${{ steps.verdict.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
+
+      - name: Point the lock and profile at upstream HEAD
+        run: scripts/update-cfsolve.sh HEAD --no-build
+
+      - id: diff
+        run: |
+          if git diff --quiet -- internal/scraper/cfsolver; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already on upstream HEAD."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build that commit
+        id: build
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: scripts/get-cfsolve.sh --build
+
+      - name: Clear Goyabu's gate with it
+        id: live
+        if: steps.diff.outputs.changed == 'true' && steps.build.outcome == 'success'
+        # Upstream HEAD failing is information, not a broken build: stay green
+        # and just do not open a PR, instead of a red run every week.
+        continue-on-error: true
+        run: >
+          go test -tags live -run '^TestGoyabuThroughCfsolveLive$'
+          -count=1 -v -timeout=5m ./internal/scraper/providers/goyabu
+
+      - name: Unit tests
+        id: unit
+        if: steps.diff.outputs.changed == 'true' && steps.live.outcome == 'success'
+        continue-on-error: true
+        run: go test -count=1 ./internal/scraper/cfsolver
+
+      - id: verdict
+        run: |
+          if [ "${{ steps.diff.outputs.changed }}" = true ] && [ "${{ steps.live.outcome }}" = success ] && [ "${{ steps.unit.outcome }}" = success ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Upstream HEAD is not adopted (unchanged, or it did not build/clear the gate)."
+          fi
+
+      - name: Save the change as a patch
+        if: steps.verdict.outputs.ok == 'true'
+        run: |
+          git add -N internal/scraper/cfsolver
+          git diff --binary -- internal/scraper/cfsolver > cfsolve.patch
+          wc -c cfsolve.patch
+
+      - uses: actions/upload-artifact@v7
+        if: steps.verdict.outputs.ok == 'true'
+        with:
+          name: cfsolve-patch
+          path: cfsolve.patch
+          retention-days: 7
+
+  pull-request:
+    name: Open the pull request
+    needs: try
+    if: needs.try.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cfsolve-patch
+
+      - name: Apply the patch
+        run: git apply --include='internal/scraper/cfsolver/*' cfsolve.patch && rm cfsolve.patch
+
+      - name: Open the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad sha in the patched lock"; exit 1; }
+          branch="chore/cfsolve-${sha:0:12}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add internal/scraper/cfsolver
+          git commit -q -m "chore(cfsolve): move to upstream ${sha:0:12}"
+          git push -q origin "$branch"
+          gh pr create --base dev --head "$branch" \
+            --title "chore(cfsolve): move to upstream ${sha:0:12}" \
+            --body "Automated. Upstream's latest cfsolve commit built and cleared Goyabu's gate in CI (TestGoyabuThroughCfsolveLive), so the pin and the embedded profile now follow it. Merging makes the cfsolve-build workflow publish the new binaries once the release environment is approved; until then GoAnime keeps downloading the previous pin."

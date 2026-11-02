@@ -50,6 +50,9 @@ Source: "staging\goanime.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "staging\bin\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "staging\bin\*.dll"; DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
 
+; cfsolve clears the Cloudflare gate Goyabu sits behind; GoAnime finds it next to goanime.exe
+Source: "staging\cfsolve\challenge.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
 [Icons]
 ; Start Menu shortcuts
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
