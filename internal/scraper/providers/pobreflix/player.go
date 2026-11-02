@@ -180,6 +180,8 @@ func (c *Client) ResolvePlayer(ctx context.Context, serverURL string, target Pla
 
 	siteKey, action, cdata, ok := parseTurnstile(body)
 	if !ok {
+		util.Debug("Pobreflix player page is in neither known format",
+			"page", redactURL(finalURL), "summary", describePage(body))
 		return Stream{}, ErrPlayerNoTurnstile
 	}
 	util.Debug("Pobreflix: answering the player's Turnstile", "player", hostOfURL(finalURL), "audio", want)
@@ -526,4 +528,20 @@ func redactURL(raw string) string {
 	}
 	u.RawQuery = ""
 	return u.String()
+}
+
+var pageTitleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+// describePage says what kind of page body is without quoting it: the player
+// pages carry signed tickets, which must not end up in a log. It reports the
+// size and the first <title>, enough to tell a block page from a new player.
+func describePage(body []byte) string {
+	title := "none"
+	if m := pageTitleRe.FindSubmatch(body); m != nil {
+		title = strings.Join(strings.Fields(string(m[1])), " ")
+		if len(title) > 80 {
+			title = title[:80]
+		}
+	}
+	return fmt.Sprintf("%d bytes, title %q", len(body), title)
 }

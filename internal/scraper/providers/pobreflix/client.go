@@ -24,9 +24,10 @@ import (
 
 const (
 	// DefaultBase is the catalog host. The site moves between mirror domains
-	// (the old .sale host is dead; .gay is live as of 2026-10-24), so
+	// (.sale is dead; .gay and .cam redirect to .christmas as of 2026-11-02, and
+	// the client follows such a redirect), so
 	// GOANIME_POBREFLIX_URL can repoint this without waiting for a release.
-	DefaultBase = "https://pobreflixtv.gay"
+	DefaultBase = "https://pobreflixtv.christmas"
 
 	// userAgent describes a current Chrome, matching the TLS fingerprint
 	// util.NewFastClient presents. Neither the site nor its player checked it
@@ -40,7 +41,8 @@ const (
 // pages. It owns the corpus so the index is built once and shared.
 type Client struct {
 	http       *http.Client
-	baseURL    string
+	baseMu     sync.RWMutex
+	baseURL    string // the catalog host; followed to a mirror by followMirror
 	playerBase string
 	userAgent  string
 	maxRetries int
@@ -81,7 +83,7 @@ func NewClient() *Client {
 		apiEnabled:      true,
 	}
 	c.search.cachePath, _ = corpusCachePath()
-	c.search.loadCache(c.baseURL)
+	c.search.loadCache(c.base())
 	return c
 }
 
@@ -112,7 +114,49 @@ func Shared() *Client {
 }
 
 // BaseURL is the catalog host this client searches.
-func (c *Client) BaseURL() string { return c.baseURL }
+func (c *Client) BaseURL() string { return c.base() }
+
+func (c *Client) base() string {
+	c.baseMu.RLock()
+	defer c.baseMu.RUnlock()
+	return c.baseURL
+}
+
+// mirrorOf reports the origin to adopt when a request to base ended on final.
+// The site moves between mirror domains (.sale, .gay, .cam, .christmas) and
+// leaves redirects behind, so the client follows one instead of paying a hop on
+// every request. It adopts only a host whose first label is the same
+// ("pobreflixtv"), on the same scheme: a redirect to anything else is a
+// redirect, never a new catalog.
+func mirrorOf(base string, final *url.URL) (string, bool) {
+	b, err := url.Parse(base)
+	if err != nil || final == nil || b.Hostname() == "" || final.Hostname() == "" {
+		return "", false
+	}
+	if final.Scheme != b.Scheme || strings.EqualFold(final.Host, b.Host) {
+		return "", false
+	}
+	first := func(h string) string { return strings.ToLower(strings.SplitN(h, ".", 2)[0]) }
+	if first(final.Hostname()) != first(b.Hostname()) {
+		return "", false
+	}
+	return final.Scheme + "://" + final.Host, true
+}
+
+// followMirror makes the catalog host the one a redirect of a catalog request
+// ended on, when mirrorOf accepts it.
+func (c *Client) followMirror(requested *url.URL, resp *http.Response) {
+	c.baseMu.Lock()
+	defer c.baseMu.Unlock()
+	b, err := url.Parse(c.baseURL)
+	if err != nil || requested == nil || !strings.EqualFold(requested.Host, b.Host) {
+		return // not a request to the catalog itself (the player, a CDN)
+	}
+	if next, ok := mirrorOf(c.baseURL, resp.Request.URL); ok {
+		util.Debug("Pobreflix moved to a mirror domain", "from", c.baseURL, "to", next)
+		c.baseURL = next
+	}
+}
 
 type getOptions struct {
 	referer string
@@ -169,6 +213,9 @@ func (c *Client) getOnce(ctx context.Context, rawURL string, opt getOptions) (bo
 		return nil, true, err
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		c.followMirror(req.URL, resp)
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return body, false, nil
 	}
 	return nil, resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
@@ -200,7 +247,7 @@ var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|series)(?:-(\d+)
 // sitemap-movies.xml / sitemap-series.xml files; both layouts are supported so
 // a mirror still running the old theme keeps working.
 func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
-	body, err := c.get(ctx, c.baseURL+"/sitemap.php", getOptions{
+	body, err := c.get(ctx, c.base()+"/sitemap.php", getOptions{
 		accept: "text/xml,application/xml,text/html,*/*;q=0.8",
 	})
 	if err == nil {
@@ -212,7 +259,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 				continue
 			}
 			seen[name[1]] = true
-			out = append(out, shard{name: name[1], url: c.baseURL + "/sitemap.php?file=" + name[1]})
+			out = append(out, shard{name: name[1], url: c.base() + "/sitemap.php?file=" + name[1]})
 		}
 		if len(out) > 0 {
 			sortShards(out)
@@ -220,7 +267,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 		}
 	}
 
-	body, err = c.get(ctx, c.baseURL+"/sitemap.xml", getOptions{
+	body, err = c.get(ctx, c.base()+"/sitemap.xml", getOptions{
 		accept: "text/xml,application/xml,text/html,*/*;q=0.8",
 	})
 	if err != nil {
@@ -357,7 +404,7 @@ func (c *Client) apiSearch(ctx context.Context, query string) ([]Media, error) {
 			if res.kind == KindSeries {
 				path = "/serie/"
 			}
-			rawURL := c.baseURL + path + url.PathEscape(slug) + ".html"
+			rawURL := c.base() + path + url.PathEscape(slug) + ".html"
 			if seen[rawURL] {
 				continue
 			}
@@ -406,9 +453,9 @@ func (c *Client) catalog(ctx context.Context, kind, query string) ([]embeddedIte
 	params.Set("limit", strconv.Itoa(maxSearchResults))
 	params.Set("sort", "recent")
 	params.Set("search", query)
-	body, err := c.get(ctx, c.baseURL+"/api?"+params.Encode(), getOptions{
+	body, err := c.get(ctx, c.base()+"/api?"+params.Encode(), getOptions{
 		accept:  "application/json",
-		referer: c.baseURL + "/",
+		referer: c.base() + "/",
 	})
 	if err != nil {
 		return nil, err
@@ -426,7 +473,7 @@ func (c *Client) Title(ctx context.Context, pageURL string) (Title, error) {
 	if t, ok := c.titles.Load(pageURL); ok {
 		return t.(Title), nil
 	}
-	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.baseURL + "/"})
+	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.base() + "/"})
 	if err != nil {
 		return Title{}, err
 	}
@@ -447,7 +494,7 @@ func (c *Client) Episode(ctx context.Context, pageURL string) (EpisodeData, erro
 	if e, ok := c.episodes.Load(pageURL); ok {
 		return e.(EpisodeData), nil
 	}
-	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.baseURL + "/"})
+	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.base() + "/"})
 	if err != nil {
 		return EpisodeData{}, err
 	}
@@ -478,7 +525,7 @@ func (c *Client) EpisodeURL(t Title, season, episode int) string {
 	if path == "" {
 		return ""
 	}
-	return c.baseURL + path
+	return c.base() + path
 }
 
 // absolutizeServers resolves the site's relative download endpoints against
@@ -498,14 +545,14 @@ func (c *Client) absoluteURL(raw string) string {
 		return raw
 	}
 	if strings.HasPrefix(raw, "//") {
-		if u, err := url.Parse(c.baseURL); err == nil {
+		if u, err := url.Parse(c.base()); err == nil {
 			return u.Scheme + ":" + raw
 		}
 	}
 	if !strings.HasPrefix(raw, "/") {
 		raw = "/" + raw
 	}
-	return c.baseURL + raw
+	return c.base() + raw
 }
 
 // ResolveDownload follows an episode's download endpoint to its final media
@@ -522,7 +569,7 @@ func (c *Client) ResolveDownload(ctx context.Context, rawURL string) string {
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return rawURL
