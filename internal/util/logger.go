@@ -102,7 +102,7 @@ func (s *logSink) Write(p []byte) (int, error) {
 	clean := diag.Redact(string(p))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := io.WriteString(s.f, clean); err != nil {
+	if _, err := s.f.WriteString(clean); err != nil {
 		return 0, err
 	}
 	return len(p), nil // the caller wrote len(p) bytes; redaction may shorten them
@@ -283,7 +283,7 @@ func WriteSessionReport(text string) {
 // instead of the library's own cyan, yellow, pink and violet. Everything is a
 // theme style, so a light terminal and NO_COLOR follow the theme as the
 // screens do.
-func themedLogStyles(theme tui.Theme) *log.Styles {
+func themedLogStyles(theme *tui.Theme) *log.Styles {
 	level := func(text string, st lipgloss.Style) lipgloss.Style {
 		return st.SetString(text).Padding(0, 1)
 	}
@@ -314,7 +314,8 @@ func newConsoleLogger(w io.Writer, profile colorprofile.Profile, timestamps bool
 		TimeFormat:      "15:04:05",
 		Prefix:          prefixForProfile(profile),
 	})
-	l.SetStyles(themedLogStyles(tui.CurrentTheme()))
+	theme := tui.CurrentTheme()
+	l.SetStyles(themedLogStyles(&theme))
 	l.SetLevel(log.InfoLevel)
 	l.SetColorProfile(profile)
 	return l
