@@ -1,6 +1,7 @@
 package util
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -32,6 +33,22 @@ var fileLogger *log.Logger
 
 // logFile holds the reference to the open log file so it can be closed on cleanup
 var logFile *logSink
+
+// logFileMu guards logFile: the debug report is written from a goroutine that
+// can outlive the log, and CloseLogFile runs on the main one.
+var logFileMu sync.RWMutex
+
+func currentLogFile() *logSink {
+	logFileMu.RLock()
+	defer logFileMu.RUnlock()
+	return logFile
+}
+
+func setLogFile(s *logSink) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	logFile = s
+}
 
 // Retention: a debug session writes a file each run, so without a limit the
 // folder only grows. The newest are kept; crash reports are kept apart so a
@@ -94,25 +111,105 @@ func SessionID() string { return sessionID }
 // tickets and the home directory removed first, so a log can be attached to a
 // bug report as it is.
 type logSink struct {
-	mu sync.Mutex
-	f  *os.File
+	mu     sync.Mutex
+	f      *os.File
+	closed bool
+
+	subMu sync.Mutex
+	sub   *lineWriter
 }
 
 func (s *logSink) Write(p []byte) (int, error) {
 	clean := diag.Redact(string(p))
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return 0, os.ErrClosed
+	}
 	if _, err := s.f.WriteString(clean); err != nil {
 		return 0, err
 	}
 	return len(p), nil // the caller wrote len(p) bytes; redaction may shorten them
 }
 
-func (s *logSink) close() {
+// lines is the writer for output that arrives in arbitrary chunks (a
+// subprocess's pipe): it hands the sink whole lines only.
+func (s *logSink) lines() io.Writer {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if s.sub == nil {
+		s.sub = &lineWriter{sink: s}
+	}
+	return s.sub
+}
+
+func (s *logSink) close() { s.finish("") }
+
+// finish empties the partial subprocess line, writes footer (redacted like
+// everything else) and closes the file. Later writes answer os.ErrClosed.
+func (s *logSink) finish(footer string) {
+	s.subMu.Lock()
+	sub := s.sub
+	s.subMu.Unlock()
+	if sub != nil {
+		sub.flush()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	if footer != "" {
+		_, _ = s.f.WriteString(diag.Redact(footer))
+	}
+	s.closed = true
 	_ = s.f.Sync()
 	_ = s.f.Close()
+}
+
+// maxPartialLine bounds what lineWriter holds waiting for a newline.
+const maxPartialLine = 8 << 10
+
+// lineWriter buffers input up to each newline before it reaches the sink. A
+// secret split across two writes matches no rule in either half, so redaction
+// has to see the whole line. A line that never ends is flushed at
+// maxPartialLine rather than held without limit.
+type lineWriter struct {
+	mu   sync.Mutex
+	sink *logSink
+	buf  []byte
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		if _, err := l.sink.Write(l.buf[:i+1]); err != nil {
+			return 0, err
+		}
+		l.buf = append(l.buf[:0], l.buf[i+1:]...)
+	}
+	if len(l.buf) > maxPartialLine {
+		if _, err := l.sink.Write(l.buf); err != nil {
+			return 0, err
+		}
+		l.buf = l.buf[:0]
+	}
+	return len(p), nil
+}
+
+func (l *lineWriter) flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.buf) > 0 {
+		_, _ = l.sink.Write(append(l.buf, '\n'))
+		l.buf = nil
+	}
 }
 
 // LogFilePath stores the path to the current debug log file (exported for user visibility)
@@ -272,10 +369,13 @@ func pruneLogs(dir, prefix string, keep int, keepFile string) {
 // nothing when no log file is open.
 func WriteSessionReport(text string) {
 	sessionReport.Store(text)
-	if logFile == nil {
+	sink := currentLogFile()
+	if sink == nil {
 		return
 	}
-	_, _ = logFile.Write([]byte("\n--- Environment ---\n" + text + "\n--- Log ---\n"))
+	// The log may close between the check and the write: a closed sink answers
+	// with an error, which is dropped.
+	_, _ = sink.Write([]byte("\n--- Environment ---\n" + text + "\n--- Log ---\n"))
 }
 
 // themedLogStyles gives the console log the look of the screens: the level is
@@ -337,8 +437,8 @@ func InitLogger() {
 
 	if IsDebug {
 		// Initialize file logging — all debug output goes here
-		logFile = initFileLogger()
-		if logFile != nil {
+		setLogFile(initFileLogger())
+		if currentLogFile() != nil {
 			RegisterCleanup(CloseLogFile)
 			// Reset first so the banner starts on its own fresh line rather
 			// than risking a glue-on with whatever column the shell's
@@ -363,7 +463,7 @@ func InitLogger() {
 			note = "Japanese labels hidden: this terminal cannot draw them (GOANIME_JAPANESE=1 shows them anyway)"
 		}
 		if note != "" {
-			if IsDebug && logFile != nil {
+			if IsDebug && currentLogFile() != nil {
 				Debug(note)
 			}
 			Info(note)
@@ -445,10 +545,12 @@ func debugPanelWidth() int {
 
 // CloseLogFile flushes and closes the debug log file
 func CloseLogFile() {
-	if logFile != nil {
-		_, _ = logFile.Write([]byte(sessionFooter(time.Now())))
-		logFile.close()
-		logFile = nil
+	logFileMu.Lock()
+	sink := logFile
+	logFile = nil
+	logFileMu.Unlock()
+	if sink != nil {
+		sink.finish(sessionFooter(time.Now()))
 	}
 }
 
@@ -495,10 +597,11 @@ func writeToFile(level log.Level, msg string, keyvals ...any) {
 // GetLogFileWriter returns the log file as an io.Writer for external use (e.g., capturing subprocess output).
 // Returns nil if file logging is not active.
 func GetLogFileWriter() io.Writer {
-	if logFile == nil {
+	sink := currentLogFile()
+	if sink == nil {
 		return nil
 	}
-	return logFile // the redacting sink, never the bare file
+	return sink.lines() // whole lines through the redacting sink, never the bare file
 }
 
 // Debug logs a debug message (only when debug mode is enabled).

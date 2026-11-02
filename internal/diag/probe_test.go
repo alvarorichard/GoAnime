@@ -1,10 +1,13 @@
 package diag
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -129,4 +132,22 @@ func TestProbeAllReportsEveryProviderAndNeverMoreThanFourAtOnce(t *testing.T) {
 
 	assert.Len(t, seen, 10)
 	assert.LessOrEqual(t, peak, 4)
+}
+
+// Windows reports a refused connection as WSAECONNREFUSED (10061), not as the
+// Unix ECONNREFUSED. CI caught the classifier answering "error" there; this
+// builds the Windows error on every platform.
+func TestClassifyErrorKnowsTheWindowsRefusal(t *testing.T) {
+	t.Parallel()
+	windows := &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connectex", Err: syscall.Errno(10061)}}
+	outcome, detail := classifyError(windows)
+	assert.Equal(t, "refused", outcome)
+	assert.Equal(t, "connection refused", detail)
+
+	unix := &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}
+	outcome, _ = classifyError(unix)
+	assert.Equal(t, "refused", outcome)
+
+	outcome, _ = classifyError(errors.New("something else"))
+	assert.Equal(t, "error", outcome)
 }

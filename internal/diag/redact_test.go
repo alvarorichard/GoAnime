@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -54,4 +55,80 @@ func TestRedactHome(t *testing.T) {
 	assert.Equal(t, "/etc/hosts", RedactHome("/etc/hosts", "/"), "a root home would mangle every path")
 	assert.Equal(t, "/usr/bin/mpv", RedactHome("/usr/bin/mpv", ""))
 	assert.False(t, strings.Contains(RedactHome("/home/krone/a /home/krone/b", "/home/krone"), "krone"))
+}
+
+// Lowercasing can change a string's length in bytes ("İ" is two bytes, its
+// lowercase "i̇" is three), so offsets taken from one cannot index the other.
+// It panicked inside the log sink, and so inside the crash handler.
+func TestRedactHomeDoesNotPanicWhenCaseFoldingChangesLength(t *testing.T) {
+	t.Parallel()
+	assert.NotPanics(t, func() {
+		got := RedactHome("İİİ /home/Zed/a /home/zed/b", "/home/Zed")
+		assert.Equal(t, "İİİ ~/a ~/b", got, "both spellings of the home folder go")
+	})
+	assert.NotPanics(t, func() { RedactHome("ǅǅǅ C:\\Users\\Zed\\x c:\\users\\zed\\y", `C:\Users\Zed`) })
+}
+
+// The first parameter of a URL starts right after "?", and the name must not
+// swallow the path before it: "sig", "key" and "auth" are secrets only as whole
+// names.
+func TestRedactCatchesTheFirstQueryParameter(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"GET https://host/path?sig=abc123&x=1":     "GET https://host/path?sig=[redacted]&x=1",
+		"https://host/p?key=SECRET":                "https://host/p?key=[redacted]",
+		"https://host/p?auth=SECRET&q=naruto":      "https://host/p?auth=[redacted]&q=naruto",
+		"https://host/p?sid=SECRET#frag":           "https://host/p?sid=[redacted]#frag",
+		"https://host/p?q=naruto&key=SECRET":       "https://host/p?q=naruto&key=[redacted]",
+		"https://host/p?keyword=naruto":            "https://host/p?keyword=naruto",
+		"https://host/some.key/file?page=2":        "https://host/some.key/file?page=2",
+		"url=https://host/p?pwd=SECRET and moving": "url=https://host/p?pwd=[redacted] and moving",
+	} {
+		assert.Equal(t, want, Redact(in), in)
+	}
+}
+
+func BenchmarkRedactTypicalLogLine(b *testing.B) {
+	line := `17:21:39 DEBUG <api/enhanced.go:340> GoAnime: Provider check source=Goyabu result=challenge ms=1218 status=403 detail="cloudflare challenge (challenge)" url=https://goyabu.io/anime/black-clover?page=2` + "\n"
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = Redact(line)
+	}
+}
+
+// The shortcut that skips every regular expression for a line with no trigger
+// word is only an optimisation: it must never change what Redact returns.
+func TestFastPathAgreesWithEveryRule(t *testing.T) {
+	t.Parallel()
+	fragments := []string{
+		"token=", "sig=", "key=", "keyword=", "q=", "?", "&", " ", "=", ":", "@", "/", "https://", "host", "x.example",
+		"abc123", "SECRET", "v1.AAAAAAAA.BBBBBBBB.CCCCCCCC", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
+		"Authorization: ", "Cookie: ", "Bearer ", "cf_clearance=", "X-Amz-Signature=", "password=", "user:pw@", `"token":"`, `"`, "naruto",
+		"status=200", "source=Pobreflix", "17:21:36", "İ", "\n",
+	}
+	rng := rand.New(rand.NewPCG(7, 11))
+	for range 20000 {
+		var b strings.Builder
+		for range 1 + rng.IntN(9) {
+			b.WriteString(fragments[rng.IntN(len(fragments))])
+		}
+		in := b.String()
+		want := RedactHome(redactEverything(in), homeDir())
+		if got := Redact(in); got != want {
+			t.Fatalf("the shortcut changed the answer for %q:\n  Redact    = %q\n  every rule = %q", in, got, want)
+		}
+	}
+}
+
+// Every word a rule can match on must be a trigger, or the shortcut would skip
+// a line the rule would have cleaned.
+func TestEveryRuleWordIsATrigger(t *testing.T) {
+	t.Parallel()
+	for _, w := range append(append([]string{}, sensitiveWords...), "key", "sig", "sid", "tsv", "auth", "pass", "pwd") {
+		assert.True(t, mayHoldASecret("a?"+w+"=VALUE"), w)
+	}
+	for _, w := range []string{"Authorization: x", "Cookie: x", "X-Api-Key: x", "Bearer abcdefghij", "v1.abcdefgh.ijklmnop", "eyJabcdefgh.abcdefgh.abcd", "cf_clearance=x", "u:p@h"} {
+		assert.True(t, mayHoldASecret(w), w)
+	}
+	assert.False(t, mayHoldASecret(`17:21:39 DEBUG GoAnime: Provider check source=Goyabu result=ok ms=12 status=200`))
 }

@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -79,5 +82,65 @@ func TestClientIgnoresARedirectToAnotherSite(t *testing.T) {
 	}
 	if got := c.BaseURL(); got != old2.URL {
 		t.Fatalf("BaseURL() = %q; a redirect to another site must not become the catalog", got)
+	}
+}
+
+// The cached corpus holds absolute URLs on the host they were read from. When
+// the client moves to the mirror, its entries move with it: left behind they
+// would redirect on every open, and fail when the old domain goes.
+func TestMovingToAMirrorRewritesTheCorpusHost(t *testing.T) {
+	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }))
+	t.Cleanup(moved.Close)
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, moved.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	t.Cleanup(old.Close)
+	cache := t.TempDir() + "/corpus.json"
+	c := NewClientForTest(http.DefaultClient, old.URL, cache)
+	c.search.entries = []entry{
+		{URL: old.URL + "/filme/todo-poderoso.html", BaseSlug: "todo-poderoso", Kind: KindMovie},
+		{URL: "https://unrelated.example/filme/x.html", BaseSlug: "x", Kind: KindMovie},
+	}
+
+	if _, err := c.get(context.Background(), old.URL+"/filme/x", getOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := c.search.entries
+	if want := moved.URL + "/filme/todo-poderoso.html"; got[0].URL != want {
+		t.Fatalf("entry = %q; want it on the mirror: %q", got[0].URL, want)
+	}
+	if got[1].URL != "https://unrelated.example/filme/x.html" {
+		t.Fatalf("an entry on another host was rewritten: %q", got[1].URL)
+	}
+	if raw, err := os.ReadFile(cache); err != nil || !strings.Contains(string(raw), moved.URL) {
+		t.Fatalf("the cache on disk still names the old host: err=%v\n%s", err, raw)
+	}
+}
+
+// Many requests at once, the first of which moves the base: no race, and the
+// base ends on the mirror exactly once.
+func TestFollowingAMirrorIsRaceFree(t *testing.T) {
+	moved := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }))
+	t.Cleanup(moved.Close)
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, moved.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	t.Cleanup(old.Close)
+	c := NewClientForTest(http.DefaultClient, old.URL, t.TempDir()+"/corpus.json")
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = c.get(context.Background(), old.URL+"/a", getOptions{})
+			_ = c.BaseURL()
+		}()
+	}
+	wg.Wait()
+
+	if c.BaseURL() != moved.URL {
+		t.Fatalf("BaseURL() = %q; want %q", c.BaseURL(), moved.URL)
 	}
 }

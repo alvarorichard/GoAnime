@@ -40,16 +40,21 @@ func Start() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
-
-		descs := registeredSources()
-		report := diag.Collect(ctx, diag.Options{
-			Version: version.Version,
-			Tools:   debugTools,
-			Extra:   []diag.Section{pathsSection(), sourcesSection(descs), cfsolveSection()},
-		})
-		util.WriteSessionReport(report.Text())
-		probeProviders(ctx, descs)
+		util.WriteSessionReport(Report(ctx))
+		probeProviders(ctx, registeredSources())
 	}()
+}
+
+// Report builds the full environment report as text: the machine, the
+// terminal, the tools, the paths, each source's state and cfsolve. A crash
+// report asks for it too (util.SetReportCollector), so the person who hit the
+// crash does not have to have used --debug.
+func Report(ctx context.Context) string {
+	return diag.Collect(ctx, diag.Options{
+		Version: version.Version,
+		Tools:   debugTools,
+		Extra:   []diag.Section{pathsSection(), sourcesSection(registeredSources()), cfsolveSection()},
+	}).Text()
 }
 
 func registeredSources() []source.Descriptor {

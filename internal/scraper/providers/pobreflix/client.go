@@ -144,18 +144,29 @@ func mirrorOf(base string, final *url.URL) (string, bool) {
 }
 
 // followMirror makes the catalog host the one a redirect of a catalog request
-// ended on, when mirrorOf accepts it.
+// ended on, when mirrorOf accepts it. The common case — no redirect — costs a
+// read lock; only a real move takes the write lock, once.
 func (c *Client) followMirror(requested *url.URL, resp *http.Response) {
-	c.baseMu.Lock()
-	defer c.baseMu.Unlock()
-	b, err := url.Parse(c.baseURL)
+	c.baseMu.RLock()
+	current := c.baseURL
+	c.baseMu.RUnlock()
+	b, err := url.Parse(current)
 	if err != nil || requested == nil || !strings.EqualFold(requested.Host, b.Host) {
 		return // not a request to the catalog itself (the player, a CDN)
 	}
-	if next, ok := mirrorOf(c.baseURL, resp.Request.URL); ok {
-		util.Debug("Pobreflix moved to a mirror domain", "from", c.baseURL, "to", next)
-		c.baseURL = next
+	next, ok := mirrorOf(current, resp.Request.URL)
+	if !ok {
+		return
 	}
+	c.baseMu.Lock()
+	if c.baseURL != current { // another request moved it first
+		c.baseMu.Unlock()
+		return
+	}
+	c.baseURL = next
+	c.baseMu.Unlock()
+	util.Debug("Pobreflix moved to a mirror domain", "from", current, "to", next)
+	c.search.rehost(current, next)
 }
 
 type getOptions struct {

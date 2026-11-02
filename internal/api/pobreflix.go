@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -504,28 +505,33 @@ func pobreflixPlayMovieFile(ctx context.Context, media *models.Anime, files []po
 // returns the media URL behind it. It asks the usual audio question if the
 // player serves a different track than the one wanted.
 func pobreflixResolveGate(ctx context.Context, media *models.Anime, servers []pobreflix.Server, target pobreflix.PlayerTarget, want pobreflix.Audio, quality string) (string, error) {
-	server, ok := choosePobreflixGatedServer(servers, want, quality)
-	if !ok {
-		return "", errPobreflixGated
-	}
-	pb := pbClientFn()
+	// Every listed player is a candidate, best first. One that cannot work here
+	// (it needs a solver and none is installed) is skipped and one that fails
+	// is not the end of the title: the next is tried.
 	var stream pobreflix.Stream
-	var err error
-	solverFree := pb.IsSolverFreePlayer(server.URL)
-	if solverFree {
-		stream, err = pb.ResolveRedeflix(ctx, server.URL, want)
-		if err != nil && !errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
+	var failure error
+	resolved := false
+	for _, server := range rankPobreflixGatedServers(servers, want, quality) {
+		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-	}
-	if !solverFree || errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
-		if !netx.TurnstileSolverAvailable() {
-			return "", errPobreflixGated
+		s, err := resolvePobreflixPlayer(ctx, server, target, want)
+		if errors.Is(err, errPobreflixGated) {
+			continue // needs a solver that is not installed
 		}
-		stream, err = pb.ResolvePlayer(ctx, server.URL, target, want)
 		if err != nil {
-			return "", err
+			failure = err
+			util.Debug("Pobreflix player did not resolve; trying the next one", "player", server.Name, "err", err)
+			continue
 		}
+		stream, resolved = s, true
+		break
+	}
+	if !resolved {
+		if failure != nil {
+			return "", failure
+		}
+		return "", errPobreflixGated
 	}
 	have := stream.Audio
 	if have == pobreflix.AudioUnknown {
@@ -555,16 +561,38 @@ func pobreflixResolveGate(ctx context.Context, media *models.Anime, servers []po
 	return stream.URL, nil
 }
 
-// choosePobreflixGatedServer picks the player page most likely to carry want,
-// then the best-quality one. The URL is the same for both audios on the live
-// pages, so the actual track is checked after the gate is cleared.
-func choosePobreflixGatedServer(servers []pobreflix.Server, want pobreflix.Audio, quality string) (pobreflix.Server, bool) {
-	best := pobreflix.Server{}
-	bestScore := -1
+// resolvePobreflixPlayer opens one player page: the RedeFlix player needs no
+// solver; a page in the Turnstile format needs the registered one, and without
+// it the answer is errPobreflixGated so the caller moves on.
+func resolvePobreflixPlayer(ctx context.Context, server pobreflix.Server, target pobreflix.PlayerTarget, want pobreflix.Audio) (pobreflix.Stream, error) {
+	pb := pbClientFn()
+	if pb.IsSolverFreePlayer(server.URL) {
+		stream, err := pb.ResolveRedeflix(ctx, server.URL, want)
+		if err == nil || !errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
+			return stream, err
+		}
+	}
+	if !netx.TurnstileSolverAvailable() {
+		return pobreflix.Stream{}, errPobreflixGated
+	}
+	return pb.ResolvePlayer(ctx, server.URL, target, want)
+}
+
+// rankPobreflixGatedServers lists the player pages most likely to carry want
+// first, then the best quality, one per URL: the site lists the same player for
+// both audios, and the track is checked after the page is opened.
+func rankPobreflixGatedServers(servers []pobreflix.Server, want pobreflix.Audio, quality string) []pobreflix.Server {
+	type scored struct {
+		server pobreflix.Server
+		score  int
+	}
+	var all []scored
+	seen := map[string]bool{}
 	for _, s := range servers {
-		if !s.Gated() {
+		if !s.Gated() || seen[s.URL] {
 			continue
 		}
+		seen[s.URL] = true
 		score := pobreflix.QualityRank(s.Quality)
 		if s.Audio == want {
 			score += 100000
@@ -575,11 +603,14 @@ func choosePobreflixGatedServer(servers []pobreflix.Server, want pobreflix.Audio
 		if s.URL != "" {
 			score += 100
 		}
-		if score > bestScore {
-			best, bestScore = s, score
-		}
+		all = append(all, scored{s, score})
 	}
-	return best, bestScore >= 0
+	sort.SliceStable(all, func(i, j int) bool { return all[i].score > all[j].score })
+	out := make([]pobreflix.Server, len(all))
+	for i, sc := range all {
+		out[i] = sc.server
+	}
+	return out
 }
 
 // pobreflixResolveDownload follows only the site's own download endpoints;

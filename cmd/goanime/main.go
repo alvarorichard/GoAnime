@@ -53,6 +53,8 @@ func main() {
 	// provider's state in the log once it is open. Background: it never
 	// delays the start.
 	util.OnDebugSession(debugreport.Start)
+	// A crash report carries the same environment, with or without --debug.
+	util.SetReportCollector(debugreport.Report)
 
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -195,4 +196,87 @@ func TestLogLinesNameTheCallerNotTheWrapper(t *testing.T) {
 		assert.Contains(t, line, "logger_pro_test.go", "%q should be attributed to the test that logged it", msg)
 		assert.NotContains(t, line, "util/logger.go", "%q must not be attributed to the wrapper", msg)
 	}
+}
+
+// debugreport's goroutine writes the environment report some seconds after
+// start, and a short run can close the log in between: a read of the global
+// followed by a use of it would then dereference nil (and race).
+func TestWriteSessionReportSurvivesTheLogClosingUnderIt(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	setLogFile(initFileLogger())
+	require.NotNil(t, currentLogFile())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			WriteSessionReport("Application\n  Version  2.0.0\n")
+		}
+	}()
+	for range 200 {
+		CloseLogFile()
+		setLogFile(initFileLogger())
+	}
+	<-done
+	CloseLogFile()
+}
+
+// A subprocess's output reaches the log in chunks of any size. A secret split
+// across two writes matches no rule in either half, so the sink must hold a
+// partial line until it is complete.
+func TestSubprocessOutputSplitAcrossWritesIsStillRedacted(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	setLogFile(initFileLogger())
+	w := GetLogFileWriter()
+	require.NotNil(t, w)
+
+	for _, chunk := range []string{"mpv: GET https://h/p?tok", "en=SPLITSECRET1234&q=naruto\nAuthori", "zation: Bearer SPLITBEARER", "TOKEN99\nv1.AAAAAAAA", ".BBBBBBBB.CCCCCCCC done\n"} {
+		_, err := w.Write([]byte(chunk))
+		require.NoError(t, err)
+	}
+	CloseLogFile()
+
+	got := readLog(t)
+	for _, secret := range []string{"SPLITSECRET1234", "SPLITBEARER", "TOKEN99", "AAAAAAAA.BBBBBBBB"} {
+		assert.NotContains(t, got, secret)
+	}
+	assert.Contains(t, got, "q=naruto", "what is not a secret survives")
+}
+
+func TestSubprocessOutputWithoutATrailingNewlineIsNotLost(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = true
+	setLogFile(initFileLogger())
+	_, err := GetLogFileWriter().Write([]byte("last words without a newline"))
+	require.NoError(t, err)
+	CloseLogFile()
+
+	assert.Contains(t, readLog(t), "last words without a newline")
+}
+
+// The crash handler must not itself panic: a collector that blows up costs the
+// environment section, not the report.
+func TestCrashReportSurvivesAFailingCollectorAndUsesAGoodOne(t *testing.T) {
+	snapshotLogger(t)
+	withRedirectedHome(t)
+	IsDebug = false
+	sessionReport.Store("")
+	t.Cleanup(func() { SetReportCollector(nil) })
+
+	SetReportCollector(func(context.Context) string { panic("collector exploded") })
+	path, err := WriteCrashReport("boom", []byte("stack"))
+	require.NoError(t, err, "a panicking collector must not lose the crash report")
+	b, _ := os.ReadFile(path) // #nosec G304 -- a file the test just made
+	assert.Contains(t, string(b), "boom")
+
+	SetReportCollector(func(context.Context) string { return "Tools\n  mpv  mpv v0.41.0\n" })
+	path, err = WriteCrashReport("boom", []byte("stack"))
+	require.NoError(t, err)
+	b, _ = os.ReadFile(path) // #nosec G304 -- a file the test just made
+	assert.Contains(t, string(b), "mpv v0.41.0", "the full report, with the tools, is what a maintainer needs")
 }

@@ -352,6 +352,32 @@ func (cc *corpus) loadCache(baseURL string) {
 	}
 }
 
+// rehost points the entries read from the host of from at the host of to, and
+// saves the cache so the next start finds it usable (loadCache drops entries
+// whose host is not the client's). Entries on any other host are left alone.
+func (cc *corpus) rehost(from, to string) {
+	f, errF := url.Parse(from)
+	t, errT := url.Parse(to)
+	if errF != nil || errT != nil || f.Host == "" || t.Host == "" {
+		return
+	}
+	cc.mu.Lock()
+	moved := 0
+	for i := range cc.entries {
+		u, err := url.Parse(cc.entries[i].URL)
+		if err != nil || !sameHost(u.Host, f.Host) {
+			continue
+		}
+		u.Scheme, u.Host = t.Scheme, t.Host
+		cc.entries[i].URL = u.String()
+		moved++
+	}
+	cc.mu.Unlock()
+	if moved > 0 {
+		cc.saveCache()
+	}
+}
+
 // sameHost compares hosts ignoring the www. prefix.
 func sameHost(a, b string) bool {
 	return strings.TrimPrefix(strings.ToLower(a), "www.") == strings.TrimPrefix(strings.ToLower(b), "www.")

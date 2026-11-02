@@ -105,12 +105,25 @@ func classifyError(err error) (outcome, detail string) {
 		return "slow", "no answer before the timeout"
 	case errors.As(err, &dnsErr):
 		return "dns", "the name does not resolve"
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case isRefused(err):
 		return "refused", "connection refused"
 	case errors.As(err, &tlsErr):
 		return "tls", "certificate not accepted"
 	}
 	return "error", shortErr(err)
+}
+
+// wsaeConnRefused is Windows' WSAECONNREFUSED. Its errors do not compare equal
+// to syscall.ECONNREFUSED there, so a refusal would be reported as a generic
+// error.
+const wsaeConnRefused = syscall.Errno(10061)
+
+func isRefused(err error) bool {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == syscall.ECONNREFUSED || errno == wsaeConnRefused
+	}
+	return false
 }
 
 func shortErr(err error) string {

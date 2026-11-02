@@ -1,11 +1,13 @@
-//go:build unix
+//go:build linux || darwin || freebsd || dragonfly
 
 package diag
 
 import "syscall"
 
 // FreeSpace reports the bytes available to an unprivileged user on the
-// filesystem holding path.
+// filesystem holding path. Only the systems whose syscall.Statfs_t has these
+// fields are covered: "unix" also takes in openbsd, netbsd and solaris, where
+// it does not build.
 func FreeSpace(path string) (uint64, bool) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
