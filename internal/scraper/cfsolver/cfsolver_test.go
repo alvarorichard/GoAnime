@@ -2,6 +2,9 @@ package cfsolver
 
 import (
 	"context"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +21,7 @@ func fakeTool(t *testing.T, script string) *Solver {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "challenge")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o700); err != nil { //nolint:gosec // test helper script
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	prof := filepath.Join(dir, "p.json")
@@ -72,7 +75,7 @@ func TestSolveChallengeHonorsTimeout(t *testing.T) {
 	}
 }
 
-func TestDiscoverNeedsBinaryAndProfile(t *testing.T) {
+func TestDiscoverNeedsABinary(t *testing.T) {
 	isolate(t)
 	if _, ok := Discover(); ok {
 		t.Fatal("discovered a solver with nothing installed")
@@ -80,11 +83,6 @@ func TestDiscoverNeedsBinaryAndProfile(t *testing.T) {
 
 	s := fakeTool(t, "true")
 	t.Setenv(envBin, s.Bin)
-	t.Setenv(envProfile, filepath.Join(t.TempDir(), "missing.json"))
-	if _, ok := Discover(); ok {
-		t.Fatal("a missing profile must disable the solver")
-	}
-	t.Setenv(envProfile, s.Profile)
 	got, ok := Discover()
 	if !ok || got.Bin != s.Bin {
 		t.Fatalf("Discover = %+v, %v", got, ok)
@@ -100,7 +98,6 @@ func TestRegisterOnlyWhenInstalled(t *testing.T) {
 	}
 	s := fakeTool(t, "true")
 	t.Setenv(envBin, s.Bin)
-	t.Setenv(envProfile, s.Profile)
 	if !Register() || !netx.ChallengeSolverAvailable() {
 		t.Fatal("not registered although cfsolve is installed")
 	}
@@ -110,7 +107,6 @@ func TestRegisterOnlyWhenInstalled(t *testing.T) {
 func isolate(t *testing.T) {
 	t.Helper()
 	t.Setenv(envBin, "")
-	t.Setenv(envProfile, "")
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -130,7 +126,7 @@ func TestDiscoverFindsBinaryInConfigFolderWithEmbeddedProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "challenge"
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // test helper
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := Discover()
@@ -199,5 +195,73 @@ func TestParseClearance(t *testing.T) {
 	}
 	if !strings.Contains(lastLine("a\nb\n"), "b") {
 		t.Error("lastLine")
+	}
+}
+
+// sitekey, action and cData come out of a page the site controls. cfsolve parses
+// its argv with options, so a value shaped like one must never reach it.
+func TestSolveTurnstileRejectsValuesThatLookLikeOptions(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "ran")
+	s := fakeTool(t, `echo ran > `+ran+`
+echo token
+`)
+	base := TurnstileRequest{PageURL: "https://x.example/", SiteKey: "0xKEY", Action: "act", CData: "cd"}
+	for name, mutate := range map[string]func(*TurnstileRequest){
+		"sitekey": func(r *TurnstileRequest) { r.SiteKey = "--proxy" },
+		"action":  func(r *TurnstileRequest) { r.Action = "-x" },
+		"cdata":   func(r *TurnstileRequest) { r.CData = "--fingerprint" },
+		"nul":     func(r *TurnstileRequest) { r.CData = "a\x00b" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := base
+			mutate(&r)
+			if _, err := s.SolveTurnstile(context.Background(), r, time.Minute); err == nil {
+				t.Fatal("accepted a value that would be read as an option")
+			}
+			if _, err := os.Stat(ran); err == nil {
+				t.Fatal("cfsolve was started with an unsafe argument")
+			}
+		})
+	}
+}
+
+// cf_clearance is a Secure cookie and the solve only makes sense against a
+// Cloudflare-fronted https site; an http target is refused instead of getting
+// a cookie that is not marked Secure.
+func TestSolveChallengeNeedsHTTPSAndMarksTheCookie(t *testing.T) {
+	s := fakeTool(t, "echo cf_clearance=abc")
+	if _, err := s.SolveChallenge(context.Background(), "http://goyabu.io/", time.Minute, netx.RevealNever); err == nil {
+		t.Fatal("an http target must be refused")
+	}
+	res, err := s.SolveChallenge(context.Background(), "https://goyabu.io/", time.Minute, netx.RevealNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := res.Cookies[0]
+	if !c.Secure || !c.HttpOnly || c.SameSite != http.SameSiteLaxMode {
+		t.Errorf("cookie = Secure:%v HttpOnly:%v SameSite:%v, want Secure, HttpOnly and Lax", c.Secure, c.HttpOnly, c.SameSite)
+	}
+	// What matters downstream: the jar still hands it to the site.
+	jar, _ := cookiejar.New(nil)
+	target, _ := url.Parse("https://goyabu.io/anime/x")
+	jar.SetCookies(target, res.Cookies)
+	if got := jar.Cookies(target); len(got) != 1 || got[0].Value != "abc" {
+		t.Errorf("the jar did not return the clearance: %v", got)
+	}
+}
+
+// The browser profile is always GoAnime's own embedded copy. A stray variable
+// pointing somewhere else must neither redirect it nor disable the solver.
+func TestDiscoverIgnoresAForeignProfilePath(t *testing.T) {
+	isolate(t)
+	s := fakeTool(t, "true")
+	t.Setenv(envBin, s.Bin)
+	t.Setenv("GOANIME_CFSOLVE_PROFILE", filepath.Join(t.TempDir(), "missing.json"))
+	got, ok := Discover()
+	if !ok {
+		t.Fatal("a stray GOANIME_CFSOLVE_PROFILE disabled the solver")
+	}
+	if strings.Contains(got.Profile, "missing.json") {
+		t.Errorf("profile followed the variable: %s", got.Profile)
 	}
 }

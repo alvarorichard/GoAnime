@@ -1,6 +1,7 @@
 package cfsolver
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -63,11 +65,12 @@ func TestInstallVerifiesAndInstalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
-	if err != nil || string(got) != string(bin) {
+	if err != nil || !bytes.Equal(got, bin) {
 		t.Fatalf("installed %q, err=%v", got, err)
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm()&0o100 == 0 {
-		t.Errorf("not executable: %v", st.Mode())
+	// Executable by its owner and nobody else: the tightest mode that can run.
+	if st, _ := os.Stat(path); runtime.GOOS != "windows" && st.Mode().Perm() != 0o700 {
+		t.Errorf("mode = %v, want exactly 0700", st.Mode().Perm())
 	}
 	left, _ := filepath.Glob(filepath.Join(in.Dir, "*.part"))
 	if len(left) != 0 {

@@ -10,10 +10,8 @@
 // Nothing needs configuring. The binary is looked for next to the goanime
 // executable, in a "cfsolve" folder there, in GoAnime's config folder and on
 // PATH. The browser profile it impersonates is embedded in GoAnime (see
-// profile.go) and unpacked on first use. Two variables override this:
-//
-//	GOANIME_CFSOLVE_BIN      path to the cfsolve "challenge" binary
-//	GOANIME_CFSOLVE_PROFILE  path to a cfsolve browser profile (.json)
+// profile.go) and unpacked on first use. GOANIME_CFSOLVE_BIN points at a
+// "challenge" binary kept somewhere else.
 package cfsolver
 
 import (
@@ -35,8 +33,7 @@ import (
 )
 
 const (
-	envBin     = "GOANIME_CFSOLVE_BIN"
-	envProfile = "GOANIME_CFSOLVE_PROFILE"
+	envBin = "GOANIME_CFSOLVE_BIN"
 
 	clearanceName = "cf_clearance"
 )
@@ -96,16 +93,10 @@ func Discover() (*Solver, bool) {
 		util.Debug("cfsolve: binary not found", "bin", bin)
 		return nil, false
 	}
-	profile := os.Getenv(envProfile)
-	if profile == "" {
-		var err error
-		if profile, err = defaultProfilePath(); err != nil {
-			util.Debug("cfsolve: cannot prepare the embedded profile", "err", err)
-			return nil, false
-		}
-	}
-	if _, err := os.Stat(profile); err != nil {
-		util.Debug("cfsolve: profile not found", "profile", profile)
+	// The profile is always GoAnime's own embedded copy, unpacked by us.
+	profile, err := defaultProfilePath()
+	if err != nil {
+		util.Debug("cfsolve: cannot prepare the embedded profile", "err", err)
 		return nil, false
 	}
 	return &Solver{Bin: bin, Profile: profile}, true
@@ -149,8 +140,8 @@ func (s *Solver) userAgent() (string, error) {
 // so reveal is ignored.
 func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout time.Duration, _ netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
 	u, err := url.Parse(targetURL)
-	if err != nil || u.Host == "" {
-		return nil, fmt.Errorf("cfsolve: bad target %q", targetURL)
+	if err != nil || u.Host == "" || u.Scheme != "https" {
+		return nil, fmt.Errorf("cfsolve: target must be an https URL, got %q", targetURL)
 	}
 	ua, err := s.userAgent()
 	if err != nil {
@@ -169,7 +160,7 @@ func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout t
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, s.Bin, "--page", targetURL, filepath.Join(tmp, "run"), //nolint:gosec // Bin is operator configuration, args are not shell-interpreted
+	cmd := exec.CommandContext(ctx, s.Bin, "--page", targetURL, filepath.Join(tmp, "run"), // #nosec G204 -- Bin is the operator-configured tool; no shell; targetURL is a parsed https URL
 		"--solve", "--fingerprint", s.Profile)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -184,7 +175,9 @@ func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout t
 	return &netx.ChallengeSolveResult{
 		Cookies: []*http.Cookie{{
 			Name: clearanceName, Value: value,
-			Domain: u.Hostname(), Path: "/", Secure: u.Scheme == "https", HttpOnly: true,
+			// Secure and HttpOnly as Cloudflare sets them. net/http's cookie jar
+			// ignores SameSite, so Lax is the safe value and changes nothing.
+			Domain: u.Hostname(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		}},
 		UserAgent: ua,
 		FinalURL:  targetURL,
@@ -207,8 +200,15 @@ func (s *Solver) SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout
 		return "", errors.New("cfsolve: a sitekey is required")
 	}
 	u, err := url.Parse(r.PageURL)
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("cfsolve: bad page %q", r.PageURL)
+	if err != nil || u.Host == "" || u.Scheme != "https" {
+		return "", fmt.Errorf("cfsolve: page must be an https URL, got %q", r.PageURL)
+	}
+	// These come out of a page the site controls and cfsolve parses its argv with
+	// options, so a value shaped like one must never reach it.
+	for name, v := range map[string]string{"sitekey": r.SiteKey, "action": r.Action, "cdata": r.CData} {
+		if err := checkArg(name, v); err != nil {
+			return "", err
+		}
 	}
 	tmp, err := os.MkdirTemp("", "goanime-cfsolve-")
 	if err != nil {
@@ -228,7 +228,7 @@ func (s *Solver) SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout
 	if r.CData != "" {
 		args = append(args, "--cdata", r.CData)
 	}
-	cmd := exec.CommandContext(ctx, s.Bin, args...) //nolint:gosec // Bin is operator configuration, args are not shell-interpreted
+	cmd := exec.CommandContext(ctx, s.Bin, args...) // #nosec G204 -- Bin is the operator-configured tool; no shell; every value was checked by checkArg or parsed as an https URL
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -239,6 +239,15 @@ func (s *Solver) SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout
 		return "", fmt.Errorf("cfsolve: no token in output: %q", token)
 	}
 	return token, nil
+}
+
+// checkArg rejects a value cfsolve could read as an option or that cannot be an
+// argument at all.
+func checkArg(name, v string) error {
+	if strings.HasPrefix(v, "-") || strings.ContainsRune(v, 0) {
+		return fmt.Errorf("cfsolve: %s %q cannot be passed as an argument", name, v)
+	}
+	return nil
 }
 
 // parseClearance finds the "cf_clearance=<value>" line cfsolve prints on success.

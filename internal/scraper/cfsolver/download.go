@@ -136,7 +136,7 @@ func (in *Installer) get(ctx context.Context, name string) (*http.Response, erro
 	if err != nil {
 		return nil, err
 	}
-	resp, err := in.Client.Do(req) //nolint:gosec // URL is the pinned release root plus fixed asset names
+	resp, err := in.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -147,18 +147,18 @@ func (in *Installer) get(ctx context.Context, name string) (*http.Response, erro
 	return resp, nil
 }
 
-// readAll returns a small release file, capped at max bytes.
-func (in *Installer) readAll(ctx context.Context, name string, max int64) ([]byte, error) {
+// readAll returns a small release file, capped at limit bytes.
+func (in *Installer) readAll(ctx context.Context, name string, limit int64) ([]byte, error) {
 	resp, err := in.get(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(b)) > max {
+	if int64(len(b)) > limit {
 		return nil, fmt.Errorf("cfsolve: %s is too large", name)
 	}
 	return b, nil
@@ -226,7 +226,7 @@ func (in *Installer) fetch(ctx context.Context) (string, error) {
 	if got := hex.EncodeToString(h.Sum(nil)); got != want {
 		return "", fmt.Errorf("cfsolve: checksum mismatch for %s", in.Asset)
 	}
-	if err := os.Chmod(tmp.Name(), 0o700); err != nil { //nolint:gosec // an executable the user's own account runs
+	if err := os.Chmod(tmp.Name(), 0o700); err != nil { // #nosec G302 -- an executable needs its x bit; 0700 is the tightest mode that can run
 		return "", err
 	}
 	final := filepath.Join(in.Dir, "challenge")
