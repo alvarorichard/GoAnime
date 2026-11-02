@@ -1,0 +1,554 @@
+{
+  "engine": "webkit",
+  "transport": {
+    "profile": "safari_ios_26.2",
+    "platform": "ios",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6.2 Mobile/15E148 Safari/604.1"
+    },
+    "requests": {
+      "headers": {
+        "navigation": [
+          "sec-fetch-dest: document",
+          "user-agent",
+          "upgrade-insecure-requests: 1",
+          "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "sec-fetch-site: none",
+          "sec-fetch-mode: navigate",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=0, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "iframe": [
+          "sec-fetch-dest: iframe",
+          "user-agent",
+          "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "referer",
+          "sec-fetch-site: cross-site",
+          "sec-fetch-mode: navigate",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=0, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "script": [
+          "sec-fetch-dest: script",
+          "user-agent",
+          "accept: */*",
+          "referer",
+          "sec-fetch-site: cross-site",
+          "sec-fetch-mode: no-cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "cors_script": [
+          "sec-fetch-dest: script",
+          "user-agent",
+          "accept: */*",
+          "referer",
+          "sec-fetch-site: cross-site",
+          "origin",
+          "sec-fetch-mode: cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "script_redirect": [
+          "accept: */*",
+          "sec-fetch-site: cross-site",
+          "priority: u=3, i",
+          "sec-fetch-mode: no-cors",
+          "user-agent",
+          "accept-language: en-US,en;q=0.9",
+          "sec-fetch-dest: script",
+          "referer",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "orchestrator": [
+          "sec-fetch-dest: script",
+          "user-agent",
+          "accept: */*",
+          "referer",
+          "sec-fetch-site: same-origin",
+          "sec-fetch-mode: no-cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=1, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "page_image": [
+          "sec-fetch-dest: image",
+          "user-agent",
+          "accept: image/webp,image/avif,image/jxl,image/heic,image/heic-sequence,video/*;q=0.8,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+          "referer",
+          "sec-fetch-site: same-origin",
+          "sec-fetch-mode: no-cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=5, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "orchestrator_post": [
+          "accept: */*",
+          "content-type: text/plain;charset=UTF-8",
+          "sec-fetch-site: same-origin",
+          "origin",
+          "cf-chl",
+          "content-length",
+          "sec-fetch-mode: cors",
+          "user-agent",
+          "referer",
+          "sec-fetch-dest: empty",
+          "cf-chl-ra: 0",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "challenge_post": [
+          "accept: */*",
+          "content-type: text/plain;charset=UTF-8",
+          "sec-fetch-site: same-origin",
+          "origin",
+          "cf-chl",
+          "content-length",
+          "sec-fetch-mode: cors",
+          "user-agent",
+          "referer",
+          "sec-fetch-dest: empty",
+          "cf-chl-ra: 0",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "image": [
+          "sec-fetch-dest: image",
+          "user-agent",
+          "accept: image/webp,image/avif,image/jxl,image/heic,image/heic-sequence,video/*;q=0.8,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+          "referer",
+          "sec-fetch-site: same-origin",
+          "sec-fetch-mode: no-cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=5, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "worker_fetch": [
+          "sec-fetch-dest: empty",
+          "user-agent",
+          "accept: */*",
+          "sec-fetch-site",
+          "cache-control: max-age=0",
+          "sec-fetch-mode: cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "worker_fetch_without_credentials": [
+          "sec-fetch-dest: empty",
+          "user-agent",
+          "accept: */*",
+          "sec-fetch-site",
+          "pragma: no-cache",
+          "cache-control: no-cache",
+          "sec-fetch-mode: cors",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=3, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "form": [
+          "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "content-type: application/x-www-form-urlencoded",
+          "sec-fetch-site",
+          "origin",
+          "sec-fetch-mode: navigate",
+          "user-agent",
+          "referer",
+          "sec-fetch-dest: document",
+          "content-length",
+          "accept-language: en-US,en;q=0.9",
+          "priority: u=0, i",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ],
+        "websocket": [
+          "upgrade: websocket",
+          "connection: Upgrade",
+          "origin",
+          "pragma: no-cache",
+          "cache-control: no-cache",
+          "sec-websocket-version: 13",
+          "user-agent",
+          "accept-language: en-US,en;q=0.9",
+          "accept-encoding: gzip, deflate, br, zstd"
+        ]
+      }
+    }
+  },
+  "browser": {
+    "inner_width": 375,
+    "inner_height": 553,
+    "challenge_page": {
+      "top": 378,
+      "left": 16,
+      "right": 359
+    }
+  },
+  "timeline": {
+    "script_fetch": 90.0,
+    "implicit_render": 2,
+    "render_start": 2,
+    "render_end": 3,
+    "init_start": 225,
+    "params_start": 225,
+    "collect_start": 225,
+    "sent": 226
+  },
+  "intervals": {
+    "initialise": 7,
+    "handoff": 8,
+    "collect": 19,
+    "send": 121
+  },
+  "orchestrator": {
+    "intervals": {
+      "initialise": 6,
+      "handoff": 0,
+      "collect": 92,
+      "send": 195
+    },
+    "program_startup_ms": 15,
+    "callback_ms": 30
+  },
+  "interaction": {
+    "width": 300,
+    "height": 65,
+    "checkbox": {"x": 9, "y": 20.5, "width": 168.125, "height": 24},
+    "ready_delay_ms": 1000,
+    "device_pixel_ratio": 2,
+    "touch": true
+  },
+  "resource_timing": {
+    "phases": {"request": 0.07, "response": 0.04},
+    "navigation": {"request": 0, "response": 0.9},
+    "sizes_exposed": false
+  },
+  "second": {
+    "facts": {
+      "worker_fetch_rejected": true,
+      "navigator": {
+        "hardwareConcurrency": 4
+      },
+      "media": {
+        "outcome": "observed",
+        "preparation": {
+          "receiver": {
+            "outcome": "observed",
+            "calls": [
+              {
+                "outcome": "returned",
+                "value": {
+                  "codecs": [
+                    {
+                      "mimeType": "audio/opus",
+                      "clockRate": 48000,
+                      "sdpFmtpLine": "minptime=10;useinbandfec=1"
+                    },
+                    {
+                      "mimeType": "audio/red",
+                      "clockRate": 48000
+                    },
+                    {
+                      "mimeType": "audio/G722",
+                      "clockRate": 8000
+                    },
+                    {
+                      "mimeType": "audio/PCMU",
+                      "clockRate": 8000
+                    },
+                    {
+                      "mimeType": "audio/PCMA",
+                      "clockRate": 8000
+                    },
+                    {
+                      "mimeType": "audio/CN",
+                      "clockRate": 8000
+                    },
+                    {
+                      "mimeType": "audio/telephone-event",
+                      "clockRate": 48000
+                    },
+                    {
+                      "mimeType": "audio/telephone-event",
+                      "clockRate": 8000
+                    }
+                  ]
+                }
+              },
+              {
+                "outcome": "returned",
+                "value": {
+                  "codecs": [
+                    {
+                      "mimeType": "video/H264",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f"
+                    },
+                    {
+                      "mimeType": "video/rtx",
+                      "clockRate": 90000
+                    },
+                    {
+                      "mimeType": "video/H264",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+                    },
+                    {
+                      "mimeType": "video/H264",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=640c1f"
+                    },
+                    {
+                      "mimeType": "video/H264",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f"
+                    },
+                    {
+                      "mimeType": "video/H265",
+                      "clockRate": 90000
+                    },
+                    {
+                      "mimeType": "video/VP8",
+                      "clockRate": 90000
+                    },
+                    {
+                      "mimeType": "video/VP9",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "profile-id=0"
+                    },
+                    {
+                      "mimeType": "video/VP9",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "profile-id=2"
+                    },
+                    {
+                      "mimeType": "video/red",
+                      "clockRate": 90000
+                    },
+                    {
+                      "mimeType": "video/ulpfec",
+                      "clockRate": 90000
+                    },
+                    {
+                      "mimeType": "video/flexfec-03",
+                      "clockRate": 90000,
+                      "sdpFmtpLine": "repair-window=10000000"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "type_support": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "audio_decoding": null,
+          "video_decoding": null,
+          "message_length": null
+        },
+        "snapshot": {
+          "connection": {
+            "pub_candidates": [
+              {
+                "candidate": "candidate:3460880736 1 udp 2113939711 f1bed2f8-f860-457f-b026-2d23d9140c03.local 59340 typ host generation 0 ufrag mtbG network-cost 999",
+                "observed_ms": 1792876992039
+              },
+              {
+                "candidate": "candidate:3747697418 1 udp 2113937151 f9501b39-1d57-4eb6-8029-16167a5a330b.local 51498 typ host generation 0 ufrag mtbG network-cost 999",
+                "observed_ms": 1792876992039
+              },
+              {
+                "candidate": "candidate:1648342598 1 udp 1677729535 192.0.2.1 64597 typ srflx raddr 0.0.0.0 rport 0 generation 0 ufrag mtbG network-cost 999",
+                "observed_ms": 1792876992052
+              },
+              {
+                "candidate": "candidate:2007285888 1 udp 1677732095 2001:db8::1 59340 typ srflx raddr :: rport 0 generation 0 ufrag mtbG network-cost 999",
+                "observed_ms": 1792876992056
+              }
+            ],
+            "data_channel": true,
+            "sdp": "v=0\r\no=- 2400467206764510475 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:mtbG\r\na=ice-pwd:0Dc00kOlIMYBy8fnUlejV6Qu\r\na=ice-options:trickle\r\na=fingerprint:sha-256 DD:42:3A:63:B0:F3:DD:05:09:2E:04:DB:DC:08:0F:95:85:98:BB:9E:04:10:8B:72:64:14:09:0E:31:EA:13:69\r\na=setup:actpass\r\na=mid:0\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n"
+          },
+          "started_ms": 1792876992546,
+          "finished_ms": 1792876992554,
+          "ice_state": "complete"
+        }
+      },
+      "proof_worker": {
+        "digest_us": [
+          35.7,
+          31.8,
+          36.5
+        ],
+        "startup_ms": [
+          27.5,
+          21.0,
+          28.8
+        ]
+      },
+      "benchmark_worker": {
+        "compile_ms": [
+          11.499999999999993,
+          2.039999999999992,
+          1.1599999999999966,
+          2.0,
+          1.6599999999999682,
+          2.5
+        ],
+        "kernel_ms_per_million": [
+          [
+            1.003,
+            0.93,
+            0.944,
+            1.035,
+            0.972,
+            0.946,
+            1.291,
+            0.962,
+            0.941,
+            1.214,
+            0.971,
+            0.971,
+            1.003,
+            0.935,
+            0.964,
+            1.002,
+            0.953,
+            0.968
+          ],
+          [
+            1.055,
+            0.932,
+            0.946,
+            1.027,
+            0.933,
+            0.944,
+            1.061,
+            0.942,
+            0.947,
+            1.007,
+            1.007,
+            1.007,
+            1.399,
+            0.926,
+            0.941,
+            1.379,
+            0.936,
+            0.946
+          ],
+          [
+            1.222,
+            0.617,
+            0.635,
+            0.801,
+            0.621,
+            0.626,
+            0.665,
+            0.628,
+            0.631,
+            0.645,
+            0.645,
+            0.645,
+            0.746,
+            0.62,
+            0.63,
+            0.656,
+            0.629,
+            0.641
+          ],
+          [
+            5.798,
+            5.567,
+            5.609,
+            5.75,
+            5.574,
+            5.692,
+            5.978,
+            5.707,
+            5.707,
+            5.831,
+            5.831,
+            5.831,
+            5.931,
+            5.554,
+            5.673,
+            5.869,
+            5.693,
+            5.791
+          ]
+        ]
+      }
+    },
+    "document": {
+      "shadow_root": "[null,\"closed\",\"<body></body>\",\"\",4,4,37,\"function attachShadow() {\\n    [native code]\\n}\"]"
+    },
+    "image": {
+      "effective_type": "",
+      "online": true
+    },
+    "durations": {
+      "audio": 24,
+      "behavior": 4,
+      "clock_resolution": 6,
+      "computed_style_hash": 12,
+      "console": 26,
+      "date_parsing_offsets": 1,
+      "document_structure": 0,
+      "document_summary": 1,
+      "dom_mutation": 2,
+      "emoji_color": 3,
+      "empty": 0,
+      "environment": 5,
+      "environment_audit": 17,
+      "error_message_length": 1,
+      "font_enumeration": 6,
+      "graphics": 48,
+      "high_entropy_user_agent": 1,
+      "image": 14,
+      "intl": 3,
+      "isolation": 16,
+      "keyboard_layout": 0,
+      "math": 6,
+      "media": 5,
+      "native_inspection": 65,
+      "network_information": 0,
+      "parent_info": 0,
+      "performance_entries": 1,
+      "private_token": 1,
+      "rects": 5,
+      "stack": 1,
+      "storage": 5,
+      "stylesheets": 3,
+      "summarizer_availability": 0,
+      "svg_geometry": 18,
+      "worker_fetch": 1,
+      "worker_navigator": 7
+    },
+    "startup_ms": 119,
+    "pending_ms": 227
+  },
+  "answers": "safari-26-ios/answers.json",
+  "challenge_page_answers": "safari-26-ios/challenge-page-answers.json"
+}

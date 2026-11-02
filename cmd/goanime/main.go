@@ -10,6 +10,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/updater"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
@@ -39,6 +40,13 @@ func main() {
 	// staged files only after this binary has started and its digest matches
 	// the one recorded by the updater. No marker means nothing to clean up.
 	updater.CleanupAfterUpdate()
+
+	// Challenge-gated sources (Goyabu) are only reachable through the optional
+	// cfsolve tool. Use it when installed; otherwise fetch the pinned build in
+	// the background (silent on failure) and Goyabu joins the search once it lands.
+	if !cfsolver.Register() {
+		cfsolver.InstallInBackground()
+	}
 
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape

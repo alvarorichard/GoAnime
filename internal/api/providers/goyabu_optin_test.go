@@ -1,29 +1,45 @@
 package providers
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Goyabu ships off, for now.
+// Goyabu's default follows whether a challenge solver is registered.
 //
-// It is the only source that needs a browser, and on a network Cloudflare has
-// flagged there is currently no way past its gate — measured 2026-09-25, the
-// gate cleared in the browser and the clearance was refused on replay by every
-// transport available to us. So it costs a Chrome launch and returns nothing.
+// It is the only source behind a bot gate (a Cloudflare managed challenge).
+// Without a solver it can only report itself blocked on a flagged network, so
+// it stays out of the search rather than slowing every query. With one — the
+// optional cfsolve tool, registered at startup when installed — it joins the
+// search with no setup. Measured 2026-11-01, cfsolve clears the gate in about
+// 8s and GoAnime's own client accepts the resulting clearance.
 //
-// These tests pin the DEFAULT, not the capability, and they are written that
-// way on purpose: the scraper is complete and correct, the source works on a
-// network that is not flagged, and GOANIME_ENABLED_SOURCES=goyabu brings it
-// back the moment a bypass exists. See the descriptor in source_providers.go
-// for what has already been ruled out.
-//
-// When that day comes, the change is one line — DefaultDisabled goes away — and
-// TestGoyabu_IsOffByDefault is the test that should fail and be deleted with
-// it. It is a marker, not a verdict.
+// GOANIME_ENABLED_SOURCES=goyabu still forces it on for an unchallenged
+// network, and GOANIME_DISABLED_SOURCES=goyabu still forces it off.
+
+// stubSolver is a registered solver that is never asked to solve anything.
+type stubSolver struct{}
+
+func (stubSolver) SolveChallenge(context.Context, string, time.Duration, netx.RevealPolicy) (*netx.ChallengeSolveResult, error) {
+	return nil, errors.New("stub")
+}
+
+func withSolver(t *testing.T, on bool) {
+	t.Helper()
+	var s netx.ChallengeSolver
+	if on {
+		s = stubSolver{}
+	}
+	netx.RegisterChallengeSolver(s)
+	t.Cleanup(func() { netx.RegisterChallengeSolver(nil) })
+}
 
 func goyabuDescriptor(t *testing.T) source.Descriptor {
 	t.Helper()
@@ -32,12 +48,13 @@ func goyabuDescriptor(t *testing.T) source.Descriptor {
 	return src.Describe()
 }
 
-func TestGoyabu_IsOffByDefault(t *testing.T) {
+func TestGoyabu_IsOffByDefaultWithoutASolver(t *testing.T) {
+	withSolver(t, false)
 	d := goyabuDescriptor(t)
 	assert.True(t, d.DefaultDisabled,
-		"Goyabu must ship off: it is the only source that launches a browser, for results AnimeFire already covers")
+		"without a solver Goyabu can only be blocked on a challenged network, so it must not join the search")
 	assert.False(t, source.IsSearchEnabled(d),
-		"with no opt-in, Goyabu must not join the search")
+		"with no opt-in and no solver, Goyabu must not join the search")
 	// But it must still be RESOLVABLE, or an anime already saved as Goyabu
 	// stops matching its own Kind and falls through to the URL — which is how
 	// one of them resolved to AnimeFire while this was being written.
@@ -45,7 +62,15 @@ func TestGoyabu_IsOffByDefault(t *testing.T) {
 		"turning a source off must not make its existing entries route somewhere else")
 }
 
+func TestGoyabu_IsOnByDefaultWithASolver(t *testing.T) {
+	withSolver(t, true)
+	d := goyabuDescriptor(t)
+	assert.False(t, d.DefaultDisabled, "a registered solver is the whole reason to search Goyabu by default")
+	assert.True(t, source.IsSearchEnabled(d), "Goyabu must join the search with no opt-in once a solver exists")
+}
+
 func TestGoyabu_ComesBackWhenAskedFor(t *testing.T) {
+	withSolver(t, false)
 	t.Setenv("GOANIME_ENABLED_SOURCES", "goyabu")
 	assert.True(t, source.IsSearchEnabled(goyabuDescriptor(t)),
 		"the opt-in must work, or this is a removal wearing a default's clothes")
@@ -55,6 +80,7 @@ func TestGoyabu_ComesBackWhenAskedFor(t *testing.T) {
 // over an opt-in, so someone who enabled it globally can still turn it off for
 // one run.
 func TestGoyabu_KillSwitchStillWins(t *testing.T) {
+	withSolver(t, true)
 	t.Setenv("GOANIME_ENABLED_SOURCES", "goyabu")
 	t.Setenv("GOANIME_DISABLED_SOURCES", "goyabu")
 	d := goyabuDescriptor(t)
