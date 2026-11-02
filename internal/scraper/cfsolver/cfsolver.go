@@ -44,6 +44,13 @@ type Solver struct {
 	Profile string
 }
 
+// A Solver answers both gates GoAnime knows: a full challenge page and a
+// standalone Turnstile widget rendered by a player page.
+var (
+	_ netx.ChallengeSolver = (*Solver)(nil)
+	_ netx.TurnstileSolver = (*Solver)(nil)
+)
+
 // binaryNames are the file names cfsolve's binary may carry.
 var binaryNames = []string{"challenge", "cfsolve"}
 
@@ -184,18 +191,14 @@ func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout t
 	}, nil
 }
 
-// TurnstileRequest names a Turnstile widget a page renders from script.
-type TurnstileRequest struct {
-	PageURL string // the address the widget belongs to; the page is not fetched
-	SiteKey string
-	Action  string // optional
-	CData   string // optional
-}
+// TurnstileRequest is kept as an alias so callers that used the cfsolver
+// package's type before the interface moved to netx keep compiling.
+type TurnstileRequest = netx.TurnstileRequest
 
 // SolveTurnstile returns a token for one widget without loading its page, so
 // the caller keeps the only session that fetched it (a site may bind its
 // own challenge to that session's address and User-Agent).
-func (s *Solver) SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout time.Duration) (string, error) {
+func (s *Solver) SolveTurnstile(ctx context.Context, r netx.TurnstileRequest, timeout time.Duration) (string, error) {
 	if r.SiteKey == "" {
 		return "", errors.New("cfsolve: a sitekey is required")
 	}

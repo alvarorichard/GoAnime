@@ -159,6 +159,17 @@ func DirectServers(servers []Server) []Server {
 	return out
 }
 
+// GatedServers keeps the servers that are player pages, in listing order.
+func GatedServers(servers []Server) []Server {
+	var out []Server
+	for _, s := range servers {
+		if s.Gated() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // GatedHosts lists the distinct hosts of the servers that are player pages.
 func GatedHosts(servers []Server) []string {
 	var hosts []string

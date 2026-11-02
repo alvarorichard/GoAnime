@@ -316,7 +316,7 @@ SD.
 | Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
 | StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
 | TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
-| Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto; painel StartFlix como reserva     |
+| Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto ou cfsolve para o player; painel como reserva |
 
 `--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
 `animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
@@ -324,18 +324,32 @@ SD.
 em português.
 
 O Pobreflix consulta primeiro o catálogo `/api` do site e usa o índice de
-sitemaps como reserva. As páginas atuais de filmes e episódios trazem servidores
-MP4 públicos, então a reprodução é direta e não precisa de navegador. Páginas
-do tema antigo ainda usam o painel do StartFlix.
+sitemaps como reserva. As páginas atuais de filmes e episódios listam seus
+servidores no JSON embutido; quando o servidor é um MP4 público, a reprodução é
+direta se o arquivo já tem o áudio desejado. As páginas que listam um player
+protegido por Turnstile passam pelo cfsolve (veja abaixo); sem ele, elas usam o
+painel do StartFlix como reserva. Páginas do tema antigo ainda usam o painel.
 
 O endereço da AnimeDrive fica intermitentemente inacessível em algumas redes.
 Se o site mudar ou a sua rede bloquear o endereço, `GOANIME_ANIMEDRIVE_URL`
 aponta a fonte para um espelho acessível.
 
-O Goyabu fica atrás de uma verificação gerenciada do Cloudflare e vem
-desativado. Ele funciona em redes que o Cloudflare não verifica; em uma rede
-verificada, nenhum cliente HTTP sem navegador consegue passar pela verificação.
-Para ativá-lo, use `GOANIME_ENABLED_SOURCES=goyabu`.
+O Goyabu fica atrás de uma verificação gerenciada do Cloudflare, e as páginas
+de player do Pobreflix atrás de um Turnstile do Cloudflare. Em redes que o
+Cloudflare não verifica, eles funcionam; em uma rede verificada, os dois
+precisam da ferramenta [cfsolve](https://github.com/chris124567/cfsolve), que
+passa pelas verificações com requisições simples, sem navegador. Não há nada
+para instalar em Linux e macOS Apple Silicon: uma versão de release baixa na
+primeira execução o binário publicado com a própria release (conferido pelas
+somas de verificação assinadas) e as duas fontes passam a usá-lo. Se o download
+falhar, o Goyabu fica fora da busca e o Pobreflix continua com os arquivos
+diretos e o painel como reserva. **Windows e Macs Intel ainda não têm build do
+cfsolve**, então o Goyabu só funciona nessas plataformas em redes que não são
+verificadas (`GOANIME_ENABLED_SOURCES=goyabu`), e o Pobreflix não consegue
+passar pelo player. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` desliga o download,
+`GOANIME_CFSOLVE_BIN` aponta para um binário próprio e
+`GOANIME_DISABLED_SOURCES=goyabu` desativa a fonte. Desenvolvedores e
+mantenedores: veja [docs/CFSOLVE.md](docs/CFSOLVE.md).
 
 O GoAnime depende de sites de terceiros, e esses sites mudam sem aviso. Quando
 isso acontece, a fonte correspondente pode parar de funcionar até ser
@@ -361,6 +375,7 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Endereço da AnimeDrive                                                   |
 | `GOANIME_POBREFLIX_URL`       | Endereço do Pobreflix                                                    |
+| `GOANIME_POBREFLIX_PLAYER_URL`| Endereço do player com Turnstile (`https://streambetter.lat`)            |
 | `GOANIME_STARTFLIX_URL`       | Endereço do StartFlix                                                    |
 | `GOANIME_STARTFLIX_PANEL_URL` | Endereço do painel de vídeo do StartFlix                                 |
 | `GOANIME_TOPCINE_URL`         | Endereço do TopCine                                                      |

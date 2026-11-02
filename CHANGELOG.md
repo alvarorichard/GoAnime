@@ -1,3 +1,23 @@
+# GoAnime Release Notes - Unreleased
+
+## Features
+
+### Sources
+
+- **Pobreflix plays its Turnstile-gated player.** The pages Pobreflix lists for movies and episodes no longer have to fall back to the StartFlix panel: GoAnime solves the widget with cfsolve, exchanges the token for the page proof, and plays the source behind it with the proof-bearing page as `Referer`. A title whose embedded MP4 already carries the wanted audio still plays directly. Without cfsolve nothing changes: gated titles keep the panel fallback and its explanation. `GOANIME_POBREFLIX_PLAYER_URL` repoints the player host without a release.
+
+## Bug Fixes
+
+### Sources and search
+
+- Fix Pobreflix movies whose catalog entry points at a dead `/api/player?id=<tmdb>` endpoint: the player page is rebuilt from the TMDB id instead of failing the title.
+- Fix Pobreflix listing a gated movie as having no playable episode, and preferring the panel when the wanted audio had no direct file.
+- Fix Pobreflix's player host refusing the shared Chrome TLS fingerprint with a bare HTTP 500: the gate's requests run on netx's plain SSRF-safe transport (measured against the live host, the same headers answer 200 there).
+
+## Documentation
+
+- `docs/CFSOLVE.md` covers the Pobreflix Turnstile flow and its live test, and both READMEs describe cfsolve as the solver for Goyabu and Pobreflix.
+
 # GoAnime Release Notes - Version 2.0.0
 
 Release date: 2026-10-28

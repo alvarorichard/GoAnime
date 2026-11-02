@@ -312,7 +312,7 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 | Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
 | StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
 | TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
-| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4 playback; StartFlix panel fallback |
+| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4, or cfsolve for its player gate; panel fallback |
 
 `--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
 `animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
@@ -320,23 +320,29 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 Portuguese source.
 
 Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
-index. Current movie and episode pages embed public MP4 servers, so playback is
-direct and needs no browser. Old-theme pages still use the StartFlix panel.
+index. Current movie and episode pages list their servers in embedded JSON;
+when a server is a public MP4, playback is direct if the file already carries
+the wanted audio. Pages that instead list a Turnstile-gated player are cleared
+with cfsolve (see below); without it, those pages take the old StartFlix panel
+fallback. Old-theme pages still use the panel.
 
 AnimeDrive's host is intermittently unreachable from some networks. If the
 site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
 source at a reachable mirror.
 
-Goyabu is behind a Cloudflare managed challenge. On a network Cloudflare does not
-challenge it just works; elsewhere it needs the [cfsolve](https://github.com/chris124567/cfsolve)
-tool, which clears the challenge from plain requests with no browser. There is
-nothing to install on Linux and Apple Silicon Macs: a release build downloads
-the binary shipped with its own release on first run (verified against the
-release's signed checksums) and Goyabu joins the search once it is in place. If
-the download fails, Goyabu just stays out of the search. **Windows and Intel
-Macs have no cfsolve build yet**, so Goyabu only works there on networks that
-are not challenged (`GOANIME_ENABLED_SOURCES=goyabu`). `GOANIME_CFSOLVE_AUTODOWNLOAD=0`
-turns the download off, `GOANIME_CFSOLVE_BIN` points at a binary of your own and
+Goyabu is behind a Cloudflare managed challenge, and Pobreflix's player pages
+behind a Cloudflare Turnstile. On a network Cloudflare does not challenge them
+they just work; elsewhere both need the
+[cfsolve](https://github.com/chris124567/cfsolve) tool, which clears the gates
+from plain requests with no browser. There is nothing to install on Linux and
+Apple Silicon Macs: a release build downloads the binary shipped with its own
+release on first run (verified against the release's signed checksums) and both
+sources use it once it is in place. If the download fails, Goyabu stays out of
+the search and Pobreflix keeps its direct files and panel fallback. **Windows
+and Intel Macs have no cfsolve build yet**, so Goyabu only works there on
+networks that are not challenged (`GOANIME_ENABLED_SOURCES=goyabu`), and
+Pobreflix cannot clear its player gate. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns
+the download off, `GOANIME_CFSOLVE_BIN` points at a binary of your own and
 `GOANIME_DISABLED_SOURCES=goyabu` turns the source off. Developers and
 maintainers: see [docs/CFSOLVE.md](docs/CFSOLVE.md).
 
@@ -364,6 +370,7 @@ common needs:
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Address of AnimeDrive                                                    |
 | `GOANIME_POBREFLIX_URL`       | Address of Pobreflix                                                     |
+| `GOANIME_POBREFLIX_PLAYER_URL`| Address of its Turnstile-gated player (`https://streambetter.lat`)       |
 | `GOANIME_STARTFLIX_URL`       | Address of StartFlix                                                     |
 | `GOANIME_STARTFLIX_PANEL_URL` | Address of the StartFlix video panel                                     |
 | `GOANIME_TOPCINE_URL`         | Address of TopCine                                                       |

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
@@ -91,6 +92,31 @@ func pobreflixFiles(titleURL string, servers []pobreflix.Server) ([]pobreflix.Se
 		return nil, errPobreflixGated
 	}
 	return servers, nil
+}
+
+// pobreflixGateResolvable reports whether the page lists a player page and a
+// registered Turnstile solver can answer it. With no solver this is false, so
+// the previous panel fallback runs without a single extra request.
+func pobreflixGateResolvable(servers []pobreflix.Server) bool {
+	return netx.TurnstileSolverAvailable() && len(pobreflix.GatedServers(servers)) > 0
+}
+
+// pobreflixCanPlayDirectly reports whether the title can bypass the panel:
+// either it embeds a file, or its player page can be cleared.
+func pobreflixCanPlayDirectly(title pobreflix.Title) bool {
+	return title.HasDirect() || pobreflixGateResolvable(title.Servers)
+}
+
+// pobreflixFilesHaveAudio reports whether the embedded files already carry the
+// wanted audio. An unlabelled file counts, as the direct chooser takes it
+// silently.
+func pobreflixFilesHaveAudio(servers []pobreflix.Server, want pobreflix.Audio) bool {
+	for _, s := range servers {
+		if s.Direct() && (s.Audio == want || s.Audio == pobreflix.AudioUnknown) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadPobreflixTitle(ctx context.Context, media *models.Anime) (pobreflix.Title, error) {
@@ -220,6 +246,17 @@ func GetPobreflixEpisodes(media *models.Anime) ([]models.Episode, error) {
 		defer cancel()
 		title, err = loadPobreflixTitle(ctx, media)
 	})
+	if err == nil && !title.HasDirect() && title.Kind == pobreflix.KindMovie && pobreflixGateResolvable(title.Servers) {
+		// The movie has no embedded file, but its player page can be cleared.
+		// Listing it here keeps the direct playback path (and its real audio
+		// check) instead of sending it through the panel first.
+		return []models.Episode{{
+			Number: "1",
+			Num:    1,
+			URL:    media.URL,
+			Title:  models.TitleDetails{English: media.Name, Romaji: media.Name},
+		}}, nil
+	}
 	if err == nil && title.HasDirect() {
 		if title.Kind == pobreflix.KindMovie {
 			return []models.Episode{{
@@ -394,7 +431,7 @@ func GetPobreflixStreamURL(media *models.Anime, episode *models.Episode, quality
 	ctx, cancel := context.WithTimeout(context.Background(), sfxStreamBudget)
 	defer cancel()
 	title, err := loadPobreflixTitle(ctx, media)
-	if err == nil && title.HasDirect() {
+	if err == nil && pobreflixCanPlayDirectly(title) {
 		var streamURL string
 		if title.Kind == pobreflix.KindMovie {
 			streamURL, err = pobreflixDirectMovieURL(ctx, media, title, quality)
@@ -411,14 +448,37 @@ func GetPobreflixStreamURL(media *models.Anime, episode *models.Episode, quality
 	return GetStartFlixStreamURL(media, episode, quality)
 }
 
-// pobreflixDirectMovieURL picks the movie's embedded server and returns its
-// public MP4.
+// pobreflixDirectMovieURL returns a movie's file, from the page's own servers
+// or, when only player pages are listed, from behind the Turnstile gate.
 func pobreflixDirectMovieURL(ctx context.Context, media *models.Anime, title pobreflix.Title, quality string) (string, error) {
 	want := pobreflixAudio(wantedStreamAudio(media, nil))
-	files, err := pobreflixFiles(media.URL, title.Servers)
-	if err != nil {
-		return "", err
+	files, filesErr := pobreflixFiles(media.URL, title.Servers)
+	if filesErr == nil && pobreflixFilesHaveAudio(files, want) {
+		return pobreflixPlayMovieFile(ctx, media, files, want, quality)
 	}
+
+	var gateErr error
+	if pobreflixGateResolvable(title.Servers) {
+		target := pobreflix.PlayerTarget{TMDBID: title.TMDBID, Kind: pobreflix.KindMovie}
+		if streamURL, err := pobreflixResolveGate(ctx, media, title.Servers, target, want, quality); err == nil && streamURL != "" {
+			return streamURL, nil
+		} else if err != nil {
+			gateErr = err
+			util.Debug("Pobreflix player gate did not resolve the movie", "title", media.Name, "err", err)
+		}
+	}
+	if filesErr != nil {
+		if gateErr != nil {
+			return "", gateErr
+		}
+		return "", filesErr
+	}
+	return pobreflixPlayMovieFile(ctx, media, files, want, quality)
+}
+
+// pobreflixPlayMovieFile picks the movie's embedded server and returns its
+// public MP4. It is also the fallback when the gate could not be cleared.
+func pobreflixPlayMovieFile(ctx context.Context, media *models.Anime, files []pobreflix.Server, want pobreflix.Audio, quality string) (string, error) {
 	server, have, err := choosePobreflixServer(files, want, quality, media)
 	if err != nil {
 		return "", err
@@ -431,8 +491,78 @@ func pobreflixDirectMovieURL(ctx context.Context, media *models.Anime, title pob
 		return "", fmt.Errorf("pobreflix: movie %q has no playable file", media.Name)
 	}
 	rawURL = pobreflixResolveDownload(ctx, rawURL)
-	pobreflixPreparePlayback(have)
+	pobreflixPreparePlayback(have, "")
 	return rawURL, nil
+}
+
+// pobreflixResolveGate answers the Turnstile on the title's player page and
+// returns the media URL behind it. It asks the usual audio question if the
+// player serves a different track than the one wanted.
+func pobreflixResolveGate(ctx context.Context, media *models.Anime, servers []pobreflix.Server, target pobreflix.PlayerTarget, want pobreflix.Audio, quality string) (string, error) {
+	if !netx.TurnstileSolverAvailable() {
+		return "", errPobreflixGated
+	}
+	server, ok := choosePobreflixGatedServer(servers, want, quality)
+	if !ok {
+		return "", errPobreflixGated
+	}
+	stream, err := pbClientFn().ResolvePlayer(ctx, server.URL, target, want)
+	if err != nil {
+		return "", err
+	}
+	have := stream.Audio
+	if have == pobreflix.AudioUnknown {
+		have = want
+	}
+	if have != want {
+		swap := audioSwap{
+			Source: pobreflix.SourceName,
+			Title:  media.Name,
+			Want:   startflixAudio(want),
+			Have:   startflixAudio(have),
+			Why: []string{fmt.Sprintf(
+				"Pobreflix lists this title %s, but its player served the %s.",
+				want, have)},
+		}
+		accepted, err := sfxAudioSwapFn(swap)
+		if err != nil || !accepted {
+			return "", &friendlyError{
+				cause: fmt.Errorf("%w: %s plays, %s does not", ErrAudioUnavailable, have, want),
+				msg: fmt.Sprintf("No Pobreflix server has this title %s right now, so the %s was not played in its place.",
+					want, audioDescription(startflixAudio(have))),
+			}
+		}
+	}
+	pobreflixPreparePlayback(have, stream.Referer)
+	util.Debug("Pobreflix stream obtained through its player", "tmdb", target.TMDBID, "audio", have)
+	return stream.URL, nil
+}
+
+// choosePobreflixGatedServer picks the player page most likely to carry want,
+// then the best-quality one. The URL is the same for both audios on the live
+// pages, so the actual track is checked after the gate is cleared.
+func choosePobreflixGatedServer(servers []pobreflix.Server, want pobreflix.Audio, quality string) (pobreflix.Server, bool) {
+	best := pobreflix.Server{}
+	bestScore := -1
+	for _, s := range servers {
+		if !s.Gated() {
+			continue
+		}
+		score := pobreflix.QualityRank(s.Quality)
+		if s.Audio == want {
+			score += 100000
+		}
+		if quality != "" && !strings.EqualFold(quality, "best") && strings.EqualFold(s.Quality, quality) {
+			score += 1000000
+		}
+		if s.URL != "" {
+			score += 100
+		}
+		if score > bestScore {
+			best, bestScore = s, score
+		}
+	}
+	return best, bestScore >= 0
 }
 
 // pobreflixResolveDownload follows only the site's own download endpoints;
@@ -467,10 +597,44 @@ func pobreflixDirectEpisodeURL(ctx context.Context, media *models.Anime, title p
 		return "", err
 	}
 	want := pobreflixAudio(wantedStreamAudio(media, episode))
-	files, err := pobreflixFiles(media.URL, data.Servers)
-	if err != nil {
-		return "", err
+	files, filesErr := pobreflixFiles(media.URL, data.Servers)
+	if filesErr == nil && pobreflixFilesHaveAudio(files, want) {
+		return pobreflixPlayEpisodeFile(ctx, files, want, quality, media, season, number)
 	}
+
+	var gateErr error
+	if pobreflixGateResolvable(data.Servers) {
+		tmdb := data.Series.TMDBID
+		if tmdb <= 0 {
+			tmdb = title.TMDBID
+		}
+		target := pobreflix.PlayerTarget{
+			TMDBID:  tmdb,
+			Kind:    pobreflix.KindSeries,
+			Season:  season,
+			Episode: number,
+		}
+		if streamURL, err := pobreflixResolveGate(ctx, media, data.Servers, target, want, quality); err == nil && streamURL != "" {
+			return streamURL, nil
+		} else if err != nil {
+			gateErr = err
+			util.Debug("Pobreflix player gate did not resolve the episode", "title", media.Name,
+				"season", season, "episode", number, "err", err)
+		}
+	}
+	if filesErr != nil {
+		if gateErr != nil {
+			return "", gateErr
+		}
+		return "", filesErr
+	}
+	return pobreflixPlayEpisodeFile(ctx, files, want, quality, media, season, number)
+}
+
+// pobreflixPlayEpisodeFile picks an embedded episode server and resolves its
+// download endpoint. It is also the fallback when the gate could not be
+// cleared.
+func pobreflixPlayEpisodeFile(ctx context.Context, files []pobreflix.Server, want pobreflix.Audio, quality string, media *models.Anime, season, number int) (string, error) {
 	server, have, err := choosePobreflixServer(files, want, quality, media)
 	if err != nil {
 		return "", err
@@ -483,7 +647,7 @@ func pobreflixDirectEpisodeURL(ctx context.Context, media *models.Anime, title p
 		return "", fmt.Errorf("pobreflix: episode %d has no playable file", number)
 	}
 	rawURL = pobreflixResolveDownload(ctx, rawURL)
-	pobreflixPreparePlayback(have)
+	pobreflixPreparePlayback(have, "")
 	util.Debug("Pobreflix episode stream", "season", season, "episode", number, "audio", have, "quality", server.Quality)
 	return rawURL, nil
 }
@@ -574,10 +738,14 @@ func pobreflixAudio(a startflix.Audio) pobreflix.Audio {
 	return pobreflix.AudioDubbed
 }
 
-// pobreflixPreparePlayback clears state a previous panel stream left behind
-// and tells mpv which track the direct file carries.
-func pobreflixPreparePlayback(audio pobreflix.Audio) {
+// pobreflixPreparePlayback clears state a previous panel stream left behind,
+// sets the Referer a proof-bearing player stream requires, and tells mpv which
+// track the file carries.
+func pobreflixPreparePlayback(audio pobreflix.Audio, referer string) {
 	util.ClearGlobalReferer()
+	if referer != "" {
+		util.SetGlobalReferer(referer)
+	}
 	util.ClearGlobalSubtitles()
 	if startFlixPinnedAudioLang() == "" {
 		util.SetGlobalAudioLanguage(audioLangForStartFlix(startflixAudio(audio)))

@@ -41,9 +41,17 @@ const (
 type Client struct {
 	http       *http.Client
 	baseURL    string
+	playerBase string
 	userAgent  string
 	maxRetries int
 	retryDelay time.Duration
+	// playerTransport carries the player-gate requests. The player host runs
+	// on Cloudflare and its worker answers the shared Chrome-impersonating
+	// TLS fingerprint with a bare HTTP 500 (measured 2026-11-01), so
+	// production sends the player over netx's SSRF-safe plain transport and
+	// describes itself as userAgent; the site's catalog keeps the shared
+	// fingerprint. Tests leave it nil and use net/http's own transport.
+	playerTransport http.RoundTripper
 
 	// search is the sitemap-backed index, built lazily when the site's own
 	// search API misses and cached on disk across runs.
@@ -63,12 +71,14 @@ func NewClient() *Client {
 		base = DefaultBase
 	}
 	c := &Client{
-		http:       util.NewFastClient(),
-		baseURL:    base,
-		userAgent:  userAgent,
-		maxRetries: 2,
-		retryDelay: 400 * time.Millisecond,
-		apiEnabled: true,
+		http:            util.NewFastClient(),
+		baseURL:         base,
+		playerBase:      playerBaseFromEnv(),
+		playerTransport: netx.SafeScraperTransport(playerHTTPTimeout),
+		userAgent:       userAgent,
+		maxRetries:      2,
+		retryDelay:      400 * time.Millisecond,
+		apiEnabled:      true,
 	}
 	c.search.cachePath, _ = corpusCachePath()
 	c.search.loadCache(c.baseURL)
@@ -80,10 +90,11 @@ func NewClient() *Client {
 // the user's cache.
 func NewClientForTest(hc *http.Client, baseURL, cachePath string) *Client {
 	return &Client{
-		http:      hc,
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		userAgent: userAgent,
-		search:    corpus{cachePath: cachePath},
+		http:       hc,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		playerBase: playerBaseFromEnv(),
+		userAgent:  userAgent,
+		search:     corpus{cachePath: cachePath},
 	}
 }
 
