@@ -327,10 +327,18 @@ AnimeDrive's host is intermittently unreachable from some networks. If the
 site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
 source at a reachable mirror.
 
-Goyabu is behind a Cloudflare managed challenge and is disabled by default. It
-works on networks that Cloudflare does not challenge; on a challenged network
-no browserless HTTP client can clear the challenge. Enable it with
-`GOANIME_ENABLED_SOURCES=goyabu`.
+Goyabu is behind a Cloudflare managed challenge. On a network Cloudflare does not
+challenge it just works; elsewhere it needs the [cfsolve](https://github.com/chris124567/cfsolve)
+tool, which clears the challenge from plain requests with no browser. There is
+nothing to install: GoAnime downloads the build its CI published for the pinned
+cfsolve commit on first run (checksums signed with the same key as GoAnime's
+updates), and Goyabu joins the search once it is in place. The Windows installer
+bundles it. If the download fails or is blocked, Goyabu just stays out of the
+search. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns the download off,
+`GOANIME_CFSOLVE_BIN` points at a binary of your own, `GOANIME_ENABLED_SOURCES=goyabu`
+forces the source on and `GOANIME_DISABLED_SOURCES=goyabu` turns it off. To get the
+binary yourself: `scripts/get-cfsolve.sh` (or `--build` to compile it; needs Rust,
+cmake and libclang). Maintainers: see [docs/CFSOLVE.md](docs/CFSOLVE.md).
 
 GoAnime depends on third-party websites, and those websites change without
 notice. When one does, the corresponding source can stop working until it is
