@@ -94,11 +94,16 @@ func pobreflixFiles(titleURL string, servers []pobreflix.Server) ([]pobreflix.Se
 	return servers, nil
 }
 
-// pobreflixGateResolvable reports whether the page lists a player page and a
-// registered Turnstile solver can answer it. With no solver this is false, so
-// the previous panel fallback runs without a single extra request.
+// pobreflixGateResolvable reports whether the page lists a player page that
+// can be opened: with a registered Turnstile solver any of them, without one
+// only a player on a host other than the Turnstile one (the RedeFlixApi
+// player needs no solver). When neither holds this is false, so the previous
+// panel fallback runs without a single extra request.
 func pobreflixGateResolvable(servers []pobreflix.Server) bool {
-	return netx.TurnstileSolverAvailable() && len(pobreflix.GatedServers(servers)) > 0
+	if len(pobreflix.GatedServers(servers)) == 0 {
+		return false
+	}
+	return netx.TurnstileSolverAvailable() || pbClientFn().HasSolverFreePlayer(servers)
 }
 
 // pobreflixCanPlayDirectly reports whether the title can bypass the panel:
@@ -499,16 +504,28 @@ func pobreflixPlayMovieFile(ctx context.Context, media *models.Anime, files []po
 // returns the media URL behind it. It asks the usual audio question if the
 // player serves a different track than the one wanted.
 func pobreflixResolveGate(ctx context.Context, media *models.Anime, servers []pobreflix.Server, target pobreflix.PlayerTarget, want pobreflix.Audio, quality string) (string, error) {
-	if !netx.TurnstileSolverAvailable() {
-		return "", errPobreflixGated
-	}
 	server, ok := choosePobreflixGatedServer(servers, want, quality)
 	if !ok {
 		return "", errPobreflixGated
 	}
-	stream, err := pbClientFn().ResolvePlayer(ctx, server.URL, target, want)
-	if err != nil {
-		return "", err
+	pb := pbClientFn()
+	var stream pobreflix.Stream
+	var err error
+	solverFree := pb.IsSolverFreePlayer(server.URL)
+	if solverFree {
+		stream, err = pb.ResolveRedeflix(ctx, server.URL, want)
+		if err != nil && !errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
+			return "", err
+		}
+	}
+	if !solverFree || errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
+		if !netx.TurnstileSolverAvailable() {
+			return "", errPobreflixGated
+		}
+		stream, err = pb.ResolvePlayer(ctx, server.URL, target, want)
+		if err != nil {
+			return "", err
+		}
 	}
 	have := stream.Audio
 	if have == pobreflix.AudioUnknown {

@@ -4,6 +4,7 @@
 
 ### Sources
 
+- **Pobreflix plays its RedeFlixApi player without cfsolve.** On 2026-11-02 the site began listing `redeflixapi.bar` players, which have no Turnstile: the page hands out a ticket that the player's own script trades in two POSTs (`playback-resolve.php`, then `playerkys/source.php`) for the media URL. GoAnime now does the same, sending the player's own origin and never another site's, and the title plays with no solver installed. The Turnstile player and the cfsolve path are unchanged and are tried when the page is in the old format. `GOANIME_POBREFLIX_OPEN_PLAYER_HOSTS` adds hosts that serve this player when the site moves it. The client also follows the catalog's redirect to its current mirror domain (`pobreflixtv.christmas` now) instead of paying a hop on every request.
 - **Pobreflix plays its Turnstile-gated player.** The pages Pobreflix lists for movies and episodes no longer have to fall back to the StartFlix panel: GoAnime solves the widget with cfsolve, exchanges the token for the page proof, and plays the source behind it with the proof-bearing page as `Referer`. A title whose embedded MP4 already carries the wanted audio still plays directly. Without cfsolve nothing changes: gated titles keep the panel fallback and its explanation. `GOANIME_POBREFLIX_PLAYER_URL` repoints the player host without a release.
 
 ## Bug Fixes
