@@ -1,0 +1,84 @@
+{
+ "d": [
+  {
+   "id": "tt0903747",
+   "l": "Breaking Bad",
+   "q": "TV series",
+   "qid": "tvSeries",
+   "rank": 56,
+   "s": "Bryan Cranston, Aaron Paul",
+   "tl": "2008-2013 TV Series",
+   "y": 2008,
+   "yr": "2008-2013"
+  },
+  {
+   "id": "in0000274",
+   "l": "Breaking Bad",
+   "rank": 236,
+   "s": "Franchise"
+  },
+  {
+   "id": "tt9243946",
+   "l": "El Camino",
+   "q": "feature",
+   "qid": "movie",
+   "rank": 2051,
+   "s": "Aaron Paul, Jonathan Banks",
+   "tl": "2019",
+   "y": 2019
+  },
+  {
+   "id": "tt2387761",
+   "l": "Breaking Bad: Original Minisodes",
+   "q": "TV series",
+   "qid": "tvSeries",
+   "rank": 43685,
+   "s": "Bob Odenkirk, Matt Jones",
+   "tl": "2009-2011 TV Series",
+   "y": 2009,
+   "yr": "2009-2011"
+  },
+  {
+   "id": "tt12812846",
+   "l": "Breaking Bad: Breaking Ice",
+   "q": "video",
+   "qid": "video",
+   "rank": 108005,
+   "s": "Amr Abdulgalil, Bobby Beauchamp",
+   "tl": "2013 Video",
+   "y": 2013
+  },
+  {
+   "id": "tt31392119",
+   "l": "The Bad Guys: Breaking In",
+   "q": "TV series",
+   "qid": "tvSeries",
+   "rank": 31260,
+   "s": "Michael Godere, Ezekiel Ajeigbe",
+   "tl": "2025 TV Series",
+   "y": 2025
+  },
+  {
+   "id": "tt8750122",
+   "l": "Benchwarmers 2: Breaking Balls",
+   "q": "feature",
+   "qid": "movie",
+   "rank": 49953,
+   "s": "Chris Klein, Jon Lovitz",
+   "tl": "2019",
+   "y": 2019
+  },
+  {
+   "id": "tt30207787",
+   "l": "Breaking Bad: Chicks 'n' Guns",
+   "q": "video",
+   "qid": "video",
+   "rank": 56882,
+   "s": "Charles Baker, Kayden Kross",
+   "tl": "2013 Video",
+   "y": 2013
+  }
+ ],
+ "q": "breaking%20ba",
+ "v": 1
+}

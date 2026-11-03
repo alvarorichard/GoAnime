@@ -2,6 +2,10 @@
 
 ## Features
 
+### Search
+
+- **Autocomplete in the search box.** Pause while typing and up to six titles appear under the box, anime, movies and series, each with its kind and year (`Anime · 2002`). `↑`/`↓` pick one and `enter` searches it, `→` at the end of the text completes the box without searching, `esc` closes the list (a second `esc` clears the box). The list follows the scope tab: PT-BR and ENGLISH suggest anime, MOVIES/TV suggests movies and series. It needs no key or setup: anime come from Kitsu (which matches partial words) and movies and series from IMDb's public suggestion feed. Lookups wait 180 ms after the last key, a newer keystroke cancels the one in flight so an old answer never shows under new text, answers are cached for ten minutes, and when a provider is down the other still answers; when both are, the box simply works without suggestions. The engine is `internal/suggest`.
+
 ### Diagnostics
 
 - **`--debug` captures the machine, not just the run.** The log opens with an environment report: OS, distribution, kernel, memory, terminal and colour support, locale, every `GOANIME_*` variable and proxy, the versions of mpv, yt-dlp, ffmpeg and ffprobe, which sources are on and why one is off, and whether cfsolve is installed. In the background it then asks each provider's homepage how it answers (`ok`, `challenge`, `blocked`, `down`, `slow`, `dns`, `refused`, `tls`, and `moved_to=` when a site changed domain). See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).

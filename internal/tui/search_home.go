@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -97,6 +98,39 @@ type SearchHomeOptions struct {
 	Recent      []HomeRecentSearch
 	// DeleteEntry removes a CONTINUE row by key; nil disables x.
 	DeleteEntry func(key string) error
+	// Suggest feeds the autocomplete under the box: it returns titles for the
+	// typed query in the given scope. nil turns the autocomplete off. It runs
+	// off the UI loop and must honour ctx, which is cancelled when the user
+	// types again.
+	Suggest SuggestFunc
+}
+
+// HomeSuggestion is one autocomplete row: the title that fills the box and a
+// short detail at the right ("Anime · 2002").
+type HomeSuggestion struct {
+	Title  string
+	Detail string
+}
+
+// SuggestFunc produces autocomplete rows for query in scope.
+type SuggestFunc func(ctx context.Context, query, scope string) ([]HomeSuggestion, error)
+
+// Autocomplete timing and size: the debounce waits for a pause in typing, the
+// timeout bounds one lookup, and at most maxHomeSuggestions rows show.
+const (
+	suggestDebounce    = 180 * time.Millisecond
+	suggestTimeout     = 4 * time.Second
+	maxHomeSuggestions = 6
+)
+
+// suggestDueMsg fires after the debounce; it is stale unless seq is current.
+type suggestDueMsg struct{ seq int }
+
+// suggestResultMsg carries a lookup's answer back to the UI loop.
+type suggestResultMsg struct {
+	seq   int
+	items []HomeSuggestion
+	err   error
 }
 
 // SearchHomeResult is the home screen's decision.
@@ -162,6 +196,17 @@ type searchHomeModel struct {
 	deleteEntry func(key string) error
 	now         func() time.Time
 
+	// Autocomplete state. seq numbers the typing bursts: a debounce tick or a
+	// lookup answer with an older seq is stale and dropped. asked is the
+	// query+scope the current suggestions (or pending lookup) belong to.
+	suggest     SuggestFunc
+	debounce    time.Duration
+	suggestions []HomeSuggestion
+	sugCursor   int // -1: the box itself is highlighted
+	seq         int
+	asked       string
+	cancel      context.CancelFunc
+
 	result   SearchHomeResult
 	err      error
 	showHelp bool
@@ -206,7 +251,11 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		focusInput:  true,
 		deleteEntry: opts.DeleteEntry,
 		now:         time.Now,
+		suggest:     opts.Suggest,
+		debounce:    suggestDebounce,
+		sugCursor:   -1,
 	}
+	m.asked = m.suggestKey()
 	m.rebuildRows()
 	return m
 }
@@ -252,6 +301,14 @@ func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sizeInput()
 		return m, nil
 
+	case suggestDueMsg:
+		cmd := m.startLookup(msg.seq)
+		return m, cmd
+
+	case suggestResultMsg:
+		m.applySuggestions(msg)
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if m.showHelp {
 			switch msg.String() {
@@ -276,27 +333,49 @@ func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "tab":
 			m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)
-			return m, nil
+			cmd := m.queryChanged()
+			return m, cmd
 		case "esc":
-			// esc clears the box; it never quits (tela 10).
+			// esc closes the suggestions first, then clears the box; it
+			// never quits (tela 10).
+			if m.suggestionsOpen() {
+				m.dropSuggestions()
+				return m, nil
+			}
 			if m.input.Value() != "" {
 				m.input.SetValue("")
 				m.focusInput = true
 				m.input.Focus()
 			}
-			return m, nil
+			cmd := m.queryChanged()
+			return m, cmd
 		case "enter":
 			if res, ok := m.confirm(); ok {
+				m.dropSuggestions()
 				m.result = res
 				return m, tea.Quit
 			}
 			return m, nil
 		case "up":
+			if m.suggestionsOpen() {
+				m.moveSuggestion(-1)
+				return m, nil
+			}
 			m.move(-1)
 			return m, nil
 		case "down":
+			if m.suggestionsOpen() && m.moveSuggestion(1) {
+				return m, nil
+			}
 			m.move(1)
 			return m, nil
+		case "right":
+			// right at the end of the text completes it with the highlighted
+			// (or first) suggestion.
+			if m.suggestionsOpen() && m.input.Position() >= len([]rune(m.input.Value())) {
+				m.completeSuggestion()
+				return m, nil
+			}
 		case "r", "e", "x":
 			if !m.focusInput {
 				if cmd := m.rowAction(msg.String()); cmd != nil {
@@ -308,7 +387,7 @@ func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focusInput {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+			return m, tea.Batch(cmd, m.queryChanged())
 		}
 		// Typing over the lists jumps back to the box with the character.
 		if isHomeTypeKey(msg) {
@@ -316,12 +395,122 @@ func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+			return m, tea.Batch(cmd, m.queryChanged())
 		}
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// suggestKey identifies what the autocomplete would ask: the trimmed query
+// and the scope it runs in.
+func (m *searchHomeModel) suggestKey() string {
+	return m.scopes[m.scopeIdx].Value + "\x00" + strings.TrimSpace(m.input.Value())
+}
+
+// suggestionsOpen reports whether the dropdown shows under the box.
+func (m *searchHomeModel) suggestionsOpen() bool {
+	return m.focusInput && len(m.suggestions) > 0
+}
+
+// dropSuggestions closes the dropdown and cancels any lookup in flight. It
+// bumps seq so an answer already on its way is dropped on arrival.
+func (m *searchHomeModel) dropSuggestions() {
+	m.seq++
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	m.suggestions = nil
+	m.sugCursor = -1
+}
+
+// queryChanged reacts to typing, a scope change or a clear: when what the
+// autocomplete would ask has changed, the old suggestions go and, for a long
+// enough query, a debounce tick is scheduled.
+func (m *searchHomeModel) queryChanged() tea.Cmd {
+	key := m.suggestKey()
+	if key == m.asked {
+		return nil
+	}
+	m.asked = key
+	m.dropSuggestions()
+	query := strings.TrimSpace(m.input.Value())
+	if m.suggest == nil || len([]rune(query)) < minHomeQuery {
+		return nil
+	}
+	seq := m.seq
+	return tea.Tick(m.debounce, func(time.Time) tea.Msg { return suggestDueMsg{seq: seq} })
+}
+
+// startLookup runs the lookup for the burst seq, off the UI loop. A stale
+// tick (the user typed on) does nothing.
+func (m *searchHomeModel) startLookup(seq int) tea.Cmd {
+	if seq != m.seq || m.suggest == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), suggestTimeout)
+	m.cancel = cancel
+	query := strings.TrimSpace(m.input.Value())
+	scope := m.scopes[m.scopeIdx].Value
+	fn := m.suggest
+	return func() tea.Msg {
+		defer cancel()
+		items, err := fn(ctx, query, scope)
+		return suggestResultMsg{seq: seq, items: items, err: err}
+	}
+}
+
+// applySuggestions shows a lookup's answer unless the user moved on. A failed
+// lookup shows nothing: the box works without autocomplete.
+func (m *searchHomeModel) applySuggestions(msg suggestResultMsg) {
+	if msg.seq != m.seq {
+		return
+	}
+	m.cancel = nil
+	m.suggestions, m.sugCursor = nil, -1
+	if msg.err != nil {
+		return
+	}
+	query := strings.TrimSpace(m.input.Value())
+	for _, item := range msg.items {
+		title := singleLine(item.Title)
+		// A row repeating exactly what is typed adds nothing.
+		if title == "" || strings.EqualFold(title, query) {
+			continue
+		}
+		m.suggestions = append(m.suggestions, HomeSuggestion{Title: title, Detail: singleLine(item.Detail)})
+		if len(m.suggestions) == maxHomeSuggestions {
+			break
+		}
+	}
+}
+
+// moveSuggestion steps the dropdown highlight. Up from the first row returns
+// to the box. It reports false when down ran off the last row, so the caller
+// carries on into the lists below.
+func (m *searchHomeModel) moveSuggestion(delta int) bool {
+	next := m.sugCursor + delta
+	switch {
+	case next < -1:
+		return true
+	case next >= len(m.suggestions):
+		m.sugCursor = -1
+		return false
+	}
+	m.sugCursor = next
+	return true
+}
+
+// completeSuggestion fills the box with the highlighted (else first)
+// suggestion without searching, and closes the dropdown.
+func (m *searchHomeModel) completeSuggestion() {
+	pick := max(m.sugCursor, 0)
+	m.input.SetValue(m.suggestions[pick].Title)
+	m.input.CursorEnd()
+	m.asked = m.suggestKey()
+	m.dropSuggestions()
 }
 
 // move steps the highlight; up from the first row returns to the box.
@@ -352,6 +541,9 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 	scope := m.scopes[m.scopeIdx].Value
 	if m.focusInput {
 		query := strings.TrimSpace(m.input.Value())
+		if m.sugCursor >= 0 {
+			query = m.suggestions[m.sugCursor].Title
+		}
 		if len([]rune(query)) < minHomeQuery {
 			return SearchHomeResult{}, false
 		}
@@ -430,13 +622,21 @@ func (m *searchHomeModel) hints() []Hint {
 	if Plain() {
 		move = "up/dn"
 	}
-	return []Hint{
+	hints := []Hint{
 		{Key: "enter", Desc: "search", Essential: true},
 		{Key: move, Desc: "move"},
 		{Key: "tab", Desc: "sources"},
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
 	}
+	if m.suggestionsOpen() {
+		right := "→"
+		if Plain() {
+			right = "right"
+		}
+		hints = append(hints[:2], append([]Hint{{Key: right, Desc: "complete"}}, hints[2:]...)...)
+	}
+	return hints
 }
 
 // View renders the search box, the scope tabs, the continue and recent
@@ -471,7 +671,11 @@ func (m *searchHomeModel) helpView(width, height int) string {
 // homeView lays out the box, tabs and lists, with the panel beside the
 // continue list on a wide terminal (as text below it in plain mode).
 func (m *searchHomeModel) homeView(width, height int) string {
-	sections := []string{m.searchBox(width), m.scopeTabs()}
+	sections := []string{m.searchBox(width)}
+	if drop := m.suggestionsView(width); drop != "" {
+		sections = append(sections, drop)
+	}
+	sections = append(sections, m.scopeTabs())
 	lists, panel := m.listsView(width, height)
 	if lists != "" {
 		lists = m.sectionHeader("CONTINUE", "続き") + "\n" + lists
@@ -490,6 +694,19 @@ func (m *searchHomeModel) homeView(width, height int) string {
 		sections = append(sections, "", m.sectionHeader("RECENT", "最近"), recent)
 	}
 	return strings.Join(sections, "\n")
+}
+
+// suggestionsView draws the autocomplete rows under the box: the title and,
+// at the right, its kind and year.
+func (m *searchHomeModel) suggestionsView(width int) string {
+	if !m.suggestionsOpen() {
+		return ""
+	}
+	items := make([]homeRowItem, 0, len(m.suggestions))
+	for _, s := range m.suggestions {
+		items = append(items, homeRowItem{title: s.Title, note: s.Detail})
+	}
+	return renderHomeRows(&m.theme, items, m.sugCursor, width)
 }
 
 // searchBox draws the bordered query box.

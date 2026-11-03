@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/suggest"
 	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
@@ -62,9 +64,22 @@ func HandleSearchHome() (SearchHomeDecision, error) {
 // The retry loop uses it to go back to search (tela 3's "edit search").
 // Empty query starts blank. Cancel surfaces tui.ErrSearchHomeCancelled.
 func OpenSearchHome(query string) (tui.SearchHomeResult, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return tui.SearchHomeResult{}, fmt.Errorf("no interactive terminal available for search")
 	}
+	return openSearchHome(query, runSearchHome)
+}
+
+// Seams for tests: whether stdin is a terminal, and the screen runner.
+var (
+	stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	runSearchHome   = tui.SearchHome
+)
+
+// openSearchHome gathers the home screen's lists and options, with the
+// autocomplete attached, and hands them to run (tui.SearchHome in
+// production, a capture in tests).
+func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHomeResult, error)) (tui.SearchHomeResult, error) {
 
 	continueAll, err := tracking.ContinueEntries()
 	if err != nil {
@@ -86,14 +101,38 @@ func OpenSearchHome(query string) (tui.SearchHomeResult, error) {
 		}
 	}
 
-	return tui.SearchHome(tui.SearchHomeOptions{
+	return run(tui.SearchHomeOptions{
 		Query:       query,
 		ScopeIndex:  scopeIndexForSource(util.GlobalSource),
 		SourcesLine: sourcesLine(),
 		Continue:    entries,
 		Recent:      recent,
 		DeleteEntry: deleteContinueEntry,
+		Suggest:     homeSuggest,
 	})
+}
+
+// homeSuggest adapts the keyless suggestion engine (Kitsu for anime, IMDb for
+// movies and series) to the search home's autocomplete.
+func homeSuggest(ctx context.Context, query, scope string) ([]tui.HomeSuggestion, error) {
+	return homeSuggestWith(ctx, query, scope, suggest.Default().Suggest)
+}
+
+// homeSuggestWith narrows the lookup to the scope's kinds and adapts the rows.
+func homeSuggestWith(ctx context.Context, query, scope string, ask func(context.Context, string, []suggest.Kind) ([]suggest.Suggestion, error)) ([]tui.HomeSuggestion, error) {
+	return adaptSuggestions(ask(ctx, query, suggest.KindsForScope(scope)))
+}
+
+// adaptSuggestions turns engine suggestions into autocomplete rows.
+func adaptSuggestions(items []suggest.Suggestion, err error) ([]tui.HomeSuggestion, error) {
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tui.HomeSuggestion, 0, len(items))
+	for _, s := range items {
+		rows = append(rows, tui.HomeSuggestion{Title: s.Title, Detail: s.Detail()})
+	}
+	return rows, nil
 }
 
 func init() {
