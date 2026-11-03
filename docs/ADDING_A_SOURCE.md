@@ -34,18 +34,18 @@ Read the Goyabu column as "copy this, rename it".
 
 | # | File | Where Goyabu does it | Required |
 |---|---|---|:---:|
-| 1 | `internal/scraper/providers/<name>/{doc.go,client.go}` | whole package | ✅ |
-| 2 | `internal/scraper/manager.go` | import · `ScraperType` const · `NewAdapter` case · `scraperDisplayName` · `scraperLanguageTag` · `GoyabuAdapter` type | ✅ |
-| 3 | `internal/api/source/kind.go` | `SourceKind` const · `scraperTypeMap` | ✅ |
-| 4 | `internal/api/providers/source_providers.go` | the `goyabuProvider` block | ✅ |
-| 5 | `internal/api/providers/tagging.go` | `sourceDisplayName` · `isPTBR` in `tagResults` (+ `languageTag` if not PT-BR) | ✅ |
-| 6 | `internal/api/providers/naming/naming.go` | `tagPattern` regex | ✅ |
-| 7 | `internal/scraper/source_health.go` | `healthTargets` · `DefaultHealthCheckQuery` | 🟡 |
-| 8 | `internal/api/enhanced.go` | `--source` case and `ptbr` group in `searchAnimeEnhanced` · backfill by name · backfill by URL · `Source breakdown` debug print · `sourceBreakdown` field · `countSourceBreakdown` case | 🟡 |
-| 9 | `internal/api/anime.go` | `reSpaceDashNoise` source alternation | 🟡 |
-| 10 | `internal/util/util.go` | `--source` help text in `parseFlags` | ⚪ |
-| 11 | `pkg/goanime/types/source.go` | public SDK enum — **breaking change** | ⚪ |
-| 12 | tests | see [Tests](#tests) | ✅ |
+| 1 | `internal/scraper/providers/<name>/{doc.go,client.go}` | whole package | Yes |
+| 2 | `internal/scraper/manager.go` | import · `ScraperType` const · `NewAdapter` case · `scraperDisplayName` · `scraperLanguageTag` · `GoyabuAdapter` type | Yes |
+| 3 | `internal/api/source/kind.go` | `SourceKind` const · `scraperTypeMap` | Yes |
+| 4 | `internal/api/providers/source_providers.go` | the `goyabuProvider` block | Yes |
+| 5 | `internal/api/providers/tagging.go` | `sourceDisplayName` · `isPTBR` in `tagResults` (+ `languageTag` if not PT-BR) | Yes |
+| 6 | `internal/api/providers/naming/naming.go` | `tagPattern` regex | Yes |
+| 7 | `internal/scraper/source_health.go` | `healthTargets` · `DefaultHealthCheckQuery` | Recommended |
+| 8 | `internal/api/enhanced.go` | `--source` case and `ptbr` group in `searchAnimeEnhanced` · backfill by name · backfill by URL · `Source breakdown` debug print · `sourceBreakdown` field · `countSourceBreakdown` case | Recommended |
+| 9 | `internal/api/anime.go` | `reSpaceDashNoise` source alternation | Recommended |
+| 10 | `internal/util/util.go` | `--source` help text in `parseFlags` | Optional |
+| 11 | `pkg/goanime/types/source.go` | public SDK enum — **breaking change** | Optional |
+| 12 | tests | see [Tests](#tests) | Yes |
 
 Skip #6 and your tag is never stripped from titles → wrong AniList matches. Skip
 #7 and the source is never health-probed → silent breakage. Skip #8 and
@@ -170,14 +170,14 @@ at every step:
 7.  source_health.go        healthTargets + DefaultHealthCheckQuery
 8.  kind.go                 SourceKind const + scraperTypeMap entry
 9.  manager.go              adapter type, NewAdapter case, both name switches,
-                            import, ScraperType const   ⚠️ iota
+                            import, ScraperType const   (iota, see warning)
 10. rm -r internal/scraper/providers/<name>/
 11. tests                   remove from every enumerating test
 12. pkg/goanime/types/      only if publicly exposed (breaking change)
 13. go mod tidy             if it pulled deps nobody else uses
 ```
 
-> ⚠️ **`ScraperType` iota (step 9).** Deleting a middle constant renumbers
+> **Warning: `ScraperType` iota (step 9).** Deleting a middle constant renumbers
 > everything after it. Safe *today* — no `ScraperType` value is persisted to disk
 > or the wire; it is process-lifetime only. Confirm that still holds
 > (`rg 'ScraperType' --glob '!*_test.go'`) before renumbering. If unsure, move the
