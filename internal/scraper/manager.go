@@ -23,6 +23,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
@@ -46,6 +47,7 @@ const (
 	// serialized/tracked positions; reordering the middle ones would migrate
 	// user history.
 	AnrollType // AnimesROLL PT-BR anime source
+	PomfyType  // Pomfy movie/series catalog, Byse HLS with a PoW captcha
 )
 
 // SearchContextScraper is the optional search-only cancellation capability.
@@ -102,6 +104,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &PobreflixAdapter{client: pobreflix.Shared(), panel: startflix.Shared()}, nil
 	case AnrollType:
 		return &AnrollAdapter{client: anroll.Shared()}, nil
+	case PomfyType:
+		return &PomfyAdapter{client: pomfy.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -129,6 +133,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return pobreflix.SourceName
 	case AnrollType:
 		return anroll.SourceName
+	case PomfyType:
+		return pomfy.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -144,6 +150,10 @@ func scraperLanguageTag(scraperType ScraperType) string {
 	case HiAnimeType:
 		return "[English]"
 	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType:
+		return "[PT-BR]"
+	case PomfyType:
+		// Pomfy serves PT-BR audio tracks (the HLS masters spell lang/por)
+		// but its catalog mixes dubbed and subtitled; label like StartFlix.
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -675,4 +685,60 @@ func (a *PobreflixAdapter) GetClient() *pobreflix.Client {
 // tests that point them at a mock server.
 func NewPobreflixAdapterWithClients(client *pobreflix.Client, panel *startflix.Client) *PobreflixAdapter {
 	return &PobreflixAdapter{client: client, panel: panel}
+}
+
+// PomfyAdapter adapts pomfy.Client to the UnifiedScraper interface.
+//
+// The title "URL" a Pomfy result carries names the TMDB id (the catalog's own
+// key): pomfy.my/assistir/<tmdb> for movies, pomfy.my/serie/<tmdb> for
+// series. Search needs TMDB_API_KEY because Pomfy never maps words to ids —
+// see the pomfy package docs.
+type PomfyAdapter struct {
+	client *pomfy.Client
+}
+
+func (a *PomfyAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes PomfyAdapter a ContextualScraper.
+func (a *PomfyAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	results, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(results))
+	for _, m := range results {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. Pomfy lists seasons and episodes in the api package, not here.
+func (a *PomfyAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *PomfyAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for Pomfy, use GetPomfyEpisodes in the api package")
+}
+
+func (a *PomfyAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return "", nil, fmt.Errorf("for Pomfy, use GetPomfyStreamURL in the api package")
+}
+
+func (a *PomfyAdapter) GetType() ScraperType {
+	return PomfyType
+}
+
+// GetClient returns the underlying Pomfy client.
+func (a *PomfyAdapter) GetClient() *pomfy.Client {
+	return a.client
+}
+
+// NewPomfyAdapterWithClient builds an adapter around a given client, for
+// tests that point it at a mock server.
+func NewPomfyAdapterWithClient(client *pomfy.Client) *PomfyAdapter {
+	return &PomfyAdapter{client: client}
 }

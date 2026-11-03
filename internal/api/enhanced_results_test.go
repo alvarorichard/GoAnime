@@ -64,9 +64,10 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "StartFlix", want: []source.SourceKind{source.StartFlix}},
 			{src: "topcine", want: []source.SourceKind{source.TopCine}},
 			{src: "pobreflix", want: []source.SourceKind{source.Pobreflix}},
-			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.Pobreflix, source.AnimeDrive}},
+			{src: "pomfy", want: []source.SourceKind{source.Pomfy}},
+			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}

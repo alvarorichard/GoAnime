@@ -317,11 +317,12 @@ SD.
 | StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
 | TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
 | Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto ou cfsolve para o player; painel como reserva |
+| Pomfy         | Filmes, séries | Português (Brasil)          | HLS Byse com captcha de prova de trabalho; `TMDB_API_KEY` opcional |
 
 `--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
-`movietv` cobre StartFlix, TopCine e Pobreflix; `ptbr` cobre todas as fontes
-em português.
+`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine`, `pobreflix`
+ou `pomfy`. `movietv` cobre StartFlix, TopCine, Pobreflix e Pomfy; `ptbr`
+cobre todas as fontes em português.
 
 O Pobreflix consulta primeiro o catálogo `/api` do site e usa o índice de
 sitemaps como reserva. As páginas atuais de filmes e episódios listam seus
@@ -333,6 +334,16 @@ painel do StartFlix como reserva. Páginas do tema antigo ainda usam o painel.
 O endereço da AnimeDrive fica intermitentemente inacessível em algumas redes.
 Se o site mudar ou a sua rede bloquear o endereço, `GOANIME_ANIMEDRIVE_URL`
 aponta a fonte para um espelho acessível.
+
+O catálogo do Pomfy é identificado por id do TMDB e o site não tem busca por
+texto, então nomes viram títulos pela API de busca do TMDB — primeiro com a
+sua `TMDB_API_KEY` quando ela está definida, e sem ela no conjunto de chaves
+públicas que o próprio site embarca no bundle do navegador (rotacionado
+igualmente). Um id TMDB soletrado (`550`) abre o título direto pelos
+payloads do site, sem chave. A reprodução pede ao player Byse um desafio de
+prova de trabalho, resolve em Go (pouco mais de um segundo na dificuldade
+usual) e toca o HLS desselado. `GOANIME_POMFY_URL` aponta a fonte para outro
+espelho do site.
 
 O Goyabu fica atrás de uma verificação gerenciada do Cloudflare, e as páginas
 de player do Pobreflix atrás de um Turnstile do Cloudflare. Em redes que o
@@ -379,6 +390,7 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_STARTFLIX_URL`       | Endereço do StartFlix                                                    |
 | `GOANIME_STARTFLIX_PANEL_URL` | Endereço do painel de vídeo do StartFlix                                 |
 | `GOANIME_TOPCINE_URL`         | Endereço do TopCine                                                      |
+| `GOANIME_POMFY_URL`           | Endereço do Pomfy (`https://pomfy.my`)                                   |
 | `TMDB_API_KEY`                | Uma chave do [TMDB](https://www.themoviedb.org/settings/api) para detalhes de filmes, séries e temporadas |
 | `OMDB_API_KEY`                | Uma chave do [OMDb](https://www.omdbapi.com/apikey.aspx) para usar no lugar da chave de demonstração compartilhada |
 

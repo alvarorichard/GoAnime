@@ -13,6 +13,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
@@ -37,6 +38,11 @@ var (
 	// titles play through the StartFlix panel by TMDB id.
 	pobreflixStreamFn   = api.GetPobreflixStreamURL
 	pobreflixEpisodesFn = api.GetPobreflixEpisodes
+
+	// Pomfy plays through its own Byse CDN (the PoW captcha flow); the api
+	// package owns the season/episode listing on top of the site's JSON.
+	pomfyStreamFn   = api.GetPomfyStreamURL
+	pomfyEpisodesFn = api.GetPomfyEpisodes
 
 	// AnimesDigital keeps dubbed and subtitled releases on separate title
 	// pages. The api path owns the one interactive audio choice.
@@ -799,6 +805,82 @@ func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.
 		util.SetGlobalAnimeSource(anime.Source)
 	}
 	return pobreflixStreamFn(anime, episode, quality)
+}
+
+// --- Pomfy Provider ---
+//
+// Pomfy is the Byse-CDN catalog keyed by TMDB id. Search filters TMDB hits
+// through the site's catalog (needs TMDB_API_KEY); movies are one episode,
+// series list per season from the site's keyless season API, and playback
+// runs the Byse proof-of-work captcha — all inside the pomfy package.
+
+type pomfyProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&pomfyProvider{})
+}
+
+func (p *pomfyProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.PomfyType)
+}
+
+func (p *pomfyProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.Pomfy,
+		Priority: 47,
+		Explicit: []string{"Pomfy"},
+		Tags:     []string{"[pomfy]"},
+		// The title page is the identifier: assistir/<tmdb> for movies and
+		// serie/<tmdb> for series, both on pomfy.my (the old pomfy.online
+		// spelling stays accepted: shell aliases and history carry it).
+		URLMatchers: []string{"pomfy"},
+		ProbeURL:    pomfy.DefaultBase,
+	}
+}
+
+// HasSeasons: Pomfy is a movie/TV catalog organized into seasons.
+func (p *pomfyProvider) HasSeasons() bool { return true }
+
+func (p *pomfyProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Pomfy)
+	return results, nil
+}
+
+func (p *pomfyProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return pomfyEpisodesFn(anime)
+}
+
+func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	return pomfyStreamFn(anime, episode, quality)
 }
 
 // --- AnimeDrive Provider ---

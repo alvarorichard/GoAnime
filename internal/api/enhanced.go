@@ -261,8 +261,10 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.TopCine}
 	case "pobreflix":
 		registryKinds = []apisource.SourceKind{apisource.Pobreflix}
+	case "pomfy":
+		registryKinds = []apisource.SourceKind{apisource.Pomfy}
 	case "movietv":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix}
+		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
 	case "animedrive":
 		registryKinds = []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
@@ -274,6 +276,7 @@ func searchAnimeEnhanced(
 			apisource.StartFlix,
 			apisource.TopCine,
 			apisource.Pobreflix,
+			apisource.Pomfy,
 			apisource.AnimeDrive,
 		}
 	}

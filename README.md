@@ -313,11 +313,12 @@ says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 | StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
 | TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
 | Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4, or cfsolve for its player gate; panel fallback |
+| Pomfy         | Movies, TV | Portuguese (Brazil)        | Byse HLS with the PoW captcha; optional `TMDB_API_KEY` |
 
 `--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
-`movietv` covers StartFlix, TopCine and Pobreflix; `ptbr` covers every
-Portuguese source.
+`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine`, `pobreflix`
+or `pomfy`. `movietv` covers StartFlix, TopCine, Pobreflix and Pomfy; `ptbr`
+covers every Portuguese source.
 
 Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
 index. Current movie and episode pages list their servers in embedded JSON;
@@ -329,6 +330,16 @@ fallback. Old-theme pages still use the panel.
 AnimeDrive's host is intermittently unreachable from some networks. If the
 site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
 source at a reachable mirror.
+
+Pomfy's catalog is keyed by TMDB id and it has no text search of its own, so
+matching names to titles runs through TMDB's search API — first with your own
+`TMDB_API_KEY` when it is set, and otherwise on the public key pool the site
+itself ships in its browser bundle (rotated the same way). A bare TMDB id
+searches keyless: `550` opens the title straight from the site's own
+payloads. A play asks its Byse player for a proof-of-work challenge, solves
+it in Go (sub-second at the usual difficulty) and plays the unsealed HLS
+master. `GOANIME_POMFY_URL` points the source at another mirror of the watch
+site.
 
 Goyabu is behind a Cloudflare managed challenge, and Pobreflix's player pages
 behind a Cloudflare Turnstile. On a network Cloudflare does not challenge them
@@ -374,6 +385,7 @@ common needs:
 | `GOANIME_STARTFLIX_URL`       | Address of StartFlix                                                     |
 | `GOANIME_STARTFLIX_PANEL_URL` | Address of the StartFlix video panel                                     |
 | `GOANIME_TOPCINE_URL`         | Address of TopCine                                                       |
+| `GOANIME_POMFY_URL`           | Address of Pomfy (`https://pomfy.my`)                                    |
 | `TMDB_API_KEY`                | A [TMDB](https://www.themoviedb.org/settings/api) key for movie, TV and season details |
 | `OMDB_API_KEY`                | An [OMDb](https://www.omdbapi.com/apikey.aspx) key to use instead of the shared demo key |
 

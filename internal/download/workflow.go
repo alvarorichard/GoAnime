@@ -46,6 +46,35 @@ var (
 	seriesEpisodesFn = api.GetStartFlixSeasonEpisodes
 )
 
+// seriesListingRoute names where a -dm title's season/episode listing lives:
+// "pomfy" for Pomfy results (the site's own TMDB-keyed listing) and "panel"
+// for the rest of the movie/TV family, which list through the StartFlix
+// panel flow.
+func seriesListingRoute(title *models.Anime) string {
+	if title != nil && title.Source == pomfySourceName {
+		return "pomfy"
+	}
+	return "panel"
+}
+
+// seriesSeasonsFor / seriesEpisodesFor dispatch listing by that route.
+func seriesSeasonsFor(title *models.Anime) func(*models.Anime) ([]int, error) {
+	if seriesListingRoute(title) == "pomfy" {
+		return api.GetPomfySeasonNumbers
+	}
+	return seriesSeasonsFn
+}
+
+func seriesEpisodesFor(title *models.Anime) func(*models.Anime, int) ([]models.Episode, error) {
+	if seriesListingRoute(title) == "pomfy" {
+		return api.GetPomfySeasonEpisodes
+	}
+	return seriesEpisodesFn
+}
+
+// pomfySourceName is api-providers' canonical Source spelling for Pomfy.
+const pomfySourceName = "Pomfy"
+
 // fileUnderSeason points the player's download paths at the season being
 // downloaded and refreshes the naming metadata. Called after listing, which
 // is where StartFlix's season picker records the season the user chose.
@@ -215,7 +244,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	if request.IsRange {
 		start, end = request.StartEpisode, request.EndEpisode
 	}
-	eps, err := seriesEpisodesFn(title, request.SeasonNum)
+	eps, err := seriesEpisodesFor(title)(title, request.SeasonNum)
 	if err != nil {
 		return seriesErr(title, err)
 	}
@@ -244,13 +273,13 @@ func downloadStartFlixMovie(title *models.Anime) error {
 // with failed episodes does not stop the others; the failures are reported
 // together at the end.
 func downloadStartFlixSeries(title *models.Anime) error {
-	seasons, err := seriesSeasonsFn(title)
+	seasons, err := seriesSeasonsFor(title)(title)
 	if err != nil {
 		return seriesErr(title, err)
 	}
 	var failed []error
 	for _, n := range seasons {
-		eps, err := seriesEpisodesFn(title, n)
+		eps, err := seriesEpisodesFor(title)(title, n)
 		if err != nil {
 			failed = append(failed, fmt.Errorf("season %d: %w", n, err))
 			continue
