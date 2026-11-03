@@ -450,3 +450,108 @@ func TestSearchHomeSuggestResultLeavesCancelClean(t *testing.T) {
 	m.dropSuggestions() // with nothing in flight
 	assert.Empty(t, m.suggestions)
 }
+
+func ghostOf(m *searchHomeModel) []string { return m.input.MatchedSuggestions() }
+
+// TestSearchHomeGhostText covers the editor-style inline suggestion: the rest
+// of the best completion drawn after the typed text, beside the dropdown.
+func TestSearchHomeGhostText(t *testing.T) {
+	t.Parallel()
+	open := func(t *testing.T, items ...string) (*searchHomeModel, *recordingSuggest) {
+		rec := &recordingSuggest{items: sugRows(items...)}
+		m := suggestModel(t, rec, SearchHomeOptions{})
+		typeText(m, "nar")
+		return m, rec
+	}
+
+	t.Run("shows the first completion after the typed text", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Like Naruto", "Naruto", "Naruto: Shippuuden")
+		assert.Equal(t, []string{"Naruto"}, ghostOf(m), "rows that do not continue the text give no ghost")
+		view := ansi.Strip(m.View().Content)
+		assert.Contains(t, view, "naruto", "typed 'nar' + ghost 'uto' reads as one word (the rows are capitalised)")
+	})
+
+	t.Run("follows the highlighted row and returns to the best one", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Naruto", "Naruto: Shippuuden")
+		_, _ = m.Update(press(tea.KeyDown, ""))
+		_, _ = m.Update(press(tea.KeyDown, ""))
+		assert.Equal(t, []string{"Naruto: Shippuuden"}, ghostOf(m))
+		assert.Contains(t, ansi.Strip(m.View().Content), "naruto: Shippuuden", "typed text plus the rest in the row's own case")
+		_, _ = m.Update(press(tea.KeyUp, ""))
+		_, _ = m.Update(press(tea.KeyUp, ""))
+		assert.Equal(t, []string{"Naruto"}, ghostOf(m))
+	})
+
+	t.Run("matches ignoring case", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingSuggest{items: sugRows("Naruto")}
+		m := suggestModel(t, rec, SearchHomeOptions{})
+		typeText(m, "NAR")
+		assert.Equal(t, []string{"Naruto"}, ghostOf(m))
+	})
+
+	t.Run("no row continues the text: no ghost, no completion", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Like Naruto")
+		assert.Empty(t, ghostOf(m))
+		_, ok := m.completionPick()
+		assert.False(t, ok)
+		for _, h := range m.hints() {
+			assert.NotEqual(t, "→", h.Key, "no completion to teach")
+		}
+		_, _ = m.Update(press(tea.KeyLeft, ""))
+		_, _ = m.Update(press(tea.KeyRight, ""))
+		assert.Equal(t, "nar", m.input.Value(), "right only moves the cursor")
+		assert.True(t, m.suggestionsOpen(), "the dropdown still shows")
+	})
+
+	t.Run("a highlighted row completes even when it does not continue the text", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Like Naruto")
+		_, _ = m.Update(press(tea.KeyDown, ""))
+		_, _ = m.Update(press(tea.KeyRight, ""))
+		assert.Equal(t, "Like Naruto", m.input.Value())
+	})
+
+	t.Run("goes away with typing", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Naruto")
+		require.NotEmpty(t, ghostOf(m))
+		_, _ = m.Update(press('x', "x"))
+		assert.Empty(t, ghostOf(m), "a ghost for old text never sits under new text")
+	})
+
+	t.Run("goes away with esc", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Naruto")
+		require.NotEmpty(t, ghostOf(m))
+		_, _ = m.Update(press(tea.KeyEscape, ""))
+		assert.Empty(t, ghostOf(m), "esc closes the dropdown and the ghost together")
+	})
+
+	t.Run("goes away when focus leaves the box", func(t *testing.T) {
+		t.Parallel()
+		continueAll, _ := homeTestEntries()
+		rec := &recordingSuggest{items: sugRows("Naruto")}
+		m := suggestModel(t, rec, SearchHomeOptions{Continue: continueAll})
+		typeText(m, "nar")
+		require.NotEmpty(t, ghostOf(m))
+		_, _ = m.Update(press(tea.KeyDown, "")) // onto the dropdown row
+		_, _ = m.Update(press(tea.KeyDown, "")) // past it, into the lists
+		require.False(t, m.focusInput)
+		assert.Empty(t, ghostOf(m), "no ghost while the lists have focus")
+	})
+
+	t.Run("the widget's own keys stay off", func(t *testing.T) {
+		t.Parallel()
+		m, _ := open(t, "Naruto", "Naruto: Shippuuden")
+		_, _ = m.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+		assert.Equal(t, "nar", m.input.Value())
+		assert.Equal(t, []string{"Naruto"}, ghostOf(m), "ctrl+n does not cycle the ghost away from the pick")
+		_, _ = m.Update(press(tea.KeyTab, ""))
+		assert.Equal(t, "nar", m.input.Value(), "tab changes the scope; it never accepts the ghost")
+		assert.Equal(t, 1, m.scopeIdx)
+	})
+}

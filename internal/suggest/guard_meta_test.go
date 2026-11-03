@@ -50,7 +50,7 @@ const (
 var tuiGuards = []string{
 	"TestSearchHomeSuggestCascade", "TestSearchHomeSuggestStaleAnswersAreDropped",
 	"TestSearchHomeSuggestFailureShowsNothing", "TestSearchHomeSuggestRowCleaning",
-	"TestSearchHomeSuggestKeys", "TestSearchHomeSuggestFollowsScope",
+	"TestSearchHomeSuggestKeys", "TestSearchHomeSuggestFollowsScope", "TestSearchHomeGhostText",
 	"TestSearchHomePrefilledQueryDoesNotAutoAsk", "TestSearchHomeSuggestHintsAndPlain",
 }
 
@@ -240,8 +240,28 @@ var suggestMutants = []mutant{
 	},
 	{
 		name:  "the footer forgets the completion key",
-		edits: []codeEdit{{homeFile, "if m.suggestionsOpen() {\n\t\tright :=", "if false {\n\t\tright :="}},
+		edits: []codeEdit{{homeFile, "if _, ok := m.completionPick(); ok {\n\t\tright :=", "if false {\n\t\tright :="}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomeSuggestHintsAndPlain"}},
+	},
+	{
+		name:  "the inline ghost text is off",
+		edits: []codeEdit{{homeFile, "input.ShowSuggestions = true", "input.ShowSuggestions = false"}},
+		kills: map[string][]string{tuiPkg: {"TestSearchHomeGhostText"}},
+	},
+	{
+		name:  "the ghost is not refreshed after a key",
+		edits: []codeEdit{{homeFile, "\tm.syncGhost()\n\treturn model, cmd", "\treturn model, cmd"}},
+		kills: map[string][]string{tuiPkg: {"TestSearchHomeGhostText"}},
+	},
+	{
+		name:  "the ghost shows a row that does not continue the text",
+		edits: []codeEdit{{homeFile, "if strings.HasPrefix(strings.ToLower(s.Title), typed) {", "if strings.HasPrefix(strings.ToLower(s.Title), typed) || true {"}},
+		kills: map[string][]string{tuiPkg: {"TestSearchHomeGhostText"}},
+	},
+	{
+		name:  "the ghost ignores the highlighted row",
+		edits: []codeEdit{{homeFile, "if m.sugCursor >= 0 {\n\t\treturn m.sugCursor, true", "if false {\n\t\treturn m.sugCursor, true"}},
+		kills: map[string][]string{tuiPkg: {"TestSearchHomeGhostText"}},
 	},
 	// --- the wiring ---
 	{

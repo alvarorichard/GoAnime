@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	bubblekey "charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -225,9 +226,18 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 	styles.Focused.Placeholder = theme.Muted
 	styles.Focused.Prompt = theme.Primary
 	styles.Blurred = styles.Focused
+	styles.Focused.Suggestion = theme.Muted
+	styles.Blurred.Suggestion = theme.Muted
 	styles.Cursor.Color = theme.Primary.GetForeground()
 	styles.Cursor.Shape = tea.CursorBlock
 	input.SetStyles(styles)
+	// The inline ghost text (the rest of the best suggestion, drawn after the
+	// cursor) is driven by syncGhost; the widget's own accept/cycle keys would
+	// fight the scope tab and the dropdown, so they are off.
+	input.ShowSuggestions = true
+	input.KeyMap.AcceptSuggestion = bubblekey.NewBinding(bubblekey.WithDisabled())
+	input.KeyMap.NextSuggestion = bubblekey.NewBinding(bubblekey.WithDisabled())
+	input.KeyMap.PrevSuggestion = bubblekey.NewBinding(bubblekey.WithDisabled())
 	if query := singleLine(opts.Query); query != "" {
 		input.SetValue(query)
 		input.CursorEnd()
@@ -293,8 +303,15 @@ func (m *searchHomeModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update handles resize, typing, scope tabs, navigation and actions.
+// Update handles resize, typing, scope tabs, navigation and actions, then
+// refreshes the inline ghost text to match the resulting state.
 func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	m.syncGhost()
+	return model, cmd
+}
+
+func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
@@ -372,7 +389,7 @@ func (m *searchHomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right":
 			// right at the end of the text completes it with the highlighted
 			// (or first) suggestion.
-			if m.suggestionsOpen() && m.input.Position() >= len([]rune(m.input.Value())) {
+			if _, ok := m.completionPick(); ok && m.input.Position() >= len([]rune(m.input.Value())) {
 				m.completeSuggestion()
 				return m, nil
 			}
@@ -503,10 +520,39 @@ func (m *searchHomeModel) moveSuggestion(delta int) bool {
 	return true
 }
 
-// completeSuggestion fills the box with the highlighted (else first)
-// suggestion without searching, and closes the dropdown.
+// completionPick is the suggestion → would complete the box with: the
+// highlighted row, else the first row that continues what is typed (the one
+// the inline ghost text shows). ok is false when there is none.
+func (m *searchHomeModel) completionPick() (int, bool) {
+	if !m.suggestionsOpen() {
+		return 0, false
+	}
+	if m.sugCursor >= 0 {
+		return m.sugCursor, true
+	}
+	typed := strings.ToLower(m.input.Value())
+	for i, s := range m.suggestions {
+		if strings.HasPrefix(strings.ToLower(s.Title), typed) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// syncGhost shows the completion pick's remainder after the cursor, like an
+// editor's inline suggestion, and clears it whenever no completion applies.
+func (m *searchHomeModel) syncGhost() {
+	if pick, ok := m.completionPick(); ok {
+		m.input.SetSuggestions([]string{m.suggestions[pick].Title})
+		return
+	}
+	m.input.SetSuggestions(nil)
+}
+
+// completeSuggestion fills the box with the completion pick without
+// searching, and closes the dropdown.
 func (m *searchHomeModel) completeSuggestion() {
-	pick := max(m.sugCursor, 0)
+	pick, _ := m.completionPick()
 	m.input.SetValue(m.suggestions[pick].Title)
 	m.input.CursorEnd()
 	m.asked = m.suggestKey()
@@ -629,7 +675,7 @@ func (m *searchHomeModel) hints() []Hint {
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
 	}
-	if m.suggestionsOpen() {
+	if _, ok := m.completionPick(); ok {
 		right := "→"
 		if Plain() {
 			right = "right"

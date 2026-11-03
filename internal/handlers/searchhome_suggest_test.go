@@ -6,10 +6,23 @@ import (
 	"testing"
 
 	"github.com/alvarorichard/Goanime/v2/internal/suggest"
+	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// isolateHome points the home directory at a temp dir so the watch-history
+// database never touches the real one, and closes the tracker it opened
+// before the dir is removed (Windows cannot delete an open database file).
+func isolateHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", home)
+	t.Cleanup(func() { _ = tracking.CloseGlobalTracker() })
+}
 
 func TestAdaptSuggestions(t *testing.T) {
 	t.Parallel()
@@ -44,10 +57,7 @@ func TestHomeSuggestShortQueryStaysOffline(t *testing.T) {
 // screen must be opened with the suggestion engine attached, or the box
 // silently loses its autocomplete.
 func TestSearchHomeWiresAutocomplete(t *testing.T) {
-	home := t.TempDir() // keep the test off the real watch history
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("LOCALAPPDATA", home)
+	isolateHome(t)
 
 	var got tui.SearchHomeOptions
 	want := tui.SearchHomeResult{Action: tui.HomeSearch, Query: "kept"}
@@ -69,10 +79,7 @@ func TestSearchHomeWiresAutocomplete(t *testing.T) {
 // and the screen stubbed: no terminal is a clear error, a terminal reaches
 // the screen with the autocomplete attached.
 func TestOpenSearchHomeEndToEnd(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("LOCALAPPDATA", home)
+	isolateHome(t)
 	origTerm, origRun := stdinIsTerminal, runSearchHome
 	t.Cleanup(func() { stdinIsTerminal, runSearchHome = origTerm, origRun })
 
