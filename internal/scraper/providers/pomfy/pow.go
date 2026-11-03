@@ -135,21 +135,20 @@ func solveNonce(ctx context.Context, prefix string, difficulty int, timeout time
 	if failed {
 		return "", ctx.Err()
 	}
-	count := 0
 	for s := 0; ; s++ {
 		h := grHash(appendDecimal(until, s))
 		if leadingZeroBits(h) >= difficulty {
 			return itoa(s), nil
 		}
-		// A deadline check every 4096 candidates keeps the loop responsive
-		// without paying time.Now() on every hash.
-		if count = (count + 1) & 4095; count == 0 {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-			if time.Now().After(deadline) {
-				return "", errPoWTimeout
-			}
+		// One grHash is thousands of quarter rounds (and far slower under the
+		// race detector), so reading the clock after every candidate costs
+		// nothing next to it; batching the check let a deadline slip by
+		// seconds.
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if time.Now().After(deadline) {
+			return "", errPoWTimeout
 		}
 	}
 }
