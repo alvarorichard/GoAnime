@@ -21,9 +21,14 @@ import (
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
 func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error {
+	return runMovie(realFlow(), ctx, anime, episodes, discordEnabled)
+}
+
+// runMovie is HandleMovie's loop over the environment env provides.
+func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error { //nolint:revive // env first keeps call sites readable next to the real wiring
 	// Prepare the mpv path while metadata/stream work is in progress.
-	player.PreWarmMPVPath()
-	player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
+	env.preWarmMPV()
+	env.setEpisodeListCtx(anime.Name, anime.Source, anime.Audio)
 
 	for {
 		animeMutex := sync.Mutex{}
@@ -38,7 +43,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 		// Use static log instead of spinner while fetching video URL
 		// to avoid terminal UI contention if a quality picker opens.
 		util.Infof("Loading video stream...")
-		videoURL, videoErr := player.GetVideoURLForEpisodeEnhanced(ctx, &episodes[0], anime)
+		videoURL, videoErr := env.streamURL(ctx, &episodes[0], anime)
 
 		// Keep the metadata only if it is already here; playback never waits
 		// for it.
@@ -54,19 +59,19 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			// The anime-side scheme: say why this copy failed, name the other
 			// sources that list the title, and let the next result screen
 			// open with the notice above the list.
-			reportMovieStreamFailed(anime, videoErr)
+			env.reportStreamFailed(anime, videoErr)
 			// Return to anime selection
 			return player.ErrBackToAnimeSelection
 		}
 
 		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
-		updater := createUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
+		updater := env.newUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
 
 		// Route downloads to the correct directory (anime/ vs movies/) using exact media type
-		player.SetExactMediaType(string(anime.MediaType))
+		env.setExactMediaType(string(anime.MediaType))
 
 		// Store external IDs for Plex/Jellyfin-compatible folder naming
-		player.SetMediaMeta(&util.MediaMeta{
+		env.setMediaMeta(&util.MediaMeta{
 			OfficialTitle: anime.OfficialTitle(),
 			Year:          anime.Year,
 			TMDBID:        anime.TMDBID,
@@ -75,7 +80,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			MalID:         anime.MalID,
 		})
 
-		playErr := player.HandleDownloadAndPlay(
+		playErr := env.downloadAndPlay(
 			videoURL,
 			episodes,
 			1,
@@ -99,7 +104,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 				log.Printf("Error during movie playback: %v", util.LogSafe(playErr))
 			}
 			// Ask user what to do next after movie finishes
-			action = movieActionAfterPrompt(GetUserInput(true))
+			action = movieActionAfterPrompt(env.userInput(true))
 		}
 
 		switch action {
@@ -120,7 +125,7 @@ func HandleMovie(ctx context.Context, anime *models.Anime, episodes []models.Epi
 			case changeToSeries:
 				anime, episodes = change.anime, change.episodes
 				log.Printf("Switched to series: %s with %d episodes.\n", util.LogSafe(anime.Name), len(episodes))
-				if seriesErr := HandleSeries(ctx, anime, episodes, len(episodes), discordEnabled); errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
+				if seriesErr := env.handleSeries(ctx, anime, episodes, len(episodes), discordEnabled); errors.Is(seriesErr, player.ErrBackToAnimeSelection) {
 					return seriesErr
 				}
 				return nil

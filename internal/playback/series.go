@@ -12,7 +12,6 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/appflow"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
-	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
@@ -23,8 +22,13 @@ func printEpisodeNotFoundMsg() {
 }
 
 func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error {
-	tui.ResetTerminal()
-	player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
+	return runSeries(realFlow(), ctx, anime, episodes, totalEpisodes, discordEnabled)
+}
+
+// runSeries is HandleSeries's loop over the environment env provides.
+func runSeries(env flowEnv, ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error { //nolint:revive // env first keeps call sites readable next to the real wiring
+	env.resetTerminal()
+	env.setEpisodeListCtx(anime.Name, anime.Source, anime.Audio)
 	if anime.IsTV() {
 		fmt.Printf("The selected TV show has %d episodes.\n", totalEpisodes)
 	} else {
@@ -39,7 +43,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 	}
 
 	for {
-		playErr := PlayEpisode(
+		playErr := env.playEpisode(
 			ctx,
 			anime,
 			episodes,
@@ -57,7 +61,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			if playErr != nil {
 				log.Printf("Error during episode playback: %v", util.LogSafe(playErr))
 			}
-			userInput = GetUserInput()
+			userInput = env.userInput()
 			action = seriesActionAfterPrompt(userInput)
 		}
 
@@ -90,7 +94,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			case changeToMovie:
 				anime, episodes = change.anime, change.episodes
 				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if movieErr := HandleMovie(ctx, anime, episodes, discordEnabled); errors.Is(movieErr, player.ErrBackToAnimeSelection) {
+				if movieErr := env.handleMovie(ctx, anime, episodes, discordEnabled); errors.Is(movieErr, player.ErrBackToAnimeSelection) {
 					return movieErr
 				}
 				return nil
