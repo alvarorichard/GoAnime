@@ -1423,6 +1423,46 @@ func showPlayerMenu(socketPath, animeName string, currentEpisodeNum int) (string
 	return menuItems[idx].Value, nil
 }
 
+// playerLoop holds what the in-player menu loop acts through. The real set
+// talks to mpv and the terminal; tests swap in fakes, so the loop's routing
+// can be exercised without either.
+type playerLoop struct {
+	send     func(socketPath string, command []any) (any, error)
+	menu     func(socketPath, animeName string, episodeNum int) (string, error)
+	next     func(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	previous func(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	selectEp func(episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	audio    func(socketPath string)
+	subtitle func(socketPath string)
+	skip     func(socketPath string, episode *models.Episode)
+}
+
+// realPlayerLoop is the set that talks to mpv and the terminal.
+func realPlayerLoop() playerLoop {
+	return playerLoop{
+		send:     mpvSendCommand,
+		menu:     showPlayerMenu,
+		next:     playNextEpisode,
+		previous: playPreviousEpisode,
+		selectEp: selectEpisode,
+		audio:    selectAudioTrack,
+		subtitle: selectSubtitleTrack,
+		skip:     skipIntro,
+	}
+}
+
+// playerAnimeName is the name the player menu shows. The Discord updater
+// only exists while Discord is running; the name HandleDownloadAndPlay stored
+// is there either way.
+func playerAnimeName(updater *discord.RichPresenceUpdater) string {
+	if updater != nil && updater.GetAnime() != nil {
+		if name := updater.GetAnime().Name; name != "" {
+			return name
+		}
+	}
+	return snapshotMedia().AnimeName
+}
+
 // handleUserInput manages user input
 func handleUserInput(
 	socketPath string,
@@ -1435,64 +1475,73 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display. The Discord updater only exists while
-	// Discord is running; the name HandleDownloadAndPlay stored is there
-	// either way.
-	var animeName string
-	if updater != nil && updater.GetAnime() != nil {
-		animeName = updater.GetAnime().Name
-	}
-	if animeName == "" {
-		animeName = snapshotMedia().AnimeName
-	}
+	return runPlayerMenu(realPlayerLoop(), socketPath, episodes, currentIndex, currentEpisodeNum, malID, anilistID, updater, stopTracking, currentEpisode)
+}
+
+// runPlayerMenu shows the player menu until a choice ends playback. Choices
+// that stay in the menu (audio, subtitles, skip, or a next/previous/select
+// that reports errStayInPlayerMenu) loop; every other outcome returns.
+func runPlayerMenu(
+	pl playerLoop,
+	socketPath string,
+	episodes []models.Episode,
+	currentIndex int,
+	currentEpisodeNum int,
+	malID int,
+	anilistID int,
+	updater *discord.RichPresenceUpdater,
+	stopTracking chan struct{},
+	currentEpisode *models.Episode,
+) error {
+	animeName := playerAnimeName(updater)
 
 	for {
 		// Check if mpv is still running before showing the menu.
 		// If mpv exited (e.g., due to a bad URL), quit gracefully instead of
 		// showing a menu that the user cannot meaningfully interact with.
-		if _, pingErr := mpvSendCommand(socketPath, []any{"get_property", "pid"}); pingErr != nil {
+		if _, pingErr := pl.send(socketPath, []any{"get_property", "pid"}); pingErr != nil {
 			util.Debugf("mpv process appears to have exited, returning to caller")
 			return ErrBackToDownloadOptions
 		}
 
-		choice, err := showPlayerMenu(socketPath, animeName, currentEpisodeNum)
+		choice, err := pl.menu(socketPath, animeName, currentEpisodeNum)
 		if err != nil {
 			// If the menu was disrupted (e.g., by a concurrent terminal writer),
 			// treat it as "go back" rather than a fatal error.
 			util.Debugf("Player menu interrupted: %v", err)
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		}
 
 		switch choice {
 		case "download_options":
 			// Stop playback and go back to download options
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		case "next":
-			if err := playNextEpisode(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.next(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "previous":
-			if err := playPreviousEpisode(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.previous(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "quit":
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrUserQuit
 		case "change":
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrChangeAnime
 		case "select":
-			if err := selectEpisode(episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.selectEp(episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "audio":
-			selectAudioTrack(socketPath)
+			pl.audio(socketPath)
 		case "subtitle":
-			selectSubtitleTrack(socketPath)
+			pl.subtitle(socketPath)
 		case "skip":
-			skipIntro(socketPath, currentEpisode)
+			pl.skip(socketPath, currentEpisode)
 		}
 	}
 }
