@@ -876,18 +876,17 @@ func HandleDownloadAndPlay(
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
-		downloadOption := downloadMenuOption(selectedEpisodeNum, len(episodes), animeName)
-		switch downloadOption {
-		case 0:
+		switch downloadMenuOptionFn(selectedEpisodeNum, len(episodes), animeName) {
+		case downloadBack:
 			// User wants to go back to server selection
 			return ErrBackToEpisodeSelection
-		case 1:
+		case downloadThis:
 			// Download the current episode
 			if isHLSStream {
 				// HLS streams need special download handling
 				util.Debugf("HLS download requested - using stream URL")
 			}
-			err := downloadAndPlayEpisode(
+			err := downloadAndPlayEpisodeFn(
 				videoURL,
 				episodes,
 				selectedEpisodeNum,
@@ -900,31 +899,25 @@ func HandleDownloadAndPlay(
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
 					// Go back to download options menu
-					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					requestEpisodeMenuFn(EpisodeMenuRequest{ShowMenu: true})
 					continue
 				}
 				return err
 			}
 			return nil
-		case 2:
+		case downloadRange:
 			// Download episodes in a range
 			if start := takeRangeStart(); start > 0 {
-				if err := downloadRangeFrom(start, episodes, anime); err != nil {
-					return err
-				}
-				return nil
+				return downloadRangeFromFn(start, episodes, anime)
 			}
-			if err := HandleBatchDownload(episodes, anime); err != nil {
-				return err
-			}
-			return nil
-		case 3:
+			return handleBatchDownloadFn(episodes, anime)
+		case downloadUpscale:
 			// Upscale video with Anime4K
-			if err := handleUpscaleFromMenu(); err != nil {
+			if err := upscaleMenuFn(); err != nil {
 				util.Errorf("Upscale error: %v", err)
 			}
 			continue // Return to menu after upscaling
-		case 5:
+		case downloadAll:
 			// Download ALL episodes
 			if len(episodes) == 0 {
 				util.Errorf("No episodes available to download")
@@ -933,7 +926,7 @@ func HandleDownloadAndPlay(
 			if !confirmDownloadAll(len(episodes)) {
 				continue
 			}
-			if err := HandleDownloadAll(episodes, anime); err != nil {
+			if err := handleDownloadAllFn(episodes, anime); err != nil {
 				if errors.Is(err, ErrUserQuit) {
 					return nil
 				}
@@ -941,76 +934,20 @@ func HandleDownloadAndPlay(
 			}
 			return nil
 		default:
-			// Play online - determine the best approach based on URL type
-			videoURLToPlay := ""
-
-			switch {
-			case isHLSStream:
-				// HLS streams are already resolved, play directly
-				videoURLToPlay = videoURL
-				if util.IsDebug {
-					util.Debugf("HLS stream detected, playing directly: %s", videoURLToPlay)
-				}
-			case videoURL != "" && needsVideoExtraction(videoURL):
-				// Intermediate URL (e.g. animefire.io/video/) needs resolution
-				// to obtain the final CDN video URL.
-				if util.IsDebug {
-					util.Debugf("Intermediate URL detected, resolving: %s", videoURL)
-				}
-				if resolved, err := extractActualVideoURL(videoURL); err == nil && resolved != "" {
-					videoURLToPlay = resolved
-				}
-			case videoURL != "" && strings.HasPrefix(videoURL, "http"):
-				// The enhanced API already resolved a direct stream URL (CDN,
-				// mp4, etc.). Use it directly — re-extracting may trigger
-				// duplicate quality prompts or cause CDN URLs to expire.
-				videoURLToPlay = videoURL
-				if util.IsDebug {
-					util.Debugf("Using resolved stream URL directly: %s", videoURLToPlay)
-				}
-			case videoURL != "":
-				// Non-HTTP URL (e.g. episode ID). Try legacy extraction.
-				if len(episodes) > 0 && selectedEpisodeNum > 0 {
-					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-					if found {
-						if util.IsDebug {
-							util.Debugf("Extracting URL from episode page: %s", selectedEp.URL)
-						}
-						url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL)
-						if errors.Is(err, ErrBackRequested) {
-							continue
-						}
-						if err == nil && url != "" {
-							videoURLToPlay = url
-						}
-					}
-				}
-				// Fallback: try to extract from original videoURL
-				if videoURLToPlay == "" {
-					if util.IsDebug {
-						util.Debugf("Fallback: extracting from original URL: %s", videoURL)
-					}
-					url, err := ExtractVideoSourcesWithPrompt(videoURL)
-					if errors.Is(err, ErrBackRequested) {
-						continue
-					}
-					if err == nil && url != "" {
-						videoURLToPlay = url
-					}
-				}
+			// Play online
+			videoURLToPlay, back := resolvePlaybackURL(routeForPlayback(videoURL, isHLSStream), videoURL, episodes, selectedEpisodeNum)
+			if back {
+				continue
 			}
-
-			// Final validation
 			if videoURLToPlay == "" {
 				util.Debugf("No valid video URL found")
 				return fmt.Errorf("no valid video URL found")
 			}
-
 			if util.IsDebug {
 				util.Debugf("Final video URL: %s", videoURLToPlay)
 			}
 
-			err := playVideo(
+			err := playVideoFn(
 				videoURLToPlay,
 				episodes,
 				selectedEpisodeNum,
@@ -1021,13 +958,95 @@ func HandleDownloadAndPlay(
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
 					// Go back to download options menu
-					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					requestEpisodeMenuFn(EpisodeMenuRequest{ShowMenu: true})
 					continue
 				}
 				return err
 			}
 			return nil
 		}
+	}
+}
+
+// playbackRoute is how a stream URL becomes the URL mpv plays.
+type playbackRoute int
+
+const (
+	routeNone    playbackRoute = iota // nothing to play
+	routeHLS                          // an HLS stream, already resolved: played as is
+	routeResolve                      // an intermediate page (AnimeFire video API, Blogger) to resolve to the CDN URL
+	routeDirect                       // a direct http(s) stream the source already resolved
+	routeLegacy                       // a bare id: resolved through the episode page
+)
+
+// routeForPlayback classifies videoURL. A direct URL is played untouched:
+// re-extracting it could raise a second quality prompt or let a CDN URL expire.
+func routeForPlayback(videoURL string, isHLS bool) playbackRoute {
+	switch {
+	case isHLS:
+		return routeHLS
+	case videoURL != "" && needsVideoExtraction(videoURL):
+		return routeResolve
+	case videoURL != "" && strings.HasPrefix(videoURL, "http"):
+		return routeDirect
+	case videoURL != "":
+		return routeLegacy
+	default:
+		return routeNone
+	}
+}
+
+// Seams for the playback flow; tests replace them, so no menu opens, nothing is
+// downloaded and mpv never starts.
+var (
+	downloadMenuOptionFn     = downloadMenuOption
+	downloadAndPlayEpisodeFn = downloadAndPlayEpisode
+	downloadRangeFromFn      = downloadRangeFrom
+	handleBatchDownloadFn    = HandleBatchDownload
+	handleDownloadAllFn      = HandleDownloadAll
+	upscaleMenuFn            = handleUpscaleFromMenu
+	playVideoFn              = playVideo
+	requestEpisodeMenuFn     = RequestEpisodeMenu
+	extractActualVideoURLFn  = extractActualVideoURL
+	extractWithPromptFn      = ExtractVideoSourcesWithPrompt
+)
+
+// resolvePlaybackURL turns the route into the URL to play, "" when none could
+// be found. back is true when the user backed out of a quality prompt, which
+// sends them back to the options menu.
+func resolvePlaybackURL(route playbackRoute, videoURL string, episodes []models.Episode, selectedEpisodeNum int) (url string, back bool) {
+	switch route {
+	case routeHLS, routeDirect:
+		return videoURL, false
+	case routeResolve:
+		if resolved, err := extractActualVideoURLFn(videoURL); err == nil && resolved != "" {
+			return resolved, false
+		}
+		return "", false
+	case routeLegacy:
+		// The episode page first, when the episode is known.
+		if len(episodes) > 0 && selectedEpisodeNum > 0 {
+			if ep, found := findEpisode(episodes, selectedEpisodeNum); found {
+				u, err := extractWithPromptFn(ep.URL)
+				if errors.Is(err, ErrBackRequested) {
+					return "", true
+				}
+				if err == nil && u != "" {
+					return u, false
+				}
+			}
+		}
+		// Fallback: extract from the original URL.
+		u, err := extractWithPromptFn(videoURL)
+		if errors.Is(err, ErrBackRequested) {
+			return "", true
+		}
+		if err == nil && u != "" {
+			return u, false
+		}
+		return "", false
+	default:
+		return "", false
 	}
 }
 
