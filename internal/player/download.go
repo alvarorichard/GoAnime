@@ -874,49 +874,94 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	if m != nil && util.IsDebug {
 		util.Debugf("Preparing yt-dlp engine (first run may take a moment)...")
 	}
-
-	// Try to install yt-dlp with timeout and error handling
-	_, installErr := ytdlp.Install(ctx, nil)
-	if installErr != nil {
+	engine := newYtdlpEngine()
+	if installErr := engine.Install(ctx); installErr != nil {
 		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
 	}
 
 	if m != nil && util.IsDebug {
 		util.Debugf("Starting yt-dlp download...")
 	}
+	spec := ytdlpSpec{
+		URL:         safeURL,
+		Output:      safePath,
+		Impersonate: ytdlpCanImpersonate(),
+		// Forward the stored referer/origin so the CDN accepts the request
+		Headers: ytdlpHeaders(downloadReferer(url)),
+	}
+	runErr := runYtdlpDownload(ctx, engine, spec, m, ytdlpSleep)
+	return ytdlpOutcome(runErr, func() error {
+		util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
+		return downloadDirectHTTPFn(safeURL, safePath, m)
+	})
+}
 
-	// Use yt-dlp's native HLS downloader (not ffmpeg) so that obfuscated
-	// segment extensions (.js, .html, .jpg) from CDNs are accepted without
-	// issues. ffmpeg's allowed_segment_extensions check rejects them.
+// ytdlpSpec is everything one yt-dlp download is configured with.
+type ytdlpSpec struct {
+	URL         string
+	Output      string
+	Impersonate bool     // present as Chrome, for CDNs that fingerprint TLS
+	Headers     []string // "Name:value" request headers
+}
+
+// newYtdlpCommand configures yt-dlp for spec. It uses yt-dlp's native HLS
+// downloader (not ffmpeg) so obfuscated segment extensions (.js, .html, .jpg)
+// from CDNs are accepted: ffmpeg's allowed_segment_extensions check rejects them.
+func newYtdlpCommand(spec ytdlpSpec) *ytdlp.Command {
 	dl := ytdlp.New().
-		Output(safePath).
+		Output(spec.Output).
 		Format("bestvideo+bestaudio/best").
 		ConcurrentFragments(24).
 		BufferSize("32M").
 		FragmentRetries("5").
 		Retries("5").
 		SocketTimeout(30)
-
-	if util.YtdlpCanImpersonate() {
+	if spec.Impersonate {
 		dl.Impersonate("chrome")
 	}
-
-	// Forward the stored referer/origin so the CDN accepts the request
-	for _, h := range ytdlpHeaders(downloadReferer(url)) {
+	for _, h := range spec.Headers {
 		dl.AddHeaders(h)
 	}
+	return dl
+}
 
-	// Real-time progress via yt-dlp's native callback.
-	progress := newYtdlpProgress(m)
-	if m != nil {
-		dl.ProgressFunc(200*time.Millisecond, progress.handle)
+// ytdlpEngine is what a download needs from yt-dlp: to have it installed, and
+// to run one configured download, reporting progress.
+type ytdlpEngine interface {
+	Install(ctx context.Context) error
+	Run(ctx context.Context, spec ytdlpSpec, onProgress func(ytdlp.ProgressUpdate)) error
+}
+
+// goYtdlpEngine is the real engine, over the go-ytdlp library.
+type goYtdlpEngine struct{}
+
+func (goYtdlpEngine) Install(ctx context.Context) error {
+	_, err := ytdlp.Install(ctx, nil)
+	return err
+}
+
+func (goYtdlpEngine) Run(ctx context.Context, spec ytdlpSpec, onProgress func(ytdlp.ProgressUpdate)) error {
+	dl := newYtdlpCommand(spec)
+	if onProgress != nil {
+		dl.ProgressFunc(200*time.Millisecond, onProgress)
 	}
+	// --hls-use-mpegts has no typed method, so it goes as a raw argument.
+	_, err := dl.Run(ctx, spec.URL, "--hls-use-mpegts")
+	return err
+}
 
-	// Run with --hls-use-mpegts as raw arg (no typed method available) + retry logic
-	runErr := runWithRetry(
-		func() error { _, err := dl.Run(ctx, safeURL, "--hls-use-mpegts"); return err },
+// runYtdlpDownload runs the download with retries, feeding progress to m (when
+// there is one). Each retry starts the byte counter over.
+func runYtdlpDownload(ctx context.Context, engine ytdlpEngine, spec ytdlpSpec, m *model, sleep func(time.Duration)) error {
+	progress := newYtdlpProgress(m)
+	var onProgress func(ytdlp.ProgressUpdate)
+	if m != nil {
+		onProgress = progress.handle
+	}
+	return runWithRetry(
+		func() error { return engine.Run(ctx, spec, onProgress) },
 		ytdlpMaxRetries,
-		time.Sleep,
+		sleep,
 		func(attempt int) {
 			if m != nil && util.IsDebug {
 				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, ytdlpMaxRetries+1)
@@ -924,19 +969,29 @@ func downloadWithYtDlp(url, path string, m *model) error {
 			progress.resetForRetry()
 		},
 	)
-
-	if runErr != nil {
-		// yt-dlp rejects URLs with unusual extensions (.aspx, etc.) as a security
-		// measure (CVE-2024-38519). Fall back to direct HTTP download.
-		if isUnsafeExtensionError(runErr) {
-			util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
-			return downloadDirectHTTP(safeURL, safePath, m)
-		}
-		return fmt.Errorf("go-ytdlp download failed: %w", runErr)
-	}
-
-	return nil
 }
+
+// ytdlpOutcome turns a finished run into the download's result. yt-dlp rejects
+// URLs with unusual extensions (.aspx, ...) as a security measure
+// (CVE-2024-38519); those fall back to a direct HTTP download.
+func ytdlpOutcome(runErr error, directHTTP func() error) error {
+	if runErr == nil {
+		return nil
+	}
+	if isUnsafeExtensionError(runErr) {
+		return directHTTP()
+	}
+	return fmt.Errorf("go-ytdlp download failed: %w", runErr)
+}
+
+// Seams for the yt-dlp download; tests replace them so no binary is installed
+// or run.
+var (
+	newYtdlpEngine       = func() ytdlpEngine { return goYtdlpEngine{} }
+	ytdlpCanImpersonate  = util.YtdlpCanImpersonate
+	ytdlpSleep           = time.Sleep
+	downloadDirectHTTPFn = downloadDirectHTTP
+)
 
 // isUnsafeExtensionError returns true if the error is yt-dlp's unsafe extension check.
 func isUnsafeExtensionError(err error) bool {
