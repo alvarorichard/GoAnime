@@ -594,7 +594,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	// SSRF protection: validate the URL resolves to a public IP before using
 	// the Chrome-impersonation surf client (whose transport we cannot replace).
-	if err := api.ValidateExternalURL(directURL); err != nil {
+	if err := validateURLFn(directURL); err != nil {
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
 
@@ -603,7 +603,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 	}
 
 	// Use download client that follows redirects (googlevideo uses 302s)
-	headClient := newSurfDownloadClient().Std()
+	headClient := newBloggerClientFn()
 	contentLength, err := getContentLength(directURL, headClient)
 	if err != nil {
 		return fmt.Errorf("failed to get content length: %w", err)
@@ -654,7 +654,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 // Automatically retries with resume on connection drops.
 func downloadBloggerChunk(url string, from, to int64, part int, destPath string, m *model) error {
 	// SSRF protection: reject URLs that resolve to private/internal IPs.
-	if err := api.ValidateExternalURL(url); err != nil {
+	if err := validateURLFn(url); err != nil {
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
 
@@ -684,13 +684,13 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 		}
 		if attempt > 0 {
 			util.Debugf("Blogger chunk %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(500 * time.Millisecond) // Brief pause before retry
+			chunkRetrySleep(500 * time.Millisecond) // Brief pause before retry
 		}
 
 		beforeRead := current
 
 		// Fresh download client per attempt — follows redirects and has a long timeout
-		client := newSurfDownloadClient().Std()
+		client := newBloggerClientFn()
 
 		req, err := http.NewRequest("GET", url, http.NoBody)
 		if err != nil {
@@ -701,19 +701,36 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 		resp, err := client.Do(req)
 		if err != nil {
 			util.Debugf("Blogger chunk %d: request error: %v", part, err)
-			continue // Retry
+			staleRetries++ // no data arrived: counts toward giving up
+			continue       // Retry
 		}
 
 		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
 			util.Debugf("Blogger chunk %d: unexpected status %d", part, resp.StatusCode)
+			// A signed URL that expired answers 403 for good: without this the
+			// loop would retry it forever.
+			staleRetries++
 			continue
 		}
+
+		// A 200 means the server ignored the Range header and is sending the
+		// file from byte 0: skip what this part already has, so the bytes land
+		// where they belong.
+		if resp.StatusCode == http.StatusOK && current > 0 {
+			if _, err := io.CopyN(io.Discard, resp.Body, current); err != nil {
+				_ = resp.Body.Close()
+				staleRetries++
+				continue
+			}
+		}
+		// Never take more than this part's span, whatever the server sends.
+		body := io.LimitReader(resp.Body, to-current+1)
 
 		// Read data from this connection until it drops
 		buf := make([]byte, 64*1024) // 64KB buffer
 		for {
-			n, readErr := resp.Body.Read(buf)
+			n, readErr := body.Read(buf)
 			if n > 0 {
 				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
 					_ = resp.Body.Close()
@@ -2337,3 +2354,16 @@ func (p *ytdlpProgress) handle(update ytdlp.ProgressUpdate) {
 // package goes through; tests replace it, because the guard refuses the
 // loopback servers they stand up.
 var safeGetFn = api.SafeGet
+
+// Seams for the Blogger/googlevideo parallel download: tests substitute a
+// plain client and a no-op guard, because the real ones impersonate Chrome and
+// refuse the loopback servers a test starts.
+var (
+	// validateURLFn is the SSRF guard applied before any request.
+	validateURLFn = api.ValidateExternalURL
+	// newBloggerClientFn builds a fresh client for each attempt: independent
+	// connections avoid HTTP/2 multiplexing and the per-client timeout.
+	newBloggerClientFn = func() *http.Client { return newSurfDownloadClient().Std() }
+	// chunkRetrySleep is the pause before a chunk resumes.
+	chunkRetrySleep = time.Sleep
+)
