@@ -174,7 +174,7 @@ func TestEpisodeDownloadPaths_DirsAreDistinctAndFileIsInsideDir(t *testing.T) {
 	}
 	for _, c := range pathsCases() {
 		dir, file := episodeDownloadPaths(c.snap, c.url, c.epStr, c.n)
-		if filepath.Dir(file) != dir {
+		if filepath.ToSlash(filepath.Dir(file)) != filepath.ToSlash(dir) {
 			t.Errorf("%s: file %q is not directly inside dir %q", c.name, file, dir)
 		}
 	}
