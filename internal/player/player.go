@@ -638,6 +638,11 @@ func filterMPVArgs(args []string) []string {
 		"--demuxer-max-bytes=",
 		"--demuxer-readahead-secs=",
 		"--video-latency-hacks=",
+		"--keep-open=",       // user-config guards (see userConfigGuardArgs)
+		"--idle=",            //
+		"--loop-file=",       //
+		"--loop-playlist=",   //
+		"--resume-playback=", //
 		"--audio-display=",
 		"--start=",
 		"--alang=",                     // Audio language preference

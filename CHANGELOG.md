@@ -2,6 +2,10 @@
 
 ## Features
 
+### Playback
+
+- **mpv loads your own configuration.** When GoAnime finds an mpv config (`mpv.conf`, `input.conf`, scripts, script-opts, shaders in `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`, `~/.config/mpv`, `~/.mpv` or `%APPDATA%\mpv`), it no longer starts mpv with `--no-config` (#228), so `mpv.conf`, `input.conf`, scripts such as uosc, script-opts and shaders in your mpv folder apply. The options GoAnime depends on (`keep-open`, `idle`, `loop-file`, `loop-playlist`, `resume-playback`) are fixed on the command line so the episode still ends and resumes correctly, and `--profile=fast` is no longer forced over your quality settings. Without a config the start is unchanged. `GOANIME_MPV_CONFIG=off` brings back the isolated `--no-config` start. See "Your mpv configuration" in the README.
+
 ### Search
 
 - **Autocomplete in the search box.** Pause while typing and up to six titles appear under the box, anime, movies and series, each with its kind and year (`Anime · 2002`). Like a code editor, the rest of the best match also shows as dim inline text after the cursor (type `nar` and see `uto` ghosted); it follows the highlighted row. `↑`/`↓` pick one and `enter` searches it, `→` at the end of the text accepts the inline completion without searching, `esc` closes the list (a second `esc` clears the box). The list follows the scope tab: PT-BR and ENGLISH suggest anime, MOVIES/TV suggests movies and series. It needs no key or setup: anime come from Kitsu (which matches partial words) and movies and series from IMDb's public suggestion feed. Lookups wait 180 ms after the last key, a newer keystroke cancels the one in flight so an old answer never shows under new text, answers are cached for ten minutes, and when a provider is down the other still answers; when both are, the box simply works without suggestions. The engine is `internal/suggest`.

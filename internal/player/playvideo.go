@@ -114,6 +114,10 @@ type playbackArgsInput struct {
 	SubsLang         string
 	SubArgs          []string
 	ResumeTime       int
+	// UserMPVConfig lets mpv load the user's own config. False keeps the
+	// isolated --no-config profile. Upscaling always loads it (the shader
+	// chain needs the user's GPU settings).
+	UserMPVConfig bool
 }
 
 // videoOutputArg picks the mpv --vo chain for goos. mpv takes the first output
@@ -159,6 +163,11 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		// unscaled if only a non-GPU output works.
 		mpvArgs = append(mpvArgs, defaultVideoOutputArg(), "--hwdec=no")
 		mpvArgs = append(mpvArgs, in.ShaderArgs...)
+	} else if in.UserMPVConfig {
+		// The user's config decides profile and render quality, so no
+		// --profile=fast or latency hacks here. hwdec and the VO chain stay:
+		// they are what lets mpv start on machines where the default fails.
+		mpvArgs = append(mpvArgs, "--hwdec=auto-safe", defaultVideoOutputArg())
 	} else {
 		mpvArgs = append(mpvArgs,
 			"--no-config",
@@ -170,6 +179,10 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 			"--profile=fast",
 			"--video-latency-hacks=yes",
 		)
+	}
+
+	if in.UpscalingEnabled || in.UserMPVConfig {
+		mpvArgs = append(mpvArgs, userConfigGuardArgs()...)
 	}
 
 	if in.Wayland {
@@ -646,6 +659,11 @@ func playVideo(
 		canImpersonate = util.YtdlpCanImpersonate()
 	}
 
+	userConfig := shouldLoadMPVUserConfig(os.Getenv, mpvUserConfigPresent)
+	if userConfig {
+		util.Debugf("mpv will load the user's configuration (%s=off to isolate it)", mpvConfigEnv)
+	}
+
 	wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""
 	if upscalingEnabled {
 		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.GetShaderMode()))
@@ -671,6 +689,7 @@ func playVideo(
 		SubsLang:         subsLang,
 		SubArgs:          subArgs,
 		ResumeTime:       resumeTime,
+		UserMPVConfig:    userConfig,
 	})
 
 	// Fetch AniSkip data asynchronously (AniSkip API is keyed on MAL ID)

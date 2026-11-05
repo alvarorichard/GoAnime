@@ -304,6 +304,31 @@ Setup shaders para baixá-los e depois escolha um modo. O nome de cada modo diz
 para que ele serve, de Performance, para GPUs fracas, a Ultra, para fontes em
 SD.
 
+### Sua configuração do mpv
+
+Quando o GoAnime encontra uma configuração sua, ele inicia o mpv com ela, então
+`mpv.conf`, `input.conf`, scripts (uosc, thumbfast), script-opts e shaders em
+`~/.config/mpv/` (`%APPDATA%\mpv` no Windows) valem como quando você roda o
+mpv sozinho. O GoAnime procura em `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`,
+`~/.config/mpv` e no antigo `~/.mpv`, e só conta uma pasta que tenha
+`mpv.conf`, `input.conf`, `scripts`, `script-opts`, `script-modules`,
+`shaders`, `fonts` ou `lua-settings`. Sem essa config, o GoAnime mantém o
+início otimizado de antes (`--no-config`, `--profile=fast`), mais leve em
+máquinas fracas.
+
+Opções de linha de comando vencem o `mpv.conf`, então algumas que o GoAnime
+precisa ficam fixas na reprodução dele: `keep-open`, `idle`, `loop-file` e
+`loop-playlist` ficam desligados para o mpv fechar no fim do episódio, e
+`resume-playback` fica desligado porque o GoAnime retoma da própria posição
+salva. O GoAnime também define `hwdec=auto-safe` e a cadeia de fallback de
+`vo`, para iniciar em máquinas onde a saída padrão do mpv falha; um `vo` ou
+`hwdec` do seu `mpv.conf` é sobrescrito, então para usar o seu, abra o
+arquivo direto no mpv. Ele não força `profile=fast` quando a sua config é carregada.
+
+Para iniciar o mpv com `--no-config`, como nas versões anteriores, defina
+`GOANIME_MPV_CONFIG=off` (também `0`, `false`, `no` ou `none`). Faça isso
+primeiro quando a reprodução falhar e sua config for a suspeita.
+
 ## Fontes
 
 | Fonte         | Conteúdo       | Idioma                      | Observações                                   |

@@ -300,6 +300,32 @@ Real-time Upscale, in the menu before playback, applies
 choose Setup shaders to download them, then pick a mode. Each mode's label
 says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 
+### Your mpv configuration
+
+When GoAnime finds a configuration of yours, it starts mpv with it, so
+`mpv.conf`, `input.conf`, scripts (uosc, thumbfast), script-opts and shaders in
+`~/.config/mpv/` (`%APPDATA%\mpv` on Windows) apply as they do when you run mpv
+yourself. GoAnime looks in `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`,
+`~/.config/mpv` and the legacy `~/.mpv`, and counts a folder only if it holds an
+`mpv.conf`, `input.conf`, `scripts`, `script-opts`, `script-modules`,
+`shaders`, `fonts` or `lua-settings`. With no such config, GoAnime keeps its
+own tuned start (`--no-config`, `--profile=fast`), which is lighter on weak
+machines.
+
+Command-line options win over `mpv.conf`, so a few settings that GoAnime
+depends on are fixed for its playback: `keep-open`, `idle`, `loop-file` and
+`loop-playlist` are off so mpv exits when the episode ends, and
+`resume-playback` is off because GoAnime resumes from its own saved position.
+GoAnime also sets `hwdec=auto-safe` and the `vo` fallback chain, so it can
+start on machines where mpv's default output fails; a `vo` or `hwdec`
+in your `mpv.conf` is overridden, so to use your own, play the file in mpv
+directly. It
+does not force `profile=fast` when your config is loaded.
+
+To start mpv with `--no-config`, as earlier versions did, set
+`GOANIME_MPV_CONFIG=off` (also `0`, `false`, `no` or `none`). Do this first
+when playback fails and your config is the suspect.
+
 ## Sources
 
 | Source        | Content    | Language                   | Notes                                         |

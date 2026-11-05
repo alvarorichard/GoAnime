@@ -6,6 +6,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAppendPlaybackRefererArgsAddsGlobalRefererForDirectHTTP(t *testing.T) {
@@ -245,4 +246,110 @@ func TestBuildPlaybackArgs(t *testing.T) {
 			assert.Containsf(t, args, "--sub-file=https://subs.example/pt.vtt", "%s must keep its subtitles", url)
 		}
 	})
+}
+
+// userConfigViolations checks the contract of the user-config argument set and
+// returns every rule broken. Shared by the test and its metatest.
+func userConfigViolations(args []string) []string {
+	var v []string
+	has := func(a string) bool {
+		for _, x := range args {
+			if x == a {
+				return true
+			}
+		}
+		return false
+	}
+	if has("--no-config") {
+		v = append(v, "passes --no-config")
+	}
+	if has("--profile=fast") {
+		v = append(v, "forces --profile=fast over the user's quality settings")
+	}
+	if has("--video-latency-hacks=yes") {
+		v = append(v, "forces latency hacks")
+	}
+	if !has("--hwdec=auto-safe") {
+		v = append(v, "lost hwdec")
+	}
+	if !has(defaultVideoOutputArg()) {
+		v = append(v, "lost the VO fallback chain")
+	}
+	for _, g := range userConfigGuardArgs() {
+		if !has(g) {
+			v = append(v, "missing guard "+g)
+		}
+	}
+	return v
+}
+
+func TestBuildPlaybackArgsUserMPVConfig(t *testing.T) {
+	t.Run("user config drops --no-config and keeps the guards", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4", UserMPVConfig: true})
+		assert.Empty(t, userConfigViolations(args))
+	})
+
+	t.Run("isolated profile is unchanged", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4"})
+		assert.Contains(t, args, "--no-config")
+		assert.Contains(t, args, "--profile=fast")
+		for _, g := range userConfigGuardArgs() {
+			assert.NotContains(t, args, g, "guards are only for loaded configs")
+		}
+	})
+
+	t.Run("upscaling loads the config so it gets the guards", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL: "/tmp/x.mp4", UpscalingEnabled: true, ShaderArgs: []string{"--glsl-shader=/a.glsl"},
+		})
+		assert.NotContains(t, args, "--no-config")
+		for _, g := range userConfigGuardArgs() {
+			assert.Contains(t, args, g)
+		}
+	})
+
+	t.Run("referer, HLS and resume still apply with the user config", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{
+			VideoURL: "/tmp/x.mp4", UserMPVConfig: true, ResumeTime: 30, Title: "T",
+		})
+		assert.Contains(t, args, "--start=+30")
+		assert.Contains(t, args, "--force-media-title=T")
+	})
+
+	t.Run("every emitted flag passes the allowlist", func(t *testing.T) {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4", UserMPVConfig: true})
+		assert.Equal(t, args, filterMPVArgs(args), "StartVideo must not silently drop any of them")
+	})
+}
+
+// TestUserConfigViolationsMeta proves the contract check has teeth: each
+// mutation of a correct argument list must be reported.
+func TestUserConfigViolationsMeta(t *testing.T) {
+	good := buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4", UserMPVConfig: true})
+	require.Empty(t, userConfigViolations(good))
+
+	without := func(drop string) []string {
+		var out []string
+		for _, a := range good {
+			if a != drop {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	mutants := map[string][]string{
+		"no-config added":   append(append([]string{}, good...), "--no-config"),
+		"profile fast":      append(append([]string{}, good...), "--profile=fast"),
+		"latency hacks":     append(append([]string{}, good...), "--video-latency-hacks=yes"),
+		"hwdec dropped":     without("--hwdec=auto-safe"),
+		"vo chain dropped":  without(defaultVideoOutputArg()),
+		"keep-open dropped": without("--keep-open=no"),
+		"idle dropped":      without("--idle=no"),
+		"loop-file dropped": without("--loop-file=no"),
+		"resume dropped":    without("--resume-playback=no"),
+		"isolated profile":  buildPlaybackArgs(playbackArgsInput{VideoURL: "/tmp/x.mp4"}),
+	}
+	for name, m := range mutants {
+		assert.NotEmpty(t, userConfigViolations(m), "mutant %q survived", name)
+	}
 }
