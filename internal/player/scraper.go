@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 
 	// Blank import: the providers package self-registers every live Source in
@@ -638,7 +637,7 @@ func extractVideoURL(url string) (string, error) {
 		util.Debugf("Extracting video URL from page: %s", url)
 	}
 
-	response, err := api.SafeGet(url)
+	response, err := safeGetFn(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %+v", err)
 	}
@@ -733,7 +732,7 @@ func extractVideoURL(url string) (string, error) {
 }
 
 func fetchContent(url string) (string, error) {
-	resp, err := api.SafeGet(url)
+	resp, err := safeGetFn(url)
 	if err != nil {
 		return "", err
 	}
@@ -1452,7 +1451,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 
 		// Fetch the video page
-		response, err := api.SafeGet(videoSrc)
+		response, err := safeGetFn(videoSrc)
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch video page: %w", err)
 		}

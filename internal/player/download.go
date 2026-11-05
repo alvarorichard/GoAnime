@@ -332,7 +332,7 @@ func resolveDownloadURL(videoURL string) (string, error) {
 	}
 
 	util.Debug("Resolving AnimeFire video API URL for download", "url", videoURL)
-	resp, err := api.SafeGet(videoURL)
+	resp, err := safeGetFn(videoURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch AnimeFire video API: %w", err)
 	}
@@ -436,7 +436,7 @@ func resolveAnimeFireFallbackDownloadURL(videoAPIURL, failedURL string) (string,
 		return "", errors.New("source URL is not an AnimeFire video API URL")
 	}
 
-	resp, err := api.SafeGet(videoAPIURL)
+	resp, err := safeGetFn(videoAPIURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch AnimeFire fallback sources: %w", err)
 	}
@@ -1189,7 +1189,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 		return nil, err
 	}
 	if strings.Contains(videoSrc, "animefire.io/video/") {
-		resp, err := api.SafeGet(videoSrc)
+		resp, err := safeGetFn(videoSrc)
 		if err != nil {
 			return nil, err
 		}
@@ -1198,68 +1198,72 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 				util.Logger.Warn("Error closing response body", "error", err)
 			}
 		}()
-		var videoResponse struct {
-			Data []struct {
-				Src   string `json:"src"`
-				Label string `json:"label"`
-			}
-		}
+		var videoResponse videoEnvelope
 		// Streamed: the response bytes are only used for this decode.
 		if err := jsonx.Decode(resp.Body, 5*1024*1024, &videoResponse); err == nil && len(videoResponse.Data) > 0 {
-			var sources []struct {
-				Quality int
-				URL     string
-			}
-			for _, v := range videoResponse.Data {
-				labelDigits := digitsRe.FindString(v.Label)
-				q := 0
-				if labelDigits != "" {
-					q, _ = strconv.Atoi(labelDigits)
-				}
-				sources = append(sources, struct {
-					Quality int
-					URL     string
-				}{Quality: q, URL: v.Src})
-			}
-			return sources, nil
+			return sourcesFromEntries(videoResponse.Data), nil
 		}
 	}
-	var respStruct struct {
-		Data []struct {
-			Src   string `json:"src"`
-			Label string `json:"label"`
-		}
-	}
+	var respStruct videoEnvelope
 	if err := jsonx.Unmarshal([]byte(videoSrc), &respStruct); err == nil && len(respStruct.Data) > 0 {
-		var sources []struct {
-			Quality int
-			URL     string
-		}
-		for _, v := range respStruct.Data {
-			labelDigits := digitsRe.FindString(v.Label)
-			q := 0
-			if labelDigits != "" {
-				q, _ = strconv.Atoi(labelDigits)
-			}
-			sources = append(sources, struct {
-				Quality int
-				URL     string
-			}{Quality: q, URL: v.Src})
-		}
-		return sources, nil
-	}
-	matches := resolutionMp4Re.FindStringSubmatch(videoSrc)
-	if len(matches) > 1 {
-		q, _ := strconv.Atoi(matches[1])
-		return []struct {
-			Quality int
-			URL     string
-		}{{Quality: q, URL: videoSrc}}, nil
+		return sourcesFromEntries(respStruct.Data), nil
 	}
 	return []struct {
 		Quality int
 		URL     string
-	}{{Quality: 0, URL: videoSrc}}, nil
+	}{{Quality: qualityOfURL(videoSrc), URL: videoSrc}}, nil
+}
+
+// videoEntry is one quality in a source's video JSON.
+type videoEntry struct {
+	Src   string `json:"src"`
+	Label string `json:"label"`
+}
+
+// videoEnvelope is the JSON a video endpoint answers with.
+type videoEnvelope struct {
+	Data []videoEntry
+}
+
+// qualityOfLabel is the number in a quality label ("720p" is 720); 0 when the
+// label has none ("Auto", "FHD").
+func qualityOfLabel(label string) int {
+	digits := digitsRe.FindString(label)
+	if digits == "" {
+		return 0
+	}
+	q, _ := strconv.Atoi(digits)
+	return q
+}
+
+// qualityOfURL is the resolution a direct MP4 link spells in its name
+// ("..._720p.mp4"), 0 when it spells none.
+func qualityOfURL(u string) int {
+	matches := resolutionMp4Re.FindStringSubmatch(u)
+	if len(matches) > 1 {
+		q, _ := strconv.Atoi(matches[1])
+		return q
+	}
+	return 0
+}
+
+// sourcesFromEntries lists the entries' links with the quality their labels
+// state, in the order given.
+func sourcesFromEntries(entries []videoEntry) []struct {
+	Quality int
+	URL     string
+} {
+	sources := make([]struct {
+		Quality int
+		URL     string
+	}, 0, len(entries))
+	for _, v := range entries {
+		sources = append(sources, struct {
+			Quality int
+			URL     string
+		}{Quality: qualityOfLabel(v.Label), URL: v.Src})
+	}
+	return sources
 }
 
 // getBestQualityURL returns the best available quality for an episode.
@@ -2328,3 +2332,8 @@ func (p *ytdlpProgress) handle(update ytdlp.ProgressUpdate) {
 		p.sink.setProgressPeak(pct)
 	}
 }
+
+// safeGetFn is the SSRF-guarded GET every page and video-API fetch in this
+// package goes through; tests replace it, because the guard refuses the
+// loopback servers they stand up.
+var safeGetFn = api.SafeGet
