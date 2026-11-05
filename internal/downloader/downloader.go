@@ -1249,6 +1249,25 @@ func (m *progressModel) Init() tea.Cmd {
 	return tickCmd()
 }
 
+// monotonicPercent is the fraction the bar shows for received of total bytes.
+// It never goes below peak (an estimate that shrinks must not pull the bar
+// back) and never reaches 1 before the download is marked done, so the bar
+// is not full while the file is still being finished. It returns the percent
+// to show and the new peak.
+func monotonicPercent(received, total int64, peak float64) (pct, newPeak float64) {
+	if total > 0 && received > 0 {
+		pct = float64(received) / float64(total)
+	}
+	if pct < peak {
+		return peak, peak
+	}
+	if pct > 0 {
+		pct = min(pct, 0.99)
+		return pct, pct
+	}
+	return pct, peak
+}
+
 func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -1268,19 +1287,8 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mu.Lock()
 		m.rate.Observe(m.received, time.Time(msg))
-		pct := 0.0
-		if m.totalBytes > 0 && m.received > 0 {
-			pct = float64(m.received) / float64(m.totalBytes)
-		}
-		// Monotonic: never go backward
-		if pct < m.peakPct {
-			pct = m.peakPct
-		} else if pct > 0 {
-			if pct > 0.99 {
-				pct = 0.99
-			}
-			m.peakPct = pct
-		}
+		var pct float64
+		pct, m.peakPct = monotonicPercent(m.received, m.totalBytes, m.peakPct)
 		if pct > 0 {
 			cmd := m.progress.SetPercent(pct)
 			m.mu.Unlock()
@@ -1295,19 +1303,8 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
-		// Compute pct with monotonic guarantee
-		pct := 0.0
-		if m.totalBytes > 0 {
-			pct = float64(m.received) / float64(m.totalBytes)
-		}
-		if pct < m.peakPct {
-			pct = m.peakPct
-		} else if pct > 0 {
-			if pct > 0.99 {
-				pct = 0.99
-			}
-			m.peakPct = pct
-		}
+		var pct float64
+		pct, m.peakPct = monotonicPercent(m.received, m.totalBytes, m.peakPct)
 		var cmd tea.Cmd
 		if pct > 0 {
 			cmd = m.progress.SetPercent(pct)
