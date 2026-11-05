@@ -885,89 +885,28 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	}
 
 	// Forward the stored referer/origin so the CDN accepts the request
-	if ref := downloadReferer(url); ref != "" {
-		dl.AddHeaders("Referer:" + ref)
-		origin := strings.TrimSuffix(ref, "/")
-		if u, e := neturl.Parse(origin); e == nil {
-			origin = u.Scheme + "://" + u.Host
-		}
-		dl.AddHeaders("Origin:" + origin)
+	for _, h := range ytdlpHeaders(downloadReferer(url)) {
+		dl.AddHeaders(h)
 	}
 
 	// Real-time progress via yt-dlp's native callback.
-	// Track per-file totals so video+audio sizes are summed correctly
-	// (yt-dlp downloads them as separate files then merges).
-	var lastReportedBytes int64
-	var lastProgressFile string
-	fileTotals := make(map[string]int64)
+	progress := newYtdlpProgress(m)
 	if m != nil {
-		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
-			if update.Status == ytdlp.ProgressStatusPostProcessing ||
-				update.Status == ytdlp.ProgressStatusFinished {
-				return
-			}
-
-			if update.Filename != "" && update.Filename != lastProgressFile {
-				lastProgressFile = update.Filename
-				lastReportedBytes = 0
-			}
-
-			downloaded := int64(update.DownloadedBytes)
-			if delta := downloaded - lastReportedBytes; delta > 0 {
-				m.addProgressReceived(delta)
-				lastReportedBytes = downloaded
-			}
-
-			// Sum totals across all files (video + audio) for accurate progress.
-			if update.TotalBytes > 0 {
-				fname := update.Filename
-				if fname == "" {
-					fname = "_default"
-				}
-				fileTotals[fname] = int64(update.TotalBytes)
-				var sum int64
-				for _, v := range fileTotals {
-					sum += v
-				}
-				m.setProgressTotal(sum)
-			} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
-				// HLS streams: TotalBytes is 0 because the size is unknown
-				// upfront. Use fragment index/count as a monotonically
-				// increasing progress ratio so the bar never goes backward.
-				pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
-				if pct > 0.99 {
-					pct = 0.99 // reserve 100% for actual completion
-				}
-				m.setProgressPeak(pct)
-			}
-		})
+		dl.ProgressFunc(200*time.Millisecond, progress.handle)
 	}
 
 	// Run with --hls-use-mpegts as raw arg (no typed method available) + retry logic
-	var runErr error
-	maxRetries := 2
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
+	runErr := runWithRetry(
+		func() error { _, err := dl.Run(ctx, safeURL, "--hls-use-mpegts"); return err },
+		ytdlpMaxRetries,
+		time.Sleep,
+		func(attempt int) {
 			if m != nil && util.IsDebug {
-				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, maxRetries+1)
+				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, ytdlpMaxRetries+1)
 			}
-			time.Sleep(time.Duration(attempt*2) * time.Second)
-			lastReportedBytes = 0
-			lastProgressFile = ""
-		}
-
-		_, runErr = dl.Run(ctx, safeURL, "--hls-use-mpegts")
-
-		if runErr == nil {
-			break
-		}
-
-		if attempt < maxRetries && isRetryableError(runErr) {
-			continue
-		} else {
-			break
-		}
-	}
+			progress.resetForRetry()
+		},
+	)
 
 	if runErr != nil {
 		// yt-dlp rejects URLs with unusual extensions (.aspx, etc.) as a security
@@ -2284,4 +2223,108 @@ func validEpisodeNumber(v string) error {
 		return fmt.Errorf("invalid number")
 	}
 	return nil
+}
+
+// ytdlpMaxRetries is how many times a retryable yt-dlp failure is retried.
+const ytdlpMaxRetries = 2
+
+// ytdlpHeaders are the request headers that make a CDN accept the download:
+// the stored referer and an Origin derived from it (scheme and host only).
+// No referer, no headers.
+func ytdlpHeaders(referer string) []string {
+	if referer == "" {
+		return nil
+	}
+	origin := strings.TrimSuffix(referer, "/")
+	if u, err := neturl.Parse(origin); err == nil && u.Scheme != "" && u.Host != "" {
+		origin = u.Scheme + "://" + u.Host
+	}
+	return []string{"Referer:" + referer, "Origin:" + origin}
+}
+
+// runWithRetry runs fn, retrying up to maxRetries times while the failure is
+// retryable (isRetryableError). Before retry number n it waits 2n seconds
+// through sleep and calls onRetry(n). It returns the last error, nil when a
+// run succeeded.
+func runWithRetry(fn func() error, maxRetries int, sleep func(time.Duration), onRetry func(attempt int)) error {
+	var err error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			sleep(time.Duration(attempt*2) * time.Second)
+			onRetry(attempt)
+		}
+		if err = fn(); err == nil {
+			return nil
+		}
+		if attempt == maxRetries || !isRetryableError(err) {
+			return err
+		}
+	}
+	return err
+}
+
+// progressSink is where a download reports how far it got.
+type progressSink interface {
+	addProgressReceived(delta int64)
+	setProgressTotal(total int64)
+	setProgressPeak(pct float64)
+}
+
+// ytdlpProgress turns yt-dlp's progress updates into sink calls. yt-dlp fetches
+// video and audio as separate files and merges them, so received bytes are
+// counted per file and the total is the sum of every file's size.
+type ytdlpProgress struct {
+	sink      progressSink
+	lastBytes int64
+	lastFile  string
+	totals    map[string]int64
+}
+
+func newYtdlpProgress(sink progressSink) *ytdlpProgress {
+	return &ytdlpProgress{sink: sink, totals: make(map[string]int64)}
+}
+
+// resetForRetry forgets the byte counter of the failed attempt: the next one
+// starts again from zero.
+func (p *ytdlpProgress) resetForRetry() {
+	p.lastBytes = 0
+	p.lastFile = ""
+}
+
+func (p *ytdlpProgress) handle(update ytdlp.ProgressUpdate) {
+	if update.Status == ytdlp.ProgressStatusPostProcessing || update.Status == ytdlp.ProgressStatusFinished {
+		return
+	}
+	if update.Filename != "" && update.Filename != p.lastFile {
+		p.lastFile = update.Filename
+		p.lastBytes = 0
+	}
+
+	downloaded := int64(update.DownloadedBytes)
+	if delta := downloaded - p.lastBytes; delta > 0 {
+		p.sink.addProgressReceived(delta)
+		p.lastBytes = downloaded
+	}
+
+	switch {
+	case update.TotalBytes > 0:
+		name := update.Filename
+		if name == "" {
+			name = "_default"
+		}
+		p.totals[name] = int64(update.TotalBytes)
+		var sum int64
+		for _, v := range p.totals {
+			sum += v
+		}
+		p.sink.setProgressTotal(sum)
+	case update.FragmentCount > 0 && update.FragmentIndex > 0:
+		// HLS: the size is unknown upfront, so fragment index/count is a
+		// monotonically increasing ratio and the bar never goes backward.
+		pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
+		if pct > 0.99 {
+			pct = 0.99 // reserve 100% for actual completion
+		}
+		p.sink.setProgressPeak(pct)
+	}
 }
