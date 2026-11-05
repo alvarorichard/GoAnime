@@ -151,7 +151,9 @@ func TestReportCarriesEverySection(t *testing.T) {
 	for _, want := range []string{"Paths", "Logs", "Sources", "cfsolve", version.Version} {
 		assert.Contains(t, text, want)
 	}
-	assert.NotContains(t, text, os.Getenv("HOME")+"/", "the home directory is scrubbed (reports are shared)")
+	if home, err := os.UserHomeDir(); err == nil && len(home) > 3 {
+		assert.NotContains(t, text, home, "the home directory is scrubbed (reports are shared)")
+	}
 }
 
 // ---- pathsSectionFrom --------------------------------------------------------
