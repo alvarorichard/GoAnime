@@ -455,6 +455,12 @@ func resolveAnimeFireFallbackDownloadURL(videoAPIURL, failedURL string) (string,
 	if err != nil {
 		return "", err
 	}
+	return pickFallbackCandidate(candidates, failedURL)
+}
+
+// pickFallbackCandidate is the first usable source that is not the one that
+// just failed. The list is already ordered by preference.
+func pickFallbackCandidate(candidates []string, failedURL string) (string, error) {
 	for _, candidate := range candidates {
 		if candidate != "" && candidate != failedURL {
 			return candidate, nil
@@ -608,16 +614,12 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	m.setProgressTotal(contentLength)
 
-	chunkSize := contentLength / int64(numThreads)
+	ranges := splitByteRanges(contentLength, numThreads)
+	numThreads = len(ranges)
 	var downloadWg sync.WaitGroup
 	errChan := make(chan error, numThreads)
 
-	for i := range numThreads {
-		from := int64(i) * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
+	for i, r := range ranges {
 		downloadWg.Add(1)
 		go func(from, to int64, part int) {
 			defer downloadWg.Done()
@@ -625,7 +627,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 				util.Logger.Error("Blogger download chunk failed", "thread", part, "error", err)
 				errChan <- err
 			}
-		}(from, to, i)
+		}(r.from, r.to, i)
 	}
 
 	downloadWg.Wait()
@@ -783,8 +785,6 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	httpClient := &http.Client{
 		Transport: downloadTransport(10 * time.Second),
 	}
-	chunkSize := int64(0)
-	var contentLength int64
 	contentLength, err := getContentLength(url, httpClient)
 	if err != nil {
 		return err
@@ -799,15 +799,11 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if numThreads > 1 && util.IsLocalProxyURL(url) {
 		numThreads = 1
 	}
-	chunkSize = contentLength / int64(numThreads)
+	ranges := splitByteRanges(contentLength, numThreads)
+	numThreads = len(ranges)
 	var downloadWg sync.WaitGroup
 	errChan := make(chan error, numThreads)
-	for i := range numThreads {
-		from := int64(i) * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
+	for i, r := range ranges {
 		downloadWg.Add(1)
 		go func(from, to int64, part int, httpClient *http.Client) {
 			defer downloadWg.Done()
@@ -815,7 +811,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 				util.Logger.Error("Download part failed", "thread", part, "error", err)
 				errChan <- err
 			}
-		}(from, to, i, httpClient)
+		}(r.from, r.to, i, httpClient)
 	}
 	downloadWg.Wait()
 	close(errChan)
@@ -2013,33 +2009,18 @@ func getEpisodeRange() (startNum, endNum int, err error) {
 			huh.NewInput().
 				Title("Enter start episode number").
 				Value(&startStr).
-				Validate(func(v string) error {
-					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
-						return fmt.Errorf("invalid number")
-					}
-					return nil
-				}),
+				Validate(validEpisodeNumber),
 			huh.NewInput().
 				Title("Enter end episode number").
 				Value(&endStr).
-				Validate(func(v string) error {
-					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
-						return fmt.Errorf("invalid number")
-					}
-					return nil
-				}),
+				Validate(validEpisodeNumber),
 		),
 	)
 
 	if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
 		return 0, 0, err
 	}
-	startNum, _ = strconv.Atoi(strings.TrimSpace(startStr))
-	endNum, _ = strconv.Atoi(strings.TrimSpace(endStr))
-	if startNum > endNum {
-		return 0, 0, fmt.Errorf("start cannot be greater than end")
-	}
-	return startNum, endNum, nil
+	return parseEpisodeRange(startStr, endStr)
 }
 
 // findEpisode returns the episode struct by number.
@@ -2131,191 +2112,176 @@ func fileExists(path string) bool {
 }
 
 // handleExistingEpisodes handles the case when all episodes in the requested range already exist
+// and offers to play one of them.
 func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum, endNum int) error {
 	fmt.Printf("All episodes in range %d-%d already exist!\n\n", startNum, endNum)
-
-	// Collect existing episodes in the range
-	var existingEpisodes []models.Episode
-	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
-		episode, found := findEpisode(episodes, episodeNum)
-		if !found {
-			continue
-		}
-
-		episodePath, err := createEpisodePath(animeURL, episodeNum)
-		if err != nil {
-			continue
-		}
-
-		if fileExists(episodePath) {
-			existingEpisodes = append(existingEpisodes, episode)
-		}
-	}
-
-	if len(existingEpisodes) == 0 {
-		fmt.Println("No downloaded episodes found in the specified range.")
-		return nil
-	}
-
-	// Create options for the interactive menu
-	type menuOption struct {
-		Label string
-		Value string
-	}
-	var menuItems []menuOption
-	for _, ep := range existingEpisodes {
-		title := fmt.Sprintf("Episode %d", ep.Num)
-		if ep.Title.English != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
-		} else if ep.Title.Romaji != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
-		}
-		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
-	}
-
-	// Add option to not watch anything
-	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
-
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
-	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Download > Watch",
-		WindowTitle:  "GoAnime - Watch Downloaded",
-		ItemSingular: "episode",
-		ItemPlural:   "episodes",
-	})
-
-	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return ErrUserQuit
-		}
-		return fmt.Errorf("episode selection error: %w", err)
-	}
-
-	selectedEpisode := menuItems[idx].Value
-	if selectedEpisode == "exit" {
-		fmt.Println("No episode selected.")
-		return ErrUserQuit
-	}
-
-	// Find and play the selected episode
-	episodeNum, err := strconv.Atoi(selectedEpisode)
-	if err != nil {
-		return fmt.Errorf("invalid episode number: %w", err)
-	}
-
-	// Verify the episode exists in our list
-	_, found := findEpisode(existingEpisodes, episodeNum)
-	if !found {
-		return fmt.Errorf("selected episode not found")
-	}
-
-	fmt.Printf("Playing Episode %d...\n", episodeNum)
-
-	// Get the episode path and play it
-	episodePath, err := createEpisodePath(animeURL, episodeNum)
-	if err != nil {
-		return fmt.Errorf("failed to get episode path: %w", err)
-	}
-
-	// Play the episode using the existing player logic
-	// Note: We use the local file path as the video URL since it's already downloaded
-	// IDs set to 0 since we don't have that context here, updater set to nil
-	return playVideo(episodePath, episodes, episodeNum, 0, 0, nil)
+	return watchDownloadedRange(episodes, animeURL, startNum, endNum, "Download > Watch")
 }
 
 // askAndPlayDownloadedEpisode asks the user which episode from the downloaded range they want to play
 func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, startNum, endNum int) error {
-	// Collect downloaded episodes in the range
-	var downloadedEpisodes []models.Episode
+	return watchDownloadedRange(episodes, animeURL, startNum, endNum, "Download > Watch Range")
+}
+
+// Seams for the "watch what you downloaded" menu.
+var (
+	episodePathFn = createEpisodePath
+	pathExistsFn  = fileExists
+	pickLabelsFn  = tui.PickLabels
+	playLocalFn   = func(path string, episodes []models.Episode, num int) error {
+		return playVideo(path, episodes, num, 0, 0, nil)
+	}
+	watchExitValue = "exit"
+)
+
+// downloadedEpisodesInRange lists the episodes of [startNum, endNum] that are in
+// the list and already on disk, in number order.
+func downloadedEpisodesInRange(episodes []models.Episode, animeURL string, startNum, endNum int) []models.Episode {
+	var found []models.Episode
 	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
-		episode, found := findEpisode(episodes, episodeNum)
-		if !found {
+		episode, ok := findEpisode(episodes, episodeNum)
+		if !ok {
 			continue
 		}
-
-		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		episodePath, err := episodePathFn(animeURL, episodeNum)
 		if err != nil {
 			continue
 		}
-
-		if fileExists(episodePath) {
-			downloadedEpisodes = append(downloadedEpisodes, episode)
+		if pathExistsFn(episodePath) {
+			found = append(found, episode)
 		}
 	}
+	return found
+}
 
-	if len(downloadedEpisodes) == 0 {
+// watchMenuEntry is one row of the downloaded-episodes menu.
+type watchMenuEntry struct{ label, value string }
+
+// watchMenuEntries labels each episode ("Episode 3: English title", the
+// Romaji one when there is no English one) and closes the list with the exit
+// row.
+func watchMenuEntries(episodes []models.Episode) []watchMenuEntry {
+	entries := make([]watchMenuEntry, 0, len(episodes)+1)
+	for _, ep := range episodes {
+		label := fmt.Sprintf("Episode %d", ep.Num)
+		if ep.Title.English != "" {
+			label = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
+		} else if ep.Title.Romaji != "" {
+			label = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
+		}
+		entries = append(entries, watchMenuEntry{label: label, value: strconv.Itoa(ep.Num)})
+	}
+	return append(entries, watchMenuEntry{label: "Don't watch anything", value: watchExitValue})
+}
+
+// watchPickError turns the picker's failure into what the caller returns:
+// backing out or cancelling leaves like quitting does.
+func watchPickError(err error) error {
+	if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+		return ErrUserQuit
+	}
+	return fmt.Errorf("episode selection error: %w", err)
+}
+
+// watchDownloadedRange offers the episodes of the range that are on disk and
+// plays the one chosen.
+func watchDownloadedRange(episodes []models.Episode, animeURL string, startNum, endNum int, breadcrumb string) error {
+	downloaded := downloadedEpisodesInRange(episodes, animeURL, startNum, endNum)
+	if len(downloaded) == 0 {
 		fmt.Println("No downloaded episodes found in the specified range.")
 		return nil
 	}
 
-	// Create options for the interactive menu
-	type menuOption struct {
-		Label string
-		Value string
+	entries := watchMenuEntries(downloaded)
+	labels := make([]string, len(entries))
+	for i, e := range entries {
+		labels[i] = e.label
 	}
-	var menuItems []menuOption
-	for _, ep := range downloadedEpisodes {
-		title := fmt.Sprintf("Episode %d", ep.Num)
-		if ep.Title.English != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
-		} else if ep.Title.Romaji != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
-		}
-		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
-	}
-
-	// Add option to not watch anything
-	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
-
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
-	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Download > Watch Range",
+	idx, err := pickLabelsFn(labels, tui.PickOptions{
+		Breadcrumb:   breadcrumb,
 		WindowTitle:  "GoAnime - Watch Downloaded",
 		ItemSingular: "episode",
 		ItemPlural:   "episodes",
 	})
-
 	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return ErrUserQuit
-		}
-		return fmt.Errorf("episode selection error: %w", err)
+		return watchPickError(err)
+	}
+	if idx < 0 || idx >= len(entries) {
+		return fmt.Errorf("selected episode not found")
 	}
 
-	selectedEpisode := menuItems[idx].Value
-	if selectedEpisode == "exit" {
+	selected := entries[idx].value
+	if selected == watchExitValue {
 		fmt.Println("No episode selected.")
 		return ErrUserQuit
 	}
-
-	// Find and play the selected episode
-	episodeNum, err := strconv.Atoi(selectedEpisode)
+	episodeNum, err := strconv.Atoi(selected)
 	if err != nil {
 		return fmt.Errorf("invalid episode number: %w", err)
 	}
-
-	// Verify the episode exists in our list
-	_, found := findEpisode(downloadedEpisodes, episodeNum)
-	if !found {
+	if _, ok := findEpisode(downloaded, episodeNum); !ok {
 		return fmt.Errorf("selected episode not found")
 	}
 
 	fmt.Printf("Playing Episode %d...\n", episodeNum)
-
-	// Get the episode path and play it
-	episodePath, err := createEpisodePath(animeURL, episodeNum)
+	episodePath, err := episodePathFn(animeURL, episodeNum)
 	if err != nil {
 		return fmt.Errorf("failed to get episode path: %w", err)
 	}
+	// The file is already local; the IDs are 0 because there is no tracking
+	// context here, and no Discord updater.
+	return playLocalFn(episodePath, episodes, episodeNum)
+}
 
-	// Play the episode using the existing player logic
-	// Note: We use the local file path as the video URL since it's already downloaded
-	// IDs set to 0 since we don't have that context here, updater set to nil
-	return playVideo(episodePath, episodes, episodeNum, 0, 0, nil)
+// byteRange is an inclusive span of a file, as an HTTP Range header counts it.
+type byteRange struct{ from, to int64 }
+
+// splitByteRanges cuts a file of contentLength bytes into at most n contiguous
+// ranges that cover it exactly once; the last range takes the remainder. There
+// are never more ranges than bytes, so none is empty, and n below one means a
+// single range. Parts are numbered by position, which is how combineParts puts
+// them back together.
+func splitByteRanges(contentLength int64, n int) []byteRange {
+	if contentLength <= 0 {
+		return nil
+	}
+	n = max(n, 1)
+	if int64(n) > contentLength {
+		n = int(contentLength)
+	}
+	chunk := contentLength / int64(n)
+	ranges := make([]byteRange, n)
+	for i := range ranges {
+		from := int64(i) * chunk
+		to := from + chunk - 1
+		if i == n-1 {
+			to = contentLength - 1
+		}
+		ranges[i] = byteRange{from: from, to: to}
+	}
+	return ranges
+}
+
+// parseEpisodeRange validates the two numbers typed into the range form.
+func parseEpisodeRange(startStr, endStr string) (start, end int, err error) {
+	start, err = strconv.Atoi(strings.TrimSpace(startStr))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid number")
+	}
+	end, err = strconv.Atoi(strings.TrimSpace(endStr))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid number")
+	}
+	if start > end {
+		return 0, 0, fmt.Errorf("start cannot be greater than end")
+	}
+	return start, end, nil
+}
+
+// validEpisodeNumber is the form field's check.
+func validEpisodeNumber(v string) error {
+	if _, err := strconv.Atoi(strings.TrimSpace(v)); err != nil {
+		return fmt.Errorf("invalid number")
+	}
+	return nil
 }
