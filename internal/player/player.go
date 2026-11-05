@@ -1404,16 +1404,51 @@ func takeRangeStart() int {
 	return start
 }
 
-// askForDownload presents the episode options. Enter watches right away:
-// downloading is a shortcut (d/D/A), never the default (tela 6). Return
-// codes: 0 back, 1 this episode, 2 range, 3 upscale, 4 watch now, 5 all.
-func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return 4 // no TTY: default to play online
-	}
-	// Build the upscale option label with current status
-	upscaleStatus := upscaler.GetShaderModeName(upscaler.GetShaderMode())
+// The codes askForDownload returns, which the playback loop switches on.
+const (
+	downloadBack    = 0 // back out of the options
+	downloadThis    = 1 // download this episode
+	downloadRange   = 2 // download a range
+	downloadUpscale = 3 // open the upscaling menu
+	downloadWatch   = 4 // watch now
+	downloadAll     = 5 // download every episode
+)
 
+// Seams for the interactive menus in this file. The defaults open the real
+// terminal UI; tests replace them, so no menu needs a TTY to be exercised.
+var (
+	stdinIsTerminal     = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	pickItemsFn         = tui.Pick
+	confirmFn           = confirmWithHuh
+	shaderModeNameFn    = func() string { return upscaler.GetShaderModeName(upscaler.GetShaderMode()) }
+	shadersInstalledFn  = upscaler.ShadersInstalled
+	ganInstalledFn      = upscaler.GANShadersInstalled
+	setShaderModeFn     = upscaler.SetShaderMode
+	installShadersFn    = upscaler.InstallShaders
+	installGANShadersFn = upscaler.InstallGANShaders
+	infoFn              = util.Info
+	warnFn              = util.Warn
+)
+
+// confirmWithHuh asks a yes/no question in the terminal.
+func confirmWithHuh(title, description, yes, no string) (bool, error) {
+	var confirmed bool
+	confirm := huh.NewConfirm().
+		Title(title).
+		Description(description).
+		Affirmative(yes).
+		Negative(no).
+		Value(&confirmed)
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+		return false, err
+	}
+	return confirmed, nil
+}
+
+// downloadMenuItems are the rows of the episode options menu. Enter watches
+// right away: downloading is a shortcut (d/D/A), never the default. The
+// download-all row exists only when there is more than one episode.
+func downloadMenuItems(totalEpisodes int, upscaleStatus string) []tui.PickItem {
 	items := []tui.PickItem{
 		{Label: "Watch now"},
 		{Label: "Download this episode", Key: "d"},
@@ -1426,17 +1461,47 @@ func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 			Key:   "A",
 		})
 	}
+	return items
+}
 
-	breadcrumb := "Playback > Options"
+// downloadMenuHeader is the breadcrumb and the one-line context of the menu.
+func downloadMenuHeader(episodeNum int, animeName string) (breadcrumb, context string) {
+	breadcrumb = "Playback > Options"
 	if episodeNum > 0 {
 		breadcrumb = fmt.Sprintf("Episode %d > Options", episodeNum)
 	}
-	context := tui.SingleLine(animeName)
+	context = tui.SingleLine(animeName)
 	if episodeNum > 0 && context != "" {
 		context = fmt.Sprintf("%s · Episode %d", context, episodeNum)
 	}
+	return breadcrumb, context
+}
 
-	idx, err := tui.Pick(items, tui.PickOptions{
+// downloadChoiceFor maps the picked row to its code. A row that does not exist
+// plays the episode: the one thing an unexpected index must never do is start
+// downloading the whole series.
+func downloadChoiceFor(idx int, hasDownloadAll bool) int {
+	switch {
+	case idx == 1:
+		return downloadThis
+	case idx == 2:
+		return downloadRange
+	case idx == 3:
+		return downloadUpscale
+	case idx == 4 && hasDownloadAll:
+		return downloadAll
+	default:
+		return downloadWatch
+	}
+}
+
+// askForDownload presents the episode options and returns a download* code.
+func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
+	if !stdinIsTerminal() {
+		return downloadWatch // no TTY: default to play online
+	}
+	breadcrumb, context := downloadMenuHeader(episodeNum, animeName)
+	idx, err := pickItemsFn(downloadMenuItems(totalEpisodes, shaderModeNameFn()), tui.PickOptions{
 		Breadcrumb:   breadcrumb,
 		WindowTitle:  "GoAnime - Options",
 		Context:      context,
@@ -1446,43 +1511,28 @@ func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPickBack) {
-			return 0
+			return downloadBack
 		}
 		util.Errorf("Error showing options menu: %v", err)
-		return 4 // Default to play online on error
+		return downloadWatch // Default to play online on error
 	}
-
-	// Determines the selected option based on position
-	switch idx {
-	case 0:
-		return 4
-	case 1:
-		return 1
-	case 2:
-		return 2
-	case 3:
-		return 3
-	default:
-		return 5
-	}
+	return downloadChoiceFor(idx, totalEpisodes > 1)
 }
 
 // confirmDownloadAll asks before downloading the whole series: the old menu
 // put "Download ALL" one arrow from enter, so one wrong tap fetched the
-// entire series (tela 6).
+// entire series.
 func confirmDownloadAll(totalEpisodes int) bool {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return true
 	}
-	var confirmed bool
-	confirm := huh.NewConfirm().
-		Title(fmt.Sprintf("Download all %d episodes?", totalEpisodes)).
-		Description("This downloads the whole series.").
-		Affirmative("Yes, download all").
-		Negative("No, back").
-		Value(&confirmed)
-
-	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+	confirmed, err := confirmFn(
+		fmt.Sprintf("Download all %d episodes?", totalEpisodes),
+		"This downloads the whole series.",
+		"Yes, download all",
+		"No, back",
+	)
+	if err != nil {
 		util.Errorf("Error showing download confirmation: %v", err)
 		return false
 	}
@@ -1490,10 +1540,10 @@ func confirmDownloadAll(totalEpisodes int) bool {
 }
 
 func askForPlayOffline() bool {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return false // no TTY: default to no
 	}
-	idx, err := tui.PickLabels([]string{"Yes", "No"}, tui.PickOptions{
+	idx, err := pickLabelsFn([]string{"Yes", "No"}, tui.PickOptions{
 		Breadcrumb:   "Playback > Offline",
 		WindowTitle:  "GoAnime - Play Offline",
 		ItemSingular: "option",
@@ -1669,127 +1719,130 @@ func GetCurrentSubtitleTrack(socketPath string) (int, error) {
 	return 0, fmt.Errorf("unexpected sid format")
 }
 
-// handleUpscaleFromMenu shows the real-time upscaling options menu
-func handleUpscaleFromMenu() error {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return fmt.Errorf("no TTY available for interactive menu")
-	}
-	// Check if shaders are installed
-	shadersInstalled := upscaler.ShadersInstalled()
-	currentMode := upscaler.GetShaderModeName(upscaler.GetShaderMode())
+// upscaleEntry is one row of the upscaling menu.
+type upscaleEntry struct{ label, value string }
 
-	prompt := fmt.Sprintf("Upscaling [%s]: ", currentMode)
-	if !shadersInstalled {
-		prompt = "Upscaling (install shaders first): "
-	}
-
-	type menuOption struct {
-		Label string
-		Value string
-	}
-
-	items := []menuOption{
+// upscaleMenuEntries are the rows of the upscaling menu. The modes appear only
+// once the Anime4K shaders are installed, and the GAN row offers installing
+// them when they are not.
+func upscaleMenuEntries(shadersInstalled, ganInstalled bool) []upscaleEntry {
+	items := []upscaleEntry{
 		{"Back", "back"},
 		{"Off (no upscaling)", "off"},
 	}
-
 	if shadersInstalled {
 		items = append(items,
-			menuOption{"Performance (weak GPU)", "performance"},
-			menuOption{"Fast (Mode A - text-heavy)", "fast"},
-			menuOption{"Balanced (Mode B - general)", "balanced"},
-			menuOption{"Quality (Mode C - films)", "quality"},
-			menuOption{"Ultra (Max Enhancement - SD sources)", "ultra"},
-			menuOption{"--- Advanced Modes ---", "separator"},
-			menuOption{"A+A (Max Perceptual - 1080p)", "advanced_aa"},
-			menuOption{"B+B (720p Optimized)", "advanced_bb"},
-			menuOption{"C+A (Upscaled/Downscaled Content)", "advanced_ca"},
+			upscaleEntry{"Performance (weak GPU)", "performance"},
+			upscaleEntry{"Fast (Mode A - text-heavy)", "fast"},
+			upscaleEntry{"Balanced (Mode B - general)", "balanced"},
+			upscaleEntry{"Quality (Mode C - films)", "quality"},
+			upscaleEntry{"Ultra (Max Enhancement - SD sources)", "ultra"},
+			upscaleEntry{"--- Advanced Modes ---", "separator"},
+			upscaleEntry{"A+A (Max Perceptual - 1080p)", "advanced_aa"},
+			upscaleEntry{"B+B (720p Optimized)", "advanced_bb"},
+			upscaleEntry{"C+A (Upscaled/Downscaled Content)", "advanced_ca"},
 		)
-
-		// Add GAN UUL option (check if GAN shaders are installed)
-		if upscaler.GANShadersInstalled() {
-			items = append(items,
-				menuOption{"GAN UUL (360p to 4K - HEAVY)", "gan_uul"},
-			)
+		if ganInstalled {
+			items = append(items, upscaleEntry{"GAN UUL (360p to 4K - HEAVY)", "gan_uul"})
 		} else {
-			items = append(items,
-				menuOption{"GAN UUL (not installed)", "setup_gan"},
-			)
+			items = append(items, upscaleEntry{"GAN UUL (not installed)", "setup_gan"})
 		}
 	}
+	return append(items, upscaleEntry{"Setup shaders (download)", "setup"})
+}
 
-	items = append(items, menuOption{"Setup shaders (download)", "setup"})
-
-	labels := make([]string, len(items))
-	for i, it := range items {
-		labels[i] = it.Label
+// upscaleBreadcrumb names the menu after the current mode, or asks for the
+// shaders when there are none.
+func upscaleBreadcrumb(shadersInstalled bool, currentMode string) string {
+	if !shadersInstalled {
+		return "Upscaling (install shaders first)"
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   tui.SingleLine(strings.TrimSuffix(prompt, ": ")),
-		WindowTitle:  "GoAnime - Upscale",
-		ItemSingular: "mode",
-		ItemPlural:   "modes",
-	})
-	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return nil
-		}
-		return fmt.Errorf("cancelled: %w", err)
-	}
+	return tui.SingleLine(fmt.Sprintf("Upscaling [%s]", currentMode))
+}
 
-	choice := items[idx].Value
+// upscaleModes maps a menu value to the shader mode it selects and the
+// message that announces it.
+var upscaleModes = map[string]struct {
+	mode upscaler.ShaderMode
+	info string
+}{
+	"off":         {upscaler.ShaderModeOff, "Real-time upscaling disabled"},
+	"performance": {upscaler.ShaderModePerformance, "Real-time upscaling: Performance mode (minimal shaders)"},
+	"fast":        {upscaler.ShaderModeFast, "Real-time upscaling: Fast mode (Mode A - good for subtitled anime)"},
+	"balanced":    {upscaler.ShaderModeBalanced, "Real-time upscaling: Balanced mode (Mode B - general purpose)"},
+	"quality":     {upscaler.ShaderModeQuality, "Real-time upscaling: Quality mode (Mode C - best for films)"},
+	"ultra":       {upscaler.ShaderModeUltra, "Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)"},
+	"advanced_aa": {upscaler.ShaderModeAdvancedAA, "Real-time upscaling: Advanced A+A (highest perceptual quality, may cause ringing)"},
+	"advanced_bb": {upscaler.ShaderModeAdvancedBB, "Real-time upscaling: Advanced B+B (optimized for 720p with aliasing)"},
+	"advanced_ca": {upscaler.ShaderModeAdvancedCA, "Real-time upscaling: Advanced C+A (quality + restore for downscaled content)"},
+	"gan_uul":     {upscaler.ShaderModeGAN_UUL, "Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)"},
+}
+
+// applyUpscaleChoice carries out one pick of the upscaling menu. again is true
+// when the menu should be shown once more (the separator row was chosen).
+func applyUpscaleChoice(choice string) (again bool, err error) {
 	switch choice {
 	case "back":
-		return nil
+		return false, nil
 	case "separator":
-		// Do nothing for separator, show menu again
-		return handleUpscaleFromMenu()
-	case "off":
-		upscaler.SetShaderMode(upscaler.ShaderModeOff)
-		util.Info("Real-time upscaling disabled")
-	case "performance":
-		upscaler.SetShaderMode(upscaler.ShaderModePerformance)
-		util.Info("Real-time upscaling: Performance mode (minimal shaders)")
-	case "fast":
-		upscaler.SetShaderMode(upscaler.ShaderModeFast)
-		util.Info("Real-time upscaling: Fast mode (Mode A - good for subtitled anime)")
-	case "balanced":
-		upscaler.SetShaderMode(upscaler.ShaderModeBalanced)
-		util.Info("Real-time upscaling: Balanced mode (Mode B - general purpose)")
-	case "quality":
-		upscaler.SetShaderMode(upscaler.ShaderModeQuality)
-		util.Info("Real-time upscaling: Quality mode (Mode C - best for films)")
-	case "ultra":
-		upscaler.SetShaderMode(upscaler.ShaderModeUltra)
-		util.Info("Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)")
-	case "advanced_aa":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedAA)
-		util.Info("Real-time upscaling: Advanced A+A (highest perceptual quality, may cause ringing)")
-	case "advanced_bb":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedBB)
-		util.Info("Real-time upscaling: Advanced B+B (optimized for 720p with aliasing)")
-	case "advanced_ca":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedCA)
-		util.Info("Real-time upscaling: Advanced C+A (quality + restore for downscaled content)")
-	case "gan_uul":
-		upscaler.SetShaderMode(upscaler.ShaderModeGAN_UUL)
-		util.Info("Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)")
-		util.Warn("This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+		return true, nil
 	case "setup_gan":
-		util.Info("Setting up experimental GAN UUL shaders...")
-		if err := upscaler.InstallGANShaders(); err != nil {
-			return fmt.Errorf("failed to install GAN shaders: %w", err)
+		infoFn("Setting up experimental GAN UUL shaders...")
+		if err := installGANShadersFn(); err != nil {
+			return false, fmt.Errorf("failed to install GAN shaders: %w", err)
 		}
-		util.Info("GAN UUL shaders installed! Select 'GAN UUL' to enable 360p→4K upscaling.")
+		infoFn("GAN UUL shaders installed! Select 'GAN UUL' to enable 360p→4K upscaling.")
+		return false, nil
 	case "setup":
-		util.Info("Setting up Anime4K shaders...")
-		if err := upscaler.InstallShaders(); err != nil {
-			return fmt.Errorf("failed to install shaders: %w", err)
+		infoFn("Setting up Anime4K shaders...")
+		if err := installShadersFn(); err != nil {
+			return false, fmt.Errorf("failed to install shaders: %w", err)
 		}
-		util.Info("Anime4K shaders installed! Select a mode to enable upscaling.")
+		infoFn("Anime4K shaders installed! Select a mode to enable upscaling.")
+		return false, nil
 	}
+	if m, ok := upscaleModes[choice]; ok {
+		setShaderModeFn(m.mode)
+		infoFn(m.info)
+		if choice == "gan_uul" {
+			warnFn("This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+		}
+	}
+	return false, nil
+}
 
-	return nil
+// handleUpscaleFromMenu shows the real-time upscaling options menu
+func handleUpscaleFromMenu() error {
+	if !stdinIsTerminal() {
+		return fmt.Errorf("no TTY available for interactive menu")
+	}
+	for {
+		shadersInstalled := shadersInstalledFn()
+		items := upscaleMenuEntries(shadersInstalled, ganInstalledFn())
+		labels := make([]string, len(items))
+		for i, it := range items {
+			labels[i] = it.label
+		}
+		idx, err := pickLabelsFn(labels, tui.PickOptions{
+			Breadcrumb:   upscaleBreadcrumb(shadersInstalled, shaderModeNameFn()),
+			WindowTitle:  "GoAnime - Upscale",
+			ItemSingular: "mode",
+			ItemPlural:   "modes",
+		})
+		if err != nil {
+			if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+				return nil
+			}
+			return fmt.Errorf("cancelled: %w", err)
+		}
+		if idx < 0 || idx >= len(items) {
+			return nil
+		}
+		again, err := applyUpscaleChoice(items[idx].value)
+		if err != nil || !again {
+			return err
+		}
+	}
 }
 
 // printDownloadLocation prints the absolute path of the downloaded file so
