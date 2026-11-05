@@ -401,8 +401,13 @@ func episodePickNum(episodes []models.Episode, idx int) int {
 	if num := episodes[idx].Num; num > 0 {
 		return num
 	}
-	if num, err := strconv.Atoi(ExtractEpisodeNumber(episodes[idx].Number)); err == nil && num > 0 {
-		return num
+	// ExtractEpisodeNumber answers "1" for a label with no number at all; only
+	// a label that really has digits may set the range start.
+	label := episodes[idx].Number
+	if strings.ContainsAny(label, "0123456789") {
+		if num, err := strconv.Atoi(ExtractEpisodeNumber(label)); err == nil && num > 0 {
+			return num
+		}
 	}
 	return idx + 1
 }

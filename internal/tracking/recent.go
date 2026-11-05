@@ -16,8 +16,13 @@ func DBPath() string {
 	if err != nil {
 		return ""
 	}
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
+	return dbPathFor(runtime.GOOS, home, os.Getenv("LOCALAPPDATA"))
+}
+
+// dbPathFor is DBPath's pure core: the layout per OS, given the home directory
+// and (Windows) %LOCALAPPDATA%.
+func dbPathFor(goos, home, localAppData string) string {
+	if goos == "windows" {
 		if localAppData == "" {
 			localAppData = filepath.Join(home, "AppData", "Local")
 		}
