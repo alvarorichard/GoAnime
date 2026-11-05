@@ -408,21 +408,7 @@ func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
 	}
 	var resume bool
 
-	// Convert seconds to minutes and seconds for better readability
-	minutes := timeSeconds / 60
-	seconds := timeSeconds % 60
-
-	var timeStr string
-	if minutes > 0 {
-		timeStr = fmt.Sprintf("%dm %ds", minutes, seconds)
-	} else {
-		timeStr = fmt.Sprintf("%ds", seconds)
-	}
-
-	title := fmt.Sprintf("Resume episode %d from %s?", episodeNum, timeStr)
-	if isMovie {
-		title = fmt.Sprintf("Resume movie from %s?", timeStr)
-	}
+	title := resumeTitle(episodeNum, timeSeconds, isMovie)
 
 	confirm := huh.NewConfirm().
 		Title(title).
@@ -907,61 +893,80 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 		}
 	}
 
-	key := trackingKey(episode.URL, episodeNum)
-	util.Debugf("Tracking lookup: anilistID=%d, key=%s", anilistID, key)
+	util.Debugf("Tracking lookup: anilistID=%d, key=%s", anilistID, trackingKey(episode.URL, episodeNum))
 
-	// Try episode-specific key first
-	progress, err := tracker.GetAnime(anilistID, key)
+	progress, err := findProgress(tracker, anilistID, episode.URL, episodeNum)
 	if err != nil {
 		util.Debugf("Tracking lookup error: %v", err)
 		return tracker, 0
 	}
+	return tracker, resumePositionFor(progress, episodeNum, takeResumeOverride, func(ep, seconds int) bool {
+		ok, _ := showResumeDialog(ep, seconds, IsCurrentMediaMovie())
+		return ok
+	})
+}
 
-	// Fallback: try legacy key (without episode number) for backward compatibility
+// progressStore is where watch progress is looked up.
+type progressStore interface {
+	GetAnime(anilistID int, allanimeID string) (*tracking.Anime, error)
+}
+
+// findProgress looks the episode up under its own key first and, failing that,
+// under the legacy key (the bare episode URL) older versions wrote. A lookup
+// error ends the search: the legacy key is only tried after a clean miss.
+func findProgress(store progressStore, anilistID int, episodeURL string, episodeNum int) (*tracking.Anime, error) {
+	progress, err := store.GetAnime(anilistID, trackingKey(episodeURL, episodeNum))
+	if err != nil {
+		return nil, err
+	}
 	if progress == nil {
-		progress, err = tracker.GetAnime(anilistID, episode.URL)
-		if err != nil {
-			util.Debugf("Tracking legacy lookup error: %v", err)
-			return tracker, 0
-		}
+		return store.GetAnime(anilistID, episodeURL)
 	}
+	return progress, nil
+}
 
-	if progress == nil {
-		util.Debugf("Tracking lookup: no progress found")
-		return tracker, 0
+// resumePositionFor decides where playback starts from the saved progress:
+// 0 for the beginning, otherwise the saved second.
+//   - no progress, or none worth resuming (0 seconds or less), starts over;
+//   - progress saved for another episode is ignored (some sources share one URL
+//     across episodes, so episode 3's position must not be offered on episode 4);
+//   - a pending override (the CONTINUE list) decides without asking;
+//   - otherwise the user is asked.
+func resumePositionFor(progress *tracking.Anime, episodeNum int, takeOverride func() (position int, fromStart, ok bool), ask func(episodeNum, seconds int) bool) int {
+	if progress == nil || progress.PlaybackTime <= 0 {
+		return 0
 	}
-	if progress.PlaybackTime <= 0 {
-		util.Debugf("Tracking lookup: playback time is 0 or negative")
-		return tracker, 0
-	}
-
-	// Safety check: verify the saved progress belongs to the current episode.
-	// This prevents offering a resume from episode 3's position when the user
-	// has switched to episode 4 (some sources share one URL across episodes).
 	if progress.EpisodeNumber != episodeNum {
 		util.Debugf("Tracking: saved progress is for episode %d, current is %d - skipping resume",
 			progress.EpisodeNumber, episodeNum)
-		return tracker, 0
+		return 0
 	}
-
-	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
-
-	if position, fromStart, ok := takeResumeOverride(); ok {
+	if position, fromStart, ok := takeOverride(); ok {
 		if fromStart {
-			util.Debugf("Starting from the beginning (requested)")
-			return tracker, 0
+			return 0
 		}
-		util.Debugf("Resuming from %d seconds without asking (requested)", position)
-		return tracker, position
+		return position
 	}
-
-	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime, IsCurrentMediaMovie()); ok {
-		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
-		return tracker, progress.PlaybackTime
+	if ask(episodeNum, progress.PlaybackTime) {
+		return progress.PlaybackTime
 	}
+	return 0
+}
 
-	util.Debugf("User declined to resume")
-	return tracker, 0
+// resumeClock words a position as "3m 5s", or "42s" under a minute.
+func resumeClock(seconds int) string {
+	if minutes := seconds / 60; minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds%60)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
+// resumeTitle is the resume question; a movie has no episode number to name.
+func resumeTitle(episodeNum, seconds int, isMovie bool) string {
+	if isMovie {
+		return fmt.Sprintf("Resume movie from %s?", resumeClock(seconds))
+	}
+	return fmt.Sprintf("Resume episode %d from %s?", episodeNum, resumeClock(seconds))
 }
 
 // InitTrackerAsync initializes the tracker in the background.
@@ -1104,21 +1109,26 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 // updateTrackingWithDuration updates the local tracker with episode info and duration
 func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
 	if tracker != nil && dur > 0 {
-		ctx := snapshotMediaContext()
-		anime := tracking.Anime{
-			AnilistID:     anilistID,
-			AllanimeID:    episode.URL,
-			EpisodeNumber: episodeNum,
-			Duration:      int(dur.Seconds()),
-			Title:         getEpisodeTitle(episode.Title),
-			AnimeTitle:    ctx.animeTitle,
-			Source:        ctx.source,
-			Audio:         ctx.audio,
-			LastUpdated:   time.Now(),
-		}
+		anime := trackingRecord(anilistID, episode, episodeNum, dur, snapshotMediaContext(), time.Now())
 		if err := tracker.UpdateProgress(anime); err != nil {
 			util.Errorf("Failed to update tracking: %v", err)
 		}
+	}
+}
+
+// trackingRecord is the row saved when an episode starts: what it is, which
+// show and source it belongs to, and how long it is.
+func trackingRecord(anilistID int, episode *models.Episode, episodeNum int, dur time.Duration, ctx mediaContext, now time.Time) tracking.Anime {
+	return tracking.Anime{
+		AnilistID:     anilistID,
+		AllanimeID:    episode.URL,
+		EpisodeNumber: episodeNum,
+		Duration:      int(dur.Seconds()),
+		Title:         getEpisodeTitle(episode.Title),
+		AnimeTitle:    ctx.animeTitle,
+		Source:        ctx.source,
+		Audio:         ctx.audio,
+		LastUpdated:   now,
 	}
 }
 
