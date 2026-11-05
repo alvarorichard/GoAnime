@@ -125,8 +125,12 @@ func movieFriendlyErr(err error) string {
 // away. After this HandleMovie returns to selection, where that list opens.
 func reportMovieStreamFailed(anime *models.Anime, err error) {
 	util.Warnf("Failed to extract video URL: %v", util.ErrorHandler(err))
-	tui.NoticeOnNextResults(movieStreamFailedNotice(anime, err))
+	noticeOnNextResults(movieStreamFailedNotice(anime, err))
 }
+
+// noticeOnNextResults is the TUI seam reportMovieStreamFailed writes through;
+// tests replace it to read back what the user would be told.
+var noticeOnNextResults = tui.NoticeOnNextResults
 
 // movieStreamFailedNotice composes the result-screen notice for a movie whose
 // stream failed: the api layer's plain-language friendly wording, plus where
@@ -321,7 +325,7 @@ func PlayEpisode(
 }
 
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (episodeURL, episodeNumber string, episodeIndex int, err error) {
-	url, numStr, err := player.SelectEpisodeWithFuzzyFinder(episodes)
+	url, numStr, err := selectEpisodeFunc(episodes)
 	if err != nil {
 		// If user selected back, return empty values to signal back request
 		if errors.Is(err, player.ErrBackRequested) {
@@ -329,7 +333,7 @@ func SelectEpisodeWithFuzzy(episodes []models.Episode) (episodeURL, episodeNumbe
 		}
 		return "", "", 0, fmt.Errorf("episode selection failed: %w", err)
 	}
-	epNum, err := strconv.Atoi(player.ExtractEpisodeNumber(numStr))
+	epNum, err := strconv.Atoi(extractEpisodeNumberFunc(numStr))
 	if err != nil {
 		return "", "", 0, fmt.Errorf("error converting episode number: %w", err)
 	}
