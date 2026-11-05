@@ -1079,49 +1079,7 @@ func downloadAndPlayEpisode(
 		}
 	}
 
-	// Use Plex-compatible naming when anime name is available
-	var downloadPath, episodePath string
-	snap := snapshotMedia()
-	if snap.AnimeName != "" {
-		// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
-		var baseDir string
-		if snap.IsMovieOrTV {
-			baseDir = util.DefaultMovieDownloadDir()
-		} else {
-			baseDir = util.DefaultDownloadDir()
-		}
-
-		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
-		if snap.MediaType == "movie" {
-			// Movies: flat structure <baseDir>/<MovieName (Year) {ids}>/
-			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta)
-			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
-		} else {
-			// TV Shows and Anime: season/episode structure
-			// Use the int episode number directly; fall back to parsing the string only if needed
-			epNum := selectedEpisodeNum
-			if epNum < 1 {
-				parsed, _ := strconv.Atoi(episodeNumberStr)
-				if parsed > 0 {
-					epNum = parsed
-				} else {
-					epNum = 1
-				}
-			}
-			season, relEp := resolveSeasonForEpisode(snap, epNum)
-			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta)
-			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
-		}
-		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
-	} else {
-		// Fallback: route based on media type even without anime name
-		fallbackBase := util.DefaultDownloadDir()
-		if snap.IsMovieOrTV {
-			fallbackBase = util.DefaultMovieDownloadDir()
-		}
-		downloadPath = filepath.Join(fallbackBase, DownloadFolderFormatter(animeURL))
-		episodePath = filepath.Join(downloadPath, episodeNumberStr+".mp4")
-	}
+	downloadPath, episodePath := episodeDownloadPaths(snapshotMedia(), animeURL, episodeNumberStr, selectedEpisodeNum)
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, 0o700); err != nil {
@@ -1142,8 +1100,8 @@ func downloadAndPlayEpisode(
 		numThreads := 4 // Define the number of threads for downloading
 
 		// Check URL type and use appropriate download method
-		switch {
-		case isBloggerProxyURL(videoURL):
+		switch downloadKindFor(videoURL) {
+		case downloadKindBlogger:
 			// Download directly from googlevideo CDN, bypassing the proxy.
 			// Uses independent surf clients per chunk for parallel download
 			// with Chrome TLS and automatic resume on connection drops.
@@ -1193,11 +1151,8 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("download failed: file was not created")
 			}
 
-			const minEpisodeSize int64 = 10 * 1024 * 1024
-			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < minEpisodeSize {
-				_ = os.Remove(episodePath)
-				return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
-					stat.Size(), float64(stat.Size())/(1024*1024), float64(minEpisodeSize)/(1024*1024))
+			if err := checkBloggerEpisodeSize(episodePath); err != nil {
+				return err
 			}
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
@@ -1206,10 +1161,7 @@ func downloadAndPlayEpisode(
 				fmt.Printf(format, a...)
 			})
 
-		case strings.Contains(videoURL, "blogger.com") ||
-			LooksLikeHLS(videoURL) ||
-			strings.Contains(videoURL, "wixmp.com") ||
-			strings.Contains(videoURL, "sharepoint.com"):
+		case downloadKindStream:
 			// Fail fast without a TTY (see above): progress UI hangs on Windows.
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
@@ -1237,38 +1189,7 @@ func downloadAndPlayEpisode(
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
-				var dlErr error
-				switch {
-				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
-					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
-					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
-						// Separate audio tracks need yt-dlp for proper audio/video merging
-						util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", dlErr)
-						// Reset progress — native HLS didn't produce output
-						m.mu.Lock()
-						m.received = 0
-						m.totalBytes = 0
-						m.peakPct = 0
-						m.mu.Unlock()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-					} else if dlErr != nil {
-						// Native HLS failed for another reason — try yt-dlp, then direct HTTP
-						util.Debugf("Native HLS failed, trying yt-dlp: %v", dlErr)
-						// Reset progress for yt-dlp fallback
-						m.mu.Lock()
-						m.received = 0
-						m.totalBytes = 0
-						m.peakPct = 0
-						m.mu.Unlock()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-						if dlErr != nil {
-							util.Debugf("yt-dlp failed, trying direct HTTP: %v", dlErr)
-							dlErr = downloadDirectHTTP(videoURL, episodePath, m)
-						}
-					}
-				default:
-					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-				}
+				dlErr := downloadStreamWithFallbacks(videoURL, episodePath, m, streamDownloaders)
 				if dlErr == nil {
 					dlErr = validateDownloadedVideo(episodePath)
 					if dlErr != nil {
@@ -1318,7 +1239,7 @@ func downloadAndPlayEpisode(
 				fmt.Printf(format, a...)
 			})
 
-		default:
+		case downloadKindDirect:
 			// Fail fast without a TTY (see above): progress UI hangs on Windows.
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
@@ -1377,7 +1298,7 @@ func downloadAndPlayEpisode(
 		fmt.Println("Video already downloaded.")
 		// Check if the file is actually valid (not empty)
 		if stat, err := os.Stat(episodePath); err == nil {
-			if stat.Size() < 1024 {
+			if episodeTooSmall(stat.Size()) {
 				fmt.Println("File is too small, re-downloading...")
 				if removeErr := os.Remove(episodePath); removeErr != nil {
 					util.Warnf("Failed to remove invalid file: %v", removeErr)
@@ -2130,4 +2051,132 @@ func muxSubtitles(run func(args []string) error, videoPath string, entries []sub
 		_ = os.Remove(tmpMKV)
 	}
 	return muxFailed
+}
+
+// minReusableEpisodeSize is the size under which an already-downloaded file
+// is treated as a failed download and fetched again.
+const minReusableEpisodeSize int64 = 1024
+
+// minBloggerEpisodeSize is the size under which a Blogger download is
+// rejected as truncated.
+const minBloggerEpisodeSize int64 = 10 * 1024 * 1024
+
+// episodeTooSmall reports whether an existing file is too small to keep.
+func episodeTooSmall(size int64) bool { return size < minReusableEpisodeSize }
+
+// checkBloggerEpisodeSize verifies a finished Blogger download exists and is
+// not truncated; a truncated file is removed so the next try starts clean.
+func checkBloggerEpisodeSize(path string) error {
+	stat, err := statFn(path)
+	if err != nil {
+		return fmt.Errorf("download failed: file was not created")
+	}
+	if stat.Size() < minBloggerEpisodeSize {
+		_ = os.Remove(path)
+		return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
+			stat.Size(), float64(stat.Size())/(1024*1024), float64(minBloggerEpisodeSize)/(1024*1024))
+	}
+	return nil
+}
+
+// episodeDownloadPaths decides the folder and file an episode is saved to.
+// With an anime name it follows the Plex/Jellyfin layout (movies flat,
+// anime and TV by season); without one it falls back to a folder derived
+// from the anime URL. Movies and TV go under the movie base directory.
+func episodeDownloadPaths(snap mediaSnapshot, animeURL, episodeNumberStr string, selectedEpisodeNum int) (dir, file string) {
+	baseDir := util.DefaultDownloadDir()
+	if snap.IsMovieOrTV {
+		baseDir = util.DefaultMovieDownloadDir()
+	}
+	if snap.AnimeName == "" {
+		dir = filepath.Join(baseDir, DownloadFolderFormatter(animeURL))
+		return dir, filepath.Join(dir, episodeNumberStr+".mp4")
+	}
+	if snap.MediaType == "movie" {
+		return util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta),
+			util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
+	}
+	epNum := selectedEpisodeNum
+	if epNum < 1 {
+		epNum = 1
+		if parsed, _ := strconv.Atoi(episodeNumberStr); parsed > 0 {
+			epNum = parsed
+		}
+	}
+	season, relEp := resolveSeasonForEpisode(snap, epNum)
+	return util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta),
+		util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
+}
+
+// downloadKind is the way a video URL is downloaded.
+type downloadKind int
+
+const (
+	downloadKindDirect  downloadKind = iota // parallel ranged HTTP
+	downloadKindBlogger                     // googlevideo CDN behind the proxy
+	downloadKindStream                      // HLS, yt-dlp hosts, SharePoint
+)
+
+// downloadKindFor picks the download method for a video URL.
+func downloadKindFor(videoURL string) downloadKind {
+	switch {
+	case isBloggerProxyURL(videoURL):
+		return downloadKindBlogger
+	case strings.Contains(videoURL, "blogger.com") ||
+		LooksLikeHLS(videoURL) ||
+		strings.Contains(videoURL, "wixmp.com") ||
+		strings.Contains(videoURL, "sharepoint.com"):
+		return downloadKindStream
+	default:
+		return downloadKindDirect
+	}
+}
+
+// streamEngines are the engines downloadStreamWithFallbacks chains.
+type streamEngines struct {
+	nativeHLS  func(url, path string, m *model) error
+	ytdlp      func(url, path string, m *model) error
+	directHTTP func(url, path string, m *model) error
+}
+
+var streamDownloaders = streamEngines{
+	nativeHLS:  downloadWithNativeHLS,
+	ytdlp:      downloadWithYtDlp,
+	directHTTP: downloadDirectHTTP,
+}
+
+// resetProgress clears the progress a failed engine left behind so the next
+// one starts the bar from zero.
+func resetProgress(m *model) {
+	m.mu.Lock()
+	m.received = 0
+	m.totalBytes = 0
+	m.peakPct = 0
+	m.mu.Unlock()
+}
+
+// downloadStreamWithFallbacks downloads a stream. HLS (or an unsafe
+// extension) goes to the native HLS engine first; separate audio tracks
+// need yt-dlp to merge, and any other native failure falls back to yt-dlp
+// and then plain HTTP. Anything else goes straight to yt-dlp.
+func downloadStreamWithFallbacks(videoURL, path string, m *model, e streamEngines) error {
+	if !LooksLikeHLS(videoURL) && !hasUnsafeExtension(videoURL) {
+		return e.ytdlp(videoURL, path, m)
+	}
+	err := e.nativeHLS(videoURL, path, m)
+	if err == nil {
+		return nil
+	}
+	if stderrors.Is(err, hls.ErrSeparateAudioTracks) {
+		util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", err)
+		resetProgress(m)
+		return e.ytdlp(videoURL, path, m)
+	}
+	util.Debugf("Native HLS failed, trying yt-dlp: %v", err)
+	resetProgress(m)
+	if err = e.ytdlp(videoURL, path, m); err == nil {
+		return nil
+	}
+	util.Debugf("yt-dlp failed, trying direct HTTP: %v", err)
+	return e.directHTTP(videoURL, path, m)
 }
