@@ -33,196 +33,91 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 	animeMutex := sync.Mutex{}
 	isPaused := false
 
-	var selectedEpisodeURL, episodeNumberStr string
-	var selectedEpisodeNum int
-	const maxEpisodeRetries = 3
-	var selErr error
-	for attempt := range maxEpisodeRetries {
-		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum, selErr = SelectInitialEpisode(episodes)
-		if selErr == nil {
-			break
-		}
-		if errors.Is(selErr, player.ErrBackRequested) {
-			return player.ErrBackToAnimeSelection
-		}
-		printEpisodeNotFoundMsg()
-		util.Warnf("Episode selection failed (attempt %d/%d): %v", attempt+1, maxEpisodeRetries, selErr)
-	}
-	if selErr != nil {
-		return fmt.Errorf("episode selection failed after %d attempts: %w", maxEpisodeRetries, selErr)
+	sel, err := selectFirstEpisode(episodes)
+	if err != nil {
+		return err
 	}
 
 	for {
-		err := PlayEpisode(
+		playErr := PlayEpisode(
 			ctx,
 			anime,
 			episodes,
-			selectedEpisodeNum,
-			selectedEpisodeURL,
-			episodeNumberStr,
+			sel.num,
+			sel.url,
+			sel.label,
 			discordEnabled,
 			&isPaused,
 			&animeMutex,
 		)
 
-		// Check if user quit during video playback
-		if errors.Is(err, player.ErrUserQuit) {
-			log.Println("Quitting application as per user request.")
-			break
+		var userInput string
+		action := seriesActionAfterPlayback(playErr)
+		if action == seriesAskUser {
+			if playErr != nil {
+				log.Printf("Error during episode playback: %v", util.LogSafe(playErr))
+			}
+			userInput = GetUserInput()
+			action = seriesActionAfterPrompt(userInput)
 		}
 
-		// Check if user requested to go back to episode selection (from server selection)
-		if errors.Is(err, player.ErrBackToEpisodeSelection) {
-			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
-			if selErr != nil {
-				// If user selected back at episode selection, go back to anime selection
-				if errors.Is(selErr, player.ErrBackRequested) {
+		switch action {
+		case seriesQuit:
+			log.Println("Quitting application as per user request.")
+			return nil
+
+		case seriesReselectFromServer:
+			// Back from server selection: the picker opens again, and backing
+			// out of it leaves for anime selection.
+			next, err := reselectEpisode(episodes, sel, true)
+			if err != nil {
+				return err
+			}
+			sel = next
+
+		case seriesPickEpisode:
+			// Back or failure keeps the current (valid) selection.
+			sel, _ = reselectEpisode(episodes, sel, false)
+
+		case seriesChange:
+			change := resolveAnimeChange()
+			switch change.outcome {
+			case changeBack:
+				// A CONTINUE row pends for the session loop to reopen.
+				return player.ErrBackToAnimeSelection
+			case changeStay:
+				continue // Stay with current anime if change fails
+			case changeToMovie:
+				anime, episodes, totalEpisodes = change.anime, change.episodes, len(change.episodes)
+				log.Println("Switched to a movie/OVA, handling as single episode.")
+				if movieErr := HandleMovie(ctx, anime, episodes, discordEnabled); errors.Is(movieErr, player.ErrBackToAnimeSelection) {
+					return movieErr
+				}
+				return nil
+			case changeToSeries:
+				anime, episodes, totalEpisodes = change.anime, change.episodes, len(change.episodes)
+				// There is no valid selection to fall back to (the old one
+				// belongs to the previous anime), so a failed pick bounces to
+				// anime selection instead of committing zeros.
+				next, err := pickEpisode(episodes)
+				if err != nil {
+					log.Printf("Error selecting episode for new anime: %v", util.LogSafe(err))
 					return player.ErrBackToAnimeSelection
 				}
-				// Keep the previous selection: committing the zero values of a
-				// failed selection made the loop replay a fabricated empty episode.
-				log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
-				continue
+				sel = next
+				fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
 			}
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
-			continue
+
+		case seriesNavigate:
+			url, label, num := handleUserNavigationEnhanced(userInput, episodes, sel.num, totalEpisodes, anime)
+			next, moved := navigationResult(sel, url, label, num)
+			if !moved {
+				// Navigation failed (e.g. fuzzy finder error) — retry selection
+				log.Println("Episode navigation failed, please select again.")
+			}
+			sel = next
 		}
-
-		// Check if user requested to change anime during video playback
-		if errors.Is(err, player.ErrChangeAnime) {
-			newAnime, newEpisodes, err := ChangeAnimeLocal()
-			if errors.Is(err, appflow.ErrHomeContinue) {
-				// A CONTINUE row pends for the session loop to reopen.
-				return player.ErrBackToAnimeSelection
-			}
-			if err != nil {
-				log.Printf("Error changing anime: %v", util.LogSafe(err))
-				continue // Stay with current anime if change fails
-			}
-
-			// Update anime and episodes
-			anime = newAnime
-			episodes = newEpisodes
-
-			// Check if new anime is a series using media type first, then episode count as fallback
-			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
-			newTotalEpisodes := len(newEpisodes)
-			totalEpisodes = newTotalEpisodes
-			series := !newAnime.IsMovie() && newTotalEpisodes > 1
-
-			if !series {
-				// If new anime is a movie, handle it differently
-				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
-					if errors.Is(err, player.ErrBackToAnimeSelection) {
-						return err
-					}
-				}
-				break
-			}
-
-			// Select initial episode for the new anime. On failure there is no
-			// valid selection to fall back to (the old one belongs to the previous
-			// anime), so bounce to anime selection instead of committing zeros.
-			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
-			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
-				return player.ErrBackToAnimeSelection
-			}
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
-
-			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
-			continue // Skip normal navigation and start playing the new anime
-		}
-
-		// Handle other errors
-		if err != nil {
-			log.Printf("Error during episode playback: %v", util.LogSafe(err))
-		}
-
-		userInput := GetUserInput()
-		if userInput == "q" || userInput == "quit" {
-			log.Println("Quitting application as per user request.")
-			break
-		}
-
-		// Handle back/change anime - both options allow searching for a new anime
-		if userInput == "c" || userInput == "back" {
-			newAnime, newEpisodes, err := ChangeAnimeLocal()
-			if errors.Is(err, appflow.ErrHomeContinue) {
-				// A CONTINUE row pends for the session loop to reopen.
-				return player.ErrBackToAnimeSelection
-			}
-			if err != nil {
-				log.Printf("Error changing anime: %v", util.LogSafe(err))
-				continue // Stay with current anime if change fails
-			}
-
-			// Update anime and episodes
-			anime = newAnime
-			episodes = newEpisodes
-
-			// Check if new anime is a series using media type first, then episode count as fallback
-			// This avoids re-fetching episodes which would cause duplicate season selection for FlixHQ
-			newTotalEpisodes := len(newEpisodes)
-			totalEpisodes = newTotalEpisodes
-			series := !newAnime.IsMovie() && newTotalEpisodes > 1
-
-			if !series {
-				// If new anime is a movie, handle it differently
-				log.Println("Switched to a movie/OVA, handling as single episode.")
-				if err := HandleMovie(ctx, anime, episodes, discordEnabled); err != nil {
-					if errors.Is(err, player.ErrBackToAnimeSelection) {
-						return err
-					}
-				}
-				break
-			}
-
-			// Select initial episode for the new anime. On failure there is no
-			// valid selection to fall back to (the old one belongs to the previous
-			// anime), so bounce to anime selection instead of committing zeros.
-			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
-			if selErr != nil {
-				log.Printf("Error selecting episode for new anime: %v", util.LogSafe(selErr))
-				return player.ErrBackToAnimeSelection
-			}
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
-
-			fmt.Printf("Switched to anime: %s with %d episodes.\n", anime.Name, totalEpisodes)
-			continue // Skip normal navigation and start playing the new anime
-		}
-
-		// Handle episode selection
-		if userInput == "e" {
-			newURL, newNumStr, newNum, selErr := SelectInitialEpisode(episodes)
-			if selErr != nil {
-				// Back or failure: keep the current (valid) selection instead
-				// of committing the zero values of a failed selection.
-				if !errors.Is(selErr, player.ErrBackRequested) {
-					log.Printf("Error selecting episode: %v", util.LogSafe(selErr))
-				}
-				continue
-			}
-			selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
-			continue
-		}
-
-		newURL, newNumStr, newNum := handleUserNavigationEnhanced(
-			userInput,
-			episodes,
-			selectedEpisodeNum,
-			totalEpisodes,
-			anime,
-		)
-		if newURL == "" {
-			// Navigation failed (e.g. fuzzy finder error) — retry selection
-			log.Println("Episode navigation failed, please select again.")
-			continue
-		}
-		selectedEpisodeURL, episodeNumberStr, selectedEpisodeNum = newURL, newNumStr, newNum
 	}
-	return nil
 }
 
 // selectEpisodeFuncType matches player.SelectEpisodeWithFuzzyFinder so tests
@@ -347,4 +242,115 @@ func ChangeAnimeLocal() (*models.Anime, []models.Episode, error) {
 		player.SetEpisodeListContext(anime.Name, anime.Source, anime.Audio)
 	}
 	return anime, episodes, nil
+}
+
+// episodeSel is the episode being played: its page, its label as the source
+// words it, and its number.
+type episodeSel struct {
+	url   string
+	label string
+	num   int
+}
+
+// pickEpisode opens the episode picker once (or takes the CONTINUE preselect).
+func pickEpisode(episodes []models.Episode) (episodeSel, error) {
+	url, label, num, err := SelectInitialEpisode(episodes)
+	if err != nil {
+		return episodeSel{}, err
+	}
+	return episodeSel{url: url, label: label, num: num}, nil
+}
+
+// maxEpisodeRetries is how many times the first pick is attempted.
+const maxEpisodeRetries = 3
+
+// selectFirstEpisode runs the first pick, retrying a failed one. Backing out
+// of the picker leaves for anime selection at once; running out of attempts is
+// an error.
+func selectFirstEpisode(episodes []models.Episode) (episodeSel, error) {
+	var lastErr error
+	for attempt := range maxEpisodeRetries {
+		sel, err := pickEpisode(episodes)
+		if err == nil {
+			return sel, nil
+		}
+		if errors.Is(err, player.ErrBackRequested) {
+			return episodeSel{}, player.ErrBackToAnimeSelection
+		}
+		lastErr = err
+		printEpisodeNotFoundMsg()
+		util.Warnf("Episode selection failed (attempt %d/%d): %v", attempt+1, maxEpisodeRetries, err)
+	}
+	return episodeSel{}, fmt.Errorf("episode selection failed after %d attempts: %w", maxEpisodeRetries, lastErr)
+}
+
+// reselectEpisode asks for another episode while one is playing. A failed pick
+// keeps current: committing the zero values of a failed selection made the
+// loop replay a fabricated empty episode. When backLeaves is set, backing out
+// of the picker leaves for anime selection instead.
+func reselectEpisode(episodes []models.Episode, current episodeSel, backLeaves bool) (episodeSel, error) {
+	next, err := pickEpisode(episodes)
+	if err == nil {
+		return next, nil
+	}
+	if errors.Is(err, player.ErrBackRequested) {
+		if backLeaves {
+			return current, player.ErrBackToAnimeSelection
+		}
+		return current, nil
+	}
+	log.Printf("Error selecting episode: %v", util.LogSafe(err))
+	return current, nil
+}
+
+// navigationResult accepts a navigation answer only when it names an episode.
+func navigationResult(current episodeSel, url, label string, num int) (episodeSel, bool) {
+	if url == "" {
+		return current, false
+	}
+	return episodeSel{url: url, label: label, num: num}, true
+}
+
+// seriesAction is what HandleSeries does once an episode's playback returns.
+type seriesAction int
+
+const (
+	seriesAskUser            seriesAction = iota // playback ended: show the menu
+	seriesQuit                                   // leave the application
+	seriesReselectFromServer                     // back from server selection: pick the episode again
+	seriesChange                                 // search for another title
+	seriesPickEpisode                            // the menu's "Select episode"
+	seriesNavigate                               // next / previous
+)
+
+// seriesActionAfterPlayback reads the outcome of playback. Quit, going back to
+// episode selection and changing the title act at once; anything else, including
+// an error, falls through to the post-playback menu.
+func seriesActionAfterPlayback(playErr error) seriesAction {
+	switch {
+	case errors.Is(playErr, player.ErrUserQuit):
+		return seriesQuit
+	case errors.Is(playErr, player.ErrBackToEpisodeSelection):
+		return seriesReselectFromServer
+	case errors.Is(playErr, player.ErrChangeAnime):
+		return seriesChange
+	default:
+		return seriesAskUser
+	}
+}
+
+// seriesActionAfterPrompt maps the post-playback menu's answer. Both "c" and
+// "back" lead to a new search; anything unrecognised navigates, where an
+// unknown answer behaves as "next".
+func seriesActionAfterPrompt(input string) seriesAction {
+	switch input {
+	case "q", "quit":
+		return seriesQuit
+	case "c", "back":
+		return seriesChange
+	case "e":
+		return seriesPickEpisode
+	default:
+		return seriesNavigate
+	}
 }
