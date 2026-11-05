@@ -100,7 +100,7 @@ func TestMPVUserConfigEnabledMeta(t *testing.T) {
 		},
 		"off word dropped": func(g func(string) string) bool {
 			v := strings.ToLower(strings.TrimSpace(g(mpvConfigEnv)))
-			return !(v == "off" || v == "0" || v == "false" || v == "no")
+			return v != "off" && v != "0" && v != "false" && v != "no"
 		},
 		"unknown value isolates": func(g func(string) string) bool {
 			v := strings.ToLower(strings.TrimSpace(g(mpvConfigEnv)))
@@ -152,13 +152,13 @@ func TestUserConfigGuardArgsMeta(t *testing.T) {
 	}
 	require.True(t, check(userConfigGuardArgs()))
 
-	real := userConfigGuardArgs()
+	good := userConfigGuardArgs()
 	mutants := map[string][]string{
 		"empty":           nil,
-		"missing one":     real[1:],
-		"keep-open yes":   append([]string{"--keep-open=yes"}, real[1:]...),
-		"extra flag":      append(append([]string{}, real...), "--pause=yes"),
-		"duplicate guard": append(append([]string{}, real[1:]...), real[1]),
+		"missing one":     good[1:],
+		"keep-open yes":   append([]string{"--keep-open=yes"}, good[1:]...),
+		"extra flag":      append(append([]string{}, good...), "--pause=yes"),
+		"duplicate guard": append(append([]string{}, good[1:]...), good[1]),
 	}
 	for name, m := range mutants {
 		assert.False(t, check(m), "mutant %q survived", name)

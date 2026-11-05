@@ -88,7 +88,7 @@ func HandleSeries(ctx context.Context, anime *models.Anime, episodes []models.Ep
 			case changeStay:
 				continue // Stay with current anime if change fails
 			case changeToMovie:
-				anime, episodes, totalEpisodes = change.anime, change.episodes, len(change.episodes)
+				anime, episodes = change.anime, change.episodes
 				log.Println("Switched to a movie/OVA, handling as single episode.")
 				if movieErr := HandleMovie(ctx, anime, episodes, discordEnabled); errors.Is(movieErr, player.ErrBackToAnimeSelection) {
 					return movieErr

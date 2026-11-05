@@ -226,7 +226,7 @@ func TestPickFallbackCandidateMeta(t *testing.T) {
 		"no error when exhausted": func(c []string, f string) (string, error) {
 			got, err := pickFallbackCandidate(c, f)
 			if err != nil {
-				return "", nil
+				return "", nil //nolint:nilerr // deliberate mutant: no error when exhausted
 			}
 			return got, nil
 		},

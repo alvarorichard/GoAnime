@@ -3,6 +3,7 @@ package playback
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -63,7 +64,7 @@ func fuzzyFailures(impl func([]models.Episode) (string, string, int, error)) []s
 		selectEpisodeFunc = p.fn
 		url, num, idx, err := impl(sampleEpisodes(2))
 		if tc.wantErrHas != "" {
-			if err == nil || !contains(err.Error(), tc.wantErrHas) {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErrHas) {
 				f = append(f, fmt.Sprintf("%s: error %v", tc.name, err))
 			}
 			if url != "" || num != "" || idx != 0 {
@@ -76,18 +77,6 @@ func fuzzyFailures(impl func([]models.Episode) (string, string, int, error)) []s
 		}
 	}
 	return f
-}
-
-func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
-}
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 func TestSelectEpisodeWithFuzzy(t *testing.T) {
@@ -145,13 +134,13 @@ func TestSelectEpisodeWithFuzzyMeta(t *testing.T) {
 		"selector error swallowed": func(e []models.Episode) (string, string, int, error) {
 			u, n, i, err := SelectEpisodeWithFuzzy(e)
 			if err != nil {
-				return "", "", 0, nil
+				return "", "", 0, nil //nolint:nilerr // deliberate mutant: swallows the error
 			}
 			return u, n, i, err
 		},
 		"parse error swallowed": func(e []models.Episode) (string, string, int, error) {
 			u, n, i, err := SelectEpisodeWithFuzzy(e)
-			if err != nil && contains(err.Error(), "episode number") {
+			if err != nil && strings.Contains(err.Error(), "episode number") {
 				return u, n, 0, nil
 			}
 			return u, n, i, err

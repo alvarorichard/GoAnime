@@ -392,7 +392,7 @@ func TestProbeFieldsMeta(t *testing.T) {
 		"detail not lowercased": func(r diag.Result) []any {
 			kv := probeFields(r)
 			for i, v := range kv {
-				if v == strings.ToLower(r.Detail) && r.Detail != "" {
+				if s, ok := v.(string); ok && strings.EqualFold(s, r.Detail) && r.Detail != "" {
 					kv[i] = r.Detail
 				}
 			}

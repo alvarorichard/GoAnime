@@ -128,13 +128,13 @@ func TestEstimateStreamContentLengthMalformedURL(t *testing.T) {
 
 func TestEstimateStreamContentLengthMeta(t *testing.T) {
 	d := makeEpisodeDownloader(t, "Foo", nil, false)
-	real := d.estimateStreamContentLength
-	require.Empty(t, estimateFailures(real), "the real estimator satisfies the contract")
+	reference := d.estimateStreamContentLength
+	require.Empty(t, estimateFailures(reference), "the real estimator satisfies the contract")
 
 	mutants := map[string]func(string, *http.Client) (int64, error){
 		"always default": func(string, *http.Client) (int64, error) { return estimateDefault, nil },
 		"ignores Content-Range": func(u string, c *http.Client) (int64, error) {
-			n, err := real(u, c)
+			n, err := reference(u, c)
 			if n != estimateHLS && n != 0 {
 				return estimateDefault, err
 			}
@@ -144,7 +144,7 @@ func TestEstimateStreamContentLengthMeta(t *testing.T) {
 			if len(u) > 5 && u[len(u)-5:] == ".m3u8" {
 				return estimateDefault, nil
 			}
-			return real(u, c)
+			return reference(u, c)
 		},
 		"no Range header sent": func(u string, c *http.Client) (int64, error) {
 			if strings.Contains(u, ".m3u8") {
@@ -168,21 +168,21 @@ func TestEstimateStreamContentLengthMeta(t *testing.T) {
 			return estimateDefault, nil
 		},
 		"unreachable host errors": func(u string, c *http.Client) (int64, error) {
-			n, err := real(u, c)
+			n, err := reference(u, c)
 			if n == estimateDefault && u == "http://127.0.0.1:1/v.mp4" {
 				return 0, fmt.Errorf("dial failed")
 			}
 			return n, err
 		},
 		"malformed URL swallowed": func(u string, c *http.Client) (int64, error) {
-			n, err := real(u, c)
+			n, err := reference(u, c)
 			if err != nil {
-				return estimateDefault, nil
+				return estimateDefault, nil //nolint:nilerr // deliberate mutant: swallows the error
 			}
 			return n, err
 		},
 		"unknown total parsed as zero": func(u string, c *http.Client) (int64, error) {
-			n, err := real(u, c)
+			n, err := reference(u, c)
 			if n == estimateDefault {
 				return 0, err
 			}

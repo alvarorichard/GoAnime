@@ -31,7 +31,7 @@ func (m *mockScraper) GetAnimeEpisodes(u string) ([]models.Episode, error) {
 	m.episodeCalls = append(m.episodeCalls, u)
 	return m.episodes, m.episodeErr
 }
-func (m *mockScraper) GetStreamURL(u string, opts ...any) (string, map[string]string, error) {
+func (m *mockScraper) GetStreamURL(u string, opts ...any) (streamURL string, meta map[string]string, err error) {
 	m.streamCalls = append(m.streamCalls, u)
 	m.streamOpts = append(m.streamOpts, opts)
 	return m.streamURL, m.streamMeta, m.streamErr

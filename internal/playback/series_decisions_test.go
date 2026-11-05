@@ -3,6 +3,7 @@ package playback
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -353,7 +354,7 @@ func firstEpisodeFailures(impl func([]models.Episode) (episodeSel, error)) (f []
 			f = append(f, fmt.Sprintf("%s: unexpected error %v", tc.name, err))
 		case tc.wantErr != nil && !errors.Is(err, tc.wantErr):
 			f = append(f, fmt.Sprintf("%s: error %v", tc.name, err))
-		case tc.errHas != "" && (err == nil || !contains(err.Error(), tc.errHas)):
+		case tc.errHas != "" && (err == nil || !strings.Contains(err.Error(), tc.errHas)):
 			f = append(f, fmt.Sprintf("%s: message %v", tc.name, err))
 		}
 	}
@@ -369,7 +370,7 @@ func TestSelectFirstEpisodeMeta(t *testing.T) {
 	withSelector(t, nil, nil)
 	require.Empty(t, firstEpisodeFailures(selectFirstEpisode))
 	mutants := map[string]func([]models.Episode) (episodeSel, error){
-		"no retry": func(e []models.Episode) (episodeSel, error) { return pickEpisode(e) },
+		"no retry": pickEpisode,
 		"retries forever on back": func(e []models.Episode) (episodeSel, error) {
 			for range maxEpisodeRetries {
 				if sel, err := pickEpisode(e); err == nil {
@@ -489,7 +490,7 @@ func TestReselectEpisodeMeta(t *testing.T) {
 		"failure commits zeros": func(e []models.Episode, c episodeSel, b bool) (episodeSel, error) {
 			next, err := pickEpisode(e)
 			if err != nil {
-				return episodeSel{}, nil
+				return episodeSel{}, nil //nolint:nilerr // deliberate mutant: commits zeros on failure
 			}
 			return next, nil
 		},

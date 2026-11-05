@@ -157,18 +157,19 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		"--audio-display=no",
 	}
 
-	if in.UpscalingEnabled {
+	switch {
+	case in.UpscalingEnabled:
 		// Shader-based upscaling: no hw decode so shaders can process frames.
 		// gpu-next leads the chain; a machine it can't start on still plays,
 		// unscaled if only a non-GPU output works.
 		mpvArgs = append(mpvArgs, defaultVideoOutputArg(), "--hwdec=no")
 		mpvArgs = append(mpvArgs, in.ShaderArgs...)
-	} else if in.UserMPVConfig {
+	case in.UserMPVConfig:
 		// The user's config decides profile and render quality, so no
 		// --profile=fast or latency hacks here. hwdec and the VO chain stay:
 		// they are what lets mpv start on machines where the default fails.
 		mpvArgs = append(mpvArgs, "--hwdec=auto-safe", defaultVideoOutputArg())
-	} else {
+	default:
 		mpvArgs = append(mpvArgs,
 			"--no-config",
 			"--hwdec=auto-safe",

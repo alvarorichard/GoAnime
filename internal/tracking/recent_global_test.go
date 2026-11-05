@@ -205,7 +205,7 @@ func recordNormalizationFailures(norm func(string) string) []string {
 func TestRecordSearchNormalizationMeta(t *testing.T) {
 	needSQLite(t)
 	isolatedHome(t)
-	real := func(in string) string {
+	observe := func(in string) string {
 		// Observe the normalisation through the public behaviour: store, read back.
 		resetGlobalTracker(t)
 		t.Setenv("HOME", t.TempDir()) // a fresh database for every observation
@@ -218,7 +218,7 @@ func TestRecordSearchNormalizationMeta(t *testing.T) {
 		}
 		return got[0].Query
 	}
-	require.Empty(t, recordNormalizationFailures(real), "the real RecordSearch satisfies the contract")
+	require.Empty(t, recordNormalizationFailures(observe), "the real RecordSearch satisfies the contract")
 
 	mutants := map[string]func(string) string{
 		"no normalisation": func(s string) string { return s },
@@ -272,8 +272,13 @@ func TestContinueEntriesOrderingMeta(t *testing.T) {
 			sort.Slice(in, func(i, j int) bool { return in[i].AllanimeID < in[j].AllanimeID })
 			return in
 		},
-		"drops one":     func(in []Anime) []Anime { return realOrder(in)[:2] },
-		"reverse input": func(in []Anime) []Anime { sort.SliceStable(in, func(i, j int) bool { return i > j }); return in },
+		"drops one": func(in []Anime) []Anime { return realOrder(in)[:2] },
+		"reverse input": func(in []Anime) []Anime {
+			for i, j := 0, len(in)-1; i < j; i, j = i+1, j-1 {
+				in[i], in[j] = in[j], in[i]
+			}
+			return in
+		},
 	}
 	for name, m := range mutants {
 		assert.NotEmpty(t, orderingFailures(m), "mutant %q survived", name)
