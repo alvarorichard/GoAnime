@@ -23,67 +23,15 @@ func setProcessGroup(cmd *exec.Cmd) {
 // This function handles the case where mpv is installed via the GoAnime installer but
 // the PATH environment variable hasn't been updated yet (common in Windows Sandbox).
 func findMPVPath() (string, error) {
-	// First, try standard PATH lookup
-	if mpvPath, err := exec.LookPath("mpv"); err == nil {
-		return mpvPath, nil
+	l := mpvLocator{lookPath: exec.LookPath, stat: os.Stat}
+	execPath, _ := os.Executable() // empty when unknown: the bundled locations are skipped
+	candidates := mpvCandidatesWindows(execPath, os.Getenv)
+	for i, c := range candidates {
+		candidates[i] = filepath.Clean(c)
 	}
-
-	// List of common MPV installation paths on Windows
-	possiblePaths := []string{}
-
-	// Get the directory where goanime.exe is located
-	execPath, err := os.Executable()
-	if err == nil {
-		execDir := filepath.Dir(execPath)
-		// Check for bundled mpv in the same directory as goanime
-		possiblePaths = append(possiblePaths,
-			filepath.Join(execDir, "bin", "mpv.exe"), // Installed via GoAnime installer
-			filepath.Join(execDir, "mpv.exe"),        // Portable installation
-		)
+	if path, ok := locateMPV(l, candidates, false); ok {
+		util.Debugf("Found mpv at: %s", path)
+		return path, nil
 	}
-
-	// Check Program Files directories
-	programFiles := os.Getenv("ProgramFiles")
-	programFilesX86 := os.Getenv("ProgramFiles(x86)")
-	localAppData := os.Getenv("LOCALAPPDATA")
-
-	if programFiles != "" {
-		possiblePaths = append(possiblePaths,
-			filepath.Join(programFiles, "GoAnime", "bin", "mpv.exe"),
-			filepath.Join(programFiles, "mpv", "mpv.exe"),
-			filepath.Join(programFiles, "mpv.net", "mpv.exe"),
-		)
-	}
-	if programFilesX86 != "" {
-		possiblePaths = append(possiblePaths,
-			filepath.Join(programFilesX86, "GoAnime", "bin", "mpv.exe"),
-			filepath.Join(programFilesX86, "mpv", "mpv.exe"),
-		)
-	}
-	if localAppData != "" {
-		possiblePaths = append(possiblePaths,
-			filepath.Join(localAppData, "Programs", "GoAnime", "bin", "mpv.exe"),
-		)
-	}
-
-	// Also check scoop and chocolatey installations
-	userProfile := os.Getenv("USERPROFILE")
-	if userProfile != "" {
-		possiblePaths = append(possiblePaths,
-			filepath.Join(userProfile, "scoop", "apps", "mpv", "current", "mpv.exe"),
-			filepath.Join(userProfile, "scoop", "shims", "mpv.exe"),
-		)
-	}
-
-	// Check each possible path (constructed from known safe OS directories like ProgramFiles, LOCALAPPDATA, etc.)
-	for _, path := range possiblePaths {
-		cleanPath := filepath.Clean(path)
-		util.Debugf("Checking for mpv at: %s", cleanPath)
-		if _, err := os.Stat(cleanPath); err == nil { // #nosec G703 -- path built from trusted OS env vars
-			util.Debugf("Found mpv at: %s", cleanPath)
-			return cleanPath, nil
-		}
-	}
-
 	return "", fmt.Errorf("mpv not found in PATH or common installation directories. Please install mpv: https://mpv.io/installation/")
 }

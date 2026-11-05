@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/discord"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -402,25 +401,29 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 // showResumeDialog displays a compact dialog asking if user wants to resume playback.
 // For movies (single-title playback) the wording avoids "episode N".
 func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
-	// Fail fast without a TTY: huh blocks on Windows console input headless.
-	if !tui.HasTerminal() {
+	return askToResume(tui.HasTerminal, confirmFn, episodeNum, timeSeconds, isMovie)
+}
+
+// askToResume asks the resume question through confirm. Without a terminal it
+// fails fast instead of prompting: huh blocks on Windows console input headless.
+func askToResume(
+	hasTerminal func() bool,
+	confirm func(title, description, yes, no string) (bool, error),
+	episodeNum, timeSeconds int,
+	isMovie bool,
+) (bool, error) {
+	if !hasTerminal() {
 		return false, fmt.Errorf("no terminal: stdin is not a TTY")
 	}
-	var resume bool
-
-	title := resumeTitle(episodeNum, timeSeconds, isMovie)
-
-	confirm := huh.NewConfirm().
-		Title(title).
-		Description("You can continue watching from where you left off.").
-		Affirmative("Yes, resume").
-		Negative("No, start from beginning").
-		Value(&resume)
-
-	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+	resume, err := confirm(
+		resumeTitle(episodeNum, timeSeconds, isMovie),
+		"You can continue watching from where you left off.",
+		"Yes, resume",
+		"No, start from beginning",
+	)
+	if err != nil {
 		return false, fmt.Errorf("error showing dialog: %w", err)
 	}
-
 	return resume, nil
 }
 
