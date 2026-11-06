@@ -519,8 +519,11 @@ func StartVideo(link string, args []string) (string, error) {
 	if lf, lerr := os.CreateTemp("", "goanime_mpv_*.log"); lerr == nil {
 		logPath = lf.Name()
 		_ = lf.Close()
-		defer func() { _ = os.Remove(logPath) }()
 		mpvArgs = append(mpvArgs, "--log-file="+logPath)
+		if util.IsDebug {
+			// Verbose: VO/AO selection, hwdec probing, demuxer and network errors.
+			mpvArgs = append(mpvArgs, "--msg-level=all=v")
+		}
 	}
 
 	// Sanitize media target (URL or local file path)
@@ -531,6 +534,7 @@ func StartVideo(link string, args []string) (string, error) {
 	mpvArgs = append(mpvArgs, safeLink)
 
 	util.Debugf("Starting mpv with arguments: %v", mpvArgs)
+	logMPVLaunch(mpvPath, mpvArgs)
 
 	// #nosec G204: mpvArgs are validated via filterMPVArgs and sanitizeMediaTarget
 	cmd := exec.Command(mpvPath, mpvArgs...)
@@ -543,17 +547,19 @@ func StartVideo(link string, args []string) (string, error) {
 
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
+		if logPath != "" {
+			_ = os.Remove(logPath)
+		}
+		util.Debugf("mpv failed to start: %v (path=%s)", err, mpvPath)
 		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
 	}
+	util.Debugf("mpv process started: pid=%d", cmd.Process.Pid)
 
 	// Reap the process in the background so we can detect early exit (common on
 	// Windows VMs when --vo=gpu fails / bundled mpv is missing DLLs). Without
 	// this, StartVideo waits the full timeout then Process.Kill returns
 	// "Access is denied" because the process is already dead.
-	waitErrCh := make(chan error, 1)
-	go func() {
-		waitErrCh <- cmd.Wait()
-	}()
+	exitCh := reapMPV(cmd, logPath, &stderr, startTime)
 
 	util.Debugf("mpv started (pid probe), waiting for socket creation: %s", socketPath)
 
@@ -567,8 +573,8 @@ func StartVideo(link string, args []string) (string, error) {
 	for time.Since(startTime) < maxWaitTime {
 		// Detect early mpv death before wasting the full timeout.
 		select {
-		case waitErr := <-waitErrCh:
-			return "", formatMPVEarlyExitError(waitErr, joinMPVDiagnostics(stderr.String(), readMPVLogTail(logPath)), mpvPath)
+		case ex := <-exitCh:
+			return "", formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath)
 		default:
 		}
 
@@ -604,35 +610,18 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 	}
 	// Drain Wait so we don't leak the reaper goroutine's result unnoticed.
+	var timeoutLog string
 	select {
-	case waitErr := <-waitErrCh:
-		if waitErr != nil {
-			util.Debugf("mpv wait after timeout: %v", waitErr)
-		}
+	case ex := <-exitCh:
+		timeoutLog = mpvProblemLines(ex.log, 15)
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	stderrHint := strings.TrimSpace(stderr.String())
+	stderrHint := joinMPVDiagnostics(stderr.String(), timeoutLog)
 	if stderrHint != "" {
 		return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv stderr: %s\nmpv path: %s\nPossible issues:\n1. MPV crashed or GPU/video output failed (common on VMs — try updating GPU drivers or reinstall mpv)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds(), stderrHint, mpvPath)
 	}
 	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv path: %s\nPossible issues:\n1. MPV hung before creating IPC (GPU/driver issue on VMs)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nRun: \"%s\" --version\nCheck debug logs with -debug flag", elapsed.Seconds(), mpvPath, mpvPath)
-}
-
-// readMPVLogTail returns the last lines of mpv's --log-file ("" if unreadable).
-func readMPVLogTail(path string) string {
-	if path == "" {
-		return ""
-	}
-	data, err := os.ReadFile(path) // #nosec G304 -- our own temp file
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) > 15 {
-		lines = lines[len(lines)-15:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // joinMPVDiagnostics merges mpv's stderr and log tail, dropping empties.
