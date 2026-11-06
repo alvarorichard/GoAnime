@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +35,9 @@ type mutant struct {
 	// kills maps a package to the guard tests in it; in every package at least
 	// one of them must fail against the mutant.
 	kills map[string][]string
+	// posixOnly marks a mutant whose guard cannot exist on Windows (file
+	// permission bits): it is skipped there, loudly, never silently passed.
+	posixOnly bool
 	// stopsAt, for a cascade, is the stage the run must stop at: later stages
 	// must not run.
 	stopsAt string
@@ -80,9 +84,10 @@ var sourcesMutants = []mutant{
 		kills: map[string][]string{utilPkg: {"TestLoadSourcePrefsMissingFileIsFine"}},
 	},
 	{
-		name:  "the file is world readable",
-		edits: []codeEdit{{prefsFile, "os.Chmod(tmp.Name(), 0o600)", "os.Chmod(tmp.Name(), 0o644)"}},
-		kills: map[string][]string{utilPkg: {"TestSaveLoadRoundTrip"}},
+		name:      "the file is world readable",
+		edits:     []codeEdit{{prefsFile, "os.Chmod(tmp.Name(), 0o600)", "os.Chmod(tmp.Name(), 0o644)"}},
+		kills:     map[string][]string{utilPkg: {"TestSaveLoadRoundTrip"}},
+		posixOnly: true,
 	},
 	{
 		name:  "an empty name reaches the file",
@@ -290,6 +295,9 @@ func TestSourcesGuardKillsMutants(t *testing.T) {
 
 	for _, m := range sourcesMutants {
 		t.Run(m.name, func(t *testing.T) {
+			if m.posixOnly && runtime.GOOS == "windows" {
+				t.Skip("file permission bits do not exist on Windows; this guard is POSIX-only")
+			}
 			t.Parallel()
 			overlay := writeMutantOverlay(t, root, m.edits)
 			for pkg, tests := range m.kills {
@@ -317,6 +325,18 @@ func TestSourcesGuardKillsMutants(t *testing.T) {
 
 // Every mutant is a real, distinct claim: named, with at least one guard in at
 // least one package, and no two swap the same snippet the same way.
+// Only the permission mutant may be POSIX-only: the exemption must not grow
+// into a way to skip guards.
+func TestOnlyPermissionMutantsArePosixOnly(t *testing.T) {
+	var exempt []string
+	for _, m := range sourcesMutants {
+		if m.posixOnly {
+			exempt = append(exempt, m.name)
+		}
+	}
+	assert.Equal(t, []string{"the file is world readable"}, exempt)
+}
+
 func TestMutantTableIsWellFormed(t *testing.T) {
 	seen := map[string]bool{}
 	for _, m := range sourcesMutants {
