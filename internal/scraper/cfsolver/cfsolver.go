@@ -172,7 +172,7 @@ func (s *Solver) SolveChallenge(ctx context.Context, targetURL string, timeout t
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("cfsolve: %w: %s", err, lastLine(stderr.String()))
+		return nil, runError(err, stderr.String())
 	}
 
 	value, ok := parseClearance(stdout.String())
@@ -235,7 +235,7 @@ func (s *Solver) SolveTurnstile(ctx context.Context, r netx.TurnstileRequest, ti
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cfsolve: %w: %s", err, lastLine(stderr.String()))
+		return "", runError(err, stderr.String())
 	}
 	token := lastLine(stdout.String())
 	if token == "" || strings.HasPrefix(token, clearanceName+"=") {
@@ -262,6 +262,21 @@ func parseClearance(out string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ErrProfileMismatch means the installed cfsolve binary and the profile
+// embedded in GoAnime come from different cfsolve commits.
+var ErrProfileMismatch = errors.New("the installed cfsolve does not match this GoAnime's browser profile")
+
+// runError wraps a failed cfsolve run. The tool refuses a profile from another
+// build with "the stored answers name reference build X, not the embedded Y";
+// that is fixed by reinstalling cfsolve, so say so instead of echoing it raw.
+func runError(err error, stderr string) error {
+	last := lastLine(stderr)
+	if strings.Contains(last, "stored answers name reference build") {
+		return fmt.Errorf("cfsolve: %w (%s); reinstall it with scripts/get-cfsolve.sh --build, or delete it to let GoAnime download the matching one", ErrProfileMismatch, last)
+	}
+	return fmt.Errorf("cfsolve: %w: %s", err, last)
 }
 
 func lastLine(s string) string {

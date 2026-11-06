@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
@@ -453,6 +455,9 @@ func (t *gateTransport) solve(req *http.Request) (string, bool) {
 	res, _, err := netx.SolveChallengeFor(ctx, target.String(), gateSolveTimeout, netx.RevealWhenStuck)
 	if err != nil || res == nil {
 		util.Debug("Goyabu: challenge solve failed", "url", target.String(), "err", err)
+		if errors.Is(err, cfsolver.ErrProfileMismatch) {
+			util.Warn("Goyabu needs a newer cfsolve: reinstall it with scripts/get-cfsolve.sh --build (or delete the installed one so GoAnime downloads the matching build).")
+		}
 		return "", false
 	}
 	if len(res.Cookies) > 0 {

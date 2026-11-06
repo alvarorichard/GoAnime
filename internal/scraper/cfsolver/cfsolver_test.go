@@ -2,6 +2,7 @@ package cfsolver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -270,5 +271,27 @@ func TestDiscoverIgnoresAForeignProfilePath(t *testing.T) {
 	}
 	if strings.Contains(got.Profile, "missing.json") {
 		t.Errorf("profile followed the variable: %s", got.Profile)
+	}
+}
+
+// A binary from another cfsolve commit than the embedded profile refuses to run
+// with a "stored answers name reference build" message; the error must say how
+// to fix it and be recognisable with errors.Is.
+func TestSolveChallengeProfileMismatchIsActionable(t *testing.T) {
+	s := fakeTool(t, `echo "Error: the stored answers name reference build 0c639c, not the embedded a56273" >&2; exit 1`)
+	_, err := s.SolveChallenge(context.Background(), "https://goyabu.io/", time.Minute, netx.RevealNever)
+	if !errors.Is(err, ErrProfileMismatch) {
+		t.Fatalf("want ErrProfileMismatch, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "get-cfsolve.sh --build") {
+		t.Fatalf("error does not say how to fix it: %v", err)
+	}
+	if _, err := s.SolveTurnstile(context.Background(), TurnstileRequest{PageURL: "https://x.example/", SiteKey: "0x4AAAAAAA"}, time.Minute); !errors.Is(err, ErrProfileMismatch) {
+		t.Fatalf("turnstile: want ErrProfileMismatch, got %v", err)
+	}
+
+	_, err = fakeTool(t, "echo boom >&2; exit 1").SolveChallenge(context.Background(), "https://goyabu.io/", time.Minute, netx.RevealNever)
+	if errors.Is(err, ErrProfileMismatch) {
+		t.Fatal("an unrelated failure must not read as a profile mismatch")
 	}
 }
