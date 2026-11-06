@@ -512,6 +512,17 @@ func StartVideo(link string, args []string) (string, error) {
 	// Validate and filter any additional args before passing to mpv
 	mpvArgs = append(mpvArgs, filterMPVArgs(args)...)
 
+	// --no-terminal silences stderr, so an mpv that dies at startup (bad
+	// option, VO/driver failure, missing DLL) would leave nothing to report.
+	// Its own log file keeps the real reason for the early-exit error.
+	logPath := ""
+	if lf, lerr := os.CreateTemp("", "goanime_mpv_*.log"); lerr == nil {
+		logPath = lf.Name()
+		_ = lf.Close()
+		defer func() { _ = os.Remove(logPath) }()
+		mpvArgs = append(mpvArgs, "--log-file="+logPath)
+	}
+
 	// Sanitize media target (URL or local file path)
 	safeLink, err := sanitizeMediaTarget(link)
 	if err != nil {
@@ -557,7 +568,7 @@ func StartVideo(link string, args []string) (string, error) {
 		// Detect early mpv death before wasting the full timeout.
 		select {
 		case waitErr := <-waitErrCh:
-			return "", formatMPVEarlyExitError(waitErr, stderr.String(), mpvPath)
+			return "", formatMPVEarlyExitError(waitErr, joinMPVDiagnostics(stderr.String(), readMPVLogTail(logPath)), mpvPath)
 		default:
 		}
 
@@ -606,6 +617,27 @@ func StartVideo(link string, args []string) (string, error) {
 		return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv stderr: %s\nmpv path: %s\nPossible issues:\n1. MPV crashed or GPU/video output failed (common on VMs — try updating GPU drivers or reinstall mpv)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds(), stderrHint, mpvPath)
 	}
 	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv path: %s\nPossible issues:\n1. MPV hung before creating IPC (GPU/driver issue on VMs)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nRun: \"%s\" --version\nCheck debug logs with -debug flag", elapsed.Seconds(), mpvPath, mpvPath)
+}
+
+// readMPVLogTail returns the last lines of mpv's --log-file ("" if unreadable).
+func readMPVLogTail(path string) string {
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- our own temp file
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > 15 {
+		lines = lines[len(lines)-15:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// joinMPVDiagnostics merges mpv's stderr and log tail, dropping empties.
+func joinMPVDiagnostics(stderrOut, logTail string) string {
+	return strings.TrimSpace(strings.TrimSpace(stderrOut) + "\n" + strings.TrimSpace(logTail))
 }
 
 // formatMPVEarlyExitError builds a clear error when mpv dies before the IPC
