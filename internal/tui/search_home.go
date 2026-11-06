@@ -104,6 +104,10 @@ type SearchHomeOptions struct {
 	// off the UI loop and must honour ctx, which is cancelled when the user
 	// types again.
 	Suggest SuggestFunc
+	// Sources lists the sources for the ctrl+s screen and SetSource saves a
+	// choice. Either nil leaves the screen out.
+	Sources   LoadSourcesFunc
+	SetSource SetSourceFunc
 }
 
 // HomeSuggestion is one autocomplete row: the title that fills the box and a
@@ -208,6 +212,11 @@ type searchHomeModel struct {
 	asked       string
 	cancel      context.CancelFunc
 
+	// The ctrl+s sources screen: sources is non-nil while it is open.
+	loadSources LoadSourcesFunc
+	setSource   SetSourceFunc
+	sources     *sourcesPanel
+
 	result   SearchHomeResult
 	err      error
 	showHelp bool
@@ -262,6 +271,8 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		deleteEntry: opts.DeleteEntry,
 		now:         time.Now,
 		suggest:     opts.Suggest,
+		loadSources: opts.Sources,
+		setSource:   opts.SetSource,
 		debounce:    suggestDebounce,
 		sugCursor:   -1,
 	}
@@ -327,6 +338,9 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.sources != nil {
+			return m.updateSources(msg)
+		}
 		if m.showHelp {
 			switch msg.String() {
 			case "?", "esc":
@@ -348,6 +362,9 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = true
 				return m, nil
 			}
+		case "ctrl+s":
+			m.openSources()
+			return m, nil
 		case "tab":
 			m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)
 			cmd := m.queryChanged()
@@ -418,6 +435,30 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// openSources opens the sources screen when the host provided one.
+func (m *searchHomeModel) openSources() {
+	if m.loadSources == nil {
+		return
+	}
+	m.dropSuggestions()
+	m.sources = newSourcesPanel(&m.theme, m.loadSources, m.setSource)
+}
+
+// updateSources feeds a key to the open sources screen, closing it on done and
+// keeping the header's "N sources on" in step with what was just switched.
+func (m *searchHomeModel) updateSources(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		m.err = ErrSearchHomeCancelled
+		return m, tea.Quit
+	}
+	closed := m.sources.update(msg)
+	m.shell.Context = SourcesSummary(m.sources.rows)
+	if closed {
+		m.sources = nil
+	}
+	return m, nil
 }
 
 // suggestKey identifies what the autocomplete would ask: the trimmed query
@@ -658,6 +699,9 @@ func isHomeTypeKey(msg tea.KeyPressMsg) bool {
 
 // hints lists the footer keys (tela 1).
 func (m *searchHomeModel) hints() []Hint {
+	if m.sources != nil {
+		return m.sources.hints()
+	}
 	if m.showHelp {
 		return []Hint{
 			{Key: "?", Desc: "close", Essential: true},
@@ -671,9 +715,12 @@ func (m *searchHomeModel) hints() []Hint {
 	hints := []Hint{
 		{Key: "enter", Desc: "search", Essential: true},
 		{Key: move, Desc: "move"},
-		{Key: "tab", Desc: "sources"},
+		{Key: "tab", Desc: "scope"},
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
+	}
+	if m.loadSources != nil {
+		hints = append(hints[:3], append([]Hint{{Key: "ctrl+s", Desc: "sources", Essential: true}}, hints[3:]...)...)
 	}
 	if _, ok := m.completionPick(); ok {
 		right := "→"
@@ -690,9 +737,12 @@ func (m *searchHomeModel) hints() []Hint {
 func (m *searchHomeModel) View() tea.View {
 	width, height := m.shell.ContentSize()
 	var body string
-	if m.showHelp {
+	switch {
+	case m.sources != nil:
+		body = m.sources.view(width)
+	case m.showHelp:
 		body = m.helpView(width, height)
-	} else {
+	default:
 		body = m.homeView(width, height)
 	}
 	view := tea.NewView(m.shell.Render(body, m.hints()))
@@ -704,7 +754,8 @@ func (m *searchHomeModel) View() tea.View {
 func (m *searchHomeModel) helpView(width, height int) string {
 	if help := RenderHelp(&m.theme, "Search", []HelpRow{
 		{Key: "enter", Desc: "search, resume"},
-		{Key: "tab", Desc: "sources"},
+		{Key: "tab", Desc: "change scope"},
+		{Key: "ctrl+s", Desc: "choose sources"},
 		{Key: "r", Desc: "from the start"},
 		{Key: "e", Desc: "episodes"},
 		{Key: "x", Desc: "remove"},

@@ -38,10 +38,10 @@ func planLiveSearch(kinds []source.SourceKind) (searchers []activeSearcher, off 
 		desc := s.Describe()
 		display := panelSourceName(kind)
 		switch {
-		case desc.DefaultDisabled && !util.SourceForceEnabled(string(kind)):
-			off = append(off, models.SearchOffEntry{Name: display, Reason: "off by default"})
 		case !source.IsEnabled(desc):
 			off = append(off, models.SearchOffEntry{Name: display, Reason: "disabled"})
+		case !source.IsSearchEnabled(desc):
+			off = append(off, models.SearchOffEntry{Name: display, Reason: searchOffReason(desc)})
 		default:
 			sr, ok := s.(source.Searchable)
 			if !ok {
@@ -59,6 +59,15 @@ func planLiveSearch(kinds []source.SourceKind) (searchers []activeSearcher, off 
 		}
 	}
 	return searchers, off, searched
+}
+
+// searchOffReason is the SOURCES panel's reason for a source sitting out of the
+// search: the user's own choice, or the source's default.
+func searchOffReason(desc source.Descriptor) string {
+	if _, set := util.SourcePref(string(desc.Kind)); set {
+		return "turned off"
+	}
+	return "off by default"
 }
 
 // SearchLive fans out like SearchAll but streams the fan-out to the SEARCHING

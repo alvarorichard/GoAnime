@@ -27,6 +27,10 @@ type Descriptor struct {
 	// available GOANIME_DISABLED_SOURCES kill-switch.
 	DefaultDisabled bool
 
+	// Note is a short caveat the SOURCES screen shows beside the source
+	// ("needs cfsolve"), whatever its state. Empty when there is none.
+	Note string
+
 	// ProbeURL is the source's public homepage, used only to disambiguate a
 	// search timeout: after a per-source deadline the dispatcher issues a quick
 	// HEAD against it (netx.EnrichTimeoutWithProbe) so a 5xx / Cloudflare-origin
@@ -139,17 +143,22 @@ func Kinds() []SourceKind {
 
 // registeredByPriority returns a snapshot of the registry ordered by
 // (Priority, Kind). The Kind tie-break keeps resolution deterministic even if
-// two sources declare the same Priority.
+// two sources declare the same Priority. Config-disabled sources are dropped
+// so they never resolve (S1 kill-switch).
 func registeredByPriority() []Source {
+	return filterEnabled(allByPriority())
+}
+
+// allByPriority is registeredByPriority before the kill-switch: every
+// registered source, so the SOURCES screen can show the ones the environment
+// switched off instead of letting them vanish unexplained.
+func allByPriority() []Source {
 	registryMu.RLock()
-	snapshot := make([]Source, 0, len(registry))
+	srcs := make([]Source, 0, len(registry))
 	for _, s := range registry {
-		snapshot = append(snapshot, s)
+		srcs = append(srcs, s)
 	}
 	registryMu.RUnlock()
-
-	// Drop config-disabled sources so they never resolve (S1 kill-switch).
-	srcs := filterEnabled(snapshot)
 
 	sort.Slice(srcs, func(i, j int) bool {
 		di, dj := srcs[i].Describe(), srcs[j].Describe()

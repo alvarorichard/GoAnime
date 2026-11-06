@@ -109,6 +109,8 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Recent:      recent,
 		DeleteEntry: deleteContinueEntry,
 		Suggest:     homeSuggest,
+		Sources:     homeSources,
+		SetSource:   setHomeSource,
 	})
 }
 
@@ -155,21 +157,42 @@ func scopeIndexForSource(src string) int {
 
 // sourcesLine reads "6 sources on · Goyabu off" at the right of the header.
 func sourcesLine() string {
-	active := source.ActiveSources()
-	disabled := source.DisabledSources()
-	sep := " · "
-	if tui.Plain() {
-		sep = " - "
+	return tui.SourcesSummary(homeSources())
+}
+
+// Seams for tests: where the choices are saved and how.
+var (
+	sourcePrefsPath   = util.SourcePrefsPath
+	persistSourcePref = util.PersistSourcePref
+)
+
+// homeSources lists the registered sources for the ctrl+s screen.
+func homeSources() []tui.SourceRow {
+	return homeSourceRows(source.SourceStates())
+}
+
+// homeSourceRows adapts source states to the screen's rows.
+func homeSourceRows(states []source.State) []tui.SourceRow {
+	rows := make([]tui.SourceRow, 0, len(states))
+	for _, st := range states {
+		rows = append(rows, tui.SourceRow{
+			ID:     string(st.Kind),
+			Name:   string(st.Kind),
+			Note:   st.Note,
+			On:     st.On,
+			Locked: st.Locked,
+		})
 	}
-	line := fmt.Sprintf("%d sources on", len(active))
-	if len(disabled) > 0 {
-		names := make([]string, 0, len(disabled))
-		for _, kind := range disabled {
-			names = append(names, string(kind))
-		}
-		line += sep + strings.Join(names, ", ") + " off"
+	return rows
+}
+
+// setHomeSource saves the user's choice for one source.
+func setHomeSource(id string, on bool) error {
+	path, err := sourcePrefsPath()
+	if err != nil {
+		return err
 	}
-	return line
+	return persistSourcePref(path, id, on)
 }
 
 // groupContinueEntries collapses watch history to one row per show: episodes

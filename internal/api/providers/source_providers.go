@@ -351,7 +351,17 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 		// resulting cf_clearance is accepted by GoAnime's own HTTP client, so
 		// the old "clearance does not replay" finding no longer holds for it.
 		DefaultDisabled: !netx.ChallengeSolverAvailable(),
+		Note:            goyabuNote(netx.ChallengeSolverAvailable()),
 	}
+}
+
+// goyabuNote is the caveat the SOURCES screen shows for Goyabu: without the
+// cfsolve helper, turning it on finds nothing, and the screen says why.
+func goyabuNote(solverAvailable bool) string {
+	if solverAvailable {
+		return ""
+	}
+	return "needs cfsolve to pass Cloudflare (docs/CFSOLVE.md)"
 }
 
 func (p *goyabuProvider) HasSeasons() bool { return false }

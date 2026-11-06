@@ -53,6 +53,12 @@ func main() {
 	// the one recorded by the updater. No marker means nothing to clean up.
 	updater.CleanupAfterUpdate()
 
+	// The sources the user switched on or off in the SOURCES screen. A file
+	// that cannot be read is reported and ignored: sources keep their defaults.
+	if err := util.LoadSavedSourcePrefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (using the default sources)\n", err)
+	}
+
 	// Challenge-gated sources (Goyabu) are only reachable through the optional
 	// cfsolve tool. Use it when installed; otherwise fetch the pinned build in
 	// the background (silent on failure) and Goyabu joins the search once it lands.
