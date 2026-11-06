@@ -1,15 +1,12 @@
 name: cfsolve Windows trial
 
-# Builds cfsolve for Windows with the temporary patch (third_party/cfsolve) and
-# uploads the .exe as an artifact. It publishes nothing: it only answers "does
+# Builds the pinned cfsolve for Windows and uploads the .exe as an artifact. It publishes nothing: it only answers "does
 # it build and does the .exe start", so the release is not touched until it does.
 
 on:
   push:
     branches: [dev]
     paths:
-      - third_party/cfsolve/**
-      - scripts/apply-cfsolve-patches.sh
       - internal/scraper/cfsolver/cfsolve.lock
       - .github/workflows/cfsolve-windows-trial.yml
   workflow_dispatch:
@@ -65,10 +62,6 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-clang
-
-      - name: Apply the temporary Windows patch
-        shell: msys2 {0}
-        run: scripts/apply-cfsolve-patches.sh cfsolve-src
 
       - name: Install the pinned Rust toolchain and the windows-gnu target
         shell: msys2 {0}

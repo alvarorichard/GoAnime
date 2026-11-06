@@ -247,8 +247,7 @@ jobs:
   # use. It is optional: a failure here must never block a release, it only
   # leaves that platform without Goyabu. The binaries join the signed
   # checksums-sha256.txt below, which is what the downloader verifies.
-  # Windows has its own job below: upstream does not build there yet, so it
-  # applies third_party/cfsolve/windows-build.patch (upstream PR #2).
+  # Windows has its own job below (MinGW-w64 toolchain).
   cfsolve:
     name: Build cfsolve ${{ matrix.asset }}
     runs-on: ${{ matrix.runner }}
@@ -321,9 +320,7 @@ jobs:
           path: dist/${{ matrix.asset }}
           retention-days: 1
 
-  # Temporary: delete the patch step with third_party/cfsolve once upstream
-  # merges PR #2 and the pin moves past it. Tested on a real Windows 11: the
-  # solver cleared Goyabu's gate (HTTP 403 -> 200).
+  # Tested on a real Windows 11: the solver cleared Goyabu's gate (HTTP 403 -> 200).
   cfsolve-windows:
     name: Build cfsolve challenge-windows-amd64.exe
     runs-on: windows-latest
@@ -370,10 +367,6 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-clang
-
-      - name: Apply the temporary Windows patch
-        shell: msys2 {0}
-        run: scripts/apply-cfsolve-patches.sh cfsolve-src
 
       - name: Install the pinned Rust toolchain and the windows-gnu target
         shell: msys2 {0}
