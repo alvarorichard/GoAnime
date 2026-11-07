@@ -199,7 +199,7 @@ func (e *Enricher) EnrichFromAniList(ctx context.Context, animeName string) (*An
 	if err != nil {
 		return nil, fmt.Errorf("AniList request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("AniList returned status %d", resp.StatusCode)
@@ -276,7 +276,7 @@ func (e *Enricher) EnrichFromAniListByID(ctx context.Context, anilistID int) (*A
 	if err != nil {
 		return nil, fmt.Errorf("AniList request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("AniList returned status %d", resp.StatusCode)
@@ -329,7 +329,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 	if err != nil {
 		return "", fmt.Errorf("TMDB find request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", nil // not found is not an error
@@ -362,7 +362,7 @@ func (e *Enricher) LookupIMDBID(ctx context.Context, malID int, tmdbAPIKey strin
 	if err != nil {
 		return "", nil
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	var extIDs struct {
 		IMDBID string `json:"imdb_id"`
@@ -570,7 +570,7 @@ func (e *Enricher) buildSeasonMapFromTMDB(ctx context.Context, malID int, tmdbAP
 	if err != nil {
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil
@@ -600,7 +600,7 @@ func (e *Enricher) buildSeasonMapFromTMDB(ctx context.Context, malID int, tmdbAP
 	if err != nil {
 		return nil
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK {
 		return nil

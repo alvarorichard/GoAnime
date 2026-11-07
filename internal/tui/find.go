@@ -42,9 +42,9 @@ func ResetTerminal() {
 	// ResetTerminal runs after every finder/spinner, and an unconditional
 	// newline stacks a blank line per call, riddling the session with gaps.
 	if SupportsANSI(os.Stdout) {
-		fmt.Fprint(os.Stdout, "\r\033[2K\033[?1l\033>\033[?25h")
+		_, _ = fmt.Fprint(os.Stdout, "\r\033[2K\033[?1l\033>\033[?25h")
 	} else {
-		fmt.Fprint(os.Stdout, "\r")
+		_, _ = fmt.Fprint(os.Stdout, "\r")
 	}
 
 	// Drain any stale bytes from stdin (platform-specific implementation). A
