@@ -47,11 +47,27 @@ func alternateSources(current string) []string {
 	return others
 }
 
-// reportSourceVideoRemoved explains a dead episode in terms the user can act
-// on: the source still lists it, the host deleted the file, and the way
-// forward is the same title on another source (ESC in the episode list walks
-// back to the search results, where the other sources' entries are waiting).
-func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
+// reportEpisodeVideoError tells the user why an episode's video could not be
+// had, in the way that fits the cause, before the episode list opens again.
+func reportEpisodeVideoError(anime *models.Anime, episodeNumberStr string, videoErr error) {
+	switch {
+	case errors.Is(videoErr, player.ErrBackToEpisodeSelection):
+		// User-initiated: nothing to report.
+	case errors.Is(videoErr, player.ErrSourceVideoRemoved):
+		// The listing is alive but the media behind it is gone, so trying
+		// other episodes of the same title usually fails the same way
+		// (issue #203). Say that plainly and point at the only thing that
+		// can work — the same title on a different source — instead of
+		// printing a raw extraction error the user cannot act on.
+		reportSourceVideoRemoved(anime, episodeNumberStr)
+	default:
+		reportEpisodeLoadFailed(episodeNumberStr, videoErr)
+	}
+}
+
+// sourceVideoRemovedMessage is what a dead episode says: what happened, and
+// the way forward. label names the episode and may be blank.
+func sourceVideoRemovedMessage(anime *models.Anime, episodeNumberStr string) (problem, hint string) {
 	current := ""
 	if anime != nil {
 		current = anime.Source
@@ -64,13 +80,60 @@ func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
 	if label == "" {
 		label = "This episode"
 	}
-	util.Errorf("%s is no longer playable on %s: the host deleted the video file (the episode is still listed, the media behind it is gone).", label, src)
+	problem = fmt.Sprintf("%s is no longer playable on %s: the host deleted the video file (the episode is still listed, the media behind it is gone).", label, src)
 	if others := alternateSources(current); len(others) > 0 {
-		util.Infof("Press ESC to leave the episode list and pick the same title from another source: %s.", strings.Join(others, ", "))
+		hint = fmt.Sprintf("Press ESC to leave the episode list and pick the same title from another source: %s.", strings.Join(others, ", "))
 	} else {
-		util.Infof("Press ESC to leave the episode list and search again.")
+		hint = "Press ESC to leave the episode list and search again."
 	}
+	return problem, hint
 }
+
+// reportSourceVideoRemoved explains a dead episode in terms the user can act
+// on: the source still lists it, the host deleted the file, and the way
+// forward is the same title on another source (ESC in the episode list walks
+// back to the search results, where the other sources' entries are waiting).
+//
+// The episode list opens again straight away and covers the terminal, so the
+// message goes on that list as well as to the terminal: printed alone it was
+// there for a few milliseconds, and the user saw the list come back with no
+// word of why (issue #229).
+func reportSourceVideoRemoved(anime *models.Anime, episodeNumberStr string) {
+	problem, hint := sourceVideoRemovedMessage(anime, episodeNumberStr)
+	util.Errorf("%s", problem)
+	util.Infof("%s", hint)
+	noticeOnNextPicker(problem + " " + hint)
+}
+
+// reportEpisodeLoadFailed says why an episode did not load, on the episode list
+// it returns to; see reportSourceVideoRemoved for why the terminal alone is not
+// enough.
+func reportEpisodeLoadFailed(episodeNumberStr string, err error) {
+	util.Warnf("Failed to extract video URL: %v", err)
+	noticeOnNextPicker(episodeLoadFailedNotice(episodeNumberStr, err))
+}
+
+// episodeLoadFailedNotice is the list notice for an episode whose stream could
+// not be resolved: the friendly wording when the api layer has one, and the
+// way to go on.
+func episodeLoadFailedNotice(episodeNumberStr string, err error) string {
+	if err == nil {
+		return ""
+	}
+	label := strings.TrimSpace(episodeNumberStr)
+	if label == "" {
+		label = "This episode"
+	}
+	reason := strings.TrimSpace(movieFriendlyErr(err))
+	if reason == "" {
+		reason = "no reason was given"
+	}
+	return fmt.Sprintf("%s did not load: %s Pick another episode, or press ESC to go back.", label, strings.TrimRight(reason, ". ")+".")
+}
+
+// noticeOnNextPicker is the TUI seam the reports write through; tests replace
+// it to read back what the user would be told.
+var noticeOnNextPicker = tui.NoticeOnNextPicker
 
 // alternateMovieSources lists the movie sources that could still carry the
 // title — the movie-side version of alternateSources. StartFlix, TopCine and
@@ -150,6 +213,13 @@ func movieStreamFailedNotice(anime *models.Anime, err error) string {
 	return base
 }
 
+// Seams for PlayEpisode's two lookups, so a test can drive the failure paths
+// without the network.
+var (
+	videoURLFor    = player.GetVideoURLForEpisodeEnhanced
+	episodeDataFor = api.GetEpisodeData
+)
+
 func PlayEpisode(
 	ctx context.Context,
 	anime *models.Anime,
@@ -228,7 +298,7 @@ func PlayEpisode(
 		defer wg.Done()
 		// Metadata providers mutate Episodes. Keep that mutation isolated from
 		// stream resolution, which concurrently reads and may enrich anime.
-		episodeDataErr = api.GetEpisodeData(anime.MalID, episodeNum, &episodeDataAnime)
+		episodeDataErr = episodeDataFor(anime.MalID, episodeNum, &episodeDataAnime)
 		if episodeDataErr != nil {
 			util.Debugf("Error fetching episode data: %v", episodeDataErr)
 		}
@@ -236,7 +306,7 @@ func PlayEpisode(
 
 	go func() {
 		defer wg.Done()
-		videoURL, videoErr = player.GetVideoURLForEpisodeEnhanced(ctx, currentEpisodeCopy, anime)
+		videoURL, videoErr = videoURLFor(ctx, currentEpisodeCopy, anime)
 	}()
 
 	wg.Wait()
@@ -249,19 +319,7 @@ func PlayEpisode(
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
 		// Route user back to episode selection so they can pick another one.
-		switch {
-		case errors.Is(videoErr, player.ErrBackToEpisodeSelection):
-			// User-initiated: nothing to report.
-		case errors.Is(videoErr, player.ErrSourceVideoRemoved):
-			// The listing is alive but the media behind it is gone, so trying
-			// other episodes of the same title usually fails the same way
-			// (issue #203). Say that plainly and point at the only thing that
-			// can work — the same title on a different source — instead of
-			// printing a raw extraction error the user cannot act on.
-			reportSourceVideoRemoved(anime, episodeNumberStr)
-		default:
-			util.Warnf("Failed to extract video URL: %v", videoErr)
-		}
+		reportEpisodeVideoError(anime, episodeNumberStr, videoErr)
 		return player.ErrBackToEpisodeSelection
 	}
 

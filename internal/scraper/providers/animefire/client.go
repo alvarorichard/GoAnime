@@ -30,6 +30,9 @@ type AnimefireClient struct {
 	userAgent  string
 	maxRetries int
 	retryDelay time.Duration
+	// notice tells the user something about the list they are about to see
+	// (see util.NoticeOnNextPicker); a field so a test can read it back.
+	notice func(string)
 }
 
 // NewAnimefireClient creates a new Animefire client
@@ -41,6 +44,7 @@ func NewAnimefireClient() *AnimefireClient {
 		userAgent:  netx.UserAgent,
 		maxRetries: 2,
 		retryDelay: 100 * time.Millisecond,
+		notice:     util.NoticeOnNextPicker,
 	}
 }
 

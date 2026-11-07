@@ -357,6 +357,16 @@ func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
 	util.Warnf("AnimeFire may have no video files for this title — "+
 		"the first and middle episodes are both offline (%d episodes listed).", len(episodes))
 	util.Infof("Try the same title on another source (StartFlix or HiAnime).")
+	// The episode list opens next and covers what was just printed.
+	if c.notice != nil {
+		c.notice(titleOfflineNotice(len(episodes)))
+	}
+}
+
+// titleOfflineNotice is what the episode list tells the user about a title
+// whose episodes are probably all offline.
+func titleOfflineNotice(listed int) string {
+	return fmt.Sprintf("AnimeFire may have no video files for this title: the first and middle episodes are both offline (%d episodes listed). Press ESC and pick the same title from StartFlix or HiAnime.", listed)
 }
 
 // streamAPI resolves an episode's playable URL.
