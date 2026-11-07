@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -301,4 +302,62 @@ func Download(contentLength int64, threads int, dest string, fetch func(Part) er
 		return fmt.Errorf("failed to combine parts: %w", err)
 	}
 	return nil
+}
+
+// ProbeOptions tune ContentLength; every field is optional.
+type ProbeOptions struct {
+	Prepare func(*http.Request) // sets the request headers a CDN expects
+	// OnMissing answers when the server sends no Content-Length. Without it
+	// that is an error.
+	OnMissing func() (int64, error)
+}
+
+// ContentLength asks the server how large url is. It sends a HEAD request and,
+// when the server refuses HEAD (405 or 501) or the request fails, reads the
+// size off a one-byte ranged GET instead. A 403 or 404 is a
+// netx.DownloadExpiredError.
+func ContentLength(url string, client *http.Client, opts ProbeOptions) (int64, error) {
+	req, err := http.NewRequest("HEAD", url, http.NoBody)
+	if err != nil {
+		return 0, err
+	}
+	if opts.Prepare != nil {
+		opts.Prepare(req)
+	}
+
+	resp, err := client.Do(req) // #nosec G704
+	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
+		if resp != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				util.Debugf("Failed to close HEAD response body: %v", closeErr)
+			}
+		}
+		req.Method = "GET"
+		req.Header.Set("Range", "bytes=0-0") // only the first byte, to keep the transfer small
+		resp, err = client.Do(req)           // #nosec G704 -- the modified GET request
+		if err != nil {
+			return 0, err
+		}
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			util.Debugf("Failed to close response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+			return 0, netx.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+		}
+		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
+	}
+
+	header := resp.Header.Get("Content-Length")
+	if header == "" {
+		if opts.OnMissing != nil {
+			return opts.OnMissing()
+		}
+		return 0, fmt.Errorf("server sent no Content-Length")
+	}
+	return strconv.ParseInt(header, 10, 64)
 }

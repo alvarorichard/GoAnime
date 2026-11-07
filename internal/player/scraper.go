@@ -26,6 +26,7 @@ import (
 	_ "github.com/alvarorichard/Goanime/v2/internal/api/providers"
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
@@ -84,9 +85,11 @@ func DownloadFolderFormatter(str string) string {
 	return ""
 }
 
-// getContentLength retrieves the content length of the given URL.
+// getContentLength retrieves the content length of the given URL. The probing
+// lives in rangedl; this adds the auth headers and what to do when the server
+// does not say.
 func getContentLength(url string, client *http.Client) (int64, error) {
-	// Check if this is a URL that might not have Content-Length header
+	// A URL that might not have a Content-Length header
 	isKnownStreamURL := strings.Contains(url, "sharepoint.com") ||
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
@@ -96,72 +99,18 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "animesfire") ||
 		strings.Contains(url, "repackager.wixmp.com")
 
-	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
-	req, err := http.NewRequest("HEAD", url, http.NoBody)
-	if err != nil {
-		// Returns 0 and the error if the request creation fails.
-		return 0, err
-	}
-	applyDownloadAuthHeaders(req, url)
-
-	// Sends the HEAD request to the server.
-	resp, err := client.Do(req) // #nosec G704
-	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
-		if resp != nil {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				util.Debugf("Failed to close HEAD response body: %v", closeErr)
+	return rangedl.ContentLength(url, client, rangedl.ProbeOptions{
+		Prepare: func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
+		OnMissing: func() (int64, error) {
+			if isKnownStreamURL {
+				util.Debugf("Content-Length header missing for streaming URL, using fallback method")
+				return estimateStreamContentLength(url, client)
 			}
-		}
-		// If the HEAD request fails or is not supported, fall back to a GET request.
-		req.Method = "GET"
-		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
-		resp, err = client.Do(req)           // #nosec G704 -- Sends the modified GET request.
-		if err != nil {
-			// Returns 0 and the error if the GET request fails.
-			return 0, err
-		}
-	}
-
-	// Ensures that the response body is closed after it is used to avoid resource leaks.
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			// Logs a warning if closing the response body fails.
-			util.Debugf("Failed to close response body: %v", err)
-		}
-	}()
-
-	// Checks if the server responded with a 200 OK or 206 Partial Content status.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return 0, netx.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
-		}
-		// Returns an error if the server does not support partial content (required for ranged requests).
-		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
-	}
-
-	// Retrieves the "Content-Length" header from the response.
-	contentLengthHeader := resp.Header.Get("Content-Length")
-	if contentLengthHeader == "" {
-		// For known streaming URLs that might not have Content-Length, return a default size
-		if isKnownStreamURL {
-			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
-			return estimateStreamContentLength(url, client)
-		}
-		// For any other URL without Content-Length, use a reasonable default instead of failing
-		util.Debugf("Content-Length header missing, using default estimate")
-		return 200 * 1024 * 1024, nil // 200MB default
-	}
-
-	// Converts the "Content-Length" header from a string to an int64.
-	contentLength, err := strconv.ParseInt(contentLengthHeader, 10, 64)
-	if err != nil {
-		// Returns 0 and an error if the conversion fails.
-		return 0, err
-	}
-
-	// Returns the content length in bytes.
-	return contentLength, nil
+			// For any other URL without Content-Length, use a reasonable default instead of failing
+			util.Debugf("Content-Length header missing, using default estimate")
+			return 200 * 1024 * 1024, nil // 200MB default
+		},
+	})
 }
 
 // estimateStreamContentLength estimates the size of a stream whose server
