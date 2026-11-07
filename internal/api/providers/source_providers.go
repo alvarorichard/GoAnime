@@ -41,7 +41,7 @@ var (
 
 	// Pomfy plays through its own Byse CDN (the PoW captcha flow); the api
 	// package owns the season/episode listing on top of the site's JSON.
-	pomfyStreamFn   = api.GetPomfyStreamURL
+	pomfyStreamFn   = api.ResolvePomfyStream
 	pomfyEpisodesFn = api.GetPomfyEpisodes
 
 	// AnimesDigital keeps dubbed and subtitled releases on separate title
@@ -882,15 +882,17 @@ func (p *pomfyProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) 
 	return pomfyEpisodesFn(anime)
 }
 
-func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *pomfyProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return pomfyStreamFn(anime, episode, quality)
+}
+
+func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- AnimeDrive Provider ---
@@ -1001,4 +1003,23 @@ func (p *animeDriveProvider) FetchStreamURL(
 	}
 
 	return streamURL, nil
+}
+
+// fetchAndPublish is the one place a StreamFetcher's result reaches the
+// player: it clears what the previous stream left, resolves, and publishes the
+// Stream's playback context. A failed resolve publishes nothing.
+func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	stream, err := sf.FetchStream(ctx, episode, anime, quality)
+	if err != nil {
+		return "", err
+	}
+	stream.Publish()
+	return stream.URL, nil
 }

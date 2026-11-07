@@ -57,8 +57,12 @@ const (
 	apiByseNonce  = "awoken"
 	apiByseCode   = "gkcq8gbiwh4r"
 	apiByseEmbed  = "https://cdn.test/e/" + apiByseCode
-	apiByseMaster = "https://edge.test/hls2/master.m3u8"
+	apiByseSubURL = "https://edge.test/pt-br.vtt"
 )
+
+// apiByseMaster is what the fake playback seals. A var so a test can serve a
+// master whose URL spells an audio language.
+var apiByseMaster = "https://edge.test/hls2/master.m3u8"
 
 // newPomfyWorld is the whole fake: site routes plus byse routes, wired so
 // watch-sources names the embed this same server serves.

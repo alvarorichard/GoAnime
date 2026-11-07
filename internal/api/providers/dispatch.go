@@ -370,5 +370,8 @@ func FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.
 	util.ClearGlobalReferer()
 	util.ClearGlobalOrigin()
 	util.Debug("Fetching stream via registry", "kind", src.Describe().Kind, "reason", resolved.Reason)
+	if sf, ok := src.(source.StreamFetcher); ok {
+		return fetchAndPublish(ctx, sf, episode, anime, quality)
+	}
 	return src.FetchStreamURL(ctx, episode, anime, quality)
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
@@ -239,16 +240,30 @@ func GetPomfySeasonEpisodes(media *models.Anime, seasonNum int) ([]models.Episod
 	return pomfySeasonEpisodes(media, tmdbID, seasonNum)
 }
 
-// GetPomfyStreamURL resolves an episode or movie to its HLS master. The input
+// GetPomfyStreamURL resolves an episode or movie to its HLS master and
+// publishes the playback context that goes with it. Callers that can take a
+// source.Stream should use ResolvePomfyStream and publish it themselves.
+func GetPomfyStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
+	stream, err := ResolvePomfyStream(media, episode, quality)
+	if err != nil {
+		return "", err
+	}
+	stream.Publish()
+	return stream.URL, nil
+}
+
+// ResolvePomfyStream resolves an episode or movie to its HLS master. The input
 // it needs is exactly what episode listing stores: the TMDB id and, for
 // series, the season/episode numbers — names ride along in the identifiers.
-func GetPomfyStreamURL(media *models.Anime, episode *models.Episode, _ string) (string, error) {
+// It writes no playback state: the referer, audio hint and subtitles come back
+// in the Stream.
+func ResolvePomfyStream(media *models.Anime, episode *models.Episode, _ string) (source.Stream, error) {
 	if media == nil || episode == nil {
-		return "", errors.New("no Pomfy title or episode to play")
+		return source.Stream{}, errors.New("no Pomfy title or episode to play")
 	}
 	tmdbID, ok := pomfyTMDBID(media, episode)
 	if !ok {
-		return "", fmt.Errorf("%q has no TMDB id to play on Pomfy", media.Name)
+		return source.Stream{}, fmt.Errorf("%q has no TMDB id to play on Pomfy", media.Name)
 	}
 	id := atoint64(tmdbID)
 	kind := pomfyKindOf(media)
@@ -263,25 +278,20 @@ func GetPomfyStreamURL(media *models.Anime, episode *models.Episode, _ string) (
 		stream, err = PomfyClientFn().ResolveStream(sctx, id, kind, season, num, watch)
 	})
 	if err != nil {
-		return "", describePomfyErr(err)
+		return source.Stream{}, describePomfyErr(err)
 	}
-	if stream.Referer != "" {
-		util.SetGlobalReferer(stream.Referer)
+	out := source.Stream{
+		URL:     stream.URL,
+		Referer: stream.Referer,
+		// The HLS master's URL spells the audio language its file carries
+		// (…/lang/por/… on series); hint mpv before the first track plays.
+		AudioLang: pomfyStreamLang(stream.URL),
 	}
-	// The HLS master's URL spells the audio language its file carries
-	// (…/lang/por/… on series); hint mpv before the first track plays.
-	if lang := pomfyStreamLang(stream.URL); lang != "" {
-		util.SetGlobalAudioLanguage(lang)
-	}
-	if len(stream.Subtitles) > 0 && !util.GlobalNoSubs {
-		subs := make([]util.SubtitleInfo, 0, len(stream.Subtitles))
-		for _, s := range stream.Subtitles {
-			subs = append(subs, util.SubtitleInfo{URL: s.URL, Language: s.Language, Label: s.Label})
-		}
-		util.SetGlobalSubtitles(subs)
+	for _, s := range stream.Subtitles {
+		out.Subtitles = append(out.Subtitles, source.Subtitle{URL: s.URL, Language: s.Language, Label: s.Label})
 	}
 	util.Debug("Pomfy stream URL obtained", "host", stream.Host, "url", stream.URL[:min(len(stream.URL), 80)])
-	return stream.URL, nil
+	return out, nil
 }
 
 // pomfySeasonAndEpisode derives the season and episode numbers. Movies are
