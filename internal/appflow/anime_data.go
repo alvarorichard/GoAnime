@@ -172,7 +172,7 @@ func rememberSearch(query, scope string) {
 // began with: the title can be changed during playback, and the results screen
 // can edit the search. query and scope are what the caller would repeat
 // otherwise, and are returned when nothing has been searched yet.
-func SearchToRepeat(query, scope string) (string, string) {
+func SearchToRepeat(query, scope string) (repeatQuery, repeatScope string) {
 	lastSearch.Lock()
 	defer lastSearch.Unlock()
 	if !lastSearch.set {
