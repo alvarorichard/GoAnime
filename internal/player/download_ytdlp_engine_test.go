@@ -3,132 +3,18 @@ package player
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/alvarorichard/Goanime/v2/internal/ytdlpdl"
 	"github.com/lrstanley/go-ytdlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// ytdlpArgs is the command line yt-dlp would be started with for spec. The
-// executable is fixed so nothing is resolved, installed or run.
-func ytdlpArgs(spec ytdlpSpec, extra ...string) []string {
-	return newYtdlpCommand(spec).SetExecutable("yt-dlp").BuildCommand(context.Background(), extra...).Args
-}
-
-// flagValue is the argument following flag, "" when the flag is absent.
-func flagValue(args []string, flag string) string {
-	if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
-		return args[i+1]
-	}
-	return ""
-}
-
-func flagValues(args []string, flag string) []string {
-	var out []string
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == flag {
-			out = append(out, args[i+1])
-		}
-	}
-	return out
-}
-
-// ---- newYtdlpCommand -------------------------------------------------------------------
-
-func commandFailures(impl func(ytdlpSpec) []string) (f []string) {
-	defer func() {
-		if r := recover(); r != nil {
-			f = append(f, fmt.Sprint("panic: ", r))
-		}
-	}()
-	full := impl(ytdlpSpec{URL: "https://cdn/x.m3u8", Output: "/o/ep.mp4", Impersonate: true, Headers: []string{"Referer:https://a/", "Origin:https://a"}})
-	plain := impl(ytdlpSpec{URL: "https://cdn/x.m3u8", Output: "/o/ep.mp4"})
-
-	for flag, want := range map[string]string{
-		"--output": "/o/ep.mp4", "--format": "bestvideo+bestaudio/best", "--concurrent-fragments": "24",
-		"--buffer-size": "32M", "--fragment-retries": "5", "--retries": "5", "--socket-timeout": "30",
-	} {
-		for name, args := range map[string][]string{"full": full, "plain": plain} {
-			if got := flagValue(args, flag); got != want {
-				f = append(f, fmt.Sprintf("%s: %s=%q want %q", name, flag, got, want))
-			}
-		}
-	}
-	if flagValue(full, "--impersonate") != "chrome" {
-		f = append(f, "impersonation missing when asked for")
-	}
-	if slices.Contains(plain, "--impersonate") {
-		f = append(f, "impersonation set when not asked for")
-	}
-	if got := flagValues(full, "--add-headers"); fmt.Sprint(got) != "[Referer:https://a/ Origin:https://a]" {
-		f = append(f, fmt.Sprintf("headers %v", got))
-	}
-	if slices.Contains(plain, "--add-headers") {
-		f = append(f, "headers set when none were given")
-	}
-	if full[len(full)-1] != "--hls-use-mpegts" || full[len(full)-2] != "https://cdn/x.m3u8" {
-		f = append(f, fmt.Sprintf("URL and raw flag not last: %v", full[len(full)-2:]))
-	}
-	return f
-}
-
-func realCommandArgs(spec ytdlpSpec) []string { return ytdlpArgs(spec, spec.URL, "--hls-use-mpegts") }
-
-func TestNewYtdlpCommand(t *testing.T) {
-	assert.Empty(t, commandFailures(realCommandArgs))
-}
-
-func TestNewYtdlpCommandMeta(t *testing.T) {
-	require.Empty(t, commandFailures(realCommandArgs))
-	with := func(edit func(*ytdlpSpec)) func(ytdlpSpec) []string {
-		return func(s ytdlpSpec) []string { edit(&s); return realCommandArgs(s) }
-	}
-	strip := func(flag string) func(ytdlpSpec) []string {
-		return func(s ytdlpSpec) []string {
-			a := realCommandArgs(s)
-			for {
-				i := slices.Index(a, flag)
-				if i < 0 {
-					return a
-				}
-				a = slices.Delete(slices.Clone(a), i, min(i+2, len(a)))
-			}
-		}
-	}
-	mutants := map[string]func(ytdlpSpec) []string{
-		"always impersonates": with(func(s *ytdlpSpec) { s.Impersonate = true }),
-		"never impersonates":  with(func(s *ytdlpSpec) { s.Impersonate = false }),
-		"headers dropped":     with(func(s *ytdlpSpec) { s.Headers = nil }),
-		"first header only":   with(func(s *ytdlpSpec) { s.Headers = s.Headers[:min(1, len(s.Headers))] }),
-		"output elsewhere":    with(func(s *ytdlpSpec) { s.Output += ".part" }),
-		"no output":           strip("--output"),
-		"no format":           strip("--format"),
-		"no fragments":        strip("--concurrent-fragments"),
-		"no retries":          strip("--retries"),
-		"no fragment retries": strip("--fragment-retries"),
-		"no socket timeout":   strip("--socket-timeout"),
-		"no buffer":           strip("--buffer-size"),
-		"mpegts dropped": func(s ytdlpSpec) []string {
-			return ytdlpArgs(s, s.URL)
-		},
-		"url dropped": func(s ytdlpSpec) []string {
-			return ytdlpArgs(s, "--hls-use-mpegts")
-		},
-	}
-	for name, m := range mutants {
-		assert.NotEmpty(t, commandFailures(m), "mutant %q survived", name)
-	}
-}
-
-// ---- runYtdlpDownload / ytdlpOutcome ------------------------------------------------------
-
+// engineMock is a yt-dlp engine that records its runs and replays canned results.
 type engineMock struct {
 	installErr error
 	results    []error // one per Run; the last repeats
@@ -136,13 +22,13 @@ type engineMock struct {
 
 	installs int
 	runs     int
-	specs    []ytdlpSpec
+	specs    []ytdlpdl.Spec
 	gotCB    []bool // whether a progress callback was given
 }
 
 func (e *engineMock) Install(context.Context) error { e.installs++; return e.installErr }
 
-func (e *engineMock) Run(_ context.Context, spec ytdlpSpec, cb func(ytdlp.ProgressUpdate)) error {
+func (e *engineMock) Run(_ context.Context, spec ytdlpdl.Spec, cb func(ytdlp.ProgressUpdate)) error {
 	i := e.runs
 	e.runs++
 	e.specs = append(e.specs, spec)
@@ -155,134 +41,11 @@ func (e *engineMock) Run(_ context.Context, spec ytdlpSpec, cb func(ytdlp.Progre
 	return e.results[min(i, len(e.results)-1)]
 }
 
-func TestRunYtdlpDownloadRetriesAndResetsProgress(t *testing.T) {
-	dl := ytdlp.ProgressStatusDownloading
-	eng := &engineMock{
-		results: []error{errTransient, nil},
-		updates: [][]ytdlp.ProgressUpdate{
-			{upd(dl, "v.mp4", 400, 1000, 0, 0)},
-			{upd(dl, "v.mp4", 150, 1000, 0, 0)}, // the retry starts over from fewer bytes
-		},
-	}
-	var sleeps []time.Duration
-	m := &model{}
-
-	err := runYtdlpDownload(context.Background(), eng, ytdlpSpec{URL: "u", Output: "o"}, m, func(d time.Duration) { sleeps = append(sleeps, d) })
-
-	require.NoError(t, err)
-	assert.Equal(t, 2, eng.runs)
-	assert.Equal(t, []time.Duration{2 * time.Second}, sleeps)
-	assert.Equal(t, int64(550), m.received, "400 from the first attempt plus all 150 of the retry")
-	assert.Equal(t, int64(1000), m.totalBytes)
-	assert.Equal(t, ytdlpSpec{URL: "u", Output: "o"}, eng.specs[1], "the retry runs the same download")
-}
-
-func TestRunYtdlpDownloadWithoutAModelGivesNoProgressCallback(t *testing.T) {
-	eng := &engineMock{results: []error{nil}}
-	require.NoError(t, runYtdlpDownload(context.Background(), eng, ytdlpSpec{}, nil, func(time.Duration) {}))
-	assert.Equal(t, []bool{false}, eng.gotCB)
-
-	eng = &engineMock{results: []error{nil}}
-	require.NoError(t, runYtdlpDownload(context.Background(), eng, ytdlpSpec{}, &model{}, func(time.Duration) {}))
-	assert.Equal(t, []bool{true}, eng.gotCB)
-}
-
-func TestRunYtdlpDownloadStopsOnFatalErrors(t *testing.T) {
-	eng := &engineMock{results: []error{errFatal}}
-	err := runYtdlpDownload(context.Background(), eng, ytdlpSpec{}, &model{}, func(time.Duration) { t.Fatal("slept before a fatal error") })
-	assert.ErrorIs(t, err, errFatal)
-	assert.Equal(t, 1, eng.runs)
-}
-
-func TestRunYtdlpDownloadGivesUpAfterTheRetryBudget(t *testing.T) {
-	eng := &engineMock{results: []error{errTransient}}
-	err := runYtdlpDownload(context.Background(), eng, ytdlpSpec{}, &model{}, func(time.Duration) {})
-	assert.ErrorIs(t, err, errTransient)
-	assert.Equal(t, ytdlpMaxRetries+1, eng.runs)
-}
-
-func TestYtdlpOutcome(t *testing.T) {
-	called := 0
-	direct := func() error { called++; return errors.New("direct result") }
-
-	assert.NoError(t, ytdlpOutcome(nil, direct))
-	assert.Zero(t, called)
-
-	err := ytdlpOutcome(errors.New("HTTP 404"), direct)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "go-ytdlp download failed")
-	assert.Zero(t, called, "an ordinary failure does not fall back")
-
-	err = ytdlpOutcome(errors.New("The extension .aspx is unusual and will be skipped"), direct)
-	assert.EqualError(t, err, "direct result", "the unsafe-extension rejection falls back to a direct download and returns its result")
-	assert.Equal(t, 1, called)
-}
-
-func outcomeFailures(impl func(error, func() error) error) (f []string) {
-	direct := errors.New("direct")
-	cases := []struct {
-		name string
-		err  error
-		want string
-	}{
-		{"success", nil, ""},
-		{"ordinary", errors.New("boom"), "go-ytdlp download failed: boom"},
-		{"unsafe extension", errors.New("unsafe extension"), "direct"},
-		{"unusual extension", errors.New("unusual extension"), "direct"},
-	}
-	for _, tc := range cases {
-		got := impl(tc.err, func() error { return direct })
-		s := ""
-		if got != nil {
-			s = got.Error()
-		}
-		if s != tc.want {
-			f = append(f, fmt.Sprintf("%s: %q want %q", tc.name, s, tc.want))
-		}
-	}
-	return f
-}
-
-func TestYtdlpOutcomeMeta(t *testing.T) {
-	require.Empty(t, outcomeFailures(ytdlpOutcome))
-	mutants := map[string]func(error, func() error) error{
-		"always falls back": func(e error, d func() error) error {
-			if e == nil {
-				return nil
-			}
-			return d()
-		},
-		"never falls back": func(e error, _ func() error) error { return ytdlpOutcome(e, func() error { return e }) },
-		"failure swallowed": func(e error, d func() error) error {
-			if e != nil && !isUnsafeExtensionError(e) {
-				return nil
-			}
-			return ytdlpOutcome(e, d)
-		},
-		"success becomes error": func(e error, d func() error) error {
-			if e == nil {
-				return errors.New("go-ytdlp download failed: <nil>")
-			}
-			return ytdlpOutcome(e, d)
-		},
-		"cause not wrapped": func(e error, d func() error) error {
-			if e != nil && !isUnsafeExtensionError(e) {
-				return errors.New("go-ytdlp download failed: " + strings.ToUpper(e.Error()))
-			}
-			return ytdlpOutcome(e, d)
-		},
-		"fallback result dropped": func(e error, d func() error) error {
-			if e != nil && isUnsafeExtensionError(e) {
-				_ = d()
-				return nil
-			}
-			return ytdlpOutcome(e, d)
-		},
-	}
-	for name, m := range mutants {
-		assert.NotEmpty(t, outcomeFailures(m), "mutant %q survived", name)
-	}
-}
+var (
+	errTransient = errors.New("connection reset by peer")
+	errTimeout   = errors.New("i/o timeout")
+	errFatal     = errors.New("HTTP Error 404: Not Found")
+)
 
 // ---- downloadWithYtDlp, end to end over the mock engine ------------------------------------
 
@@ -305,7 +68,7 @@ func installYtdlpHarness(t *testing.T, eng *engineMock) *ytdlpHarness {
 	t.Cleanup(func() {
 		newYtdlpEngine, ytdlpCanImpersonate, ytdlpSleep, downloadDirectHTTPFn = oldEng, oldImp, oldSleep, oldDirect
 	})
-	newYtdlpEngine = func() ytdlpEngine { return eng }
+	newYtdlpEngine = func() ytdlpdl.Engine { return eng }
 	ytdlpCanImpersonate = func() bool { return h.impers }
 	ytdlpSleep = func(d time.Duration) { h.sleeps = append(h.sleeps, d) }
 	downloadDirectHTTPFn = func(u, p string, _ *model) error {
@@ -336,7 +99,7 @@ func TestDownloadWithYtDlpRunsTheEngineWithTheRightSpec(t *testing.T) {
 
 	assert.Equal(t, 1, eng.installs)
 	require.Len(t, eng.specs, 1)
-	assert.Equal(t, ytdlpSpec{
+	assert.Equal(t, ytdlpdl.Spec{
 		URL: "https://cdn.test/master.m3u8", Output: out, Impersonate: true,
 		Headers: []string{"Referer:https://site.test/watch/", "Origin:https://site.test"},
 	}, eng.specs[0])
@@ -421,5 +184,5 @@ func TestDownloadWithYtDlpPassesHeadersOnlyWhenAReferrerIsKnown(t *testing.T) {
 }
 
 func TestGoYtdlpEngineIsTheDefault(t *testing.T) {
-	assert.IsType(t, goYtdlpEngine{}, newYtdlpEngine())
+	assert.IsType(t, ytdlpdl.GoEngine{}, newYtdlpEngine())
 }

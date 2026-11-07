@@ -1100,6 +1100,10 @@ func downloadAndPlayEpisode(
 		}
 	}
 
+	if ref := util.GetGlobalReferer(); ref != "" {
+		defer rememberDownloadReferer(videoURL, ref)()
+	}
+
 	downloadPath, episodePath := episodeDownloadPaths(snapshotMedia(), animeURL, episodeNumberStr, selectedEpisodeNum)
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {

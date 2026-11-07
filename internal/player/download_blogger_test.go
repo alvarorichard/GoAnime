@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -170,7 +171,7 @@ func TestDownloadBloggerChunkWritesExactlyItsRange(t *testing.T) {
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 100, 299, 2, dest, m))
 
-	part, _ := safePartPath(dest, 2)
+	part, _ := rangedl.PartPath(dest, 2)
 	assert.Equal(t, body[100:300], readFile(t, part))
 	assert.Equal(t, []string{"bytes=100-299"}, h.host.ranges)
 	assert.Equal(t, int64(200), m.received, "progress counts the bytes of this part")
@@ -186,7 +187,7 @@ func TestDownloadBloggerChunkResumesAfterADroppedConnection(t *testing.T) {
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 199, 0, dest, m))
 
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body[:200], readFile(t, part), "no byte lost or repeated across the drop")
 	assert.Equal(t, []string{"bytes=0-199", "bytes=50-199"}, h.host.ranges, "the second request resumes where the first stopped")
 	assert.Equal(t, []time.Duration{500 * time.Millisecond}, h.sleeps)
@@ -202,7 +203,7 @@ func TestDownloadBloggerChunkProgressResetsTheStaleCounter(t *testing.T) {
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 299, 0, dest, &model{}))
 
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body, readFile(t, part))
 	assert.Equal(t, 30, h.host.gets)
 }
@@ -226,7 +227,7 @@ func TestDownloadBloggerChunkRetriesAfterAnErrorStatus(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ep.mp4")
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 199, 0, dest, &model{}))
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body, readFile(t, part))
 	assert.Equal(t, 3, h.host.gets)
 }
@@ -241,7 +242,7 @@ func TestDownloadBloggerChunkWhenTheServerIgnoresRange(t *testing.T) {
 
 			require.NoError(t, downloadBloggerChunk(h.url(), tc.from, tc.to, 1, dest, m))
 
-			part, _ := safePartPath(dest, 1)
+			part, _ := rangedl.PartPath(dest, 1)
 			assert.Equal(t, body[tc.from:tc.to+1], readFile(t, part), "a 200 answer is trimmed to this part's span")
 			assert.Equal(t, tc.to-tc.from+1, m.received)
 		})
@@ -292,7 +293,7 @@ func chunkScenarioFailures(t *testing.T, impl func(url string, from, to int64, p
 			f = append(f, fmt.Sprintf("%s: error %v", sc.name, err))
 			continue
 		}
-		part, _ := safePartPath(dest, 0)
+		part, _ := rangedl.PartPath(dest, 0)
 		got, err := os.ReadFile(part)
 		if err != nil || !bytes.Equal(got, body[sc.from:sc.to+1]) {
 			f = append(f, fmt.Sprintf("%s: part file differs", sc.name))
@@ -310,7 +311,7 @@ func TestDownloadBloggerChunkMeta(t *testing.T) {
 	mutants := map[string]fn{
 		"truncates the part": func(u string, a, b int64, p int, d string, m *model) error {
 			err := downloadBloggerChunk(u, a, b, p, d, m)
-			part, _ := safePartPath(d, p)
+			part, _ := rangedl.PartPath(d, p)
 			if st, e := os.Stat(part); e == nil && st.Size() > 0 {
 				_ = os.Truncate(part, st.Size()-1)
 			}
@@ -318,7 +319,7 @@ func TestDownloadBloggerChunkMeta(t *testing.T) {
 		},
 		"appends a stray byte": func(u string, a, b int64, p int, d string, m *model) error {
 			err := downloadBloggerChunk(u, a, b, p, d, m)
-			part, _ := safePartPath(d, p)
+			part, _ := rangedl.PartPath(d, p)
 			if f, e := os.OpenFile(part, os.O_APPEND|os.O_WRONLY, 0o600); e == nil {
 				_, _ = f.Write([]byte{0})
 				_ = f.Close()
@@ -471,7 +472,7 @@ func TestDownloadBloggerChunkProgressGrantsAFreshBudgetOfRetries(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ep.mp4")
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 99, 0, dest, &model{}))
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body, readFile(t, part))
 	assert.Equal(t, 21, h.host.gets, "progress zeroes the stale count, so 19 more failures are survivable")
 }
@@ -482,7 +483,7 @@ func TestDownloadBloggerChunkLastBytesAreNotLost(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ep.mp4")
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 199, 0, dest, &model{}))
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body, readFile(t, part), "the final byte is fetched, not skipped")
 	assert.Equal(t, []string{"bytes=0-199", "bytes=199-199"}, h.host.ranges)
 }
@@ -493,7 +494,7 @@ func TestDownloadBloggerChunkOneByteBeforeAnIgnoredRange(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ep.mp4")
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, 299, 0, dest, &model{}))
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.Equal(t, body, readFile(t, part), "a resumed 200 skips the one byte already written")
 }
 
@@ -510,7 +511,7 @@ func TestDownloadBloggerChunkReadsLargePartsInOneRequest(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ep.mp4")
 
 	require.NoError(t, downloadBloggerChunk(h.url(), 0, int64(len(body)-1), 0, dest, &model{}))
-	part, _ := safePartPath(dest, 0)
+	part, _ := rangedl.PartPath(dest, 0)
 	assert.True(t, bytes.Equal(body, readFile(t, part)))
 	assert.Equal(t, 1, h.host.gets, "a healthy connection is read to the end, not re-opened per read")
 }

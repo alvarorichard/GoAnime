@@ -169,69 +169,6 @@ func TestHasUnsafeExtension(t *testing.T) {
 }
 
 // =====================================================================
-// Tests: isRetryableError
-// =====================================================================
-
-func TestIsRetryableError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil error", nil, false},
-		{"timeout", errors.New("i/o timeout"), true},
-		{"connection reset", errors.New("connection reset by peer"), true},
-		{"network unreachable", errors.New("network is unreachable"), true},
-		{"temporary failure", errors.New("temporary failure in name resolution"), true},
-		{"connection refused", errors.New("connection refused"), true},
-		{"permission denied", errors.New("permission denied"), false},
-		{"not found", errors.New("404 not found"), false},
-		{"ffmpeg exit code", errors.New("ffmpeg exited with code 183"), false},
-		{"generic error", errors.New("something went wrong"), false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := isRetryableError(tc.err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-// =====================================================================
-// Tests: isUnsafeExtensionError
-// =====================================================================
-
-func TestIsUnsafeExtensionError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil error", nil, false},
-		{"unsafe extension msg", errors.New("unsafe file extension detected"), true},
-		{"unusual extension msg", errors.New("the file has an unusual extension"), true},
-		{"skip msg", errors.New("is unusual and will be skipped"), true},
-		{"yt-dlp CVE message", errors.New("URL has an unsafe extension"), true},
-		{"generic error", errors.New("download failed"), false},
-		{"ffmpeg extension error", errors.New("not in allowed_segment_extensions"), false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := isUnsafeExtensionError(tc.err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-// =====================================================================
 // Tests: isBloggerProxyURL
 // =====================================================================
 

@@ -25,11 +25,12 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
 	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
-	"github.com/lrstanley/go-ytdlp"
+	"github.com/alvarorichard/Goanime/v2/internal/ytdlpdl"
 	"golang.org/x/term"
 )
 
@@ -95,168 +96,21 @@ func applyDownloadAuthHeaders(req *http.Request, url string) {
 	}
 }
 
-// downloadPart downloads a part of the video file using HTTP Range Requests.
-// Automatically retries with resume on connection drops (up to 20 stale retries).
+// downloadPart downloads one byte range into its part file, resuming on
+// connection drops. The mechanics live in rangedl; this wires in the progress
+// model and the auth headers.
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
-	partFilePath, err := safePartPath(destPath, part)
-	if err != nil {
-		return err
+	var sink rangedl.Sink
+	if m != nil {
+		sink = modelSink{m}
 	}
-	// #nosec G304: path validated by safePartPath to remain within destination directory
-	file, err := os.Create(partFilePath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			util.Logger.Warn("Error closing file", "error", err)
-		}
-	}()
-
-	current := from
-	maxStaleRetries := 20
-	staleRetries := 0
-
-	for attempt := 0; current <= to; attempt++ {
-		if staleRetries >= maxStaleRetries {
-			return fmt.Errorf("part %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
-		}
-		if attempt > 0 {
-			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(downloadPartRetryDelay)
-		}
-
-		beforeRead := current
-
-		req, err := http.NewRequest("GET", url, http.NoBody)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
-		applyDownloadAuthHeaders(req, url)
-
-		resp, err := client.Do(req) // #nosec G704
-		if err != nil {
-			util.Debugf("Download part %d: request error: %v", part, err)
-			staleRetries++
-			continue
-		}
-
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			statusCode := resp.StatusCode
-			status := resp.Status
-			if cErr := resp.Body.Close(); cErr != nil {
-				util.Logger.Warn("Error closing response body", "error", cErr)
-			}
-			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
-				return netx.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
-			}
-			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
-			staleRetries++
-			continue
-		}
-
-		buf := make([]byte, 256*1024)
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
-					if cErr := resp.Body.Close(); cErr != nil {
-						util.Logger.Warn("Error closing response body", "error", cErr)
-					}
-					return writeErr
-				}
-				current += int64(n)
-				m.addProgressReceived(int64(n))
-			}
-			if readErr == io.EOF {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				break
-			}
-			if readErr != nil {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				util.Debugf("Download part %d: read error after %d bytes: %v", part, current-from, readErr)
-				break
-			}
-		}
-
-		if current > to {
-			break
-		}
-
-		if current == beforeRead {
-			staleRetries++
-		} else {
-			staleRetries = 0
-		}
-	}
-
-	return nil
-}
-
-// combineParts combines downloaded parts into a single final file.
-func combineParts(destPath string, numThreads int) error {
-	outFile, err := os.Create(filepath.Clean(destPath))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := outFile.Close(); err != nil {
-			util.Logger.Warn("Error closing output file", "error", err)
-		}
-	}()
-	for i := range numThreads {
-		partFilePath, err := safePartPath(destPath, i)
-		if err != nil {
-			return err
-		}
-		// #nosec G304: path validated by safePartPath to remain within destination directory
-		partFile, err := os.Open(partFilePath)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(outFile, partFile); err != nil {
-			if closeErr := partFile.Close(); closeErr != nil {
-				util.Logger.Warn("Error closing part file", "error", closeErr)
-			}
-			return err
-		}
-		if err := partFile.Close(); err != nil {
-			util.Logger.Warn("Error closing part file", "error", err)
-		}
-		if err := os.Remove(partFilePath); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// safePartPath builds the part file path and ensures it stays within the destination directory
-func safePartPath(destPath string, part int) (string, error) {
-	dir := filepath.Clean(filepath.Dir(destPath))
-	base := filepath.Base(destPath)
-	name := fmt.Sprintf("%s.part%d", base, part)
-	joined := filepath.Join(dir, name)
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	absFile, err := filepath.Abs(joined)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(absDir, absFile)
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("invalid part path: %s", joined)
-	}
-	return joined, nil
+	return rangedl.FetchPart(rangedl.Part{
+		URL: url, From: from, To: to, Index: part, Dest: destPath,
+	}, client, rangedl.Options{
+		Prepare:    func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
+		Progress:   sink,
+		RetryDelay: downloadPartRetryDelay,
+	})
 }
 
 // isBloggerProxyURL returns true if the URL points to the local Blogger proxy.
@@ -614,7 +468,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	m.setProgressTotal(contentLength)
 
-	ranges := splitByteRanges(contentLength, numThreads)
+	ranges := rangedl.Split(contentLength, numThreads)
 	numThreads = len(ranges)
 	var downloadWg sync.WaitGroup
 	errChan := make(chan error, numThreads)
@@ -627,7 +481,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 				util.Logger.Error("Blogger download chunk failed", "thread", part, "error", err)
 				errChan <- err
 			}
-		}(r.from, r.to, i)
+		}(r.From, r.To, i)
 	}
 
 	downloadWg.Wait()
@@ -640,7 +494,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 		}
 	}
 
-	if err := combineParts(destPath, numThreads); err != nil {
+	if err := rangedl.Combine(destPath, numThreads); err != nil {
 		return fmt.Errorf("failed to combine parts: %w", err)
 	}
 
@@ -658,7 +512,7 @@ func downloadBloggerChunk(url string, from, to int64, part int, destPath string,
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
 
-	partFilePath, err := safePartPath(destPath, part)
+	partFilePath, err := rangedl.PartPath(destPath, part)
 	if err != nil {
 		return err
 	}
@@ -816,7 +670,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if numThreads > 1 && util.IsLocalProxyURL(url) {
 		numThreads = 1
 	}
-	ranges := splitByteRanges(contentLength, numThreads)
+	ranges := rangedl.Split(contentLength, numThreads)
 	numThreads = len(ranges)
 	var downloadWg sync.WaitGroup
 	errChan := make(chan error, numThreads)
@@ -828,7 +682,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 				util.Logger.Error("Download part failed", "thread", part, "error", err)
 				errChan <- err
 			}
-		}(r.from, r.to, i, httpClient)
+		}(r.From, r.To, i, httpClient)
 	}
 	downloadWg.Wait()
 	close(errChan)
@@ -840,7 +694,7 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 		}
 	}
 
-	err = combineParts(destPath, numThreads)
+	err = rangedl.Combine(destPath, numThreads)
 	if err != nil {
 		return fmt.Errorf("failed to combine parts: %v", err)
 	}
@@ -882,139 +736,36 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	if m != nil && util.IsDebug {
 		util.Debugf("Starting yt-dlp download...")
 	}
-	spec := ytdlpSpec{
+	spec := ytdlpdl.Spec{
 		URL:         safeURL,
 		Output:      safePath,
 		Impersonate: ytdlpCanImpersonate(),
 		// Forward the stored referer/origin so the CDN accepts the request
-		Headers: ytdlpHeaders(downloadReferer(url)),
+		Headers: ytdlpdl.Headers(downloadReferer(url)),
 	}
-	runErr := runYtdlpDownload(ctx, engine, spec, m, ytdlpSleep)
-	return ytdlpOutcome(runErr, func() error {
+	var sink ytdlpdl.Sink
+	if m != nil {
+		sink = modelSink{m}
+	}
+	runErr := ytdlpdl.Run(ctx, engine, spec, sink, ytdlpSleep, func(attempt int) {
+		if m != nil && util.IsDebug {
+			util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, ytdlpdl.MaxRetries+1)
+		}
+	})
+	return ytdlpdl.Outcome(runErr, func() error {
 		util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
 		return downloadDirectHTTPFn(safeURL, safePath, m)
 	})
 }
 
-// ytdlpSpec is everything one yt-dlp download is configured with.
-type ytdlpSpec struct {
-	URL         string
-	Output      string
-	Impersonate bool     // present as Chrome, for CDNs that fingerprint TLS
-	Headers     []string // "Name:value" request headers
-}
-
-// newYtdlpCommand configures yt-dlp for spec. It uses yt-dlp's native HLS
-// downloader (not ffmpeg) so obfuscated segment extensions (.js, .html, .jpg)
-// from CDNs are accepted: ffmpeg's allowed_segment_extensions check rejects them.
-func newYtdlpCommand(spec ytdlpSpec) *ytdlp.Command {
-	dl := ytdlp.New().
-		Output(spec.Output).
-		Format("bestvideo+bestaudio/best").
-		ConcurrentFragments(24).
-		BufferSize("32M").
-		FragmentRetries("5").
-		Retries("5").
-		SocketTimeout(30)
-	if spec.Impersonate {
-		dl.Impersonate("chrome")
-	}
-	for _, h := range spec.Headers {
-		dl.AddHeaders(h)
-	}
-	return dl
-}
-
-// ytdlpEngine is what a download needs from yt-dlp: to have it installed, and
-// to run one configured download, reporting progress.
-type ytdlpEngine interface {
-	Install(ctx context.Context) error
-	Run(ctx context.Context, spec ytdlpSpec, onProgress func(ytdlp.ProgressUpdate)) error
-}
-
-// goYtdlpEngine is the real engine, over the go-ytdlp library.
-type goYtdlpEngine struct{}
-
-func (goYtdlpEngine) Install(ctx context.Context) error {
-	_, err := ytdlp.Install(ctx, nil)
-	return err
-}
-
-func (goYtdlpEngine) Run(ctx context.Context, spec ytdlpSpec, onProgress func(ytdlp.ProgressUpdate)) error {
-	dl := newYtdlpCommand(spec)
-	if onProgress != nil {
-		dl.ProgressFunc(200*time.Millisecond, onProgress)
-	}
-	// --hls-use-mpegts has no typed method, so it goes as a raw argument.
-	_, err := dl.Run(ctx, spec.URL, "--hls-use-mpegts")
-	return err
-}
-
-// runYtdlpDownload runs the download with retries, feeding progress to m (when
-// there is one). Each retry starts the byte counter over.
-func runYtdlpDownload(ctx context.Context, engine ytdlpEngine, spec ytdlpSpec, m *model, sleep func(time.Duration)) error {
-	progress := newYtdlpProgress(m)
-	var onProgress func(ytdlp.ProgressUpdate)
-	if m != nil {
-		onProgress = progress.handle
-	}
-	return runWithRetry(
-		func() error { return engine.Run(ctx, spec, onProgress) },
-		ytdlpMaxRetries,
-		sleep,
-		func(attempt int) {
-			if m != nil && util.IsDebug {
-				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, ytdlpMaxRetries+1)
-			}
-			progress.resetForRetry()
-		},
-	)
-}
-
-// ytdlpOutcome turns a finished run into the download's result. yt-dlp rejects
-// URLs with unusual extensions (.aspx, ...) as a security measure
-// (CVE-2024-38519); those fall back to a direct HTTP download.
-func ytdlpOutcome(runErr error, directHTTP func() error) error {
-	if runErr == nil {
-		return nil
-	}
-	if isUnsafeExtensionError(runErr) {
-		return directHTTP()
-	}
-	return fmt.Errorf("go-ytdlp download failed: %w", runErr)
-}
-
 // Seams for the yt-dlp download; tests replace them so no binary is installed
 // or run.
 var (
-	newYtdlpEngine       = func() ytdlpEngine { return goYtdlpEngine{} }
+	newYtdlpEngine       = func() ytdlpdl.Engine { return ytdlpdl.GoEngine{} }
 	ytdlpCanImpersonate  = util.YtdlpCanImpersonate
 	ytdlpSleep           = time.Sleep
 	downloadDirectHTTPFn = downloadDirectHTTP
 )
-
-// isUnsafeExtensionError returns true if the error is yt-dlp's unsafe extension check.
-func isUnsafeExtensionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
-		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
-		strings.Contains(s, "is unusual and will be skipped")
-}
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "connection") ||
-		strings.Contains(errStr, "network") ||
-		strings.Contains(errStr, "temporary") ||
-		strings.Contains(errStr, "reset") ||
-		strings.Contains(errStr, "refused")
-}
 
 // downloadWithNativeHLS downloads HLS streams using native implementation instead of yt-dlp
 // This avoids issues with yt-dlp where ffmpeg rejects obfuscated segment extensions (.jpg, .png)
@@ -1656,6 +1407,14 @@ var batchStatusf = func(format string, a ...any) { fmt.Printf(format, a...) }
 // concurrent batch downloads each send their own instead of the global.
 var downloadReferers sync.Map // url -> referer
 
+// rememberDownloadReferer pins referer to url until the returned func is
+// called, so a download keeps the referer its resolver gave even when the
+// global one changes under it.
+func rememberDownloadReferer(url, referer string) (forget func()) {
+	downloadReferers.Store(url, referer)
+	return func() { downloadReferers.Delete(url) }
+}
+
 // downloadReferer is the referer to send when downloading url.
 func downloadReferer(url string) string {
 	if v, ok := downloadReferers.Load(url); ok {
@@ -1749,8 +1508,7 @@ func keepChosenSubtitles(subs, chosen []util.SubtitleInfo) []util.SubtitleInfo {
 // its own subtitles. A failed download removes whatever it wrote, so the
 // next run fetches the episode again instead of skipping a partial file.
 func downloadBatchEpisode(be *batchEpisode, anime *models.Anime, progressModel *model, printFn func(string, ...any)) error {
-	downloadReferers.Store(be.url, be.referer)
-	defer downloadReferers.Delete(be.url)
+	defer rememberDownloadReferer(be.url, be.referer)()
 
 	var dlErr error
 	videoURL, episodePath, epNum := be.url, be.path, be.num
@@ -2248,35 +2006,6 @@ func watchDownloadedRange(episodes []models.Episode, animeURL string, startNum, 
 	return playLocalFn(episodePath, episodes, episodeNum)
 }
 
-// byteRange is an inclusive span of a file, as an HTTP Range header counts it.
-type byteRange struct{ from, to int64 }
-
-// splitByteRanges cuts a file of contentLength bytes into at most n contiguous
-// ranges that cover it exactly once; the last range takes the remainder. There
-// are never more ranges than bytes, so none is empty, and n below one means a
-// single range. Parts are numbered by position, which is how combineParts puts
-// them back together.
-func splitByteRanges(contentLength int64, n int) []byteRange {
-	if contentLength <= 0 {
-		return nil
-	}
-	n = max(n, 1)
-	if int64(n) > contentLength {
-		n = int(contentLength)
-	}
-	chunk := contentLength / int64(n)
-	ranges := make([]byteRange, n)
-	for i := range ranges {
-		from := int64(i) * chunk
-		to := from + chunk - 1
-		if i == n-1 {
-			to = contentLength - 1
-		}
-		ranges[i] = byteRange{from: from, to: to}
-	}
-	return ranges
-}
-
 // parseEpisodeRange validates the two numbers typed into the range form.
 func parseEpisodeRange(startStr, endStr string) (start, end int, err error) {
 	start, err = strconv.Atoi(strings.TrimSpace(startStr))
@@ -2299,110 +2028,6 @@ func validEpisodeNumber(v string) error {
 		return fmt.Errorf("invalid number")
 	}
 	return nil
-}
-
-// ytdlpMaxRetries is how many times a retryable yt-dlp failure is retried.
-const ytdlpMaxRetries = 2
-
-// ytdlpHeaders are the request headers that make a CDN accept the download:
-// the stored referer and an Origin derived from it (scheme and host only).
-// No referer, no headers.
-func ytdlpHeaders(referer string) []string {
-	if referer == "" {
-		return nil
-	}
-	origin := strings.TrimSuffix(referer, "/")
-	if u, err := neturl.Parse(origin); err == nil && u.Scheme != "" && u.Host != "" {
-		origin = u.Scheme + "://" + u.Host
-	}
-	return []string{"Referer:" + referer, "Origin:" + origin}
-}
-
-// runWithRetry runs fn, retrying up to maxRetries times while the failure is
-// retryable (isRetryableError). Before retry number n it waits 2n seconds
-// through sleep and calls onRetry(n). It returns the last error, nil when a
-// run succeeded.
-func runWithRetry(fn func() error, maxRetries int, sleep func(time.Duration), onRetry func(attempt int)) error {
-	var err error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			sleep(time.Duration(attempt*2) * time.Second)
-			onRetry(attempt)
-		}
-		if err = fn(); err == nil {
-			return nil
-		}
-		if attempt == maxRetries || !isRetryableError(err) {
-			return err
-		}
-	}
-	return err
-}
-
-// progressSink is where a download reports how far it got.
-type progressSink interface {
-	addProgressReceived(delta int64)
-	setProgressTotal(total int64)
-	setProgressPeak(pct float64)
-}
-
-// ytdlpProgress turns yt-dlp's progress updates into sink calls. yt-dlp fetches
-// video and audio as separate files and merges them, so received bytes are
-// counted per file and the total is the sum of every file's size.
-type ytdlpProgress struct {
-	sink      progressSink
-	lastBytes int64
-	lastFile  string
-	totals    map[string]int64
-}
-
-func newYtdlpProgress(sink progressSink) *ytdlpProgress {
-	return &ytdlpProgress{sink: sink, totals: make(map[string]int64)}
-}
-
-// resetForRetry forgets the byte counter of the failed attempt: the next one
-// starts again from zero.
-func (p *ytdlpProgress) resetForRetry() {
-	p.lastBytes = 0
-	p.lastFile = ""
-}
-
-func (p *ytdlpProgress) handle(update ytdlp.ProgressUpdate) {
-	if update.Status == ytdlp.ProgressStatusPostProcessing || update.Status == ytdlp.ProgressStatusFinished {
-		return
-	}
-	if update.Filename != "" && update.Filename != p.lastFile {
-		p.lastFile = update.Filename
-		p.lastBytes = 0
-	}
-
-	downloaded := int64(update.DownloadedBytes)
-	if delta := downloaded - p.lastBytes; delta > 0 {
-		p.sink.addProgressReceived(delta)
-		p.lastBytes = downloaded
-	}
-
-	switch {
-	case update.TotalBytes > 0:
-		name := update.Filename
-		if name == "" {
-			name = "_default"
-		}
-		p.totals[name] = int64(update.TotalBytes)
-		var sum int64
-		for _, v := range p.totals {
-			sum += v
-		}
-		p.sink.setProgressTotal(sum)
-	case update.FragmentCount > 0 && update.FragmentIndex > 0:
-		// HLS: the size is unknown upfront, so fragment index/count is a
-		// monotonically increasing ratio and the bar never goes backward.
-		pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
-		if pct > 0.99 {
-			pct = 0.99 // reserve 100% for actual completion
-		}
-		p.sink.setProgressPeak(pct)
-	}
 }
 
 // safeGetFn is the SSRF-guarded GET every page and video-API fetch in this

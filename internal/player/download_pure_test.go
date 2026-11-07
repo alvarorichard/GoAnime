@@ -96,32 +96,6 @@ func TestValidateDownloadedVideoAcceptsCompleteMedia(t *testing.T) {
 	require.NoError(t, validateDownloadedVideo(path))
 }
 
-func TestSafePartPath(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid", func(t *testing.T) {
-		t.Parallel()
-		got, err := safePartPath(filepath.FromSlash("/tmp/video.mp4"), 1)
-		require.NoError(t, err)
-		assert.Equal(t, filepath.FromSlash("/tmp/video.mp4.part1"), got)
-	})
-
-	t.Run("subdir ok", func(t *testing.T) {
-		t.Parallel()
-		got, err := safePartPath(filepath.FromSlash("/tmp/sub/video.mp4"), 7)
-		require.NoError(t, err)
-		assert.Contains(t, got, "video.mp4.part7")
-	})
-
-	t.Run("part embedded in dir name still resolves correctly", func(t *testing.T) {
-		t.Parallel()
-		// Use a path whose basename uniquely identifies the part file.
-		got, err := safePartPath(filepath.FromSlash("/tmp/dir.with.dots/video.mp4"), 0)
-		require.NoError(t, err)
-		assert.Equal(t, filepath.FromSlash("/tmp/dir.with.dots/video.mp4.part0"), got)
-	})
-}
-
 func TestIsBloggerProxyURL_Extra(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -141,26 +115,6 @@ func TestIsBloggerProxyURL_Extra(t *testing.T) {
 	}
 }
 
-// Cover the bare error-text branches of isUnsafeExtensionError & isRetryableError
-// that the existing tests do not hit.
-func TestIsUnsafeExtensionError_Extra(t *testing.T) {
-	t.Parallel()
-	assert.False(t, isUnsafeExtensionError(nil))
-	assert.True(t, isUnsafeExtensionError(errors.New("file has unsafe extension")))
-	assert.True(t, isUnsafeExtensionError(errors.New("file is unusual and will be skipped")))
-	assert.False(t, isUnsafeExtensionError(errors.New("other failure")))
-}
-
-func TestIsRetryableError_Extra(t *testing.T) {
-	t.Parallel()
-	assert.False(t, isRetryableError(nil))
-	assert.True(t, isRetryableError(errors.New("connection reset")))
-	assert.True(t, isRetryableError(errors.New("network down")))
-	assert.True(t, isRetryableError(errors.New("connection refused")))
-	assert.True(t, isRetryableError(errors.New("temporary error")))
-	assert.False(t, isRetryableError(errors.New("auth denied")))
-}
-
 // Mutates global media state (SetAnimeName/SetMediaType) → serial.
 func TestPrintBatchDownloadLocation_DoesNotPanic(t *testing.T) {
 	SetAnimeName("PrintBatchDownloadLocationTest", 1)
@@ -174,38 +128,6 @@ func TestPrintBatchDownloadLocation_DoesNotPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		printBatchDownloadLocation("https://example.com/anime/test", 1)
 	})
-}
-
-func TestCombineParts(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "video.mp4")
-
-	// Write 3 parts.
-	for i, payload := range [][]byte{[]byte("AAA"), []byte("BBB"), []byte("CCC")} {
-		p, err := safePartPath(dest, i)
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(p, payload, 0o600))
-	}
-
-	require.NoError(t, combineParts(dest, 3))
-	got, err := os.ReadFile(dest)
-	require.NoError(t, err)
-	assert.Equal(t, "AAABBBCCC", string(got))
-
-	// Parts must be cleaned up.
-	for i := range 3 {
-		p, _ := safePartPath(dest, i)
-		_, err := os.Stat(p)
-		assert.True(t, os.IsNotExist(err), "part %d should be removed", i)
-	}
-}
-
-func TestCombineParts_MissingPartReturnsError(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "v.mp4")
-	require.Error(t, combineParts(dest, 2))
 }
 
 func TestCreateEpisodePath_BuildsPathAndCreatesDir(t *testing.T) {

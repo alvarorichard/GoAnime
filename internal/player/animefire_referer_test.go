@@ -37,6 +37,7 @@ package player
 import (
 	"bytes"
 	"errors"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -383,7 +384,7 @@ func TestDownloadVideo_AnimeFireCDN_EndToEnd(t *testing.T) {
 	}
 
 	// Step 3: stitch the parts back together and confirm the bytes match.
-	require.NoError(t, combineParts(destPath, numThreads))
+	require.NoError(t, rangedl.Combine(destPath, numThreads))
 	got, err := os.ReadFile(destPath)
 	require.NoError(t, err)
 	assert.True(t, bytes.Equal(payload, got),
