@@ -216,7 +216,7 @@ func TestDownloadBloggerChunkGivesUpAfterTwentyStaleRetries(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max retries (20)")
-	assert.Contains(t, err.Error(), "chunk 0")
+	assert.Contains(t, err.Error(), "part 0")
 	assert.Equal(t, 20, h.host.gets, "exactly 20 attempts, no more")
 	assert.Len(t, h.sleeps, 19, "a pause before every retry, none before the first try")
 }

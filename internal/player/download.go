@@ -107,9 +107,10 @@ func downloadPart(url string, from, to int64, part int, client *http.Client, des
 	return rangedl.FetchPart(rangedl.Part{
 		URL: url, From: from, To: to, Index: part, Dest: destPath,
 	}, client, rangedl.Options{
-		Prepare:    func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
-		Progress:   sink,
-		RetryDelay: downloadPartRetryDelay,
+		Prepare:        func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
+		Progress:       sink,
+		RetryDelay:     downloadPartRetryDelay,
+		ExpiredIsFinal: true,
 	})
 }
 
@@ -483,122 +484,26 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 	return nil
 }
 
-// downloadBloggerChunk downloads a single chunk from googlevideo CDN.
-// Creates its own independent surf client (fresh TCP+TLS connection) to avoid
-// HTTP/2 multiplexing and surf's per-client timeout.
-// Automatically retries with resume on connection drops.
+// downloadBloggerChunk downloads a single chunk from the googlevideo CDN.
+// Each attempt uses its own fresh client (new TCP+TLS connection) to avoid
+// HTTP/2 multiplexing and surf's per-client timeout, and resumes on drops.
 func downloadBloggerChunk(url string, from, to int64, part int, destPath string, m *model) error {
 	// SSRF protection: reject URLs that resolve to private/internal IPs.
 	if err := validateURLFn(url); err != nil {
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
-
-	partFilePath, err := rangedl.PartPath(destPath, part)
-	if err != nil {
-		return err
+	var sink rangedl.Sink
+	if m != nil {
+		sink = modelSink{m}
 	}
-
-	// Create/truncate the part file
-	file, err := os.Create(partFilePath) /* #nosec G304 -- path validated by safePartPath (traversal checked) */
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			util.Logger.Warn("Error closing part file", "error", err)
-		}
-	}()
-
-	current := from
-	maxStaleRetries := 20 // Only count retries where no data was received
-	staleRetries := 0
-
-	for attempt := 0; current <= to; attempt++ {
-		if staleRetries >= maxStaleRetries {
-			return fmt.Errorf("chunk %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
-		}
-		if attempt > 0 {
-			util.Debugf("Blogger chunk %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			chunkRetrySleep(500 * time.Millisecond) // Brief pause before retry
-		}
-
-		beforeRead := current
-
-		// Fresh download client per attempt — follows redirects and has a long timeout
-		client := newBloggerClientFn()
-
-		req, err := http.NewRequest("GET", url, http.NoBody)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			util.Debugf("Blogger chunk %d: request error: %v", part, err)
-			staleRetries++ // no data arrived: counts toward giving up
-			continue       // Retry
-		}
-
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			util.Debugf("Blogger chunk %d: unexpected status %d", part, resp.StatusCode)
-			// A signed URL that expired answers 403 for good: without this the
-			// loop would retry it forever.
-			staleRetries++
-			continue
-		}
-
-		// A 200 means the server ignored the Range header and is sending the
-		// file from byte 0: skip what this part already has, so the bytes land
-		// where they belong.
-		if resp.StatusCode == http.StatusOK && current > 0 {
-			if _, err := io.CopyN(io.Discard, resp.Body, current); err != nil {
-				_ = resp.Body.Close()
-				staleRetries++
-				continue
-			}
-		}
-		// Never take more than this part's span, whatever the server sends.
-		body := io.LimitReader(resp.Body, to-current+1)
-
-		// Read data from this connection until it drops
-		buf := make([]byte, 64*1024) // 64KB buffer
-		for {
-			n, readErr := body.Read(buf)
-			if n > 0 {
-				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
-					_ = resp.Body.Close()
-					return writeErr
-				}
-				current += int64(n)
-				m.addProgressReceived(int64(n))
-			}
-			if readErr == io.EOF {
-				_ = resp.Body.Close()
-				break // Done with this connection
-			}
-			if readErr != nil {
-				_ = resp.Body.Close()
-				util.Debugf("Blogger chunk %d: read error after %d bytes: %v", part, current-from, readErr)
-				break // Will retry from current offset
-			}
-		}
-
-		// Check if we got all the data
-		if current > to {
-			break
-		}
-
-		// Only count as stale retry if no progress was made
-		if current == beforeRead {
-			staleRetries++
-		} else {
-			staleRetries = 0 // Reset on progress
-		}
-	}
-
-	return nil
+	return rangedl.FetchPart(rangedl.Part{
+		URL: url, From: from, To: to, Index: part, Dest: destPath,
+	}, nil, rangedl.Options{
+		Progress:   sink,
+		NewClient:  newBloggerClientFn,
+		Sleep:      chunkRetrySleep,
+		RetryDelay: 500 * time.Millisecond,
+	})
 }
 
 // downloadTransport is the SSRF-guarded transport for media downloads, except

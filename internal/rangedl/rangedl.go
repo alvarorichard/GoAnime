@@ -5,6 +5,7 @@
 package rangedl
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,6 +40,16 @@ type Options struct {
 	Prepare    func(*http.Request) // sets the request headers a CDN expects
 	Progress   Sink
 	RetryDelay time.Duration
+	// NewClient, when set, supplies the client for each attempt instead of the
+	// one passed to FetchPart: independent connections avoid HTTP/2
+	// multiplexing and a per-client timeout.
+	NewClient func() *http.Client
+	// Sleep pauses before a part resumes; time.Sleep when nil.
+	Sleep func(time.Duration)
+	// ExpiredIsFinal makes a 403 or 404 end the part at once with a
+	// netx.DownloadExpiredError, so the caller can fetch a fresh link. Without
+	// it those statuses count as any other failed attempt.
+	ExpiredIsFinal bool
 }
 
 // ByteRange is an inclusive span of a file, as an HTTP Range header counts it.
@@ -70,15 +81,22 @@ func Split(contentLength int64, n int) []ByteRange {
 	return ranges
 }
 
+// maxStaleRetries is how many attempts in a row may bring no data before a
+// part gives up.
+const maxStaleRetries = 20
+
 // FetchPart downloads a part of the video file using HTTP Range Requests.
 // Automatically retries with resume on connection drops (up to 20 stale retries).
 func FetchPart(p Part, client *http.Client, opts Options) error {
-	url, from, to, part, destPath := p.URL, p.From, p.To, p.Index, p.Dest
 	retryDelay := opts.RetryDelay
 	if retryDelay <= 0 {
 		retryDelay = DefaultRetryDelay
 	}
-	partFilePath, err := PartPath(destPath, part)
+	sleep := opts.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	partFilePath, err := PartPath(p.Dest, p.Index)
 	if err != nil {
 		return err
 	}
@@ -93,93 +111,106 @@ func FetchPart(p Part, client *http.Client, opts Options) error {
 		}
 	}()
 
-	current := from
-	maxStaleRetries := 20
+	current := p.From
 	staleRetries := 0
-
-	for attempt := 0; current <= to; attempt++ {
+	for attempt := 0; current <= p.To; attempt++ {
 		if staleRetries >= maxStaleRetries {
-			return fmt.Errorf("part %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
+			return fmt.Errorf("part %d: max retries (%d) exceeded at offset %d/%d", p.Index, maxStaleRetries, current, p.To)
 		}
 		if attempt > 0 {
-			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(retryDelay)
+			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", p.Index, current, attempt+1)
+			sleep(retryDelay)
 		}
 
 		beforeRead := current
-
-		req, err := http.NewRequest("GET", url, http.NoBody)
-		if err != nil {
+		current, err = fetchOnce(file, p, current, client, opts)
+		switch {
+		case errors.Is(err, errNoData): // nothing arrived: counts toward giving up
+			staleRetries++
+			continue
+		case err != nil:
 			return err
 		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
-		if opts.Prepare != nil {
-			opts.Prepare(req)
-		}
-
-		resp, err := client.Do(req) // #nosec G704
-		if err != nil {
-			util.Debugf("Download part %d: request error: %v", part, err)
-			staleRetries++
-			continue
-		}
-
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			statusCode := resp.StatusCode
-			status := resp.Status
-			if cErr := resp.Body.Close(); cErr != nil {
-				util.Logger.Warn("Error closing response body", "error", cErr)
-			}
-			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
-				return netx.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
-			}
-			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
-			staleRetries++
-			continue
-		}
-
-		buf := make([]byte, 256*1024)
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
-					if cErr := resp.Body.Close(); cErr != nil {
-						util.Logger.Warn("Error closing response body", "error", cErr)
-					}
-					return writeErr
-				}
-				current += int64(n)
-				if opts.Progress != nil {
-					opts.Progress.AddProgressReceived(int64(n))
-				}
-			}
-			if readErr == io.EOF {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				break
-			}
-			if readErr != nil {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				util.Debugf("Download part %d: read error after %d bytes: %v", part, current-from, readErr)
-				break
-			}
-		}
-
-		if current > to {
-			break
-		}
-
 		if current == beforeRead {
 			staleRetries++
 		} else {
 			staleRetries = 0
 		}
 	}
-
 	return nil
+}
+
+// errNoData marks an attempt that brought nothing worth keeping and should be
+// retried: a failed request, a refused status, a body that would not skip.
+var errNoData = errors.New("rangedl: attempt brought no data")
+
+// fetchOnce makes one request for the part from offset current on, writes what
+// arrives into file and returns the offset reached. errNoData means the attempt
+// should be retried; any other error is final.
+func fetchOnce(file *os.File, p Part, current int64, client *http.Client, opts Options) (int64, error) {
+	req, err := http.NewRequest("GET", p.URL, http.NoBody)
+	if err != nil {
+		return current, err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, p.To))
+	if opts.Prepare != nil {
+		opts.Prepare(req)
+	}
+	if opts.NewClient != nil {
+		client = opts.NewClient()
+	}
+	resp, err := client.Do(req) // #nosec G704
+	if err != nil {
+		util.Debugf("Download part %d: request error: %v", p.Index, err)
+		return current, errNoData
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+		if opts.ExpiredIsFinal && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound) {
+			return current, netx.NewDownloadExpiredError("Download", "http-range", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
+		}
+		util.Debugf("Download part %d: unexpected status %d", p.Index, resp.StatusCode)
+		return current, errNoData
+	}
+
+	// A 200 means the server ignored the Range header and is sending the file
+	// from byte 0: skip what this part already has, so the bytes land where
+	// they belong.
+	if resp.StatusCode == http.StatusOK && current > 0 {
+		if _, err := io.CopyN(io.Discard, resp.Body, current); err != nil {
+			return current, errNoData
+		}
+	}
+	return copyBody(resp.Body, file, p, current, opts.Progress)
+}
+
+// copyBody writes body into file until the connection ends or the part is
+// complete, and returns the offset reached. Only a failed write is an error; a
+// read that stops early just ends the attempt.
+func copyBody(body io.Reader, file *os.File, p Part, current int64, progress Sink) (int64, error) {
+	// Never take more than this part's span, whatever the server sends.
+	body = io.LimitReader(body, p.To-current+1)
+	buf := make([]byte, 256*1024)
+	for {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			if _, writeErr := file.Write(buf[:n]); writeErr != nil {
+				return current, writeErr
+			}
+			current += int64(n)
+			if progress != nil {
+				progress.AddProgressReceived(int64(n))
+			}
+		}
+		if readErr == io.EOF {
+			return current, nil
+		}
+		if readErr != nil {
+			util.Debugf("Download part %d: read error after %d bytes: %v", p.Index, current-p.From, readErr)
+			return current, nil
+		}
+	}
 }
 
 // Combine combines downloaded parts into a single final file.
