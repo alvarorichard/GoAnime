@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
@@ -240,4 +241,33 @@ func PartPath(destPath string, part int) (string, error) {
 		return "", fmt.Errorf("invalid part path: %s", joined)
 	}
 	return joined, nil
+}
+
+// Download fetches a file of contentLength bytes as up to threads parallel
+// parts and joins them into dest. fetch downloads one part (typically through
+// FetchPart) and is called once per part, concurrently; its error stops the
+// join. Download removes nothing on failure: the part files are what a retry
+// resumes from.
+func Download(contentLength int64, threads int, dest string, fetch func(Part) error) error {
+	ranges := Split(contentLength, threads)
+	var wg sync.WaitGroup
+	errs := make(chan error, len(ranges))
+	for i, r := range ranges {
+		wg.Add(1)
+		go func(p Part) {
+			defer wg.Done()
+			if err := fetch(p); err != nil {
+				errs <- err
+			}
+		}(Part{From: r.From, To: r.To, Index: i, Dest: dest})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		return fmt.Errorf("chunk download failed: %w", err)
+	}
+	if err := Combine(dest, len(ranges)); err != nil {
+		return fmt.Errorf("failed to combine parts: %w", err)
+	}
+	return nil
 }

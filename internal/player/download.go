@@ -468,34 +468,15 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	m.setProgressTotal(contentLength)
 
-	ranges := rangedl.Split(contentLength, numThreads)
-	numThreads = len(ranges)
-	var downloadWg sync.WaitGroup
-	errChan := make(chan error, numThreads)
-
-	for i, r := range ranges {
-		downloadWg.Add(1)
-		go func(from, to int64, part int) {
-			defer downloadWg.Done()
-			if err := downloadBloggerChunk(directURL, from, to, part, destPath, m); err != nil {
-				util.Logger.Error("Blogger download chunk failed", "thread", part, "error", err)
-				errChan <- err
-			}
-		}(r.From, r.To, i)
-	}
-
-	downloadWg.Wait()
-	close(errChan)
-
-	// Check if any chunk failed
-	for err := range errChan {
+	err = rangedl.Download(contentLength, numThreads, destPath, func(p rangedl.Part) error {
+		err := downloadBloggerChunk(directURL, p.From, p.To, p.Index, destPath, m)
 		if err != nil {
-			return fmt.Errorf("chunk download failed: %w", err)
+			util.Logger.Error("Blogger download chunk failed", "thread", p.Index, "error", err)
 		}
-	}
-
-	if err := rangedl.Combine(destPath, numThreads); err != nil {
-		return fmt.Errorf("failed to combine parts: %w", err)
+		return err
+	})
+	if err != nil {
+		return err
 	}
 
 	util.Debug("downloadBloggerDirect completed", "duration", time.Since(start))
@@ -670,33 +651,15 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if numThreads > 1 && util.IsLocalProxyURL(url) {
 		numThreads = 1
 	}
-	ranges := rangedl.Split(contentLength, numThreads)
-	numThreads = len(ranges)
-	var downloadWg sync.WaitGroup
-	errChan := make(chan error, numThreads)
-	for i, r := range ranges {
-		downloadWg.Add(1)
-		go func(from, to int64, part int, httpClient *http.Client) {
-			defer downloadWg.Done()
-			if err := downloadPart(url, from, to, part, httpClient, destPath, m); err != nil {
-				util.Logger.Error("Download part failed", "thread", part, "error", err)
-				errChan <- err
-			}
-		}(r.From, r.To, i, httpClient)
-	}
-	downloadWg.Wait()
-	close(errChan)
-
-	// Check if any chunk failed
-	for err := range errChan {
+	err = rangedl.Download(contentLength, numThreads, destPath, func(p rangedl.Part) error {
+		err := downloadPart(url, p.From, p.To, p.Index, httpClient, destPath, m)
 		if err != nil {
-			return fmt.Errorf("chunk download failed: %w", err)
+			util.Logger.Error("Download part failed", "thread", p.Index, "error", err)
 		}
-	}
-
-	err = rangedl.Combine(destPath, numThreads)
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("failed to combine parts: %v", err)
+		return err
 	}
 	util.Debug("DownloadVideo completed", "url", url, "duration", time.Since(start))
 	return nil
