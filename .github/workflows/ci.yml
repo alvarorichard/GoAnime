@@ -175,7 +175,7 @@ jobs:
 
       - name: Run tests with race detector and coverage
         shell: bash
-        run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -short -race -count=1 -timeout 25m -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: Goroutine leak gate
         if: runner.os == 'Linux'

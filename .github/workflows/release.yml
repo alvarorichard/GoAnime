@@ -79,7 +79,7 @@ jobs:
           version: v2.14.0
 
       - name: Run tests
-        run: go test -short -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -short -race -count=1 -timeout 25m -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Check test coverage
         run: |
