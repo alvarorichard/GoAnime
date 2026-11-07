@@ -56,15 +56,50 @@ func HandlePlaybackMode(animeName string) {
 	_ = discordManager.Initialize() // Non-blocking, runs async
 	defer discordManager.Shutdown()
 
+	runPlaybackLoop(ctx, realPlaybackEnv(discordManager), animeName)
+}
+
+// playbackEnv is what the playback loop needs from the rest of the program.
+// The real one is realPlaybackEnv; tests answer for the terminal and the
+// sources.
+type playbackEnv struct {
+	search       func(name, scope string) (*models.Anime, error)
+	fetchDetails func(*models.Anime)
+	episodes     func(*models.Anime) ([]models.Episode, error)
+	handleSeries func(ctx context.Context, anime *models.Anime, episodes []models.Episode, total int, discordOn bool) error
+	handleMovie  func(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordOn bool) error
+	drainHome    func() bool
+	// repeatSearch is the search to run again after backing out of a title.
+	repeatSearch func(name, scope string) (string, string)
+	discordOn    func() bool
+}
+
+func realPlaybackEnv(discordManager *discord.Manager) playbackEnv {
+	return playbackEnv{
+		search:       appflow.SearchAnimeWithRetryIn,
+		fetchDetails: appflow.FetchAnimeDetails,
+		episodes:     appflow.GetAnimeEpisodes,
+		handleSeries: playback.HandleSeries,
+		handleMovie:  playback.HandleMovie,
+		drainHome:    drainPendingHome,
+		repeatSearch: appflow.SearchToRepeat,
+		discordOn:    discordManager.IsEnabled,
+	}
+}
+
+// runPlaybackLoop searches, opens the title the user picks and plays it, and
+// when they back out of it searches again.
+func runPlaybackLoop(ctx context.Context, env playbackEnv, animeName string) {
 	currentAnimeName := animeName
+	currentScope := util.GlobalSource
 
 	for {
 		// Use enhanced search with retry logic
 		searchTimer := util.StartTimer("SearchAnime:WithRetry")
-		anime, err := appflow.SearchAnimeWithRetry(currentAnimeName)
+		anime, err := env.search(currentAnimeName, currentScope)
 		searchTimer.Stop()
 
-		if err == nil && anime == nil && drainPendingHome() {
+		if err == nil && anime == nil && env.drainHome() {
 			return
 		}
 
@@ -87,11 +122,11 @@ func HandlePlaybackMode(animeName string) {
 
 		fetchTimer := util.StartTimer("FetchDetails+Episodes:Sequential")
 		detailsTimer := util.StartTimer("FetchAnimeDetails")
-		appflow.FetchAnimeDetails(anime)
+		env.fetchDetails(anime)
 		detailsTimer.Stop()
 
 		episodesTimer := util.StartTimer("GetAnimeEpisodes")
-		episodes, epErr = appflow.GetAnimeEpisodes(anime)
+		episodes, epErr = env.episodes(anime)
 		episodesTimer.Stop()
 		fetchTimer.Stop()
 
@@ -100,6 +135,7 @@ func HandlePlaybackMode(animeName string) {
 		if errors.Is(epErr, api.ErrBackToSearch) {
 			util.Infof("Going back to new search...")
 			currentAnimeName = ""
+			currentScope = util.GlobalSource
 			continue
 		}
 
@@ -110,6 +146,9 @@ func HandlePlaybackMode(animeName string) {
 		if epErr != nil || len(episodes) == 0 {
 			reportEpisodesUnavailable(anime, epErr)
 			util.Infof("Going back to anime selection...")
+			// The results to come back to are the ones this title was in,
+			// even if the search was edited on the way.
+			currentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)
 			continue
 		}
 
@@ -123,19 +162,23 @@ func HandlePlaybackMode(animeName string) {
 
 		playbackTimer := util.StartTimer("Playback:Handle")
 		if series {
-			playbackErr = playback.HandleSeries(ctx, anime, episodes, totalEpisodes, discordManager.IsEnabled())
+			playbackErr = env.handleSeries(ctx, anime, episodes, totalEpisodes, env.discordOn())
 		} else {
-			playbackErr = playback.HandleMovie(ctx, anime, episodes, discordManager.IsEnabled())
+			playbackErr = env.handleMovie(ctx, anime, episodes, env.discordOn())
 		}
 		playbackTimer.Stop()
 
 		// Check if user wants to go back to anime selection
 		if errors.Is(playbackErr, player.ErrBackToAnimeSelection) {
-			if drainPendingHome() {
+			if env.drainHome() {
 				return
 			}
 			util.Infof("Going back to anime selection...")
-			// Keep the same search term to show the anime list again
+			// Show the results of the search that found the title the user is
+			// leaving, which is not the first one when the title was changed
+			// during playback (issue #229: backing out of Wind Breaker landed on
+			// the results for the show searched before it).
+			currentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)
 			continue
 		}
 

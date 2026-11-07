@@ -241,6 +241,9 @@ func ChangeAnimeHome() (*models.Anime, []models.Episode, error) {
 		if len(episodes) == 0 {
 			return nil, nil, fmt.Errorf("no episodes for %q", anime.Name)
 		}
+		// Only now is this the title being played, so only now is this the
+		// search to come back to.
+		rememberSearch(res.Query, res.Scope)
 		return anime, episodes, nil
 	}
 }
@@ -298,6 +301,7 @@ func legacyChangeAnime() (*models.Anime, []models.Episode, error) {
 			return nil, nil, fmt.Errorf("failed to get episodes after %d attempts", maxRetries)
 		}
 
+		rememberSearch(animeName, "")
 		return anime, episodes, nil
 	}
 

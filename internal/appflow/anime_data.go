@@ -152,10 +152,53 @@ func SearchAnimeEnhanced(name string) (*models.Anime, error) {
 	return anime, nil
 }
 
+// lastSearch is the search that produced the title being played.
+var lastSearch struct {
+	sync.Mutex
+	query, scope string
+	set          bool
+}
+
+// rememberSearch records query and scope as the search behind the title now
+// being played.
+func rememberSearch(query, scope string) {
+	lastSearch.Lock()
+	defer lastSearch.Unlock()
+	lastSearch.query, lastSearch.scope, lastSearch.set = query, scope, true
+}
+
+// SearchToRepeat is the search to run again when the user backs out of a
+// title: the one that produced it. That is not always the one the session
+// began with: the title can be changed during playback, and the results screen
+// can edit the search. query and scope are what the caller would repeat
+// otherwise, and are returned when nothing has been searched yet.
+func SearchToRepeat(query, scope string) (string, string) {
+	lastSearch.Lock()
+	defer lastSearch.Unlock()
+	if !lastSearch.set {
+		return query, scope
+	}
+	return lastSearch.query, lastSearch.scope
+}
+
+// resetLastSearch forgets the recorded search, for tests.
+func resetLastSearch() {
+	lastSearch.Lock()
+	defer lastSearch.Unlock()
+	lastSearch.query, lastSearch.scope, lastSearch.set = "", "", false
+}
+
 // SearchAnimeWithRetry - searches for anime with retry logic on failure
 func SearchAnimeWithRetry(name string) (*models.Anime, error) {
+	return SearchAnimeWithRetryIn(name, util.GlobalSource)
+}
+
+// SearchAnimeWithRetryIn is SearchAnimeWithRetry limited to scope, a source
+// kind, or every source when it is empty. The search that finds a title is
+// remembered; see SearchToRepeat.
+func SearchAnimeWithRetryIn(name, scope string) (*models.Anime, error) {
 	currentName := name
-	loopSource := util.GlobalSource
+	loopSource := scope
 
 	for {
 		searchStart := time.Now()
@@ -172,6 +215,7 @@ func SearchAnimeWithRetry(name string) (*models.Anime, error) {
 
 		if searchErr == nil && anime != nil {
 			util.Debugf("[PERF] SearchAnimeWithRetry completed in %v", time.Since(searchStart))
+			rememberSearch(currentName, source)
 			return anime, nil
 		}
 

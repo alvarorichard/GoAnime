@@ -16,6 +16,11 @@ const (
 	animefireAPI = "internal/scraper/providers/animefire/api.go"
 	animefireCli = "internal/scraper/providers/animefire/client.go"
 	mpvLaunch    = "internal/player/mpv_launch.go"
+	handlersFile = "internal/handlers/playback.go"
+	appflowData  = "internal/appflow/anime_data.go"
+	appflowTry   = "internal/appflow/try.go"
+	handlersPkg  = "./internal/handlers"
+	appflowPkg   = "./internal/appflow"
 	playerGo     = "internal/player/player.go"
 
 	pickerPrepend   = "\tif !m.showHelp {\n\t\tif notice := renderNotice(&m.theme, m.notice, width); notice != \"\" {\n\t\t\tbody = notice + \"\\n\" + body\n\t\t}\n\t}\n"
@@ -387,6 +392,148 @@ var issue229Mutants = []mutant{
 		edits: []codeEdit{{playerGo, "\tvar stderr lockedBuffer\n", "\tvar stderr bytes.Buffer\n"}},
 		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossReadsStderrSafelyWhileMPVIsStillWritingIt"}},
 	},
+
+	// ---- backing out goes to the search that found the title (#229) ------------------
+	{
+		name:  "backing out repeats the search the session began with",
+		edits: []codeEdit{{handlersFile, "\t\t\t// the results for the show searched before it).\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n", "\t\t\t// the results for the show searched before it).\n"}},
+		kills: map[string][]string{handlersPkg: {"TestBackingOutAfterChangingTheTitleShowsTheChangedSearch", "TestEachBackFollowsTheLatestSearch"}},
+	},
+	{
+		name:  "an unopenable title repeats the search the session began with",
+		edits: []codeEdit{{handlersFile, "\t\t\t// even if the search was edited on the way.\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n", "\t\t\t// even if the search was edited on the way.\n"}},
+		kills: map[string][]string{handlersPkg: {"TestAnUnopenableTitleSendsTheUserBackToTheResultsItWasIn"}},
+	},
+	{
+		name:  "backing out forgets the scope of the changed search",
+		edits: []codeEdit{{handlersFile, "\t\t\t// the results for the show searched before it).\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n", "\t\t\t// the results for the show searched before it).\n\t\t\tcurrentAnimeName, _ = env.repeatSearch(currentAnimeName, currentScope)\n"}},
+		kills: map[string][]string{handlersPkg: {"TestBackingOutKeepsTheScopeOfTheChangedSearch"}},
+	},
+	{
+		name:  "backing out forgets the name of the changed search",
+		edits: []codeEdit{{handlersFile, "\t\t\t// the results for the show searched before it).\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n", "\t\t\t// the results for the show searched before it).\n\t\t\t_, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n"}},
+		kills: map[string][]string{handlersPkg: {"TestBackingOutAfterChangingTheTitleShowsTheChangedSearch"}},
+	},
+	{
+		name:  "an unopenable title forgets the scope of its search",
+		edits: []codeEdit{{handlersFile, "\t\t\t// even if the search was edited on the way.\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n", "\t\t\t// even if the search was edited on the way.\n\t\t\tcurrentAnimeName, _ = env.repeatSearch(currentAnimeName, currentScope)\n"}},
+		kills: map[string][]string{handlersPkg: {"TestAnUnopenableTitleSendsTheUserBackToTheResultsItWasIn"}},
+	},
+	{
+		name:  "backing out of the season picker keeps the old name",
+		edits: []codeEdit{{handlersFile, "\t\t\tcurrentAnimeName = \"\"\n\t\t\tcurrentScope = util.GlobalSource\n", "\t\t\tcurrentScope = util.GlobalSource\n"}},
+		kills: map[string][]string{handlersPkg: {"TestBackingOutOfTheSeasonPickerOpensAFreshSearchInTheGlobalScope"}},
+	},
+	{
+		name:  "backing out of the season picker keeps the last scope",
+		edits: []codeEdit{{handlersFile, "\t\t\tcurrentAnimeName = \"\"\n\t\t\tcurrentScope = util.GlobalSource\n", "\t\t\tcurrentAnimeName = \"\"\n"}},
+		kills: map[string][]string{handlersPkg: {"TestAFreshSearchAfterAChangedScopeGoesBackToTheGlobalScope"}},
+	},
+	{
+		name:  "a pended CONTINUE row is ignored when backing out",
+		edits: []codeEdit{{handlersFile, "\t\t\tif env.drainHome() {\n\t\t\t\treturn\n\t\t\t}\n\t\t\tutil.Infof(\"Going back to anime selection...\")\n\t\t\t// Show", "\t\t\tutil.Infof(\"Going back to anime selection...\")\n\t\t\t// Show"}},
+		kills: map[string][]string{handlersPkg: {"TestAContinueRowPendedWhileBackingOutEndsTheLoop"}},
+	},
+	{
+		name:  "a pended CONTINUE row is ignored after a search",
+		edits: []codeEdit{{handlersFile, "\t\tif err == nil && anime == nil && env.drainHome() {", "\t\tif err == nil && anime == nil && false {"}},
+		kills: map[string][]string{handlersPkg: {"TestAContinueRowPendedByTheSearchEndsTheLoop"}},
+	},
+	{
+		name:  "the first search ignores --source",
+		edits: []codeEdit{{handlersFile, "\tcurrentScope := util.GlobalSource\n", "\tcurrentScope := \"\"\n"}},
+		kills: map[string][]string{handlersPkg: {"TestTheLoopStartsInTheGlobalScope"}},
+	},
+	{
+		name:  "a movie is played as a series",
+		edits: []codeEdit{{handlersFile, "series := !anime.IsMovie() && totalEpisodes > 1", "series := totalEpisodes > 1"}},
+		kills: map[string][]string{handlersPkg: {"TestASeriesAndAMovieGoToTheirOwnHandlers"}},
+	},
+	{
+		name:  "a one-episode title is played as a series",
+		edits: []codeEdit{{handlersFile, "series := !anime.IsMovie() && totalEpisodes > 1", "series := !anime.IsMovie()"}},
+		kills: map[string][]string{handlersPkg: {"TestASeriesAndAMovieGoToTheirOwnHandlers"}},
+	},
+	{
+		name:  "the series handler is told discord is off",
+		edits: []codeEdit{{handlersFile, "env.handleSeries(ctx, anime, episodes, totalEpisodes, env.discordOn())", "env.handleSeries(ctx, anime, episodes, totalEpisodes, false)"}},
+		kills: map[string][]string{handlersPkg: {"TestThePlayersDiscordSettingReachesTheHandlers"}},
+	},
+	{
+		name:  "the movie handler is told discord is off",
+		edits: []codeEdit{{handlersFile, "env.handleMovie(ctx, anime, episodes, env.discordOn())", "env.handleMovie(ctx, anime, episodes, false)"}},
+		kills: map[string][]string{handlersPkg: {"TestThePlayersDiscordSettingReachesTheHandlers", "TestASeriesAndAMovieGoToTheirOwnHandlers"}},
+	},
+	{
+		name:  "a title with no episodes is played anyway",
+		edits: []codeEdit{{handlersFile, "\t\t\t// even if the search was edited on the way.\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n\t\t\tcontinue\n", "\t\t\t// even if the search was edited on the way.\n\t\t\tcurrentAnimeName, currentScope = env.repeatSearch(currentAnimeName, currentScope)\n"}},
+		kills: map[string][]string{handlersPkg: {"TestATitleWithNoEpisodesSendsTheUserBackToTheResults", "TestAnUnopenableTitleSendsTheUserBackToTheResultsItWasIn"}},
+	},
+	{
+		name:  "a search that found a title is not remembered",
+		edits: []codeEdit{{appflowData, "\t\t\trememberSearch(currentName, source)\n", ""}},
+		kills: map[string][]string{appflowPkg: {"TestSearchAnimeWithRetryInRemembersWhatFoundTheTitle"}},
+	},
+	{
+		name:  "the typed search is remembered, not the one that found the title",
+		edits: []codeEdit{{appflowData, "rememberSearch(currentName, source)", "rememberSearch(name, source)"}},
+		kills: map[string][]string{appflowPkg: {"TestSearchAnimeWithRetryRemembersTheEditedSearchNotTheFirst"}},
+	},
+	{
+		name:  "the first scope is remembered, not the one that found the title",
+		edits: []codeEdit{{appflowData, "rememberSearch(currentName, source)", "rememberSearch(currentName, scope)"}},
+		kills: map[string][]string{appflowPkg: {"TestSearchAnimeWithRetryRemembersTheScopeTheRetryScreenChose"}},
+	},
+	{
+		name:  "the search ignores the scope it is given",
+		edits: []codeEdit{{appflowData, "\tloopSource := scope\n", "\tloopSource := util.GlobalSource\n"}},
+		kills: map[string][]string{appflowPkg: {"TestSearchAnimeWithRetryInSearchesTheScopeItIsGiven"}},
+	},
+	{
+		name:  "the plain search ignores --source",
+		edits: []codeEdit{{appflowData, "return SearchAnimeWithRetryIn(name, util.GlobalSource)", "return SearchAnimeWithRetryIn(name, \"\")"}},
+		kills: map[string][]string{appflowPkg: {"TestSearchAnimeWithRetryUsesTheGlobalSourceAsItAlwaysDid"}},
+	},
+	{
+		name:  "a search before any is not the caller's",
+		edits: []codeEdit{{appflowData, "\tif !lastSearch.set {\n\t\treturn query, scope\n\t}\n", ""}},
+		kills: map[string][]string{appflowPkg: {"TestSearchToRepeatBeforeAnySearchIsWhatTheCallerHad"}},
+	},
+	{
+		name:  "the search to repeat is always the caller's",
+		edits: []codeEdit{{appflowData, "\treturn lastSearch.query, lastSearch.scope\n}\n\n// resetLastSearch", "\treturn query, scope\n}\n\n// resetLastSearch"}},
+		kills: map[string][]string{appflowPkg: {"TestTheLatestSearchWins", "TestSearchAnimeWithRetryInRemembersWhatFoundTheTitle"}},
+	},
+	{
+		name:  "the search to repeat forgets its scope",
+		edits: []codeEdit{{appflowData, "\treturn lastSearch.query, lastSearch.scope\n}\n\n// resetLastSearch", "\treturn lastSearch.query, scope\n}\n\n// resetLastSearch"}},
+		kills: map[string][]string{appflowPkg: {"TestTheLatestSearchWins", "TestRememberSearchAcceptsAnEmptyScope"}},
+	},
+	{
+		name:  "the first search is kept over the latest",
+		edits: []codeEdit{{appflowData, "\tlastSearch.query, lastSearch.scope, lastSearch.set = query, scope, true\n}\n\n// SearchToRepeat", "\tif !lastSearch.set {\n\t\tlastSearch.query, lastSearch.scope, lastSearch.set = query, scope, true\n\t}\n}\n\n// SearchToRepeat"}},
+		kills: map[string][]string{appflowPkg: {"TestTheLatestSearchWins"}},
+	},
+	{
+		name:  "changing the title never records its search",
+		edits: []codeEdit{{appflowTry, "\t\trememberSearch(res.Query, res.Scope)\n", ""}},
+		kills: map[string][]string{appflowPkg: {"TestChangeAnimeHomeRemembersTheSearchItMade"}},
+	},
+	{
+		name:  "changing the title records the query but not the scope",
+		edits: []codeEdit{{appflowTry, "rememberSearch(res.Query, res.Scope)", "rememberSearch(res.Query, \"\")"}},
+		kills: map[string][]string{appflowPkg: {"TestChangeAnimeHomeRemembersTheSearchItMade"}},
+	},
+	{
+		name:  "changing the title records the search before its episodes load",
+		edits: []codeEdit{{appflowTry, "\t\tepisodes, err := getAnimeEpisodesEnhancedFn(anime)\n\t\tif err != nil {\n\t\t\treturn nil, nil, err\n", "\t\trememberSearch(res.Query, res.Scope)\n\t\tepisodes, err := getAnimeEpisodesEnhancedFn(anime)\n\t\tif err != nil {\n\t\t\treturn nil, nil, err\n"}},
+		kills: map[string][]string{appflowPkg: {"TestChangeAnimeHomeKeepsTheOldSearchWhenEpisodesFail", "TestChangeAnimeHomeKeepsTheOldSearchWhenTheNewTitleHasNoEpisodes"}},
+	},
+	{
+		name:  "changing the title records the search before it is checked for episodes",
+		edits: []codeEdit{{appflowTry, "\t\tif len(episodes) == 0 {\n\t\t\treturn nil, nil, fmt.Errorf(\"no episodes for %q\", anime.Name)\n\t\t}\n", "\t\trememberSearch(res.Query, res.Scope)\n\t\tif len(episodes) == 0 {\n\t\t\treturn nil, nil, fmt.Errorf(\"no episodes for %q\", anime.Name)\n\t\t}\n"}},
+		kills: map[string][]string{appflowPkg: {"TestChangeAnimeHomeKeepsTheOldSearchWhenTheNewTitleHasNoEpisodes"}},
+	},
 }
 
 func TestIssue229GuardKillsMutants(t *testing.T) {
@@ -397,4 +544,6 @@ var issue229Guards = map[string][]string{
 	tuiPkg:      {"TestPickerShowsItsNoticeAboveTheList", "TestNoticeOnNextPickerIsTakenOnce"},
 	playbackPkg: {"TestSourceVideoRemovedMessage", "TestPlayEpisodeExplainsARemovedVideoOnTheListItReturnsTo"},
 	playerPkg:   {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestStartVideoAcrossStartsTheFirstMPVThatComesUp"},
+	handlersPkg: {"TestBackingOutAfterChangingTheTitleShowsTheChangedSearch"},
+	appflowPkg:  {"TestSearchAnimeWithRetryInRemembersWhatFoundTheTitle"},
 }
