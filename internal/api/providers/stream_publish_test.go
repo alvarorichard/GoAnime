@@ -347,7 +347,10 @@ func TestPomfyFetchStreamURLPublishesLikeItAlwaysDid(t *testing.T) {
 
 // ---- every migrated provider, the same contract --------------------------------
 
-var _ source.StreamFetcher = (*startFlixProvider)(nil)
+var (
+	_ source.StreamFetcher = (*startFlixProvider)(nil)
+	_ source.StreamFetcher = (*topCineProvider)(nil)
+)
 
 type streamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error)
 
@@ -373,6 +376,19 @@ var migratedProviders = []struct {
 	} {
 		return &startFlixProvider{}
 	}},
+	{"topcine", swapTopCineStream, func() interface {
+		source.StreamFetcher
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	} {
+		return &topCineProvider{}
+	}},
+}
+
+func swapTopCineStream(t *testing.T, fn streamFn) {
+	t.Helper()
+	old := topCineStreamFn
+	topCineStreamFn = fn
+	t.Cleanup(func() { topCineStreamFn = old })
 }
 
 func swapStartFlixStream(t *testing.T, fn streamFn) {

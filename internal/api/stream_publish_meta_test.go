@@ -25,6 +25,7 @@ const (
 	providersFile              = "internal/api/providers/source_providers.go"
 	dispatchFile               = "internal/api/providers/dispatch.go"
 	pomfyAPIFile               = "internal/api/pomfy.go"
+	topCineFetchStreamURLSig   = "func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 	pomfyFetchStreamURLSig     = "func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 	startFlixFetchStreamURLSig = "func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 	fetchAndPublishP           = "func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
@@ -262,6 +263,33 @@ var streamPublishMutants = []mutant{
 		name:  "a missing StartFlix episode is let through",
 		edits: []codeEdit{{sfxAPIFile, "if media == nil || episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no %s title or episode to play\"", "if media == nil && episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no %s title or episode to play\""}},
 		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamRejectsAMissingTitleOrEpisode"}},
+	},
+
+	// ---- the TopCine provider ---------------------------------------------------
+	{
+		name:  "the TopCine resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *topCineProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *topCineProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamPropagatesErrorsAndCancellation"}},
+	},
+	{
+		name:  "TopCine's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, topCineFetchStreamURLSig + "\treturn fetchAndPublish(ctx, p, episode, anime, quality)\n}", topCineFetchStreamURLSig + "\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamURLPublishes", "TestTopCineProvider_FetchStreamURL", "TestTopCineStreamPublishCascade"}},
+	},
+	{
+		name:  "TopCine's FetchStream publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "\treturn topCineStreamFn(anime, episode, quality)\n}", "\ts, err := topCineStreamFn(anime, episode, quality)\n\ts.Publish()\n\treturn s, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamWritesNoPlaybackState"}},
+	},
+	{
+		name:  "TopCine resolves nothing",
+		edits: []codeEdit{{"internal/api/topcine.go", "\treturn ResolveStartFlixStream(media, episode, quality)\n}", "\treturn source.Stream{}, nil\n}"}},
+		kills: map[string][]string{apiPkg: {"TestResolveTopCineStreamIsTheStartFlixStreamWithoutSideEffects", "TestResolveTopCineStreamRejectsAMissingTitleOrEpisode"}},
+	},
+	{
+		name:  "GetTopCineStreamURL stops publishing",
+		edits: []codeEdit{{"internal/api/topcine.go", "\treturn GetStartFlixStreamURL(media, episode, quality)\n}", "\ts, err := ResolveStartFlixStream(media, episode, quality)\n\treturn s.URL, err\n}"}},
+		kills: map[string][]string{apiPkg: {"TestGetTopCineStreamURLStillPublishes"}},
 	},
 }
 

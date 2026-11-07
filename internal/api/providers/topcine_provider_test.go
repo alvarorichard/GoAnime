@@ -124,7 +124,7 @@ func TestTopCineProvider_FetchStreamURL(t *testing.T) {
 	p := &topCineProvider{}
 	anime := &models.Anime{URL: "https://topcine3.site/serie/x", Source: "TopCine", MediaType: models.MediaTypeTV}
 	ep := &models.Episode{Number: "1", Num: 1, URL: "https://www.painel-aso.sbs/episodio/1"}
-	t.Cleanup(func() { topCineStreamFn = api.GetTopCineStreamURL })
+	t.Cleanup(func() { topCineStreamFn = api.ResolveTopCineStream })
 
 	t.Run("delegates to the api path and resets per-episode state", func(t *testing.T) {
 		util.SetGlobalSubtitles([]util.SubtitleInfo{{URL: "https://old.test/prev.vtt"}})
@@ -132,10 +132,10 @@ func TestTopCineProvider_FetchStreamURL(t *testing.T) {
 		var gotEp *models.Episode
 		var gotQuality string
 		var subsAtCall int
-		topCineStreamFn = func(a *models.Anime, e *models.Episode, q string) (string, error) {
+		topCineStreamFn = func(a *models.Anime, e *models.Episode, q string) (source.Stream, error) {
 			gotAnime, gotEp, gotQuality = a, e, q
 			subsAtCall = len(util.GetGlobalSubtitles())
-			return "https://cdn.example/tc.m3u8", nil
+			return source.Stream{URL: "https://cdn.example/tc.m3u8"}, nil
 		}
 		got, err := p.FetchStreamURL(context.Background(), ep, anime, "720")
 		require.NoError(t, err)
@@ -148,23 +148,27 @@ func TestTopCineProvider_FetchStreamURL(t *testing.T) {
 	})
 
 	t.Run("error passthrough", func(t *testing.T) {
-		topCineStreamFn = func(*models.Anime, *models.Episode, string) (string, error) { return "", assert.AnError }
+		topCineStreamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error) {
+			return source.Stream{}, assert.AnError
+		}
 		_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
 		require.ErrorIs(t, err, assert.AnError)
 	})
 
 	t.Run("an anime without a source leaves the global alone", func(t *testing.T) {
 		util.SetGlobalAnimeSource("Previous")
-		topCineStreamFn = func(*models.Anime, *models.Episode, string) (string, error) { return "u", nil }
+		topCineStreamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error) {
+			return source.Stream{URL: "u"}, nil
+		}
 		_, err := p.FetchStreamURL(context.Background(), ep, &models.Anime{}, "")
 		require.NoError(t, err)
 		assert.Equal(t, "Previous", util.GetGlobalAnimeSource())
 	})
 
 	t.Run("cancelled context returns immediately", func(t *testing.T) {
-		topCineStreamFn = func(*models.Anime, *models.Episode, string) (string, error) {
+		topCineStreamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error) {
 			t.Error("must not fetch with a cancelled context")
-			return "", nil
+			return source.Stream{}, nil
 		}
 		_, err := p.FetchStreamURL(cancelledCtx(), ep, anime, "best")
 		require.ErrorIs(t, err, context.Canceled)

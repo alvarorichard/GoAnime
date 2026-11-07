@@ -108,3 +108,41 @@ func TestGetStartFlixStreamURLPublishesNothingOnFailure(t *testing.T) {
 	assert.Empty(t, url)
 	assert.Empty(t, util.GetGlobalReferer(), "a failed resolve leaves no referer behind")
 }
+
+// ---- TopCine plays through the StartFlix panel ----------------------------------
+
+func TestResolveTopCineStreamIsTheStartFlixStreamWithoutSideEffects(t *testing.T) {
+	media, ep := startFlixShow(t)
+	util.SetGlobalReferer("https://sentinel.example/")
+	util.SetGlobalSubtitles([]util.SubtitleInfo{{URL: "sentinel"}})
+
+	want, err := ResolveStartFlixStream(media, ep, "best")
+	require.NoError(t, err)
+	got, err := ResolveTopCineStream(media, ep, "best")
+
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	assert.Equal(t, "https://sentinel.example/", util.GetGlobalReferer(), "resolving leaves the referer alone")
+	assert.Equal(t, []util.SubtitleInfo{{URL: "sentinel"}}, util.GetGlobalSubtitles())
+}
+
+func TestGetTopCineStreamURLStillPublishes(t *testing.T) {
+	media, ep := startFlixShow(t)
+	util.ClearGlobalReferer()
+	util.ClearGlobalSubtitles()
+
+	url, err := GetTopCineStreamURL(media, ep, "best")
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://files.test/ep-1101.mp4", url)
+	assert.Equal(t, "https://painel.test/", util.GetGlobalReferer())
+	assert.Len(t, util.GetGlobalSubtitles(), 1)
+	assert.Equal(t, audioLangForStartFlix(startflix.AudioSubtitled), util.GetGlobalAudioLanguage())
+}
+
+func TestResolveTopCineStreamRejectsAMissingTitleOrEpisode(t *testing.T) {
+	_, err := ResolveTopCineStream(nil, &models.Episode{}, "")
+	require.Error(t, err)
+	_, err = ResolveTopCineStream(&models.Anime{}, nil, "")
+	require.Error(t, err)
+}

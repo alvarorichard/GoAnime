@@ -31,7 +31,7 @@ var (
 
 	// topCineStreamFn / topCineEpisodesFn do the same for TopCine, whose titles
 	// play through the StartFlix panel by TMDB id.
-	topCineStreamFn   = api.GetTopCineStreamURL
+	topCineStreamFn   = api.ResolveTopCineStream
 	topCineEpisodesFn = api.GetTopCineEpisodes
 
 	// pobreflixStreamFn / pobreflixEpisodesFn do the same for Pobreflix, whose
@@ -726,15 +726,17 @@ func (p *topCineProvider) FetchEpisodes(ctx context.Context, anime *models.Anime
 	return topCineEpisodesFn(anime)
 }
 
-func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *topCineProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return topCineStreamFn(anime, episode, quality)
+}
+
+func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- Pobreflix Provider ---
