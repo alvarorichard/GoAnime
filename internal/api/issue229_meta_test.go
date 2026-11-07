@@ -1,6 +1,15 @@
 package api
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 // Tests of the tests, for the guard on issue #229: the reason an episode did
 // not load has to be on the episode list the user is sent back to, because
@@ -537,7 +546,61 @@ var issue229Mutants = []mutant{
 }
 
 func TestIssue229GuardKillsMutants(t *testing.T) {
-	killMutants(t, issue229Guards, issue229Mutants)
+	guards, mutants := issue229Guards, issue229Mutants
+	if runtime.GOOS == "windows" {
+		guards, mutants = withoutPosixOnlyGuards(t, guards, mutants)
+	}
+	killMutants(t, guards, mutants)
+}
+
+// posixOnlyTestsFile holds the stand-in mpv tests: they run shell scripts, so
+// the file is not built on Windows and its tests do not exist there.
+const posixOnlyTestsFile = "internal/player/mpv_launch_fake_test.go"
+
+var testFuncRe = regexp.MustCompile(`(?m)^func (Test\w+)\(`)
+
+// withoutPosixOnlyGuards drops, on Windows, the guards and mutants that rely on
+// a test defined in posixOnlyTestsFile, and says so. Which tests those are is
+// read from the file, so the exemption cannot grow past what does not exist
+// there.
+func withoutPosixOnlyGuards(t *testing.T, guards map[string][]string, mutants []mutant) (map[string][]string, []mutant) {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(moduleRoot(t), filepath.FromSlash(posixOnlyTestsFile)))
+	require.NoError(t, err)
+	posixOnly := map[string]bool{}
+	for _, m := range testFuncRe.FindAllSubmatch(src, -1) {
+		posixOnly[string(m[1])] = true
+	}
+	reliesOnIt := func(kills map[string][]string) bool {
+		for _, names := range kills {
+			for _, name := range names {
+				if posixOnly[name] {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	keptGuards := map[string][]string{}
+	for pkg, names := range guards {
+		for _, name := range names {
+			if posixOnly[name] {
+				t.Logf("skipped on Windows: guard %s needs the stand-in mpv", name)
+				continue
+			}
+			keptGuards[pkg] = append(keptGuards[pkg], name)
+		}
+	}
+	var kept []mutant
+	for _, m := range mutants {
+		if reliesOnIt(m.kills) {
+			t.Logf("skipped on Windows: mutant %q needs the stand-in mpv", m.name)
+			continue
+		}
+		kept = append(kept, m)
+	}
+	return keptGuards, kept
 }
 
 var issue229Guards = map[string][]string{
@@ -546,4 +609,25 @@ var issue229Guards = map[string][]string{
 	playerPkg:   {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestStartVideoAcrossStartsTheFirstMPVThatComesUp"},
 	handlersPkg: {"TestBackingOutAfterChangingTheTitleShowsTheChangedSearch"},
 	appflowPkg:  {"TestSearchAnimeWithRetryInRemembersWhatFoundTheTitle"},
+}
+
+func TestWindowsDropsOnlyWhatNeedsTheStandInMPV(t *testing.T) {
+	guards, mutants := withoutPosixOnlyGuards(t, issue229Guards, issue229Mutants)
+
+	assert.NotContains(t, guards[playerPkg], "TestStartVideoAcrossStartsTheFirstMPVThatComesUp")
+	assert.Contains(t, guards[playerPkg], "TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "a guard that exists on Windows stays")
+	assert.Equal(t, issue229Guards[handlersPkg], guards[handlersPkg])
+
+	names := map[string]bool{}
+	for _, m := range mutants {
+		names[m.name] = true
+		for _, tests := range m.kills {
+			for _, name := range tests {
+				assert.NotContains(t, name, "TestStartVideoAcross", "%q still relies on the stand-in mpv", m.name)
+			}
+		}
+	}
+	assert.False(t, names["the mpv that worked is not remembered"], "needs the stand-in mpv")
+	assert.True(t, names["backing out repeats the search the session began with"], "the playback loop tests run on Windows")
+	assert.Less(t, len(mutants), len(issue229Mutants))
 }
