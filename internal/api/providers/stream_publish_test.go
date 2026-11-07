@@ -546,3 +546,141 @@ func TestMigratedProvidersFetchStreamURLPublishes(t *testing.T) {
 		})
 	}
 }
+
+// ---- FetchStream: the dispatcher without the side effects -----------------------
+
+func TestFetchStreamTouchesNoPlaybackState(t *testing.T) {
+	cleanPlayback(t)
+	util.SetGlobalReferer("https://playing-now.example/")
+	util.SetGlobalOrigin("https://playing-now.example")
+	util.SetGlobalAudioLanguage("eng")
+	util.SetGlobalAnimeSource("PlayingNow")
+	util.SetGlobalSubtitles([]util.SubtitleInfo{{URL: "https://playing-now.example/en.vtt"}})
+	before := readPlayback()
+	stub := &fetchStub{desc: goyabuDesc(), stream: richStream()}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	got, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "720p")
+
+	require.NoError(t, err)
+	assert.Equal(t, richStream(), got, "the whole Stream comes back")
+	assert.Equal(t, before, readPlayback(), "what is playing keeps its referer, origin, audio, source and subtitles")
+	assert.Equal(t, before, stub.seenDuringFetch, "and the resolve did not start by clearing them")
+}
+
+func TestFetchStreamPassesTheArgumentsToTheSource(t *testing.T) {
+	cleanPlayback(t)
+	stub := &fetchStub{desc: goyabuDesc(), stream: source.Stream{URL: "u"}}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+	ep, anime := &models.Episode{Number: "7"}, dispatchAnime()
+
+	_, err := FetchStream(context.Background(), ep, anime, "480p")
+
+	require.NoError(t, err)
+	assert.Same(t, ep, stub.gotEpisode)
+	assert.Same(t, anime, stub.gotAnime)
+	assert.Equal(t, "480p", stub.gotQuality)
+	assert.Equal(t, 1, stub.calls)
+	assert.Zero(t, stub.legacyCalls, "the Stream method is used when the source has one")
+}
+
+func TestFetchStreamPropagatesAFailedResolve(t *testing.T) {
+	cleanPlayback(t)
+	boom := errors.New("no stream")
+	stub := &fetchStub{desc: goyabuDesc(), stream: richStream(), err: boom}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	_, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "")
+
+	require.ErrorIs(t, err, boom)
+}
+
+func TestFetchStreamForALegacySourceGivesJustTheURL(t *testing.T) {
+	cleanPlayback(t)
+	stub := &quietLegacyStub{desc: goyabuDesc()}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	got, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "")
+
+	require.NoError(t, err)
+	assert.Equal(t, source.Stream{URL: "https://legacy.example/v.mp4"}, got)
+}
+
+func TestFetchStreamRejectsANilAnime(t *testing.T) {
+	_, err := FetchStream(context.Background(), &models.Episode{}, nil, "")
+	require.EqualError(t, err, "cannot fetch stream for a nil anime", "refused up front, not by whatever the registry makes of nothing")
+}
+
+func TestFetchStreamRefusesAnUnrecognizedSourceWhenStrict(t *testing.T) {
+	cleanPlayback(t)
+	t.Setenv("GOANIME_STRICT_SOURCE", "1")
+	stub := &fetchStub{desc: goyabuDesc(), stream: richStream()}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	_, err := FetchStream(context.Background(), &models.Episode{}, &models.Anime{Name: "Mystery", URL: "https://unknown.example/x"}, "")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "GOANIME_STRICT_SOURCE", "the strict mode is what refused it, not a missing source")
+	assert.Zero(t, stub.calls, "nothing is guessed")
+}
+
+// gatedFetchStub is a StreamFetcher whose source needs warming up first.
+type gatedFetchStub struct {
+	fetchStub
+	warmErr           error
+	warmCalls         int
+	warmedBeforeFetch bool
+}
+
+func (s *gatedFetchStub) WarmUp(context.Context) error {
+	s.warmCalls++
+	return s.warmErr
+}
+
+func (s *gatedFetchStub) FetchStream(ctx context.Context, ep *models.Episode, a *models.Anime, q string) (source.Stream, error) {
+	s.warmedBeforeFetch = s.warmCalls > 0
+	return s.fetchStub.FetchStream(ctx, ep, a, q)
+}
+
+func TestFetchStreamWarmsUpABrowserGatedSourceFirst(t *testing.T) {
+	cleanPlayback(t)
+	stub := &gatedFetchStub{fetchStub: fetchStub{desc: goyabuDesc(), stream: richStream()}}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	_, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "")
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, stub.warmCalls)
+	assert.True(t, stub.warmedBeforeFetch, "the warm-up comes before the resolve")
+}
+
+func TestFetchStreamReportsAWarmUpThatCannotRun(t *testing.T) {
+	cleanPlayback(t)
+	boom := errors.New("no browser in this environment")
+	stub := &gatedFetchStub{fetchStub: fetchStub{desc: goyabuDesc(), stream: richStream()}, warmErr: boom}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	_, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "")
+
+	require.ErrorIs(t, err, boom)
+	assert.Zero(t, stub.calls, "a doomed fetch is not attempted")
+}
+
+func TestFetchStreamURLEqualsFetchStreamThenPublish(t *testing.T) {
+	stub := &fetchStub{desc: goyabuDesc(), stream: richStream()}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	cleanPlayback(t)
+	url, err := FetchStreamURL(context.Background(), &models.Episode{}, dispatchAnime(), "")
+	require.NoError(t, err)
+	want := readPlayback()
+
+	cleanPlayback(t)
+	stream, err := FetchStream(context.Background(), &models.Episode{}, dispatchAnime(), "")
+	require.NoError(t, err)
+	util.SetGlobalAnimeSource(dispatchAnime().Source) // the tag FetchStreamURL adds on its way in
+	stream.Publish()
+
+	assert.Equal(t, url, stream.URL)
+	assert.Equal(t, want, readPlayback(), "the two routes leave the player the same state")
+}

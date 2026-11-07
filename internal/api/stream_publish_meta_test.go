@@ -136,7 +136,7 @@ var streamPublishMutants = []mutant{
 	},
 	{
 		name:  "every source is sent down the FetchStream path",
-		edits: []codeEdit{{dispatchFile, "\tif sf, ok := src.(source.StreamFetcher); ok {\n", "\tif sf, ok := src.(source.StreamFetcher); ok || true {\n"}},
+		edits: []codeEdit{{dispatchFile, "\tif sf, ok := src.(source.StreamFetcher); ok {\n\t\treturn fetchAndPublish(", "\tif sf, ok := src.(source.StreamFetcher); ok || true {\n\t\treturn fetchAndPublish("}},
 		// a source that is not a StreamFetcher makes the assertion yield a nil
 		// interface; calling it must not go unnoticed
 		kills: map[string][]string{providersPkg: {"TestFetchStreamURLStillUsesTheLegacyPathForOtherSources"}},
@@ -614,6 +614,14 @@ var streamPublishMutants = []mutant{
 }
 
 func TestStreamPublishGuardKillsMutants(t *testing.T) {
+	killMutants(t, publishGuards, streamPublishMutants)
+}
+
+// killMutants runs the control, then each mutant, as the other meta tests do:
+// the guard tests must pass on the real code, and every mutant must build and
+// be failed by a guard test it names.
+func killMutants(t *testing.T, extraGuards map[string][]string, mutants []mutant) {
+	t.Helper()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Skip("no go toolchain on PATH to build the mutants with")
@@ -624,10 +632,10 @@ func TestStreamPublishGuardKillsMutants(t *testing.T) {
 	// test that always fails — or one renamed away, which -run would select
 	// nothing of — would "kill" every mutant.
 	guards := map[string][]string{}
-	for pkg, tests := range publishGuards {
+	for pkg, tests := range extraGuards {
 		guards[pkg] = append(guards[pkg], tests...)
 	}
-	for _, m := range streamPublishMutants {
+	for _, m := range mutants {
 		for pkg, tests := range m.kills {
 			guards[pkg] = append(guards[pkg], tests...)
 		}
@@ -640,7 +648,7 @@ func TestStreamPublishGuardKillsMutants(t *testing.T) {
 		}
 	}
 
-	for _, m := range streamPublishMutants {
+	for _, m := range mutants {
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			overlay := writeMutantOverlay(t, root, m.edits)

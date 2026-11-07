@@ -512,11 +512,11 @@ func homePath(t *testing.T, name string) string {
 	return filepath.Join(dir, name)
 }
 
-func TestGetBestQualityURL_UnsupportedIdentifier(t *testing.T) {
+func TestGetBestQualityStream_UnsupportedIdentifier(t *testing.T) {
 	// AllAnime path retries through the enhanced API which spawns goroutines —
 	// keep serial to avoid races with other tests that touch network globals.
 	anime := &models.Anime{Source: "AllAnime", URL: ""}
-	_, err := getBestQualityURL(models.Episode{URL: "x"}, anime)
+	_, err := getBestQualityStream(models.Episode{URL: "x"}, anime)
 	require.Error(t, err)
 }
 

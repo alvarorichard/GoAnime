@@ -91,8 +91,7 @@ func TestDownloadWithYtDlpRunsTheEngineWithTheRightSpec(t *testing.T) {
 	eng := &engineMock{results: []error{nil}}
 	h := installYtdlpHarness(t, eng)
 	h.impers = true
-	downloadReferers.Store("https://cdn.test/master.m3u8", "https://site.test/watch/")
-	t.Cleanup(func() { downloadReferers.Delete("https://cdn.test/master.m3u8") })
+	t.Cleanup(rememberDownloadReferer("https://cdn.test/master.m3u8", "https://site.test/watch/"))
 	out := homeOut(t, "dl/ep1.mp4")
 
 	require.NoError(t, downloadWithYtDlp("https://cdn.test/master.m3u8", out, &model{}))

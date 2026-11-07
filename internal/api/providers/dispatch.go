@@ -338,30 +338,61 @@ func FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, 
 	return src.FetchEpisodes(ctx, anime)
 }
 
-// FetchStreamURL resolves an episode's stream URL through the Model B registry
-// — the declarative replacement for api.GetEpisodeStreamURL's per-source
-// switch. Same resolution semantics as FetchEpisodes (kill-switch + best-effort
-// fallback), then delegates to the resolved Source's FetchStreamURL, which
-// warms up a browser-gated source first.
-func FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// streamSource picks the Source that resolves anime's streams and warms it up:
+// the kill-switch and best-effort fallback FetchEpisodes uses, then the
+// browser-gated warm-up. resolved says why that source was chosen.
+func streamSource(ctx context.Context, anime *models.Anime) (source.Source, source.ResolvedSource, error) {
 	if anime == nil {
-		return "", fmt.Errorf("cannot fetch stream for a nil anime")
+		return nil, source.ResolvedSource{}, fmt.Errorf("cannot fetch stream for a nil anime")
 	}
 
 	src, resolved := source.Resolve(anime)
 	if src == nil {
 		if util.StrictSourceResolution() {
-			return "", fmt.Errorf("unrecognized source for %q (%s); best-effort disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
+			return nil, resolved, fmt.Errorf("unrecognized source for %q (%s); best-effort disabled by GOANIME_STRICT_SOURCE", anime.Name, resolved.Reason)
 		}
 		best, ok := source.Enabled(resolved.BestEffortKind())
 		if !ok {
-			return "", fmt.Errorf("no enabled source for %q (%s); it may be off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
+			return nil, resolved, fmt.Errorf("no enabled source for %q (%s); it may be off via GOANIME_DISABLED_SOURCES", resolved.BestEffortKind(), resolved.Reason)
 		}
 		util.Warn("unrecognized source; resolving stream best-effort", "anime", anime.Name, "kind", best.Describe().Kind, "reason", resolved.Reason)
 		src = best
 	}
 
 	if err := source.WarmUp(ctx, src); err != nil {
+		return nil, resolved, err
+	}
+	return src, resolved, nil
+}
+
+// FetchStream resolves an episode's stream and returns it with its playback
+// context, and touches no process-wide state: the referer, origin, subtitles
+// and audio hint are in the Stream, not in the player's globals. A caller that
+// plays or downloads the stream passes it on; one that needs the globals set
+// calls FetchStreamURL, which publishes it. A source that has not moved to
+// returning a Stream gives back just its URL.
+func FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
+	src, resolved, err := streamSource(ctx, anime)
+	if err != nil {
+		return source.Stream{}, err
+	}
+	util.Debug("Fetching stream via registry", "kind", src.Describe().Kind, "reason", resolved.Reason)
+	if sf, ok := src.(source.StreamFetcher); ok {
+		return sf.FetchStream(ctx, episode, anime, quality)
+	}
+	url, err := src.FetchStreamURL(ctx, episode, anime, quality)
+	return source.Stream{URL: url}, err
+}
+
+// FetchStreamURL resolves an episode's stream URL through the Model B registry
+// — the declarative replacement for api.GetEpisodeStreamURL's per-source
+// switch. Same resolution semantics as FetchEpisodes (kill-switch + best-effort
+// fallback), then delegates to the resolved Source, which warms up a
+// browser-gated source first. It publishes the stream's playback context for
+// the player; FetchStream is the same without that.
+func FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	src, resolved, err := streamSource(ctx, anime)
+	if err != nil {
 		return "", err
 	}
 

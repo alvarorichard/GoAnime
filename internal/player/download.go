@@ -23,6 +23,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
@@ -674,7 +675,7 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 
 	if referer != "" {
 		headers["Referer"] = referer
-		origin := util.GetGlobalOrigin()
+		origin := downloadOrigin(streamURL)
 		if origin == "" {
 			origin = strings.TrimSuffix(referer, "/")
 		}
@@ -957,15 +958,17 @@ func sourcesFromEntries(entries []videoEntry) []struct {
 	return sources
 }
 
-// getBestQualityURL returns the best available quality for an episode.
-// It uses the anime context to route to the correct source-specific stream resolver.
-func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, error) {
+// getBestQualityStream resolves an episode to the best stream available, with
+// its playback context (referer, subtitles, ...) in the Stream rather than in
+// the player's globals. It uses the anime context to route to the correct
+// source-specific stream resolver.
+func getBestQualityStream(episode models.Episode, anime *models.Anime) (source.Stream, error) {
 	// Source-aware routing: use anime.Source to determine the correct resolver.
 	// Sources like StartFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
 	// source-specific identifiers or HTTP pages that need scraper-specific
 	// resolution instead of the legacy generic page extractor.
-	source := anime.Source
-	if source != "" {
+	src := anime.Source
+	if src != "" {
 		// Use episode.Number; fall back to Num if Number is empty
 		epNumber := episode.Number
 		if epNumber == "" && episode.Num > 0 {
@@ -979,15 +982,15 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 			SeasonID: episode.SeasonID,
 		}
 
-		util.Debugf("getBestQualityURL: using source-aware resolver for %s (episode %s)", source, epNumber)
-		url, err := providers.FetchStreamURL(context.Background(), ep, anime, util.GlobalQuality)
+		util.Debugf("getBestQualityStream: using source-aware resolver for %s (episode %s)", src, epNumber)
+		stream, err := providers.FetchStream(context.Background(), ep, anime, util.GlobalQuality)
 		if err != nil {
-			return "", fmt.Errorf("failed to get stream URL from %s for episode %s: %w", source, epNumber, err)
+			return source.Stream{}, fmt.Errorf("failed to get stream URL from %s for episode %s: %w", src, epNumber, err)
 		}
-		if url == "" {
-			return "", fmt.Errorf("empty stream URL from %s for episode %s", source, epNumber)
+		if stream.URL == "" {
+			return source.Stream{}, fmt.Errorf("empty stream URL from %s for episode %s", src, epNumber)
 		}
-		return url, nil
+		return stream, nil
 	}
 
 	// Legacy HTTP page URL path. Keep this after source-aware routing so
@@ -995,10 +998,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
 		sources, err := ExtractVideoSources(episode.URL)
 		if err != nil {
-			return "", fmt.Errorf("failed to extract video sources: %w", err)
+			return source.Stream{}, fmt.Errorf("failed to extract video sources: %w", err)
 		}
 		if len(sources) == 0 {
-			return "", fmt.Errorf("no video sources available")
+			return source.Stream{}, fmt.Errorf("no video sources available")
 		}
 		best := sources[0]
 		for _, s := range sources {
@@ -1006,10 +1009,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 				best = s
 			}
 		}
-		return best.URL, nil
+		return source.Stream{URL: best.URL}, nil
 	}
 
-	return "", fmt.Errorf("unsupported episode identifier: %s", episode.URL)
+	return source.Stream{}, fmt.Errorf("unsupported episode identifier: %s", episode.URL)
 }
 
 // buildQualityMenu sorts sources highest-quality-first and produces stable,
@@ -1256,12 +1259,13 @@ type batchEpisode struct {
 	url       string // what is downloaded
 	sourceURL string // the stream URL before resolveDownloadURL (AnimeFire fallback)
 	referer   string
+	origin    string
 	subtitles []util.SubtitleInfo
 }
 
 // Per-episode stream resolution and subtitle muxing; seams for tests.
 var (
-	resolveEpisodeStreamFn = getBestQualityURL
+	resolveEpisodeStreamFn = getBestQualityStream
 	embedSubtitlesFn       = downloadSubtitleFiles
 )
 
@@ -1271,24 +1275,50 @@ var (
 // half with nothing on screen. A seam for tests.
 var batchStatusf = func(format string, a ...any) { fmt.Printf(format, a...) }
 
-// downloadReferers maps a download URL to the referer its resolver gave, so
+// downloadContext is the request context a download's resolver gave: the
+// referer, and the origin when the resolver stated one.
+type downloadContext struct {
+	referer, origin string
+	hasOrigin       bool // origin is the resolver's own answer, empty included
+}
+
+// downloadContexts maps a download URL to the context its resolver gave, so
 // concurrent batch downloads each send their own instead of the global.
-var downloadReferers sync.Map // url -> referer
+var downloadContexts sync.Map // url -> downloadContext
 
 // rememberDownloadReferer pins referer to url until the returned func is
 // called, so a download keeps the referer its resolver gave even when the
-// global one changes under it.
+// global one changes under it. The origin keeps following the global one.
 func rememberDownloadReferer(url, referer string) (forget func()) {
-	downloadReferers.Store(url, referer)
-	return func() { downloadReferers.Delete(url) }
+	downloadContexts.Store(url, downloadContext{referer: referer})
+	return func() { downloadContexts.Delete(url) }
+}
+
+// rememberDownloadContext pins both the referer and the origin to url until
+// the returned func is called. An empty origin is pinned too: the resolver
+// gave none, so the global one is not stood in for it.
+func rememberDownloadContext(url, referer, origin string) (forget func()) {
+	downloadContexts.Store(url, downloadContext{referer: referer, origin: origin, hasOrigin: true})
+	return func() { downloadContexts.Delete(url) }
 }
 
 // downloadReferer is the referer to send when downloading url.
 func downloadReferer(url string) string {
-	if v, ok := downloadReferers.Load(url); ok {
-		return v.(string)
+	if v, ok := downloadContexts.Load(url); ok {
+		return v.(downloadContext).referer
 	}
 	return util.GetGlobalReferer()
+}
+
+// downloadOrigin is the explicit Origin to send when downloading url, "" when
+// the resolver stated none.
+func downloadOrigin(url string) string {
+	if v, ok := downloadContexts.Load(url); ok {
+		if c := v.(downloadContext); c.hasOrigin {
+			return c.origin
+		}
+	}
+	return util.GetGlobalOrigin()
 }
 
 // episodeAlreadyDownloaded reports whether path holds a finished episode.
@@ -1308,36 +1338,58 @@ func episodeAlreadyDownloaded(path string) bool {
 	return false
 }
 
-// resolveBatchEpisode resolves one episode's stream and captures the
-// referer and subtitles its resolver set, before the next episode's
-// resolution replaces them.
+// resolveBatchEpisode resolves one episode's stream and keeps the referer and
+// subtitles it came with. They travel in the Stream, so resolving the next
+// episode cannot replace them.
 func resolveBatchEpisode(episode models.Episode, anime *models.Anime) (batchEpisode, error) {
 	nineAnime := util.Is9AnimeSource()
 	if !nineAnime {
-		// Tracks left by an earlier resolution must not be taken for this
-		// episode's. (9Anime keeps the user's language choice there instead.)
+		// A batch leaves the player no tracks of its own unless the user picks
+		// some (chooseBatchSubtitles); the ones an earlier episode left behind
+		// must not be offered for a downloaded file. (9Anime keeps the user's
+		// language choice there instead.) This is the one write to the player's
+		// state the batch still makes besides the source tag: it goes when the
+		// player stops reading the tracks from there.
 		util.ClearGlobalSubtitles()
 	}
+	// The tracking of what is watched afterwards, a downloaded episode
+	// included, reads the current source; resolving used to set it as a side
+	// effect.
+	if anime != nil && anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
 	be := batchEpisode{num: episode.Num, episode: episode}
-	videoURL, err := resolveEpisodeStreamFn(episode, anime)
-	if err != nil || videoURL == "" {
+	stream, err := resolveEpisodeStreamFn(episode, anime)
+	if err != nil || stream.URL == "" {
 		if err == nil {
 			err = errors.New("empty stream URL")
 		}
 		return be, fmt.Errorf("failed to resolve stream: %w", err)
 	}
-	be.sourceURL = videoURL
-	if be.url, err = resolveDownloadURL(videoURL); err != nil || be.url == "" {
+	be.sourceURL = stream.URL
+	if be.url, err = resolveDownloadURL(stream.URL); err != nil || be.url == "" {
 		if err == nil {
 			err = errors.New("empty download URL")
 		}
 		return be, err
 	}
-	be.referer = util.GetGlobalReferer()
+	be.referer, be.origin = stream.Referer, stream.Origin
 	if !nineAnime {
-		be.subtitles = util.GetGlobalSubtitles()
+		be.subtitles = streamSubtitles(stream)
 	}
 	return be, nil
+}
+
+// streamSubtitles is the stream's subtitle tracks as the player holds them.
+func streamSubtitles(s source.Stream) []util.SubtitleInfo {
+	if len(s.Subtitles) == 0 {
+		return nil
+	}
+	subs := make([]util.SubtitleInfo, 0, len(s.Subtitles))
+	for _, sub := range s.Subtitles {
+		subs = append(subs, util.SubtitleInfo{URL: sub.URL, Language: sub.Language, Label: sub.Label})
+	}
+	return subs
 }
 
 // chooseBatchSubtitles asks once, for the whole batch, which subtitle tracks
@@ -1376,7 +1428,7 @@ func keepChosenSubtitles(subs, chosen []util.SubtitleInfo) []util.SubtitleInfo {
 // its own subtitles. A failed download removes whatever it wrote, so the
 // next run fetches the episode again instead of skipping a partial file.
 func downloadBatchEpisode(be *batchEpisode, anime *models.Anime, progressModel *model, printFn func(string, ...any)) error {
-	defer rememberDownloadReferer(be.url, be.referer)()
+	defer rememberDownloadContext(be.url, be.referer, be.origin)()
 
 	var dlErr error
 	videoURL, episodePath, epNum := be.url, be.path, be.num
