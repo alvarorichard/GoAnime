@@ -377,6 +377,155 @@ var streamPublishMutants = []mutant{
 		edits: []codeEdit{{pbAPIFilePath, "if media == nil || episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no Pobreflix title or episode to play\")", "if media == nil && episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no Pobreflix title or episode to play\")"}},
 		kills: map[string][]string{apiPkg: {"TestResolvePobreflixStreamRejectsAMissingTitleOrEpisode"}},
 	},
+
+	// ---- streamFromMetadata ------------------------------------------------------
+	{
+		name:  "the scraper's referer is not trimmed",
+		edits: []codeEdit{{providersFile, "Referer: strings.TrimSpace(metadata[\"referer\"]),", "Referer: metadata[\"referer\"],"}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata"}},
+	},
+	{
+		name:  "the scraper's origin is not trimmed",
+		edits: []codeEdit{{providersFile, "Origin:  strings.TrimSpace(metadata[\"origin\"]),", "Origin:  metadata[\"origin\"],"}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata"}},
+	},
+	{
+		name:  "the scraper's referer is lost",
+		edits: []codeEdit{{providersFile, "\t\tReferer: strings.TrimSpace(metadata[\"referer\"]),\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata", "TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
+	},
+	{
+		name:  "the scraper's origin is lost",
+		edits: []codeEdit{{providersFile, "\t\tOrigin:  strings.TrimSpace(metadata[\"origin\"]),\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata", "TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
+	},
+	{
+		name:  "the scraper's subtitles are lost",
+		edits: []codeEdit{{providersFile, "\ts.Subtitles = tracks\n\treturn s\n}", "\treturn s\n}"}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata", "TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "a malformed subtitle list throws the whole stream away",
+		edits: []codeEdit{{providersFile, "util.Debug(\"could not read the subtitle list from the scraper\", \"error\", err)\n\t\treturn s", "util.Debug(\"could not read the subtitle list from the scraper\", \"error\", err)\n\t\treturn source.Stream{}"}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata"}},
+	},
+	{
+		name:  "the stream's URL is lost in the conversion",
+		edits: []codeEdit{{providersFile, "\t\tURL:     url,\n\t\tReferer: strings.TrimSpace", "\t\tReferer: strings.TrimSpace"}},
+		kills: map[string][]string{providersPkg: {"TestStreamFromMetadata"}},
+	},
+
+	// ---- HiAnime / AnimesROLL / AnimeDrive ---------------------------------------
+	{
+		name:  "HiAnime ignores the scraper's playback metadata",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil", "_ = metadata\n\treturn source.Stream{URL: url}, nil"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestHiAnimeCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "AnimesROLL ignores the scraper's playback metadata",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(streamURL, metadata), nil\n}\n\nfunc (p *anrollProvider) FetchStreamURL", "_ = metadata\n\treturn source.Stream{URL: streamURL}, nil\n}\n\nfunc (p *anrollProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "AnimeDrive ignores the scraper's playback metadata",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(streamURL, metadata), nil\n}\n\nfunc (p *animeDriveProvider) FetchStreamURL", "_ = metadata\n\treturn source.Stream{URL: streamURL}, nil\n}\n\nfunc (p *animeDriveProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestAnimeDriveCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "HiAnime accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif url == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from HiAnime\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "AnimesROLL accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif streamURL == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from AnimesROLL\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "AnimeDrive accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif streamURL == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from AnimeDrive\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "a HiAnime scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"hianime stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "an AnimesROLL scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"anroll stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "an AnimeDrive scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"AnimeDrive stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "a failed scraper still hands back a half-filled stream",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"hianime stream: %w\", err)", "return source.Stream{URL: url}, fmt.Errorf(\"hianime stream: %w\", err)"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "the HiAnime resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *hianimeProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *hianimeProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "the AnimesROLL resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *anrollProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *anrollProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "the AnimeDrive resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *animeDriveProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *animeDriveProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "HiAnime's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestHiAnimeCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "AnimesROLL's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *anrollProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *anrollProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "AnimeDrive's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *animeDriveProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *animeDriveProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestAnimeDriveCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "HiAnime publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil", "s := streamFromMetadata(url, metadata)\n\ts.Publish()\n\treturn s, nil"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
+	},
+	{
+		name:  "HiAnime's quality never reaches a plain scraper",
+		edits: []codeEdit{{providersFile, "url, metadata, err = adapter.GetStreamURL(episode.URL, quality)", "url, metadata, err = adapter.GetStreamURL(episode.URL)"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
+	},
+	{
+		name:  "AnimeDrive's quality never reaches the scraper",
+		edits: []codeEdit{{providersFile, "adapter.GetStreamURL(episode.URL, quality)\n\tif err != nil {\n\t\t// The leaf client", "adapter.GetStreamURL(episode.URL)\n\tif err != nil {\n\t\t// The leaf client"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
+	},
+	{
+		name:  "HiAnime never uses a context-aware scraper",
+		edits: []codeEdit{{providersFile, "if ca, ok := adapter.(scraper.ContextualScraper); ok {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)", "if ca, ok := adapter.(scraper.ContextualScraper); ok && false {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+	{
+		name:  "HiAnime hands the scraper a fresh context, not the caller's",
+		edits: []codeEdit{{providersFile, "ca.GetStreamURLContext(ctx, episode.URL, quality)", "ca.GetStreamURLContext(context.Background(), episode.URL, quality)"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+	{
+		name:  "AnimesROLL hands the scraper a fresh context, not the caller's",
+		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
 }
 
 func TestStreamPublishGuardKillsMutants(t *testing.T) {
