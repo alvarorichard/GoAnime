@@ -131,12 +131,28 @@ func newFakeMPVs(t *testing.T) *fakeMPVs {
 
 	f := &fakeMPVs{t: t, dir: dir, binary: binary, record: filepath.Join(dir, "launches")}
 	t.Setenv("FAKE_MPV_RECORD", f.record)
+
+	// mpv's log file and IPC socket go in the temp directory. A directory of
+	// their own keeps them out of the shared one, and has to be short: a unix
+	// socket path is limited to about 100 bytes, which t.TempDir() can exceed.
+	tmp, err := os.MkdirTemp("", "g")
+	require.NoError(t, err)
+	t.Setenv("TMPDIR", tmp)
+
 	resetMPVChoice()
 	old := mpvStartTimeout
 	t.Cleanup(func() {
 		mpvStartTimeout = old
 		resetMPVChoice()
 		f.killAll()
+		// Each launch's log is removed by a goroutine once its mpv is gone;
+		// wait for that so none is left behind.
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if left, _ := filepath.Glob(filepath.Join(tmp, "goanime_mpv_*.log")); len(left) == 0 {
+				break
+			}
+		}
+		_ = os.RemoveAll(tmp)
 	})
 	return f
 }
