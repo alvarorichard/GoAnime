@@ -1085,7 +1085,10 @@ func downloadAndPlayEpisode(
 	if videoURL == "" {
 		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
 	}
-	util.SetSubtitleContext(snapshotMedia().AnimeName, util.GetGlobalAnimeSource(), "", "")
+	// One consistent view of the media for the whole download: the file path
+	// and the progress title must come from the same state.
+	snap := snapshotMedia()
+	util.SetSubtitleContext(snap.AnimeName, util.GetGlobalAnimeSource(), "", "")
 
 	// Resolve intermediate URLs (e.g., animefire.io/video/ JSON API) to actual CDN URLs
 	if strings.Contains(videoURL, "animefire.io/video/") {
@@ -1104,7 +1107,7 @@ func downloadAndPlayEpisode(
 		defer rememberDownloadReferer(videoURL, ref)()
 	}
 
-	downloadPath, episodePath := episodeDownloadPaths(snapshotMedia(), animeURL, episodeNumberStr, selectedEpisodeNum)
+	downloadPath, episodePath := episodeDownloadPaths(snap, animeURL, episodeNumberStr, selectedEpisodeNum)
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, 0o700); err != nil {
@@ -1140,7 +1143,7 @@ func downloadAndPlayEpisode(
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			go func() {
@@ -1192,7 +1195,7 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
 			// Use yt-dlp with progress bar
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Estimate/obtain total size for progress percentage.
@@ -1270,7 +1273,7 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
 			// Initialize progress model
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Get content length
