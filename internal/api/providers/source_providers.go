@@ -26,7 +26,7 @@ var (
 	// startFlixStreamFn / startFlixEpisodesFn keep StartFlix delegating to the
 	// api package's interactive paths (season picker, then Dublado/Legendado).
 	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
-	startFlixStreamFn   = api.GetStartFlixStreamURL
+	startFlixStreamFn   = api.ResolveStartFlixStream
 	startFlixEpisodesFn = api.GetStartFlixEpisodes
 
 	// topCineStreamFn / topCineEpisodesFn do the same for TopCine, whose titles
@@ -648,15 +648,17 @@ func (p *startFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Ani
 	return startFlixEpisodesFn(anime)
 }
 
-func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *startFlixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return startFlixStreamFn(anime, episode, quality)
+}
+
+func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- TopCine Provider ---

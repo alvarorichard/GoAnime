@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/movie"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
@@ -70,26 +71,26 @@ func describeStartFlixErr(err error) error {
 
 // describePanelErr is describeStartFlixErr for any source whose titles play
 // through the StartFlix panel, naming that source.
-func describePanelErr(source string, err error) error {
+func describePanelErr(sourceName string, err error) error {
 	var noStream *startflix.NoStreamError
 	switch {
 	case err == nil:
 		return nil
 	case errors.As(err, &noStream) && len(noStream.Failures) == 0:
-		msg := source + " only offers this on servers GoAnime can't play yet (" +
+		msg := sourceName + " only offers this on servers GoAnime can't play yet (" +
 			strings.Join(noStream.Unsupported, ", ") + "). Try another episode, or another title."
 		if !ytdlpOnPath() {
 			msg += " Installing yt-dlp unlocks more servers."
 		}
 		return &friendlyError{cause: err, msg: msg}
 	case errors.Is(err, startflix.ErrNoSupportedServer):
-		return &friendlyError{cause: err, msg: "None of " + source + "'s servers worked for this right now. Try again in a moment."}
+		return &friendlyError{cause: err, msg: "None of " + sourceName + "'s servers worked for this right now. Try again in a moment."}
 	case errors.Is(err, startflix.ErrNoPlayers):
-		return &friendlyError{cause: err, msg: "No video sources for this on " + source + " right now. Try another episode, or come back later."}
+		return &friendlyError{cause: err, msg: "No video sources for this on " + sourceName + " right now. Try another episode, or come back later."}
 	case errors.Is(err, startflix.ErrNotOnPanel), errors.Is(err, startflix.ErrNoPanel):
-		return &friendlyError{cause: err, msg: source + " lists this title but has no video for it. Try another result below."}
+		return &friendlyError{cause: err, msg: sourceName + " lists this title but has no video for it. Try another result below."}
 	case errors.Is(err, context.DeadlineExceeded):
-		return &friendlyError{cause: err, msg: source + " took too long to answer. Please try again."}
+		return &friendlyError{cause: err, msg: sourceName + " took too long to answer. Please try again."}
 	default:
 		return err
 	}
@@ -330,14 +331,14 @@ func selectStartFlixAudio(titleURL string, season startflix.Season) startflix.Au
 
 // selectPanelAudio is selectStartFlixAudio with the picker titled after the
 // source the title came from.
-func selectPanelAudio(source, titleURL string, season startflix.Season) startflix.Audio {
+func selectPanelAudio(sourceName, titleURL string, season startflix.Season) startflix.Audio {
 	audios := season.Audios()
 	if len(audios) == 1 {
 		// Live panels are often single-audio (Dexter, Frieren and Round 6 are
 		// Dublado-only): the substitution is silent by design, so it is logged
 		// with the counts instead of looking like a free choice downstream.
 		util.Debug("Panel season has a single audio, taking it without asking",
-			"source", source, "season", season.Number, "audio", audios[0],
+			"source", sourceName, "season", season.Number, "audio", audios[0],
 			"dubbed", len(season.Dubbed), "subtitled", len(season.Subtitled))
 		return audios[0]
 	}
@@ -353,7 +354,7 @@ func selectPanelAudio(source, titleURL string, season startflix.Season) startfli
 		// Leveling S1 has no Legendado) must not silently become the other
 		// audio in batch runs: log it so the download manifest is explainable.
 		util.Debug("Pinned audio is not on this panel season, falling through to the picker",
-			"source", source, "season", season.Number, "pinned", a,
+			"source", sourceName, "season", season.Number, "pinned", a,
 			"dubbed", len(season.Dubbed), "subtitled", len(season.Subtitled))
 	}
 
@@ -362,7 +363,7 @@ func selectPanelAudio(source, titleURL string, season startflix.Season) startfli
 		fmt.Sprintf("Legendado (%s)", episodeCountLabel(len(season.Subtitled))),
 	}
 	choice := startflix.AudioDubbed
-	if idx, err := sfxPickFn(source+" > Você quer assistir dublado ou legendado? ", labels); err == nil && idx == 1 {
+	if idx, err := sfxPickFn(sourceName+" > Você quer assistir dublado ou legendado? ", labels); err == nil && idx == 1 {
 		choice = startflix.AudioSubtitled
 	} else if err != nil {
 		util.Debug("StartFlix: audio picker unavailable, taking the dub", "err", err)
@@ -805,8 +806,8 @@ func acceptAudioSwap(media *models.Anime, want, have startflix.Audio, offered []
 
 // audioSwapReasons explains the swap: what failed, and what plays instead.
 func audioSwapReasons(media *models.Anime, want, have startflix.Audio, stream *startflix.Stream, panelErr error, tcLine string) []string {
-	source := panelSourceName(media)
-	line := fmt.Sprintf("%s lists this title %s, but none of the %s servers GoAnime plays it from worked.", source, want, want)
+	sourceName := panelSourceName(media)
+	line := fmt.Sprintf("%s lists this title %s, but none of the %s servers GoAnime plays it from worked.", sourceName, want, want)
 	var noStream *startflix.NoStreamError
 	if errors.As(panelErr, &noStream) && len(noStream.Unsupported) > 0 {
 		line += " Listed: " + strings.Join(noStream.Unsupported, ", ") + "."
@@ -876,16 +877,31 @@ func sfxEpisodeNumber(episode *models.Episode) int {
 	return n
 }
 
-func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ string) (string, error) {
+// GetStartFlixStreamURL resolves an episode or movie through StartFlix and
+// publishes the playback context that goes with it. Callers that can take a
+// source.Stream should use ResolveStartFlixStream and publish it themselves.
+func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
+	stream, err := ResolveStartFlixStream(media, episode, quality)
+	if err != nil {
+		return "", err
+	}
+	stream.Publish()
+	return stream.URL, nil
+}
+
+// ResolveStartFlixStream resolves an episode or movie through StartFlix. It
+// writes no playback state: the referer, audio hint and subtitles come back in
+// the Stream.
+func ResolveStartFlixStream(media *models.Anime, episode *models.Episode, _ string) (source.Stream, error) {
 	if media == nil || episode == nil {
-		return "", fmt.Errorf("no %s title or episode to play", panelSourceName(media))
+		return source.Stream{}, fmt.Errorf("no %s title or episode to play", panelSourceName(media))
 	}
 	c := sfxClientFn()
 
 	playersURL, err := startFlixPlayersURL(c, media, episode)
 	if err != nil {
 		markPanelDeadErr(media, err)
-		return "", describeMediaErr(media, err)
+		return source.Stream{}, describeMediaErr(media, err)
 	}
 
 	want := wantedStreamAudio(media, episode)
@@ -937,7 +953,7 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 		}
 		// No prefix: the player dispatch already wraps this as "failed to get
 		// StartFlix stream URL", and the friendly text should follow it directly.
-		return "", describeMediaErr(media, err)
+		return source.Stream{}, describeMediaErr(media, err)
 	}
 
 	have := stream.Audio
@@ -946,28 +962,22 @@ func GetStartFlixStreamURL(media *models.Anime, episode *models.Episode, _ strin
 	}
 	if have != want {
 		if err := acceptAudioSwap(media, want, have, offered, stream, panelErr); err != nil {
-			return "", err
+			return source.Stream{}, err
 		}
 	}
 
-	if stream.Referer != "" {
-		util.SetGlobalReferer(stream.Referer)
-	}
+	out := source.Stream{URL: stream.URL, Referer: stream.Referer}
 	// Always set when the user pinned nothing: the preference is a process-wide
 	// global, and leaving it alone would carry the last title's Legendado choice
 	// into the next movie. It follows the audio the stream carries, not the one
 	// wanted: told to prefer Portuguese, mpv falls back to a lone English track
 	// without a word.
 	if startFlixPinnedAudioLang() == "" {
-		util.SetGlobalAudioLanguage(audioLangForStartFlix(have))
+		out.AudioLang = audioLangForStartFlix(have)
 	}
-	if len(stream.Subtitles) > 0 && !util.GlobalNoSubs {
-		subs := make([]util.SubtitleInfo, 0, len(stream.Subtitles))
-		for _, s := range stream.Subtitles {
-			subs = append(subs, util.SubtitleInfo{URL: s.URL, Language: s.Language, Label: s.Label})
-		}
-		util.SetGlobalSubtitles(subs)
+	for _, s := range stream.Subtitles {
+		out.Subtitles = append(out.Subtitles, source.Subtitle{URL: s.URL, Language: s.Language, Label: s.Label})
 	}
 	util.Debug("StartFlix stream URL obtained", "host", stream.Host, "url", stream.URL[:min(len(stream.URL), 80)])
-	return stream.URL, nil
+	return out, nil
 }

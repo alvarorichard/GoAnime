@@ -344,3 +344,128 @@ func TestPomfyFetchStreamURLPublishesLikeItAlwaysDid(t *testing.T) {
 	assert.Equal(t, "Pomfy", got.animeSource)
 	assert.Len(t, got.subs, 1)
 }
+
+// ---- every migrated provider, the same contract --------------------------------
+
+var _ source.StreamFetcher = (*startFlixProvider)(nil)
+
+type streamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error)
+
+// migratedProviders are the providers that return a Stream. Each entry swaps
+// the provider's resolver seam and builds the provider.
+var migratedProviders = []struct {
+	name string
+	swap func(t *testing.T, fn streamFn)
+	make func() interface {
+		source.StreamFetcher
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	}
+}{
+	{"pomfy", swapPomfyStream, func() interface {
+		source.StreamFetcher
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	} {
+		return &pomfyProvider{}
+	}},
+	{"startflix", swapStartFlixStream, func() interface {
+		source.StreamFetcher
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	} {
+		return &startFlixProvider{}
+	}},
+}
+
+func swapStartFlixStream(t *testing.T, fn streamFn) {
+	t.Helper()
+	old := startFlixStreamFn
+	startFlixStreamFn = fn
+	t.Cleanup(func() { startFlixStreamFn = old })
+}
+
+func TestMigratedProvidersFetchStreamWritesNoPlaybackState(t *testing.T) {
+	for _, pc := range migratedProviders {
+		t.Run(pc.name, func(t *testing.T) {
+			cleanPlayback(t)
+			util.SetGlobalReferer("https://untouched.example/")
+			want := richStream()
+			pc.swap(t, func(*models.Anime, *models.Episode, string) (source.Stream, error) { return want, nil })
+
+			got, err := pc.make().FetchStream(context.Background(), &models.Episode{}, &models.Anime{Source: "X"}, "")
+
+			require.NoError(t, err)
+			assert.Equal(t, want, got, "the whole Stream comes back")
+			after := readPlayback()
+			assert.Equal(t, "https://untouched.example/", after.referer, "resolving does not publish: that is the dispatcher's job")
+			assert.Empty(t, after.origin)
+			assert.Empty(t, after.audio)
+			assert.Empty(t, after.subs)
+			assert.Empty(t, after.animeSource)
+		})
+	}
+}
+
+func TestMigratedProvidersFetchStreamPassesTheArgumentsThrough(t *testing.T) {
+	for _, pc := range migratedProviders {
+		t.Run(pc.name, func(t *testing.T) {
+			cleanPlayback(t)
+			ep, anime := &models.Episode{Number: "2"}, &models.Anime{Name: "show"}
+			var gotEp *models.Episode
+			var gotAnime *models.Anime
+			var gotQuality string
+			pc.swap(t, func(a *models.Anime, e *models.Episode, q string) (source.Stream, error) {
+				gotAnime, gotEp, gotQuality = a, e, q
+				return source.Stream{URL: "u"}, nil
+			})
+
+			_, err := pc.make().FetchStream(context.Background(), ep, anime, "480p")
+
+			require.NoError(t, err)
+			assert.Same(t, ep, gotEp)
+			assert.Same(t, anime, gotAnime)
+			assert.Equal(t, "480p", gotQuality)
+		})
+	}
+}
+
+func TestMigratedProvidersFetchStreamPropagatesErrorsAndCancellation(t *testing.T) {
+	for _, pc := range migratedProviders {
+		t.Run(pc.name, func(t *testing.T) {
+			cleanPlayback(t)
+			boom := errors.New("resolver failed")
+			calls := 0
+			pc.swap(t, func(*models.Anime, *models.Episode, string) (source.Stream, error) {
+				calls++
+				return source.Stream{}, boom
+			})
+
+			_, err := pc.make().FetchStream(context.Background(), &models.Episode{}, &models.Anime{}, "")
+			require.ErrorIs(t, err, boom)
+			assert.Equal(t, 1, calls)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err = pc.make().FetchStream(ctx, &models.Episode{}, &models.Anime{}, "")
+			require.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, 1, calls, "a cancelled context never reaches the resolver")
+		})
+	}
+}
+
+func TestMigratedProvidersFetchStreamURLPublishes(t *testing.T) {
+	for _, pc := range migratedProviders {
+		t.Run(pc.name, func(t *testing.T) {
+			cleanPlayback(t)
+			pc.swap(t, func(*models.Anime, *models.Episode, string) (source.Stream, error) { return richStream(), nil })
+
+			url, err := pc.make().FetchStreamURL(context.Background(), &models.Episode{}, &models.Anime{Source: "Tagged"}, "")
+
+			require.NoError(t, err)
+			assert.Equal(t, "https://cdn.example/master.m3u8", url)
+			got := readPlayback()
+			assert.Equal(t, "https://ref.example/", got.referer)
+			assert.Equal(t, "por", got.audio)
+			assert.Equal(t, "Tagged", got.animeSource)
+			assert.Len(t, got.subs, 1)
+		})
+	}
+}

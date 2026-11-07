@@ -19,13 +19,15 @@ import (
 // guard.
 
 const (
-	sourcePkg        = "./internal/api/source"
-	providersPkg     = "./internal/api/providers"
-	streamFile       = "internal/api/source/stream.go"
-	providersFile    = "internal/api/providers/source_providers.go"
-	dispatchFile     = "internal/api/providers/dispatch.go"
-	pomfyAPIFile     = "internal/api/pomfy.go"
-	fetchAndPublishP = "func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
+	sourcePkg                  = "./internal/api/source"
+	providersPkg               = "./internal/api/providers"
+	streamFile                 = "internal/api/source/stream.go"
+	providersFile              = "internal/api/providers/source_providers.go"
+	dispatchFile               = "internal/api/providers/dispatch.go"
+	pomfyAPIFile               = "internal/api/pomfy.go"
+	pomfyFetchStreamURLSig     = "func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
+	startFlixFetchStreamURLSig = "func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
+	fetchAndPublishP           = "func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 )
 
 var publishGuards = map[string][]string{
@@ -88,7 +90,7 @@ var streamPublishMutants = []mutant{
 	{
 		name:  "the resolved stream is never published",
 		edits: []codeEdit{{providersFile, "\tstream.Publish()\n\treturn stream.URL, nil\n}", "\treturn stream.URL, nil\n}"}},
-		kills: map[string][]string{providersPkg: {"TestFetchAndPublishResolvesThenPublishes", "TestPomfyFetchStreamURLPublishesLikeItAlwaysDid", "TestFetchStreamURLPrefersFetchStreamWhenTheSourceHasIt", "TestPomfyStreamPublishCascade"}},
+		kills: map[string][]string{providersPkg: {"TestFetchAndPublishResolvesThenPublishes", "TestPomfyFetchStreamURLPublishesLikeItAlwaysDid", "TestMigratedProvidersFetchStreamURLPublishes", "TestFetchStreamURLPrefersFetchStreamWhenTheSourceHasIt", "TestPomfyStreamPublishCascade", "TestStartFlixStreamPublishCascade"}},
 		// the cascade must name the hop that carries the player's state
 		stopsAt: "6 the player gets this stream's referer, audio and subtitles",
 	},
@@ -110,7 +112,7 @@ var streamPublishMutants = []mutant{
 	{
 		name:  "the current source is never tagged",
 		edits: []codeEdit{{providersFile, "\tif anime.Source != \"\" {\n\t\tutil.SetGlobalAnimeSource(anime.Source)\n\t}\n\tstream, err := sf.FetchStream", "\tstream, err := sf.FetchStream"}},
-		kills: map[string][]string{providersPkg: {"TestFetchAndPublishTagsTheCurrentSourceBeforeResolving", "TestPomfyStreamPublishCascade"}},
+		kills: map[string][]string{providersPkg: {"TestFetchAndPublishTagsTheCurrentSourceBeforeResolving", "TestPomfyStreamPublishCascade", "TestStartFlixStreamPublishCascade"}},
 	},
 	{
 		name:  "an anime with no source wipes the tagged one",
@@ -139,7 +141,7 @@ var streamPublishMutants = []mutant{
 	{
 		name:  "the last episode's referer and origin are not cleared",
 		edits: []codeEdit{{dispatchFile, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalOrigin()\n\tutil.Debug(\"Fetching stream via registry\"", "\tutil.Debug(\"Fetching stream via registry\""}},
-		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOrigin", "TestPomfyStreamPublishCascade"}},
+		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOrigin", "TestPomfyStreamPublishCascade", "TestStartFlixStreamPublishCascade"}},
 		// the cascade must name the hop that checks the cleanup
 		stopsAt: "4 the last episode's playback state is gone before the resolve",
 	},
@@ -153,17 +155,17 @@ var streamPublishMutants = []mutant{
 	{
 		name:  "the Pomfy resolver is reached with a cancelled context",
 		edits: []codeEdit{{providersFile, "(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n\treturn pomfyStreamFn", "(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n\treturn pomfyStreamFn"}},
-		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamPropagatesErrorsAndCancellation"}},
+		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamPropagatesErrorsAndCancellation", "TestMigratedProvidersFetchStreamPropagatesErrorsAndCancellation"}},
 	},
 	{
 		name:  "Pomfy's FetchStreamURL stops publishing",
-		edits: []codeEdit{{providersFile, "\treturn fetchAndPublish(ctx, p, episode, anime, quality)\n}", "\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err\n}"}},
-		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamURLPublishesLikeItAlwaysDid"}},
+		edits: []codeEdit{{providersFile, pomfyFetchStreamURLSig + "\treturn fetchAndPublish(ctx, p, episode, anime, quality)\n}", pomfyFetchStreamURLSig + "\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamURLPublishesLikeItAlwaysDid", "TestMigratedProvidersFetchStreamURLPublishes"}},
 	},
 	{
 		name:  "Pomfy's FetchStream publishes behind the dispatcher's back",
 		edits: []codeEdit{{providersFile, "\treturn pomfyStreamFn(anime, episode, quality)\n}", "\ts, err := pomfyStreamFn(anime, episode, quality)\n\ts.Publish()\n\treturn s, err\n}"}},
-		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamWritesNoPlaybackState"}},
+		kills: map[string][]string{providersPkg: {"TestPomfyFetchStreamWritesNoPlaybackState", "TestMigratedProvidersFetchStreamWritesNoPlaybackState"}},
 	},
 
 	// ---- api: ResolvePomfyStream / GetPomfyStreamURL --------------------------
@@ -201,6 +203,65 @@ var streamPublishMutants = []mutant{
 		name:  "a missing episode is let through",
 		edits: []codeEdit{{pomfyAPIFile, "\tif media == nil || episode == nil {\n\t\treturn source.Stream{}, errors.New(\"no Pomfy title or episode to play\")", "\tif media == nil && episode == nil {\n\t\treturn source.Stream{}, errors.New(\"no Pomfy title or episode to play\")"}},
 		kills: map[string][]string{apiPkg: {"TestResolvePomfyStreamRejectsAMissingTitleOrEpisode"}},
+	},
+
+	// ---- the StartFlix provider -------------------------------------------------
+	{
+		name:  "the StartFlix resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *startFlixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *startFlixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamPropagatesErrorsAndCancellation"}},
+	},
+	{
+		name:  "StartFlix's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, startFlixFetchStreamURLSig + "\treturn fetchAndPublish(ctx, p, episode, anime, quality)\n}", startFlixFetchStreamURLSig + "\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamURLPublishes", "TestStartFlixProvider_FetchStreamURL"}},
+	},
+	{
+		name:  "StartFlix's FetchStream publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "\treturn startFlixStreamFn(anime, episode, quality)\n}", "\ts, err := startFlixStreamFn(anime, episode, quality)\n\ts.Publish()\n\treturn s, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamWritesNoPlaybackState"}},
+	},
+
+	// ---- api: ResolveStartFlixStream / GetStartFlixStreamURL --------------------
+	{
+		name:  "GetStartFlixStreamURL stops publishing",
+		edits: []codeEdit{{sfxAPIFile, "\tstream.Publish()\n\treturn stream.URL, nil\n}", "\treturn stream.URL, nil\n}"}},
+		kills: map[string][]string{apiPkg: {"TestGetStartFlixStreamURL_SetsPlaybackGlobals", "TestResolveStartFlixStreamThenPublishEqualsGetStartFlixStreamURL"}},
+	},
+	{
+		name:  "ResolveStartFlixStream publishes as it resolves",
+		edits: []codeEdit{{sfxAPIFile, "\tutil.Debug(\"StartFlix stream URL obtained\", \"host\", stream.Host, \"url\", stream.URL[:min(len(stream.URL), 80)])\n\treturn out, nil", "\tutil.Debug(\"StartFlix stream URL obtained\", \"host\", stream.Host, \"url\", stream.URL[:min(len(stream.URL), 80)])\n\tout.Publish()\n\treturn out, nil"}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamReturnsTheContextAndPublishesNothing"}},
+	},
+	{
+		name:  "the StartFlix referer is lost on the way into the Stream",
+		edits: []codeEdit{{sfxAPIFile, "out := source.Stream{URL: stream.URL, Referer: stream.Referer}", "out := source.Stream{URL: stream.URL}"}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamReturnsTheContextAndPublishesNothing", "TestGetStartFlixStreamURL_SetsPlaybackGlobals"}},
+	},
+	{
+		name:  "a pinned --audio is overridden by the stream's audio",
+		edits: []codeEdit{{sfxAPIFile, "\tif startFlixPinnedAudioLang() == \"\" {\n\t\tout.AudioLang = audioLangForStartFlix(have)\n\t}\n", "\tout.AudioLang = audioLangForStartFlix(have)\n"}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamKeepsTheAudioTheUserPinned"}},
+	},
+	{
+		name:  "mpv is never told the StartFlix audio",
+		edits: []codeEdit{{sfxAPIFile, "\tif startFlixPinnedAudioLang() == \"\" {\n\t\tout.AudioLang = audioLangForStartFlix(have)\n\t}\n", ""}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamAlwaysTellsMpvTheAudioWhenNothingIsPinned", "TestResolveStartFlixStreamReturnsTheContextAndPublishesNothing"}},
+	},
+	{
+		name:  "the StartFlix subtitles are dropped on the way in",
+		edits: []codeEdit{{sfxAPIFile, "\tfor _, s := range stream.Subtitles {\n\t\tout.Subtitles = append(out.Subtitles, source.Subtitle{URL: s.URL, Language: s.Language, Label: s.Label})\n\t}\n", ""}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamReturnsTheContextAndPublishesNothing", "TestGetStartFlixStreamURL_SetsPlaybackGlobals"}},
+	},
+	{
+		name:  "a StartFlix subtitle's language and label swapped",
+		edits: []codeEdit{{sfxAPIFile, "source.Subtitle{URL: s.URL, Language: s.Language, Label: s.Label}", "source.Subtitle{URL: s.URL, Language: s.Label, Label: s.Language}"}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamReturnsTheContextAndPublishesNothing"}},
+	},
+	{
+		name:  "a missing StartFlix episode is let through",
+		edits: []codeEdit{{sfxAPIFile, "if media == nil || episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no %s title or episode to play\"", "if media == nil && episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no %s title or episode to play\""}},
+		kills: map[string][]string{apiPkg: {"TestResolveStartFlixStreamRejectsAMissingTitleOrEpisode"}},
 	},
 }
 
