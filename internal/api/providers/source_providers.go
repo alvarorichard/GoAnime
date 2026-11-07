@@ -132,31 +132,32 @@ func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-// FetchStreamURL mirrors api.GetEpisodeStreamURL's AnimeFire branch: same
-// global side effects, same adapter call including the quality argument.
-func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode with the quality argument the AnimeFire
+// adapter expects ("best" when none is given). AnimeFire's own page sets no
+// playback context beyond the URL, so the Stream carries only that.
+func (p *animeFireProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	if quality == "" {
 		quality = "best"
 	}
 	url, _, err := adapter.GetStreamURL(episode.URL, quality)
 	if err != nil {
-		return "", fmt.Errorf("animeFire stream: %w", err)
+		return source.Stream{}, fmt.Errorf("animeFire stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from Animefire.io")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from Animefire.io")
 	}
-	return url, nil
+	return source.Stream{URL: url}, nil
+}
+
+func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- HiAnime Provider ---
@@ -391,26 +392,28 @@ func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) (
 
 // FetchStreamURL mirrors api.GetEpisodeStreamURL's Goyabu branch: same global
 // side effects, same adapter call (Goyabu takes no quality argument).
-func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+// FetchStream resolves the episode. Goyabu's page sets no playback context
+// beyond the URL, so the Stream carries only that.
+func (p *goyabuProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	url, _, err := adapter.GetStreamURL(episode.URL)
 	if err != nil {
-		return "", fmt.Errorf("goyabu stream: %w", err)
+		return source.Stream{}, fmt.Errorf("goyabu stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from Goyabu")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from Goyabu")
 	}
-	return url, nil
+	return source.Stream{URL: url}, nil
+}
+
+func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- AnimesDigital Provider ---
@@ -469,17 +472,15 @@ func (p *animesDigitalProvider) FetchEpisodes(ctx context.Context, anime *models
 	return animesDigitalEpisodesFn(anime)
 }
 
-func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+// FetchStream resolves the episode. AnimesDigital's page sets no playback
+// context beyond the URL, so the Stream carries only that.
+func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	var streamURL string
 	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
@@ -488,12 +489,16 @@ func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *mod
 		streamURL, _, err = adapter.GetStreamURL(episode.URL)
 	}
 	if err != nil {
-		return "", fmt.Errorf("animesdigital stream: %w", err)
+		return source.Stream{}, fmt.Errorf("animesdigital stream: %w", err)
 	}
 	if streamURL == "" {
-		return "", fmt.Errorf("empty stream URL returned from AnimesDigital")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesDigital")
 	}
-	return streamURL, nil
+	return source.Stream{URL: streamURL}, nil
+}
+
+func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- AnimesROLL Provider ---

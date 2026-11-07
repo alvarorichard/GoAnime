@@ -9,25 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The migration to source.Stream, one source at a time. A source that returns
-// a Stream no longer writes the player's state from inside its resolver; one
-// that does not still goes through FetchStreamURL. The ledger is exact on
-// purpose: migrating a source, or registering a new one, means moving it here,
-// so the list cannot drift from the code.
-var (
-	streamMigrated = []source.SourceKind{
-		source.Pomfy, source.StartFlix, source.TopCine, source.Pobreflix,
-		source.HiAnime, source.Anroll, source.AnimeDrive,
-	}
-	streamNotYetMigrated = []source.SourceKind{
-		source.AnimeFire, source.Goyabu, source.AnimesDigital,
-	}
-)
+// streamSources are the sources that return a Stream: their resolver writes no
+// playback state, and fetchAndPublish publishes what they return. The list is
+// exact on purpose: a source added to the registry joins it here, so it cannot
+// ship resolving through FetchStreamURL alone and writing the player's state
+// from inside its own code.
+var streamSources = []source.SourceKind{
+	source.Pomfy, source.StartFlix, source.TopCine, source.Pobreflix,
+	source.HiAnime, source.Anroll, source.AnimeDrive,
+	source.AnimeFire, source.Goyabu, source.AnimesDigital,
+}
 
-func TestStreamMigrationLedgerMatchesTheRegistry(t *testing.T) {
-	registered := source.Kinds()
+func TestEveryRegisteredSourceReturnsAStream(t *testing.T) {
 	var fetchers, legacy []source.SourceKind
-	for _, kind := range registered {
+	for _, kind := range source.Kinds() {
 		src, ok := source.Registered(kind)
 		require.True(t, ok)
 		if _, isFetcher := src.(source.StreamFetcher); isFetcher {
@@ -36,13 +31,10 @@ func TestStreamMigrationLedgerMatchesTheRegistry(t *testing.T) {
 			legacy = append(legacy, kind)
 		}
 	}
-	sortKinds := func(k []source.SourceKind) []source.SourceKind {
-		k = slices.Clone(k)
-		slices.Sort(k)
-		return k
-	}
-	assert.Equal(t, sortKinds(streamMigrated), sortKinds(fetchers),
-		"a source that returns a Stream must be in streamMigrated, and only those")
-	assert.Equal(t, sortKinds(streamNotYetMigrated), sortKinds(legacy),
-		"a source that does not must be in streamNotYetMigrated; a new source starts there or is migrated")
+	slices.Sort(fetchers)
+	want := slices.Clone(streamSources)
+	slices.Sort(want)
+
+	assert.Empty(t, legacy, "these sources still resolve only through FetchStreamURL; give them FetchStream")
+	assert.Equal(t, want, fetchers, "streamSources must list exactly the registered sources")
 }

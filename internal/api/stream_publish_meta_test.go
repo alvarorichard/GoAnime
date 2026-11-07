@@ -526,6 +526,91 @@ var streamPublishMutants = []mutant{
 		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream"}},
 		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
 	},
+
+	// ---- AnimeFire / Goyabu / AnimesDigital --------------------------------------
+	{
+		name:  "the AnimeFire resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *animeFireProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *animeFireProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "AnimeFire's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "AnimeFire accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif url == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from Animefire.io\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "a AnimeFire scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"animeFire stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "the Goyabu resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *goyabuProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *goyabuProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "Goyabu's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "Goyabu accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif url == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from Goyabu\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "a Goyabu scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"goyabu stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "the AnimesDigital resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "AnimesDigital's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "AnimesDigital accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif streamURL == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from AnimesDigital\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "a AnimesDigital scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"animesdigital stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "AnimeFire's quality never reaches the scraper",
+		edits: []codeEdit{{providersFile, "adapter.GetStreamURL(episode.URL, quality)\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"animeFire stream", "adapter.GetStreamURL(episode.URL)\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"animeFire stream"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
+	},
+	{
+		name:  "AnimeFire stops defaulting the quality to best",
+		edits: []codeEdit{{providersFile, "\tif quality == \"\" {\n\t\tquality = \"best\"\n\t}\n\turl, _, err := adapter.GetStreamURL(episode.URL, quality)", "\turl, _, err := adapter.GetStreamURL(episode.URL, quality)"}},
+		kills: map[string][]string{providersPkg: {"TestAnimeFireDefaultsTheQualityToBest"}},
+	},
+	{
+		name: "AnimeFire starts reading the scraper's playback metadata",
+		edits: []codeEdit{
+			{providersFile, "url, _, err := adapter.GetStreamURL(episode.URL, quality)", "url, md, err := adapter.GetStreamURL(episode.URL, quality)"},
+			{providersFile, "returned from Animefire.io\")\n\t}\n\treturn source.Stream{URL: url}, nil", "returned from Animefire.io\")\n\t}\n\treturn streamFromMetadata(url, md), nil"},
+		},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
+	},
+	{
+		name:  "AnimesDigital hands the scraper a fresh context, not the caller's",
+		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, _, err = adapter.GetStreamURL(episode.URL)", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, _, err = adapter.GetStreamURL(episode.URL)"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
 }
 
 func TestStreamPublishGuardKillsMutants(t *testing.T) {

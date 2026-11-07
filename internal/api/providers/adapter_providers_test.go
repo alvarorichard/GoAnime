@@ -92,6 +92,24 @@ var adapterProviders = []struct {
 		p.once.Do(func() {})
 		return p
 	}, true, "AnimeDrive stream: ", "empty stream URL returned from AnimeDrive", true},
+	{"animefire", func(a scraper.UnifiedScraper) streamProvider {
+		p := &animeFireProvider{}
+		p.adapter.UnifiedScraper = a
+		p.once.Do(func() {})
+		return p
+	}, false, "animeFire stream: ", "empty stream URL returned from Animefire.io", true},
+	{"goyabu", func(a scraper.UnifiedScraper) streamProvider {
+		p := &goyabuProvider{}
+		p.adapter.UnifiedScraper = a
+		p.once.Do(func() {})
+		return p
+	}, false, "goyabu stream: ", "empty stream URL returned from Goyabu", false},
+	{"animesdigital", func(a scraper.UnifiedScraper) streamProvider {
+		p := &animesDigitalProvider{}
+		p.adapter.UnifiedScraper = a
+		p.once.Do(func() {})
+		return p
+	}, false, "animesdigital stream: ", "empty stream URL returned from AnimesDigital", false},
 }
 
 const metadataSubs = `[{"url":"https://s.example/pt.vtt","language":"pt","label":"Portuguese"},{"url":"https://s.example/en.vtt","language":"en","label":"English"}]`
@@ -110,13 +128,15 @@ func TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone(t *testing.T)
 			got, err := pc.build(stub).FetchStream(context.Background(), &models.Episode{URL: "https://site.example/ep/1"}, &models.Anime{Source: "X"}, "720p")
 
 			require.NoError(t, err)
-			assert.Equal(t, source.Stream{
-				URL: "https://cdn.example/v.m3u8", Referer: "https://ref.example/", Origin: "https://origin.example",
-				Subtitles: []source.Subtitle{
+			want := source.Stream{URL: "https://cdn.example/v.m3u8"}
+			if pc.metadata {
+				want.Referer, want.Origin = "https://ref.example/", "https://origin.example"
+				want.Subtitles = []source.Subtitle{
 					{URL: "https://s.example/pt.vtt", Language: "pt", Label: "Portuguese"},
 					{URL: "https://s.example/en.vtt", Language: "en", Label: "English"},
-				},
-			}, got)
+				}
+			}
+			assert.Equal(t, want, got, "a provider that never read the scraper's metadata still does not")
 			assert.Equal(t, "https://site.example/ep/1", stub.gotEpisode)
 			after := readPlayback()
 			assert.Equal(t, "https://untouched.example/", after.referer, "resolving does not publish")
@@ -208,13 +228,19 @@ func TestAdapterProvidersFetchStreamURLPublishesTheContext(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "https://cdn.example/v.m3u8", url)
 			got := readPlayback()
-			assert.Equal(t, "https://ref.example/", got.referer)
-			assert.Equal(t, "https://origin.example", got.origin)
 			assert.Equal(t, "Tagged", got.animeSource)
-			assert.Equal(t, []util.SubtitleInfo{
-				{URL: "https://s.example/pt.vtt", Language: "pt", Label: "Portuguese"},
-				{URL: "https://s.example/en.vtt", Language: "en", Label: "English"},
-			}, got.subs)
+			if pc.metadata {
+				assert.Equal(t, "https://ref.example/", got.referer)
+				assert.Equal(t, "https://origin.example", got.origin)
+				assert.Equal(t, []util.SubtitleInfo{
+					{URL: "https://s.example/pt.vtt", Language: "pt", Label: "Portuguese"},
+					{URL: "https://s.example/en.vtt", Language: "en", Label: "English"},
+				}, got.subs)
+			} else {
+				assert.Empty(t, got.referer, "this provider has never published the scraper's metadata")
+				assert.Empty(t, got.origin)
+				assert.Empty(t, got.subs)
+			}
 		})
 	}
 }
@@ -241,7 +267,7 @@ func TestAdapterProvidersFetchStreamURLReplacesTheLastEpisodesContext(t *testing
 
 func TestContextAwareAdaptersAreUsedWithTheCallersContext(t *testing.T) {
 	type ctxKey struct{}
-	for _, name := range []string{"hianime", "anroll"} {
+	for _, name := range []string{"hianime", "anroll", "animesdigital"} {
 		for _, pc := range adapterProviders {
 			if pc.name != name {
 				continue
@@ -256,8 +282,25 @@ func TestContextAwareAdaptersAreUsedWithTheCallersContext(t *testing.T) {
 				assert.Equal(t, 1, stub.ctxCalls, "the context-aware method is preferred")
 				assert.Zero(t, stub.calls, "the plain one is not also called")
 				assert.Equal(t, "marker", stub.gotCtx.Value(ctxKey{}), "the caller's context reaches the scraper")
-				assert.Equal(t, "r", got.Referer)
+				assert.Equal(t, "u", got.URL)
+				if pc.metadata {
+					assert.Equal(t, "r", got.Referer)
+				} else {
+					assert.Empty(t, got.Referer)
+				}
 			})
 		}
 	}
+}
+
+func TestAnimeFireDefaultsTheQualityToBest(t *testing.T) {
+	stub := &adapterStub{url: "u"}
+	p := &animeFireProvider{}
+	p.adapter.UnifiedScraper = stub
+	p.once.Do(func() {})
+
+	_, err := p.FetchStream(context.Background(), &models.Episode{URL: "e"}, &models.Anime{}, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, []any{"best"}, stub.gotOptions)
 }
