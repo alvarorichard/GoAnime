@@ -342,3 +342,138 @@ func TestFindMPVPath_UsesPATH(t *testing.T) {
 		t.Fatalf("findMPVPath() = (%q, %v), want (%q, nil)", got, err, bin)
 	}
 }
+
+// ---- locateAllMPV ----------------------------------------------------------------
+
+type locateAllFn func(l mpvLocator, candidates []string, needExecBit, foldCase bool) []string
+
+type locateAllCase struct {
+	name       string
+	onPath     string
+	files      map[string]modeInfo
+	candidates []string
+	execBit    bool
+	foldCase   bool
+	want       []string
+}
+
+func locateAllCases() []locateAllCase {
+	abc := []string{"/a/mpv", "/b/mpv", "/c/mpv"}
+	return []locateAllCase{
+		{name: "PATH first, then every existing candidate", onPath: "/bin/mpv", files: map[string]modeInfo{"/a/mpv": exec755, "/c/mpv": exec755}, candidates: abc, execBit: true, want: []string{"/bin/mpv", "/a/mpv", "/c/mpv"}},
+		{name: "no PATH hit lists the candidates in order", files: map[string]modeInfo{"/b/mpv": exec755, "/a/mpv": exec755}, candidates: abc, execBit: true, want: []string{"/a/mpv", "/b/mpv"}},
+		{name: "nothing found is an empty list", files: map[string]modeInfo{}, candidates: abc, execBit: true, want: nil},
+		{name: "the PATH hit is not repeated as a candidate", onPath: "/a/mpv", files: map[string]modeInfo{"/a/mpv": exec755, "/b/mpv": exec755}, candidates: abc, execBit: true, want: []string{"/a/mpv", "/b/mpv"}},
+		{name: "a candidate listed twice appears once", files: map[string]modeInfo{"/a/mpv": exec755}, candidates: []string{"/a/mpv", "/a/mpv"}, execBit: true, want: []string{"/a/mpv"}},
+		{name: "directories are skipped", files: map[string]modeInfo{"/a/mpv": {dir: true, mode: 0o755}, "/b/mpv": exec755}, candidates: abc, execBit: true, want: []string{"/b/mpv"}},
+		{name: "unix needs the exec bit", files: map[string]modeInfo{"/a/mpv": {mode: 0o644}, "/b/mpv": exec755}, candidates: abc, execBit: true, want: []string{"/b/mpv"}},
+		{name: "windows ignores the exec bit", files: map[string]modeInfo{"/a/mpv": {mode: 0o644}}, candidates: abc, execBit: false, want: []string{"/a/mpv"}},
+		{name: "windows paths differing in case are one mpv", onPath: `C:\GoAnime\bin\mpv.exe`, files: map[string]modeInfo{`c:\goanime\bin\mpv.exe`: exec755}, candidates: []string{`c:\goanime\bin\mpv.exe`}, foldCase: true, want: []string{`C:\GoAnime\bin\mpv.exe`}},
+		{name: "case matters where the file system cares", onPath: "/A/mpv", files: map[string]modeInfo{"/a/mpv": exec755}, candidates: []string{"/a/mpv"}, execBit: true, want: []string{"/A/mpv", "/a/mpv"}},
+		{name: "a PATH stub does not hide the installer's mpv", onPath: `C:\Users\n\AppData\Local\Microsoft\WindowsApps\mpv.exe`, files: map[string]modeInfo{`C:\Program Files\GoAnime\bin\mpv.exe`: exec755}, candidates: []string{`C:\Program Files\GoAnime\bin\mpv.exe`}, want: []string{`C:\Users\n\AppData\Local\Microsoft\WindowsApps\mpv.exe`, `C:\Program Files\GoAnime\bin\mpv.exe`}},
+	}
+}
+
+func locateAllFailures(fn locateAllFn) []string {
+	var bad []string
+	for _, c := range locateAllCases() {
+		sys := &fakeSystem{onPath: c.onPath, files: c.files}
+		got := fn(sys.locator(), c.candidates, c.execBit, c.foldCase)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			bad = append(bad, fmt.Sprintf("%s: got %q, want %q", c.name, got, c.want))
+		}
+	}
+	return bad
+}
+
+func TestLocateAllMPV(t *testing.T) {
+	if bad := locateAllFailures(locateAllMPV); len(bad) > 0 {
+		t.Fatal(strings.Join(bad, "\n"))
+	}
+}
+
+// The first of them is what locateMPV answers, so starting mpv prefers what
+// it always preferred.
+func TestLocateAllMPVStartsWhereLocateMPVDoes(t *testing.T) {
+	for _, c := range locateCases() {
+		sys := &fakeSystem{onPath: c.onPath, files: c.files}
+		cands := []string{"/a/mpv", "/b/mpv", "/c/mpv"}
+		first, ok := locateMPV(sys.locator(), cands, c.execBit)
+		all := locateAllMPV((&fakeSystem{onPath: c.onPath, files: c.files}).locator(), cands, c.execBit, false)
+		if !ok {
+			if len(all) != 0 {
+				t.Errorf("%s: locateMPV found nothing but locateAllMPV listed %q", c.name, all)
+			}
+			continue
+		}
+		if len(all) == 0 || all[0] != first {
+			t.Errorf("%s: locateAllMPV starts with %q, locateMPV answers %q", c.name, all, first)
+		}
+	}
+}
+
+func TestMeta_LocateAllMPV_CatchesBrokenImplementations(t *testing.T) {
+	mutants := map[string]locateAllFn{
+		"ignores PATH": func(l mpvLocator, c []string, x, f bool) []string {
+			l.lookPath = func(string) (string, error) { return "", errors.New("no") }
+			return locateAllMPV(l, c, x, f)
+		},
+		"stops at the first": func(l mpvLocator, c []string, x, f bool) []string {
+			if all := locateAllMPV(l, c, x, f); len(all) > 1 {
+				return all[:1]
+			}
+			return locateAllMPV(l, c, x, f)
+		},
+		"candidates before PATH": func(l mpvLocator, c []string, x, f bool) []string {
+			all := locateAllMPV(l, c, x, f)
+			if len(all) > 1 {
+				return append(all[1:], all[0])
+			}
+			return all
+		},
+		"reversed": func(l mpvLocator, c []string, x, f bool) []string {
+			all := locateAllMPV(l, c, x, f)
+			for i, j := 0, len(all)-1; i < j; i, j = i+1, j-1 {
+				all[i], all[j] = all[j], all[i]
+			}
+			return all
+		},
+		"repeats a path": func(l mpvLocator, c []string, x, f bool) []string {
+			all := locateAllMPV(l, c, x, f)
+			if len(all) > 0 {
+				return append(all, all[0])
+			}
+			return all
+		},
+		"accepts directories": func(l mpvLocator, c []string, x, f bool) []string {
+			inner := l.stat
+			l.stat = func(n string) (os.FileInfo, error) {
+				fi, err := inner(n)
+				if err == nil {
+					return modeInfo{mode: fi.Mode()}, nil
+				}
+				return fi, err
+			}
+			return locateAllMPV(l, c, x, f)
+		},
+		"never checks the exec bit": func(l mpvLocator, c []string, _, f bool) []string {
+			return locateAllMPV(l, c, false, f)
+		},
+		"always checks the exec bit": func(l mpvLocator, c []string, _, f bool) []string {
+			return locateAllMPV(l, c, true, f)
+		},
+		"never folds case": func(l mpvLocator, c []string, x, _ bool) []string {
+			return locateAllMPV(l, c, x, false)
+		},
+		"always folds case": func(l mpvLocator, c []string, x, _ bool) []string {
+			return locateAllMPV(l, c, x, true)
+		},
+	}
+	for name, fn := range mutants {
+		t.Run(name, func(t *testing.T) {
+			if len(locateAllFailures(fn)) == 0 {
+				t.Fatalf("mutant %q survived", name)
+			}
+		})
+	}
+}

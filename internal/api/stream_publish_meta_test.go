@@ -653,7 +653,11 @@ func killMutants(t *testing.T, extraGuards map[string][]string, mutants []mutant
 			t.Parallel()
 			overlay := writeMutantOverlay(t, root, m.edits)
 			for pkg, tests := range m.kills {
-				out, err := runGuardTests(t, goBin, root, overlay, pkg, tests)
+				var flags []string
+				if m.race {
+					flags = append(flags, "-race")
+				}
+				out, err := runGuardTests(t, goBin, root, overlay, pkg, tests, flags...)
 				require.NotContains(t, out, "[build failed]", "the mutant must build, so the tests — not the compiler — catch it:\n%s", out)
 				require.Error(t, err, "mutant survived %s: the guard tests passed against it\n%s", pkg, out)
 				killed := false

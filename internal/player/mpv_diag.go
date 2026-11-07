@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,32 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
+
+// lockedBuffer is mpv's stderr: os/exec copies into it from its own goroutine
+// while the launch may already be reading it (a timeout reads it with mpv still
+// running), so a bare bytes.Buffer would be a data race.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *lockedBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Len()
+}
 
 // mpvLogMaxLines bounds how much of mpv's own log is kept for an error or the
 // debug log; a verbose startup is a few hundred lines.
@@ -127,7 +154,7 @@ func resolvedPath(p string) string {
 // reapMPV waits for cmd in the background, reads mpv's log file when it ends,
 // logs how it ended and removes the file. The result is delivered on the
 // returned channel (buffered: nobody has to be listening).
-func reapMPV(cmd *exec.Cmd, logPath string, stderr *bytes.Buffer, started time.Time) <-chan mpvExit {
+func reapMPV(cmd *exec.Cmd, logPath string, stderr fmt.Stringer, started time.Time) <-chan mpvExit {
 	ch := make(chan mpvExit, 1)
 	go func() {
 		err := cmd.Wait()

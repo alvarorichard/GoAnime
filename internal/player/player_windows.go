@@ -35,3 +35,16 @@ func findMPVPath() (string, error) {
 	}
 	return "", fmt.Errorf("mpv not found in PATH or common installation directories. Please install mpv: https://mpv.io/installation/")
 }
+
+// findAllMPVPaths lists every mpv found, the one on PATH first, then the one
+// the GoAnime installer ships next to goanime.exe and the usual install
+// directories; see locateAllMPV.
+func findAllMPVPaths() []string {
+	l := mpvLocator{lookPath: exec.LookPath, stat: os.Stat}
+	execPath, _ := os.Executable()
+	candidates := mpvCandidatesWindows(execPath, os.Getenv)
+	for i, c := range candidates {
+		candidates[i] = filepath.Clean(c)
+	}
+	return locateAllMPV(l, candidates, false, true)
+}

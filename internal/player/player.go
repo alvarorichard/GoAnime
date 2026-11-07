@@ -474,18 +474,25 @@ func (m *model) setProgressPeak(pct float64) {
 	m.mu.Unlock()
 }
 
-// StartVideo opens mpv with a socket for IPC
-// Modify the StartVideo function in player.go
+// StartVideo opens mpv with a socket for IPC. It starts the mpv the system
+// finds first and, when that one will not start, the others it finds; see
+// startVideoAcross.
 func StartVideo(link string, args []string) (string, error) {
-	// Verify MPV is installed (cached after first lookup to avoid repeated filesystem searches)
-	cachedMPVPathOnce.Do(func() {
-		cachedMPVPath, cachedMPVPathErr = findMPVPath()
-	})
-	if cachedMPVPathErr != nil {
-		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", cachedMPVPathErr)
+	paths, err := mpvPaths()
+	if err != nil {
+		return "", err
 	}
-	mpvPath := cachedMPVPath
+	return startVideoAcross(paths, link, args)
+}
 
+// mpvStartTimeout is how long launchMPV waits for mpv's IPC socket. A variable
+// so a test of the wait does not take twelve seconds.
+var mpvStartTimeout = 12 * time.Second
+
+// launchMPV starts one mpv, opens link in it and waits for its IPC socket. It
+// is one attempt: whether to try another mpv, or the same one with fewer
+// options, is startVideoAcross's call.
+func launchMPV(mpvPath, safeLink string, args []string) (string, error) {
 	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
 	var socketPath string
 
@@ -526,11 +533,6 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 	}
 
-	// Sanitize media target (URL or local file path)
-	safeLink, err := sanitizeMediaTarget(link)
-	if err != nil {
-		return "", fmt.Errorf("invalid media target: %w", err)
-	}
 	mpvArgs = append(mpvArgs, safeLink)
 
 	util.Debugf("Starting mpv with arguments: %v", mpvArgs)
@@ -542,7 +544,7 @@ func StartVideo(link string, args []string) (string, error) {
 
 	// Capture stderr so crash/GPU errors are visible when IPC never appears.
 	// Intentionally not using --quiet: silent exits on VMs hide the real cause.
-	var stderr bytes.Buffer
+	var stderr lockedBuffer
 	cmd.Stderr = &stderr
 
 	startTime := time.Now()
@@ -551,7 +553,7 @@ func StartVideo(link string, args []string) (string, error) {
 			_ = os.Remove(logPath)
 		}
 		util.Debugf("mpv failed to start: %v (path=%s)", err, mpvPath)
-		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
+		return "", &mpvStartError{err: fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())}
 	}
 	util.Debugf("mpv process started: pid=%d", cmd.Process.Pid)
 
@@ -565,7 +567,7 @@ func StartVideo(link string, args []string) (string, error) {
 
 	// Wait for socket creation with adaptive timeout and exponential backoff.
 	// VMs / cold media opens can take longer than a local GPU host.
-	maxWaitTime := 12 * time.Second
+	maxWaitTime := mpvStartTimeout
 	initialInterval := 5 * time.Millisecond
 	maxInterval := 100 * time.Millisecond
 	currentInterval := initialInterval
@@ -574,7 +576,10 @@ func StartVideo(link string, args []string) (string, error) {
 		// Detect early mpv death before wasting the full timeout.
 		select {
 		case ex := <-exitCh:
-			return "", formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath)
+			return "", &mpvEarlyExitError{
+				code: ex.code,
+				err:  formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath),
+			}
 		default:
 		}
 

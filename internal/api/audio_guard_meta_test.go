@@ -41,6 +41,9 @@ type mutant struct {
 	// stopsAt, for a cascade, is the stage the run must stop at: the stages
 	// after it must not run.
 	stopsAt string
+	// race runs the guard tests under the race detector, for a mutant whose
+	// only symptom is a data race.
+	race bool
 }
 
 const (
@@ -219,11 +222,12 @@ func writeMutantOverlay(t *testing.T, root string, edits []codeEdit) string {
 
 // runGuardTests runs the named tests of one package, with the overlay when
 // one is given, and returns the verbose output.
-func runGuardTests(t *testing.T, goBin, root, overlay, pkg string, tests []string) (string, error) {
+func runGuardTests(t *testing.T, goBin, root, overlay, pkg string, tests []string, extraFlags ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	args := []string{"test", "-count=1", "-v", "-run", "^(" + strings.Join(tests, "|") + ")$"}
+	args = append(args, extraFlags...)
 	if overlay != "" {
 		args = append(args, "-overlay="+overlay)
 	}

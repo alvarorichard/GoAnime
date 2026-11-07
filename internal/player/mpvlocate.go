@@ -3,6 +3,7 @@ package player
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // mpvLocator is what the mpv search needs from the system. The default set
@@ -30,6 +31,42 @@ func locateMPV(l mpvLocator, candidates []string, needExecBit bool) (string, boo
 		return c, true
 	}
 	return "", false
+}
+
+// locateAllMPV lists every usable mpv in the order locateMPV prefers them: the
+// PATH lookup first, then each candidate that exists, none twice. foldCase
+// makes two paths that differ only in letter case the same one, as on Windows.
+//
+// locateMPV stops at the first, which is right while that one works. This is
+// for starting mpv, where the one on PATH can be a stub that cannot run (a
+// Microsoft Store alias, say) while a working one sits in a candidate place.
+func locateAllMPV(l mpvLocator, candidates []string, needExecBit, foldCase bool) []string {
+	var found []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		key := filepath.Clean(p)
+		if foldCase {
+			key = strings.ToLower(key)
+		}
+		if !seen[key] {
+			seen[key] = true
+			found = append(found, p)
+		}
+	}
+	if p, err := l.lookPath("mpv"); err == nil {
+		add(p)
+	}
+	for _, c := range candidates {
+		info, err := l.stat(c)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if needExecBit && info.Mode()&0o111 == 0 {
+			continue
+		}
+		add(c)
+	}
+	return found
 }
 
 // mpvCandidatesUnix lists the places mpv is installed on macOS and Linux

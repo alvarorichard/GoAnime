@@ -15,6 +15,8 @@ const (
 	playbackFile = "internal/playback/common.go"
 	animefireAPI = "internal/scraper/providers/animefire/api.go"
 	animefireCli = "internal/scraper/providers/animefire/client.go"
+	mpvLaunch    = "internal/player/mpv_launch.go"
+	playerGo     = "internal/player/player.go"
 
 	pickerPrepend   = "\tif !m.showHelp {\n\t\tif notice := renderNotice(&m.theme, m.notice, width); notice != \"\" {\n\t\t\tbody = notice + \"\\n\" + body\n\t\t}\n\t}\n"
 	pickerLayoutH   = "\theight = max(height-m.noticeHeight(width), 1)\n\tm.areaHeight = height\n\tm.panelSide"
@@ -227,6 +229,164 @@ var issue229Mutants = []mutant{
 		edits: []codeEdit{{animefireCli, "\t\tnotice:     util.NoticeOnNextPicker,\n", ""}},
 		kills: map[string][]string{animefirePkg: {"TestClientsTellTheListThroughTheRealNotifierByDefault"}},
 	},
+
+	// ---- starting mpv: the Store alias that came first on PATH ----------------------
+	{
+		name:  "no option counts as tuning",
+		edits: []codeEdit{{mpvLaunch, "for _, prefix := range tuningMPVArgs {", "for _, prefix := range []string{} {"}},
+		kills: map[string][]string{playerPkg: {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestStartVideoAcrossRetriesWithoutTheTuningOptionsAnMPVRejects"}},
+	},
+	{
+		name:  "every option counts as tuning",
+		edits: []codeEdit{{mpvLaunch, "\t\ttuning := false\n", "\t\ttuning := true\n"}},
+		kills: map[string][]string{playerPkg: {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestStartVideoAcrossRetriesWithoutTheTuningOptionsAnMPVRejects"}},
+	},
+	{
+		name:  "the tuning is kept and the rest dropped",
+		edits: []codeEdit{{mpvLaunch, "\t\tif tuning {\n\t\t\tdropped = append(dropped, a)\n\t\t} else {\n\t\t\tkept = append(kept, a)\n\t\t}", "\t\tif tuning {\n\t\t\tkept = append(kept, a)\n\t\t} else {\n\t\t\tdropped = append(dropped, a)\n\t\t}"}},
+		kills: map[string][]string{playerPkg: {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestEssentialMPVArgsEdges"}},
+	},
+	{
+		name:  "an mpv that cannot be started ends the search",
+		edits: []codeEdit{{mpvLaunch, "return errors.As(err, &early) || errors.As(err, &start)", "_ = &start\n\treturn errors.As(err, &early)"}},
+		kills: map[string][]string{playerPkg: {"TestFailedToLaunch", "TestStartVideoAcrossFallsThroughWhenAnMPVCannotBeStartedAtAll"}},
+	},
+	{
+		name:  "an mpv that went silent sends the search on",
+		edits: []codeEdit{{mpvLaunch, "return errors.As(err, &early) || errors.As(err, &start)", "_, _ = &early, &start\n\treturn err != nil"}},
+		kills: map[string][]string{playerPkg: {"TestFailedToLaunch", "TestStartVideoAcrossDoesNotWaitOnASecondMPVWhenTheFirstCameUpAndWentSilent"}},
+	},
+	{
+		name:  "an mpv that exits is the end of the search",
+		edits: []codeEdit{{mpvLaunch, "\t\tif !failedToLaunch(err) {\n\t\t\treturn \"\", err\n\t\t}\n\t\tfailed = append(failed, mpvAttempt{path: path, err: err})", "\t\tif true {\n\t\t\treturn \"\", err\n\t\t}\n\t\tfailed = append(failed, mpvAttempt{path: path, err: err})"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossFallsThroughToTheNextMPVWhenThePathOneExits", "TestStartVideoAcrossFallsThroughWhenAnMPVCannotBeStartedAtAll"}},
+	},
+	{
+		name:  "the search goes on after an mpv that went silent",
+		edits: []codeEdit{{mpvLaunch, "\t\tif !failedToLaunch(err) {\n\t\t\treturn \"\", err\n\t\t}\n", ""}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossDoesNotWaitOnASecondMPVWhenTheFirstCameUpAndWentSilent"}},
+	},
+	{
+		name:  "the mpv that worked is not remembered",
+		edits: []codeEdit{{mpvLaunch, "\t\tif err == nil {\n\t\t\trememberWorkingMPV(path)\n\t\t\tif len(failed) > 0 {", "\t\tif err == nil {\n\t\t\tif len(failed) > 0 {"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossRemembersTheMPVThatWorkedSoTheStubIsNotTriedAgain"}},
+	},
+	{
+		name:  "the remembered mpv is not put first",
+		edits: []codeEdit{{mpvLaunch, "\tfor _, p := range paths {\n\t\tif p == working {\n\t\t\tout = append(out, p)\n\t\t}\n\t}\n", ""}},
+		kills: map[string][]string{playerPkg: {"TestOrderedMPVPutsTheOneThatWorkedFirst"}},
+	},
+	{
+		name:  "the other mpv are dropped from the order",
+		edits: []codeEdit{{mpvLaunch, "\tfor _, p := range paths {\n\t\tif p != working {\n\t\t\tout = append(out, p)\n\t\t}\n\t}\n\treturn out", "\treturn out"}},
+		kills: map[string][]string{playerPkg: {"TestOrderedMPVPutsTheOneThatWorkedFirst", "TestStartVideoAcrossFallsThroughToTheNextMPVWhenThePathOneExits"}},
+	},
+	{
+		name:  "an mpv known to need the minimal options is given the full ones",
+		edits: []codeEdit{{mpvLaunch, "\t\tif mpvNeedsMinimal(path) {\n\t\t\tuseArgs, _ = essentialMPVArgs(args)\n\t\t}\n", ""}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossGoesStraightToTheMinimalOptionsForAnMPVThatNeedsThem"}},
+	},
+	{
+		name:  "the minimal options are not remembered",
+		edits: []codeEdit{{mpvLaunch, "\t\t\trememberMinimalMPV(path)\n\t\t\trememberWorkingMPV(path)", "\t\t\trememberWorkingMPV(path)"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossGoesStraightToTheMinimalOptionsForAnMPVThatNeedsThem"}},
+	},
+	{
+		name:  "an mpv that played without its tuning is not remembered as working",
+		edits: []codeEdit{{mpvLaunch, "\t\t\trememberMinimalMPV(path)\n\t\t\trememberWorkingMPV(path)", "\t\t\trememberMinimalMPV(path)"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossRemembersWhichMPVNeededTheMinimalOptions"}},
+	},
+	{
+		name:  "the tuning is stripped after any exit, not only an init failure",
+		edits: []codeEdit{{mpvLaunch, "if !errors.As(failed[i].err, &early) || early.code != 1 || mpvNeedsMinimal(failed[i].path) {", "if !errors.As(failed[i].err, &early) || mpvNeedsMinimal(failed[i].path) {"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossDoesNotStripOptionsAfterAnExitThatIsNotAnInitFailure"}},
+	},
+	{
+		name:  "the tuning is stripped only after exit code 2",
+		edits: []codeEdit{{mpvLaunch, "early.code != 1 ||", "early.code != 2 ||"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossRetriesWithoutTheTuningOptionsAnMPVRejects"}},
+	},
+	{
+		name:  "a launch with nothing to leave out is repeated",
+		edits: []codeEdit{{mpvLaunch, "\tif len(dropped) == 0 {\n\t\treturn \"\", false\n\t}\n\tfor i := range failed {", "\tfor i := range failed {"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossHasNothingToStripWhenThereIsNoTuning"}},
+	},
+	{
+		name:  "a minimal launch is retried with the minimal options again",
+		edits: []codeEdit{{mpvLaunch, "|| mpvNeedsMinimal(failed[i].path) {", "{"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossDoesNotRetryAMinimalLaunchWithTheMinimalOptions"}},
+	},
+	{
+		name:  "the stripped retry is not made at all",
+		edits: []codeEdit{{mpvLaunch, "\tif socket, ok := startMinimal(failed, safeLink, args); ok {\n\t\treturn socket, nil\n\t}\n", ""}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossRetriesWithoutTheTuningOptionsAnMPVRejects", "TestStartVideoAcrossGoesStraightToTheMinimalOptionsForAnMPVThatNeedsThem"}},
+	},
+	{
+		name:  "the retry does not say it did not help",
+		edits: []codeEdit{{mpvLaunch, "\t\tfailed[i].err = fmt.Errorf(\"%w\\n\\nTrying again without GoAnime's video options (%s) did not help: %v\",\n\t\t\tfailed[i].err, strings.Join(dropped, \" \"), firstLine(err.Error()))\n", ""}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossReportsWhatEachMPVSaid"}},
+	},
+	{
+		name:  "the stripped retry is made before the other mpv are tried",
+		edits: []codeEdit{{mpvLaunch, "\t\tfailed = append(failed, mpvAttempt{path: path, err: err})\n\t}\n", "\t\tfailed = append(failed, mpvAttempt{path: path, err: err})\n\t\tif socket, ok := startMinimal(failed, safeLink, args); ok {\n\t\t\treturn socket, nil\n\t\t}\n\t}\n"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossTriesEveryMPVBeforeStrippingOptions"}},
+	},
+	{
+		name:  "the other mpv are not listed in the error",
+		edits: []codeEdit{{mpvLaunch, "\t\tfmt.Fprintf(&extra, \"\\nAlso tried %s: %s\", a.path, firstLine(a.err.Error()))\n", "\t\t_ = a\n"}},
+		kills: map[string][]string{playerPkg: {"TestDescribeMPVFailures", "TestStartVideoAcrossReportsWhatEachMPVSaid"}},
+	},
+	{
+		name:  "the Store alias is not recognised",
+		edits: []codeEdit{{mpvLaunch, "\"/microsoft/windowsapps/\")", "\"/microsoft/windowsapps-x/\")"}},
+		kills: map[string][]string{playerPkg: {"TestIsStoreAlias", "TestDescribeMPVFailures"}},
+	},
+	{
+		name:  "every mpv is taken for a Store alias",
+		edits: []codeEdit{{mpvLaunch, "func isStoreAlias(path string) bool {\n", "func isStoreAlias(path string) bool {\n\treturn true\n"}},
+		kills: map[string][]string{playerPkg: {"TestIsStoreAlias", "TestDescribeMPVFailures"}},
+	},
+	{
+		name:  "the Store alias is not told what to do",
+		edits: []codeEdit{{mpvLaunch, "\tif isStoreAlias(first.path) {", "\tif false && isStoreAlias(first.path) {"}},
+		kills: map[string][]string{playerPkg: {"TestDescribeMPVFailures"}},
+	},
+	{
+		name:  "the cached mpv is not kept first",
+		edits: []codeEdit{{mpvLaunch, "\tout := make([]string, 0, len(paths)+1)\n\tout = append(out, first)\n", "\tout := make([]string, 0, len(paths)+1)\n"}},
+		kills: map[string][]string{playerPkg: {"TestLeadWith"}},
+	},
+	{
+		name:  "the cached mpv is listed twice",
+		edits: []codeEdit{{mpvLaunch, "\t\tif p != first {\n\t\t\tout = append(out, p)\n\t\t}", "\t\tout = append(out, p)"}},
+		kills: map[string][]string{playerPkg: {"TestLeadWith"}},
+	},
+	{
+		name:  "a launch that fails to start is not typed",
+		edits: []codeEdit{{playerGo, "return \"\", &mpvStartError{err: fmt.Errorf(\"failed to start mpv: %w (stderr: %s)\", err, stderr.String())}", "return \"\", fmt.Errorf(\"failed to start mpv: %w (stderr: %s)\", err, stderr.String())"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossFallsThroughWhenAnMPVCannotBeStartedAtAll"}},
+	},
+	{
+		name:  "an early exit forgets its code",
+		edits: []codeEdit{{playerGo, "\t\t\t\tcode: ex.code,\n", "\t\t\t\tcode: 0,\n"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossRetriesWithoutTheTuningOptionsAnMPVRejects", "TestStartVideoAcrossReportsWhatEachMPVSaid"}},
+	},
+	{
+		name:  "an early exit is not typed",
+		edits: []codeEdit{{playerGo, "\t\t\treturn \"\", &mpvEarlyExitError{\n\t\t\t\tcode: ex.code,\n\t\t\t\terr:  formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath),\n\t\t\t}", "\t\t\treturn \"\", formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath)"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossFallsThroughToTheNextMPVWhenThePathOneExits"}},
+	},
+	{
+		name:  "the wait for mpv's socket ignores the timeout setting",
+		edits: []codeEdit{{playerGo, "maxWaitTime := mpvStartTimeout\n", "maxWaitTime := 12 * time.Second\n"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossDoesNotWaitOnASecondMPVWhenTheFirstCameUpAndWentSilent"}},
+	},
+	{
+		name:  "mpv's stderr is read while it is still being written",
+		race:  true,
+		edits: []codeEdit{{playerGo, "\tvar stderr lockedBuffer\n", "\tvar stderr bytes.Buffer\n"}},
+		kills: map[string][]string{playerPkg: {"TestStartVideoAcrossReadsStderrSafelyWhileMPVIsStillWritingIt"}},
+	},
 }
 
 func TestIssue229GuardKillsMutants(t *testing.T) {
@@ -236,4 +396,5 @@ func TestIssue229GuardKillsMutants(t *testing.T) {
 var issue229Guards = map[string][]string{
 	tuiPkg:      {"TestPickerShowsItsNoticeAboveTheList", "TestNoticeOnNextPickerIsTakenOnce"},
 	playbackPkg: {"TestSourceVideoRemovedMessage", "TestPlayEpisodeExplainsARemovedVideoOnTheListItReturnsTo"},
+	playerPkg:   {"TestEssentialMPVArgsKeepsWhatPlaybackNeeds", "TestStartVideoAcrossStartsTheFirstMPVThatComesUp"},
 }

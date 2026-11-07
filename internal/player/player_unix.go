@@ -26,3 +26,10 @@ func findMPVPath() (string, error) {
 	}
 	return "", exec.ErrNotFound
 }
+
+// findAllMPVPaths lists every mpv found, the one on PATH first; see locateAllMPV.
+func findAllMPVPaths() []string {
+	home, _ := os.UserHomeDir() // empty when unknown: per-user locations are skipped
+	l := mpvLocator{lookPath: exec.LookPath, stat: os.Stat}
+	return locateAllMPV(l, mpvCandidatesUnix(runtime.GOOS, home), true, false)
+}
