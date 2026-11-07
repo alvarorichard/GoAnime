@@ -212,7 +212,7 @@ func TestPobreflixGatedEpisodeIsNotAFile(t *testing.T) {
 	got, err := pobreflixDirectEpisodeURL(t.Context(), anime, title, episode, "best")
 
 	require.ErrorIs(t, err, errPobreflixGated, "the page decodes, and its only server is a player page")
-	assert.Empty(t, got)
+	assert.Empty(t, got.URL)
 	assert.Contains(t, pobreflixGateLine(anime.URL), "streambetter.test")
 	assert.Zero(t, site.gateHits.Load())
 }

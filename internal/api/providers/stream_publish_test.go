@@ -99,6 +99,23 @@ func (s *legacyStub) FetchStreamURL(context.Context, *models.Episode, *models.An
 	return s.url, nil
 }
 
+// quietLegacyStub is a legacy Source that publishes no playback context of its
+// own, so any referer or origin left at the end is a previous stream's.
+type quietLegacyStub struct {
+	desc source.Descriptor
+	seen playbackSnapshot
+}
+
+func (s *quietLegacyStub) Describe() source.Descriptor { return s.desc }
+func (s *quietLegacyStub) FetchEpisodes(context.Context, *models.Anime) ([]models.Episode, error) {
+	return nil, nil
+}
+
+func (s *quietLegacyStub) FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error) {
+	s.seen = readPlayback()
+	return "https://legacy.example/v.mp4", nil
+}
+
 func richStream() source.Stream {
 	return source.Stream{
 		URL:       "https://cdn.example/master.m3u8",
@@ -142,6 +159,21 @@ func TestFetchAndPublishClearsThePreviousStreamsSubtitlesBeforeResolving(t *test
 	assert.Empty(t, util.GetGlobalSubtitles(), "and an episode without subtitles does not inherit the last one's")
 }
 
+func TestFetchAndPublishClearsThePreviousStreamsRefererAndOriginOnAnyEntrance(t *testing.T) {
+	cleanPlayback(t)
+	util.SetGlobalReferer("https://last-stream.example/")
+	util.SetGlobalOrigin("https://last-stream.example")
+	stub := &fetchStub{stream: source.Stream{URL: "u"}} // says neither
+
+	_, err := fetchAndPublish(context.Background(), stub, &models.Episode{}, &models.Anime{}, "")
+
+	require.NoError(t, err)
+	assert.Empty(t, stub.seenDuringFetch.referer, "the resolve starts without the last stream's referer")
+	assert.Empty(t, stub.seenDuringFetch.origin)
+	assert.Empty(t, util.GetGlobalReferer(), "and a stream that names none leaves none behind, dispatcher or not")
+	assert.Empty(t, util.GetGlobalOrigin())
+}
+
 func TestFetchAndPublishTagsTheCurrentSourceBeforeResolving(t *testing.T) {
 	cleanPlayback(t)
 	stub := &fetchStub{stream: source.Stream{URL: "u"}}
@@ -175,7 +207,8 @@ func TestFetchAndPublishPublishesNothingOnFailure(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 	assert.Empty(t, url, "no URL comes back with an error")
 	got := readPlayback()
-	assert.Equal(t, "https://previous.example/", got.referer, "the failed stream's referer was not published")
+	assert.Empty(t, got.referer, "neither the failed stream's referer nor the previous one's is left: the slate was cleared before the resolve")
+	assert.NotEqual(t, "https://ref.example/", got.referer, "the failed stream's referer was not published")
 	assert.Empty(t, got.origin)
 	assert.Empty(t, got.audio)
 	assert.Empty(t, got.subs)
@@ -249,6 +282,20 @@ func TestFetchStreamURLClearsTheLastEpisodesRefererAndOrigin(t *testing.T) {
 	assert.Empty(t, stub.seenDuringFetch.origin)
 	assert.Empty(t, util.GetGlobalReferer(), "and a stream that names none leaves none behind")
 	assert.Empty(t, util.GetGlobalOrigin())
+}
+
+func TestFetchStreamURLClearsTheLastEpisodesRefererAndOriginForLegacySources(t *testing.T) {
+	cleanPlayback(t)
+	util.SetGlobalReferer("https://last-episode.example/")
+	util.SetGlobalOrigin("https://last-episode.example")
+	stub := &quietLegacyStub{desc: goyabuDesc()}
+	t.Cleanup(source.SwapRegistryForTesting(stub))
+
+	_, err := FetchStreamURL(context.Background(), &models.Episode{}, dispatchAnime(), "")
+
+	require.NoError(t, err)
+	assert.Empty(t, stub.seen.referer, "a legacy source resolves without the last episode's referer")
+	assert.Empty(t, stub.seen.origin, "or its origin")
 }
 
 func TestFetchStreamURLPropagatesAFailedResolve(t *testing.T) {
@@ -350,6 +397,7 @@ func TestPomfyFetchStreamURLPublishesLikeItAlwaysDid(t *testing.T) {
 var (
 	_ source.StreamFetcher = (*startFlixProvider)(nil)
 	_ source.StreamFetcher = (*topCineProvider)(nil)
+	_ source.StreamFetcher = (*pobreflixProvider)(nil)
 )
 
 type streamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error)
@@ -376,12 +424,25 @@ var migratedProviders = []struct {
 	} {
 		return &startFlixProvider{}
 	}},
+	{"pobreflix", swapPobreflixStream, func() interface {
+		source.StreamFetcher
+		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
+	} {
+		return &pobreflixProvider{}
+	}},
 	{"topcine", swapTopCineStream, func() interface {
 		source.StreamFetcher
 		FetchStreamURL(context.Context, *models.Episode, *models.Anime, string) (string, error)
 	} {
 		return &topCineProvider{}
 	}},
+}
+
+func swapPobreflixStream(t *testing.T, fn streamFn) {
+	t.Helper()
+	old := pobreflixStreamFn
+	pobreflixStreamFn = fn
+	t.Cleanup(func() { pobreflixStreamFn = old })
 }
 
 func swapTopCineStream(t *testing.T, fn streamFn) {

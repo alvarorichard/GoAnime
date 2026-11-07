@@ -36,7 +36,7 @@ var (
 
 	// pobreflixStreamFn / pobreflixEpisodesFn do the same for Pobreflix, whose
 	// titles play through the StartFlix panel by TMDB id.
-	pobreflixStreamFn   = api.GetPobreflixStreamURL
+	pobreflixStreamFn   = api.ResolvePobreflixStream
 	pobreflixEpisodesFn = api.GetPobreflixEpisodes
 
 	// Pomfy plays through its own Byse CDN (the PoW captcha flow); the api
@@ -810,15 +810,17 @@ func (p *pobreflixProvider) FetchEpisodes(ctx context.Context, anime *models.Ani
 	return pobreflixEpisodesFn(anime)
 }
 
-func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer and audio hint come back in the Stream.
+func (p *pobreflixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return pobreflixStreamFn(anime, episode, quality)
+}
+
+func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- Pomfy Provider ---
@@ -1016,6 +1018,10 @@ func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *mode
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	// Playback context belongs to one resolved stream: whatever the previous
+	// one left is gone before this one publishes its own.
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
 	util.ClearGlobalSubtitles()
 	if anime.Source != "" {
 		util.SetGlobalAnimeSource(anime.Source)

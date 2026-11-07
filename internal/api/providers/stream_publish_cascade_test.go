@@ -112,3 +112,10 @@ func TestTopCineStreamPublishCascade(t *testing.T) {
 		kind:  source.TopCine, tag: "TopCine", swap: swapTopCineStream, url: "https://cdn.example/tc.m3u8",
 	})
 }
+
+func TestPobreflixStreamPublishCascade(t *testing.T) {
+	runStreamCascade(t, cascadeCase{
+		anime: &models.Anime{Name: "Verity", URL: "https://pobreflix.test/filme/verity-dublado.html", Source: "Pobreflix", MediaType: models.MediaTypeMovie},
+		kind:  source.Pobreflix, tag: "Pobreflix", swap: swapPobreflixStream, url: "https://cdn.test/verity.mp4",
+	})
+}

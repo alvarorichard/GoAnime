@@ -25,6 +25,8 @@ const (
 	providersFile              = "internal/api/providers/source_providers.go"
 	dispatchFile               = "internal/api/providers/dispatch.go"
 	pomfyAPIFile               = "internal/api/pomfy.go"
+	pobreflixFetchStreamURLSig = "func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
+	pbAPIFilePath              = "internal/api/pobreflix.go"
 	topCineFetchStreamURLSig   = "func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 	pomfyFetchStreamURLSig     = "func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
 	startFlixFetchStreamURLSig = "func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n"
@@ -142,14 +144,12 @@ var streamPublishMutants = []mutant{
 	{
 		name:  "the last episode's referer and origin are not cleared",
 		edits: []codeEdit{{dispatchFile, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalOrigin()\n\tutil.Debug(\"Fetching stream via registry\"", "\tutil.Debug(\"Fetching stream via registry\""}},
-		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOrigin", "TestPomfyStreamPublishCascade", "TestStartFlixStreamPublishCascade"}},
-		// the cascade must name the hop that checks the cleanup
-		stopsAt: "4 the last episode's playback state is gone before the resolve",
+		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOriginForLegacySources"}},
 	},
 	{
 		name:  "the last episode's origin is not cleared",
 		edits: []codeEdit{{dispatchFile, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalOrigin()\n\tutil.Debug(\"Fetching stream via registry\"", "\tutil.ClearGlobalReferer()\n\tutil.Debug(\"Fetching stream via registry\""}},
-		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOrigin"}},
+		kills: map[string][]string{providersPkg: {"TestFetchStreamURLClearsTheLastEpisodesRefererAndOriginForLegacySources"}},
 	},
 
 	// ---- the Pomfy provider ---------------------------------------------------
@@ -290,6 +290,92 @@ var streamPublishMutants = []mutant{
 		name:  "GetTopCineStreamURL stops publishing",
 		edits: []codeEdit{{"internal/api/topcine.go", "\treturn GetStartFlixStreamURL(media, episode, quality)\n}", "\ts, err := ResolveStartFlixStream(media, episode, quality)\n\treturn s.URL, err\n}"}},
 		kills: map[string][]string{apiPkg: {"TestGetTopCineStreamURLStillPublishes"}},
+	},
+
+	// ---- fetchAndPublish clears the slate on any entrance ------------------------
+	{
+		name:  "the last stream's referer survives a direct provider call",
+		edits: []codeEdit{{providersFile, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalOrigin()\n\tutil.ClearGlobalSubtitles()\n\tif anime.Source != \"\" {", "\tutil.ClearGlobalOrigin()\n\tutil.ClearGlobalSubtitles()\n\tif anime.Source != \"\" {"}},
+		kills: map[string][]string{providersPkg: {"TestFetchAndPublishClearsThePreviousStreamsRefererAndOriginOnAnyEntrance"}},
+	},
+	{
+		name:  "the last stream's origin survives a direct provider call",
+		edits: []codeEdit{{providersFile, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalOrigin()\n\tutil.ClearGlobalSubtitles()\n\tif anime.Source != \"\" {", "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalSubtitles()\n\tif anime.Source != \"\" {"}},
+		kills: map[string][]string{providersPkg: {"TestFetchAndPublishClearsThePreviousStreamsRefererAndOriginOnAnyEntrance"}},
+	},
+
+	// ---- the Pobreflix provider ----------------------------------------------------
+	{
+		name:  "the Pobreflix resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *pobreflixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *pobreflixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamPropagatesErrorsAndCancellation"}},
+	},
+	{
+		name:  "Pobreflix's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, pobreflixFetchStreamURLSig + "\treturn fetchAndPublish(ctx, p, episode, anime, quality)\n}", pobreflixFetchStreamURLSig + "\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamURLPublishes", "TestPobreflixStreamPublishCascade"}},
+	},
+	{
+		name:  "Pobreflix's FetchStream publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "\treturn pobreflixStreamFn(anime, episode, quality)\n}", "\ts, err := pobreflixStreamFn(anime, episode, quality)\n\ts.Publish()\n\treturn s, err\n}"}},
+		kills: map[string][]string{providersPkg: {"TestMigratedProvidersFetchStreamWritesNoPlaybackState"}},
+	},
+
+	// ---- api: ResolvePobreflixStream / GetPobreflixStreamURL ---------------------
+	{
+		name:  "GetPobreflixStreamURL stops publishing",
+		edits: []codeEdit{{pbAPIFilePath, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalSubtitles()\n\tstream.Publish()\n\treturn stream.URL, nil", "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalSubtitles()\n\treturn stream.URL, nil"}},
+		kills: map[string][]string{apiPkg: {"TestGetPobreflixStreamURLDirectMovieClearsTheLastStreamsState", "TestPobreflixGatedDubPlaysThroughCfsolve", "TestResolvePobreflixStreamThenPublishEqualsGetPobreflixStreamURL"}},
+	},
+	{
+		name:  "GetPobreflixStreamURL leaves the last stream's referer",
+		edits: []codeEdit{{pbAPIFilePath, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalSubtitles()\n\tstream.Publish()", "\tutil.ClearGlobalSubtitles()\n\tstream.Publish()"}},
+		kills: map[string][]string{apiPkg: {"TestGetPobreflixStreamURLDirectMovieClearsTheLastStreamsState"}},
+	},
+	{
+		name:  "GetPobreflixStreamURL leaves the last stream's subtitles",
+		edits: []codeEdit{{pbAPIFilePath, "\tutil.ClearGlobalReferer()\n\tutil.ClearGlobalSubtitles()\n\tstream.Publish()", "\tutil.ClearGlobalReferer()\n\tstream.Publish()"}},
+		kills: map[string][]string{apiPkg: {"TestGetPobreflixStreamURLDirectMovieClearsTheLastStreamsState"}},
+	},
+	{
+		name:  "ResolvePobreflixStream publishes as it resolves",
+		edits: []codeEdit{{pbAPIFilePath, "\t\tif err == nil && stream.URL != \"\" {\n\t\t\treturn stream, nil", "\t\tif err == nil && stream.URL != \"\" {\n\t\t\tstream.Publish()\n\t\t\treturn stream, nil"}},
+		kills: map[string][]string{apiPkg: {"TestResolvePobreflixStreamReturnsTheContextAndPublishesNothing"}},
+	},
+	{
+		name:  "the panel fallback is dropped when the direct path fails",
+		edits: []codeEdit{{pbAPIFilePath, "\treturn ResolveStartFlixStream(media, episode, quality)\n}", "\treturn source.Stream{}, nil\n}"}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixDeadPanelPlaysThroughVIDSRC"}},
+	},
+	{
+		name:  "a Pobreflix file is not told to mpv as the dub",
+		edits: []codeEdit{{pbAPIFilePath, "\t\ts.AudioLang = audioLangForStartFlix(startflixAudio(audio))\n", "\t\ts.AudioLang = audioLangForStartFlix(startflix.AudioSubtitled)\n"}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixStreamBuildsTheContext", "TestResolvePobreflixStreamReturnsTheContextAndPublishesNothing"}},
+	},
+	{
+		name:  "a pinned --audio is overridden by the Pobreflix file",
+		edits: []codeEdit{{pbAPIFilePath, "\tif startFlixPinnedAudioLang() == \"\" {\n\t\ts.AudioLang = audioLangForStartFlix(startflixAudio(audio))\n\t}\n", "\ts.AudioLang = audioLangForStartFlix(startflixAudio(audio))\n"}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixStreamBuildsTheContext", "TestResolvePobreflixStreamKeepsTheAudioTheUserPinned", "TestGetPobreflixStreamURLDirectMovieKeepsTheAudioTheUserPinned"}},
+	},
+	{
+		name:  "mpv is never told the Pobreflix audio",
+		edits: []codeEdit{{pbAPIFilePath, "\tif startFlixPinnedAudioLang() == \"\" {\n\t\ts.AudioLang = audioLangForStartFlix(startflixAudio(audio))\n\t}\n", ""}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixStreamBuildsTheContext", "TestGetPobreflixStreamURLDirectMovieClearsTheLastStreamsState"}},
+	},
+	{
+		name:  "the Pobreflix gate's referer is lost",
+		edits: []codeEdit{{pbAPIFilePath, "return pobreflixStream(stream.URL, have, stream.Referer), nil", "return pobreflixStream(stream.URL, have, \"\"), nil"}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixGatedDubPlaysThroughCfsolve"}},
+	},
+	{
+		name:  "the Pobreflix referer is dropped from the Stream",
+		edits: []codeEdit{{pbAPIFilePath, "s := source.Stream{URL: url, Referer: referer}", "s := source.Stream{URL: url}"}},
+		kills: map[string][]string{apiPkg: {"TestPobreflixStreamBuildsTheContext", "TestPobreflixGatedDubPlaysThroughCfsolve"}},
+	},
+	{
+		name:  "a missing Pobreflix episode is let through",
+		edits: []codeEdit{{pbAPIFilePath, "if media == nil || episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no Pobreflix title or episode to play\")", "if media == nil && episode == nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"no Pobreflix title or episode to play\")"}},
+		kills: map[string][]string{apiPkg: {"TestResolvePobreflixStreamRejectsAMissingTitleOrEpisode"}},
 	},
 }
 
