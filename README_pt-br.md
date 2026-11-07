@@ -331,67 +331,11 @@ primeiro quando a reprodução falhar e sua config for a suspeita.
 
 ## Fontes
 
-| Fonte         | Conteúdo       | Idioma                      | Observações                                   |
-| ------------- | -------------- | --------------------------- | --------------------------------------------- |
-| HiAnime       | Animes         | Inglês, legendado e dublado | Legendado por padrão                          |
-| AnimeFire     | Animes         | Português (Brasil)          |                                               |
-| AnimesDigital | Animes         | Português (Brasil)          | Legendado e dublado                           |
-| AnimeDrive    | Animes         | Português (Brasil)          | Endereço configurável: `GOANIME_ANIMEDRIVE_URL` |
-| AnimesROLL    | Animes         | Português (Brasil)          | Legendado e dublado                           |
-| Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
-| StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
-| TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
-| Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto ou cfsolve para o player; painel como reserva |
-| Pomfy         | Filmes, séries | Português (Brasil)          | HLS Byse com captcha de prova de trabalho; `TMDB_API_KEY` opcional |
-
-`--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine`, `pobreflix`
-ou `pomfy`. `movietv` cobre StartFlix, TopCine, Pobreflix e Pomfy; `ptbr`
-cobre todas as fontes em português.
-
-O Pobreflix consulta primeiro o catálogo `/api` do site e usa o índice de
-sitemaps como reserva. As páginas atuais de filmes e episódios listam seus
-servidores no JSON embutido; quando o servidor é um MP4 público, a reprodução é
-direta se o arquivo já tem o áudio desejado. As páginas que listam um player
-protegido por Turnstile passam pelo cfsolve (veja abaixo); sem ele, elas usam o
-painel do StartFlix como reserva. Páginas do tema antigo ainda usam o painel.
-
-O endereço da AnimeDrive fica intermitentemente inacessível em algumas redes.
-Se o site mudar ou a sua rede bloquear o endereço, `GOANIME_ANIMEDRIVE_URL`
-aponta a fonte para um espelho acessível.
-
-O catálogo do Pomfy é identificado por id do TMDB e o site não tem busca por
-texto, então nomes viram títulos pela API de busca do TMDB — primeiro com a
-sua `TMDB_API_KEY` quando ela está definida, e sem ela no conjunto de chaves
-públicas que o próprio site embarca no bundle do navegador (rotacionado
-igualmente). Um id TMDB soletrado (`550`) abre o título direto pelos
-payloads do site, sem chave. A reprodução pede ao player Byse um desafio de
-prova de trabalho, resolve em Go (pouco mais de um segundo na dificuldade
-usual) e toca o HLS desselado. `GOANIME_POMFY_URL` aponta a fonte para outro
-espelho do site.
-
-O Goyabu fica atrás de uma verificação gerenciada do Cloudflare, e as páginas
-de player do Pobreflix atrás de um Turnstile do Cloudflare. Em redes que o
-Cloudflare não verifica, eles funcionam; em uma rede verificada, os dois
-precisam da ferramenta [cfsolve](https://github.com/chris124567/cfsolve), que
-passa pelas verificações com requisições simples, sem navegador. Não há nada
-para instalar em Linux e macOS Apple Silicon: uma versão de release baixa na
-primeira execução o binário publicado com a própria release (conferido pelas
-somas de verificação assinadas) e as duas fontes passam a usá-lo. Se o download
-falhar, o Goyabu fica fora da busca e o Pobreflix continua com os arquivos
-diretos e o painel como reserva. **Windows e Macs Intel ainda não têm build do
-cfsolve**, então o Goyabu só funciona nessas plataformas em redes que não são
-verificadas (`GOANIME_ENABLED_SOURCES=goyabu`), e o Pobreflix não consegue
-passar pelo player. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` desliga o download,
-`GOANIME_CFSOLVE_BIN` aponta para um binário próprio e
-`GOANIME_DISABLED_SOURCES=goyabu` desativa a fonte. Desenvolvedores e
-mantenedores: veja [docs/CFSOLVE.md](docs/CFSOLVE.md).
-
-O GoAnime depende de sites de terceiros, e esses sites mudam sem aviso. Quando
-isso acontece, a fonte correspondente pode parar de funcionar até ser
-atualizada. Um [workflow agendado](.github/workflows/source-health.yml) testa
-todas as fontes diariamente, então a falha costuma aparecer lá antes de ser
-reportada.
+O GoAnime busca em vários sites de anime e de filmes e séries ao mesmo tempo,
+em inglês e português. São sites de terceiros e mudam sem aviso, então uma
+fonte pode parar de funcionar até ser atualizada. A lista de fontes, como
+escolher uma com `--source` e as notas de cada uma estão em
+[docs/SOURCES.md](docs/SOURCES.md) (em inglês).
 
 ## Configuração
 

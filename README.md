@@ -328,66 +328,10 @@ when playback fails and your config is the suspect.
 
 ## Sources
 
-| Source        | Content    | Language                   | Notes                                         |
-| ------------- | ---------- | -------------------------- | --------------------------------------------- |
-| HiAnime       | Anime      | English, subbed and dubbed | Subbed by default                             |
-| AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
-| AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
-| AnimeDrive    | Anime      | Portuguese (Brazil)        | Host override: `GOANIME_ANIMEDRIVE_URL`       |
-| AnimesROLL    | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
-| Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
-| StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
-| TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
-| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4, or cfsolve for its player gate; panel fallback |
-| Pomfy         | Movies, TV | Portuguese (Brazil)        | Byse HLS with the PoW captcha; optional `TMDB_API_KEY` |
-
-`--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `anroll`, `animedrive`, `startflix`, `topcine`, `pobreflix`
-or `pomfy`. `movietv` covers StartFlix, TopCine, Pobreflix and Pomfy; `ptbr`
-covers every Portuguese source.
-
-Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
-index. Current movie and episode pages list their servers in embedded JSON;
-when a server is a public MP4, playback is direct if the file already carries
-the wanted audio. Pages that instead list a Turnstile-gated player are cleared
-with cfsolve (see below); without it, those pages take the old StartFlix panel
-fallback. Old-theme pages still use the panel.
-
-AnimeDrive's host is intermittently unreachable from some networks. If the
-site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
-source at a reachable mirror.
-
-Pomfy's catalog is keyed by TMDB id and it has no text search of its own, so
-matching names to titles runs through TMDB's search API — first with your own
-`TMDB_API_KEY` when it is set, and otherwise on the public key pool the site
-itself ships in its browser bundle (rotated the same way). A bare TMDB id
-searches keyless: `550` opens the title straight from the site's own
-payloads. A play asks its Byse player for a proof-of-work challenge, solves
-it in Go (sub-second at the usual difficulty) and plays the unsealed HLS
-master. `GOANIME_POMFY_URL` points the source at another mirror of the watch
-site.
-
-Goyabu is behind a Cloudflare managed challenge, and Pobreflix's player pages
-behind a Cloudflare Turnstile. On a network Cloudflare does not challenge them
-they just work; elsewhere both need the
-[cfsolve](https://github.com/chris124567/cfsolve) tool, which clears the gates
-from plain requests with no browser. There is nothing to install on Linux and
-Apple Silicon Macs: a release build downloads the binary shipped with its own
-release on first run (verified against the release's signed checksums) and both
-sources use it once it is in place. If the download fails, Goyabu stays out of
-the search and Pobreflix keeps its direct files and panel fallback. **Windows
-and Intel Macs have no cfsolve build yet**, so Goyabu only works there on
-networks that are not challenged (`GOANIME_ENABLED_SOURCES=goyabu`), and
-Pobreflix cannot clear its player gate. `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns
-the download off, `GOANIME_CFSOLVE_BIN` points at a binary of your own and
-`GOANIME_DISABLED_SOURCES=goyabu` turns the source off. Developers and
-maintainers: see [docs/CFSOLVE.md](docs/CFSOLVE.md).
-
-GoAnime depends on third-party websites, and those websites change without
-notice. When one does, the corresponding source can stop working until it is
-updated. A [scheduled workflow](.github/workflows/source-health.yml) checks
-every source daily, so breakage is usually visible there before it is
-reported.
+GoAnime searches several anime and movie/TV sites at once, in English and
+Portuguese. They are third-party websites and change without notice, so one
+can stop working until it is updated. The list of sources, how to pick one
+with `--source` and per-source notes are in [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Configuration
 
