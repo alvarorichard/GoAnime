@@ -177,15 +177,6 @@ jobs:
         shell: bash
         run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
-      - name: Mutation guards
-        if: runner.os == 'Linux'
-        shell: bash
-        # The tests of the tests: each builds a mutant of the code with an
-        # overlay and requires a guard test to fail on it. -short, used above,
-        # skips them: one test binary per mutant is too slow for the race run
-        # on three operating systems.
-        run: go test -count=1 -timeout 25m ./internal/api -run 'KillsMutants$'
-
       - name: Goroutine leak gate
         if: runner.os == 'Linux'
         shell: bash
@@ -229,9 +220,45 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  mutation:
+    name: Mutation guards
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download and verify dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt update
+          sudo apt install -y mpv
+
+      - name: Mutation guards
+        shell: bash
+        # The tests of the tests: each builds a mutant of the code with an
+        # overlay and requires a guard test to fail on it, and the coverage
+        # guards measure the packages. The race/coverage run skips them
+        # (-short): one test binary per mutant is too slow for three operating
+        # systems, so this job runs beside the tests instead of after them.
+        run: go test -count=1 -timeout 40m ./internal/api -run 'KillsMutants$|FullyCovered$'
+
   build-binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [quality, security, test]
+    needs: [quality, security, test, mutation]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -322,7 +349,7 @@ jobs:
   # Windows Installer Job - Creates an offline installer with bundled mpv
   build-windows-installer:
     name: Build Windows installer
-    needs: [quality, security, test]
+    needs: [quality, security, test, mutation]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
