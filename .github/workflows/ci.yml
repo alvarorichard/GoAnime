@@ -247,6 +247,13 @@ jobs:
           sudo apt update
           sudo apt install -y mpv
 
+      - name: Warm the race build cache
+        shell: bash
+        # One mutant is checked under -race. In the test job the race run
+        # before it has built the instrumented dependencies; here nothing has,
+        # and building them inside the mutant's five minutes is not enough.
+        run: go test -race -count=1 -run '^$' ./internal/player
+
       - name: Mutation guards
         shell: bash
         # The tests of the tests: each builds a mutant of the code with an
