@@ -102,15 +102,18 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 	}
 
 	return run(tui.SearchHomeOptions{
-		Query:       query,
-		ScopeIndex:  scopeIndexForSource(util.GlobalSource),
-		SourcesLine: sourcesLine(),
-		Continue:    entries,
-		Recent:      recent,
-		DeleteEntry: deleteContinueEntry,
-		Suggest:     homeSuggest,
-		Sources:     homeSources,
-		SetSource:   setHomeSource,
+		Query:         query,
+		ScopeIndex:    scopeIndexForSource(util.GlobalSource),
+		SourcesLine:   sourcesLine(),
+		Continue:      entries,
+		Recent:        recent,
+		DeleteEntry:   deleteContinueEntry,
+		DeleteRecent:  forgetRecentSearch,
+		ClearContinue: clearContinueHistory,
+		ClearRecent:   clearRecentHistory,
+		Suggest:       homeSuggest,
+		Sources:       homeSources,
+		SetSource:     setHomeSource,
 	})
 }
 
@@ -315,8 +318,18 @@ func continueTarget(entry tui.HomeContinueEntry, fromStart bool) (episodeNum, po
 	return entry.EpisodeNum + 1, 0, false, false
 }
 
-// deleteContinueEntry removes one CONTINUE row from watch history.
-func deleteContinueEntry(key string) error {
+// Seams for forgetting history, so a test can say what the history answers and
+// read back what was asked of it.
+var (
+	continueRows    = tracking.ContinueEntries
+	deleteTracked   = deleteTrackedRow
+	forgetSearchFn  = tracking.ForgetSearch
+	clearContinueFn = tracking.ClearContinue
+	clearRecentFn   = tracking.ClearRecent
+)
+
+// deleteTrackedRow removes one episode's row from watch history.
+func deleteTrackedRow(key string) error {
 	tracker := tracking.GetGlobalTracker()
 	if tracker == nil {
 		tracker = tracking.NewLocalTracker(tracking.DBPath())
@@ -325,4 +338,60 @@ func deleteContinueEntry(key string) error {
 		return fmt.Errorf("watch history unavailable")
 	}
 	return tracker.DeleteAnime(0, key)
+}
+
+// keysOfShow is the history key of every episode of the show the row with key
+// belongs to. The CONTINUE list shows one row per show, standing for the
+// latest episode watched, so removing the row has to remove them all or the
+// show would come back with an older episode. A key not in rows is just itself.
+func keysOfShow(rows []tracking.Anime, key string) []string {
+	var group string
+	for _, r := range rows {
+		if r.AllanimeID == key {
+			group = continueGroupKey(r)
+			break
+		}
+	}
+	if group == "" {
+		return []string{key}
+	}
+	var keys []string
+	for _, r := range rows {
+		if continueGroupKey(r) == group {
+			keys = append(keys, r.AllanimeID)
+		}
+	}
+	return keys
+}
+
+// deleteContinueEntry removes one CONTINUE row, and so the show it stands
+// for, from watch history.
+func deleteContinueEntry(key string) error {
+	rows, err := continueRows()
+	if err != nil {
+		return err
+	}
+	for _, k := range keysOfShow(rows, key) {
+		if err := deleteTracked(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// forgetRecentSearch removes one search from the RECENT list.
+func forgetRecentSearch(query string) error {
+	return forgetSearchFn(query)
+}
+
+// clearContinueHistory empties the CONTINUE list.
+func clearContinueHistory() error {
+	_, err := clearContinueFn()
+	return err
+}
+
+// clearRecentHistory empties the RECENT list.
+func clearRecentHistory() error {
+	_, err := clearRecentFn()
+	return err
 }

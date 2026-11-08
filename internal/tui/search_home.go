@@ -97,8 +97,14 @@ type SearchHomeOptions struct {
 	SourcesLine string
 	Continue    []HomeContinueEntry
 	Recent      []HomeRecentSearch
-	// DeleteEntry removes a CONTINUE row by key; nil disables x.
+	// DeleteEntry removes a CONTINUE row by key; nil disables x there.
 	DeleteEntry func(key string) error
+	// DeleteRecent removes a RECENT row by its query; nil disables x there.
+	DeleteRecent func(query string) error
+	// ClearContinue and ClearRecent empty a whole list (X, after a y/n
+	// question); nil disables X on that list.
+	ClearContinue func() error
+	ClearRecent   func() error
 	// Suggest feeds the autocomplete under the box: it returns titles for the
 	// typed query in the given scope. nil turns the autocomplete off. It runs
 	// off the UI loop and must honour ctx, which is cancelled when the user
@@ -187,6 +193,15 @@ func relativeDay(t, now time.Time) string {
 	}
 }
 
+// clearTarget is the list a "clear all?" question is about.
+type clearTarget int
+
+const (
+	clearNothing clearTarget = iota
+	clearContinueRows
+	clearRecentRows
+)
+
 type searchHomeModel struct {
 	theme       Theme
 	shell       Shell
@@ -200,6 +215,15 @@ type searchHomeModel struct {
 	focusInput  bool
 	deleteEntry func(key string) error
 	now         func() time.Time
+
+	// Forgetting history: the RECENT row remover, the two list clearers, the
+	// list the user is being asked to clear (clearNothing while no question is
+	// open) and what to say when a removal failed.
+	deleteRecent  func(query string) error
+	clearContinue func() error
+	clearRecent   func() error
+	clearing      clearTarget
+	notice        string
 
 	// Autocomplete state. seq numbers the typing bursts: a debounce tick or a
 	// lookup answer with an older seq is stale and dropped. asked is the
@@ -270,11 +294,15 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		focusInput:  true,
 		deleteEntry: opts.DeleteEntry,
 		now:         time.Now,
-		suggest:     opts.Suggest,
-		loadSources: opts.Sources,
-		setSource:   opts.SetSource,
-		debounce:    suggestDebounce,
-		sugCursor:   -1,
+
+		deleteRecent:  opts.DeleteRecent,
+		clearContinue: opts.ClearContinue,
+		clearRecent:   opts.ClearRecent,
+		suggest:       opts.Suggest,
+		loadSources:   opts.Sources,
+		setSource:     opts.SetSource,
+		debounce:      suggestDebounce,
+		sugCursor:     -1,
 	}
 	m.asked = m.suggestKey()
 	m.rebuildRows()
@@ -338,8 +366,12 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		m.notice = ""
 		if m.sources != nil {
 			return m.updateSources(msg)
+		}
+		if m.clearing != clearNothing {
+			return m.updateClearQuestion(msg)
 		}
 		if m.showHelp {
 			switch msg.String() {
@@ -410,7 +442,7 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.completeSuggestion()
 				return m, nil
 			}
-		case "r", "e", "x":
+		case "r", "e", "x", "X":
 			if !m.focusInput {
 				if cmd := m.rowAction(msg.String()); cmd != nil {
 					return m, cmd
@@ -649,11 +681,22 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 	}
 }
 
-// rowAction runs r (from start), e (episodes) and x (remove) on a continue
-// row. It returns a quit command when the action leaves the screen.
+// rowAction runs r (from start), e (episodes), x (remove) and X (clear the
+// list) on the highlighted row. It returns a quit command when the action
+// leaves the screen. r and e belong to continue rows; x and X to both lists.
 func (m *searchHomeModel) rowAction(key string) tea.Cmd {
 	row, ok := m.currentRow()
-	if !ok || row.kind != homeRowContinue {
+	if !ok {
+		return nil
+	}
+	if key == "X" {
+		m.askToClear(row.kind)
+		return nil
+	}
+	if row.kind == homeRowRecent {
+		if key == "x" {
+			m.forgetRecent(row.index)
+		}
 		return nil
 	}
 	entry := m.continueAll[row.index]
@@ -665,21 +708,121 @@ func (m *searchHomeModel) rowAction(key string) tea.Cmd {
 		m.result = SearchHomeResult{Action: HomeEpisodes, Entry: entry, HasEntry: true, Scope: m.scopes[m.scopeIdx].Value}
 		return tea.Quit
 	case "x":
-		if m.deleteEntry == nil {
-			return nil
-		}
-		if err := m.deleteEntry(entry.Key); err != nil {
-			return nil
-		}
-		m.continueAll = append(m.continueAll[:row.index], m.continueAll[row.index+1:]...)
-		m.rebuildRows()
-		if len(m.rows) == 0 {
-			m.focusInput = true
-			m.input.Focus()
-		}
-		return nil
+		m.forgetContinue(row.index)
 	}
 	return nil
+}
+
+// forgetContinue removes the CONTINUE row at index from the history and the
+// screen. A removal that fails keeps the row and says so.
+func (m *searchHomeModel) forgetContinue(index int) {
+	if m.deleteEntry == nil {
+		return
+	}
+	if err := m.deleteEntry(m.continueAll[index].Key); err != nil {
+		m.failed("remove the episode", err)
+		return
+	}
+	m.continueAll = append(m.continueAll[:index], m.continueAll[index+1:]...)
+	m.rowsChanged()
+}
+
+// forgetRecent removes the RECENT row at index from the history and the
+// screen. A removal that fails keeps the row and says so.
+func (m *searchHomeModel) forgetRecent(index int) {
+	if m.deleteRecent == nil {
+		return
+	}
+	if err := m.deleteRecent(m.recentAll[index].Query); err != nil {
+		m.failed("remove the search", err)
+		return
+	}
+	m.recentAll = append(m.recentAll[:index], m.recentAll[index+1:]...)
+	m.rowsChanged()
+}
+
+// askToClear opens the "clear all?" question for the list kind belongs to. It
+// opens nothing when the host cannot clear that list or the list is empty.
+func (m *searchHomeModel) askToClear(kind homeRowKind) {
+	switch {
+	case kind == homeRowContinue && m.clearContinue != nil && len(m.continueAll) > 0:
+		m.clearing = clearContinueRows
+	case kind == homeRowRecent && m.clearRecent != nil && len(m.recentAll) > 0:
+		m.clearing = clearRecentRows
+	}
+}
+
+// updateClearQuestion answers the open "clear all?" question: y clears the
+// list, n or esc keeps it, ctrl+c quits, and nothing else gets through (a
+// stray key must not type into the box or act on a row behind the question).
+func (m *searchHomeModel) updateClearQuestion(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		m.clearConfirmed()
+	case "n", "esc":
+		m.clearing = clearNothing
+	case "ctrl+c":
+		m.err = ErrSearchHomeCancelled
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// clearConfirmed empties the list the question was about. A clear that fails
+// keeps the list and says so.
+func (m *searchHomeModel) clearConfirmed() {
+	target := m.clearing
+	m.clearing = clearNothing
+	switch target {
+	case clearContinueRows:
+		if err := m.clearContinue(); err != nil {
+			m.failed("clear CONTINUE", err)
+			return
+		}
+		m.continueAll = nil
+	case clearRecentRows:
+		if err := m.clearRecent(); err != nil {
+			m.failed("clear RECENT", err)
+			return
+		}
+		m.recentAll = nil
+	}
+	m.rowsChanged()
+}
+
+// rowsChanged redraws the rows after a list shrank. With nothing left to
+// pick, the box takes the focus back.
+func (m *searchHomeModel) rowsChanged() {
+	m.rebuildRows()
+	if len(m.rows) == 0 {
+		m.focusInput = true
+		m.input.Focus()
+	}
+}
+
+// failed puts what went wrong on the screen until the next key.
+func (m *searchHomeModel) failed(what string, err error) {
+	m.notice = fmt.Sprintf("Could not %s: %v", what, err)
+}
+
+// questionView is the line under the scope tabs while the screen asks
+// whether to clear a list, or says that a removal failed. "" otherwise.
+func (m *searchHomeModel) questionView(width int) string {
+	switch m.clearing {
+	case clearContinueRows:
+		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from CONTINUE? y to clear, n to keep.", countOf(len(m.continueAll), "episode", "episodes")), width)
+	case clearRecentRows:
+		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from RECENT? y to clear, n to keep.", countOf(len(m.recentAll), "search", "searches")), width)
+	}
+	return renderNotice(&m.theme, singleLine(m.notice), width)
+}
+
+// countOf is "1 episode", "3 episodes".
+func countOf(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 func (m *searchHomeModel) sizeInput() {
@@ -708,6 +851,13 @@ func (m *searchHomeModel) hints() []Hint {
 			{Key: "esc", Desc: "close", Essential: true},
 		}
 	}
+	if m.clearing != clearNothing {
+		return []Hint{
+			{Key: "y", Desc: "clear all", Essential: true},
+			{Key: "n", Desc: "keep", Essential: true},
+			{Key: "ctrl+c", Desc: "quit"},
+		}
+	}
 	move := "↑↓"
 	if Plain() {
 		move = "up/dn"
@@ -718,6 +868,9 @@ func (m *searchHomeModel) hints() []Hint {
 		{Key: "tab", Desc: "scope"},
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
+	}
+	if !m.focusInput {
+		hints = append(hints[:3], append([]Hint{{Key: "x", Desc: "remove"}, {Key: "X", Desc: "clear list"}}, hints[3:]...)...)
 	}
 	if m.loadSources != nil {
 		hints = append(hints[:3], append([]Hint{{Key: "ctrl+s", Desc: "sources", Essential: true}}, hints[3:]...)...)
@@ -759,6 +912,7 @@ func (m *searchHomeModel) helpView(width, height int) string {
 		{Key: "r", Desc: "from the start"},
 		{Key: "e", Desc: "episodes"},
 		{Key: "x", Desc: "remove"},
+		{Key: "X", Desc: "clear the list"},
 	}, nil, width, height); help != "" {
 		return help
 	}
@@ -773,6 +927,9 @@ func (m *searchHomeModel) homeView(width, height int) string {
 		sections = append(sections, drop)
 	}
 	sections = append(sections, m.scopeTabs())
+	if question := m.questionView(width); question != "" {
+		sections = append(sections, question)
+	}
 	lists, panel := m.listsView(width, height)
 	if lists != "" {
 		lists = m.sectionHeader("CONTINUE", "続き") + "\n" + lists

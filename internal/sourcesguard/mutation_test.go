@@ -242,7 +242,7 @@ var sourcesMutants = []mutant{
 	},
 	{
 		name:  "the screen is not handed its sources",
-		edits: []codeEdit{{handlerFile, "\t\tSources:     homeSources,\n", ""}},
+		edits: []codeEdit{{handlerFile, "\t\tSources:       homeSources,\n", ""}},
 		kills: map[string][]string{handlersPkg: {"TestOpenSearchHomeHandsTheScreenItsSources"}},
 	},
 	{

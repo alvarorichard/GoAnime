@@ -248,6 +248,7 @@ goanime --source animefire "jujutsu kaisen"   # search a single source
 goanime --upscale --upscale-hq video.mp4      # upscale a file with Anime4K
 goanime --update                              # update to the latest release
 goanime --debug "naruto"                      # write a debug log
+goanime --clear-history                       # empty CONTINUE and RECENT on the home screen
 ```
 
 Run `goanime -h` for the full list of options.
@@ -263,7 +264,9 @@ Run `goanime -h` for the full list of options.
 | `Esc`                 | Go back                   |
 | `tab`                 | Switch search scope (search home) |
 | `←` `→`               | Choose a version (results) |
-| `r` `e` `x`           | From start, episodes, remove (Continue list) |
+| `r` `e`              | From start, episodes (Continue list) |
+| `x`                   | Remove the highlighted row (Continue or Recent list) |
+| `X`                   | Clear the whole list the row is in, after a `y`/`n` question |
 | `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
 
 In a menu that shows a letter beside each option, that letter picks the
@@ -271,6 +274,25 @@ option at once; any other key still filters.
 
 The episode list marks the episodes you finished with ✓ and the one you
 stopped partway with ◐, and opens where you left off.
+
+### Forgetting your history
+
+The search home screen keeps two lists: CONTINUE, the shows you have watched,
+and RECENT, your latest searches. Remove a row with `x`, or empty a whole list
+with `X`. Removing a show from CONTINUE removes every episode of it you have
+watched, so it does not come back with an older one.
+
+From the command line:
+
+```bash
+goanime --clear-continue    # empty CONTINUE (the watch history)
+goanime --clear-recent      # empty RECENT
+goanime --clear-history     # both
+goanime --clear-history --yes    # without asking (also needed in a script)
+```
+
+Each one asks first. Without a terminal to ask on, and without `--yes`, nothing
+is cleared.
 
 ### While watching
 

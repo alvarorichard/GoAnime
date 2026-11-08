@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -51,7 +50,7 @@ func sharedTracker() *LocalTracker {
 // RecordSearch remembers a successful search and its result count for the
 // SEARCH home screen's RECENT list. Best-effort: never fails the search.
 func RecordSearch(query string, resultCount int) error {
-	query = strings.Join(strings.Fields(query), " ")
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}
@@ -68,7 +67,7 @@ func (t *LocalTracker) RecordRecentSearch(query string, resultCount int) error {
 	if t == nil || t.db == nil || t.recentUpsertPS == nil {
 		return ErrTrackerNotInited
 	}
-	query = strings.Join(strings.Fields(query), " ")
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}

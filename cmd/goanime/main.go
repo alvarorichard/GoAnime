@@ -191,6 +191,13 @@ func main() {
 			fail(handlers.HandleMovieDownloadRequest())
 			return
 		}
+		// Check if error is a request to forget history
+		if err == util.ErrClearRequested {
+			if clearErr := handlers.HandleClearRequest(); clearErr != nil {
+				fail(clearErr)
+			}
+			return
+		}
 		// Check if error is upscale request
 		if err == util.ErrUpscaleRequested {
 			if upscaleErr := handlers.HandleUpscaleRequest(); upscaleErr != nil {

@@ -120,6 +120,10 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--no-subs", "Disable subtitles.")
 	addOption(&helpContent, "--download-menu", "Always show the episode options menu before playing (tela 6).")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Must be inside your home folder. Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "--clear-continue", "Empty the CONTINUE list of the home screen (the watch history) and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--clear-recent", "Empty the RECENT searches of the home screen and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--clear-history", "Empty both the CONTINUE list and the RECENT searches, and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--yes / -y", "With --clear-*, do not ask before clearing (needed when there is no terminal to ask on).")
 	addOption(&helpContent, "--plain", "Plain interface: no colors, no Japanese glosses, ASCII marks (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1).")
 	helpContent.WriteString("\n")
 
