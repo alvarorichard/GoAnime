@@ -98,7 +98,8 @@ func TestTheClearBranchCheckSeesABrokenMain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	good := string(raw)
+	// A Windows checkout may hold CRLF line endings; the snippets below use LF.
+	good := strings.ReplaceAll(string(raw), "\r\n", "\n")
 
 	const branch = "if err == util.ErrClearRequested {\n\t\t\tif clearErr := handlers.HandleClearRequest(); clearErr != nil {\n\t\t\t\tfail(clearErr)\n\t\t\t}\n\t\t\treturn\n\t\t}"
 	if !strings.Contains(good, branch) {
