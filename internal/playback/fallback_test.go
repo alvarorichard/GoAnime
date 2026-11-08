@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 
@@ -19,15 +18,6 @@ import (
 // on the source the user picked, the same episode of the same title is looked
 // for on the others. These tests run that cascade against stand-ins for the
 // sources. Not parallel: the lookups are package-level seams.
-
-// TestMain keeps every test off the network: the fallback finds nothing unless
-// a test says what the other sources answer.
-func TestMain(m *testing.M) {
-	searchOnSource = func(context.Context, apisource.SourceKind, string) ([]*models.Anime, error) {
-		return nil, errors.New("no network in tests")
-	}
-	os.Exit(m.Run())
-}
 
 // otherSources is what the stand-in sources answer.
 type otherSources struct {
