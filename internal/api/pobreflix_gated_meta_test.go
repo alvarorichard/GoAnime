@@ -98,6 +98,7 @@ var pobreflixGateMutants = []mutant{
 }
 
 func TestPobreflixGateKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	goBin, root := requireGo(t)
 
 	// Control: the guard tests run and pass on the real code.

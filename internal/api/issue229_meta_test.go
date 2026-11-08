@@ -546,6 +546,7 @@ var issue229Mutants = []mutant{
 }
 
 func TestIssue229GuardKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	guards, mutants := issue229Guards, issue229Mutants
 	if runtime.GOOS == "windows" {
 		guards, mutants = withoutPosixOnlyGuards(t, guards, mutants)

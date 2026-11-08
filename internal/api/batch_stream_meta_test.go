@@ -220,5 +220,6 @@ var batchStreamMutants = []mutant{
 }
 
 func TestBatchStreamGuardKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	killMutants(t, batchStreamGuards, batchStreamMutants)
 }

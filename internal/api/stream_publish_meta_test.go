@@ -614,7 +614,19 @@ var streamPublishMutants = []mutant{
 }
 
 func TestStreamPublishGuardKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	killMutants(t, publishGuards, streamPublishMutants)
+}
+
+// skipMutantsWhenShort leaves the mutation tests out of a -short run. Each
+// mutant builds a test binary of its own, which is minutes of work per mutant
+// on a CI runner, and the race/coverage run on three operating systems cannot
+// afford it. CI runs them in a step of their own, without -short, on Linux.
+func skipMutantsWhenShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("mutation tests are skipped with -short; run go test ./internal/api -run KillsMutants")
+	}
 }
 
 // killMutants runs the control, then each mutant, as the other meta tests do:

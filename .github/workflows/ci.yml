@@ -175,7 +175,16 @@ jobs:
 
       - name: Run tests with race detector and coverage
         shell: bash
-        run: go test -short -race -count=1 -timeout 25m -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -short -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Mutation guards
+        if: runner.os == 'Linux'
+        shell: bash
+        # The tests of the tests: each builds a mutant of the code with an
+        # overlay and requires a guard test to fail on it. -short, used above,
+        # skips them: one test binary per mutant is too slow for the race run
+        # on three operating systems.
+        run: go test -count=1 -timeout 25m ./internal/api -run 'KillsMutants$'
 
       - name: Goroutine leak gate
         if: runner.os == 'Linux'

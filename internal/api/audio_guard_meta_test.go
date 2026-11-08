@@ -132,6 +132,7 @@ var audioGuardMutants = []mutant{
 }
 
 func TestAudioGuardKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Skip("no go toolchain on PATH to build the mutants with")
