@@ -316,6 +316,18 @@ func PlayEpisode(
 		animeMutex.Unlock()
 	}
 
+	// The source failed: the same episode may play from another one.
+	if worthTryingElsewhere(ctx, videoErr) {
+		altURL, from, tried := videoFromAnotherSource(ctx, anime, episodeNumberStr, episodeNum)
+		switch {
+		case altURL != "":
+			util.Warnf("Episode %s did not load on %s; playing it from %s.", episodeNumberStr, anime.Source, from)
+			videoURL, videoErr = altURL, nil
+		case len(tried) > 0:
+			util.Infof("The episode is not available on %s either.", strings.Join(tried, ", "))
+		}
+	}
+
 	if videoErr != nil {
 		// Any video URL failure means the episode is not available on this source.
 		// Route user back to episode selection so they can pick another one.

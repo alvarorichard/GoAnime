@@ -31,6 +31,7 @@ const (
 	handlersPkg  = "./internal/handlers"
 	appflowPkg   = "./internal/appflow"
 	playerGo     = "internal/player/player.go"
+	fallbackFile = "internal/playback/fallback.go"
 
 	pickerPrepend   = "\tif !m.showHelp {\n\t\tif notice := renderNotice(&m.theme, m.notice, width); notice != \"\" {\n\t\t\tbody = notice + \"\\n\" + body\n\t\t}\n\t}\n"
 	pickerLayoutH   = "\theight = max(height-m.noticeHeight(width), 1)\n\tm.areaHeight = height\n\tm.panelSide"
@@ -542,6 +543,63 @@ var issue229Mutants = []mutant{
 		name:  "changing the title records the search before it is checked for episodes",
 		edits: []codeEdit{{appflowTry, "\t\tif len(episodes) == 0 {\n\t\t\treturn nil, nil, fmt.Errorf(\"no episodes for %q\", anime.Name)\n\t\t}\n", "\t\trememberSearch(res.Query, res.Scope)\n\t\tif len(episodes) == 0 {\n\t\t\treturn nil, nil, fmt.Errorf(\"no episodes for %q\", anime.Name)\n\t\t}\n"}},
 		kills: map[string][]string{appflowPkg: {"TestChangeAnimeHomeKeepsTheOldSearchWhenTheNewTitleHasNoEpisodes"}},
+	},
+
+	// ---- an episode that will not load plays from another source (#229) -----------------
+	{
+		name:  "a failed episode is never tried on another source",
+		edits: []codeEdit{{playbackFile, "if worthTryingElsewhere(ctx, videoErr) {", "if false && worthTryingElsewhere(ctx, videoErr) {"}},
+		kills: map[string][]string{playbackPkg: {"TestPlayEpisodeLooksOnTheOtherSourcesWhenTheEpisodeWillNotLoad"}},
+	},
+	{
+		name:  "going back to the episode list counts as a source failing",
+		edits: []codeEdit{{fallbackFile, "\t\tplayer.ErrBackToEpisodeSelection,\n\t\tplayer.ErrBackRequested,", "\t\tplayer.ErrBackRequested,"}},
+		kills: map[string][]string{playbackPkg: {"TestTheUserLeavingIsNotASourceFailing", "TestPlayEpisodeDoesNotLookElsewhereWhenTheUserWentBack"}},
+	},
+	{
+		name:  "a similar title is taken for the same title",
+		edits: []codeEdit{{fallbackFile, "titleKey(name) == wanted", "strings.Contains(titleKey(name), wanted)"}},
+		kills: map[string][]string{playbackPkg: {"TestAnotherSourceIsTakenOnlyWhenItIsTheSameTitle"}},
+	},
+	{
+		name:  "the first episode is taken for the one wanted",
+		edits: []codeEdit{{fallbackFile, "\t\tif n == want {", "\t\tif n > 0 {"}},
+		kills: map[string][]string{playbackPkg: {"TestASourceWithoutTheEpisodeIsSkipped", "TestFindEpisodeNumbered"}},
+	},
+	{
+		name:  "the source that failed is tried again",
+		edits: []codeEdit{{fallbackFile, "if strings.HasPrefix(strings.ToLower(current), strings.ToLower(string(k))) {", "if false {"}},
+		kills: map[string][]string{playbackPkg: {"TestFallbackKindsLeaveOutTheSourceThatFailedAndTheOnesTurnedOff"}},
+	},
+	{
+		name:  "a source turned off is tried",
+		edits: []codeEdit{{fallbackFile, "if !ok || !apisource.IsSearchEnabled(s.Describe()) {", "if !ok || (s == nil && !apisource.IsSearchEnabled(s.Describe())) {"}},
+		kills: map[string][]string{playbackPkg: {"TestFallbackKindsLeaveOutTheSourceThatFailedAndTheOnesTurnedOff"}},
+	},
+	{
+		name:  "a movie is looked for on the anime sources",
+		edits: []codeEdit{{fallbackFile, "if anime == nil || anime.MediaType == models.MediaTypeMovie || anime.MediaType == models.MediaTypeTV {", "if anime == nil {"}},
+		kills: map[string][]string{playbackPkg: {"TestNothingIsTriedForAMovieOrWithoutATitle"}},
+	},
+	{
+		name:  "the video is asked of the entry that failed",
+		edits: []codeEdit{{fallbackFile, "videoURLFor(ctx, episode, candidate)", "videoURLFor(ctx, episode, &models.Anime{URL: \"https://animefire.one/anime/wind-breaker\"})"}},
+		kills: map[string][]string{playbackPkg: {"TestAnEpisodeThatWillNotLoadPlaysFromAnotherSource"}},
+	},
+	{
+		name:  "the audio of the title is not looked at",
+		edits: []codeEdit{{fallbackFile, "audio != \"\" && strings.EqualFold(r.Audio, audio)", "false"}},
+		kills: map[string][]string{playbackPkg: {"TestTheSameAudioIsPreferred"}},
+	},
+	{
+		name:  "a source whose video fails ends the search",
+		edits: []codeEdit{{fallbackFile, "\t\tif ok {\n\t\t\treturn url, string(kind), tried\n\t\t}\n", "\t\tif ok {\n\t\t\treturn url, string(kind), tried\n\t\t}\n\t\tbreak\n"}},
+		kills: map[string][]string{playbackPkg: {"TestASourceWhoseVideoFailsToLoadSendsTheSearchOn"}},
+	},
+	{
+		name:  "a label with no number is given the first episode",
+		edits: []codeEdit{{fallbackFile, "n, err := strconv.Atoi(digitRun.FindString(label))\n\treturn n, err == nil", "n, _ := strconv.Atoi(digitRun.FindString(label))\n\treturn n, true"}},
+		kills: map[string][]string{playbackPkg: {"TestFindEpisodeNumbered"}},
 	},
 }
 
