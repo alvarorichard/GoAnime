@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.1.0
+	charm.land/bubbletea/v2 v2.1.1
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	charm.land/log/v2 v2.0.1
@@ -14,10 +14,10 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.1.1
-	github.com/enetx/surf v1.0.206
+	github.com/enetx/surf v1.0.207
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/lrstanley/go-ytdlp v1.5.6
-	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tetratelabs/wazero v1.12.0
