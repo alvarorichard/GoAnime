@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -206,6 +207,7 @@ func TestDownloadEpisodeWithSharedProgress_HTTPSuccess(t *testing.T) {
 func TestDownloadEpisodeWithSharedProgress_BloggerRoute(t *testing.T) {
 	t.Parallel()
 	d := makeEpisodeDownloader(t, "Foo", nil, false)
+	d.opts.install = func(context.Context) error { return errors.New("no network in tests") }
 	dest := filepath.Join(d.config.OutputDir, "blog.mp4")
 	var er, tr int64
 	var mu sync.Mutex
@@ -213,6 +215,24 @@ func TestDownloadEpisodeWithSharedProgress_BloggerRoute(t *testing.T) {
 	err := d.downloadEpisodeWithSharedProgress("https://blogger.com/video.g?some=id", dest, &er, &tr, &mu, m, nil)
 	// yt-dlp will fail on a fake URL — we just want to confirm routing happened.
 	require.Error(t, err)
+}
+
+// A yt-dlp install that fails (GitHub 504, offline) is an error the caller can
+// report, not a panic that takes the app down.
+func TestYtDlpInstallFailureIsAnError(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("bad status: 504 Gateway Timeout")
+	d := makeEpisodeDownloader(t, "Foo", nil, false)
+	d.opts.install = func(context.Context) error { return boom }
+
+	require.NotPanics(t, func() {
+		err := d.downloadWithYtDlp("https://example.test/v", filepath.Join(d.config.OutputDir, "a.mp4"))
+		require.ErrorIs(t, err, boom)
+	})
+	require.NotPanics(t, func() {
+		err := d.downloadM3U8WithYtDlp("https://example.test/v.m3u8", filepath.Join(d.config.OutputDir, "b.mp4"), &progressModel{}, newMockSender())
+		require.ErrorIs(t, err, boom)
+	})
 }
 
 // ---------------------------------------------------------------------------

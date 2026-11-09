@@ -63,6 +63,20 @@ type downloaderOptions struct {
 	videoURL func(episodeURL string) (string, error)                         // override player.GetVideoURLForEpisode
 	scan     func(a ...any) (int, error)                                     // override fmt.Scanln (the prompts' input)
 	play     func(path string, args []string) (socketPath string, err error) // override player.StartVideo
+	install  func(ctx context.Context) error                                 // override the yt-dlp install
+}
+
+// ensureYtDlp makes sure the yt-dlp binary is there, downloading it on first
+// use. A failed download is an error, not a panic: the host can be offline or
+// GitHub can answer 5xx, and neither may take the whole app down.
+func (d *EpisodeDownloader) ensureYtDlp(ctx context.Context) error {
+	if d.opts.install != nil {
+		return d.opts.install(ctx)
+	}
+	if _, err := ytdlp.Install(ctx, nil); err != nil {
+		return fmt.Errorf("install yt-dlp: %w", err)
+	}
+	return nil
 }
 
 // httpClient returns the injected HTTP client when set, else builds the
@@ -1003,7 +1017,10 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 
 	// Ensure yt-dlp is installed
 	ctx := context.Background()
-	ytdlp.MustInstall(ctx, nil)
+	if err := d.ensureYtDlp(ctx); err != nil {
+		done <- true // Stop progress simulation
+		return err
+	}
 
 	// Configure downloader using the basic API that we know works
 	dl := ytdlp.New().
@@ -1064,7 +1081,9 @@ func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 
 	// Use go-ytdlp library instead of command line
 	ctx := context.Background()
-	ytdlp.MustInstall(ctx, nil)
+	if err := d.ensureYtDlp(ctx); err != nil {
+		return err
+	}
 
 	// Configure downloader
 	dl := ytdlp.New().
