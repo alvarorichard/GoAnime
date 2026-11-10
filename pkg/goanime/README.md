@@ -84,7 +84,12 @@ type StreamOptions struct {
 `DefaultStreamOptions()` returns `{Quality: "best", Mode: "sub"}`. `Audio`
 (`"Dublado"` or `"Legendado"`) is applied for catalogue sources: an audio
 that does not play is `ErrAudioUnavailable`, never the other audio in its
-place, and `metadata["audio"]` says what played. `Quality` and `Mode` are
+place, and `metadata["audio"]` says what played. An empty `Audio` plays the
+episode in the audio it was listed in (`Episode.Audio`). When the panel's servers
+fail, or only play the other audio, a Legendado request is retried on the
+independent vidsrc fallback by the title's ids; a Dublado request never is,
+because the fallback serves the original audio only. That needs the episode as
+`GetSeasonEpisodes` returned it (`Season` and `Number` are what it looks up). `Quality` and `Mode` are
 accepted but not applied yet: the stream comes back in the source's default
 quality.
 

@@ -3,6 +3,7 @@ package types
 
 import (
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"strconv"
 )
 
 // Anime represents an anime series with its metadata
@@ -47,6 +48,13 @@ type Episode struct {
 	Synopsis string
 	// SkipTimes contains timestamps for skipping intros/outros
 	SkipTimes *SkipTimes
+	// Season is the season of an episode listed by GetSeasonEpisodes, 0 when
+	// the source has no seasons. GetEpisodeStreamURL uses it.
+	Season int
+	// Audio is the audio the episode was listed in ("Dublado" or "Legendado")
+	// for catalogue sources, empty otherwise. GetEpisodeStreamURL plays it in
+	// that audio unless StreamOptions.Audio says otherwise.
+	Audio string
 }
 
 // TitleDetails contains anime/episode titles in multiple languages
@@ -163,6 +171,8 @@ func FromInternalEpisode(internal *models.Episode) *Episode {
 		Number:   internal.Number,
 		Num:      internal.Num,
 		URL:      internal.URL,
+		Season:   seasonOf(internal.SeasonID),
+		Audio:    internal.Audio,
 		Aired:    internal.Aired,
 		Duration: internal.Duration,
 		IsFiller: internal.IsFiller,
@@ -209,4 +219,13 @@ type Season struct {
 	Number int
 	// Audios the season is offered in: "Dublado" and/or "Legendado".
 	Audios []string
+}
+
+// seasonOf reads a season id that is a number; 0 for anything else.
+func seasonOf(id string) int {
+	n, err := strconv.Atoi(id)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

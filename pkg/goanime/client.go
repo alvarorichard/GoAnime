@@ -5,6 +5,7 @@ package goanime
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
@@ -117,7 +118,7 @@ func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ..
 	}
 
 	if source.IsCatalog() {
-		return catalogStream(scr, episodeURL, "")
+		return catalogStream(scr, "", models.Episode{URL: episodeURL}, "")
 	}
 	return scr.GetStreamURL(episodeURL, options...)
 }
@@ -158,6 +159,9 @@ func DefaultStreamOptions() StreamOptions {
 //   - metadata: Additional info like quality, source, etc.
 //   - error: Any error that occurred
 func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, opts *StreamOptions) (streamURL string, metadata map[string]string, err error) {
+	if anime == nil || episode == nil {
+		return "", nil, fmt.Errorf("no title or episode given")
+	}
 	source, err := types.ParseSource(anime.Source)
 	if err != nil {
 		return "", nil, err
@@ -176,7 +180,10 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 		if opts != nil {
 			audio = opts.Audio
 		}
-		return catalogStream(scr, episode.URL, audio)
+		return catalogStream(scr, anime.URL, models.Episode{
+			Number: episode.Number, Num: episode.Num, URL: episode.URL,
+			SeasonID: strconv.Itoa(episode.Season), Audio: episode.Audio,
+		}, audio)
 	}
 
 	// The episode URL is the direct episode page. (The AllAnime branch that
@@ -186,6 +193,9 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 
 // catalogTimeout bounds one catalogue call; the client has no context to carry.
 const catalogTimeout = 45 * time.Second
+
+// catalogStreamTimeout covers the panel's servers and the fallback, 45s each.
+const catalogStreamTimeout = 100 * time.Second
 
 func asCatalog(scr scraper.UnifiedScraper) (scraper.CatalogScraper, error) {
 	cat, ok := scr.(scraper.CatalogScraper)
@@ -205,14 +215,16 @@ func catalogEpisodes(scr scraper.UnifiedScraper, titleURL string, season int, au
 	return cat.CatalogEpisodes(ctx, titleURL, season, audio)
 }
 
-func catalogStream(scr scraper.UnifiedScraper, episodeURL, audio string) (string, map[string]string, error) {
+// catalogStream resolves an episode. titleURL is the title page the fallback
+// needs ("" when the caller only has the episode URL: no fallback then).
+func catalogStream(scr scraper.UnifiedScraper, titleURL string, ep models.Episode, audio string) (string, map[string]string, error) {
 	cat, err := asCatalog(scr)
 	if err != nil {
 		return "", nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), catalogTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), catalogStreamTimeout)
 	defer cancel()
-	return cat.CatalogStream(ctx, episodeURL, audio)
+	return cat.CatalogStream(ctx, titleURL, ep, audio)
 }
 
 // GetSeasons lists the seasons of a series from a catalogue source

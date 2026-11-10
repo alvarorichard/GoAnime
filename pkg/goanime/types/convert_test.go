@@ -246,6 +246,20 @@ func TestSourceIsCatalog(t *testing.T) {
 	assert.False(t, Source(99).IsCatalog())
 }
 
+func TestEpisodeSeasonConversion(t *testing.T) {
+	assert.Equal(t, 3, FromInternalEpisode(&models.Episode{SeasonID: "3"}).Season)
+	// "99999999999999999999" overflows: Atoi reports an error but returns a
+	// huge number, which is no season.
+	for _, id := range []string{"", "x", "-2", "s1", "99999999999999999999"} {
+		assert.Equal(t, 0, FromInternalEpisode(&models.Episode{SeasonID: id}).Season, id)
+	}
+}
+
+// The audio an episode was listed in survives the conversion.
+func TestEpisodeAudioConversion(t *testing.T) {
+	assert.Equal(t, "Legendado", FromInternalEpisode(&models.Episode{Audio: "Legendado"}).Audio)
+}
+
 // Values are stored by callers: they must not move.
 func TestSourceValuesAreStable(t *testing.T) {
 	assert.Equal(t, 0, int(SourceAnimeFire))

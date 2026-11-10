@@ -108,7 +108,8 @@ func (s Source) ToScraperType() scraper.ScraperType {
 // spelling and the lowercase name of each source; AnimeFire also answers to
 // "fire".
 func ParseSource(s string) (Source, error) {
-	for i, info := range sourceTable {
+	for i := range sourceTable {
+		info := &sourceTable[i]
 		if s == info.name {
 			return Source(i), nil
 		}

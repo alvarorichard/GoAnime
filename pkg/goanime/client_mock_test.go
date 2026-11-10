@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper"
@@ -322,8 +323,11 @@ type mockCatalog struct {
 	err      error
 
 	gotURL    string
+	gotTitle  string
+	gotEp     models.Episode
 	gotSeason int
 	gotAudio  string
+	gotLeft   time.Duration // time left on the context CatalogStream got
 }
 
 func (m *mockCatalog) CatalogSeasons(_ context.Context, u string) ([]scraper.CatalogSeason, error) {
@@ -334,9 +338,12 @@ func (m *mockCatalog) CatalogEpisodes(_ context.Context, u string, season int, a
 	m.gotURL, m.gotSeason, m.gotAudio = u, season, audio
 	return m.episodes, m.err
 }
-func (m *mockCatalog) CatalogStream(_ context.Context, u, audio string) (string, map[string]string, error) {
-	m.gotURL, m.gotAudio = u, audio
-	return "https://video/" + u, map[string]string{"audio": audio}, m.err
+func (m *mockCatalog) CatalogStream(ctx context.Context, titleURL string, ep models.Episode, audio string) (streamURL string, metadata map[string]string, err error) {
+	m.gotTitle, m.gotEp, m.gotURL, m.gotAudio = titleURL, ep, ep.URL, audio
+	if dl, ok := ctx.Deadline(); ok {
+		m.gotLeft = time.Until(dl)
+	}
+	return "https://video/" + ep.URL, map[string]string{"audio": audio}, m.err
 }
 
 func startflixTitle() *types.Anime {
@@ -413,6 +420,11 @@ func TestClientGetEpisodeStreamURLCatalogAudio(t *testing.T) {
 	assert.Equal(t, "https://video/ep9", u)
 	assert.Equal(t, "Legendado", meta["audio"])
 	assert.Equal(t, "Legendado", cat.gotAudio)
+	assert.Equal(t, "https://sf/series/x/", cat.gotTitle, "the fallback needs the title page")
+
+	_, _, err = c.GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9", Num: 7, Season: 3}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, models.Episode{URL: "ep9", Num: 7, SeasonID: "3"}, cat.gotEp, "season and number reach the fallback")
 
 	_, _, err = c.GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9"}, nil)
 	require.NoError(t, err)
@@ -428,4 +440,41 @@ func TestClientGetStreamURLCatalogSource(t *testing.T) {
 	u, _, err := goanime.NewClientForTest(&mockManager{scr: cat}).GetStreamURL("ep1", types.SourceStartFlix)
 	require.NoError(t, err)
 	assert.Equal(t, "https://video/ep1", u)
+	assert.Equal(t, "", cat.gotTitle, "only the episode URL is known: no fallback")
+}
+
+// The audio an episode was listed in reaches the adapter.
+func TestClientGetEpisodeStreamURLCatalogKeepsAudio(t *testing.T) {
+	cat := &mockCatalog{}
+	_, _, err := goanime.NewClientForTest(&mockManager{scr: cat}).
+		GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9", Audio: "Legendado"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "Legendado", cat.gotEp.Audio, "the audio the episode was listed in reaches the adapter")
+	assert.Equal(t, "", cat.gotAudio, "and is not mistaken for an explicit choice")
+}
+
+// The episode's display number reaches the fallback when Num is unset.
+func TestClientGetEpisodeStreamURLCatalogKeepsNumber(t *testing.T) {
+	cat := &mockCatalog{}
+	_, _, err := goanime.NewClientForTest(&mockManager{scr: cat}).
+		GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9", Number: "5"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "5", cat.gotEp.Number)
+}
+
+// The catalogue stream call carries a deadline that spans the panel and the
+// fallback (about 100s), on both entry points.
+func TestClientCatalogStreamHasADeadline(t *testing.T) {
+	cat := &mockCatalog{}
+	c := goanime.NewClientForTest(&mockManager{scr: cat})
+
+	_, _, err := c.GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9"}, nil)
+	require.NoError(t, err)
+	assert.Greater(t, cat.gotLeft, 90*time.Second)
+	assert.LessOrEqual(t, cat.gotLeft, 100*time.Second)
+
+	cat.gotLeft = 0
+	_, _, err = c.GetStreamURL("ep1", types.SourceStartFlix)
+	require.NoError(t, err)
+	assert.Greater(t, cat.gotLeft, 90*time.Second)
 }

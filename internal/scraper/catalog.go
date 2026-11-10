@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // CatalogScraper is the optional capability (discovered by type assertion) of
@@ -24,9 +26,13 @@ type CatalogScraper interface {
 	// ignores season and audio; a series needs a season (ErrSeasonRequired
 	// otherwise). An empty audio takes the dub when the season has one.
 	CatalogEpisodes(ctx context.Context, titleURL string, season int, audio string) ([]models.Episode, error)
-	// CatalogStream resolves the episode's stream. A non-empty audio that
+	// CatalogStream resolves an episode's stream (episode as CatalogEpisodes
+	// listed it; titleURL is the title page, "" when the caller has none).
+	// When the panel's servers fail, or do not carry the audio asked for,
+	// the title is looked up by its ids on the independent vidsrc fallback,
+	// which serves the original audio (Legendado). A non-empty audio that
 	// does not play is ErrAudioUnavailable, never the other audio in silence.
-	CatalogStream(ctx context.Context, episodeURL, audio string) (string, map[string]string, error)
+	CatalogStream(ctx context.Context, titleURL string, ep models.Episode, audio string) (streamURL string, metadata map[string]string, err error)
 }
 
 // CatalogSeason is one season of a series.
@@ -131,6 +137,7 @@ func (a *StartFlixAdapter) CatalogEpisodes(ctx context.Context, titleURL string,
 				URL:      panel.EpisodeURL(e.ID),
 				DataID:   e.ID,
 				SeasonID: s.Key(),
+				Audio:    string(pick),
 				Title:    models.TitleDetails{English: e.Title, Romaji: e.Title},
 			})
 		}
@@ -139,18 +146,89 @@ func (a *StartFlixAdapter) CatalogEpisodes(ctx context.Context, titleURL string,
 	return nil, fmt.Errorf("%w: season %d (seasons: %s)", ErrSeasonNotFound, season, strings.Join(have, ", "))
 }
 
-func (a *StartFlixAdapter) CatalogStream(ctx context.Context, episodeURL, audio string) (string, map[string]string, error) {
+// catalogPhaseBudget bounds the panel's servers and, separately, the fallback:
+// one hanging host must not leave the fallback a deadline it cannot meet.
+const catalogPhaseBudget = 45 * time.Second
+
+// catalogFallbackFn resolves a title by its ids on the vidsrc fallback; a seam
+// for tests, as sfxVIDSRCFallbackFn is in the api package. Movies take the
+// IMDb id (TMDB when the panel carries only that); series take the TMDB id
+// with the season and episode number.
+var catalogFallbackFn = func(ctx context.Context, panel startflix.Panel, season, episode int) (*startflix.Stream, error) {
+	if panel.Kind == startflix.KindMovie {
+		return startflix.MovieFallback(ctx, panel.IMDBID, panel.TMDBID)
+	}
+	return startflix.EpisodeFallback(ctx, panel.TMDBID, season, episode)
+}
+
+// vidsrcStream tries the fallback for the title. nil when the caller has no
+// title page, the panel cannot be found, or the fallback misses.
+func (a *StartFlixAdapter) vidsrcStream(ctx context.Context, titleURL string, ep models.Episode) *startflix.Stream {
+	if titleURL == "" {
+		util.Debug("vidsrc fallback skipped: no title page to find the ids on", "episode", ep.URL)
+		return nil
+	}
+	fctx, cancel := context.WithTimeout(ctx, catalogPhaseBudget)
+	defer cancel()
+	panel, err := a.client.Panel(fctx, titleURL)
+	if err != nil {
+		util.Debug("vidsrc fallback skipped: no panel for the title", "title", titleURL, "err", err)
+		return nil
+	}
+	season, _ := strconv.Atoi(ep.SeasonID)
+	num := ep.Num
+	if num == 0 {
+		num, _ = strconv.Atoi(ep.Number)
+	}
+	// Season or episode 0 means "whatever the source names as Pilot": for a
+	// series that would answer some other episode as the one asked for.
+	if panel.Kind != startflix.KindMovie && (season <= 0 || num <= 0) {
+		util.Debug("vidsrc fallback skipped: series episode without season or number", "season", season, "episode", num)
+		return nil
+	}
+	fs, err := catalogFallbackFn(fctx, panel, season, num)
+	if err != nil || fs == nil {
+		util.Debug("vidsrc fallback missed", "title", titleURL, "season", season, "episode", num, "err", err)
+		return nil
+	}
+	if fs.Audio == "" {
+		fs.Audio = startflix.AudioSubtitled // the fallback serves the original audio
+	}
+	return fs
+}
+
+func (a *StartFlixAdapter) CatalogStream(ctx context.Context, titleURL string, ep models.Episode, audio string) (streamURL string, metadata map[string]string, err error) {
 	want, err := ParseCatalogAudio(audio)
 	if err != nil {
 		return "", nil, err
 	}
-	players, err := a.client.Players(ctx, episodeURL)
-	if err != nil {
-		return "", nil, err
+	if want == "" {
+		// An episode listed in one audio plays in that audio: the panel adds
+		// a player of the other audio to a list, and the tallest would win.
+		want, _ = ParseCatalogAudio(ep.Audio)
 	}
-	stream, err := a.client.ResolveStreamFor(ctx, players, want)
-	if err != nil {
-		return "", nil, err
+	pctx, cancel := context.WithTimeout(ctx, catalogPhaseBudget)
+	players, perr := a.client.Players(pctx, ep.URL)
+	var stream *startflix.Stream
+	if perr == nil {
+		stream, perr = a.client.ResolveStreamFor(pctx, players, want)
+	}
+	cancel()
+
+	wrongAudio := perr == nil && want != "" && stream.Audio != "" && stream.Audio != want
+	// The fallback only serves the original audio, so it is not asked for a dub.
+	if (perr != nil || wrongAudio) && want != startflix.AudioDubbed {
+		if ctx.Err() != nil {
+			return "", nil, ctx.Err()
+		}
+		// It replaces a panel that failed, and a panel stream in the wrong
+		// audio, when it carries the audio asked for.
+		if fs := a.vidsrcStream(ctx, titleURL, ep); fs != nil && (want == "" || fs.Audio == want) {
+			stream, perr = fs, nil
+		}
+	}
+	if perr != nil {
+		return "", nil, perr
 	}
 	if want != "" && stream.Audio != "" && stream.Audio != want {
 		return "", nil, fmt.Errorf("%w: %s plays, %s does not (listed: %s)", ErrAudioUnavailable,
