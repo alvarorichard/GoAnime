@@ -15,6 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// sameServerTransport is sameServer's own connection pool. httptest.Server.Close
+// calls CloseIdleConnections on http.DefaultTransport, which would cut a
+// parallel test's in-flight request ("transport connection broken:
+// CloseIdleConnections called") if they shared it.
+var sameServerTransport = http.DefaultTransport.(*http.Transport).Clone()
+
 // sameServer sends every request to one test server whatever its host, so the
 // adapter can be fed realistic URLs.
 type sameServer struct{ target *url.URL }
@@ -22,7 +28,7 @@ type sameServer struct{ target *url.URL }
 func (s sameServer) RoundTrip(req *http.Request) (*http.Response, error) {
 	out := req.Clone(req.Context())
 	out.URL.Scheme, out.URL.Host, out.Host = s.target.Scheme, s.target.Host, s.target.Host
-	return http.DefaultTransport.RoundTrip(out)
+	return sameServerTransport.RoundTrip(out)
 }
 
 func newStartFlixTestAdapter(t *testing.T, h http.HandlerFunc) *StartFlixAdapter {
