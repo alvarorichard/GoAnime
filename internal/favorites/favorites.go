@@ -2,6 +2,11 @@
 // "My List" of the streaming services. They live in one small JSON file next
 // to the watch history, so they work on every platform and in builds without
 // SQLite (no CGO).
+//
+// A Store serialises its own calls, but two GoAnime processes on one file do
+// not lock each other: the last writer wins, so two favorites toggled in the
+// same few milliseconds from two windows can lose one. Within a process use
+// Default, the one shared Store.
 package favorites
 
 import (
@@ -21,6 +26,10 @@ import (
 
 // maxEntries bounds the list; the oldest favorite is dropped past it.
 const maxEntries = 500
+
+// schemaVersion is the file layout this build reads and writes. A file from a
+// newer build is left alone rather than rewritten without its new fields.
+const schemaVersion = 1
 
 // Entry is one favorite work.
 type Entry struct {
@@ -65,13 +74,29 @@ func Default() *Store {
 	return defaultStore
 }
 
-var errNoPath = errors.New("favorites: no data directory")
+var (
+	errNoPath = errors.New("favorites: no data directory")
+	// ErrNewerFile means favorites.json was written by a newer GoAnime.
+	ErrNewerFile = errors.New("favorites: favorites.json was written by a newer GoAnime; update to change it")
+)
+
+// reason is err without the file path os errors carry, which is noise (and a
+// temp file name) on a screen: "permission denied", not "open /x/.tmp: ...".
+func reason(err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
+}
 
 func normalize(key string) string { return strings.ToLower(strings.TrimSpace(key)) }
 
 // load reads the file. A missing file is an empty list. A file that is not
-// valid JSON is moved aside (favorites.json.corrupt) and treated as empty, so
-// one bad write never locks the feature.
+// valid JSON is moved aside (favorites.json.corrupt.<time>) and treated as
+// empty, so one bad write never locks the feature; when it cannot be moved
+// aside the error says so, so it is never overwritten unseen. Duplicate keys
+// (a hand-edited file) collapse to the newest.
 func (s *Store) load() ([]Entry, error) {
 	if s.path == "" {
 		return nil, errNoPath
@@ -81,23 +106,49 @@ func (s *Store) load() ([]Entry, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("favorites: %w", err)
+		return nil, fmt.Errorf("favorites: %w", reason(err))
 	}
-	entries, ok := decode(data)
+	f, ok := decode(data)
 	if !ok {
-		_ = os.Rename(s.path, s.path+".corrupt")
+		aside := s.path + ".corrupt." + time.Now().Format("20060102-150405")
+		if err := os.Rename(s.path, aside); err != nil {
+			return nil, fmt.Errorf("favorites: favorites.json is damaged and could not be set aside: %w", reason(err))
+		}
 		return nil, nil
 	}
-	return entries, nil
+	if f.Version > schemaVersion {
+		return nil, ErrNewerFile
+	}
+	return dedupe(f.Entries), nil
+}
+
+// dedupe keeps one entry per key, the one added last.
+func dedupe(entries []Entry) []Entry {
+	seen := make(map[string]int, len(entries))
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		e.Key = normalize(e.Key)
+		if e.Key == "" {
+			continue
+		}
+		if i, ok := seen[e.Key]; ok {
+			if e.AddedAt.After(out[i].AddedAt) {
+				out[i] = e
+			}
+			continue
+		}
+		seen[e.Key] = len(out)
+		out = append(out, e)
+	}
+	return out
 }
 
 // decode parses the file's JSON; ok is false when it is not valid.
-func decode(data []byte) (entries []Entry, ok bool) {
-	var f file
+func decode(data []byte) (f file, ok bool) {
 	if json.Unmarshal(data, &f) != nil {
-		return nil, false
+		return file{}, false
 	}
-	return f.Entries, true
+	return f, true
 }
 
 // save writes entries atomically: a temp file in the same directory, renamed
@@ -108,15 +159,15 @@ func (s *Store) save(entries []Entry) error {
 	}
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("favorites: %w", err)
+		return fmt.Errorf("favorites: %w", reason(err))
 	}
-	data, err := json.MarshalIndent(file{Version: 1, Entries: entries}, "", "  ")
+	data, err := json.MarshalIndent(file{Version: schemaVersion, Entries: entries}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("favorites: %w", err)
+		return fmt.Errorf("favorites: %w", reason(err))
 	}
 	tmp, err := os.CreateTemp(dir, ".favorites-*.tmp")
 	if err != nil {
-		return fmt.Errorf("favorites: %w", err)
+		return fmt.Errorf("favorites: %w", reason(err))
 	}
 	name := tmp.Name()
 	_, werr := tmp.Write(data)
@@ -127,7 +178,7 @@ func (s *Store) save(entries []Entry) error {
 	}
 	if err := os.Rename(name, s.path); err != nil {
 		_ = os.Remove(name)
-		return fmt.Errorf("favorites: %w", err)
+		return fmt.Errorf("favorites: %w", reason(err))
 	}
 	return nil
 }
@@ -159,6 +210,21 @@ func (s *Store) Has(key string) bool {
 		}
 	}
 	return false
+}
+
+// Keys returns the key of every favorite, from one read of the file.
+func (s *Store) Keys() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries, err := s.load()
+	if err != nil {
+		return map[string]bool{}
+	}
+	keys := make(map[string]bool, len(entries))
+	for i := range entries {
+		keys[entries[i].Key] = true
+	}
+	return keys
 }
 
 // Toggle adds e when its key is not a favorite and removes it when it is. It

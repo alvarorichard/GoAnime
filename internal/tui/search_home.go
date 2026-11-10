@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -31,6 +32,10 @@ var homeScopes = []struct{ Name, Value string }{
 	{"ENGLISH", "hianime"},
 	{"MOVIES/TV", "movietv"},
 }
+
+// homeFavoritesShown is how many FAVORITOS rows the home screen draws; the
+// rest wait behind a "+N more" line and slide in as rows are removed.
+const homeFavoritesShown = 8
 
 // minHomeQuery is the shortest query enter searches for.
 const minHomeQuery = 2
@@ -311,7 +316,7 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		scopeIdx:    scopeIdx,
 		continueAll: opts.Continue,
 		recentAll:   opts.Recent,
-		favoriteAll: opts.Favorites,
+		favoriteAll: slices.Clone(opts.Favorites),
 		cursor:      0,
 		focusInput:  true,
 		deleteEntry: opts.DeleteEntry,
@@ -343,7 +348,7 @@ func (m *searchHomeModel) rebuildRows() {
 	for i := range m.continueAll {
 		m.rows = append(m.rows, homeRow{kind: homeRowContinue, index: i})
 	}
-	for i := range m.favoriteAll {
+	for i := range min(len(m.favoriteAll), homeFavoritesShown) {
 		m.rows = append(m.rows, homeRow{kind: homeRowFavorite, index: i})
 	}
 	for i := range m.recentAll {
@@ -1269,8 +1274,9 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 // favoritesView renders the FAVORITOS rows: the title and, at the right, its
 // year and type.
 func (m *searchHomeModel) favoritesView(width int) string {
-	items := make([]homeRowItem, 0, len(m.favoriteAll))
-	for _, f := range m.favoriteAll {
+	shown := m.favoriteAll[:min(len(m.favoriteAll), homeFavoritesShown)]
+	items := make([]homeRowItem, 0, len(shown))
+	for _, f := range shown {
 		var note []string
 		if y := singleLine(f.Year); y != "" {
 			note = append(note, y)
@@ -1280,7 +1286,11 @@ func (m *searchHomeModel) favoritesView(width int) string {
 		}
 		items = append(items, homeRowItem{title: singleLine(f.Title), note: strings.Join(note, " · "), key: displaySource(f.Source)})
 	}
-	return renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
+	rows := renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
+	if more := len(m.favoriteAll) - len(shown); more > 0 {
+		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · they show on the results when you search for them", more))
+	}
+	return rows
 }
 
 // recentView renders the recent searches: the query and its result count.

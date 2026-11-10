@@ -21,10 +21,11 @@ func useFavorites(t *testing.T) *favorites.Store {
 	return store
 }
 
-func TestHomeFavoritesAreNewestFirstAndBounded(t *testing.T) {
+func TestHomeFavoritesAreNewestFirstAndNoneAreCutOff(t *testing.T) {
 	store := useFavorites(t)
 	base := time.Now().Add(-time.Hour)
-	for i := range maxHomeFavorites + 3 {
+	const total = 13
+	for i := range total {
 		_, err := store.Toggle(favorites.Entry{
 			Key: "k" + strconv.Itoa(i), Title: "Title " + strconv.Itoa(i),
 			Year: "2020", Media: "Anime", Source: "HiAnime",
@@ -35,9 +36,9 @@ func TestHomeFavoritesAreNewestFirstAndBounded(t *testing.T) {
 
 	rows := homeFavorites()
 
-	require.Len(t, rows, maxHomeFavorites)
-	assert.Equal(t, "Title "+strconv.Itoa(maxHomeFavorites+2), rows[0].Title, "newest first")
-	assert.Equal(t, "k"+strconv.Itoa(maxHomeFavorites+2), rows[0].Key)
+	require.Len(t, rows, total, "the screen decides how many to draw, not the handler")
+	assert.Equal(t, "Title "+strconv.Itoa(total-1), rows[0].Title, "newest first")
+	assert.Equal(t, "k"+strconv.Itoa(total-1), rows[0].Key)
 	assert.Equal(t, "2020", rows[0].Year)
 	assert.Equal(t, "HiAnime", rows[0].Source)
 }

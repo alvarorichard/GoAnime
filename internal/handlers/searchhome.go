@@ -122,9 +122,6 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 	})
 }
 
-// maxHomeFavorites bounds the FAVORITOS rows on the home screen.
-const maxHomeFavorites = 8
-
 // favoritesStore is the FAVORITOS file; a variable so tests use a temporary one.
 var favoritesStore = favorites.Default
 
@@ -134,9 +131,6 @@ func homeFavorites() []tui.HomeFavorite {
 	if err != nil {
 		util.Debugf("Favorites unavailable: %v", err)
 		return nil
-	}
-	if len(list) > maxHomeFavorites {
-		list = list[:maxHomeFavorites]
 	}
 	rows := make([]tui.HomeFavorite, 0, len(list))
 	for _, f := range list {

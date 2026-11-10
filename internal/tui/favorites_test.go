@@ -3,11 +3,15 @@ package tui
 import (
 	"errors"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +87,7 @@ func TestCtrlFWhileFilteringDoesNotFavorite(t *testing.T) {
 
 type failingFavorites struct{}
 
-func (failingFavorites) Has(string) bool                      { return false }
+func (failingFavorites) Keys() map[string]bool                { return map[string]bool{} }
 func (failingFavorites) Toggle(favorites.Entry) (bool, error) { return false, errors.New("disk full") }
 
 func TestAFavoriteThatCannotBeSavedSaysWhy(t *testing.T) {
@@ -253,4 +257,168 @@ func TestRAndEDoNothingOnAFavoriteRow(t *testing.T) {
 	_, cmd = m.Update(press('e', "e"))
 	assert.Nil(t, cmd)
 	assert.Len(t, m.favoriteAll, 2)
+}
+
+// ---- feedback on the row, at any width -------------------------------------------
+
+func TestTheStarShowsOnTheRowAtEveryWidth(t *testing.T) {
+	for _, width := range []int{60, 80, 140} {
+		m, _ := resultsWithFavorites(t)
+		_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		assert.NotContains(t, screen2(m), "★", "width %d: nothing is a favorite yet", width)
+
+		_, _ = m.Update(ctrlF)
+		view := screen2(m)
+		assert.Contains(t, view, "★", "width %d: the row tells the user it worked", width)
+
+		_, _ = m.Update(ctrlF)
+		assert.NotContains(t, screen2(m), "★", "width %d: and that it is off again", width)
+	}
+}
+
+func screen2(m *animeResultsModel) string { return ansi.Strip(m.View().Content) }
+
+func TestOnlyTheFavoriteRowGetsTheStar(t *testing.T) {
+	m, _ := resultsWithFavorites(t)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	_, _ = m.Update(ctrlF) // Frieren
+
+	count := 0
+	for line := range strings.SplitSeq(screen2(m), "\n") {
+		if strings.Contains(line, "★") && !strings.Contains(line, "Details") {
+			count++
+			assert.Contains(t, line, "Frieren")
+		}
+	}
+	assert.GreaterOrEqual(t, count, 1)
+	assert.NotContains(t, rowOf(m, "Naruto"), "★")
+}
+
+func rowOf(m *animeResultsModel, title string) string {
+	for line := range strings.SplitSeq(screen2(m), "\n") {
+		if strings.Contains(line, title) {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestFavoritesFromEarlierSessionsShowOnTheirRows(t *testing.T) {
+	store := favorites.Open(filepath.Join(t.TempDir(), "favorites.json"))
+	_, err := store.Toggle(favorites.Entry{Key: "naruto", Title: "Naruto"})
+	require.NoError(t, err)
+	prev := newFavorites
+	newFavorites = func() favoritesAPI { return store }
+	t.Cleanup(func() { newFavorites = prev })
+
+	m := newAnimeResultsModel([]*models.Anime{
+		{Name: "[PT-BR] Frieren", Source: "Animefire.io"},
+		{Name: "[PT-BR] Naruto", Source: "Animefire.io"},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	assert.Contains(t, rowOf(m, "Naruto"), "★")
+	assert.NotContains(t, rowOf(m, "Frieren"), "★")
+}
+
+// countingFavorites counts how often the store is read.
+type countingFavorites struct {
+	keys  map[string]bool
+	reads int
+}
+
+func (c *countingFavorites) Keys() map[string]bool { c.reads++; return c.keys }
+func (c *countingFavorites) Toggle(e favorites.Entry) (bool, error) {
+	if c.keys[e.Key] {
+		delete(c.keys, e.Key)
+		return false, nil
+	}
+	c.keys[e.Key] = true
+	return true, nil
+}
+
+func TestRenderingNeverReadsTheStore(t *testing.T) {
+	m, _ := resultsWithFavorites(t)
+	c := &countingFavorites{keys: map[string]bool{}}
+	m.favs = c
+	for range 20 {
+		_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		_ = m.View()
+		_ = m.detailsContent()
+	}
+	assert.Zero(t, c.reads, "the keys are read once, when the screen opens")
+}
+
+func TestTheErrorNoticeGoesAwayWhenAToggleWorksAgain(t *testing.T) {
+	m, _ := resultsWithFavorites(t)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	good := &countingFavorites{keys: map[string]bool{}}
+	m.favs = failingFavorites{}
+	_, _ = m.Update(ctrlF)
+	require.NotEmpty(t, m.notice)
+
+	m.favs = good
+	_, _ = m.Update(ctrlF)
+
+	assert.Empty(t, m.notice)
+	assert.NotContains(t, screen2(m), "Could not update")
+	assert.Contains(t, screen2(m), "★")
+}
+
+// ---- more than the home screen draws ---------------------------------------------
+
+func manyFavorites(n int) []HomeFavorite {
+	rows := make([]HomeFavorite, n)
+	for i := range rows {
+		rows[i] = HomeFavorite{Key: "k" + strconv.Itoa(i), Title: "Work " + strconv.Itoa(i), Media: "Anime"}
+	}
+	return rows
+}
+
+func TestOnlyTheFirstFavoritesAreDrawnAndTheRestAreCounted(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{Favorites: manyFavorites(13)})
+
+	assert.Len(t, m.rows, homeFavoritesShown, "the cursor only reaches what is drawn")
+	view := screen(m)
+	assert.Contains(t, view, "Work 0")
+	assert.Contains(t, view, "Work 7")
+	assert.NotContains(t, view, "Work 8")
+	assert.Contains(t, view, "+5 more")
+}
+
+func TestRemovingAFavoriteSlidesTheNextOneIn(t *testing.T) {
+	f := &favoritesFake{}
+	m := newSearchHomeModel(f.options(manyFavorites(10), nil, nil))
+	downTo(t, m, 0)
+
+	_, _ = m.Update(press('x', "x"))
+
+	assert.Equal(t, []string{"k0"}, f.removed)
+	assert.Len(t, m.rows, homeFavoritesShown, "the hidden ones backfill")
+	view := screen(m)
+	assert.Contains(t, view, "Work 8", "it was behind the +N line")
+	assert.Contains(t, view, "Work 1")
+	assert.NotContains(t, view, "Work 0")
+	assert.Contains(t, view, "+1 more", "9 favorites are left, 8 drawn")
+}
+
+func TestClearCountsEveryFavoriteIncludingHiddenOnes(t *testing.T) {
+	f := &favoritesFake{}
+	m := newSearchHomeModel(f.options(manyFavorites(13), nil, nil))
+	downTo(t, m, 0)
+
+	_, _ = m.Update(press('X', "X"))
+
+	assert.Contains(t, screen(m), "Clear all 13 favorites from FAVORITOS?")
+}
+
+func TestTheScreenDoesNotScribbleOnTheCallersFavorites(t *testing.T) {
+	rows := manyFavorites(3)
+	before := slices.Clone(rows)
+	f := &favoritesFake{}
+	m := newSearchHomeModel(f.options(rows, nil, nil))
+	downTo(t, m, 0)
+	_, _ = m.Update(press('x', "x"))
+
+	assert.Equal(t, before, rows, "removing a row must not shift the caller's slice")
 }

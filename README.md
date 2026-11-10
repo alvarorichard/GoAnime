@@ -280,9 +280,10 @@ stopped partway with ◐, and opens where you left off.
 ### Favoritos
 
 Press `ctrl+f` on a result to add the work to FAVORITOS, and again to take it
-off; a favorite shows a star before its title in the details. A work is one
+off; a favorite wears a star on its row in the results and in the details. A work is one
 favorite whatever the source it came from. FAVORITOS appears on the search
-home between CONTINUE and RECENT, newest first; `enter` searches the title
+home between CONTINUE and RECENT, newest first, eight rows at a time with a
+"+N more" line for the rest (they slide in as you remove rows); `enter` searches the title
 in every scope, `x` removes a row and `X` empties the list after a `y`/`n`
 question. The list is one small file, `favorites.json`, next to the watch
 history (`~/.local/goanime/tracking/` on Linux and macOS,

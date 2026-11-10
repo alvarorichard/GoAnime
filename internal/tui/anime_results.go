@@ -276,6 +276,9 @@ type animeGroupItem struct {
 	group  *animeGroup
 	pos    int    // the group's position in the model
 	number string // the row's position, zero padded to the widest one
+	// favs is the model's set of FAVORITOS keys, shared so a toggle shows on
+	// the row at once; nil when favorites are not in use.
+	favs map[string]bool
 }
 
 // FilterValue exposes the title and every version's metadata to the fuzzy
@@ -327,6 +330,9 @@ func (i animeGroupItem) row() row {
 	var tags []string
 	if i.group != nil {
 		tags = i.group.badges()
+		if i.favs[normalizeTitleKey(i.group.title)] {
+			tags = append([]string{drawGlyph("★", "*")}, tags...)
+		}
 	}
 	return row{number: i.number, title: i.Title(), desc: i.Description(), tags: tags}
 }
@@ -378,13 +384,15 @@ type animeResultsModel struct {
 	plainPanel string
 	// showHelp replaces the list with the KEYS overlay (tela 10).
 	showHelp bool
-	// favs is the FAVORITOS list ctrl+f adds the highlighted work to.
-	favs favoritesAPI
+	// favs is the FAVORITOS list ctrl+f adds the highlighted work to, and
+	// favKeys the keys in it, read once and kept in step with every toggle.
+	favs    favoritesAPI
+	favKeys map[string]bool
 }
 
 // favoritesAPI is the part of the favorites store the result screen uses.
 type favoritesAPI interface {
-	Has(key string) bool
+	Keys() map[string]bool
 	Toggle(e favorites.Entry) (bool, error)
 }
 
@@ -406,10 +414,15 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		shell.Context = `"` + query + `"`
 	}
 	groups := groupAnimeResults(animes)
+	favs := newFavorites()
+	favKeys := map[string]bool{}
+	if favs != nil {
+		favKeys = favs.Keys()
+	}
 	digits := max(len(strconv.Itoa(len(groups))), 2)
 	items := make([]list.Item, 0, len(groups))
 	for i := range groups {
-		items = append(items, animeGroupItem{group: &groups[i], pos: i, number: fmt.Sprintf("%0*d", digits, i+1)})
+		items = append(items, animeGroupItem{group: &groups[i], pos: i, number: fmt.Sprintf("%0*d", digits, i+1), favs: favKeys})
 	}
 
 	delegate := rowDelegate{theme: &theme, twoLine: true, spacing: 1}
@@ -421,7 +434,8 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		versionSel: make(map[int]int),
 		query:      query,
 		notice:     takeResultsNotice(),
-		favs:       newFavorites(),
+		favs:       favs,
+		favKeys:    favKeys,
 	}
 	width, height := shell.ContentSize()
 	results := list.New(items, delegate, width, max(height-m.noticeHeight(width), 1))
@@ -597,7 +611,7 @@ func (m *animeResultsModel) favoriteEntry(item animeGroupItem) favorites.Entry {
 
 // isFavorite reports whether the highlighted work is in FAVORITOS.
 func (m *animeResultsModel) isFavorite(g *animeGroup) bool {
-	return m.favs != nil && g != nil && m.favs.Has(normalizeTitleKey(g.title))
+	return g != nil && m.favKeys[normalizeTitleKey(g.title)]
 }
 
 // toggleFavorite adds the highlighted work to FAVORITOS or takes it off.
@@ -606,9 +620,21 @@ func (m *animeResultsModel) toggleFavorite() {
 	if !ok || item.group == nil || m.favs == nil {
 		return
 	}
-	if _, err := m.favs.Toggle(m.favoriteEntry(item)); err != nil {
+	entry := m.favoriteEntry(item)
+	on, err := m.favs.Toggle(entry)
+	if err != nil {
 		// The notice takes rows above the list, so the list is resized.
 		m.notice = "Could not update FAVORITOS: " + singleLine(err.Error())
+		m.resize()
+		return
+	}
+	if on {
+		m.favKeys[entry.Key] = true
+	} else {
+		delete(m.favKeys, entry.Key)
+	}
+	if strings.HasPrefix(m.notice, "Could not update FAVORITOS") {
+		m.notice = ""
 		m.resize()
 		return
 	}
