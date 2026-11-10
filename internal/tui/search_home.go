@@ -1009,9 +1009,7 @@ func (m *searchHomeModel) homeView(width, height int) string {
 		}
 		sections = append(sections, "", lists)
 	}
-	if favorites := m.favoritesView(width); favorites != "" {
-		sections = append(sections, "", m.sectionHeader("FAVORITOS", ""), favorites)
-	}
+	sections = append(sections, "", m.sectionHeader("FAVORITOS", ""), m.favoritesView(width))
 	if recent := m.recentView(width); recent != "" {
 		sections = append(sections, "", m.sectionHeader("RECENT", "最近"), recent)
 	}
@@ -1274,6 +1272,10 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 // favoritesView renders the FAVORITOS rows: the title and, at the right, its
 // year and type.
 func (m *searchHomeModel) favoritesView(width int) string {
+	if len(m.favoriteAll) == 0 {
+		// Always on the menu, so it can be found before the first favorite.
+		return m.theme.Muted.Render("  Nothing here yet · press ctrl+f on a result to add it")
+	}
 	shown := m.favoriteAll[:min(len(m.favoriteAll), homeFavoritesShown)]
 	items := make([]homeRowItem, 0, len(shown))
 	for _, f := range shown {

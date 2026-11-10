@@ -591,6 +591,15 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// favoriteHint is the footer's word for ctrl+f: what it will do to the
+// highlighted work.
+func (m *animeResultsModel) favoriteHint() string {
+	if item, ok := m.results.SelectedItem().(animeGroupItem); ok && m.isFavorite(item.group) {
+		return "unfavorite"
+	}
+	return "favorite"
+}
+
 // favoriteEntry is the FAVORITOS record of a work: it is kept by title, so
 // every source's copy of it is one favorite, and remembers the version that
 // was chosen.
@@ -771,7 +780,6 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 		lines = append(lines, prefix+label+"  "+detail)
 	}
 	lines = append(lines, "", "enter opens it on "+displaySource(group.versions[sel].anime.Source))
-
 	fields := []detailField{}
 	if group.year != "" {
 		fields = append(fields, detailField{"Year", group.year})
@@ -780,8 +788,14 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 		fields = append(fields, detailField{"Type", group.media})
 	}
 	title := group.title
-	if m.isFavorite(group) {
-		title = drawGlyph("★ ", "* ") + title
+	tip := ""
+	if m.favs != nil {
+		// Said in words, for whoever has never seen the key.
+		tip = "ctrl+f adds it to FAVORITOS"
+		if m.isFavorite(group) {
+			title = drawGlyph("★ ", "* ") + title
+			tip = "ctrl+f takes it off FAVORITOS"
+		}
 	}
 	return &panelContent{
 		label:  "Details",
@@ -789,6 +803,7 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 		title:  title,
 		fields: fields,
 		lines:  lines,
+		tip:    tip,
 	}
 }
 
@@ -817,7 +832,7 @@ func (m *animeResultsModel) hints() []Hint {
 	return []Hint{
 		{Key: "enter", Desc: "open", Essential: true},
 		{Key: version, Desc: "version"},
-		{Key: "ctrl+f", Desc: "favorite"},
+		{Key: "ctrl+f", Desc: m.favoriteHint()},
 		{Key: move, Desc: "move"},
 		{Key: "esc", Desc: "edit search", Essential: true},
 		{Key: "?", Desc: "help"},

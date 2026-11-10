@@ -168,9 +168,30 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-func TestNoFavoritosNoSection(t *testing.T) {
+func TestFavoritosIsOnTheMenuBeforeTheFirstFavorite(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{})
-	assert.NotContains(t, screen(m), "FAVORITOS")
+
+	view := screen(m)
+	assert.Contains(t, view, "FAVORITOS", "a new user can find it")
+	assert.Contains(t, view, "Nothing here yet")
+	assert.Contains(t, view, "ctrl+f", "and learns how to fill it")
+	assert.Empty(t, m.rows, "an empty list has no rows to walk")
+}
+
+func TestTheEmptyFavoritosHintGoesAwayWithTheFirstOne(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{Favorites: sampleFavorites[:1]})
+	view := screen(m)
+	assert.Contains(t, view, "FAVORITOS")
+	assert.NotContains(t, view, "Nothing here yet")
+}
+
+func TestTheEmptyHintReturnsWhenTheLastFavoriteIsRemoved(t *testing.T) {
+	f := &favoritesFake{}
+	m := newSearchHomeModel(f.options(sampleFavorites[:1], nil, nil))
+	downTo(t, m, 0)
+	_, _ = m.Update(press('x', "x"))
+	assert.Contains(t, screen(m), "Nothing here yet")
+	assert.True(t, m.focusInput)
 }
 
 func TestEnterOnAFavoriteSearchesItsTitleEverywhere(t *testing.T) {
@@ -421,4 +442,42 @@ func TestTheScreenDoesNotScribbleOnTheCallersFavorites(t *testing.T) {
 	_, _ = m.Update(press('x', "x"))
 
 	assert.Equal(t, before, rows, "removing a row must not shift the caller's slice")
+}
+
+// ---- plain words for beginners ---------------------------------------------------
+
+func TestTheDetailsSayInWordsWhatCtrlFDoes(t *testing.T) {
+	m, _ := resultsWithFavorites(t)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITOS")
+
+	_, _ = m.Update(ctrlF)
+	view := screen2(m)
+	assert.Contains(t, view, "ctrl+f takes it off FAVORITOS")
+	assert.NotContains(t, view, "ctrl+f adds it to FAVORITOS")
+}
+
+func TestTheFooterNamesTheActionItWillDo(t *testing.T) {
+	m, _ := resultsWithFavorites(t)
+	hint := func() string {
+		for _, h := range m.hints() {
+			if h.Key == "ctrl+f" {
+				return h.Desc
+			}
+		}
+		return ""
+	}
+	assert.Equal(t, "favorite", hint())
+	_, _ = m.Update(ctrlF)
+	assert.Equal(t, "unfavorite", hint())
+}
+
+func TestThePlainPanelSaysItToo(t *testing.T) {
+	SetPlain(true)
+	t.Cleanup(func() { SetPlain(false) })
+	m, _ := resultsWithFavorites(t)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITOS")
+	_, _ = m.Update(ctrlF)
+	assert.Contains(t, screen2(m), "* Frieren", "a star drawn as text, for screen readers")
 }
