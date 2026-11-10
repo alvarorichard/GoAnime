@@ -122,6 +122,19 @@ accepts each `String()` spelling, the lowercase name of each source (and
 `fire` for AnimeFire), and returns an error for anything else. New values are
 only appended, so a stored `Source` keeps its meaning.
 
+### `types.Season`
+
+```go
+type Season struct {
+    Number int
+    Audios []string // "Dublado" and/or "Legendado", as the site offers them
+}
+```
+
+Audios are written `Dublado` and `Legendado` (the library also accepts `dub`
+and `sub`, in any case). Check `Season.Audios` before asking: many titles have
+only the dub, and an audio the season lacks is `ErrAudioUnavailable`.
+
 ### `types.Anime`
 
 ```go
@@ -158,6 +171,18 @@ type Episode struct {
 `CoverImages` are plain structs; see [types/anime.go](types/anime.go).
 
 ## Notes
+
+- A Legendado stream can fail on some titles even when it is listed: the
+  servers that carry it come and go. The error says what played instead and
+  how to ask for it; try again later or ask for `Dublado`.
+- Calls take no `context`. A failing stream call can take about 5 seconds, and
+  the worst case is bounded at 100 seconds.
+- Streams from the anime sources and the Dublado streams of StartFlix are URLs
+  on a local proxy (`http://127.0.0.1:PORT/...`) that lives while your program
+  runs: play them before it exits. Legendado streams are HLS (`.m3u8`) on a
+  host that changes per call, and need `metadata["referer"]` as the Referer.
+- Titles are listed under their Portuguese names, so `breaking bad` finds
+  "Breaking Bad: A Química do Mal".
 
 - Stream URLs expire. Request a new one shortly before playing.
 - AnimeFire's video host expects a `Referer: https://animefire.io` header.

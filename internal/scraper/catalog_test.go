@@ -232,6 +232,7 @@ func TestStartFlixCatalogStreamFallsBackWhenThePanelFails(t *testing.T) {
 	require.ErrorIs(t, err, startflix.ErrNoPlayers)
 	assert.Len(t, *calls, n0)
 	ep.Audio = ""
+	assert.ErrorContains(t, ErrSeasonRequired, "GetSeasons", "the error names the next step")
 
 	// Season or episode 0 would mean "the Pilot" to the fallback: a series
 	// episode without them is never looked up.
@@ -288,6 +289,9 @@ func TestStartFlixCatalogStreamFallbackSuppliesTheMissingAudio(t *testing.T) {
 	stubFallback(t, nil, errors.New("miss"))
 	_, _, err = a.CatalogStream(context.Background(), dubOnly, moviePanelEp, "Legendado")
 	require.ErrorIs(t, err, ErrAudioUnavailable, "the dub is still not played in the sub's place")
+	// The message says what played, what was offered, and what to do.
+	assert.Contains(t, err.Error(), "only Dublado played, not Legendado")
+	assert.Contains(t, err.Error(), `ask for Audio "Dublado"`)
 
 	// A fallback that also serves the wrong audio does not replace the panel.
 	stubFallback(t, &startflix.Stream{URL: "https://vidsrc/x", Audio: startflix.AudioDubbed}, nil)

@@ -2,8 +2,10 @@ package startflix
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -155,4 +157,20 @@ func TestVIDSRCHangingBaseNamedInError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), hang.URL)
 	assert.Contains(t, err.Error(), "did not answer within")
+}
+
+// A transport failure must not spell the URL: the host-token URL carries the
+// player's api_token, and the error ends up in debug logs.
+func TestVIDSRCRequestErrorDoesNotLeakTheToken(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	dead := srv.URL
+	srv.Close() // connection refused
+
+	_, err := vidsrcGetBody(context.Background(), dead+"/generate.php?api_token=SECRET-TOKEN", "")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "SECRET-TOKEN")
+	assert.NotContains(t, err.Error(), "generate.php")
+	var uerr *url.Error
+	assert.False(t, errors.As(err, &uerr), "the url.Error that spells the URL is not kept in the chain")
+	assert.Contains(t, err.Error(), "request failed")
 }

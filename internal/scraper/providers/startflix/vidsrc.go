@@ -649,6 +649,12 @@ func vidsrcGetBody(ctx context.Context, rawURL, referer string, allow ...int) ([
 	}
 	resp, err := vidsrcHTTPFn().Do(req)
 	if err != nil {
+		// A *url.Error spells the whole URL, and the host-token URL carries the
+		// player's api_token: keep the cause, drop the URL.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

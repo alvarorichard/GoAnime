@@ -32,7 +32,18 @@ func main() {
 		fmt.Printf("  season %d: %v\n", s.Number, s.Audios)
 	}
 	if len(seasons) == 0 {
-		log.Fatal("a movie has no seasons: use GetAnimeEpisodes")
+		// A movie has no seasons: it is its one episode, and the audio is
+		// asked for at the stream.
+		episodes, err := client.GetAnimeEpisodes(title.URL, source)
+		if err != nil {
+			log.Fatal(err)
+		}
+		streamURL, metadata, err := client.GetEpisodeStreamURL(title, episodes[0], &goanime.StreamOptions{Audio: "Dublado"})
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("movie stream:", streamURL, "audio:", metadata["audio"])
+		return
 	}
 
 	// An empty audio takes the dub when the season has one.

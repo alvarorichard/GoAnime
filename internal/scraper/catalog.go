@@ -43,7 +43,7 @@ type CatalogSeason struct {
 
 var (
 	// ErrSeasonRequired is a series asked for without saying which season.
-	ErrSeasonRequired = errors.New("this title is a series: choose a season")
+	ErrSeasonRequired = errors.New("this title is a series: list its seasons with GetSeasons and pick one for GetSeasonEpisodes")
 	// ErrAudioUnavailable is an audio the title does not offer, or offers on
 	// no server that plays.
 	ErrAudioUnavailable = errors.New("the requested audio is not available")
@@ -231,8 +231,8 @@ func (a *StartFlixAdapter) CatalogStream(ctx context.Context, titleURL string, e
 		return "", nil, perr
 	}
 	if want != "" && stream.Audio != "" && stream.Audio != want {
-		return "", nil, fmt.Errorf("%w: %s plays, %s does not (listed: %s)", ErrAudioUnavailable,
-			stream.Audio, want, strings.Join(audioNames(startflix.ListedAudios(players, "")), ", "))
+		return "", nil, fmt.Errorf("%w: only %s played, not %s (offered: %s); ask for Audio %q to play it, or try again later", ErrAudioUnavailable,
+			stream.Audio, want, strings.Join(audioNames(startflix.ListedAudios(players, "")), ", "), string(stream.Audio))
 	}
 	meta := startFlixStreamMetadata(stream)
 	if stream.Audio != "" {

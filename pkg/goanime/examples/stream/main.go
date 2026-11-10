@@ -12,8 +12,9 @@ import (
 func main() {
 	client := goanime.NewClient()
 
-	// Episode lists and stream URLs are only available for AnimeFire through
-	// the library, so search that source rather than all of them.
+	// Searching one source keeps the example fast. Episode lists and stream
+	// URLs work for the anime sources and StartFlix; see examples/series for
+	// seasons and movies.
 	source := types.SourceAnimeFire
 	animeName := "Demon Slayer"
 	fmt.Printf("Searching for '%s'...\n", animeName)
