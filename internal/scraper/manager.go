@@ -520,7 +520,14 @@ func (a *StartFlixAdapter) GetStreamURLContext(ctx context.Context, episodeURL s
 	if err != nil {
 		return "", nil, err
 	}
-	metadata = map[string]string{
+	metadata = startFlixStreamMetadata(stream)
+	return stream.URL, metadata, nil
+}
+
+// startFlixStreamMetadata is the playback metadata contract of a StartFlix
+// stream: "referer", "host", and "subtitles" as a JSON array.
+func startFlixStreamMetadata(stream *startflix.Stream) map[string]string {
+	metadata := map[string]string{
 		"source":  "startflix",
 		"referer": stream.Referer,
 		"host":    stream.Host,
@@ -534,7 +541,7 @@ func (a *StartFlixAdapter) GetStreamURLContext(ctx context.Context, episodeURL s
 			metadata["subtitles"] = string(raw)
 		}
 	}
-	return stream.URL, metadata, nil
+	return metadata
 }
 
 func (a *StartFlixAdapter) GetType() ScraperType {

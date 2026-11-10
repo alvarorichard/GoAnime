@@ -1,6 +1,7 @@
 package goanime_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -283,7 +284,7 @@ func TestClientContractMeta(t *testing.T) {
 // says so, and never reaches the scraper (a mockManager with a scraper would
 // answer for them).
 func TestClientEpisodesUnsupportedSources(t *testing.T) {
-	for _, src := range []types.Source{types.SourceStartFlix, types.SourceTopCine, types.SourcePobreflix, types.SourcePomfy} {
+	for _, src := range []types.Source{types.SourceTopCine, types.SourcePobreflix, types.SourcePomfy} {
 		m := &mockManager{scr: &mockScraper{}}
 		c := goanime.NewClientForTest(m)
 
@@ -303,12 +304,128 @@ func TestClientEpisodesUnsupportedSources(t *testing.T) {
 
 func TestClientEpisodesSupportedSourcesReachTheScraper(t *testing.T) {
 	for _, src := range types.Sources() {
-		if !src.SupportsEpisodes() {
-			continue
+		if !src.SupportsEpisodes() || src.IsCatalog() {
+			continue // catalogue sources are covered by the Season tests
 		}
 		m := &mockManager{scr: &mockScraper{episodes: []models.Episode{{Number: "1", URL: "e1"}}}}
 		_, err := goanime.NewClientForTest(m).GetAnimeEpisodes("u", src)
 		require.NoError(t, err, src.String())
 		assert.Equal(t, []scraper.ScraperType{src.ToScraperType()}, m.scraperReqs, src.String())
 	}
+}
+
+// mockCatalog is a UnifiedScraper that is also a CatalogScraper.
+type mockCatalog struct {
+	mockScraper
+	seasons  []scraper.CatalogSeason
+	episodes []models.Episode
+	err      error
+
+	gotURL    string
+	gotSeason int
+	gotAudio  string
+}
+
+func (m *mockCatalog) CatalogSeasons(_ context.Context, u string) ([]scraper.CatalogSeason, error) {
+	m.gotURL = u
+	return m.seasons, m.err
+}
+func (m *mockCatalog) CatalogEpisodes(_ context.Context, u string, season int, audio string) ([]models.Episode, error) {
+	m.gotURL, m.gotSeason, m.gotAudio = u, season, audio
+	return m.episodes, m.err
+}
+func (m *mockCatalog) CatalogStream(_ context.Context, u, audio string) (string, map[string]string, error) {
+	m.gotURL, m.gotAudio = u, audio
+	return "https://video/" + u, map[string]string{"audio": audio}, m.err
+}
+
+func startflixTitle() *types.Anime {
+	return &types.Anime{Name: "Show", URL: "https://sf/series/x/", Source: types.SourceStartFlix.String()}
+}
+
+func TestClientGetSeasons(t *testing.T) {
+	cat := &mockCatalog{seasons: []scraper.CatalogSeason{{Number: 1, Audios: []string{"Dublado"}}, {Number: 2, Audios: []string{"Dublado", "Legendado"}}}}
+	m := &mockManager{scr: cat}
+	got, err := goanime.NewClientForTest(m).GetSeasons(startflixTitle())
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, 2, got[1].Number)
+	assert.Equal(t, []string{"Dublado", "Legendado"}, got[1].Audios)
+	assert.Equal(t, "https://sf/series/x/", cat.gotURL)
+	assert.Equal(t, []scraper.ScraperType{scraper.StartFlixType}, m.scraperReqs)
+}
+
+func TestClientGetSeasonsRefusals(t *testing.T) {
+	c := goanime.NewClientForTest(&mockManager{scr: &mockCatalog{}})
+
+	_, err := c.GetSeasons(nil)
+	require.Error(t, err)
+
+	_, err = c.GetSeasons(&types.Anime{Source: "NoSuchSite"})
+	require.Error(t, err)
+
+	_, err = c.GetSeasons(&types.Anime{Source: types.SourceAnimeFire.String()})
+	require.ErrorIs(t, err, goanime.ErrNotCatalog, "an anime source has no seasons")
+
+	// A catalogue source whose scraper is not a CatalogScraper.
+	c = goanime.NewClientForTest(&mockManager{scr: &mockScraper{}})
+	_, err = c.GetSeasons(startflixTitle())
+	require.ErrorIs(t, err, goanime.ErrEpisodesUnsupported)
+
+	c = goanime.NewClientForTest(&mockManager{scr: &mockCatalog{err: errors.New("boom")}})
+	_, err = c.GetSeasons(startflixTitle())
+	require.EqualError(t, err, "boom")
+}
+
+func TestClientGetSeasonEpisodes(t *testing.T) {
+	cat := &mockCatalog{episodes: []models.Episode{{Number: "1", Num: 1, URL: "e1"}}}
+	got, err := goanime.NewClientForTest(&mockManager{scr: cat}).GetSeasonEpisodes(startflixTitle(), 3, "Legendado")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "e1", got[0].URL)
+	assert.Equal(t, 3, cat.gotSeason)
+	assert.Equal(t, "Legendado", cat.gotAudio)
+
+	_, err = goanime.NewClientForTest(&mockManager{scr: &mockCatalog{err: scraper.ErrSeasonNotFound}}).GetSeasonEpisodes(startflixTitle(), 9, "")
+	require.ErrorIs(t, err, goanime.ErrSeasonNotFound)
+}
+
+// For a catalogue source the old by-source calls go through the catalogue too:
+// a movie is its one episode, a series asks for a season.
+func TestClientGetAnimeEpisodesCatalogSource(t *testing.T) {
+	cat := &mockCatalog{episodes: []models.Episode{{Number: "1", URL: "movie"}}}
+	got, err := goanime.NewClientForTest(&mockManager{scr: cat}).GetAnimeEpisodes("https://sf/filmes/m/", types.SourceStartFlix)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 0, cat.gotSeason)
+	assert.Equal(t, "", cat.gotAudio)
+
+	_, err = goanime.NewClientForTest(&mockManager{scr: &mockCatalog{err: scraper.ErrSeasonRequired}}).GetAnimeEpisodes("u", types.SourceStartFlix)
+	require.ErrorIs(t, err, goanime.ErrSeasonRequired)
+}
+
+func TestClientGetEpisodeStreamURLCatalogAudio(t *testing.T) {
+	cat := &mockCatalog{}
+	c := goanime.NewClientForTest(&mockManager{scr: cat})
+
+	u, meta, err := c.GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9"}, &goanime.StreamOptions{Audio: "Legendado"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://video/ep9", u)
+	assert.Equal(t, "Legendado", meta["audio"])
+	assert.Equal(t, "Legendado", cat.gotAudio)
+
+	_, _, err = c.GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "ep9"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "", cat.gotAudio, "nil options mean no preference")
+
+	_, _, err = goanime.NewClientForTest(&mockManager{scr: &mockCatalog{err: scraper.ErrAudioUnavailable}}).
+		GetEpisodeStreamURL(startflixTitle(), &types.Episode{URL: "e"}, &goanime.StreamOptions{Audio: "Legendado"})
+	require.ErrorIs(t, err, goanime.ErrAudioUnavailable)
+}
+
+func TestClientGetStreamURLCatalogSource(t *testing.T) {
+	cat := &mockCatalog{}
+	u, _, err := goanime.NewClientForTest(&mockManager{scr: cat}).GetStreamURL("ep1", types.SourceStartFlix)
+	require.NoError(t, err)
+	assert.Equal(t, "https://video/ep1", u)
 }

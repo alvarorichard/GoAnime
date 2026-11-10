@@ -46,27 +46,35 @@ type sourceInfo struct {
 	// episodes is whether the source's episodes and streams can be reached
 	// without the CLI's season and audio pickers: true for anime sources.
 	episodes bool
+	// catalog is whether its episodes hang off seasons and audio tracks
+	// (movies and series): the Season calls apply to it.
+	catalog bool
 }
 
 var sourceTable = [sourceCount]sourceInfo{
-	SourceAnimeFire:     {"Animefire.io", scraper.AnimefireType, []string{"AnimeFire", "animefire", "fire", "animefire.io"}, true},
-	SourceGoyabu:        {"Goyabu", scraper.GoyabuType, []string{"goyabu"}, true},
-	SourceHiAnime:       {"HiAnime", scraper.HiAnimeType, []string{"hianime"}, true},
-	SourceStartFlix:     {"StartFlix", scraper.StartFlixType, []string{"startflix"}, false},
-	SourceTopCine:       {"TopCine", scraper.TopCineType, []string{"topcine"}, false},
-	SourceAnimesDigital: {"AnimesDigital", scraper.AnimesDigitalType, []string{"animesdigital"}, true},
-	SourceAnimeDrive:    {"AnimeDrive", scraper.AnimeDriveType, []string{"animedrive"}, true},
-	SourcePobreflix:     {"Pobreflix", scraper.PobreflixType, []string{"pobreflix"}, false},
-	SourceAnroll:        {"AnimesROLL", scraper.AnrollType, []string{"Anroll", "anroll", "animesroll"}, true},
-	SourcePomfy:         {"Pomfy", scraper.PomfyType, []string{"pomfy"}, false},
+	SourceAnimeFire:     {"Animefire.io", scraper.AnimefireType, []string{"AnimeFire", "animefire", "fire", "animefire.io"}, true, false},
+	SourceGoyabu:        {"Goyabu", scraper.GoyabuType, []string{"goyabu"}, true, false},
+	SourceHiAnime:       {"HiAnime", scraper.HiAnimeType, []string{"hianime"}, true, false},
+	SourceStartFlix:     {"StartFlix", scraper.StartFlixType, []string{"startflix"}, true, true},
+	SourceTopCine:       {"TopCine", scraper.TopCineType, []string{"topcine"}, false, false},
+	SourceAnimesDigital: {"AnimesDigital", scraper.AnimesDigitalType, []string{"animesdigital"}, true, false},
+	SourceAnimeDrive:    {"AnimeDrive", scraper.AnimeDriveType, []string{"animedrive"}, true, false},
+	SourcePobreflix:     {"Pobreflix", scraper.PobreflixType, []string{"pobreflix"}, false, false},
+	SourceAnroll:        {"AnimesROLL", scraper.AnrollType, []string{"Anroll", "anroll", "animesroll"}, true, false},
+	SourcePomfy:         {"Pomfy", scraper.PomfyType, []string{"pomfy"}, false, false},
 }
 
 func (s Source) valid() bool { return s >= 0 && s < sourceCount }
 
 // SupportsEpisodes reports whether the source's episode lists and stream URLs
-// can be fetched through the client. The movie and series catalogues
-// (StartFlix, TopCine, Pobreflix, Pomfy) can only be searched.
+// can be fetched through the client. TopCine, Pobreflix and Pomfy can only be
+// searched for now.
 func (s Source) SupportsEpisodes() bool { return s.valid() && sourceTable[s].episodes }
+
+// IsCatalog reports whether the source is a movie and series catalogue, whose
+// episodes the client lists through GetSeasons and GetSeasonEpisodes and whose
+// streams take an audio (see StreamOptions.Audio).
+func (s Source) IsCatalog() bool { return s.valid() && sourceTable[s].catalog }
 
 // Sources returns every source this package knows, in declaration order: all
 // of them can be searched.

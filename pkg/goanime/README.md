@@ -16,7 +16,9 @@ import (
 ```
 
 Search covers every enabled source. Episode lists and stream URLs are
-available for the anime sources (`Source.SupportsEpisodes()`).
+available for the anime sources and for StartFlix (`Source.SupportsEpisodes()`).
+StartFlix is a movie and series catalogue: its series go through `GetSeasons`
+and `GetSeasonEpisodes` (see below).
 
 ## Client
 
@@ -47,10 +49,25 @@ returns `ErrEpisodesUnsupported`. `options` may be `nil`.
 Deprecated. Returns the same values as `GetEpisodeStreamURL`, taking the
 episode URL directly.
 
+### `func (c *Client) GetSeasons(anime *types.Anime) ([]*types.Season, error)`
+
+For a catalogue source (`Source.IsCatalog()`: StartFlix). Lists a series'
+seasons, each with the audios it is offered in (`Dublado`, `Legendado`). A
+movie has no seasons: the list is empty, and `GetAnimeEpisodes` returns the
+movie as its one episode. `anime` is a `SearchAnime` result of that source;
+an anime source returns `ErrNotCatalog`.
+
+### `func (c *Client) GetSeasonEpisodes(anime *types.Anime, season int, audio string) ([]*types.Episode, error)`
+
+Lists one season in one audio. An empty `audio` takes the dub when the season
+has one. A season the series lacks is `ErrSeasonNotFound` and an audio the
+season lacks is `ErrAudioUnavailable`; both messages say what exists.
+`GetAnimeEpisodes` on a series returns `ErrSeasonRequired`.
+
 ### `func (c *Client) GetAvailableSources() []types.Source`
 
 Returns the sources that support episode lists and stream URLs: AnimeFire,
-Goyabu, HiAnime, AnimesDigital, AnimeDrive and AnimesROLL. `types.Sources()`
+Goyabu, HiAnime, StartFlix, AnimesDigital, AnimeDrive and AnimesROLL. `types.Sources()`
 lists every source that can be searched. A source that is switched off
 (Goyabu is, by default; see `GOANIME_ENABLED_SOURCES`) is still listed but
 returns no search results.
@@ -64,9 +81,12 @@ type StreamOptions struct {
 }
 ```
 
-`DefaultStreamOptions()` returns `{Quality: "best", Mode: "sub"}`. The options
-are accepted but not applied yet: the stream comes back in the source's
-default quality.
+`DefaultStreamOptions()` returns `{Quality: "best", Mode: "sub"}`. `Audio`
+(`"Dublado"` or `"Legendado"`) is applied for catalogue sources: an audio
+that does not play is `ErrAudioUnavailable`, never the other audio in its
+place, and `metadata["audio"]` says what played. `Quality` and `Mode` are
+accepted but not applied yet: the stream comes back in the source's default
+quality.
 
 ## Types
 
@@ -85,12 +105,14 @@ default quality.
 | `types.SourceAnroll`          | `"AnimesROLL"`    |
 | `types.SourcePomfy`           | `"Pomfy"`         |
 
-`types.Sources()` returns all of them. All can be searched, but StartFlix,
-TopCine, Pobreflix and Pomfy are movie and series catalogues whose episodes
-the command-line tool picks through season and audio menus: for them
-`GetAnimeEpisodes`, `GetStreamURL` and `GetEpisodeStreamURL` return
-`goanime.ErrEpisodesUnsupported`. `Source.SupportsEpisodes()` tells which.
-Some catalogues index PT-BR titles only, so search `A Origem`, not `Inception`. `types.ParseSource(s string) (Source, error)`
+`types.Sources()` returns all of them. All can be searched. StartFlix, TopCine,
+Pobreflix and Pomfy are movie and series catalogues; only StartFlix lists
+episodes through this package so far (`Source.IsCatalog()`). For the other
+three, `GetAnimeEpisodes`, `GetStreamURL` and `GetEpisodeStreamURL` return
+`goanime.ErrEpisodesUnsupported`; `Source.SupportsEpisodes()` tells which.
+Some catalogues index PT-BR titles only, so search `A Origem`, not `Inception`.
+
+`types.ParseSource(s string) (Source, error)`
 accepts each `String()` spelling, the lowercase name of each source (and
 `fire` for AnimeFire), and returns an error for anything else. New values are
 only appended, so a stored `Source` keeps its meaning.

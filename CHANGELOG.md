@@ -50,7 +50,8 @@ Release date: 2026-11-10
 
 ### Library
 
-- **`pkg/goanime` covers every source.** `types.Source` gains Goyabu, HiAnime, StartFlix, TopCine, AnimesDigital, AnimeDrive, Pobreflix, AnimesROLL and Pomfy beside AnimeFire, and `types.Sources()` lists them. All can be searched; episode lists and stream URLs work for the anime sources (`Source.SupportsEpisodes()`, the list `GetAvailableSources` returns), while the movie and series catalogues (StartFlix, TopCine, Pobreflix, Pomfy) answer `goanime.ErrEpisodesUnsupported` because their episodes are picked through menus in the CLI. `ParseSource` accepts each name `Source.String()` returns. `SourceAnimeFire` keeps value 0 and new values are only appended, so a stored `Source` keeps its meaning.
+- **`pkg/goanime` covers every source.** `types.Source` gains Goyabu, HiAnime, StartFlix, TopCine, AnimesDigital, AnimeDrive, Pobreflix, AnimesROLL and Pomfy beside AnimeFire, and `types.Sources()` lists them. All can be searched; episode lists and stream URLs work for the anime sources and StartFlix (`Source.SupportsEpisodes()`, the list `GetAvailableSources` returns), while TopCine, Pobreflix and Pomfy answer `goanime.ErrEpisodesUnsupported` until they get the same treatment. `ParseSource` accepts each name `Source.String()` returns. `SourceAnimeFire` keeps value 0 and new values are only appended, so a stored `Source` keeps its meaning.
+- **Movies and series through the library, no menus.** For a catalogue source (StartFlix first, `Source.IsCatalog()`), `GetSeasons` lists a series' seasons with their audios, `GetSeasonEpisodes(anime, season, audio)` lists one, a movie is its one episode, and `StreamOptions.Audio` picks Dublado or Legendado. A season or audio that does not exist is `ErrSeasonNotFound` or `ErrAudioUnavailable` and says what does; the other audio is never played in its place. Built on a new optional `CatalogScraper` capability, so the CLI's pickers are untouched.
 
 ## Bug Fixes
 

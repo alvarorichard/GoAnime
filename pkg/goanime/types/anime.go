@@ -203,3 +203,10 @@ func FromInternalEpisodeList(internal []models.Episode) []*Episode {
 	}
 	return result
 }
+
+// Season is one season of a series from a movie and series catalogue.
+type Season struct {
+	Number int
+	// Audios the season is offered in: "Dublado" and/or "Legendado".
+	Audios []string
+}

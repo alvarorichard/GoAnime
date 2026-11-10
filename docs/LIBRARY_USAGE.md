@@ -12,17 +12,19 @@ and [pkg/goanime/examples](../pkg/goanime/examples) has complete programs.
 ## Current limits
 
 - Search covers every enabled source.
-- Episode lists and stream URLs are available for the anime sources:
-  AnimeFire, Goyabu, HiAnime, AnimesDigital, AnimeDrive and AnimesROLL
-  (`Source.SupportsEpisodes()`). StartFlix, TopCine, Pobreflix and Pomfy are
-  movie and series catalogues that can only be searched; asking them for
-  episodes or a stream returns `goanime.ErrEpisodesUnsupported`. A result
-  whose `Source` name is unknown makes `GetEpisodeStreamURL` return an
-  `unknown source` error.
+- Episode lists and stream URLs are available for the anime sources
+  (AnimeFire, Goyabu, HiAnime, AnimesDigital, AnimeDrive, AnimesROLL) and for
+  StartFlix (`Source.SupportsEpisodes()`). StartFlix is a movie and series
+  catalogue: use `GetSeasons` and `GetSeasonEpisodes` for its series, and pass
+  `StreamOptions.Audio` for the audio. TopCine, Pobreflix and Pomfy can only be
+  searched for now; asking them for episodes or a stream returns
+  `goanime.ErrEpisodesUnsupported`. A result whose `Source` name is unknown
+  makes `GetEpisodeStreamURL` return an `unknown source` error.
 - Goyabu is off by default; enable it with `GOANIME_ENABLED_SOURCES=Goyabu`.
   Pointing a call at a disabled source returns no results.
-- `StreamOptions` is accepted but not applied yet: the stream comes back in
-  the source's default quality.
+- `StreamOptions.Quality` and `Mode` are accepted but not applied yet: the
+  stream comes back in the source's default quality. `Audio` is applied for
+  catalogue sources.
 
 ## Installation
 
@@ -122,6 +124,7 @@ An episode whose video the host no longer has returns an error ending in
 ```bash
 go run ./pkg/goanime/examples/search
 go run ./pkg/goanime/examples/source_specific
+go run ./pkg/goanime/examples/series
 go run ./pkg/goanime/examples/episodes
 go run ./pkg/goanime/examples/stream
 ```

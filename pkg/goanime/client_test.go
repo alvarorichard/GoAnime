@@ -20,7 +20,7 @@ func TestGetAvailableSources(t *testing.T) {
 
 	want := []types.Source{
 		types.SourceAnimeFire, types.SourceGoyabu, types.SourceHiAnime,
-		types.SourceAnimesDigital, types.SourceAnimeDrive, types.SourceAnroll,
+		types.SourceStartFlix, types.SourceAnimesDigital, types.SourceAnimeDrive, types.SourceAnroll,
 	}
 	if len(sources) != len(want) {
 		t.Fatalf("GetAvailableSources() = %v, want %v", sources, want)

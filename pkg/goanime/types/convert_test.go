@@ -229,12 +229,21 @@ func TestSourcesMapToDistinctScrapers(t *testing.T) {
 }
 
 func TestSourceSupportsEpisodes(t *testing.T) {
-	for _, src := range []Source{SourceAnimeFire, SourceGoyabu, SourceHiAnime, SourceAnimesDigital, SourceAnimeDrive, SourceAnroll} {
+	for _, src := range []Source{SourceAnimeFire, SourceGoyabu, SourceHiAnime, SourceStartFlix, SourceAnimesDigital, SourceAnimeDrive, SourceAnroll} {
 		assert.True(t, src.SupportsEpisodes(), src.String())
 	}
-	for _, src := range []Source{SourceStartFlix, SourceTopCine, SourcePobreflix, SourcePomfy, Source(-1), Source(99)} {
+	for _, src := range []Source{SourceTopCine, SourcePobreflix, SourcePomfy, Source(-1), Source(99)} {
 		assert.False(t, src.SupportsEpisodes(), src.String())
 	}
+}
+
+func TestSourceIsCatalog(t *testing.T) {
+	for _, src := range Sources() {
+		assert.Equal(t, src == SourceStartFlix, src.IsCatalog(), src.String())
+		assert.False(t, src.IsCatalog() && !src.SupportsEpisodes(), "%s: a catalogue lists episodes", src)
+	}
+	assert.False(t, Source(-1).IsCatalog())
+	assert.False(t, Source(99).IsCatalog())
 }
 
 // Values are stored by callers: they must not move.
