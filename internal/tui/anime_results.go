@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -377,7 +378,19 @@ type animeResultsModel struct {
 	plainPanel string
 	// showHelp replaces the list with the KEYS overlay (tela 10).
 	showHelp bool
+	// favs is the FAVORITOS list ctrl+f adds the highlighted work to.
+	favs favoritesAPI
 }
+
+// favoritesAPI is the part of the favorites store the result screen uses.
+type favoritesAPI interface {
+	Has(key string) bool
+	Toggle(e favorites.Entry) (bool, error)
+}
+
+// newFavorites opens the favorites the result screen reads and writes. A
+// variable so tests point it at a temporary file.
+var newFavorites = func() favoritesAPI { return favorites.Default() }
 
 // newAnimeResultsModel creates the styled, filterable anime result screen.
 func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
@@ -408,6 +421,7 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		versionSel: make(map[int]int),
 		query:      query,
 		notice:     takeResultsNotice(),
+		favs:       newFavorites(),
 	}
 	width, height := shell.ContentSize()
 	results := list.New(items, delegate, width, max(height-m.noticeHeight(width), 1))
@@ -453,6 +467,17 @@ func (m *animeResultsModel) reservePlainPanel() {
 	m.results.SetSize(width, max(height-lipgloss.Height(panel)-1, 1))
 }
 
+// resize fits the list to the shell and the notice above it.
+func (m *animeResultsModel) resize() {
+	width, height := m.shell.ContentSize()
+	listWidth := width
+	if width >= wideResultsBreakpoint && !Plain() {
+		listWidth = resultsListWidth(width) - resultsGutter
+	}
+	m.results.SetSize(listWidth, max(height-m.noticeHeight(width), 1))
+	m.reservePlainPanel()
+}
+
 // noticeHeight is the rows the notice takes above the list at width.
 func (m *animeResultsModel) noticeHeight(width int) int {
 	if m.notice == "" {
@@ -474,13 +499,7 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
-		width, height := m.shell.ContentSize()
-		listWidth := width
-		if width >= wideResultsBreakpoint && !Plain() {
-			listWidth = resultsListWidth(width) - resultsGutter
-		}
-		m.results.SetSize(listWidth, max(height-m.noticeHeight(width), 1))
-		m.reservePlainPanel()
+		m.resize()
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -516,6 +535,12 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = ErrSelectionBack
 				return m, tea.Quit
 			}
+		case "ctrl+f":
+			// Add the highlighted work to FAVORITOS, or take it off.
+			if !filtering {
+				m.toggleFavorite()
+				return m, nil
+			}
 		case "left", "right":
 			// ←→ picks the highlighted work's version (tela 3). While
 			// filtering the arrows move the filter's caret instead.
@@ -550,6 +575,44 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.reservePlainPanel()
 	return m, cmd
+}
+
+// favoriteEntry is the FAVORITOS record of a work: it is kept by title, so
+// every source's copy of it is one favorite, and remembers the version that
+// was chosen.
+func (m *animeResultsModel) favoriteEntry(item animeGroupItem) favorites.Entry {
+	g := item.group
+	source := ""
+	if v := m.chosenVersion(item.pos); v != nil {
+		source = displaySource(v.Source)
+	}
+	return favorites.Entry{
+		Key:    normalizeTitleKey(g.title),
+		Title:  g.title,
+		Year:   g.year,
+		Media:  g.media,
+		Source: source,
+	}
+}
+
+// isFavorite reports whether the highlighted work is in FAVORITOS.
+func (m *animeResultsModel) isFavorite(g *animeGroup) bool {
+	return m.favs != nil && g != nil && m.favs.Has(normalizeTitleKey(g.title))
+}
+
+// toggleFavorite adds the highlighted work to FAVORITOS or takes it off.
+func (m *animeResultsModel) toggleFavorite() {
+	item, ok := m.results.SelectedItem().(animeGroupItem)
+	if !ok || item.group == nil || m.favs == nil {
+		return
+	}
+	if _, err := m.favs.Toggle(m.favoriteEntry(item)); err != nil {
+		// The notice takes rows above the list, so the list is resized.
+		m.notice = "Could not update FAVORITOS: " + singleLine(err.Error())
+		m.resize()
+		return
+	}
+	m.reservePlainPanel()
 }
 
 // switchVersion moves the highlighted group's chosen version one step.
@@ -636,6 +699,7 @@ func (m *animeResultsModel) helpView(width, height int, body string) string {
 	}
 	if help := RenderHelp(&m.theme, "Results", []HelpRow{
 		{Key: versionKey, Desc: "choose a version"},
+		{Key: "ctrl+f", Desc: "add to or remove from FAVORITOS"},
 		{Key: "esc", Desc: "edit the search"},
 		{Key: "q", Desc: "quit"},
 	}, nil, width, height); help != "" {
@@ -689,10 +753,14 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 	if group.media != "" {
 		fields = append(fields, detailField{"Type", group.media})
 	}
+	title := group.title
+	if m.isFavorite(group) {
+		title = drawGlyph("★ ", "* ") + title
+	}
 	return &panelContent{
 		label:  "Details",
 		gloss:  "詳細",
-		title:  group.title,
+		title:  title,
 		fields: fields,
 		lines:  lines,
 	}
@@ -723,6 +791,7 @@ func (m *animeResultsModel) hints() []Hint {
 	return []Hint{
 		{Key: "enter", Desc: "open", Essential: true},
 		{Key: version, Desc: "version"},
+		{Key: "ctrl+f", Desc: "favorite"},
 		{Key: move, Desc: "move"},
 		{Key: "esc", Desc: "edit search", Essential: true},
 		{Key: "?", Desc: "help"},

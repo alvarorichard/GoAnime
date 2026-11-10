@@ -11,6 +11,7 @@ import (
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/suggest"
 	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
@@ -114,8 +115,43 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Suggest:       homeSuggest,
 		Sources:       homeSources,
 		SetSource:     setHomeSource,
+
+		Favorites:      homeFavorites(),
+		DeleteFavorite: forgetFavorite,
+		ClearFavorites: clearFavorites,
 	})
 }
+
+// maxHomeFavorites bounds the FAVORITOS rows on the home screen.
+const maxHomeFavorites = 8
+
+// favoritesStore is the FAVORITOS file; a variable so tests use a temporary one.
+var favoritesStore = favorites.Default
+
+// homeFavorites reads the FAVORITOS rows, newest first.
+func homeFavorites() []tui.HomeFavorite {
+	list, err := favoritesStore().List()
+	if err != nil {
+		util.Debugf("Favorites unavailable: %v", err)
+		return nil
+	}
+	if len(list) > maxHomeFavorites {
+		list = list[:maxHomeFavorites]
+	}
+	rows := make([]tui.HomeFavorite, 0, len(list))
+	for _, f := range list {
+		if title := tui.SingleLine(f.Title); title != "" {
+			rows = append(rows, tui.HomeFavorite{Key: f.Key, Title: title, Year: f.Year, Media: f.Media, Source: f.Source})
+		}
+	}
+	return rows
+}
+
+// forgetFavorite takes one work off FAVORITOS.
+func forgetFavorite(key string) error { return favoritesStore().Remove(key) }
+
+// clearFavorites empties FAVORITOS.
+func clearFavorites() error { return favoritesStore().Clear() }
 
 // homeSuggest adapts the keyless suggestion engine (Kitsu for anime, IMDb for
 // movies and series) to the search home's autocomplete.

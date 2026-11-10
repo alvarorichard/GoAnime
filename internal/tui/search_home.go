@@ -81,6 +81,15 @@ func (e HomeContinueEntry) DisplayTitle() string {
 	return "Unknown title"
 }
 
+// HomeFavorite is one row of the FAVORITOS list.
+type HomeFavorite struct {
+	Key    string // favorites key, for removal
+	Title  string
+	Year   string
+	Media  string // "Anime", "Movie" or "TV"
+	Source string
+}
+
 // HomeRecentSearch is one row of the RECENT list.
 type HomeRecentSearch struct {
 	Query string
@@ -97,6 +106,13 @@ type SearchHomeOptions struct {
 	SourcesLine string
 	Continue    []HomeContinueEntry
 	Recent      []HomeRecentSearch
+	// Favorites is the FAVORITOS list: the works the user marked. Enter
+	// searches the title. DeleteFavorite removes a row by key and
+	// ClearFavorites empties the list (X, after a y/n question); nil disables
+	// x or X there.
+	Favorites      []HomeFavorite
+	DeleteFavorite func(key string) error
+	ClearFavorites func() error
 	// DeleteEntry removes a CONTINUE row by key; nil disables x there.
 	DeleteEntry func(key string) error
 	// DeleteRecent removes a RECENT row by its query; nil disables x there.
@@ -159,6 +175,7 @@ type homeRowKind int
 const (
 	homeRowContinue homeRowKind = iota
 	homeRowRecent
+	homeRowFavorite
 )
 
 type homeRow struct {
@@ -200,6 +217,7 @@ const (
 	clearNothing clearTarget = iota
 	clearContinueRows
 	clearRecentRows
+	clearFavoriteRows
 )
 
 type searchHomeModel struct {
@@ -210,6 +228,7 @@ type searchHomeModel struct {
 	scopeIdx    int
 	continueAll []HomeContinueEntry
 	recentAll   []HomeRecentSearch
+	favoriteAll []HomeFavorite
 	rows        []homeRow
 	cursor      int
 	focusInput  bool
@@ -219,11 +238,13 @@ type searchHomeModel struct {
 	// Forgetting history: the RECENT row remover, the two list clearers, the
 	// list the user is being asked to clear (clearNothing while no question is
 	// open) and what to say when a removal failed.
-	deleteRecent  func(query string) error
-	clearContinue func() error
-	clearRecent   func() error
-	clearing      clearTarget
-	notice        string
+	deleteRecent   func(query string) error
+	deleteFavorite func(key string) error
+	clearContinue  func() error
+	clearRecent    func() error
+	clearFavorites func() error
+	clearing       clearTarget
+	notice         string
 
 	// Autocomplete state. seq numbers the typing bursts: a debounce tick or a
 	// lookup answer with an older seq is stale and dropped. asked is the
@@ -290,19 +311,22 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		scopeIdx:    scopeIdx,
 		continueAll: opts.Continue,
 		recentAll:   opts.Recent,
+		favoriteAll: opts.Favorites,
 		cursor:      0,
 		focusInput:  true,
 		deleteEntry: opts.DeleteEntry,
 		now:         time.Now,
 
-		deleteRecent:  opts.DeleteRecent,
-		clearContinue: opts.ClearContinue,
-		clearRecent:   opts.ClearRecent,
-		suggest:       opts.Suggest,
-		loadSources:   opts.Sources,
-		setSource:     opts.SetSource,
-		debounce:      suggestDebounce,
-		sugCursor:     -1,
+		deleteRecent:   opts.DeleteRecent,
+		deleteFavorite: opts.DeleteFavorite,
+		clearContinue:  opts.ClearContinue,
+		clearRecent:    opts.ClearRecent,
+		clearFavorites: opts.ClearFavorites,
+		suggest:        opts.Suggest,
+		loadSources:    opts.Sources,
+		setSource:      opts.SetSource,
+		debounce:       suggestDebounce,
+		sugCursor:      -1,
 	}
 	m.asked = m.suggestKey()
 	m.rebuildRows()
@@ -318,6 +342,9 @@ func (m *searchHomeModel) rebuildRows() {
 	m.rows = m.rows[:0]
 	for i := range m.continueAll {
 		m.rows = append(m.rows, homeRow{kind: homeRowContinue, index: i})
+	}
+	for i := range m.favoriteAll {
+		m.rows = append(m.rows, homeRow{kind: homeRowFavorite, index: i})
 	}
 	for i := range m.recentAll {
 		m.rows = append(m.rows, homeRow{kind: homeRowRecent, index: i})
@@ -675,6 +702,9 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 	switch row.kind {
 	case homeRowRecent:
 		return SearchHomeResult{Action: HomeSearch, Query: m.recentAll[row.index].Query, Scope: scope}, true
+	case homeRowFavorite:
+		// A favorite can be an anime or a movie: search every scope for it.
+		return SearchHomeResult{Action: HomeSearch, Query: m.favoriteAll[row.index].Title}, true
 	default:
 		entry := m.continueAll[row.index]
 		return SearchHomeResult{Action: HomeResume, Entry: entry, HasEntry: true, Scope: scope}, true
@@ -696,6 +726,12 @@ func (m *searchHomeModel) rowAction(key string) tea.Cmd {
 	if row.kind == homeRowRecent {
 		if key == "x" {
 			m.forgetRecent(row.index)
+		}
+		return nil
+	}
+	if row.kind == homeRowFavorite {
+		if key == "x" {
+			m.forgetFavorite(row.index)
 		}
 		return nil
 	}
@@ -741,6 +777,20 @@ func (m *searchHomeModel) forgetRecent(index int) {
 	m.rowsChanged()
 }
 
+// forgetFavorite takes the FAVORITOS row at index off the list and the
+// screen. A removal that fails keeps the row and says so.
+func (m *searchHomeModel) forgetFavorite(index int) {
+	if m.deleteFavorite == nil {
+		return
+	}
+	if err := m.deleteFavorite(m.favoriteAll[index].Key); err != nil {
+		m.failed("remove the favorite", err)
+		return
+	}
+	m.favoriteAll = append(m.favoriteAll[:index], m.favoriteAll[index+1:]...)
+	m.rowsChanged()
+}
+
 // askToClear opens the "clear all?" question for the list kind belongs to. It
 // opens nothing when the host cannot clear that list or the list is empty.
 func (m *searchHomeModel) askToClear(kind homeRowKind) {
@@ -749,6 +799,8 @@ func (m *searchHomeModel) askToClear(kind homeRowKind) {
 		m.clearing = clearContinueRows
 	case kind == homeRowRecent && m.clearRecent != nil && len(m.recentAll) > 0:
 		m.clearing = clearRecentRows
+	case kind == homeRowFavorite && m.clearFavorites != nil && len(m.favoriteAll) > 0:
+		m.clearing = clearFavoriteRows
 	}
 }
 
@@ -786,6 +838,12 @@ func (m *searchHomeModel) clearConfirmed() {
 			return
 		}
 		m.recentAll = nil
+	case clearFavoriteRows:
+		if err := m.clearFavorites(); err != nil {
+			m.failed("clear FAVORITOS", err)
+			return
+		}
+		m.favoriteAll = nil
 	}
 	m.rowsChanged()
 }
@@ -813,6 +871,8 @@ func (m *searchHomeModel) questionView(width int) string {
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from CONTINUE? y to clear, n to keep.", countOf(len(m.continueAll), "episode", "episodes")), width)
 	case clearRecentRows:
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from RECENT? y to clear, n to keep.", countOf(len(m.recentAll), "search", "searches")), width)
+	case clearFavoriteRows:
+		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from FAVORITOS? y to clear, n to keep.", countOf(len(m.favoriteAll), "favorite", "favorites")), width)
 	}
 	return renderNotice(&m.theme, singleLine(m.notice), width)
 }
@@ -944,6 +1004,9 @@ func (m *searchHomeModel) homeView(width, height int) string {
 		}
 		sections = append(sections, "", lists)
 	}
+	if favorites := m.favoritesView(width); favorites != "" {
+		sections = append(sections, "", m.sectionHeader("FAVORITOS", ""), favorites)
+	}
 	if recent := m.recentView(width); recent != "" {
 		sections = append(sections, "", m.sectionHeader("RECENT", "最近"), recent)
 	}
@@ -996,7 +1059,7 @@ func (m *searchHomeModel) scopeTabs() string {
 // sectionHeader draws a CONTINUE/RECENT heading with its Japanese gloss.
 func (m *searchHomeModel) sectionHeader(label, gloss string) string {
 	head := m.theme.Primary.Render(label)
-	if ShowJapanese() {
+	if gloss != "" && ShowJapanese() {
 		head += m.theme.Gloss.Render("  " + gloss)
 	}
 	return head
@@ -1201,6 +1264,23 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 			{Key: "x", Desc: "remove"},
 		},
 	}
+}
+
+// favoritesView renders the FAVORITOS rows: the title and, at the right, its
+// year and type.
+func (m *searchHomeModel) favoritesView(width int) string {
+	items := make([]homeRowItem, 0, len(m.favoriteAll))
+	for _, f := range m.favoriteAll {
+		var note []string
+		if y := singleLine(f.Year); y != "" {
+			note = append(note, y)
+		}
+		if media := singleLine(f.Media); media != "" {
+			note = append(note, media)
+		}
+		items = append(items, homeRowItem{title: singleLine(f.Title), note: strings.Join(note, " · "), key: displaySource(f.Source)})
+	}
+	return renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
 }
 
 // recentView renders the recent searches: the query and its result count.

@@ -205,8 +205,9 @@ run `sudo goanime --update`.
 Run `goanime` without arguments to open search home. Type a name and press
 enter, or press `↓` to pick from the lists below: Continue reopens an
 episode where you stopped (`enter` resumes, `r` starts over, `e` lists
-episodes, `x` removes it) and Recent repeats a past search with its result
-count. `tab` switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
+episodes, `x` removes it), Favoritos lists the works you marked with
+`ctrl+f` and Recent repeats a past search with its result count. `tab`
+switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
 From a result, choose a version with `←` `→` and, for a series, an episode.
 You can also pass the name directly:
 
@@ -264,8 +265,9 @@ Run `goanime -h` for the full list of options.
 | `Esc`                 | Go back                   |
 | `tab`                 | Switch search scope (search home) |
 | `←` `→`               | Choose a version (results) |
+| `ctrl+f`              | Add the highlighted work to Favoritos, or take it off (results) |
 | `r` `e`              | From start, episodes (Continue list) |
-| `x`                   | Remove the highlighted row (Continue or Recent list) |
+| `x`                   | Remove the highlighted row (Continue, Favoritos or Recent list) |
 | `X`                   | Clear the whole list the row is in, after a `y`/`n` question |
 | `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
 
@@ -274,6 +276,18 @@ option at once; any other key still filters.
 
 The episode list marks the episodes you finished with ✓ and the one you
 stopped partway with ◐, and opens where you left off.
+
+### Favoritos
+
+Press `ctrl+f` on a result to add the work to FAVORITOS, and again to take it
+off; a favorite shows a star before its title in the details. A work is one
+favorite whatever the source it came from. FAVORITOS appears on the search
+home between CONTINUE and RECENT, newest first; `enter` searches the title
+in every scope, `x` removes a row and `X` empties the list after a `y`/`n`
+question. The list is one small file, `favorites.json`, next to the watch
+history (`~/.local/goanime/tracking/` on Linux and macOS,
+`%LOCALAPPDATA%\GoAnime\tracking\` on Windows), so it works without SQLite
+and on every platform.
 
 ### Forgetting your history
 
