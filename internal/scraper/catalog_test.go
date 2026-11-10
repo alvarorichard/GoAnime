@@ -440,5 +440,7 @@ func TestCatalogFallbackFnRoutesByKind(t *testing.T) {
 	require.Error(t, err)
 	_, err = catalogFallbackFn(context.Background(), startflix.Panel{Kind: startflix.KindSeries, TMDBID: 55}, 2, 4)
 	require.Error(t, err)
-	assert.Equal(t, []string{"movie:tt7", "movie:99", "series:55"}, got)
+	// A series goes on the wire as "tv": vs_src answers "series" with the movie
+	// page of the same TMDB id.
+	assert.Equal(t, []string{"movie:tt7", "movie:99", "tv:55"}, got)
 }

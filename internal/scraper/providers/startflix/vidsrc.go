@@ -31,8 +31,8 @@ import (
 // The chain, reverse-engineered from vidsrc.io's player JavaScript (an sbx
 // wrapper page → landing /embed/{kind}/{id} → player /embed/player/{kind}/{id}):
 //
-//  1. GET  {base}/vs_src.php?type=movie&id=tt0315327
-//     → {"src":"https://<player-host>/embed/movie/tt0315327?vs=<token>"}
+//  1. GET  {base}/vs_src.php?type=movie&id=tt0315327 (a series is type=tv)
+//     →{"src":"https://<player-host>/embed/movie/tt0315327?vs=<token>"}
 //  2. GET the landing page → CFG.playerUrl, the real player page relative to
 //     the landing host.
 //  3. GET that player page → window.CONFIG names the stream-data API and a
@@ -43,7 +43,10 @@ import (
 //  5. Run the WASM like the browser does: alloc(len) → write ciphertext →
 //     decrypt(ptr,len) → plaintext at memory[ptr+12 … ptr+12+outLen], one
 //     master URL per line.
-//  6. Each stream host mints a ~4h, IP-bound JWT at origin/generate.php.
+//  6. Each stream host mints a ~4h, IP-bound JWT at origin/generate.php,
+//     which since 2026-11-10 answers 403 "invalid or mismatched api token"
+//     unless called with ?api_token=<a player-page apiToken the stream-data
+//     call has not spent> — a second render of the player page supplies it.
 //     Stamping ?token=<jwt> on the master URL plays it; the served playlist
 //     inlines the token into every variant and segment URI, so mpv needs
 //     nothing beyond the master URL (plus the referer already set from
@@ -52,22 +55,25 @@ import (
 // Nothing needs a browser or a solver: plain HTTP and one WASM call.
 
 const (
-	// DefaultVIDSRCBase is the embed API fronting the fallback source.
+	// DefaultVIDSRCBase is the embed API that fronted the fallback source.
+	// Its origin answers Cloudflare 522 after ~20s since 2026-11-10 (curl
+	// and the Go client alike: a dead host, not a challenge), so the walk
+	// tries it last and cuts it at vidsrcBaseTimeout.
 	DefaultVIDSRCBase = "https://vidsrc.io"
 
 	// DefaultVIDSRCMirrorBase is the vidsrc.to family's player host. It
 	// speaks the same vs_src protocol and keys the same ids, but runs its
-	// own frontend uptime — the fallback walks it when the primary front
-	// is unreachable, so one shell going down does not take the source
-	// with it (live-checked 2026-10-17: it resolves and lands on the same
-	// stream hosts).
+	// own frontend uptime — the fallback walks it when another front is
+	// unreachable, so one shell going down does not take the source with
+	// it (live-checked 2026-11-10: it resolves in about half a second and
+	// lands on the same stream hosts).
 	DefaultVIDSRCMirrorBase = "https://vsembed.ru"
 
 	// DefaultVIDSRCShBase is the vidsrc front the StartFlix panel itself
 	// embeds as a player (vidsrc.sh/embed/…; resolved by vidsrcsh.go). It
 	// speaks the same vs_src protocol and keys the same ids, and
-	// live-checked 2026-10-21 it resolved one title end to end in about
-	// two seconds, so the fallback walks it third.
+	// live-checked 2026-11-10 it resolved a series episode and two movies
+	// end to end, so the fallback walks it first.
 	DefaultVIDSRCShBase = "https://vidsrc.sh"
 
 	// masterBodyLimit caps the master playlist read during the playable
@@ -115,15 +121,23 @@ var vidsrcHTTPFn = vidsrcHTTPDefault
 // vidsrcBasesFn names the embed APIs the fallback walks in order. The env
 // override GOANIME_VIDSRC_URL repoints the whole list at one base (mirroring
 // GOANIME_STARTFLIX_URL / GOANIME_STARTFLIX_PANEL_URL); the default walks the
-// primary, its mirror, and vidsrc.sh — the front the StartFlix panel embeds
-// as a player (vidsrcsh.go), family-checked live on 2026-10-21. A seam, also,
-// so tests can stage fake bases and prove the walk.
+// two live fronts (vidsrc.sh, the one the StartFlix panel embeds as a player —
+// vidsrcsh.go — and the vsembed.ru mirror) and then vidsrc.io, last since
+// 2026-11-10 when its origin went dark (Cloudflare 522 after ~20s on every
+// request). A seam, also, so tests can stage fake bases and prove the walk.
 var vidsrcBasesFn = func() []string {
 	if b := strings.TrimRight(strings.TrimSpace(os.Getenv("GOANIME_VIDSRC_URL")), "/"); b != "" {
 		return []string{b}
 	}
-	return []string{DefaultVIDSRCBase, DefaultVIDSRCMirrorBase, DefaultVIDSRCShBase}
+	return []string{DefaultVIDSRCShBase, DefaultVIDSRCMirrorBase, DefaultVIDSRCBase}
 }
+
+// vidsrcBaseTimeout bounds the first hop (vs_src) on each base. A healthy
+// front answers it in well under a second; one whose origin hangs would
+// otherwise hold the walk for the HTTP client's whole timeout and burn the
+// caller's fallback budget before the next base gets a turn. A var so tests
+// do not wait real seconds.
+var vidsrcBaseTimeout = 4 * time.Second
 
 // MovieFallback resolves a movie by its IMDb id (preferred) or TMDB id on the
 // fallback source. Either alone is accepted because a panel record can carry
@@ -176,6 +190,19 @@ func EpisodeFallback(ctx context.Context, tmdbID, season, episode int) (*Stream,
 	return nil, err
 }
 
+// vidsrcTypeWord names a MediaKind the way the vs_src endpoint keys it: movie
+// stays movie, a series is "tv". Sending GoAnime's own "series" word looks
+// like a harmless synonym but is not: the endpoint answers it with the MOVIE
+// page for that TMDB id (live 2026-11-10: type=series&id=1396 landed on
+// /embed/player/movie/1396 — a different title than Breaking Bad, which is
+// tv 1396).
+func vidsrcTypeWord(kind MediaKind) string {
+	if kind == KindSeries {
+		return "tv"
+	}
+	return string(kind)
+}
+
 // resolveVIDSRC runs the whole chain for one title, walking the fallback
 // bases until one answers. Errors stay internal: the caller reports the
 // original panel error to the user and Debug output records why each base
@@ -210,8 +237,14 @@ func resolveVIDSRCOn(ctx context.Context, base string, kind MediaKind, id string
 	var res struct {
 		Src string `json:"src"`
 	}
-	vsURL := fmt.Sprintf("%s/vs_src.php?type=%s&id=%s", base, kind, url.QueryEscape(id))
-	if err := vidsrcGetJSON(ctx, vsURL, "", &res); err != nil {
+	vsURL := fmt.Sprintf("%s/vs_src.php?type=%s&id=%s", base, vidsrcTypeWord(kind), url.QueryEscape(id))
+	hopCtx, hopCancel := context.WithTimeout(ctx, vidsrcBaseTimeout)
+	err := vidsrcGetJSON(hopCtx, vsURL, "", &res)
+	hopCancel()
+	if err != nil {
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("vidsrc base %s did not answer within %s: %w", base, vidsrcBaseTimeout, err)
+		}
 		return nil, err
 	}
 	landing := strings.TrimSpace(res.Src)
@@ -278,9 +311,17 @@ func resolveVIDSRCOn(ctx context.Context, base string, kind MediaKind, id string
 	// (5) Token + probe each master on the host it came from. The first
 	// playable one wins; the list usually carries two or three rotating
 	// copies of the same encode.
+	//
+	// The host's token endpoint wants a player-page apiToken of its own: the
+	// one the stream-data call just spent is dead for it, so a second render
+	// of the player page supplies a fresh one (reusable across the hosts).
 	referer := masterReferer(playerURL)
+	hostAuth := vidsrcRefreshToken(ctx, playerURL)
+	if hostAuth == "" {
+		hostAuth = token
+	}
 	for _, raw := range urls {
-		master, host, err := resolveVIDSRCMaster(ctx, raw, referer)
+		master, host, err := resolveVIDSRCMaster(ctx, raw, referer, playerURL, hostAuth)
 		if err != nil {
 			util.Debug("VIDSRC fallback master missed", "host", host, "err", err)
 			continue
@@ -426,13 +467,20 @@ func vidsrcWASM(ctx context.Context, wasmURL, wasmB64, dataBase string) ([]byte,
 
 // resolveVIDSRCMaster stamps the host token onto one master URL and verifies
 // it plays, so the user never lands on a dead playlist.
-func resolveVIDSRCMaster(ctx context.Context, raw, referer string) (*Stream, string, error) {
+func resolveVIDSRCMaster(ctx context.Context, raw, referer, playerURL, apiToken string) (*Stream, string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {
 		return nil, raw, fmt.Errorf("malformed stream URL")
 	}
 	origin := u.Scheme + "://" + u.Host
-	tok, err := vidsrcHostToken(ctx, origin, referer)
+	tok, err := vidsrcHostToken(ctx, origin, referer, apiToken)
+	if err != nil && isForbidden(err) && playerURL != "" {
+		// "invalid or mismatched api token": the one in hand went stale. The
+		// player recovers by re-rendering for a fresh one; mirror that once.
+		if fresh := vidsrcRefreshToken(ctx, playerURL); fresh != "" && fresh != apiToken {
+			tok, err = vidsrcHostToken(ctx, origin, referer, fresh)
+		}
+	}
 	if err != nil {
 		return nil, u.Host, err
 	}
@@ -460,12 +508,22 @@ func resolveVIDSRCMaster(ctx context.Context, raw, referer string) (*Stream, str
 var vidsrcRatePause = 5 * time.Second
 
 // vidsrcHostTokenOnce performs one token fetch attempt (see vidsrcHostToken).
-func vidsrcHostTokenOnce(ctx context.Context, origin, referer string) ([]byte, error) {
-	return vidsrcGetBody(ctx, origin+"/generate.php", referer)
+func vidsrcHostTokenOnce(ctx context.Context, origin, referer, apiToken string) ([]byte, error) {
+	u := origin + "/generate.php"
+	if apiToken != "" {
+		u += "?api_token=" + url.QueryEscape(apiToken)
+	}
+	return vidsrcGetBody(ctx, u, referer)
 }
 
-func vidsrcHostToken(ctx context.Context, origin, referer string) (string, error) {
-	raw, err := vidsrcHostTokenOnce(ctx, origin, referer)
+// isForbidden reports whether err is an HTTP 403 from the chain.
+func isForbidden(err error) bool {
+	var diag *netx.SourceDiagnostic
+	return errors.As(err, &diag) && diag.StatusCode == http.StatusForbidden
+}
+
+func vidsrcHostToken(ctx context.Context, origin, referer, apiToken string) (string, error) {
+	raw, err := vidsrcHostTokenOnce(ctx, origin, referer, apiToken)
 	if err != nil {
 		// The token endpoint rate-limits bursts: playing twice in quick
 		// succession rates out on the second run, and the IP-bound limit
@@ -482,7 +540,7 @@ func vidsrcHostToken(ctx context.Context, origin, referer string) (string, error
 			return "", fmt.Errorf("host token fetch failed: %w", ctx.Err())
 		case <-time.After(vidsrcRatePause):
 		}
-		raw, err = vidsrcHostTokenOnce(ctx, origin, referer)
+		raw, err = vidsrcHostTokenOnce(ctx, origin, referer, apiToken)
 		if err != nil {
 			return "", fmt.Errorf("host token fetch still refused after a rate-limit pause: %w", err)
 		}

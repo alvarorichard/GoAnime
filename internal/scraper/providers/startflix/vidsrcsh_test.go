@@ -9,18 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestVIDSRCBasesDefaultIncludeSh pins the fallback walk order: the primary,
-// its mirror, and vidsrc.sh — the panel's own front, family-checked live on
-// 2026-10-21 (same vs_src protocol, one title end to end in about two
-// seconds). When a front goes away this fails loudly instead of the walk
-// silently losing a base.
+// TestVIDSRCBasesDefaultIncludeSh pins the fallback walk order: vidsrc.sh —
+// the panel's own front — its vsembed.ru mirror, and vidsrc.io last, whose
+// origin has been dark (Cloudflare 522) since 2026-11-10. When a front goes
+// away this fails loudly instead of the walk silently losing a base.
 func TestVIDSRCBasesDefaultIncludeSh(t *testing.T) {
 	t.Setenv("GOANIME_VIDSRC_URL", "")
 	bases := vidsrcBasesFn()
 	assert.Equal(t, []string{
-		"https://vidsrc.io",
-		"https://vsembed.ru",
 		"https://vidsrc.sh",
+		"https://vsembed.ru",
+		"https://vidsrc.io",
 	}, bases)
 }
 
@@ -84,7 +83,7 @@ func TestVIDSRCPanelPlayerMovie(t *testing.T) {
 	assert.Equal(t, base.String()+"/pl/panel/master.m3u8?token=testtoken", stream.URL)
 	assert.Equal(t, 1080, stream.Height)
 	assert.Equal(t, 1, f.masterHits)
-	assert.Equal(t, 1, f.playerRenders, "one render, one single-use token")
+	assert.Equal(t, 2, f.playerRenders, "one render for the stream-data token, one for the host token")
 	assert.Equal(t, AudioSubtitled, stream.Audio, "the chain's own stream is the original audio, never the dub")
 }
 
