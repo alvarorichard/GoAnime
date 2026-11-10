@@ -10,8 +10,8 @@ import (
 )
 
 // TestVIDSRCBasesDefaultIncludeSh pins the fallback walk order: vidsrc.sh —
-// the panel's own front — its vsembed.ru mirror, and vidsrc.io last, whose
-// origin has been dark (Cloudflare 522) since 2026-11-10. When a front goes
+// the panel's own front and its vsembed.ru mirror; vidsrc.io is
+// gone from the walk, its origin dark (Cloudflare 522) since 2026-11-10. When a front goes
 // away this fails loudly instead of the walk silently losing a base.
 func TestVIDSRCBasesDefaultIncludeSh(t *testing.T) {
 	t.Setenv("GOANIME_VIDSRC_URL", "")
@@ -19,7 +19,6 @@ func TestVIDSRCBasesDefaultIncludeSh(t *testing.T) {
 	assert.Equal(t, []string{
 		"https://vidsrc.sh",
 		"https://vsembed.ru",
-		"https://vidsrc.io",
 	}, bases)
 }
 

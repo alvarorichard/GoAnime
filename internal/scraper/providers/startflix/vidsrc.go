@@ -55,12 +55,6 @@ import (
 // Nothing needs a browser or a solver: plain HTTP and one WASM call.
 
 const (
-	// DefaultVIDSRCBase is the embed API that fronted the fallback source.
-	// Its origin answers Cloudflare 522 after ~20s since 2026-11-10 (curl
-	// and the Go client alike: a dead host, not a challenge), so the walk
-	// tries it last and cuts it at vidsrcBaseTimeout.
-	DefaultVIDSRCBase = "https://vidsrc.io"
-
 	// DefaultVIDSRCMirrorBase is the vidsrc.to family's player host. It
 	// speaks the same vs_src protocol and keys the same ids, but runs its
 	// own frontend uptime — the fallback walks it when another front is
@@ -122,14 +116,14 @@ var vidsrcHTTPFn = vidsrcHTTPDefault
 // override GOANIME_VIDSRC_URL repoints the whole list at one base (mirroring
 // GOANIME_STARTFLIX_URL / GOANIME_STARTFLIX_PANEL_URL); the default walks the
 // two live fronts (vidsrc.sh, the one the StartFlix panel embeds as a player —
-// vidsrcsh.go — and the vsembed.ru mirror) and then vidsrc.io, last since
-// 2026-11-10 when its origin went dark (Cloudflare 522 after ~20s on every
-// request). A seam, also, so tests can stage fake bases and prove the walk.
+// vidsrcsh.go — and the vsembed.ru mirror). vidsrc.io, the original front, is
+// not walked: its origin has answered Cloudflare 522 after ~20s on every
+// request since 2026-11-10. A seam, also, so tests can stage fake bases and prove the walk.
 var vidsrcBasesFn = func() []string {
 	if b := strings.TrimRight(strings.TrimSpace(os.Getenv("GOANIME_VIDSRC_URL")), "/"); b != "" {
 		return []string{b}
 	}
-	return []string{DefaultVIDSRCShBase, DefaultVIDSRCMirrorBase, DefaultVIDSRCBase}
+	return []string{DefaultVIDSRCShBase, DefaultVIDSRCMirrorBase}
 }
 
 // vidsrcBaseTimeout bounds the first hop (vs_src) on each base. A healthy
