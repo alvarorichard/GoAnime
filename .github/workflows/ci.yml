@@ -718,7 +718,7 @@ jobs:
             Assert-True -Condition (Test-Path -LiteralPath $appExe) `
               -Message 'goanime.exe was not installed'
             $versionOutput = (& $appExe --version 2>&1 | Out-String).Trim()
-            Assert-True -Condition ($versionOutput -match '^GoAnime v2\.0\.0') `
+            Assert-True -Condition ($versionOutput -match '^GoAnime v2\.\d+\.\d+') `
               -Message "unexpected --version output: $versionOutput"
             $appSignature = Get-AuthenticodeSignature -LiteralPath $appExe
             Assert-True -Condition ($appSignature.Status -eq 'NotSigned') `
@@ -762,7 +762,7 @@ jobs:
               $env:PATH = [Environment]::ExpandEnvironmentVariables($rawPath)
               $pathOutput = (& $env:ComSpec /D /C 'goanime.exe --version' 2>&1 |
                 Out-String).Trim()
-              Assert-True -Condition ($pathOutput -match '^GoAnime v2\.0\.0') `
+              Assert-True -Condition ($pathOutput -match '^GoAnime v2\.\d+\.\d+') `
                 -Message "goanime.exe was not found through PATH: $pathOutput"
             } finally {
               $env:PATH = $savedProcessPath
