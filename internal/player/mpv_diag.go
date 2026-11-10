@@ -151,12 +151,19 @@ func resolvedPath(p string) string {
 	return "<unresolved>"
 }
 
+// mpvReapers counts the reapMPV goroutines still running. Tests that launch a
+// real mpv wait on it so the goroutine's last log line does not race the next
+// test swapping the package-level logger.
+var mpvReapers sync.WaitGroup
+
 // reapMPV waits for cmd in the background, reads mpv's log file when it ends,
 // logs how it ended and removes the file. The result is delivered on the
 // returned channel (buffered: nobody has to be listening).
 func reapMPV(cmd *exec.Cmd, logPath string, stderr fmt.Stringer, started time.Time) <-chan mpvExit {
 	ch := make(chan mpvExit, 1)
+	mpvReapers.Add(1)
 	go func() {
+		defer mpvReapers.Done()
 		err := cmd.Wait()
 		ex := mpvExit{err: err, code: mpvExitCode(err), runtime: time.Since(started)}
 		if logPath != "" {

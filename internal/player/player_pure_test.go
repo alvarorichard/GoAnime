@@ -183,6 +183,7 @@ func TestDownloadSubtitleFiles_NoSubsIsNoop(t *testing.T) {
 }
 
 func TestStartVideo_InvalidLinkReturnsError(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	t.Parallel()
 	if _, err := StartVideo("http://bad\nurl", nil); err == nil {
 		t.Fatal("expected error from sanitize or missing-mpv path")

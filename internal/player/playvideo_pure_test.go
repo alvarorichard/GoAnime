@@ -618,6 +618,7 @@ func TestSwitchEpisode_PropagatesResolutionError(t *testing.T) {
 }
 
 func TestPlayVideo_PropagatesEpisodeNotFound(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	t.Parallel()
 	// Empty episodes list — getCurrentEpisode returns an error and the
 	// orchestration aborts before touching mpv.
@@ -626,6 +627,7 @@ func TestPlayVideo_PropagatesEpisodeNotFound(t *testing.T) {
 }
 
 func TestPlayVideo_ValidEpisodeRoutesToStartVideo(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	// Valid episode → getCurrentEpisode succeeds. mpv args + tracking setup
 	// run. StartVideo either fails (no mpv) or launches mpv with a bogus
 	// URL; in both cases playVideo returns once the player exits or fails.
@@ -634,6 +636,7 @@ func TestPlayVideo_ValidEpisodeRoutesToStartVideo(t *testing.T) {
 }
 
 func TestPlayVideo_MovieTypeAppliesLanguagePreferences(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	// Movie/TV → playVideo enters the language-preference branch which
 	// adds --alang/--slang mpv args. Set gMedia accordingly.
 	SetExactMediaType("movie")
@@ -647,6 +650,7 @@ func TestPlayVideo_MovieTypeAppliesLanguagePreferences(t *testing.T) {
 }
 
 func TestPlayVideo_BloggerURLTriggersResolveAttempt(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	// blogger.com/video.g URL → playVideo calls extractBloggerGoogleVideoURL
 	// (fails because URL is bogus) then continues with the original URL.
 	episodes := []models.Episode{{Number: "1", Num: 1, URL: "https://blogger.com/video.g?token=abc"}}
@@ -657,6 +661,7 @@ func TestPlayVideo_BloggerURLTriggersResolveAttempt(t *testing.T) {
 // installed. Keep this test off the default suite by skipping when mpv is
 // present; otherwise it provides cheap StartVideo failure-path coverage.
 func TestPlayVideo_HLSURLEnablesHLSPath(t *testing.T) {
+	t.Cleanup(mpvReapers.Wait)
 	if _, err := exec.LookPath("mpv"); err == nil {
 		t.Skip("mpv present on host — HLS branch waits 45s polling for stream readiness")
 	}
