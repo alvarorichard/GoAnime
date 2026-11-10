@@ -178,6 +178,17 @@ func TestParseSourceAllSpellings(t *testing.T) {
 		require.NoError(t, err, in)
 		assert.Equal(t, SourceAnimeFire, got, in)
 	}
+	for in, want := range map[string]Source{
+		"Goyabu": SourceGoyabu, "goyabu": SourceGoyabu, "hianime": SourceHiAnime,
+		"StartFlix": SourceStartFlix, "TopCine": SourceTopCine,
+		"animesdigital": SourceAnimesDigital, "AnimeDrive": SourceAnimeDrive,
+		"Pobreflix": SourcePobreflix, "AnimesROLL": SourceAnroll, "anroll": SourceAnroll,
+		"Pomfy": SourcePomfy,
+	} {
+		got, err := ParseSource(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
 	for _, in := range []string{"", " ", "ANIMEFIRE", "allanime", "Fire "} {
 		_, err := ParseSource(in)
 		require.Error(t, err, "%q", in)
@@ -188,9 +199,51 @@ func TestParseSourceAllSpellings(t *testing.T) {
 // The round trip clients depend on: the label SearchAnime stamps on results
 // (Source.String) must parse back to the same source.
 func TestSourceStringRoundTripsThroughParse(t *testing.T) {
-	got, err := ParseSource(SourceAnimeFire.String())
-	require.NoError(t, err)
-	assert.Equal(t, SourceAnimeFire, got)
+	for _, src := range Sources() {
+		got, err := ParseSource(src.String())
+		require.NoError(t, err, src.String())
+		assert.Equal(t, src, got)
+	}
+}
+
+// Every source reaches its own scraper, and no two share one: a table row
+// copied from its neighbour would make a source silently serve another's data.
+func TestSourcesMapToDistinctScrapers(t *testing.T) {
+	seen := map[scraper.ScraperType]Source{}
+	names := map[string]Source{}
+	for _, src := range Sources() {
+		st := src.ToScraperType()
+		if prev, dup := seen[st]; dup {
+			t.Errorf("%v and %v both map to scraper type %v", prev, src, st)
+		}
+		seen[st] = src
+		if prev, dup := names[src.String()]; dup {
+			t.Errorf("%v and %v share the name %q", prev, src, src.String())
+		}
+		names[src.String()] = src
+		assert.NotEqual(t, "Unknown", src.String())
+	}
+	assert.Equal(t, scraper.GoyabuType, SourceGoyabu.ToScraperType())
+	assert.Equal(t, scraper.PomfyType, SourcePomfy.ToScraperType())
+	assert.Equal(t, scraper.AnrollType, SourceAnroll.ToScraperType())
+}
+
+func TestSourceSupportsEpisodes(t *testing.T) {
+	for _, src := range []Source{SourceAnimeFire, SourceGoyabu, SourceHiAnime, SourceAnimesDigital, SourceAnimeDrive, SourceAnroll} {
+		assert.True(t, src.SupportsEpisodes(), src.String())
+	}
+	for _, src := range []Source{SourceStartFlix, SourceTopCine, SourcePobreflix, SourcePomfy, Source(-1), Source(99)} {
+		assert.False(t, src.SupportsEpisodes(), src.String())
+	}
+}
+
+// Values are stored by callers: they must not move.
+func TestSourceValuesAreStable(t *testing.T) {
+	assert.Equal(t, 0, int(SourceAnimeFire))
+	assert.Equal(t, 1, int(SourceGoyabu))
+	assert.Equal(t, 9, int(SourcePomfy))
+	assert.Len(t, Sources(), 10)
+	assert.Equal(t, "Unknown", Source(-1).String())
 }
 
 // ---- metatests --------------------------------------------------------------

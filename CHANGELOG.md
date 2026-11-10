@@ -48,6 +48,10 @@ Release date: 2026-11-10
 - **Pobreflix plays its Turnstile-gated player.** The pages Pobreflix lists for movies and episodes no longer have to fall back to the StartFlix panel: GoAnime solves the widget with cfsolve, exchanges the token for the page proof, and plays the source behind it with the proof-bearing page as `Referer`. The dubbed version plays through the same gate. A title whose embedded MP4 already carries the wanted audio still plays directly. Without cfsolve nothing changes: gated titles keep the panel fallback and its explanation. `GOANIME_POBREFLIX_PLAYER_URL` repoints the player host without a release.
 - **Goyabu clears its Cloudflare gate with the optional cfsolve tool**, a browserless solver, so GoAnime stays browser-free. The binary is found through `GOANIME_CFSOLVE_BIN`, next to goanime, the config folder or PATH; when none is installed, the build pinned in `cfsolve.lock` is fetched in the background from GoAnime's releases, and only after its checksums carry a minisign signature by the key the updater trusts. Every failure is silent: Goyabu just stays out of the search, and a failed attempt is not retried for 24 hours. Goyabu searches by default exactly when a solver is registered. The Windows solver ships with each release. See [docs/CFSOLVE.md](docs/CFSOLVE.md).
 
+### Library
+
+- **`pkg/goanime` covers every source.** `types.Source` gains Goyabu, HiAnime, StartFlix, TopCine, AnimesDigital, AnimeDrive, Pobreflix, AnimesROLL and Pomfy beside AnimeFire, and `types.Sources()` lists them. All can be searched; episode lists and stream URLs work for the anime sources (`Source.SupportsEpisodes()`, the list `GetAvailableSources` returns), while the movie and series catalogues (StartFlix, TopCine, Pobreflix, Pomfy) answer `goanime.ErrEpisodesUnsupported` because their episodes are picked through menus in the CLI. `ParseSource` accepts each name `Source.String()` returns. `SourceAnimeFire` keeps value 0 and new values are only appended, so a stored `Source` keeps its meaning.
+
 ## Bug Fixes
 
 ### Sources and search

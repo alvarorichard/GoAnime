@@ -55,18 +55,7 @@ func (registryManager) GetScraper(scraperType scraper.ScraperType) (scraper.Unif
 
 // scraperKind maps an internal ScraperType to its Model B SourceKind.
 func scraperKind(st scraper.ScraperType) (apisource.SourceKind, bool) {
-	switch st {
-	case scraper.AnimefireType:
-		return apisource.AnimeFire, true
-	case scraper.GoyabuType:
-		return apisource.Goyabu, true
-	case scraper.StartFlixType:
-		return apisource.StartFlix, true
-	case scraper.TopCineType:
-		return apisource.TopCine, true
-	default:
-		return "", false
-	}
+	return apisource.KindFor(st)
 }
 
 // SearchAnime searches for anime across all sources or a specific source.
@@ -91,6 +80,9 @@ func (c *Client) SearchAnime(query string, source *types.Source) ([]*types.Anime
 // GetAnimeEpisodes retrieves all episodes for a specific anime.
 // The animeURL should be obtained from a SearchAnime result.
 func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*types.Episode, error) {
+	if err := requireEpisodes(source); err != nil {
+		return nil, err
+	}
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return nil, err
@@ -109,6 +101,9 @@ func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*type
 //
 // Deprecated: Use GetEpisodeStreamURL instead for better control over quality and mode.
 func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...any) (streamURL string, metadata map[string]string, err error) {
+	if err := requireEpisodes(source); err != nil {
+		return "", nil, err
+	}
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
 		return "", nil, err
@@ -151,6 +146,9 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 	if err != nil {
 		return "", nil, err
 	}
+	if err := requireEpisodes(source); err != nil {
+		return "", nil, err
+	}
 
 	scr, err := c.manager.GetScraper(source.ToScraperType())
 	if err != nil {
@@ -162,14 +160,27 @@ func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode,
 	return scr.GetStreamURL(episode.URL)
 }
 
+// requireEpisodes refuses a source that can only be searched.
+func requireEpisodes(source types.Source) error {
+	if !source.SupportsEpisodes() {
+		return fmt.Errorf("%s: %w", source, ErrEpisodesUnsupported)
+	}
+	return nil
+}
+
 // NewClientForTest creates a Client backed by a custom Manager. Only for tests.
 func NewClientForTest(manager Manager) *Client {
 	return &Client{manager: manager}
 }
 
-// GetAvailableSources returns a list of all available scraper sources.
+// GetAvailableSources returns the sources whose episode lists and stream URLs
+// the client can fetch. types.Sources lists every source that can be searched.
 func (c *Client) GetAvailableSources() []types.Source {
-	return []types.Source{
-		types.SourceAnimeFire,
+	var out []types.Source
+	for _, s := range types.Sources() {
+		if s.SupportsEpisodes() {
+			out = append(out, s)
+		}
 	}
+	return out
 }

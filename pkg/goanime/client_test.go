@@ -16,31 +16,19 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestGetAvailableSources(t *testing.T) {
-	client := goanime.NewClient()
-	sources := client.GetAvailableSources()
+	sources := goanime.NewClient().GetAvailableSources()
 
-	if len(sources) == 0 {
-		t.Fatal("No sources available")
+	want := []types.Source{
+		types.SourceAnimeFire, types.SourceGoyabu, types.SourceHiAnime,
+		types.SourceAnimesDigital, types.SourceAnimeDrive, types.SourceAnroll,
 	}
-
-	// Check if expected sources are present
-	hasAllAnime := false
-	hasAnimeFire := false
-
-	for _, source := range sources {
-		if source == types.SourceAnimeFire {
-			hasAllAnime = true
+	if len(sources) != len(want) {
+		t.Fatalf("GetAvailableSources() = %v, want %v", sources, want)
+	}
+	for i, w := range want {
+		if sources[i] != w {
+			t.Errorf("source %d = %v, want %v", i, sources[i], w)
 		}
-		if source == types.SourceAnimeFire {
-			hasAnimeFire = true
-		}
-	}
-
-	if !hasAllAnime {
-		t.Error("AllAnime source not found")
-	}
-	if !hasAnimeFire {
-		t.Error("AnimeFire source not found")
 	}
 }
 
@@ -50,6 +38,15 @@ func TestSourceString(t *testing.T) {
 		expected string
 	}{
 		{types.SourceAnimeFire, "Animefire.io"},
+		{types.SourceGoyabu, "Goyabu"},
+		{types.SourceHiAnime, "HiAnime"},
+		{types.SourceStartFlix, "StartFlix"},
+		{types.SourceTopCine, "TopCine"},
+		{types.SourceAnimesDigital, "AnimesDigital"},
+		{types.SourceAnimeDrive, "AnimeDrive"},
+		{types.SourcePobreflix, "Pobreflix"},
+		{types.SourceAnroll, "AnimesROLL"},
+		{types.SourcePomfy, "Pomfy"},
 	}
 
 	for _, tt := range tests {

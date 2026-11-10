@@ -38,6 +38,17 @@ func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
 	return st, ok
 }
 
+// KindFor is the inverse of ScraperTypeFor: the SourceKind of a ScraperType,
+// or ("", false) when none has it.
+func KindFor(st scraper.ScraperType) (SourceKind, bool) {
+	for kind, t := range scraperTypeMap {
+		if t == st {
+			return kind, true
+		}
+	}
+	return "", false
+}
+
 var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimeFire:     scraper.AnimefireType,
 	Goyabu:        scraper.GoyabuType,

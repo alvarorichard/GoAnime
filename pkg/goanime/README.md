@@ -16,7 +16,7 @@ import (
 ```
 
 Search covers every enabled source. Episode lists and stream URLs are
-available for AnimeFire results only.
+available for the anime sources (`Source.SupportsEpisodes()`).
 
 ## Client
 
@@ -28,7 +28,7 @@ tool. It performs no network requests.
 ### `func (c *Client) SearchAnime(query string, source *types.Source) ([]*types.Anime, error)`
 
 Searches for `query`. With a `nil` source it searches every enabled source in
-parallel; with `&types.SourceAnimeFire` it searches AnimeFire only.
+parallel; with a source such as `&types.SourceAnimeFire` it searches that one only.
 
 ### `func (c *Client) GetAnimeEpisodes(animeURL string, source types.Source) ([]*types.Episode, error)`
 
@@ -38,8 +38,9 @@ search result.
 ### `func (c *Client) GetEpisodeStreamURL(anime *types.Anime, episode *types.Episode, options *StreamOptions) (string, map[string]string, error)`
 
 Returns the stream URL of an episode and a metadata map whose `source` key
-names the source. `anime` must be an AnimeFire result; any other source
-returns an `unknown source` error. `options` may be `nil`.
+names the source. `anime.Source` must be the name of one of the sources below; anything
+else returns an `unknown source` error, and a source that is search-only
+returns `ErrEpisodesUnsupported`. `options` may be `nil`.
 
 ### `func (c *Client) GetStreamURL(episodeURL string, source types.Source, options ...any) (string, map[string]string, error)`
 
@@ -48,8 +49,11 @@ episode URL directly.
 
 ### `func (c *Client) GetAvailableSources() []types.Source`
 
-Returns the sources that support episode lists and stream URLs. Today that is
-`types.SourceAnimeFire` only.
+Returns the sources that support episode lists and stream URLs: AnimeFire,
+Goyabu, HiAnime, AnimesDigital, AnimeDrive and AnimesROLL. `types.Sources()`
+lists every source that can be searched. A source that is switched off
+(Goyabu is, by default; see `GOANIME_ENABLED_SOURCES`) is still listed but
+returns no search results.
 
 ### `type StreamOptions`
 
@@ -68,13 +72,28 @@ default quality.
 
 ### `types.Source`
 
-| Value                   | `String()`       |
-| ----------------------- | ---------------- |
-| `types.SourceAnimeFire` | `"Animefire.io"` |
+| Value                         | `String()`        |
+| ----------------------------- | ----------------- |
+| `types.SourceAnimeFire`       | `"Animefire.io"`  |
+| `types.SourceGoyabu`          | `"Goyabu"`        |
+| `types.SourceHiAnime`         | `"HiAnime"`       |
+| `types.SourceStartFlix`       | `"StartFlix"`     |
+| `types.SourceTopCine`         | `"TopCine"`       |
+| `types.SourceAnimesDigital`   | `"AnimesDigital"` |
+| `types.SourceAnimeDrive`      | `"AnimeDrive"`    |
+| `types.SourcePobreflix`       | `"Pobreflix"`     |
+| `types.SourceAnroll`          | `"AnimesROLL"`    |
+| `types.SourcePomfy`           | `"Pomfy"`         |
 
-`types.ParseSource(s string) (Source, error)` accepts `AnimeFire`,
-`animefire`, `fire`, `Animefire.io` and `animefire.io`, and returns an error
-for anything else.
+`types.Sources()` returns all of them. All can be searched, but StartFlix,
+TopCine, Pobreflix and Pomfy are movie and series catalogues whose episodes
+the command-line tool picks through season and audio menus: for them
+`GetAnimeEpisodes`, `GetStreamURL` and `GetEpisodeStreamURL` return
+`goanime.ErrEpisodesUnsupported`. `Source.SupportsEpisodes()` tells which.
+Some catalogues index PT-BR titles only, so search `A Origem`, not `Inception`. `types.ParseSource(s string) (Source, error)`
+accepts each `String()` spelling, the lowercase name of each source (and
+`fire` for AnimeFire), and returns an error for anything else. New values are
+only appended, so a stored `Source` keeps its meaning.
 
 ### `types.Anime`
 

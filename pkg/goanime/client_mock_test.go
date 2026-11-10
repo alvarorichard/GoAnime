@@ -278,3 +278,37 @@ func TestClientContractMeta(t *testing.T) {
 		assert.NotEmpty(t, clientContractFailures(mk), "mutant %q survived", name)
 	}
 }
+
+// The movie and series catalogues can be searched but not listed: the client
+// says so, and never reaches the scraper (a mockManager with a scraper would
+// answer for them).
+func TestClientEpisodesUnsupportedSources(t *testing.T) {
+	for _, src := range []types.Source{types.SourceStartFlix, types.SourceTopCine, types.SourcePobreflix, types.SourcePomfy} {
+		m := &mockManager{scr: &mockScraper{}}
+		c := goanime.NewClientForTest(m)
+
+		_, err := c.GetAnimeEpisodes("u", src)
+		require.ErrorIs(t, err, goanime.ErrEpisodesUnsupported, src.String())
+		assert.Contains(t, err.Error(), src.String())
+
+		_, _, err = c.GetStreamURL("e", src)
+		require.ErrorIs(t, err, goanime.ErrEpisodesUnsupported, src.String())
+
+		_, _, err = c.GetEpisodeStreamURL(&types.Anime{Source: src.String()}, &types.Episode{URL: "e"}, nil)
+		require.ErrorIs(t, err, goanime.ErrEpisodesUnsupported, src.String())
+
+		assert.Empty(t, m.scraperReqs, "%s: no scraper was built", src)
+	}
+}
+
+func TestClientEpisodesSupportedSourcesReachTheScraper(t *testing.T) {
+	for _, src := range types.Sources() {
+		if !src.SupportsEpisodes() {
+			continue
+		}
+		m := &mockManager{scr: &mockScraper{episodes: []models.Episode{{Number: "1", URL: "e1"}}}}
+		_, err := goanime.NewClientForTest(m).GetAnimeEpisodes("u", src)
+		require.NoError(t, err, src.String())
+		assert.Equal(t, []scraper.ScraperType{src.ToScraperType()}, m.scraperReqs, src.String())
+	}
+}

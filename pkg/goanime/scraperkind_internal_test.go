@@ -18,6 +18,12 @@ var scraperKindCases = []struct {
 	{scraper.GoyabuType, apisource.Goyabu, true},
 	{scraper.StartFlixType, apisource.StartFlix, true},
 	{scraper.TopCineType, apisource.TopCine, true},
+	{scraper.HiAnimeType, apisource.HiAnime, true},
+	{scraper.AnimesDigitalType, apisource.AnimesDigital, true},
+	{scraper.AnimeDriveType, apisource.AnimeDrive, true},
+	{scraper.PobreflixType, apisource.Pobreflix, true},
+	{scraper.AnrollType, apisource.Anroll, true},
+	{scraper.PomfyType, apisource.Pomfy, true},
 	{scraper.ScraperType(9999), "", false},
 	{scraper.ScraperType(-1), "", false},
 }
