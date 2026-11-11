@@ -22,16 +22,16 @@ func TestPickerStatusTruncatesTheTitleToTheRoomItHas(t *testing.T) {
 func TestRowKeyOfARowPastTheEndIsEmptyNotAPanic(t *testing.T) {
 	m := homeListsScreen(t, hlThreeLists(), 100, 40)
 	n := len(m.lists.all)
-	require := assert.New(t)
+	is := assert.New(t)
 
-	require.NotEmpty(m.rowKey(homeRow{kind: homeRowList, index: n - 1}), "the last list has a key")
-	require.Equal("", m.rowKey(homeRow{kind: homeRowList, index: n}), "one past the last list")
-	require.Equal(rowKeyList+m.lists.all[0].ID, m.rowKey(homeRow{kind: homeRowList, index: 0}))
+	is.NotEmpty(m.rowKey(homeRow{kind: homeRowList, index: n - 1}), "the last list has a key")
+	is.Equal("", m.rowKey(homeRow{kind: homeRowList, index: n}), "one past the last list")
+	is.Equal(rowKeyList+m.lists.all[0].ID, m.rowKey(homeRow{kind: homeRowList, index: 0}))
 
 	nf := len(m.favoriteAll)
 	m.lists.level = homeLevelLists
-	require.NotEmpty(m.rowKey(homeRow{kind: homeRowFavorite, index: nf - 1}), "the last favorite has a key")
-	require.Equal("", m.rowKey(homeRow{kind: homeRowFavorite, index: nf}), "one past the last favorite")
+	is.NotEmpty(m.rowKey(homeRow{kind: homeRowFavorite, index: nf - 1}), "the last favorite has a key")
+	is.Equal("", m.rowKey(homeRow{kind: homeRowFavorite, index: nf}), "one past the last favorite")
 }
 
 func TestRestorePointOnAnEmptyFavoritesTabNamesNoRow(t *testing.T) {
