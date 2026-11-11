@@ -127,7 +127,8 @@ func regLoadGolden(t *testing.T, name string) *regGoldenFile {
 			g.sections[current] = strings.Join(body, "\n")
 		}
 	}
-	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+	// a Windows checkout may use CRLF
+	for _, line := range strings.Split(strings.TrimSuffix(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n"), "\n") {
 		if strings.HasPrefix(line, "=== ") && strings.HasSuffix(line, " ===") {
 			flush()
 			current, body = strings.TrimSuffix(strings.TrimPrefix(line, "=== "), " ==="), nil
