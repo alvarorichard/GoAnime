@@ -35,21 +35,21 @@ var searchScopes = []struct{ Name, Value string }{
 	{"MOVIES/TV", "movietv"},
 }
 
-// homeScopes are the home screen's tabs: the search tabs, then FAVORITOS.
-var homeScopes = append(slices.Clone(searchScopes), struct{ Name, Value string }{"FAVORITOS", favoritesScope})
+// homeScopes are the home screen's tabs: the search tabs, then FAVORITES.
+var homeScopes = append(slices.Clone(searchScopes), struct{ Name, Value string }{"FAVORITES", favoritesScope})
 
-// favoritesScope is the FAVORITOS tab's value. It is not a search scope: on
+// favoritesScope is the FAVORITES tab's value. It is not a search scope: on
 // that tab the box filters the user's favorites and nothing is searched until
 // one is opened, and a result never carries it.
 const favoritesScope = "favorites"
 
-// favoritesPlaceholder is the box's hint on the FAVORITOS tab.
+// favoritesPlaceholder is the box's hint on the FAVORITES tab.
 const favoritesPlaceholder = "type to filter your favorites, enter opens the first one"
 
 // homePageRows is how far pgup and pgdown move on a list.
 const homePageRows = 10
 
-// homeFavoritesShown is how many FAVORITOS rows the home screen draws; the
+// homeFavoritesShown is how many FAVORITES rows the home screen draws; the
 // rest wait behind a "+N more" line and slide in as rows are removed.
 const homeFavoritesShown = 8
 
@@ -102,7 +102,7 @@ func (e HomeContinueEntry) DisplayTitle() string {
 	return "Unknown title"
 }
 
-// HomeFavorite is one row of the FAVORITOS list.
+// HomeFavorite is one row of the FAVORITES list.
 type HomeFavorite struct {
 	Key    string // favorites key, for removal
 	Title  string
@@ -127,7 +127,7 @@ type SearchHomeOptions struct {
 	SourcesLine string
 	Continue    []HomeContinueEntry
 	Recent      []HomeRecentSearch
-	// Favorites is the FAVORITOS list: the works the user marked. Enter
+	// Favorites is the FAVORITES list: the works the user marked. Enter
 	// searches the title. DeleteFavorite removes a row by key and
 	// ClearFavorites empties the list (X, after a y/n question); nil disables
 	// x or X there.
@@ -420,7 +420,7 @@ func (m *searchHomeModel) jumpRows(key string) bool {
 	return true
 }
 
-// onFavorites reports whether the FAVORITOS tab is the one showing.
+// onFavorites reports whether the FAVORITES tab is the one showing.
 func (m *searchHomeModel) onFavorites() bool {
 	return m.scopes[m.scopeIdx].Value == favoritesScope
 }
@@ -686,7 +686,7 @@ func (m *searchHomeModel) dropSuggestions() {
 // enough query, a debounce tick is scheduled.
 func (m *searchHomeModel) queryChanged() tea.Cmd {
 	if m.onFavorites() {
-		// Nothing is looked up on the FAVORITOS tab: typing filters the list.
+		// Nothing is looked up on the FAVORITES tab: typing filters the list.
 		// The highlight only goes back to the top when the filter changed.
 		key := m.suggestKey()
 		m.dropSuggestions()
@@ -938,7 +938,7 @@ func (m *searchHomeModel) forgetRecent(index int) {
 	m.rowsChanged()
 }
 
-// forgetFavorite takes the FAVORITOS row at index off the list and the
+// forgetFavorite takes the FAVORITES row at index off the list and the
 // screen. A removal that fails keeps the row and says so.
 func (m *searchHomeModel) forgetFavorite(index int) {
 	if m.deleteFavorite == nil {
@@ -1001,7 +1001,7 @@ func (m *searchHomeModel) clearConfirmed() {
 		m.recentAll = nil
 	case clearFavoriteRows:
 		if err := m.clearFavorites(); err != nil {
-			m.failed("clear FAVORITOS", err)
+			m.failed("clear FAVORITES", err)
 			return
 		}
 		m.favoriteAll = nil
@@ -1033,7 +1033,7 @@ func (m *searchHomeModel) questionView(width int) string {
 	case clearRecentRows:
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from RECENT? y to clear, n to keep.", countOf(len(m.recentAll), "search", "searches")), width)
 	case clearFavoriteRows:
-		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from FAVORITOS? y to clear, n to keep.", countOf(len(m.favoriteAll), "favorite", "favorites")), width)
+		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from FAVORITES? y to clear, n to keep.", countOf(len(m.favoriteAll), "favorite", "favorites")), width)
 	}
 	return renderNotice(&m.theme, singleLine(m.notice), width)
 }
@@ -1132,7 +1132,7 @@ func (m *searchHomeModel) View() tea.View {
 func (m *searchHomeModel) helpView(width, height int) string {
 	if help := RenderHelp(&m.theme, "Search", []HelpRow{
 		{Key: "enter", Desc: "search, resume"},
-		{Key: "tab", Desc: "change scope; FAVORITOS lists your favorites"},
+		{Key: "tab", Desc: "change scope; FAVORITES lists your favorites"},
 		{Key: "ctrl+s", Desc: "choose sources"},
 		{Key: "r", Desc: "from the start"},
 		{Key: "e", Desc: "episodes"},
@@ -1173,7 +1173,7 @@ func (m *searchHomeModel) homeView(width, height int) string {
 		}
 		sections = append(sections, "", lists)
 	}
-	sections = append(sections, "", m.sectionHeader("FAVORITOS", ""), m.favoritesView(width))
+	sections = append(sections, "", m.sectionHeader("FAVORITES", ""), m.favoritesView(width))
 	if recent := m.recentView(width); recent != "" {
 		sections = append(sections, "", m.sectionHeader("RECENT", "最近"), recent)
 	}
@@ -1437,11 +1437,11 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 	}
 }
 
-// favoritesTabView is the FAVORITOS tab: every favorite the box matches, in a
+// favoritesTabView is the FAVORITES tab: every favorite the box matches, in a
 // window that follows the cursor, with how many are above and below it.
 func (m *searchHomeModel) favoritesTabView(width, height int) string {
 	total := len(m.favoriteAll)
-	head := m.sectionHeader("FAVORITOS", "")
+	head := m.sectionHeader("FAVORITES", "")
 	switch {
 	case total == 0:
 		return head + "\n" + m.theme.Muted.Render("  You have no favorites yet. Search for a title, then press ctrl+f on it to add it here.")
@@ -1499,7 +1499,7 @@ func (m *searchHomeModel) favoritesTabView(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// favoritesView renders the FAVORITOS rows: the title and, at the right, its
+// favoritesView renders the FAVORITES rows: the title and, at the right, its
 // year and type.
 func (m *searchHomeModel) favoritesView(width int) string {
 	if len(m.favoriteAll) == 0 {
@@ -1520,7 +1520,7 @@ func (m *searchHomeModel) favoritesView(width int) string {
 	}
 	rows := renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
 	if more := len(m.favoriteAll) - len(shown); more > 0 {
-		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · press tab until FAVORITOS to see them all", more))
+		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · press tab until FAVORITES to see them all", more))
 	}
 	return rows
 }

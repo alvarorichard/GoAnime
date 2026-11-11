@@ -1,4 +1,4 @@
-// Package favorites keeps the works the user marked as FAVORITOS, like the
+// Package favorites keeps the works the user marked as FAVORITES, like the
 // "My List" of the streaming services. They live in one small JSON file next
 // to the watch history, so they work on every platform and in builds without
 // SQLite (no CGO).

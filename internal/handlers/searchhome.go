@@ -129,10 +129,10 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 	})
 }
 
-// favoritesStore is the FAVORITOS file; a variable so tests use a temporary one.
+// favoritesStore is the FAVORITES file; a variable so tests use a temporary one.
 var favoritesStore = favorites.Default
 
-// homeFavorites reads the FAVORITOS rows, newest first.
+// homeFavorites reads the FAVORITES rows, newest first.
 func homeFavorites() []tui.HomeFavorite {
 	list, err := favoritesStore().List()
 	if err != nil {
@@ -158,10 +158,10 @@ func favoritesNotice() string {
 	return "Your favorites file was damaged, so the list starts empty. A copy was kept as " + filepath.Base(aside) + "."
 }
 
-// forgetFavorite takes one work off FAVORITOS.
+// forgetFavorite takes one work off FAVORITES.
 func forgetFavorite(key string) error { return favoritesStore().Remove(key) }
 
-// clearFavorites empties FAVORITOS.
+// clearFavorites empties FAVORITES.
 func clearFavorites() error { return favoritesStore().Clear() }
 
 // homeSuggest adapts the keyless suggestion engine (Kitsu for anime, IMDb for

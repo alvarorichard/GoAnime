@@ -35,7 +35,7 @@ func resultsWithFavorites(t *testing.T) (*animeResultsModel, *favorites.Store) {
 	return m, store
 }
 
-func TestCtrlFAddsTheHighlightedWorkToFavoritos(t *testing.T) {
+func TestCtrlFAddsTheHighlightedWorkToFavorites(t *testing.T) {
 	m, store := resultsWithFavorites(t)
 
 	_, cmd := m.Update(ctrlF)
@@ -97,7 +97,7 @@ func TestAFavoriteThatCannotBeSavedSaysWhy(t *testing.T) {
 
 	_, _ = m.Update(ctrlF)
 
-	assert.Contains(t, m.notice, "Could not update FAVORITOS")
+	assert.Contains(t, m.notice, "Could not update FAVORITES")
 	assert.Contains(t, m.notice, "disk full")
 }
 
@@ -110,7 +110,7 @@ func TestResultHintsOfferFavorite(t *testing.T) {
 	assert.Contains(t, keys, "ctrl+f")
 }
 
-// ---- the home screen: the FAVORITOS list ---------------------------------------
+// ---- the home screen: the FAVORITES list ---------------------------------------
 
 type favoritesFake struct {
 	removed []string
@@ -136,7 +136,7 @@ var sampleFavorites = []HomeFavorite{
 	{Key: "a origem", Title: "A Origem", Year: "2010", Media: "Movie", Source: "StartFlix"},
 }
 
-func TestFavoritosSitBetweenContinueAndRecent(t *testing.T) {
+func TestFavoritesSitBetweenContinueAndRecent(t *testing.T) {
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, continueAll, recent))
 
@@ -152,9 +152,9 @@ func TestFavoritosSitBetweenContinueAndRecent(t *testing.T) {
 	}, kinds, "the cursor walks the lists in the order they are drawn")
 
 	view := screen(m)
-	assert.Contains(t, view, "FAVORITOS")
-	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITOS"))
-	assert.Less(t, lastIndexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
+	assert.Contains(t, view, "FAVORITES")
+	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITES"))
+	assert.Less(t, lastIndexOf(view, "FAVORITES"), indexOf(view, "RECENT"))
 	assert.Contains(t, view, "Frieren")
 	assert.Contains(t, view, "2023 · Anime")
 	assert.Contains(t, view, "A Origem")
@@ -171,20 +171,20 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-func TestFavoritosIsOnTheMenuBeforeTheFirstFavorite(t *testing.T) {
+func TestFavoritesIsOnTheMenuBeforeTheFirstFavorite(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{})
 
 	view := screen(m)
-	assert.Contains(t, view, "FAVORITOS", "a new user can find it")
+	assert.Contains(t, view, "FAVORITES", "a new user can find it")
 	assert.Contains(t, view, "Nothing here yet")
 	assert.Contains(t, view, "ctrl+f", "and learns how to fill it")
 	assert.Empty(t, m.rows, "an empty list has no rows to walk")
 }
 
-func TestTheEmptyFavoritosHintGoesAwayWithTheFirstOne(t *testing.T) {
+func TestTheEmptyFavoritesHintGoesAwayWithTheFirstOne(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{Favorites: sampleFavorites[:1]})
 	view := screen(m)
-	assert.Contains(t, view, "FAVORITOS")
+	assert.Contains(t, view, "FAVORITES")
 	assert.NotContains(t, view, "Nothing here yet")
 }
 
@@ -245,7 +245,7 @@ func TestXWithoutARemoverKeepsTheFavorite(t *testing.T) {
 	assert.Len(t, m.favoriteAll, 2)
 }
 
-func TestShiftXAsksThenYClearsOnlyFavoritos(t *testing.T) {
+func TestShiftXAsksThenYClearsOnlyFavorites(t *testing.T) {
 	f := &favoritesFake{}
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel(f.options(sampleFavorites, continueAll, recent))
@@ -253,7 +253,7 @@ func TestShiftXAsksThenYClearsOnlyFavoritos(t *testing.T) {
 
 	_, _ = m.Update(press('X', "X"))
 	assert.Equal(t, clearFavoriteRows, m.clearing)
-	assert.Contains(t, screen(m), "Clear all 2 favorites from FAVORITOS?")
+	assert.Contains(t, screen(m), "Clear all 2 favorites from FAVORITES?")
 	assert.Equal(t, 0, f.cleared, "nothing is cleared before the answer")
 
 	_, _ = m.Update(press('y', "y"))
@@ -433,7 +433,7 @@ func TestClearCountsEveryFavoriteIncludingHiddenOnes(t *testing.T) {
 
 	_, _ = m.Update(press('X', "X"))
 
-	assert.Contains(t, screen(m), "Clear all 13 favorites from FAVORITOS?")
+	assert.Contains(t, screen(m), "Clear all 13 favorites from FAVORITES?")
 }
 
 func TestTheScreenDoesNotScribbleOnTheCallersFavorites(t *testing.T) {
@@ -452,12 +452,12 @@ func TestTheScreenDoesNotScribbleOnTheCallersFavorites(t *testing.T) {
 func TestTheDetailsSayInWordsWhatCtrlFDoes(t *testing.T) {
 	m, _ := resultsWithFavorites(t)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITOS")
+	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITES")
 
 	_, _ = m.Update(ctrlF)
 	view := screen2(m)
-	assert.Contains(t, view, "ctrl+f takes it off FAVORITOS")
-	assert.NotContains(t, view, "ctrl+f adds it to FAVORITOS")
+	assert.Contains(t, view, "ctrl+f takes it off FAVORITES")
+	assert.NotContains(t, view, "ctrl+f adds it to FAVORITES")
 }
 
 func TestTheFooterNamesTheActionItWillDo(t *testing.T) {
@@ -480,12 +480,12 @@ func TestThePlainPanelSaysItToo(t *testing.T) {
 	t.Cleanup(func() { SetPlain(false) })
 	m, _ := resultsWithFavorites(t)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITOS")
+	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITES")
 	_, _ = m.Update(ctrlF)
 	assert.Contains(t, screen2(m), "* Frieren", "a star drawn as text, for screen readers")
 }
 
-// ---- the FAVORITOS tab -------------------------------------------------------------
+// ---- the FAVORITES tab -------------------------------------------------------------
 
 func tabTo(t *testing.T, m *searchHomeModel, name string) {
 	t.Helper()
@@ -498,14 +498,14 @@ func tabTo(t *testing.T, m *searchHomeModel, name string) {
 	t.Fatalf("no tab %s", name)
 }
 
-func TestFavoritosIsATabBesideMoviesTV(t *testing.T) {
+func TestFavoritesIsATabBesideMoviesTV(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{})
 	names := make([]string, len(m.scopes))
 	for i, s := range m.scopes {
 		names[i] = s.Name
 	}
-	assert.Equal(t, []string{"ALL", "PT-BR", "ENGLISH", "MOVIES/TV", "FAVORITOS"}, names)
-	assert.Contains(t, screen(m), "FAVORITOS", "on the tab row, where a new user looks")
+	assert.Equal(t, []string{"ALL", "PT-BR", "ENGLISH", "MOVIES/TV", "FAVORITES"}, names)
+	assert.Contains(t, screen(m), "FAVORITES", "on the tab row, where a new user looks")
 }
 
 func TestTheSearchPromptKeepsOnlyTheSearchTabs(t *testing.T) {
@@ -520,7 +520,7 @@ func TestTheTabListsEveryFavoriteWithoutTheOtherLists(t *testing.T) {
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(13), continueAll, recent))
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 
 	view := screen(m)
 	assert.Contains(t, view, "Work 0")
@@ -536,7 +536,7 @@ func TestTheTabListsEveryFavoriteWithoutTheOtherLists(t *testing.T) {
 func TestLeavingTheTabBringsTheListsBack(t *testing.T) {
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, continueAll, recent))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	_, _ = m.Update(press(tea.KeyTab, "")) // wraps to ALL
 
 	assert.Equal(t, "ALL", m.scopes[m.scopeIdx].Name)
@@ -549,7 +549,7 @@ func TestLeavingTheTabBringsTheListsBack(t *testing.T) {
 
 func TestTypingOnTheTabFiltersTheFavorites(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 
 	typeText(m, "orig")
 
@@ -566,7 +566,7 @@ func TestTypingOnTheTabFiltersTheFavorites(t *testing.T) {
 
 func TestTheFilterMatchesYearTypeAndSourceToo(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	typeText(m, "movie")
 	require.Len(t, m.rows, 1)
 	assert.Equal(t, 1, m.rows[0].index, "A Origem is the movie")
@@ -574,7 +574,7 @@ func TestTheFilterMatchesYearTypeAndSourceToo(t *testing.T) {
 
 func TestEnterInTheBoxOpensTheFirstMatchAndNeverSearchesTheTab(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	typeText(m, "orig")
 
 	_, cmd := m.Update(press(tea.KeyEnter, ""))
@@ -587,7 +587,7 @@ func TestEnterInTheBoxOpensTheFirstMatchAndNeverSearchesTheTab(t *testing.T) {
 
 func TestEnterOnAnEmptyTabDoesNothing(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{})
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	_, cmd := m.Update(press(tea.KeyEnter, ""))
 	assert.Nil(t, cmd)
 	assert.Contains(t, screen(m), "You have no favorites yet")
@@ -596,7 +596,7 @@ func TestEnterOnAnEmptyTabDoesNothing(t *testing.T) {
 
 func TestEnterOnAHighlightedFavoriteOnTheTab(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	downTo(t, m, 1)
 	_, cmd := m.Update(press(tea.KeyEnter, ""))
 	require.NotNil(t, cmd)
@@ -607,7 +607,7 @@ func TestEnterOnAHighlightedFavoriteOnTheTab(t *testing.T) {
 func TestTheTabScrollsAndKeepsTheCursorInView(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(60), nil, nil))
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	downTo(t, m, 40)
 
 	view := screen(m)
@@ -622,7 +622,7 @@ func TestTheTabScrollsAndKeepsTheCursorInView(t *testing.T) {
 func TestXAndShiftXWorkOnTheTab(t *testing.T) {
 	f := &favoritesFake{}
 	m := newSearchHomeModel(f.options(manyFavorites(12), nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	typeText(m, "work 1") // Work 1, Work 10, Work 11
 	require.Len(t, m.rows, 3)
 	downTo(t, m, 1)
@@ -634,7 +634,7 @@ func TestXAndShiftXWorkOnTheTab(t *testing.T) {
 	assert.Len(t, m.rows, 2)
 
 	_, _ = m.Update(press('X', "X"))
-	assert.Contains(t, screen(m), "Clear all 11 favorites from FAVORITOS?")
+	assert.Contains(t, screen(m), "Clear all 11 favorites from FAVORITES?")
 }
 
 func TestTheTabHintsSayOpen(t *testing.T) {
@@ -648,7 +648,7 @@ func TestTheTabHintsSayOpen(t *testing.T) {
 		return ""
 	}
 	assert.Equal(t, "search", enter())
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	assert.Equal(t, "open", enter())
 }
 
@@ -662,7 +662,7 @@ func TestNoSuggestionsAreAskedOnTheTab(t *testing.T) {
 		},
 	})
 	m.debounce = 0
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	typeText(m, "frieren")
 	assert.Nil(t, m.queryChanged())
 	assert.Zero(t, asked)
@@ -688,7 +688,7 @@ func TestTheFilterIgnoresAccentsCaseAndExtraSpaces(t *testing.T) {
 		"ação":         "d",
 	} {
 		m := newSearchHomeModel(SearchHomeOptions{Favorites: rows})
-		tabTo(t, m, "FAVORITOS")
+		tabTo(t, m, "FAVORITES")
 		m.input.SetValue(query)
 		_ = m.queryChanged()
 		require.Len(t, m.rows, 1, "query %q", query)
@@ -698,7 +698,7 @@ func TestTheFilterIgnoresAccentsCaseAndExtraSpaces(t *testing.T) {
 
 func TestEscOnAHighlightedFavoriteKeepsTheHighlight(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(10), nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	downTo(t, m, 5)
 
 	_, _ = m.Update(press(tea.KeyEscape, ""))
@@ -709,7 +709,7 @@ func TestEscOnAHighlightedFavoriteKeepsTheHighlight(t *testing.T) {
 
 func TestTabbingFromAHighlightedFavoriteLandsOnTheBox(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(10), nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	downTo(t, m, 5)
 
 	_, _ = m.Update(press(tea.KeyTab, ""))
@@ -723,7 +723,7 @@ func TestTheHighlightedFavoriteIsAlwaysOnScreen(t *testing.T) {
 		for _, question := range []bool{false, true} {
 			m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(40), nil, nil))
 			_, _ = m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
-			tabTo(t, m, "FAVORITOS")
+			tabTo(t, m, "FAVORITES")
 			downTo(t, m, 25)
 			if question {
 				_, _ = m.Update(press('X', "X"))
@@ -741,7 +741,7 @@ func (m *searchHomeModel) shellHeight() int { _, h := m.shell.ContentSize(); ret
 
 func TestOpeningOnTheFavoritesTabByIndex(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{Favorites: sampleFavorites, ScopeIndex: 4})
-	assert.Equal(t, "FAVORITOS", m.scopes[m.scopeIdx].Name)
+	assert.Equal(t, "FAVORITES", m.scopes[m.scopeIdx].Name)
 	assert.Len(t, m.rows, 2)
 	assert.Contains(t, m.input.Placeholder, "filter your favorites")
 }
@@ -750,7 +750,7 @@ func TestTheHelpMentionsTheFavoritesTab(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m.showHelp = true
-	assert.Contains(t, screen(m), "FAVORITOS")
+	assert.Contains(t, screen(m), "FAVORITES")
 }
 
 // ---- the beginner round: footer, paging, queries, notices ---------------------------
@@ -774,7 +774,7 @@ func TestRemoveStaysInTheFooterWhenARowIsHighlighted(t *testing.T) {
 
 func TestPagingAndEndsMoveThroughALongList(t *testing.T) {
 	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(60), nil, nil))
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	downTo(t, m, 0)
 
 	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
@@ -822,9 +822,9 @@ func TestThePlainTabRowMarksTheActiveTabInText(t *testing.T) {
 	t.Cleanup(func() { SetPlain(false) })
 	m := newSearchHomeModel(SearchHomeOptions{})
 	assert.Contains(t, ansi.Strip(m.scopeTabs()), "[ALL]")
-	tabTo(t, m, "FAVORITOS")
+	tabTo(t, m, "FAVORITES")
 	row := ansi.Strip(m.scopeTabs())
-	assert.Contains(t, row, "[FAVORITOS]")
+	assert.Contains(t, row, "[FAVORITES]")
 	assert.NotContains(t, row, "[ALL]")
 }
 
@@ -842,5 +842,5 @@ func TestAnOpeningNoticeShowsThenGoesAtTheFirstKey(t *testing.T) {
 
 func TestTheMoreLineSaysHowToSeeThemAll(t *testing.T) {
 	m := newSearchHomeModel(SearchHomeOptions{Favorites: manyFavorites(12)})
-	assert.Contains(t, screen(m), "press tab until FAVORITOS to see them all")
+	assert.Contains(t, screen(m), "press tab until FAVORITES to see them all")
 }

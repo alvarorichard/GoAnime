@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Edge cases for FAVORITOS on the result screen and the search home, written
+// Edge cases for FAVORITES on the result screen and the search home, written
 // from a hand-run mutation pass: each test here fails on a realistic mutant of
 // anime_results.go or search_home.go that the first tests let through.
 //
@@ -95,7 +95,7 @@ func TestATitleWithNoLettersCannotBeFavoritedButDoesNotBreakTheScreen(t *testing
 	_, cmd := m.Update(ctrlF)
 
 	assert.Nil(t, cmd)
-	assert.Contains(t, m.notice, "Could not update FAVORITOS")
+	assert.Contains(t, m.notice, "Could not update FAVORITES")
 	assert.Empty(t, storedFavorites(t, store))
 }
 
@@ -136,7 +136,7 @@ func TestAFailedFavoriteNoticeIsOneLine(t *testing.T) {
 
 	_, _ = m.Update(ctrlF)
 
-	assert.Equal(t, "Could not update FAVORITOS: disk full! really", m.notice)
+	assert.Equal(t, "Could not update FAVORITES: disk full! really", m.notice)
 }
 
 type errFavorites struct{ err error }
@@ -154,7 +154,7 @@ func TestAFailedFavoriteTakesItsRowsFromTheList(t *testing.T) {
 
 	require.NotEmpty(t, m.notice)
 	assert.Less(t, m.results.Height(), before, "the notice's rows come off the saved, like the other notices")
-	assert.Contains(t, ansi.Strip(m.View().Content), "Could not update FAVORITOS")
+	assert.Contains(t, ansi.Strip(m.View().Content), "Could not update FAVORITES")
 }
 
 func TestFavoritingInPlainModeUpdatesTheReservedPanel(t *testing.T) {
@@ -184,7 +184,7 @@ func TestHelpOverlayListsCtrlF(t *testing.T) {
 	require.True(t, m.showHelp)
 	view := ansi.Strip(m.View().Content)
 	assert.Contains(t, view, "ctrl+f")
-	assert.Contains(t, view, "FAVORITOS")
+	assert.Contains(t, view, "FAVORITES")
 }
 
 func TestFooterHintsKeepCtrlFBeforeTheBackAndQuitKeys(t *testing.T) {
@@ -344,13 +344,13 @@ func TestClearQuestionCountsOnlyTheFavorites(t *testing.T) {
 	m, f := homeWith(threeFavorites()[:1], 3, 2)
 	downTo(t, m, 3)
 	_, _ = m.Update(press('X', "X"))
-	assert.Contains(t, screen(m), "Clear all 1 favorite from FAVORITOS?", "one favorite, not the 2 searches or 3 episodes")
+	assert.Contains(t, screen(m), "Clear all 1 favorite from FAVORITES?", "one favorite, not the 2 searches or 3 episodes")
 	assert.Zero(t, f.cleared)
 
 	m, _ = homeWith(threeFavorites(), 1, 2)
 	downTo(t, m, 1)
 	_, _ = m.Update(press('X', "X"))
-	assert.Contains(t, screen(m), "Clear all 3 favorites from FAVORITOS?")
+	assert.Contains(t, screen(m), "Clear all 3 favorites from FAVORITES?")
 }
 
 func TestShiftXDoesNothingWithoutAClearerOrWithoutRows(t *testing.T) {
@@ -401,7 +401,7 @@ func TestAFailedClearKeepsTheFavoritesAndSaysWhy(t *testing.T) {
 	assert.Equal(t, 1, f.cleared, "it was tried")
 	assert.Len(t, m.favoriteAll, 3, "and the rows stay")
 	assert.Equal(t, clearNothing, m.clearing)
-	assert.Contains(t, m.notice, "clear FAVORITOS")
+	assert.Contains(t, m.notice, "clear FAVORITES")
 	assert.Contains(t, m.notice, "read-only disk")
 }
 
@@ -428,14 +428,14 @@ func TestHomeOptionsWireTheFavoritesAndTheirActions(t *testing.T) {
 	assert.Equal(t, 1, f.cleared)
 }
 
-func TestFavoritosSectionIsOnTheMenuWhateverTheOtherListsHold(t *testing.T) {
+func TestFavoritesSectionIsOnTheMenuWhateverTheOtherListsHold(t *testing.T) {
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel(SearchHomeOptions{Continue: continueAll, Recent: recent})
 	view := screen(m)
-	assert.Contains(t, view, "FAVORITOS")
+	assert.Contains(t, view, "FAVORITES")
 	assert.Contains(t, view, "Nothing here yet")
-	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITOS"))
-	assert.Less(t, lastIndexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
+	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITES"))
+	assert.Less(t, lastIndexOf(view, "FAVORITES"), indexOf(view, "RECENT"))
 }
 
 // ---- the whole path, results screen to home screen -------------------------------
@@ -487,7 +487,7 @@ func TestFavoritesFlowFromTheResultScreenToTheHomeScreen(t *testing.T) {
 		ClearFavorites: store.Clear,
 	})
 	view := screen(home)
-	assert.Contains(t, view, "FAVORITOS")
+	assert.Contains(t, view, "FAVORITES")
 	assert.Less(t, indexOf(view, "A Origem"), indexOf(view, "Frieren"), "newest on top")
 	assert.Contains(t, view, "2023 · Anime")
 	assert.Contains(t, view, "2010 · Movie")
@@ -533,6 +533,6 @@ func TestResultScreenAgainstAReadOnlyDirectoryShowsTheNotice(t *testing.T) {
 	_, cmd := m.Update(ctrlF)
 
 	assert.Nil(t, cmd)
-	assert.Contains(t, m.notice, "Could not update FAVORITOS: favorites:")
+	assert.Contains(t, m.notice, "Could not update FAVORITES: favorites:")
 	assert.Equal(t, "Frieren", m.detailsContent().title, "not marked: it was not saved")
 }

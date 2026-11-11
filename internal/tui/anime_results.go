@@ -276,7 +276,7 @@ type animeGroupItem struct {
 	group  *animeGroup
 	pos    int    // the group's position in the model
 	number string // the row's position, zero padded to the widest one
-	// favs is the model's set of FAVORITOS keys, shared so a toggle shows on
+	// favs is the model's set of FAVORITES keys, shared so a toggle shows on
 	// the row at once; nil when favorites are not in use.
 	favs map[string]bool
 }
@@ -384,7 +384,7 @@ type animeResultsModel struct {
 	plainPanel string
 	// showHelp replaces the list with the KEYS overlay (tela 10).
 	showHelp bool
-	// favs is the FAVORITOS list ctrl+f adds the highlighted work to, and
+	// favs is the FAVORITES list ctrl+f adds the highlighted work to, and
 	// favKeys the keys in it, read once and kept in step with every toggle.
 	favs    favoritesAPI
 	favKeys map[string]bool
@@ -550,7 +550,7 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "ctrl+f":
-			// Add the highlighted work to FAVORITOS, or take it off.
+			// Add the highlighted work to FAVORITES, or take it off.
 			if !filtering {
 				m.toggleFavorite()
 				return m, nil
@@ -600,7 +600,7 @@ func (m *animeResultsModel) favoriteHint() string {
 	return "favorite"
 }
 
-// favoriteEntry is the FAVORITOS record of a work: it is kept by title, so
+// favoriteEntry is the FAVORITES record of a work: it is kept by title, so
 // every source's copy of it is one favorite, and remembers the version that
 // was chosen.
 func (m *animeResultsModel) favoriteEntry(item animeGroupItem) favorites.Entry {
@@ -618,12 +618,12 @@ func (m *animeResultsModel) favoriteEntry(item animeGroupItem) favorites.Entry {
 	}
 }
 
-// isFavorite reports whether the highlighted work is in FAVORITOS.
+// isFavorite reports whether the highlighted work is in FAVORITES.
 func (m *animeResultsModel) isFavorite(g *animeGroup) bool {
 	return g != nil && m.favKeys[normalizeTitleKey(g.title)]
 }
 
-// toggleFavorite adds the highlighted work to FAVORITOS or takes it off.
+// toggleFavorite adds the highlighted work to FAVORITES or takes it off.
 func (m *animeResultsModel) toggleFavorite() {
 	item, ok := m.results.SelectedItem().(animeGroupItem)
 	if !ok || item.group == nil || m.favs == nil {
@@ -633,7 +633,7 @@ func (m *animeResultsModel) toggleFavorite() {
 	on, err := m.favs.Toggle(entry)
 	if err != nil {
 		// The notice takes rows above the list, so the list is resized.
-		m.notice = "Could not update FAVORITOS: " + singleLine(err.Error())
+		m.notice = "Could not update FAVORITES: " + singleLine(err.Error())
 		m.resize()
 		return
 	}
@@ -642,7 +642,7 @@ func (m *animeResultsModel) toggleFavorite() {
 	} else {
 		delete(m.favKeys, entry.Key)
 	}
-	if strings.HasPrefix(m.notice, "Could not update FAVORITOS") {
+	if strings.HasPrefix(m.notice, "Could not update FAVORITES") {
 		m.notice = ""
 		m.resize()
 		return
@@ -734,7 +734,7 @@ func (m *animeResultsModel) helpView(width, height int, body string) string {
 	}
 	if help := RenderHelp(&m.theme, "Results", []HelpRow{
 		{Key: versionKey, Desc: "choose a version"},
-		{Key: "ctrl+f", Desc: "add to or remove from FAVORITOS"},
+		{Key: "ctrl+f", Desc: "add to or remove from FAVORITES"},
 		{Key: "esc", Desc: "edit the search"},
 		{Key: "q", Desc: "quit"},
 	}, nil, width, height); help != "" {
@@ -791,10 +791,10 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 	tip := ""
 	if m.favs != nil {
 		// Said in words, for whoever has never seen the key.
-		tip = "ctrl+f adds it to FAVORITOS"
+		tip = "ctrl+f adds it to FAVORITES"
 		if m.isFavorite(group) {
 			title = drawGlyph("★ ", "* ") + title
-			tip = "ctrl+f takes it off FAVORITOS"
+			tip = "ctrl+f takes it off FAVORITES"
 		}
 	}
 	return &panelContent{

@@ -30,7 +30,7 @@ import (
 func TestMain(m *testing.M) {
 	SetJapanese(true)
 	SetGlyphs(true)
-	// The result screen reads and writes FAVORITOS: keep tests off the real file.
+	// The result screen reads and writes FAVORITES: keep tests off the real file.
 	dir, err := os.MkdirTemp("", "goanime-favs-")
 	if err != nil {
 		panic(err)

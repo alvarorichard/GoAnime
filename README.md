@@ -205,9 +205,9 @@ run `sudo goanime --update`.
 Run `goanime` without arguments to open search home. Type a name and press
 enter, or press `↓` to pick from the lists below: Continue reopens an
 episode where you stopped (`enter` resumes, `r` starts over, `e` lists
-episodes, `x` removes it), Favoritos lists the works you marked with
+episodes, `x` removes it), Favorites lists the works you marked with
 `ctrl+f` and Recent repeats a past search with its result count. `tab`
-switches between ALL, PT-BR, ENGLISH, MOVIES/TV and FAVORITOS.
+switches between ALL, PT-BR, ENGLISH, MOVIES/TV and FAVORITES.
 From a result, choose a version with `←` `→` and, for a series, an episode.
 You can also pass the name directly:
 
@@ -265,9 +265,9 @@ Run `goanime -h` for the full list of options.
 | `Esc`                 | Go back                   |
 | `tab`                 | Switch search scope (search home) |
 | `←` `→`               | Choose a version (results) |
-| `ctrl+f`              | Add the highlighted work to Favoritos, or take it off (results) |
+| `ctrl+f`              | Add the highlighted work to Favorites, or take it off (results) |
 | `r` `e`              | From start, episodes (Continue list) |
-| `x`                   | Remove the highlighted row (Continue, Favoritos or Recent list) |
+| `x`                   | Remove the highlighted row (Continue, Favorites or Recent list) |
 | `X`                   | Clear the whole list the row is in, after a `y`/`n` question |
 | `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
 
@@ -277,13 +277,13 @@ option at once; any other key still filters.
 The episode list marks the episodes you finished with ✓ and the one you
 stopped partway with ◐, and opens where you left off.
 
-### Favoritos
+### Favorites
 
-Press `ctrl+f` on a result to add the work to FAVORITOS, and again to take it
+Press `ctrl+f` on a result to add the work to FAVORITES, and again to take it
 off; a favorite wears a star on its row in the results and in the details. A work is one
-favorite whatever the source it came from. FAVORITOS appears on the search
+favorite whatever the source it came from. FAVORITES appears on the search
 home between CONTINUE and RECENT, newest first, eight rows at a time with a
-"+N more" line for the rest. Press `tab` to the FAVORITOS tab (beside MOVIES/TV)
+"+N more" line for the rest. Press `tab` to the FAVORITES tab (beside MOVIES/TV)
 for all of them: it lists every favorite, scrolls, and typing in the box
 filters them by title, year, type or source. `enter` opens the highlighted
 favorite (or the first match when the box has the focus) by searching its

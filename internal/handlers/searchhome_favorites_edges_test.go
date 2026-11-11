@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMain keeps the whole package off the real FAVORITOS file: tests that open
+// TestMain keeps the whole package off the real FAVORITES file: tests that open
 // the search home without choosing a store would otherwise read (and, on a
 // corrupt file, rename) the developer's own favorites.json.
 func TestMain(m *testing.M) {
