@@ -33,7 +33,8 @@ func tickStore(t *testing.T) (*Store, string) {
 	path := pathOf(t)
 	s := Open(path)
 	n := 0
-	s.now = func() time.Time { n++; return t0.Add(time.Duration(n) * time.Second) }
+	zone := time.FixedZone("UTC+9", 9*3600) // not UTC: CreatedAt must be converted
+	s.now = func() time.Time { n++; return t0.Add(time.Duration(n) * time.Second).In(zone) }
 	return s, path
 }
 
@@ -581,7 +582,9 @@ func TestToggleInAddsThenRemoves(t *testing.T) {
 }
 
 func TestToggleInStampsOnlyAZeroAddedAt(t *testing.T) {
-	s, _ := tickStore(t)
+	s := newStore(t)
+	stamp := time.Date(2031, 2, 3, 4, 5, 6, 0, time.UTC)
+	s.now = func() time.Time { return stamp }
 	a := mkList(t, s, "A")
 	given := time.Date(2020, 5, 6, 7, 8, 9, 0, time.UTC)
 	mustToggleInAt(t, s, a.ID, "old", given)
@@ -589,8 +592,8 @@ func TestToggleInStampsOnlyAZeroAddedAt(t *testing.T) {
 	list := mustEntries(t, s, a.ID)
 	require.Len(t, list, 2)
 	assert.Equal(t, "new", list[0].Key)
-	assert.True(t, list[0].AddedAt.After(t0))
-	assert.True(t, given.Equal(list[1].AddedAt))
+	assert.True(t, stamp.Equal(list[0].AddedAt), "a zero AddedAt is stamped from the clock")
+	assert.True(t, given.Equal(list[1].AddedAt), "a given one is kept")
 }
 
 func mustToggleInAt(t *testing.T, s *Store, id, key string, at time.Time) {
@@ -999,7 +1002,7 @@ func TestAnUnreadableFileFailsListCallsAndIsNotOverwritten(t *testing.T) {
 
 func TestConcurrentListWritersLoseNothing(t *testing.T) {
 	s := newStore(t)
-	const workers = 8
+	const workers = 16
 	done := make(chan error, workers)
 	for w := range workers {
 		go func() {
