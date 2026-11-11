@@ -86,7 +86,7 @@ func TestTheOptionBlockKeepsItsAlignmentForTheSourcesGuard(t *testing.T) {
 	// stops applying and the guard goes quiet. Lists sits in the second block.
 	src, err := os.ReadFile("searchhome.go")
 	require.NoError(t, err)
-	text := string(src)
+	text := strings.ReplaceAll(string(src), "\r\n", "\n") // a Windows checkout may use CRLF
 
 	assert.Contains(t, text, "\t\tSources:       homeSources,\n")
 	assert.Contains(t, text, "\t\tSetSource:     setHomeSource,\n\n\t\tFavorites:", "the second block starts after a blank line")

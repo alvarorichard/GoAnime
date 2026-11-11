@@ -1,6 +1,6 @@
 module github.com/alvarorichard/Goanime/v2
 
-go 1.27.3
+go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.2.1
