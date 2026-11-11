@@ -183,7 +183,8 @@ func TestParseSourceAllSpellings(t *testing.T) {
 		"StartFlix": SourceStartFlix, "TopCine": SourceTopCine,
 		"animesdigital": SourceAnimesDigital, "AnimeDrive": SourceAnimeDrive,
 		"Pobreflix": SourcePobreflix, "AnimesROLL": SourceAnroll, "anroll": SourceAnroll,
-		"Pomfy": SourcePomfy,
+		"Pomfy":     SourcePomfy,
+		"AnimesFHD": SourceAnimesFHD, "animesfhd": SourceAnimesFHD,
 	} {
 		got, err := ParseSource(in)
 		require.NoError(t, err, in)
@@ -226,10 +227,11 @@ func TestSourcesMapToDistinctScrapers(t *testing.T) {
 	assert.Equal(t, scraper.GoyabuType, SourceGoyabu.ToScraperType())
 	assert.Equal(t, scraper.PomfyType, SourcePomfy.ToScraperType())
 	assert.Equal(t, scraper.AnrollType, SourceAnroll.ToScraperType())
+	assert.Equal(t, scraper.AnimesFHDType, SourceAnimesFHD.ToScraperType())
 }
 
 func TestSourceSupportsEpisodes(t *testing.T) {
-	for _, src := range []Source{SourceAnimeFire, SourceGoyabu, SourceHiAnime, SourceStartFlix, SourceAnimesDigital, SourceAnimeDrive, SourceAnroll} {
+	for _, src := range []Source{SourceAnimeFire, SourceGoyabu, SourceHiAnime, SourceStartFlix, SourceAnimesDigital, SourceAnimeDrive, SourceAnroll, SourceAnimesFHD} {
 		assert.True(t, src.SupportsEpisodes(), src.String())
 	}
 	for _, src := range []Source{SourceTopCine, SourcePobreflix, SourcePomfy, Source(-1), Source(99)} {
@@ -265,7 +267,8 @@ func TestSourceValuesAreStable(t *testing.T) {
 	assert.Equal(t, 0, int(SourceAnimeFire))
 	assert.Equal(t, 1, int(SourceGoyabu))
 	assert.Equal(t, 9, int(SourcePomfy))
-	assert.Len(t, Sources(), 10)
+	assert.Equal(t, 10, int(SourceAnimesFHD))
+	assert.Len(t, Sources(), 11)
 	assert.Equal(t, "Unknown", Source(-1).String())
 }
 

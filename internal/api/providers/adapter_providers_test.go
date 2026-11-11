@@ -74,6 +74,12 @@ var adapterProviders = []struct {
 	emptyReason string // the error for an empty URL
 	quality     bool   // whether the quality reaches the adapter
 }{
+	{"animesfhd", func(a scraper.UnifiedScraper) streamProvider {
+		p := &animesfhdProvider{}
+		p.adapter.UnifiedScraper = a
+		p.once.Do(func() {})
+		return p
+	}, true, "animesfhd stream: ", "empty stream URL returned from AnimesFHD", false},
 	{"hianime", func(a scraper.UnifiedScraper) streamProvider {
 		p := &hianimeProvider{}
 		p.adapter.UnifiedScraper = a
@@ -267,7 +273,7 @@ func TestAdapterProvidersFetchStreamURLReplacesTheLastEpisodesContext(t *testing
 
 func TestContextAwareAdaptersAreUsedWithTheCallersContext(t *testing.T) {
 	type ctxKey struct{}
-	for _, name := range []string{"hianime", "anroll", "animesdigital"} {
+	for _, name := range []string{"hianime", "anroll", "animesdigital", "animesfhd"} {
 		for _, pc := range adapterProviders {
 			if pc.name != name {
 				continue

@@ -19,6 +19,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesdigital"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesfhd"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/anroll"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
@@ -46,8 +47,9 @@ const (
 	// NOTE: appended at the end on purpose — the iota values stitch into
 	// serialized/tracked positions; reordering the middle ones would migrate
 	// user history.
-	AnrollType // AnimesROLL PT-BR anime source
-	PomfyType  // Pomfy movie/series catalog, Byse HLS with a PoW captcha
+	AnrollType    // AnimesROLL PT-BR anime source
+	PomfyType     // Pomfy movie/series catalog, Byse HLS with a PoW captcha
+	AnimesFHDType // AnimesFHD PT-BR anime source
 )
 
 // SearchContextScraper is the optional search-only cancellation capability.
@@ -104,6 +106,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &PobreflixAdapter{client: pobreflix.Shared(), panel: startflix.Shared()}, nil
 	case AnrollType:
 		return &AnrollAdapter{client: anroll.Shared()}, nil
+	case AnimesFHDType:
+		return &AnimesFHDAdapter{client: animesfhd.NewAnimesFHDClient()}, nil
 	case PomfyType:
 		return &PomfyAdapter{client: pomfy.Shared()}, nil
 	default:
@@ -133,6 +137,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return pobreflix.SourceName
 	case AnrollType:
 		return anroll.SourceName
+	case AnimesFHDType:
+		return animesfhd.SourceName
 	case PomfyType:
 		return pomfy.SourceName
 	default:
@@ -149,7 +155,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType:
+	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType, AnimesFHDType:
 		return "[PT-BR]"
 	case PomfyType:
 		// Pomfy serves PT-BR audio tracks (the HLS masters spell lang/por)
@@ -748,4 +754,66 @@ func (a *PomfyAdapter) GetClient() *pomfy.Client {
 // tests that point it at a mock server.
 func NewPomfyAdapterWithClient(client *pomfy.Client) *PomfyAdapter {
 	return &PomfyAdapter{client: client}
+}
+
+// AnimesFHDAdapter adapts the plain-HTTP AnimesFHD client.
+type AnimesFHDAdapter struct {
+	client *animesfhd.Client
+}
+
+// SearchAnimeContext searches AnimesFHD for query.
+func (a *AnimesFHDAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
+}
+
+// GetAnimeEpisodesContext lists the episodes of an AnimesFHD title.
+func (a *AnimesFHDAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
+}
+
+// GetStreamURLContext resolves an episode to its stream URL and the
+// Referer, audio and captions the player needs.
+func (a *AnimesFHDAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.GetEpisodeStreamContext(ctx, episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	metadata = map[string]string{"source": "animesfhd"}
+	if stream.Referer != "" {
+		metadata["referer"] = stream.Referer
+	}
+	if stream.AudioLang != "" {
+		metadata["audio_lang"] = stream.AudioLang
+	}
+	if len(stream.Subtitles) > 0 {
+		encoded, err := jsonx.Marshal(stream.Subtitles)
+		if err != nil {
+			return "", nil, err
+		}
+		metadata["subtitles"] = string(encoded)
+	}
+	return stream.URL, metadata, nil
+}
+
+// SearchAnime is SearchAnimeContext with a background context.
+func (a *AnimesFHDAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// GetAnimeEpisodes is GetAnimeEpisodesContext with a background context.
+func (a *AnimesFHDAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+// GetStreamURL is GetStreamURLContext with a background context.
+func (a *AnimesFHDAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetType reports AnimesFHDType.
+func (a *AnimesFHDAdapter) GetType() ScraperType { return AnimesFHDType }
+
+// NewAnimesFHDAdapterWithClient builds an adapter around a test client.
+func NewAnimesFHDAdapterWithClient(client *animesfhd.Client) *AnimesFHDAdapter {
+	return &AnimesFHDAdapter{client: client}
 }

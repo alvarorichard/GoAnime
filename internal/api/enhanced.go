@@ -255,6 +255,8 @@ func searchAnimeEnhanced(
 		registryKinds = []apisource.SourceKind{apisource.AnimesDigital}
 	case "anroll":
 		registryKinds = []apisource.SourceKind{apisource.Anroll}
+	case "animesfhd":
+		registryKinds = []apisource.SourceKind{apisource.AnimesFHD}
 	case "startflix":
 		registryKinds = []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
@@ -273,6 +275,7 @@ func searchAnimeEnhanced(
 			apisource.Goyabu,
 			apisource.AnimesDigital,
 			apisource.Anroll,
+			apisource.AnimesFHD,
 			apisource.StartFlix,
 			apisource.TopCine,
 			apisource.Pobreflix,
@@ -348,6 +351,7 @@ func searchAnimeEnhanced(
 			"AnimesDigital", breakdown.AnimesDigital,
 			"HiAnime", breakdown.HiAnime,
 			"AnimeDrive", breakdown.AnimeDrive,
+			"AnimesFHD", breakdown.AnimesFHD,
 		)
 
 		// Sort results by query relevance first, then language: the closest
@@ -422,6 +426,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "AnimesDigital"
 			case "anroll":
 				anime.Source = "AnimesROLL"
+			case "animesfhd":
+				anime.Source = "AnimesFHD"
 			case "startflix":
 				anime.Source = "StartFlix"
 			case "topcine":
@@ -444,6 +450,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "AnimesDigital"
 				case strings.Contains(lowerURL, "anroll.io"):
 					anime.Source = "AnimesROLL"
+				case strings.Contains(lowerURL, "animesfhd.net"):
+					anime.Source = "AnimesFHD"
 				case strings.Contains(lowerURL, "startflix"):
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
@@ -574,6 +582,7 @@ type sourceBreakdown struct {
 	Goyabu        int
 	AnimesDigital int
 	Anroll        int
+	AnimesFHD     int
 	HiAnime       int
 	StartFlix     int
 	TopCine       int
@@ -599,6 +608,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.AnimesDigital++
 		case strings.EqualFold(anime.Source, "AnimesROLL"):
 			b.Anroll++
+		case strings.EqualFold(anime.Source, "AnimesFHD"):
+			b.AnimesFHD++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
 		case strings.EqualFold(anime.Source, "StartFlix"):

@@ -56,6 +56,24 @@ func TestAppendPlaybackRefererArgsSkipsLocalFiles(t *testing.T) {
 	assert.Equal(t, []string{"--cache=yes"}, args)
 }
 
+func TestAnimesFHDPlaybackUsesBrowserHeaders(t *testing.T) {
+	// These arguments read process-wide playback context, so do not parallelize.
+	restore := snapshotGlobalReferer()
+	defer restore()
+	util.SetGlobalReferer("https://animesfhd.net/")
+	for _, tc := range []struct {
+		url string
+		hls bool
+	}{
+		{"https://animesfhd.net/api/v/s6?source=1&playlist=.m3u8", true},
+		{"https://cdn.example/video.mp4", false},
+	} {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: tc.url, IsHLS: tc.hls})
+		assert.Contains(t, args, "--user-agent="+downloadUserAgent)
+		assert.Contains(t, strings.Join(args, " "), "Referer: https://animesfhd.net/")
+	}
+}
+
 func TestAppendHLSDemuxerArgs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

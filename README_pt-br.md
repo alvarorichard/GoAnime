@@ -337,6 +337,11 @@ fonte pode parar de funcionar até ser atualizada. A lista de fontes, como
 escolher uma com `--source` e as notas de cada uma estão em
 [docs/SOURCES.md](docs/SOURCES.md) (em inglês).
 
+O AnimesFHD (`goanime --source animesfhd "frieren"`) oferece animes legendados
+e dublados em português do Brasil, incluindo filmes de anime. Escolha a versão
+de temporada/áudio antes da lista de episódios. Somente fontes nativas MP4/HLS
+são suportadas.
+
 ## Configuração
 
 O GoAnime não precisa de arquivo de configuração. Algumas variáveis de

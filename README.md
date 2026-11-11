@@ -355,6 +355,10 @@ Portuguese. They are third-party websites and change without notice, so one
 can stop working until it is updated. The list of sources, how to pick one
 with `--source` and per-source notes are in [docs/SOURCES.md](docs/SOURCES.md).
 
+AnimesFHD (`goanime --source animesfhd "frieren"`) provides Brazilian Portuguese
+subtitled and dubbed anime, including anime movies. Choose a season/audio
+version before the episode list. Only native MP4/HLS sources are supported.
+
 ## Configuration
 
 GoAnime needs no configuration file. A few environment variables cover less

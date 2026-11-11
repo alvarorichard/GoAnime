@@ -218,7 +218,8 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 
 	// A direct Blogger googlevideo link (AnimesROLL) is signed for the
 	// User-Agent that requested it; mpv's own ("libmpv") gets HTTP 403.
-	if isDirectBloggerGoogleVideo(in.VideoURL) {
+	// AnimesFHD also requires a browser User-Agent for its native media.
+	if isDirectBloggerGoogleVideo(in.VideoURL) || strings.TrimRight(playbackReferer, "/") == "https://animesfhd.net" {
 		mpvArgs = append(mpvArgs, "--user-agent="+downloadUserAgent)
 	}
 
