@@ -8,13 +8,14 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // newFavoriteLists opens the saved lists the result screen offers on ctrl+l.
 // When it returns nil the whole feature is absent: no key, no hint, no tip. A
 // variable so tests install fakes and the app installs the real store.
-var newFavoriteLists = func() FavoriteLists { return nil }
+var newFavoriteLists = func() FavoriteLists { return StoreLists(favorites.Default()) }
 
 const (
 	// pickerMaxNameRunes is how long a list's name can be typed.

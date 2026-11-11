@@ -33,6 +33,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// productionFavoriteLists is the seam's real default, kept before TestMain
+// switches the saved lists off for the tests.
+var productionFavoriteLists = newFavoriteLists
+
 var (
 	cascCtrlL = tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 	cascSpace = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
@@ -120,7 +124,7 @@ func TestRealCascadeResultsPickerDiskHomeListOpenSearch(t *testing.T) {
 	level1 := cascView(home)
 	assert.Contains(t, level1, "Cozy nights")
 	assert.Contains(t, level1, "1", "the list's count")
-	assert.Contains(t, level1, relativeDay(w.summary(t, "Cozy nights").CreatedAt, time.Now()), "the list's date")
+	assert.Contains(t, level1, "created "+w.summary(t, "Cozy nights").CreatedAt.Format(homeListDateLayout), "the list's date")
 
 	// 4 open it: the work is there.
 	home = openListOnHome(t, w, "Cozy nights", "Frieren")
@@ -203,7 +207,7 @@ func TestRealCascadeFavoritesListStillHoldsWhatCtrlFAdds(t *testing.T) {
 func TestRealCascadeTheResultsScreenDefaultIsTheRealStore(t *testing.T) {
 	// The seam default, not the test's replacement.
 	// The cascade tests above put the seam back when they finish.
-	got := newFavoriteLists()
+	got := productionFavoriteLists()
 	sl, ok := got.(*storeLists)
 	require.True(t, ok, "the default is the store adapter, not nil and not a fake: %T", got)
 	assert.Same(t, favorites.Default(), sl.store, "it reads and writes the user's own favorites file")
@@ -240,7 +244,7 @@ func addViaPicker(t *testing.T, w *cascadeWorld, key, listID string) bool {
 		m := w.results() // the first result is Frieren
 		_, _ = m.Update(cascCtrlL)
 		require.NotContains(t, cascView(m), "Could not", "the picker opens")
-		for range idx {
+		for range idx + 1 { // the first row is "+ Create a new list"
 			_, _ = m.Update(cascDown)
 		}
 		for _, k := range keys {
@@ -259,7 +263,7 @@ func createViaPicker(t *testing.T, w *cascadeWorld, name string) bool {
 	t.Helper()
 	m := w.results()
 	_, _ = m.Update(cascCtrlL)
-	_, _ = m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	_, _ = m.Update(cascEnter) // on "+ Create a new list", the first row
 	for _, r := range name {
 		_, _ = m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}

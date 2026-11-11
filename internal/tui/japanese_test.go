@@ -36,6 +36,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	newFavorites = func() favoritesAPI { return favorites.Open(filepath.Join(dir, "favorites.json")) }
+	// The saved lists are off in tests unless a test installs its own; they
+	// would otherwise read the real file and add ctrl+l to every footer.
+	newFavoriteLists = func() FavoriteLists { return nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
