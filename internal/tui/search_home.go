@@ -311,7 +311,7 @@ type searchHomeModel struct {
 	showHelp bool
 }
 
-func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
+func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	opts = opts.withRestore()
 	theme := CurrentTheme()
 	shell := NewShell(&theme, "Search")
@@ -1609,7 +1609,7 @@ func (m *searchHomeModel) recentView(width int) string {
 type searchHomeRunner func(tea.Model) (tea.Model, error)
 
 // SearchHome opens the SEARCH home screen and returns its decision.
-func SearchHome(opts SearchHomeOptions) (SearchHomeResult, error) {
+func SearchHome(opts SearchHomeOptions) (SearchHomeResult, error) { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	if !HasTerminal() {
 		return SearchHomeResult{}, fmt.Errorf("no terminal: stdin is not a TTY")
 	}
@@ -1625,7 +1625,7 @@ func SearchHome(opts SearchHomeOptions) (SearchHomeResult, error) {
 }
 
 // searchHomeWithRunner isolates terminal execution for deterministic tests.
-func searchHomeWithRunner(opts SearchHomeOptions, run searchHomeRunner) (SearchHomeResult, error) {
+func searchHomeWithRunner(opts SearchHomeOptions, run searchHomeRunner) (SearchHomeResult, error) { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	if run == nil {
 		return SearchHomeResult{}, fmt.Errorf("search home runner not configured")
 	}

@@ -625,10 +625,11 @@ func TestRegressionStoreDamagedFileThatCannotBeSetAside(t *testing.T) {
 	_, err := s.List()
 
 	require.Error(t, err)
-	// frozen: the move is a rename, whose error is a *LinkError, so unlike the
-	// other errors this one still carries both paths.
-	re := regexp.MustCompile("^" + regexp.QuoteMeta("favorites: favorites.json is damaged and could not be set aside: rename "+path+" "+path+".corrupt.") + `\d{8}-\d{6}: permission denied$`)
-	assert.Regexp(t, re, err.Error())
+	// Updated on purpose by the lists work: the rename's *LinkError used to
+	// carry both paths onto the screen; like every other store error it now
+	// says only what failed and why.
+	assert.EqualError(t, err, "favorites: favorites.json is damaged and could not be set aside: rename: permission denied")
+	assert.NotContains(t, err.Error(), path, "no file path on the screen")
 	assert.Empty(t, s.TakeDamaged())
 	_, statErr := os.Stat(path)
 	assert.NoError(t, statErr, "an unmovable damaged file is never overwritten")

@@ -26,7 +26,7 @@ func restoreFixture() SearchHomeOptions {
 }
 
 // slugOpts is what the way back used to pass: a hyphenated query and the ALL tab.
-func slugOpts(opts SearchHomeOptions, slug string) SearchHomeOptions {
+func slugOpts(opts SearchHomeOptions, slug string) SearchHomeOptions { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	opts.Query = slug
 	opts.ScopeIndex = 0
 	return opts
@@ -118,7 +118,7 @@ func TestHomeRestoreUnknownTabIsIgnored(t *testing.T) {
 	}
 }
 
-func restoreFixtureWith(o SearchHomeOptions) SearchHomeOptions {
+func restoreFixtureWith(o SearchHomeOptions) SearchHomeOptions { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	f := restoreFixture()
 	f.Query, f.ScopeIndex, f.Restore = o.Query, o.ScopeIndex, o.Restore
 	return f
@@ -277,7 +277,7 @@ func TestRestoreLeavesTheModelsResultUntouched(t *testing.T) {
 
 // there presses enter on a home built from opts and returns the options the
 // way back would build, with the slug and the ALL tab the old way back passed.
-func there(t *testing.T, opts SearchHomeOptions, drive func(*searchHomeModel)) (SearchHomeOptions, SearchHomeResult) {
+func there(t *testing.T, opts SearchHomeOptions, drive func(*searchHomeModel)) (SearchHomeOptions, SearchHomeResult) { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	t.Helper()
 	m := newSearchHomeModel(opts)
 	drive(m)
@@ -364,7 +364,7 @@ func TestRestoredHomeAllowsTheUsualKeys(t *testing.T) {
 	assert.Equal(t, before-1, m.cursor)
 	// up from the first row returns to the box and typing works
 	m = newSearchHomeModel(back)
-	for i := 0; i < len(m.rows)+1 && !m.focusInput; i++ {
+	for i := 0; i <= len(m.rows) && !m.focusInput; i++ {
 		_, _ = m.Update(press(tea.KeyUp, ""))
 	}
 	require.True(t, m.focusInput)

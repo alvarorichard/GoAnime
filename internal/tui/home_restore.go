@@ -70,7 +70,7 @@ func tabName(value string) string {
 // its box replaces Query (a slug the caller passes is never shown when the
 // search came from a row). A restore naming no known tab is ignored, leaving o
 // exactly as it was.
-func (o SearchHomeOptions) withRestore() SearchHomeOptions {
+func (o SearchHomeOptions) withRestore() SearchHomeOptions { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	idx, ok := o.Restore.tabIndex()
 	if !ok {
 		return o
