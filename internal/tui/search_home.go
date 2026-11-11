@@ -158,6 +158,11 @@ type SearchHomeOptions struct {
 	// choice. Either nil leaves the screen out.
 	Sources   LoadSourcesFunc
 	SetSource SetSourceFunc
+
+	// Restore reopens the screen where the user left it when they come back
+	// from a search it started: its tab, row and box win over ScopeIndex and
+	// Query. The zero value changes nothing.
+	Restore HomeRestore
 }
 
 // HomeSuggestion is one autocomplete row: the title that fills the box and a
@@ -196,6 +201,9 @@ type SearchHomeResult struct {
 	Entry     HomeContinueEntry
 	HasEntry  bool
 	Cancelled bool
+
+	// Restore is where the screen was, to reopen it there after this decision.
+	Restore HomeRestore
 }
 
 type homeRowKind int
@@ -298,11 +306,13 @@ type searchHomeModel struct {
 	sources     *sourcesPanel
 
 	result   SearchHomeResult
+	restore  HomeRestore // where the screen was when result was decided
 	err      error
 	showHelp bool
 }
 
 func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
+	opts = opts.withRestore()
 	theme := CurrentTheme()
 	shell := NewShell(&theme, "Search")
 	shell.Context = singleLine(opts.SourcesLine)
@@ -374,6 +384,7 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 	m.listsOnScope()
 	m.rebuildRows()
 	m.listsLanded()
+	m.placeRestore(opts.Restore)
 	return m
 }
 
@@ -580,6 +591,7 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if res, ok := m.confirm(); ok {
 				m.dropSuggestions()
 				m.result = res
+				m.markRestore()
 				return m, tea.Quit
 			}
 			return m, nil
@@ -915,9 +927,11 @@ func (m *searchHomeModel) rowAction(key string) tea.Cmd {
 	switch key {
 	case "r":
 		m.result = SearchHomeResult{Action: HomeFromStart, Entry: entry, HasEntry: true, Scope: m.scopes[m.scopeIdx].Value}
+		m.markRestore()
 		return tea.Quit
 	case "e":
 		m.result = SearchHomeResult{Action: HomeEpisodes, Entry: entry, HasEntry: true, Scope: m.scopes[m.scopeIdx].Value}
+		m.markRestore()
 		return tea.Quit
 	case "x":
 		m.forgetContinue(row.index)
@@ -1629,5 +1643,5 @@ func searchHomeWithRunner(opts SearchHomeOptions, run searchHomeRunner) (SearchH
 	if model.result.Action == HomeSearch && !model.result.HasEntry && strings.TrimSpace(model.result.Query) == "" {
 		return SearchHomeResult{}, ErrSearchHomeCancelled
 	}
-	return model.result, nil
+	return model.resultWithRestore(), nil
 }
