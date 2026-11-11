@@ -225,7 +225,7 @@ func TestTheEntryCountsWhatIsTyped(t *testing.T) {
 	assert.NotContains(t, screen(m), "longest")
 }
 
-func TestTheCounterCountsLettersNotBytes(t *testing.T) {
+func TestHomeListsCounterCountsLettersNotBytes(t *testing.T) {
 	m := homeListsScreen(t, hlThreeLists(), 100, 40)
 	hlOpenCreate(t, m)
 	hlTypeName(m, "Ação")
