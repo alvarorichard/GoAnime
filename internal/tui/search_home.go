@@ -24,14 +24,26 @@ var (
 	ErrSearchHomeCancelled = errors.New("search home cancelled")
 )
 
-// Home scopes: the tab row under the search box. Value is the source
-// selector the search runs with ("", "ptbr", "hianime" or "movietv").
-var homeScopes = []struct{ Name, Value string }{
+// searchScopes are the search tabs: the row under the search box. Value is
+// the source selector the search runs with ("", "ptbr", "hianime" or
+// "movietv").
+var searchScopes = []struct{ Name, Value string }{
 	{"ALL", ""},
 	{"PT-BR", "ptbr"},
 	{"ENGLISH", "hianime"},
 	{"MOVIES/TV", "movietv"},
 }
+
+// homeScopes are the home screen's tabs: the search tabs, then FAVORITOS.
+var homeScopes = append(slices.Clone(searchScopes), struct{ Name, Value string }{"FAVORITOS", favoritesScope})
+
+// favoritesScope is the FAVORITOS tab's value. It is not a search scope: on
+// that tab the box filters the user's favorites and nothing is searched until
+// one is opened, and a result never carries it.
+const favoritesScope = "favorites"
+
+// favoritesPlaceholder is the box's hint on the FAVORITOS tab.
+const favoritesPlaceholder = "type to filter your favorites, enter opens the first one"
 
 // homeFavoritesShown is how many FAVORITOS rows the home screen draws; the
 // rest wait behind a "+N more" line and slide in as rows are removed.
@@ -226,19 +238,21 @@ const (
 )
 
 type searchHomeModel struct {
-	theme       Theme
-	shell       Shell
-	input       textinput.Model
-	scopes      []struct{ Name, Value string }
-	scopeIdx    int
-	continueAll []HomeContinueEntry
-	recentAll   []HomeRecentSearch
-	favoriteAll []HomeFavorite
-	rows        []homeRow
-	cursor      int
-	focusInput  bool
-	deleteEntry func(key string) error
-	now         func() time.Time
+	theme Theme
+	shell Shell
+	input textinput.Model
+	// searchPlaceholder is the box's hint on the search tabs.
+	searchPlaceholder string
+	scopes            []struct{ Name, Value string }
+	scopeIdx          int
+	continueAll       []HomeContinueEntry
+	recentAll         []HomeRecentSearch
+	favoriteAll       []HomeFavorite
+	rows              []homeRow
+	cursor            int
+	focusInput        bool
+	deleteEntry       func(key string) error
+	now               func() time.Time
 
 	// Forgetting history: the RECENT row remover, the two list clearers, the
 	// list the user is being asked to clear (clearNothing while no question is
@@ -334,6 +348,10 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		sugCursor:      -1,
 	}
 	m.asked = m.suggestKey()
+	m.searchPlaceholder = input.Placeholder
+	if m.onFavorites() {
+		m.input.Placeholder = favoritesPlaceholder
+	}
 	m.rebuildRows()
 	return m
 }
@@ -345,6 +363,19 @@ func themeIsDark() bool {
 
 func (m *searchHomeModel) rebuildRows() {
 	m.rows = m.rows[:0]
+	if m.onFavorites() {
+		// The tab shows every favorite that matches the box, and nothing else.
+		for _, i := range m.matchingFavorites() {
+			m.rows = append(m.rows, homeRow{kind: homeRowFavorite, index: i})
+		}
+		if m.cursor >= len(m.rows) {
+			m.cursor = max(len(m.rows)-1, 0)
+		}
+		if len(m.rows) == 0 {
+			m.focusInput = true
+		}
+		return
+	}
 	for i := range m.continueAll {
 		m.rows = append(m.rows, homeRow{kind: homeRowContinue, index: i})
 	}
@@ -360,6 +391,42 @@ func (m *searchHomeModel) rebuildRows() {
 	if len(m.rows) == 0 {
 		m.focusInput = true
 	}
+}
+
+// onFavorites reports whether the FAVORITOS tab is the one showing.
+func (m *searchHomeModel) onFavorites() bool {
+	return m.scopes[m.scopeIdx].Value == favoritesScope
+}
+
+// matchingFavorites is the positions in favoriteAll of the favorites the box
+// matches: every one when it is empty, else those whose title, year, type or
+// source contain what was typed, ignoring case.
+func (m *searchHomeModel) matchingFavorites() []int {
+	query := strings.ToLower(strings.TrimSpace(m.input.Value()))
+	out := make([]int, 0, len(m.favoriteAll))
+	for i, f := range m.favoriteAll {
+		if query == "" || strings.Contains(strings.ToLower(strings.Join([]string{
+			singleLine(f.Title), singleLine(f.Year), singleLine(f.Media), displaySource(f.Source),
+		}, " ")), query) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// scopeChanged puts the screen right after the tab moved: the box takes the
+// focus, the rows are the new tab's, and the box says what typing does there.
+func (m *searchHomeModel) scopeChanged() tea.Cmd {
+	m.cursor = 0
+	m.focusInput = true
+	m.input.Focus()
+	if m.onFavorites() {
+		m.input.Placeholder = favoritesPlaceholder
+	} else {
+		m.input.Placeholder = m.searchPlaceholder
+	}
+	m.rebuildRows()
+	return m.queryChanged()
 }
 
 func (m *searchHomeModel) currentRow() (homeRow, bool) {
@@ -431,7 +498,7 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "tab":
 			m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)
-			cmd := m.queryChanged()
+			cmd := m.scopeChanged()
 			return m, cmd
 		case "esc":
 			// esc closes the suggestions first, then clears the box; it
@@ -552,6 +619,14 @@ func (m *searchHomeModel) dropSuggestions() {
 // autocomplete would ask has changed, the old suggestions go and, for a long
 // enough query, a debounce tick is scheduled.
 func (m *searchHomeModel) queryChanged() tea.Cmd {
+	if m.onFavorites() {
+		// Nothing is looked up on the FAVORITOS tab: typing filters the list.
+		m.asked = m.suggestKey()
+		m.dropSuggestions()
+		m.cursor = 0
+		m.rebuildRows()
+		return nil
+	}
 	key := m.suggestKey()
 	if key == m.asked {
 		return nil
@@ -690,6 +765,17 @@ func (m *searchHomeModel) move(delta int) {
 // a resume from a continue row.
 func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 	scope := m.scopes[m.scopeIdx].Value
+	if m.onFavorites() {
+		// enter opens the highlighted favorite, or the first match from the box.
+		pos := m.cursor
+		if m.focusInput {
+			pos = 0
+		}
+		if pos < 0 || pos >= len(m.rows) {
+			return SearchHomeResult{}, false
+		}
+		return SearchHomeResult{Action: HomeSearch, Query: m.favoriteAll[m.rows[pos].index].Title}, true
+	}
 	if m.focusInput {
 		query := strings.TrimSpace(m.input.Value())
 		if m.sugCursor >= 0 {
@@ -927,8 +1013,12 @@ func (m *searchHomeModel) hints() []Hint {
 	if Plain() {
 		move = "up/dn"
 	}
+	enter := "search"
+	if m.onFavorites() {
+		enter = "open"
+	}
 	hints := []Hint{
-		{Key: "enter", Desc: "search", Essential: true},
+		{Key: "enter", Desc: enter, Essential: true},
 		{Key: move, Desc: "move"},
 		{Key: "tab", Desc: "scope"},
 		{Key: "?", Desc: "help"},
@@ -994,6 +1084,10 @@ func (m *searchHomeModel) homeView(width, height int) string {
 	sections = append(sections, m.scopeTabs())
 	if question := m.questionView(width); question != "" {
 		sections = append(sections, question)
+	}
+	if m.onFavorites() {
+		sections = append(sections, "", m.favoritesTabView(width, height))
+		return strings.Join(sections, "\n")
 	}
 	lists, panel := m.listsView(width, height)
 	if lists != "" {
@@ -1269,6 +1363,61 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 	}
 }
 
+// favoritesTabView is the FAVORITOS tab: every favorite the box matches, in a
+// window that follows the cursor, with how many are above and below it.
+func (m *searchHomeModel) favoritesTabView(width, height int) string {
+	total := len(m.favoriteAll)
+	head := m.sectionHeader("FAVORITOS", "")
+	switch {
+	case total == 0:
+		return head + "\n" + m.theme.Muted.Render("  You have no favorites yet. Search for a title, then press ctrl+f on it to add it here.")
+	case len(m.rows) == 0:
+		return head + "\n" + m.theme.Muted.Render(fmt.Sprintf("  No favorite matches %q. Delete a letter to see them all.", strings.TrimSpace(m.input.Value())))
+	}
+	if len(m.rows) == total {
+		head += m.theme.Muted.Render(fmt.Sprintf("  %d", total))
+	} else {
+		head += m.theme.Muted.Render(fmt.Sprintf("  %d of %d", len(m.rows), total))
+	}
+
+	// Rows that fit under the box, the tabs, the heading and the footer.
+	capacity := max(height-9, 3)
+	if m.questionView(width) != "" {
+		capacity = max(capacity-1, 3)
+	}
+	start := 0
+	if len(m.rows) > capacity {
+		start = min(max(m.cursor-capacity/2, 0), len(m.rows)-capacity)
+	}
+	end := min(start+capacity, len(m.rows))
+
+	items := make([]homeRowItem, 0, end-start)
+	for _, row := range m.rows[start:end] {
+		f := m.favoriteAll[row.index]
+		var note []string
+		if y := singleLine(f.Year); y != "" {
+			note = append(note, y)
+		}
+		if media := singleLine(f.Media); media != "" {
+			note = append(note, media)
+		}
+		items = append(items, homeRowItem{title: singleLine(f.Title), note: strings.Join(note, " · "), key: displaySource(f.Source)})
+	}
+	cursor := -1
+	if !m.focusInput {
+		cursor = m.cursor - start
+	}
+	lines := []string{head}
+	if start > 0 {
+		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↑ %d more above", start)))
+	}
+	lines = append(lines, renderHomeRows(&m.theme, items, cursor, width))
+	if end < len(m.rows) {
+		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↓ %d more below", len(m.rows)-end)))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // favoritesView renders the FAVORITOS rows: the title and, at the right, its
 // year and type.
 func (m *searchHomeModel) favoritesView(width int) string {
@@ -1290,7 +1439,7 @@ func (m *searchHomeModel) favoritesView(width int) string {
 	}
 	rows := renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
 	if more := len(m.favoriteAll) - len(shown); more > 0 {
-		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · they show on the results when you search for them", more))
+		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · press tab to the FAVORITOS tab to see them all", more))
 	}
 	return rows
 }

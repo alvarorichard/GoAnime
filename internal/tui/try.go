@@ -138,7 +138,7 @@ func (m *tryModel) sizeInput() {
 // scopeValue is the failed search's scope unless tabbed elsewhere. The tabs
 // stay hidden on ALL (tela 4); touching tab reveals them.
 func (m *tryModel) scopeValue() string {
-	return homeScopes[m.scopeIdx].Value
+	return searchScopes[m.scopeIdx].Value
 }
 
 // Init starts the cursor without background work.
@@ -175,7 +175,7 @@ func (m *tryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "tab":
-			m.scopeIdx = (m.scopeIdx + 1) % len(homeScopes)
+			m.scopeIdx = (m.scopeIdx + 1) % len(searchScopes)
 			return m, nil
 		case "esc":
 			// esc edits: it clears the box, never quits and never leaves.
@@ -295,10 +295,10 @@ func (m *tryModel) hints() []Hint {
 
 // scopeTabName is the scope tab's name.
 func scopeTabName(idx int) string {
-	if idx < 0 || idx >= len(homeScopes) {
+	if idx < 0 || idx >= len(searchScopes) {
 		return "ALL"
 	}
-	return homeScopes[idx].Name
+	return searchScopes[idx].Name
 }
 
 // View renders the box, the notice, the TRY rows and the SOURCES panel.
@@ -420,13 +420,13 @@ func (m *tryModel) summary() string { return m.searchSummary }
 func renderScopeTabs(theme *Theme, idx int) string {
 	var sb strings.Builder
 	sb.WriteString(theme.Muted.Render("in "))
-	for i, scope := range homeScopes {
+	for i, scope := range searchScopes {
 		if i == idx {
 			sb.WriteString(theme.Tag.Render(scope.Name))
 		} else {
 			sb.WriteString(theme.Muted.Render(scope.Name))
 		}
-		if i < len(homeScopes)-1 {
+		if i < len(searchScopes)-1 {
 			sb.WriteString("   ")
 		}
 	}

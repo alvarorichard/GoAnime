@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -152,12 +153,14 @@ func TestFavoritosSitBetweenContinueAndRecent(t *testing.T) {
 
 	view := screen(m)
 	assert.Contains(t, view, "FAVORITOS")
-	assert.Less(t, indexOf(view, "CONTINUE"), indexOf(view, "FAVORITOS"))
-	assert.Less(t, indexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
+	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITOS"))
+	assert.Less(t, lastIndexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
 	assert.Contains(t, view, "Frieren")
 	assert.Contains(t, view, "2023 · Anime")
 	assert.Contains(t, view, "A Origem")
 }
+
+func lastIndexOf(s, sub string) int { return strings.LastIndex(s, sub) }
 
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
@@ -480,4 +483,187 @@ func TestThePlainPanelSaysItToo(t *testing.T) {
 	assert.Contains(t, screen2(m), "ctrl+f adds it to FAVORITOS")
 	_, _ = m.Update(ctrlF)
 	assert.Contains(t, screen2(m), "* Frieren", "a star drawn as text, for screen readers")
+}
+
+// ---- the FAVORITOS tab -------------------------------------------------------------
+
+func tabTo(t *testing.T, m *searchHomeModel, name string) {
+	t.Helper()
+	for range len(m.scopes) {
+		if m.scopes[m.scopeIdx].Name == name {
+			return
+		}
+		_, _ = m.Update(press(tea.KeyTab, ""))
+	}
+	t.Fatalf("no tab %s", name)
+}
+
+func TestFavoritosIsATabBesideMoviesTV(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{})
+	names := make([]string, len(m.scopes))
+	for i, s := range m.scopes {
+		names[i] = s.Name
+	}
+	assert.Equal(t, []string{"ALL", "PT-BR", "ENGLISH", "MOVIES/TV", "FAVORITOS"}, names)
+	assert.Contains(t, screen(m), "FAVORITOS", "on the tab row, where a new user looks")
+}
+
+func TestTheSearchPromptKeepsOnlyTheSearchTabs(t *testing.T) {
+	names := make([]string, len(searchScopes))
+	for i, s := range searchScopes {
+		names[i] = s.Name
+	}
+	assert.Equal(t, []string{"ALL", "PT-BR", "ENGLISH", "MOVIES/TV"}, names, "a bare search prompt has no favorites tab")
+}
+
+func TestTheTabListsEveryFavoriteWithoutTheOtherLists(t *testing.T) {
+	continueAll, recent := homeTestEntries()
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(13), continueAll, recent))
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	tabTo(t, m, "FAVORITOS")
+
+	view := screen(m)
+	assert.Contains(t, view, "Work 0")
+	assert.Contains(t, view, "Work 12", "none is hidden behind a +N line: the list scrolls")
+	assert.Len(t, m.rows, 13)
+	assert.NotContains(t, view, "CONTINUE")
+	assert.NotContains(t, view, "RECENT")
+	assert.NotContains(t, view, "Mukashi Banashi")
+	assert.True(t, m.focusInput)
+	assert.Contains(t, m.input.Placeholder, "filter your favorites")
+}
+
+func TestLeavingTheTabBringsTheListsBack(t *testing.T) {
+	continueAll, recent := homeTestEntries()
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, continueAll, recent))
+	tabTo(t, m, "FAVORITOS")
+	_, _ = m.Update(press(tea.KeyTab, "")) // wraps to ALL
+
+	assert.Equal(t, "ALL", m.scopes[m.scopeIdx].Name)
+	view := screen(m)
+	assert.Contains(t, view, "CONTINUE")
+	assert.Contains(t, view, "RECENT")
+	assert.Len(t, m.rows, 3+2+2)
+	assert.Contains(t, m.input.Placeholder, "title, or")
+}
+
+func TestTypingOnTheTabFiltersTheFavorites(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	tabTo(t, m, "FAVORITOS")
+
+	typeText(m, "orig")
+
+	require.Len(t, m.rows, 1)
+	view := screen(m)
+	assert.Contains(t, view, "A Origem")
+	assert.NotContains(t, view, "Frieren")
+	assert.Contains(t, view, "1 of 2")
+
+	typeText(m, "zzz")
+	assert.Contains(t, screen(m), "No favorite matches")
+	assert.Contains(t, screen(m), "Delete a letter")
+}
+
+func TestTheFilterMatchesYearTypeAndSourceToo(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	typeText(m, "movie")
+	require.Len(t, m.rows, 1)
+	assert.Equal(t, 1, m.rows[0].index, "A Origem is the movie")
+}
+
+func TestEnterInTheBoxOpensTheFirstMatchAndNeverSearchesTheTab(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	typeText(m, "orig")
+
+	_, cmd := m.Update(press(tea.KeyEnter, ""))
+
+	require.NotNil(t, cmd)
+	assert.Equal(t, HomeSearch, m.result.Action)
+	assert.Equal(t, "A Origem", m.result.Query)
+	assert.Equal(t, "", m.result.Scope, "the tab is not a search scope")
+}
+
+func TestEnterOnAnEmptyTabDoesNothing(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{})
+	tabTo(t, m, "FAVORITOS")
+	_, cmd := m.Update(press(tea.KeyEnter, ""))
+	assert.Nil(t, cmd)
+	assert.Contains(t, screen(m), "You have no favorites yet")
+	assert.Contains(t, screen(m), "ctrl+f")
+}
+
+func TestEnterOnAHighlightedFavoriteOnTheTab(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	downTo(t, m, 1)
+	_, cmd := m.Update(press(tea.KeyEnter, ""))
+	require.NotNil(t, cmd)
+	assert.Equal(t, "A Origem", m.result.Query)
+	assert.Equal(t, "", m.result.Scope)
+}
+
+func TestTheTabScrollsAndKeepsTheCursorInView(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(60), nil, nil))
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	tabTo(t, m, "FAVORITOS")
+	downTo(t, m, 40)
+
+	view := screen(m)
+	assert.Contains(t, view, "Work 40", "the highlighted row is on screen")
+	assert.NotContains(t, view, "Work 0\n", "the top scrolled away")
+	assert.Contains(t, view, "more above")
+	assert.Contains(t, view, "more below")
+	assert.LessOrEqual(t, strings.Count(view, "\n")+1, 24, "it fits the terminal")
+}
+
+func TestXAndShiftXWorkOnTheTab(t *testing.T) {
+	f := &favoritesFake{}
+	m := newSearchHomeModel(f.options(manyFavorites(12), nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	typeText(m, "work 1") // Work 1, Work 10, Work 11
+	require.Len(t, m.rows, 3)
+	downTo(t, m, 1)
+
+	_, _ = m.Update(press('x', "x"))
+
+	assert.Equal(t, []string{"k10"}, f.removed, "the filtered row, not the one at that position overall")
+	assert.Len(t, m.favoriteAll, 11)
+	assert.Len(t, m.rows, 2)
+
+	_, _ = m.Update(press('X', "X"))
+	assert.Contains(t, screen(m), "Clear all 11 favorites from FAVORITOS?")
+}
+
+func TestTheTabHintsSayOpen(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	enter := func() string {
+		for _, h := range m.hints() {
+			if h.Key == "enter" {
+				return h.Desc
+			}
+		}
+		return ""
+	}
+	assert.Equal(t, "search", enter())
+	tabTo(t, m, "FAVORITOS")
+	assert.Equal(t, "open", enter())
+}
+
+func TestNoSuggestionsAreAskedOnTheTab(t *testing.T) {
+	asked := 0
+	m := newSearchHomeModel(SearchHomeOptions{
+		Favorites: sampleFavorites,
+		Suggest: func(context.Context, string, string) ([]HomeSuggestion, error) {
+			asked++
+			return nil, nil
+		},
+	})
+	m.debounce = 0
+	tabTo(t, m, "FAVORITOS")
+	typeText(m, "frieren")
+	assert.Nil(t, m.queryChanged())
+	assert.Zero(t, asked)
+	assert.Empty(t, m.suggestions)
 }

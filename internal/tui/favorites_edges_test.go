@@ -434,8 +434,8 @@ func TestFavoritosSectionIsOnTheMenuWhateverTheOtherListsHold(t *testing.T) {
 	view := screen(m)
 	assert.Contains(t, view, "FAVORITOS")
 	assert.Contains(t, view, "Nothing here yet")
-	assert.Less(t, indexOf(view, "CONTINUE"), indexOf(view, "FAVORITOS"))
-	assert.Less(t, indexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
+	assert.Less(t, indexOf(view, "CONTINUE"), lastIndexOf(view, "FAVORITOS"))
+	assert.Less(t, lastIndexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
 }
 
 // ---- the whole path, results screen to home screen -------------------------------

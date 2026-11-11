@@ -207,7 +207,7 @@ enter, or press `↓` to pick from the lists below: Continue reopens an
 episode where you stopped (`enter` resumes, `r` starts over, `e` lists
 episodes, `x` removes it), Favoritos lists the works you marked with
 `ctrl+f` and Recent repeats a past search with its result count. `tab`
-switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
+switches between ALL, PT-BR, ENGLISH, MOVIES/TV and FAVORITOS.
 From a result, choose a version with `←` `→` and, for a series, an episode.
 You can also pass the name directly:
 
@@ -283,9 +283,12 @@ Press `ctrl+f` on a result to add the work to FAVORITOS, and again to take it
 off; a favorite wears a star on its row in the results and in the details. A work is one
 favorite whatever the source it came from. FAVORITOS appears on the search
 home between CONTINUE and RECENT, newest first, eight rows at a time with a
-"+N more" line for the rest (they slide in as you remove rows); `enter` searches the title
-in every scope, `x` removes a row and `X` empties the list after a `y`/`n`
-question. The list is one small file, `favorites.json`, next to the watch
+"+N more" line for the rest. Press `tab` to the FAVORITOS tab (beside MOVIES/TV)
+for all of them: it lists every favorite, scrolls, and typing in the box
+filters them by title, year, type or source. `enter` opens the highlighted
+favorite (or the first match when the box has the focus) by searching its
+title in every scope, `x` removes a row and `X` empties the list after a
+`y`/`n` question. The list is one small file, `favorites.json`, next to the watch
 history (`~/.local/goanime/tracking/` on Linux and macOS,
 `%LOCALAPPDATA%\GoAnime\tracking\` on Windows), so it works without SQLite
 and on every platform.
