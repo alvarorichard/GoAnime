@@ -81,11 +81,12 @@ var (
 )
 
 // reason is err without the file path os errors carry, which is noise (and a
-// temp file name) on a screen: "permission denied", not "open /x/.tmp: ...".
+// temp file name) on a screen: "mkdir: permission denied", not
+// "mkdir /x/y: permission denied".
 func reason(err error) error {
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
-		return pe.Err
+		return fmt.Errorf("%s: %w", pe.Op, pe.Err)
 	}
 	return err
 }

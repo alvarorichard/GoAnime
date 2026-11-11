@@ -193,10 +193,6 @@ func TestRemoveDropsEveryCopyOfAKey(t *testing.T) {
 }
 
 func TestToggleOffWithDuplicateKeysInTheFile(t *testing.T) {
-	t.Skip("BUG: Toggle removes only the first of two entries with the same key, so it " +
-		"reports 'off' while Has still says true. Repro: a favorites.json holding key " +
-		`"dup" twice, then Toggle(Entry{Key:"dup"}) returns (false, nil) and Has("dup") is true. ` +
-		"Remove handles it (it drops every copy); Toggle should too.")
 	path := filepath.Join(t.TempDir(), "favorites.json")
 	writeRaw(t, path, `{"version":1,"entries":[
 		{"key":"dup","title":"A","added_at":"2024-01-01T00:00:00Z"},
@@ -450,8 +446,11 @@ func TestCorruptFileIsMovedAsideOnEveryEntryPoint(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "favorites.json")
 			writeRaw(t, path, "\x00\x01 definitely not json")
 			require.NoError(t, call(Open(path)), "a bad file is not an error")
-			bad, err := os.ReadFile(path + ".corrupt")
-			require.NoError(t, err, "kept for inspection")
+			aside, err := filepath.Glob(path + ".corrupt.*")
+			require.NoError(t, err)
+			require.Len(t, aside, 1, "kept for inspection")
+			bad, err := os.ReadFile(aside[0])
+			require.NoError(t, err)
 			assert.Equal(t, "\x00\x01 definitely not json", string(bad))
 		})
 	}

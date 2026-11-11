@@ -40,7 +40,7 @@ func captureHomeOptions(t *testing.T) tui.SearchHomeOptions {
 	return got
 }
 
-func TestTheHomeShowsExactlyEightFavorites(t *testing.T) {
+func TestTheHandlerHandsOverEveryFavoriteNewestFirst(t *testing.T) {
 	store := useFavorites(t)
 	base := time.Now().Add(-time.Hour)
 	for i := range 12 {
@@ -48,18 +48,9 @@ func TestTheHomeShowsExactlyEightFavorites(t *testing.T) {
 		require.NoError(t, err)
 	}
 	rows := homeFavorites()
-	require.Len(t, rows, 8, "the home list is a short list: the 8 newest")
+	require.Len(t, rows, 12, "the screen draws eight and counts the rest; none is dropped here")
 	assert.Equal(t, "k11", rows[0].Key)
-	assert.Equal(t, "k4", rows[7].Key)
-}
-
-func TestFewerThanTheCapShowAll(t *testing.T) {
-	store := useFavorites(t)
-	for i := range maxHomeFavorites {
-		_, err := store.Toggle(favorites.Entry{Key: "k" + strconv.Itoa(i), Title: "T" + strconv.Itoa(i)})
-		require.NoError(t, err)
-	}
-	assert.Len(t, homeFavorites(), maxHomeFavorites, "exactly the cap is not cut")
+	assert.Equal(t, "k0", rows[11].Key)
 }
 
 func TestHomeFavoriteRowsCarryEveryField(t *testing.T) {
@@ -106,8 +97,9 @@ func TestACorruptFavoritesFileOpensTheHomeWithoutFavorites(t *testing.T) {
 
 	assert.Empty(t, opts.Favorites)
 	assert.NotNil(t, opts.DeleteFavorite, "the actions are still wired")
-	_, err := os.Stat(path + ".corrupt")
-	assert.NoError(t, err, "kept for inspection")
+	aside, err := filepath.Glob(path + ".corrupt.*")
+	require.NoError(t, err)
+	assert.Len(t, aside, 1, "kept for inspection")
 	_ = store
 }
 

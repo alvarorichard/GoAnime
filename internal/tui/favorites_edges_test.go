@@ -141,7 +141,7 @@ func TestAFailedFavoriteNoticeIsOneLine(t *testing.T) {
 
 type errFavorites struct{ err error }
 
-func (errFavorites) Has(string) bool                        { return false }
+func (errFavorites) Keys() map[string]bool                  { return map[string]bool{} }
 func (e errFavorites) Toggle(favorites.Entry) (bool, error) { return false, e.err }
 
 func TestAFailedFavoriteTakesItsRowsFromTheList(t *testing.T) {
@@ -284,7 +284,7 @@ func TestRemovingTheOnlyFavoriteGivesTheFocusBackToTheBox(t *testing.T) {
 	_, _ = m.Update(press('x', "x"))
 	assert.Empty(t, m.rows)
 	assert.True(t, m.focusInput)
-	assert.NotContains(t, screen(m), "FAVORITOS", "the empty section goes away")
+	assert.Contains(t, screen(m), "Nothing here yet", "the section stays, with its hint, so it can be found again")
 }
 
 func TestAStartupWithNoRowsFocusesTheBox(t *testing.T) {
@@ -428,10 +428,14 @@ func TestHomeOptionsWireTheFavoritesAndTheirActions(t *testing.T) {
 	assert.Equal(t, 1, f.cleared)
 }
 
-func TestFavoritosHeaderComesFromTheFavoritesNotTheOtherLists(t *testing.T) {
+func TestFavoritosSectionIsOnTheMenuWhateverTheOtherListsHold(t *testing.T) {
 	continueAll, recent := homeTestEntries()
 	m := newSearchHomeModel(SearchHomeOptions{Continue: continueAll, Recent: recent})
-	assert.NotContains(t, screen(m), "FAVORITOS")
+	view := screen(m)
+	assert.Contains(t, view, "FAVORITOS")
+	assert.Contains(t, view, "Nothing here yet")
+	assert.Less(t, indexOf(view, "CONTINUE"), indexOf(view, "FAVORITOS"))
+	assert.Less(t, indexOf(view, "FAVORITOS"), indexOf(view, "RECENT"))
 }
 
 // ---- the whole path, results screen to home screen -------------------------------
