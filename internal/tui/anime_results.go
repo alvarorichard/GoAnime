@@ -392,7 +392,7 @@ type animeResultsModel struct {
 	// lists is the saved lists ctrl+l puts the work in; nil when the feature
 	// is absent. picker is its overlay while it is open.
 	lists  FavoriteLists
-	picker *favoritePicker
+	picker *pickerState
 }
 
 // favoritesAPI is the part of the favorites store the result screen uses.

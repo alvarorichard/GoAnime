@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -16,8 +17,10 @@ import (
 var newFavoriteLists = func() FavoriteLists { return nil }
 
 const (
-	// maxListNameRunes is how long a list's name can be typed.
-	maxListNameRunes = 40
+	// pickerMaxNameRunes is how long a list's name can be typed.
+	pickerMaxNameRunes = 40
+	// pickerMaxLists is how many lists of their own a user can have.
+	pickerMaxLists = 50
 	// pickerStatusLines is the room the status line has under the rows: a
 	// sentence wraps to this many lines before it is cut.
 	pickerStatusLines = 2
@@ -27,12 +30,12 @@ const (
 	pickerNamePlaceholder = "e.g. Weekend marathon"
 )
 
-// favoritePicker is the "Add to a list" overlay of the result screen: the
+// pickerState is the "Add to a list" overlay of the result screen: the
 // lists to put the highlighted work in, and the entry that names a new one.
 //
 // It reads the lists once when it opens and keeps its copy in step with every
 // change it makes, so drawing it never touches the saved file.
-type favoritePicker struct {
+type pickerState struct {
 	theme *Theme
 	lists FavoriteLists
 	work  HomeFavorite
@@ -74,17 +77,17 @@ func (s pickerStatus) text(titleRoom int) string {
 	return s.prefix + ansi.Truncate(s.work, titleRoom, "…") + s.suffix
 }
 
-// newFavoritePicker opens the picker for work, named title on screen. It reads
+// newPickerState opens the picker for work, named title on screen. It reads
 // the lists and the work's membership once.
-func newFavoritePicker(theme *Theme, lists FavoriteLists, work HomeFavorite, title string, favKeys map[string]bool) *favoritePicker {
-	p := &favoritePicker{
+func newPickerState(theme *Theme, lists FavoriteLists, work HomeFavorite, title string, favKeys map[string]bool) *pickerState {
+	p := &pickerState{
 		theme:   theme,
 		lists:   lists,
 		work:    work,
 		title:   title,
 		member:  map[string]bool{},
 		favKeys: favKeys,
-		input:   newNameInput(theme),
+		input:   newPickerNameInput(theme),
 	}
 	p.items, p.loadErr = lists.Lists()
 	if p.loadErr != nil {
@@ -99,12 +102,12 @@ func newFavoritePicker(theme *Theme, lists FavoriteLists, work HomeFavorite, tit
 	return p
 }
 
-// newNameInput is the text entry that names a new list.
-func newNameInput(theme *Theme) textinput.Model {
+// newPickerNameInput is the text entry that names a new list.
+func newPickerNameInput(theme *Theme) textinput.Model {
 	input := textinput.New()
 	input.Prompt = drawGlyph("❯ ", "> ")
 	input.Placeholder = pickerNamePlaceholder
-	input.CharLimit = maxListNameRunes
+	input.CharLimit = pickerMaxNameRunes
 	styles := textinput.DefaultStyles(themeIsDark())
 	styles.Focused.Text = theme.Text
 	styles.Focused.Placeholder = theme.Muted
@@ -117,7 +120,7 @@ func newNameInput(theme *Theme) textinput.Model {
 }
 
 // rowCount is how many rows the picker offers: the create row and the lists.
-func (p *favoritePicker) rowCount() int {
+func (p *pickerState) rowCount() int {
 	if p.loadErr != nil {
 		return 0
 	}
@@ -132,9 +135,9 @@ type pickerLayout struct {
 	rows        int
 }
 
-// layoutFor shares height lines between the heading, the rows and the status:
+// pickerLayoutFor shares height lines between the heading, the rows and the status:
 // the rows shrink last, the spacers go first.
-func layoutFor(height int) pickerLayout {
+func pickerLayoutFor(height int) pickerLayout {
 	switch {
 	case height >= 9:
 		return pickerLayout{title: true, spacers: true, statusLines: pickerStatusLines, rows: height - 3 - pickerStatusLines}
@@ -148,9 +151,9 @@ func layoutFor(height int) pickerLayout {
 	return pickerLayout{rows: 1}
 }
 
-// windowStart is the first row drawn so the cursor row is on screen, moving
+// pickerWindowStart is the first row drawn so the cursor row is on screen, moving
 // the window as little as possible.
-func windowStart(offset, cursor, total, rows int) int {
+func pickerWindowStart(offset, cursor, total, rows int) int {
 	rows = max(rows, 1)
 	if cursor < offset {
 		offset = cursor
@@ -163,14 +166,15 @@ func windowStart(offset, cursor, total, rows int) int {
 
 // fit measures the picker for a body width by height and keeps the cursor row
 // on screen. It is called when the picker opens and on every resize.
-func (p *favoritePicker) fit(width, height int) {
-	p.room = layoutFor(height).rows
-	p.offset = windowStart(p.offset, p.cursor, p.rowCount(), p.room)
-	p.input.SetWidth(max(min(width-lipgloss.Width(p.input.Prompt)-2, maxListNameRunes+1), 8))
+func (p *pickerState) fit(width, height int) {
+	p.room = pickerLayoutFor(height).rows
+	p.offset = pickerWindowStart(p.offset, p.cursor, p.rowCount(), p.room)
+	// The width is in cells: 40 wide characters can fill 80 of them.
+	p.input.SetWidth(max(width-lipgloss.Width(p.input.Prompt)-pickerIndent-1, 8))
 }
 
 // handleKey acts on a key press and reports whether the picker should close.
-func (p *favoritePicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+func (p *pickerState) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if p.naming {
 		return p.nameKey(msg), false
 	}
@@ -196,17 +200,21 @@ func (p *favoritePicker) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 // move shifts the cursor by delta rows, stopping at the first and last.
-func (p *favoritePicker) move(delta int) {
+func (p *pickerState) move(delta int) {
 	if p.rowCount() == 0 {
 		return
 	}
 	p.cursor = max(min(p.cursor+delta, p.rowCount()-1), 0)
-	p.offset = windowStart(p.offset, p.cursor, p.rowCount(), p.room)
+	p.offset = pickerWindowStart(p.offset, p.cursor, p.rowCount(), p.room)
 }
 
 // choose is enter on the highlighted row.
-func (p *favoritePicker) choose() tea.Cmd {
+func (p *pickerState) choose() tea.Cmd {
 	if p.rowCount() == 0 {
+		return nil
+	}
+	if p.cursor == 0 && p.atLimit() {
+		p.status = pickerStatus{prefix: p.limitSentence(), failed: true}
 		return nil
 	}
 	if p.cursor == 0 {
@@ -217,11 +225,11 @@ func (p *favoritePicker) choose() tea.Cmd {
 }
 
 // toggle puts the work in the list at index, or takes it off, and says so.
-func (p *favoritePicker) toggle(index int) {
+func (p *pickerState) toggle(index int) {
 	list := p.items[index]
 	on, err := p.lists.ToggleWork(list.ID, p.work)
 	if err != nil {
-		p.status = pickerStatus{prefix: fmt.Sprintf("Could not change %s. %s", quoted(list.Name), friendly(err)), failed: true}
+		p.status = pickerStatus{prefix: fmt.Sprintf("Could not change %s. %s", pickerQuoted(list.Name), friendly(err)), failed: true}
 		return
 	}
 	p.applyToggle(index, on)
@@ -234,7 +242,7 @@ func (p *favoritePicker) toggle(index int) {
 
 // applyToggle records that the work is now in the list at index (or not): the
 // membership, the list's count and, for Favorites, the result row's star.
-func (p *favoritePicker) applyToggle(index int, on bool) {
+func (p *pickerState) applyToggle(index int, on bool) {
 	list := &p.items[index]
 	was := p.member[list.ID]
 	switch {
@@ -258,15 +266,36 @@ func (p *favoritePicker) applyToggle(index int, on bool) {
 	}
 }
 
+// userLists is how many lists the user made: Favorites is not counted.
+func (p *pickerState) userLists() int {
+	n := 0
+	for i := range p.items {
+		if !p.items[i].Auto && p.items[i].ID != FavoritesListID {
+			n++
+		}
+	}
+	return n
+}
+
+// atLimit reports whether no more lists can be made.
+func (p *pickerState) atLimit() bool {
+	return p.userLists() >= pickerMaxLists
+}
+
+// limitSentence says, before a name is typed, that the lists are full.
+func (p *pickerState) limitSentence() string {
+	return fmt.Sprintf("You have %d lists, the most there can be. Delete one first.", p.userLists())
+}
+
 // startNaming opens the name entry.
-func (p *favoritePicker) startNaming() tea.Cmd {
+func (p *pickerState) startNaming() tea.Cmd {
 	p.naming = true
 	p.status = pickerStatus{}
 	return p.input.Focus()
 }
 
 // nameKey handles a key press in the name entry.
-func (p *favoritePicker) nameKey(msg tea.KeyPressMsg) tea.Cmd {
+func (p *pickerState) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		p.stopNaming()
@@ -280,7 +309,7 @@ func (p *favoritePicker) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // forward hands a message that is not a key press (a pasted text, the
 // cursor's blink) to the name entry.
-func (p *favoritePicker) forward(msg tea.Msg) tea.Cmd {
+func (p *pickerState) forward(msg tea.Msg) tea.Cmd {
 	before := p.input.Value()
 	var cmd tea.Cmd
 	p.input, cmd = p.input.Update(msg)
@@ -292,7 +321,7 @@ func (p *favoritePicker) forward(msg tea.Msg) tea.Cmd {
 
 // stopNaming goes back to the lists, creating nothing more. The entry is left
 // empty for the next time.
-func (p *favoritePicker) stopNaming() {
+func (p *pickerState) stopNaming() {
 	p.naming = false
 	p.nameErr = ""
 	p.createdID, p.createdName = "", ""
@@ -302,7 +331,7 @@ func (p *favoritePicker) stopNaming() {
 
 // submitName makes the list and puts the work in it. A failure stays in the
 // name entry, with the name as typed.
-func (p *favoritePicker) submitName() {
+func (p *pickerState) submitName() {
 	name := p.input.Value()
 	index := p.indexOf(p.createdID)
 	if p.createdID == "" || name != p.createdName || index < 0 {
@@ -318,22 +347,22 @@ func (p *favoritePicker) submitName() {
 	list := p.items[index]
 	on, err := p.lists.ToggleWork(list.ID, p.work)
 	if err != nil {
-		p.nameErr = fmt.Sprintf("Made the list %s, but could not add %s. %s", quoted(list.Name), quoted(p.title), friendly(err))
+		p.nameErr = fmt.Sprintf("Made the list %s, but could not add %s. %s", pickerQuoted(list.Name), pickerQuoted(p.title), friendly(err))
 		return
 	}
 	p.applyToggle(index, on)
 	p.stopNaming()
 	p.cursor = 1 + index
-	p.offset = windowStart(p.offset, p.cursor, p.rowCount(), p.room)
+	p.offset = pickerWindowStart(p.offset, p.cursor, p.rowCount(), p.room)
 	if !on {
-		p.status = pickerStatus{prefix: "Created " + quoted(list.Name) + ".", suffix: ""}
+		p.status = pickerStatus{prefix: "Created " + pickerQuoted(list.Name) + ".", suffix: ""}
 		return
 	}
-	p.status = pickerStatus{prefix: "Created " + quoted(list.Name) + ` and added "`, work: p.title, suffix: `".`}
+	p.status = pickerStatus{prefix: "Created " + pickerQuoted(list.Name) + ` and added "`, work: p.title, suffix: `".`}
 }
 
 // indexOf is the position of the list with id in items, or -1.
-func (p *favoritePicker) indexOf(id string) int {
+func (p *pickerState) indexOf(id string) int {
 	for i := range p.items {
 		if id != "" && p.items[i].ID == id {
 			return i
@@ -343,12 +372,12 @@ func (p *favoritePicker) indexOf(id string) int {
 }
 
 // quoted is a name between quotes, on one line.
-func quoted(name string) string {
+func pickerQuoted(name string) string {
 	return `"` + singleLine(name) + `"`
 }
 
 // hints are the footer's keys while the picker is open.
-func (p *favoritePicker) hints() []Hint {
+func (p *pickerState) hints() []Hint {
 	if p.naming {
 		return []Hint{
 			{Key: "enter", Desc: "create", Essential: true},
@@ -362,13 +391,15 @@ func (p *favoritePicker) hints() []Hint {
 	return []Hint{
 		{Key: "enter", Desc: p.enterWord(), Essential: true},
 		{Key: move, Desc: "move"},
-		{Key: "esc", Desc: "close", Essential: true},
+		{Key: "esc", Desc: "when you are done", Essential: true},
 	}
 }
 
 // enterWord is what enter will do on the highlighted row.
-func (p *favoritePicker) enterWord() string {
+func (p *pickerState) enterWord() string {
 	switch {
+	case p.cursor == 0 && p.atLimit():
+		return "see why"
 	case p.cursor == 0:
 		return "new list"
 	case p.member[p.items[p.cursor-1].ID]:
@@ -378,11 +409,11 @@ func (p *favoritePicker) enterWord() string {
 }
 
 // view draws the picker in a width by height body.
-func (p *favoritePicker) view(width, height int) string {
+func (p *pickerState) view(width, height int) string {
 	if p.naming {
 		return p.nameView(width, height)
 	}
-	layout := layoutFor(height)
+	layout := pickerLayoutFor(height)
 	var lines []string
 	if layout.title {
 		lines = append(lines, p.heading(width))
@@ -390,30 +421,30 @@ func (p *favoritePicker) view(width, height int) string {
 	if p.loadErr != nil {
 		text := "Could not read your lists. " + friendly(p.loadErr)
 		notice := strings.TrimRight(renderNotice(p.theme, text, width-pickerIndent), "\n")
-		lines = append(lines, "", indented(strings.ReplaceAll(notice, "\n", "\n"+indented(""))), "", indented(p.theme.Muted.Render("esc closes this.")))
+		lines = append(lines, "", pickerIndented(strings.ReplaceAll(notice, "\n", "\n"+pickerIndented(""))), "", pickerIndented(p.theme.Muted.Render("esc closes this.")))
 		return strings.Join(lines, "\n")
 	}
-	start := windowStart(p.offset, p.cursor, p.rowCount(), layout.rows)
+	start := pickerWindowStart(p.offset, p.cursor, p.rowCount(), layout.rows)
 	end := min(start+layout.rows, p.rowCount())
 	if layout.spacers {
-		lines = append(lines, p.more(start > 0, aboveNote(start), width))
+		lines = append(lines, p.more(start > 0, pickerAboveNote(start), width))
 	}
 	for i := start; i < end; i++ {
 		lines = append(lines, p.renderRow(i, width))
 	}
 	if layout.spacers {
-		lines = append(lines, p.more(end < p.rowCount(), belowNote(p.rowCount()-end), width))
+		lines = append(lines, p.more(end < p.rowCount(), pickerBelowNote(p.rowCount()-end), width))
 	}
 	lines = append(lines, p.statusLines(width, layout.statusLines)...)
 	return strings.Join(lines, "\n")
 }
 
-func aboveNote(n int) string { return drawGlyph("↑ ", "^ ") + fmt.Sprintf("%d more above", n) }
-func belowNote(n int) string { return drawGlyph("↓ ", "v ") + fmt.Sprintf("%d more below", n) }
+func pickerAboveNote(n int) string { return drawGlyph("↑ ", "^ ") + fmt.Sprintf("%d more above", n) }
+func pickerBelowNote(n int) string { return drawGlyph("↓ ", "v ") + fmt.Sprintf("%d more below", n) }
 
 // more is the line above or below the rows: a note when rows are out of sight
 // that way, empty otherwise.
-func (p *favoritePicker) more(show bool, note string, width int) string {
+func (p *pickerState) more(show bool, note string, width int) string {
 	if !show {
 		return ""
 	}
@@ -421,7 +452,7 @@ func (p *favoritePicker) more(show bool, note string, width int) string {
 }
 
 // heading is the first line: what is being put in a list.
-func (p *favoritePicker) heading(width int) string {
+func (p *pickerState) heading(width int) string {
 	const lead, tail = `Add "`, `" to a list`
 	room := width - pickerIndent - lipgloss.Width(lead) - lipgloss.Width(tail)
 	title := singleLine(p.title)
@@ -429,7 +460,7 @@ func (p *favoritePicker) heading(width int) string {
 	if room >= 1 {
 		text = lead + ansi.Truncate(title, room, "…") + tail
 	}
-	return indented(p.theme.Text.Bold(true).Render(ansi.Truncate(text, width-pickerIndent, "…")))
+	return pickerIndented(p.theme.Text.Bold(true).Render(ansi.Truncate(text, width-pickerIndent, "…")))
 }
 
 // pickerIndent is the margin the picker's sentences keep, like the result
@@ -437,18 +468,18 @@ func (p *favoritePicker) heading(width int) string {
 const pickerIndent = 1
 
 // indented puts the margin before a line.
-func indented(line string) string {
+func pickerIndented(line string) string {
 	return strings.Repeat(" ", pickerIndent) + line
 }
 
 // statusLines is the sentence about what just happened, wrapped to at most
 // lines lines.
-func (p *favoritePicker) statusLines(width, lines int) []string {
+func (p *pickerState) statusLines(width, lines int) []string {
 	if lines == 0 {
 		return nil
 	}
 	if p.status.prefix == "" && p.status.work == "" {
-		return make([]string, lines)
+		return p.idleLines(width, lines)
 	}
 	// Room for the work's title: what the sentence leaves of the lines, less
 	// some slack for the words that wrap.
@@ -468,10 +499,25 @@ func (p *favoritePicker) statusLines(width, lines int) []string {
 		}
 	}
 	for i := range out {
-		out[i] = indented(out[i])
+		out[i] = pickerIndented(out[i])
 	}
 	if len(out) > lines {
 		out = out[:lines]
+	}
+	return out
+}
+
+// idleLines is what the status area says before anything was done: how to use
+// the picker and how to finish, or that no more lists can be made.
+func (p *pickerState) idleLines(width, lines int) []string {
+	text := "enter adds it or takes it off. esc when you are done."
+	if p.atLimit() {
+		text = p.limitSentence()
+	}
+	out := make([]string, lines)
+	wrapped := strings.Split(ansi.Wrap(text, max(width-pickerIndent, 1), ""), "\n")
+	for i := 0; i < len(wrapped) && i < lines; i++ {
+		out[i] = pickerIndented(p.theme.Muted.Render(wrapped[i]))
 	}
 	return out
 }
@@ -486,31 +532,36 @@ type pickerRow struct {
 }
 
 // rowFor describes row i of the picker.
-func (p *favoritePicker) rowFor(i int) pickerRow {
+func (p *pickerState) rowFor(i int) pickerRow {
 	if i == 0 {
-		return pickerRow{create: true, name: "Create a new list"}
+		name := "Create a new list"
+		if p.atLimit() {
+			name += fmt.Sprintf(" (you have %d, the most there can be)", p.userLists())
+		}
+		return pickerRow{create: true, name: name}
 	}
 	list := p.items[i-1]
 	return pickerRow{
 		star:  list.ID == FavoritesListID,
 		name:  list.Name,
-		count: workCount(list.Count),
+		count: pickerCountLabel(list.Count),
 		in:    p.member[list.ID],
 	}
 }
 
-// workCount is "12 works", "1 work" or "empty".
-func workCount(n int) string {
+// pickerCountLabel is "12 titles", "1 title" or "empty": the word the results
+// screen uses.
+func pickerCountLabel(n int) string {
 	switch {
 	case n <= 0:
 		return "empty"
 	case n == 1:
-		return "1 work"
+		return "1 title"
 	}
-	return fmt.Sprintf("%d works", n)
+	return fmt.Sprintf("%d titles", n)
 }
 
-func (p *favoritePicker) renderRow(i, width int) string {
+func (p *pickerState) renderRow(i, width int) string {
 	return renderPickerRow(p.theme, p.rowFor(i), i == p.cursor, width)
 }
 
@@ -563,30 +614,49 @@ func renderPickerRow(theme *Theme, r pickerRow, selected bool, width int) string
 }
 
 // pickerRowSide is the right part of a row: the count and the membership
-// note, the note cut to a bare tick (or nothing in plain mode, where "[x]"
-// already says it) when the row is narrow.
+// note ("in this list"; in plain mode also "not in this list"), the note cut
+// to a bare tick (or nothing in plain mode, where the brackets already say it)
+// when the row is narrow.
 func pickerRowSide(side, mark *lipgloss.Style, r pickerRow, room int) string {
 	if r.create {
 		return ""
 	}
 	full := side.Render(r.count)
-	if r.in {
-		note := drawGlyph("✓ in this list", "in this list")
-		if lipgloss.Width(full)+3+lipgloss.Width(note) > room {
+	note := ""
+	switch {
+	case r.in:
+		note = drawGlyph("✓ in this list", "in this list")
+	case Plain():
+		// Words, not only "[ ]": a screen reader says what the brackets mean.
+		note = "not in this list"
+	}
+	if note != "" && lipgloss.Width(full)+3+lipgloss.Width(note) > room {
+		note = ""
+		if r.in {
 			note = drawGlyph("✓", "")
 		}
-		if note != "" {
-			full += side.Render("   ") + mark.Render(note)
-		}
+	}
+	if note != "" {
+		full += side.Render("   ") + mark.Render(note)
 	}
 	return full
 }
 
+// counter is how much of the name's room is used: "12/40", in words at the
+// end, where typing stops.
+func (p *pickerState) counter() string {
+	n := utf8.RuneCountInString(p.input.Value())
+	if n >= pickerMaxNameRunes {
+		return fmt.Sprintf("%d/%d, the most a name can have", pickerMaxNameRunes, pickerMaxNameRunes)
+	}
+	return fmt.Sprintf("%d/%d", n, pickerMaxNameRunes)
+}
+
 // nameView draws the name entry.
-func (p *favoritePicker) nameView(width, height int) string {
+func (p *pickerState) nameView(width, height int) string {
 	lines := []string{
 		p.theme.Text.Bold(true).Render("Name your list"),
-		p.theme.Muted.Render(ansi.Truncate(`It will start with `+quoted(p.title)+` in it.`, width-pickerIndent, "…")),
+		p.theme.Muted.Render(ansi.Truncate(`It will start with `+pickerQuoted(p.title)+` in it.`, width-pickerIndent, "…")),
 	}
 	roomy := height >= 7
 	if roomy {
@@ -596,14 +666,14 @@ func (p *favoritePicker) nameView(width, height int) string {
 	if p.nameErr != "" {
 		lines = append(lines, strings.TrimRight(renderNotice(p.theme, p.nameErr, width-pickerIndent), "\n"))
 	} else {
-		lines = append(lines, "")
+		lines = append(lines, p.theme.Muted.Render(p.counter()))
 	}
 	if roomy {
 		lines = append(lines, "")
 	}
 	lines = append(lines, p.theme.Muted.Render("enter create "+drawGlyph("·", "-")+" esc back"))
 	for i := range lines {
-		lines[i] = ansi.Truncate(indented(lines[i]), width, "")
+		lines[i] = ansi.Truncate(pickerIndented(lines[i]), width, "")
 	}
 	return strings.Join(lines, "\n")
 }
@@ -617,7 +687,7 @@ func (m *animeResultsModel) openPicker() bool {
 	}
 	entry := m.favoriteEntry(item)
 	work := HomeFavorite{Key: entry.Key, Title: entry.Title, Year: entry.Year, Media: entry.Media, Source: entry.Source}
-	m.picker = newFavoritePicker(&m.theme, m.lists, work, item.Title(), m.favKeys)
+	m.picker = newPickerState(&m.theme, m.lists, work, item.Title(), m.favKeys)
 	m.fitPicker()
 	return true
 }

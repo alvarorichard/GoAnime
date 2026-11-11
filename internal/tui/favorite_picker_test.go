@@ -404,9 +404,9 @@ func TestRowsAreTheListsInOrderWithTheirCounts(t *testing.T) {
 		t.Fatalf("no row %q in\n%s", name, view)
 		return ""
 	}
-	assert.Contains(t, find("Favorites"), "12 works")
-	assert.Contains(t, find("Weekend"), "1 work")
-	assert.NotContains(t, find("Weekend"), "1 works")
+	assert.Contains(t, find("Favorites"), "12 titles")
+	assert.Contains(t, find("Weekend"), "1 title")
+	assert.NotContains(t, find("Weekend"), "1 titles")
 	assert.Contains(t, find("Kids"), "empty")
 }
 
@@ -438,9 +438,10 @@ func TestPlainModeMarksRowsWithBracketsInText(t *testing.T) {
 		case strings.Contains(row, "Weekend"):
 			assert.Regexp(t, `\[x\] +Weekend`, row)
 			assert.Contains(t, row, "in this list")
+			assert.NotContains(t, row, "not in this list")
 		case strings.Contains(row, "Kids"):
 			assert.Regexp(t, `\[ \] +Kids`, row)
-			assert.NotContains(t, row, "in this list")
+			assert.Contains(t, row, "not in this list", "in words, not only brackets")
 		case strings.Contains(row, "Favorites"):
 			assert.Regexp(t, `\[ \] \* Favorites`, row)
 		}
@@ -475,7 +476,7 @@ func TestEnterOnAListAddsTheWork(t *testing.T) {
 	view := pkScreen(m)
 	assert.Contains(t, view, `Added "Frieren" to Weekend.`)
 	assert.NotNil(t, m.picker, "the picker stays open")
-	assert.Contains(t, pkHighlighted(t, view), "2 works")
+	assert.Contains(t, pkHighlighted(t, view), "2 titles")
 	assert.Contains(t, pkHighlighted(t, view), "✓ in this list")
 }
 
@@ -514,7 +515,7 @@ func TestEnterAgainTakesTheWorkOff(t *testing.T) {
 	view := pkScreen(m)
 	assert.Contains(t, view, `Removed "Frieren" from Weekend.`)
 	assert.NotContains(t, view, `Added "Frieren"`)
-	assert.Contains(t, pkHighlighted(t, view), "1 work")
+	assert.Contains(t, pkHighlighted(t, view), "1 title")
 	assert.NotContains(t, pkHighlighted(t, view), "in this list")
 }
 
@@ -571,7 +572,7 @@ func TestAListThatCannotBeChangedSaysWhy(t *testing.T) {
 	assert.Contains(t, view, `Could not change "Weekend". The disk is full.`)
 	assert.NotContains(t, view, "Added")
 	require.NotNil(t, m.picker, "the picker stays open")
-	assert.Contains(t, pkHighlighted(t, view), "1 work", "nothing changed in the count")
+	assert.Contains(t, pkHighlighted(t, view), "1 title", "nothing changed in the count")
 	assert.NotContains(t, pkHighlighted(t, view), "in this list")
 	assert.False(t, m.favKeys["frieren"])
 }
@@ -618,10 +619,10 @@ func TestPickerFooterNamesEnterMoveAndClose(t *testing.T) {
 	assert.Equal(t, []string{"enter", "↑↓", "esc"}, keys)
 	assert.True(t, hints[0].Essential)
 	assert.True(t, hints[2].Essential)
-	assert.Equal(t, "close", hints[2].Desc)
+	assert.Equal(t, "when you are done", hints[2].Desc)
 	footer := strings.Split(pkScreen(m), "\n")
 	assert.Contains(t, footer[len(footer)-1], "esc")
-	assert.Contains(t, footer[len(footer)-1], "close")
+	assert.Contains(t, footer[len(footer)-1], "when you are done")
 }
 
 func TestPlainPickerFooterSaysUpDn(t *testing.T) {
@@ -665,7 +666,7 @@ func TestNamingAListCreatesItAndPutsTheWorkIn(t *testing.T) {
 	assert.Contains(t, view, `Created "Weekend marathon" and added "Frieren".`)
 	row := pkHighlighted(t, view)
 	assert.Contains(t, row, "Weekend marathon", "the new list is highlighted")
-	assert.Contains(t, row, "1 work")
+	assert.Contains(t, row, "1 title")
 	assert.Contains(t, row, "✓ in this list")
 	assert.NotContains(t, view, "Name your list")
 }
@@ -1080,7 +1081,7 @@ func TestResizeRelaysOutTheOpenPicker(t *testing.T) {
 		view := pkScreen(m)
 		assert.LessOrEqual(t, strings.Count(view, "\n")+1, size[1], "%v", size)
 		assert.Contains(t, pkHighlighted(t, view), "List 40", "%v: the last list is on screen", size)
-		assert.Equal(t, layoutFor(size[1]-shellChromeHeight).rows, m.picker.room, "%v", size)
+		assert.Equal(t, pickerLayoutFor(size[1]-shellChromeHeight).rows, m.picker.room, "%v", size)
 	}
 }
 
@@ -1186,7 +1187,7 @@ func TestThePickerNeverOutgrowsAnyBodySize(t *testing.T) {
 			for _, width := range []int{12, 24, 40, 60, 80, 120} {
 				fake := pkBigLists(12)
 				theme := CurrentTheme()
-				p := newFavoritePicker(&theme, fake, HomeFavorite{Key: "frieren"}, strings.Repeat("A very long title ", 8), map[string]bool{})
+				p := newPickerState(&theme, fake, HomeFavorite{Key: "frieren"}, strings.Repeat("A very long title ", 8), map[string]bool{})
 				p.fit(width, height)
 				if naming {
 					_ = p.startNaming()
@@ -1265,14 +1266,14 @@ func TestRowsKeepTheirCountsAtTheRightEdge(t *testing.T) {
 	m := pkOpen(t, pkNewLists())
 	for _, line := range strings.Split(pkScreen(m), "\n") {
 		if strings.Contains(line, "Weekend") {
-			assert.True(t, strings.HasSuffix(strings.TrimRight(line, " "), "1 work"), line)
+			assert.True(t, strings.HasSuffix(strings.TrimRight(line, " "), "1 title"), line)
 		}
 	}
 }
 
 func TestNarrowRowsShortenTheMembershipNoteButKeepTheTick(t *testing.T) {
 	theme := CurrentTheme()
-	row := pickerRow{name: "Weekend marathon", count: "12 works", in: true}
+	row := pickerRow{name: "Weekend marathon", count: "12 titles", in: true}
 	wide := ansi.Strip(renderPickerRow(&theme, row, false, 80))
 	narrow := ansi.Strip(renderPickerRow(&theme, row, false, 36))
 	assert.Contains(t, wide, "✓ in this list")
@@ -1284,36 +1285,36 @@ func TestNarrowRowsShortenTheMembershipNoteButKeepTheTick(t *testing.T) {
 func TestPlainNarrowRowsStillCarryBrackets(t *testing.T) {
 	pkPlain(t)
 	theme := CurrentTheme()
-	row := pickerRow{name: "Weekend marathon", count: "12 works", in: true}
+	row := pickerRow{name: "Weekend marathon", count: "12 titles", in: true}
 	narrow := ansi.Strip(renderPickerRow(&theme, row, true, 36))
 	assert.Contains(t, narrow, "[x]")
 	assert.NotContains(t, narrow, "✓")
 	assert.LessOrEqual(t, ansi.StringWidth(narrow), 36)
 }
 
-func TestWorkCountWords(t *testing.T) {
-	assert.Equal(t, "empty", workCount(0))
-	assert.Equal(t, "empty", workCount(-1))
-	assert.Equal(t, "1 work", workCount(1))
-	assert.Equal(t, "2 works", workCount(2))
-	assert.Equal(t, "40 works", workCount(40))
+func TestPickerCountLabelWords(t *testing.T) {
+	assert.Equal(t, "empty", pickerCountLabel(0))
+	assert.Equal(t, "empty", pickerCountLabel(-1))
+	assert.Equal(t, "1 title", pickerCountLabel(1))
+	assert.Equal(t, "2 titles", pickerCountLabel(2))
+	assert.Equal(t, "40 titles", pickerCountLabel(40))
 }
 
 func TestWindowStartKeepsTheCursorInView(t *testing.T) {
-	assert.Equal(t, 0, windowStart(0, 0, 10, 4))
-	assert.Equal(t, 0, windowStart(0, 3, 10, 4))
-	assert.Equal(t, 1, windowStart(0, 4, 10, 4))
-	assert.Equal(t, 6, windowStart(0, 9, 10, 4))
-	assert.Equal(t, 6, windowStart(9, 9, 10, 4))
-	assert.Equal(t, 2, windowStart(5, 2, 10, 4))
-	assert.Equal(t, 0, windowStart(5, 1, 3, 4), "fewer rows than room starts at the top")
-	assert.Equal(t, 6, windowStart(9, 9, 10, 4), "the window never runs past the end")
-	assert.Equal(t, 5, windowStart(8, 5, 10, 0), "a room of 0 counts as 1")
+	assert.Equal(t, 0, pickerWindowStart(0, 0, 10, 4))
+	assert.Equal(t, 0, pickerWindowStart(0, 3, 10, 4))
+	assert.Equal(t, 1, pickerWindowStart(0, 4, 10, 4))
+	assert.Equal(t, 6, pickerWindowStart(0, 9, 10, 4))
+	assert.Equal(t, 6, pickerWindowStart(9, 9, 10, 4))
+	assert.Equal(t, 2, pickerWindowStart(5, 2, 10, 4))
+	assert.Equal(t, 0, pickerWindowStart(5, 1, 3, 4), "fewer rows than room starts at the top")
+	assert.Equal(t, 6, pickerWindowStart(9, 9, 10, 4), "the window never runs past the end")
+	assert.Equal(t, 5, pickerWindowStart(8, 5, 10, 0), "a room of 0 counts as 1")
 }
 
 func TestLayoutSharesTheHeightOut(t *testing.T) {
 	for height := 1; height <= 40; height++ {
-		l := layoutFor(height)
+		l := pickerLayoutFor(height)
 		used := l.rows + l.statusLines
 		if l.title {
 			used++
@@ -1327,6 +1328,6 @@ func TestLayoutSharesTheHeightOut(t *testing.T) {
 		}
 		assert.LessOrEqual(t, used, max(height, 1)+0, height)
 	}
-	assert.Equal(t, pickerLayout{title: true, spacers: true, statusLines: 2, rows: 4}, layoutFor(9))
-	assert.Equal(t, pickerLayout{title: true, statusLines: 2, rows: 2}, layoutFor(5))
+	assert.Equal(t, pickerLayout{title: true, spacers: true, statusLines: 2, rows: 4}, pickerLayoutFor(9))
+	assert.Equal(t, pickerLayout{title: true, statusLines: 2, rows: 2}, pickerLayoutFor(5))
 }

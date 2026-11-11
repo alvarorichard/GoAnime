@@ -101,7 +101,7 @@ func TestStarringInPlainModeRefreshesThePanelUnderTheList(t *testing.T) {
 func TestThePickerNeedsNoFavoritesSetToWork(t *testing.T) {
 	theme := CurrentTheme()
 	fake := pkNewLists()
-	p := newFavoritePicker(&theme, fake, HomeFavorite{Key: "frieren", Title: "Frieren"}, "Frieren", nil)
+	p := newPickerState(&theme, fake, HomeFavorite{Key: "frieren", Title: "Frieren"}, "Frieren", nil)
 	p.fit(80, 20)
 	p.move(1)
 	assert.NotPanics(t, func() { p.choose() })
@@ -136,7 +136,7 @@ func TestTheLoadErrorFitsEverySize(t *testing.T) {
 	theme := CurrentTheme()
 	for height := 1; height <= 24; height++ {
 		for _, width := range []int{24, 40, 80} {
-			p := newFavoritePicker(&theme, fake, HomeFavorite{Key: "frieren"}, "Frieren", map[string]bool{})
+			p := newPickerState(&theme, fake, HomeFavorite{Key: "frieren"}, "Frieren", map[string]bool{})
 			p.fit(width, height)
 			view := p.view(width, height)
 			for _, line := range strings.Split(view, "\n") {
@@ -178,8 +178,8 @@ func TestLettersAreLettersInTheNameEntry(t *testing.T) {
 
 func TestTheListRowsAreAlignedWhetherOrNotTheWorkIsIn(t *testing.T) {
 	theme := CurrentTheme()
-	in := ansi.Strip(renderPickerRow(&theme, pickerRow{name: "Weekend", count: "1 work", in: true}, false, 60))
-	out := ansi.Strip(renderPickerRow(&theme, pickerRow{name: "Weekend", count: "1 work"}, false, 60))
+	in := ansi.Strip(renderPickerRow(&theme, pickerRow{name: "Weekend", count: "1 title", in: true}, false, 60))
+	out := ansi.Strip(renderPickerRow(&theme, pickerRow{name: "Weekend", count: "1 title"}, false, 60))
 	assert.Equal(t, strings.Index(in, "Weekend"), strings.Index(out, "Weekend"))
 	assert.Equal(t, 60, ansi.StringWidth(in), "rows fill the width")
 	assert.Equal(t, 60, ansi.StringWidth(out), "rows fill the width")
