@@ -201,3 +201,10 @@ func TestOpenSearchHomeBackPathEndToEnd(t *testing.T) {
 	assert.True(t, opened[0].Restore.IsZero())
 	assert.Equal(t, want, opened[1].Restore)
 }
+
+func TestADecisionWithABlankQueryIsNotARestorePoint(t *testing.T) {
+	freshHome(t)
+	decide(t, tui.SearchHomeResult{Action: tui.HomeSearch, Query: "  ", Restore: tui.HomeRestore{Tab: tui.TabFavorites, RowKey: "favorite:k"}})
+	assert.True(t, reopen(t, "").Restore.IsZero())
+	assert.True(t, reopen(t, "  ").Restore.IsZero())
+}

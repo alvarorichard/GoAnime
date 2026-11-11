@@ -315,6 +315,7 @@ func TestHomeComesBackWhereItWas(t *testing.T) {
 			assert.Equal(t, tc.tab, tabName(m.scopes[m.scopeIdx].Value), "tab")
 			assert.Equal(t, tc.row, highlighted(m), "row")
 			assert.Equal(t, tc.row == "", m.focusInput, "focus")
+			assert.Equal(t, tc.row == "", m.input.Focused(), "the box takes keys only when it has the focus")
 			assert.Equal(t, tc.box, m.input.Value(), "box")
 			if tc.row != "" {
 				assert.NotContains(t, m.input.Value(), "-", "no slug in the box when the search came from a row")
@@ -463,6 +464,8 @@ func TestContinueRowKey(t *testing.T) {
 		{"another source is another row", HomeContinueEntry{AnimeTitle: "Naruto", Source: "X"}, HomeContinueEntry{AnimeTitle: "Naruto", Source: "Y"}, false},
 		{"another show", HomeContinueEntry{AnimeTitle: "Naruto"}, HomeContinueEntry{AnimeTitle: "Bleach"}, false},
 		{"no title groups by address without the episode", HomeContinueEntry{Key: "https://s/x:ep1"}, HomeContinueEntry{Key: "https://s/x:ep22"}, true},
+		{"no title, the episode suffix right at the start", HomeContinueEntry{Key: ":ep1"}, HomeContinueEntry{Key: ":ep2"}, true},
+		{"no title, address case", HomeContinueEntry{Key: "HTTPS://S/X:ep1"}, HomeContinueEntry{Key: "https://s/x:ep2"}, true},
 		{"no title, different address", HomeContinueEntry{Key: "https://s/x:ep1"}, HomeContinueEntry{Key: "https://s/y:ep1"}, false},
 		{"no title, :ep that is not a number stays", HomeContinueEntry{Key: "https://s/x:epic"}, HomeContinueEntry{Key: "https://s/x"}, false},
 		{"no title, bare :ep stays", HomeContinueEntry{Key: "https://s/x:ep"}, HomeContinueEntry{Key: "https://s/x"}, false},
@@ -555,4 +558,17 @@ func TestRestoreKeysDoNotDependOnTime(t *testing.T) {
 	f.UpdatedAt = time.Time{}
 	f.Position = 99
 	assert.Equal(t, continueRowKey(e), continueRowKey(f))
+}
+
+// The box restores what was searched: a highlighted suggestion is what was
+// searched, not the partial text typed before it.
+func TestRestoreFromTheBoxTakesThePickedSuggestion(t *testing.T) {
+	t.Parallel()
+	m := newSearchHomeModel(restoreFixture())
+	m.input.SetValue("naru")
+	m.suggestions = []HomeSuggestion{{Title: "Naruto: Shippuuden"}}
+	m.sugCursor = 0
+	res := enter(t, m)
+	assert.Equal(t, "Naruto: Shippuuden", res.Query)
+	assert.Equal(t, HomeRestore{Tab: TabAll, Query: "Naruto: Shippuuden"}, res.Restore)
 }
