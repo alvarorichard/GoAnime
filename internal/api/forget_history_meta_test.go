@@ -171,17 +171,17 @@ var forgetHistoryMutants = []mutant{
 	},
 	{
 		name:  "y does not clear",
-		edits: []codeEdit{{fhHomeFile, "\tcase \"y\":\n\t\tm.clearConfirmed()", "\tcase \"y\":\n\t\tm.clearing = clearNothing"}},
+		edits: []codeEdit{{fhHomeFile, "\tcase \"y\", \"Y\":\n\t\tm.clearConfirmed()", "\tcase \"y\", \"Y\":\n\t\tm.clearing = clearNothing"}},
 		kills: map[string][]string{tuiPkg: {"TestYClearsTheContinueListAndOnlyThat", "TestYClearsTheRecentListAndOnlyThat"}},
 	},
 	{
 		name:  "esc does not close the question",
-		edits: []codeEdit{{fhHomeFile, "\tcase \"n\", \"esc\":\n\t\tm.clearing = clearNothing", "\tcase \"n\":\n\t\tm.clearing = clearNothing"}},
+		edits: []codeEdit{{fhHomeFile, "\tcase \"n\", \"N\", \"esc\":\n\t\tm.clearing = clearNothing", "\tcase \"n\", \"N\":\n\t\tm.clearing = clearNothing"}},
 		kills: map[string][]string{tuiPkg: {"TestNAndEscKeepTheList"}},
 	},
 	{
 		name:  "n does not close the question",
-		edits: []codeEdit{{fhHomeFile, "\tcase \"n\", \"esc\":\n\t\tm.clearing = clearNothing", "\tcase \"esc\":\n\t\tm.clearing = clearNothing"}},
+		edits: []codeEdit{{fhHomeFile, "\tcase \"n\", \"N\", \"esc\":\n\t\tm.clearing = clearNothing", "\tcase \"N\", \"esc\":\n\t\tm.clearing = clearNothing"}},
 		kills: map[string][]string{tuiPkg: {"TestNAndEscKeepTheList"}},
 	},
 	{
@@ -256,7 +256,7 @@ var forgetHistoryMutants = []mutant{
 	},
 	{
 		name:  "the footer never offers x and X",
-		edits: []codeEdit{{fhHomeFile, "\tif !m.focusInput {\n\t\thints = append(hints[:3], append([]Hint{{Key: \"x\", Desc: \"remove\"}", "\tif false {\n\t\thints = append(hints[:3], append([]Hint{{Key: \"x\", Desc: \"remove\"}"}},
+		edits: []codeEdit{{fhHomeFile, "\tif !m.focusInput {\n\t\thints = append(hints[:3], append([]Hint{{Key: \"x\", Desc: \"remove\", Essential: true}", "\tif false {\n\t\thints = append(hints[:3], append([]Hint{{Key: \"x\", Desc: \"remove\", Essential: true}"}},
 		kills: map[string][]string{tuiPkg: {"TestTheFooterOffersRemoveAndClearOnlyOverARow"}},
 	},
 	{
@@ -276,17 +276,17 @@ var forgetHistoryMutants = []mutant{
 	},
 	{
 		name:  "the screen is not given the history actions",
-		edits: []codeEdit{{fhHomeFile, "deleteRecent:  opts.DeleteRecent,", "deleteRecent:  nil,"}},
+		edits: []codeEdit{{fhHomeFile, "deleteRecent:   opts.DeleteRecent,", "deleteRecent:   nil,"}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomeWiresHistoryOptionsIntoTheModel"}},
 	},
 	{
 		name:  "the screen is not given the CONTINUE clearer",
-		edits: []codeEdit{{fhHomeFile, "clearContinue: opts.ClearContinue,", "clearContinue: nil,"}},
+		edits: []codeEdit{{fhHomeFile, "clearContinue:  opts.ClearContinue,", "clearContinue:  nil,"}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomeWiresHistoryOptionsIntoTheModel"}},
 	},
 	{
 		name:  "the screen is not given the RECENT clearer",
-		edits: []codeEdit{{fhHomeFile, "clearRecent:   opts.ClearRecent,", "clearRecent:   nil,"}},
+		edits: []codeEdit{{fhHomeFile, "clearRecent:    opts.ClearRecent,", "clearRecent:    nil,"}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomeWiresHistoryOptionsIntoTheModel"}},
 	},
 	{
