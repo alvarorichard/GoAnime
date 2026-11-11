@@ -277,21 +277,33 @@ option at once; any other key still filters.
 The episode list marks the episodes you finished with ✓ and the one you
 stopped partway with ◐, and opens where you left off.
 
-### Favorites
+### Favorites and your own lists
 
-Press `ctrl+f` on a result to add the work to FAVORITES, and again to take it
-off; a favorite wears a star on its row in the results and in the details. A work is one
-favorite whatever the source it came from. FAVORITES appears on the search
-home between CONTINUE and RECENT, newest first, eight rows at a time with a
-"+N more" line for the rest. Press `tab` to the FAVORITES tab (beside MOVIES/TV)
-for all of them: it lists every favorite, scrolls, and typing in the box
-filters them by title, year, type or source. `enter` opens the highlighted
-favorite (or the first match when the box has the focus) by searching its
-title in every scope, `x` removes a row and `X` empties the list after a
-`y`/`n` question. The list is one small file, `favorites.json`, next to the watch
-history (`~/.local/goanime/tracking/` on Linux and macOS,
-`%LOCALAPPDATA%\GoAnime\tracking\` on Windows), so it works without SQLite
-and on every platform.
+Press `ctrl+f` on a result to add the work to Favorites, and again to take it
+off; a favorite wears a star on its row and in the details. Press `ctrl+l` to
+put it in one of your own lists instead (or as well): a screen opens with
+"+ Create a new list" on top and every list below it, each with its number of
+titles and a mark when the work is already in it. `enter` adds the work to the
+highlighted list, or takes it off when it is there, and the screen stays open
+so you can choose several lists; `esc` closes it. To make a list, choose
+"+ Create a new list" and type a name (up to 40 characters, such as "Weekend
+marathon"). The footer and the details always say which key does what.
+
+The FAVORITES tab, beside MOVIES/TV, opens at your lists: "+ Create a new
+list" (or press `n`), Favorites (the list `ctrl+f` fills) and the lists you
+made, with their number of titles and the day they were created, and on a
+wide terminal a panel with the titles inside. `enter` opens a list: its
+titles scroll, typing filters them (accents and capitals do not matter),
+`enter` on a title searches it, `x` takes it off the list, `X` empties the
+list after a `y`/`n` question, and `esc` goes back to your lists. On a list
+`x` deletes it after a `y`/`n` question (its titles are not deleted from
+anywhere, only the list goes) and `r` renames it. Favorites itself cannot be
+renamed or deleted. The home screen also shows the first eight Favorites
+between CONTINUE and RECENT, with a "+N more" line; coming back from a search
+reopens the tab and row you left. Everything is one small file,
+`favorites.json`, next to the watch history (`~/.local/goanime/tracking/` on
+Linux and macOS, `%LOCALAPPDATA%\GoAnime\tracking\` on Windows), so it works
+on every platform and without SQLite.
 
 ### Forgetting your history
 
