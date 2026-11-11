@@ -752,3 +752,95 @@ func TestTheHelpMentionsTheFavoritesTab(t *testing.T) {
 	m.showHelp = true
 	assert.Contains(t, screen(m), "FAVORITOS")
 }
+
+// ---- the beginner round: footer, paging, queries, notices ---------------------------
+
+func hintsByKey(m *searchHomeModel) map[string]Hint {
+	out := map[string]Hint{}
+	for _, h := range m.hints() {
+		out[h.Key] = h
+	}
+	return out
+}
+
+func TestRemoveStaysInTheFooterWhenARowIsHighlighted(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(sampleFavorites, nil, nil))
+	assert.NotContains(t, hintsByKey(m), "x", "nothing to remove while the box has the focus")
+	downTo(t, m, 0)
+	h, ok := hintsByKey(m)["x"]
+	require.True(t, ok)
+	assert.True(t, h.Essential, "a narrow terminal must not hide how to remove")
+}
+
+func TestPagingAndEndsMoveThroughALongList(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(60), nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	downTo(t, m, 0)
+
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	assert.Equal(t, homePageRows, m.cursor)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	assert.Equal(t, 2*homePageRows, m.cursor)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	assert.Equal(t, homePageRows, m.cursor)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	assert.Equal(t, 59, m.cursor)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	assert.Equal(t, 59, m.cursor, "clamped at the end")
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	assert.Equal(t, 0, m.cursor)
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	assert.Equal(t, 0, m.cursor, "clamped at the top, and still on the list")
+	assert.False(t, m.focusInput)
+}
+
+func TestHomeAndEndStillMoveTheCaretInTheBox(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(5), nil, nil))
+	typeText(m, "abc")
+	_, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	assert.True(t, m.focusInput)
+	assert.Equal(t, 0, m.input.Position())
+}
+
+func TestAFavoriteIsSearchedByItsWordsNotItsPunctuation(t *testing.T) {
+	rows := []HomeFavorite{
+		{Key: "a", Title: "Pokémon: Aventuras"},
+		{Key: "b", Title: "Re:Zero - Starting Life (2016)"},
+		{Key: "c", Title: "!!!"},
+	}
+	for want, i := range map[string]int{"Pokémon Aventuras": 0, "Re Zero Starting Life 2016": 1, "!!!": 2} {
+		m := newSearchHomeModel(SearchHomeOptions{Favorites: rows})
+		downTo(t, m, i)
+		_, cmd := m.Update(press(tea.KeyEnter, ""))
+		require.NotNil(t, cmd)
+		assert.Equal(t, want, m.result.Query)
+	}
+}
+
+func TestThePlainTabRowMarksTheActiveTabInText(t *testing.T) {
+	SetPlain(true)
+	t.Cleanup(func() { SetPlain(false) })
+	m := newSearchHomeModel(SearchHomeOptions{})
+	assert.Contains(t, ansi.Strip(m.scopeTabs()), "[ALL]")
+	tabTo(t, m, "FAVORITOS")
+	row := ansi.Strip(m.scopeTabs())
+	assert.Contains(t, row, "[FAVORITOS]")
+	assert.NotContains(t, row, "[ALL]")
+}
+
+func TestTheRichTabRowHasNoBrackets(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{})
+	assert.NotContains(t, ansi.Strip(m.scopeTabs()), "[")
+}
+
+func TestAnOpeningNoticeShowsThenGoesAtTheFirstKey(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{Notice: "Your favorites file was damaged\nsecond line"})
+	assert.Contains(t, screen(m), "Your favorites file was damaged second line")
+	_, _ = m.Update(press('a', "a"))
+	assert.NotContains(t, screen(m), "damaged")
+}
+
+func TestTheMoreLineSaysHowToSeeThemAll(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{Favorites: manyFavorites(12)})
+	assert.Contains(t, screen(m), "press tab until FAVORITOS to see them all")
+}

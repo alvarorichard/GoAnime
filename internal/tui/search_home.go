@@ -46,6 +46,9 @@ const favoritesScope = "favorites"
 // favoritesPlaceholder is the box's hint on the FAVORITOS tab.
 const favoritesPlaceholder = "type to filter your favorites, enter opens the first one"
 
+// homePageRows is how far pgup and pgdown move on a list.
+const homePageRows = 10
+
 // homeFavoritesShown is how many FAVORITOS rows the home screen draws; the
 // rest wait behind a "+N more" line and slide in as rows are removed.
 const homeFavoritesShown = 8
@@ -128,7 +131,10 @@ type SearchHomeOptions struct {
 	// searches the title. DeleteFavorite removes a row by key and
 	// ClearFavorites empties the list (X, after a y/n question); nil disables
 	// x or X there.
-	Favorites      []HomeFavorite
+	Favorites []HomeFavorite
+	// Notice is a line to show when the screen opens, such as a warning that
+	// a saved file was damaged. It goes at the first key.
+	Notice         string
 	DeleteFavorite func(key string) error
 	ClearFavorites func() error
 	// DeleteEntry removes a CONTINUE row by key; nil disables x there.
@@ -349,6 +355,7 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		sugCursor:      -1,
 	}
 	m.asked = m.suggestKey()
+	m.notice = singleLine(opts.Notice)
 	m.searchPlaceholder = input.Placeholder
 	if m.onFavorites() {
 		m.input.Placeholder = favoritesPlaceholder
@@ -394,6 +401,25 @@ func (m *searchHomeModel) rebuildRows() {
 	}
 }
 
+// jumpRows moves the highlight a page or to an end of the list. It reports
+// whether it did: it does not when the box has the focus or there are no rows.
+func (m *searchHomeModel) jumpRows(key string) bool {
+	if m.focusInput || len(m.rows) == 0 {
+		return false
+	}
+	switch key {
+	case "pgup":
+		m.cursor = max(m.cursor-homePageRows, 0)
+	case "pgdown":
+		m.cursor = min(m.cursor+homePageRows, len(m.rows)-1)
+	case "home":
+		m.cursor = 0
+	default:
+		m.cursor = len(m.rows) - 1
+	}
+	return true
+}
+
 // onFavorites reports whether the FAVORITOS tab is the one showing.
 func (m *searchHomeModel) onFavorites() bool {
 	return m.scopes[m.scopeIdx].Value == favoritesScope
@@ -421,6 +447,19 @@ func (m *searchHomeModel) matchingFavorites() []int {
 		}
 	}
 	return out
+}
+
+// searchableTitle is a favorite's title as a search query: its words, with
+// the punctuation sources put in titles ("Pokémon: Aventuras") turned into
+// spaces, which the searches turn into one clean query.
+func searchableTitle(title string) string {
+	words := strings.FieldsFunc(singleLine(title), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.Is(unicode.Mn, r)
+	})
+	if len(words) == 0 {
+		return singleLine(title)
+	}
+	return strings.Join(words, " ")
 }
 
 // foldForMatch lowercases s and drops its accents, so "pokemon" finds
@@ -542,6 +581,12 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			return m, nil
+		case "pgup", "pgdown", "home", "end":
+			// On a list these jump a page or to either end; in the box they
+			// keep moving the caret.
+			if m.jumpRows(msg.String()) {
+				return m, nil
+			}
 		case "up":
 			if m.suggestionsOpen() {
 				m.moveSuggestion(-1)
@@ -799,7 +844,7 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 		if pos < 0 || pos >= len(m.rows) {
 			return SearchHomeResult{}, false
 		}
-		return SearchHomeResult{Action: HomeSearch, Query: m.favoriteAll[m.rows[pos].index].Title}, true
+		return SearchHomeResult{Action: HomeSearch, Query: searchableTitle(m.favoriteAll[m.rows[pos].index].Title)}, true
 	}
 	if m.focusInput {
 		query := strings.TrimSpace(m.input.Value())
@@ -820,7 +865,7 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 		return SearchHomeResult{Action: HomeSearch, Query: m.recentAll[row.index].Query, Scope: scope}, true
 	case homeRowFavorite:
 		// A favorite can be an anime or a movie: search every scope for it.
-		return SearchHomeResult{Action: HomeSearch, Query: m.favoriteAll[row.index].Title}, true
+		return SearchHomeResult{Action: HomeSearch, Query: searchableTitle(m.favoriteAll[row.index].Title)}, true
 	default:
 		entry := m.continueAll[row.index]
 		return SearchHomeResult{Action: HomeResume, Entry: entry, HasEntry: true, Scope: scope}, true
@@ -1050,7 +1095,7 @@ func (m *searchHomeModel) hints() []Hint {
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
 	}
 	if !m.focusInput {
-		hints = append(hints[:3], append([]Hint{{Key: "x", Desc: "remove"}, {Key: "X", Desc: "clear list"}}, hints[3:]...)...)
+		hints = append(hints[:3], append([]Hint{{Key: "x", Desc: "remove", Essential: true}, {Key: "X", Desc: "clear list"}}, hints[3:]...)...)
 	}
 	if m.loadSources != nil {
 		hints = append(hints[:3], append([]Hint{{Key: "ctrl+s", Desc: "sources", Essential: true}}, hints[3:]...)...)
@@ -1164,6 +1209,10 @@ func (m *searchHomeModel) scopeTabs() string {
 	for i, scope := range m.scopes {
 		name := scope.Name
 		if i == m.scopeIdx {
+			if Plain() {
+				// No colour to tell the tab by: brackets do it in text.
+				name = "[" + name + "]"
+			}
 			sb.WriteString(m.theme.Tag.Render(name))
 		} else {
 			sb.WriteString(m.theme.Muted.Render(name))
@@ -1471,7 +1520,7 @@ func (m *searchHomeModel) favoritesView(width int) string {
 	}
 	rows := renderHomeRows(&m.theme, items, m.sectionCursor(homeRowFavorite), width)
 	if more := len(m.favoriteAll) - len(shown); more > 0 {
-		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · press tab to the FAVORITOS tab to see them all", more))
+		rows += "\n" + m.theme.Muted.Render(fmt.Sprintf("  +%d more · press tab until FAVORITOS to see them all", more))
 	}
 	return rows
 }

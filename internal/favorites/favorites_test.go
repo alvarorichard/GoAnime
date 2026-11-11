@@ -224,3 +224,18 @@ func TestKeysIsOneSnapshotOfEveryFavorite(t *testing.T) {
 	assert.Equal(t, map[string]bool{"a": true, "b": true}, s.Keys())
 	assert.Empty(t, Open("").Keys())
 }
+
+func TestADamagedFileIsReportedOnceForTheScreenToSay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "favorites.json")
+	require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
+	s := Open(path)
+	assert.Empty(t, s.TakeDamaged(), "nothing before the file is read")
+
+	_, err := s.List()
+	require.NoError(t, err)
+
+	aside := s.TakeDamaged()
+	assert.Contains(t, aside, "favorites.json.corrupt.")
+	assert.Empty(t, s.TakeDamaged(), "told once")
+	assert.Empty(t, newStore(t).TakeDamaged(), "a healthy store has nothing to report")
+}

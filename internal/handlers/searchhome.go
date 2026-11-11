@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,6 +103,11 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		}
 	}
 
+	// Read first: reading a damaged file is what sets it aside and earns the
+	// notice.
+	favs := homeFavorites()
+	favNotice := favoritesNotice()
+
 	return run(tui.SearchHomeOptions{
 		Query:         query,
 		ScopeIndex:    scopeIndexForSource(util.GlobalSource),
@@ -116,7 +122,8 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Sources:       homeSources,
 		SetSource:     setHomeSource,
 
-		Favorites:      homeFavorites(),
+		Favorites:      favs,
+		Notice:         favNotice,
 		DeleteFavorite: forgetFavorite,
 		ClearFavorites: clearFavorites,
 	})
@@ -139,6 +146,16 @@ func homeFavorites() []tui.HomeFavorite {
 		}
 	}
 	return rows
+}
+
+// favoritesNotice warns when the favorites file was damaged and set aside, so
+// the empty list is not a mystery.
+func favoritesNotice() string {
+	aside := favoritesStore().TakeDamaged()
+	if aside == "" {
+		return ""
+	}
+	return "Your favorites file was damaged, so the list starts empty. A copy was kept as " + filepath.Base(aside) + "."
 }
 
 // forgetFavorite takes one work off FAVORITOS.

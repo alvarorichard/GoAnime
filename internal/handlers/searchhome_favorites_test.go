@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -93,4 +94,32 @@ func TestOpenSearchHomePassesFavoritesOn(t *testing.T) {
 	assert.Equal(t, 1, gotRows)
 	assert.True(t, hasRemove)
 	assert.True(t, hasClear)
+}
+
+func TestADamagedFileReachesTheHomeAsAnOpeningNotice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "favorites.json")
+	require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
+	prev := favoritesStore
+	store := favorites.Open(path)
+	favoritesStore = func() *favorites.Store { return store }
+	t.Cleanup(func() { favoritesStore = prev })
+
+	var notice string
+	_, err := openSearchHome("", func(o tui.SearchHomeOptions) (tui.SearchHomeResult, error) {
+		notice = o.Notice
+		return tui.SearchHomeResult{}, nil
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, notice, "damaged")
+	assert.Contains(t, notice, "favorites.json.corrupt.")
+	assert.NotContains(t, notice, filepath.Dir(path), "the file name, not the folder")
+
+	notice = "unset"
+	_, err = openSearchHome("", func(o tui.SearchHomeOptions) (tui.SearchHomeResult, error) {
+		notice = o.Notice
+		return tui.SearchHomeResult{}, nil
+	})
+	require.NoError(t, err)
+	assert.Empty(t, notice, "the next opening has nothing to warn about")
 }

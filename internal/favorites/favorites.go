@@ -51,6 +51,8 @@ type file struct {
 type Store struct {
 	path string
 	mu   sync.Mutex
+	// damaged is where a damaged file was set aside, until TakeDamaged says so.
+	damaged string
 }
 
 // Open returns a store backed by path.
@@ -115,6 +117,7 @@ func (s *Store) load() ([]Entry, error) {
 		if err := os.Rename(s.path, aside); err != nil {
 			return nil, fmt.Errorf("favorites: favorites.json is damaged and could not be set aside: %w", reason(err))
 		}
+		s.damaged = aside
 		return nil, nil
 	}
 	if f.Version > schemaVersion {
@@ -211,6 +214,16 @@ func (s *Store) Has(key string) bool {
 		}
 	}
 	return false
+}
+
+// TakeDamaged reports, once, where a damaged favorites file was set aside by
+// an earlier call, or "" when none was, so the screen can tell the user.
+func (s *Store) TakeDamaged() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	aside := s.damaged
+	s.damaged = ""
+	return aside
 }
 
 // Keys returns the key of every favorite, from one read of the file.
