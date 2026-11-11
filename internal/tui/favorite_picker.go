@@ -262,8 +262,6 @@ func (p *favoritePicker) applyToggle(index int, on bool) {
 func (p *favoritePicker) startNaming() tea.Cmd {
 	p.naming = true
 	p.status = pickerStatus{}
-	p.nameErr = ""
-	p.input.Reset()
 	return p.input.Focus()
 }
 
@@ -277,13 +275,7 @@ func (p *favoritePicker) nameKey(msg tea.KeyPressMsg) tea.Cmd {
 		p.submitName()
 		return nil
 	}
-	before := p.input.Value()
-	var cmd tea.Cmd
-	p.input, cmd = p.input.Update(msg)
-	if p.input.Value() != before {
-		p.nameErr = ""
-	}
-	return cmd
+	return p.forward(msg)
 }
 
 // forward hands a message that is not a key press (a pasted text, the
@@ -298,7 +290,8 @@ func (p *favoritePicker) forward(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// stopNaming goes back to the lists, creating nothing more.
+// stopNaming goes back to the lists, creating nothing more. The entry is left
+// empty for the next time.
 func (p *favoritePicker) stopNaming() {
 	p.naming = false
 	p.nameErr = ""
