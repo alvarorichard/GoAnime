@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -388,6 +389,10 @@ type animeResultsModel struct {
 	// favKeys the keys in it, read once and kept in step with every toggle.
 	favs    favoritesAPI
 	favKeys map[string]bool
+	// lists is the saved lists ctrl+l puts the work in; nil when the feature
+	// is absent. picker is its overlay while it is open.
+	lists  FavoriteLists
+	picker *favoritePicker
 }
 
 // favoritesAPI is the part of the favorites store the result screen uses.
@@ -436,6 +441,7 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		notice:     takeResultsNotice(),
 		favs:       favs,
 		favKeys:    favKeys,
+		lists:      newFavoriteLists(),
 	}
 	width, height := shell.ContentSize()
 	results := list.New(items, delegate, width, max(height-m.noticeHeight(width), 1))
@@ -514,9 +520,13 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
 		m.resize()
+		m.fitPicker()
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.picker != nil {
+			return m.updatePicker(msg)
+		}
 		if m.showHelp {
 			switch msg.String() {
 			case "?", "esc":
@@ -555,6 +565,11 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleFavorite()
 				return m, nil
 			}
+		case "ctrl+l":
+			// Put the highlighted work in one of the saved lists.
+			if !filtering && m.openPicker() {
+				return m, nil
+			}
 		case "left", "right":
 			// ←→ picks the highlighted work's version (tela 3). While
 			// filtering the arrows move the filter's caret instead.
@@ -581,6 +596,9 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.picker != nil && m.picker.naming {
+		return m, m.picker.forward(msg)
+	}
 	filterBefore := m.results.FilterValue()
 	var cmd tea.Cmd
 	m.results, cmd = m.results.Update(msg)
@@ -699,6 +717,8 @@ func (m *animeResultsModel) View() tea.View {
 	height = max(height-m.noticeHeight(width), 1)
 	body := m.results.View()
 	switch {
+	case m.picker != nil:
+		body = m.picker.view(width, height)
 	case m.showHelp:
 		body = m.helpView(width, height, body)
 	case Plain():
@@ -732,12 +752,15 @@ func (m *animeResultsModel) helpView(width, height int, body string) string {
 	if Plain() {
 		versionKey = "left/right"
 	}
-	if help := RenderHelp(&m.theme, "Results", []HelpRow{
+	rows := []HelpRow{
 		{Key: versionKey, Desc: "choose a version"},
 		{Key: "ctrl+f", Desc: "add to or remove from FAVORITES"},
-		{Key: "esc", Desc: "edit the search"},
-		{Key: "q", Desc: "quit"},
-	}, nil, width, height); help != "" {
+	}
+	if m.lists != nil {
+		rows = append(rows, HelpRow{Key: "ctrl+l", Desc: "put it in a list"})
+	}
+	rows = append(rows, HelpRow{Key: "esc", Desc: "edit the search"}, HelpRow{Key: "q", Desc: "quit"})
+	if help := RenderHelp(&m.theme, "Results", rows, nil, width, height); help != "" {
 		return help
 	}
 	return body
@@ -797,6 +820,9 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 			tip = "ctrl+f takes it off FAVORITES"
 		}
 	}
+	if m.lists != nil {
+		tip = strings.TrimPrefix(tip+" · ctrl+l puts it in a list", " · ")
+	}
 	return &panelContent{
 		label:  "Details",
 		gloss:  "詳細",
@@ -808,6 +834,9 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 }
 
 func (m *animeResultsModel) hints() []Hint {
+	if m.picker != nil {
+		return m.picker.hints()
+	}
 	if m.showHelp {
 		return []Hint{
 			{Key: "?", Desc: "close", Essential: true},
@@ -829,7 +858,7 @@ func (m *animeResultsModel) hints() []Hint {
 			{Key: "esc", Desc: "clear filter", Essential: true},
 		}
 	}
-	return []Hint{
+	hints := []Hint{
 		{Key: "enter", Desc: "open", Essential: true},
 		{Key: version, Desc: "version"},
 		{Key: "ctrl+f", Desc: m.favoriteHint()},
@@ -838,6 +867,10 @@ func (m *animeResultsModel) hints() []Hint {
 		{Key: "?", Desc: "help"},
 		{Key: "q", Desc: "quit"},
 	}
+	if m.lists != nil {
+		hints = slices.Insert(hints, 3, Hint{Key: "ctrl+l", Desc: "lists"})
+	}
+	return hints
 }
 
 type animeResultsRunner func(tea.Model) (tea.Model, error)
