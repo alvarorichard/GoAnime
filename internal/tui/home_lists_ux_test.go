@@ -185,7 +185,7 @@ func TestWithNoListsOfYourOwnTheTabSaysWhatToDoNext(t *testing.T) {
 		f := newHomeListsFake().withFavorites(2)
 		m := homeListsScreen(t, f, size[0], size[1])
 		view := hlFlat(hlBody(m))
-		assert.Contains(t, view, `You have no lists of your own yet. Press n to make one, for example "Weekend marathon".`, "%v", size)
+		assert.Contains(t, view, `You have none of your own yet: press n to make one, for example "Weekend marathon".`, "%v", size)
 		assert.LessOrEqual(t, strings.Count(hlBody(m), "\n")+1, m.shellHeight(), "%v", size)
 	}
 }
@@ -193,19 +193,19 @@ func TestWithNoListsOfYourOwnTheTabSaysWhatToDoNext(t *testing.T) {
 func TestTheTeachingLineGoesWithTheFirstList(t *testing.T) {
 	f := newHomeListsFake().withList("a", "Mine", 1)
 	m := homeListsScreen(t, f, 100, 40)
-	assert.NotContains(t, hlFlat(screen(m)), "You have no lists of your own yet")
+	assert.NotContains(t, hlFlat(screen(m)), "You have none of your own yet")
 }
 
 func TestTheTeachingLineStaysQuietWhileFilteringOrAfterAFailedRead(t *testing.T) {
 	f := newHomeListsFake()
 	m := homeListsScreen(t, f, 100, 40)
 	hlType(m, "fav")
-	assert.NotContains(t, screen(m), "You have no lists of your own yet")
+	assert.NotContains(t, screen(m), "You have none of your own yet")
 
 	f2 := newHomeListsFake()
 	f2.fail["Lists"] = fmt.Errorf("boom")
 	m2 := homeListsScreen(t, f2, 100, 40)
-	assert.NotContains(t, screen(m2), "You have no lists of your own yet")
+	assert.NotContains(t, screen(m2), "You have none of your own yet")
 }
 
 func TestTheTeachingLineDoesNotHideTheHighlightedRowOnASmallScreen(t *testing.T) {

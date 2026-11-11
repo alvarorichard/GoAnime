@@ -143,7 +143,7 @@ func TestTheTeachingLineIsWrappedToTheWidthAndCountedInTheHeight(t *testing.T) {
 		f := newHomeListsFake().withFavorites(30)
 		m := homeListsScreen(t, f, size[0], size[1])
 		view := hlBody(m)
-		require.Contains(t, hlFlat(view), "Press n to make one", "%v", size)
+		require.Contains(t, hlFlat(view), "press n to make one", "%v", size)
 		for _, line := range strings.Split(view, "\n") {
 			if !strings.HasPrefix(line, "in ALL") { // the scope row is the shell's to cut
 				assert.LessOrEqual(t, lipgloss.Width(line), size[0], "%v: %q", size, line)
@@ -224,11 +224,11 @@ func TestTheNameEntryTakesTheCaretFromTheBox(t *testing.T) {
 func TestTheTeachingLineIsNotShownBesideAReadError(t *testing.T) {
 	f := newHomeListsFake().withFavorites(1)
 	m := homeListsScreen(t, f, 100, 40)
-	require.Contains(t, screen(m), "You have no lists of your own yet")
+	require.Contains(t, screen(m), "You have none of your own yet")
 	f.fail["Lists"] = errors.New("flaky")
 	hlSend(m, hlTab)
 	tabTo(t, m, "FAVORITES")
 	view := screen(m)
 	assert.Contains(t, view, "Could not read your lists. Flaky.")
-	assert.NotContains(t, view, "You have no lists of your own yet", "the lists are in doubt, so say nothing about having none")
+	assert.NotContains(t, view, "You have none of your own yet", "the lists are in doubt, so say nothing about having none")
 }

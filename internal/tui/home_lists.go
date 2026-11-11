@@ -306,7 +306,7 @@ func (m *searchHomeModel) listsTabView(width, height int) string {
 }
 
 // homeListTeaching tells a user with no lists of their own what to do next.
-const homeListTeaching = `You have no lists of your own yet. Press n to make one, for example "Weekend marathon".`
+const homeListTeaching = `A list keeps the titles you want to find again. You have none of your own yet: press n to make one, for example "Weekend marathon".`
 
 // teachesLists reports whether the tab should explain lists: the user has none
 // of their own and the box is not hiding anything.

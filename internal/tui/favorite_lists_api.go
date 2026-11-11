@@ -51,10 +51,16 @@ type FavoriteLists interface {
 
 // friendly turns an error phrase ("you already have a list with that name")
 // into a sentence for the screen ("You already have a list with that name.").
+//
+// A problem with the saved file itself ("favorites: open: permission denied")
+// becomes a sentence a beginner can act on instead of the developer's text.
 func friendly(err error) string {
 	text := singleLine(err.Error())
 	if text == "" {
 		return "Something went wrong."
+	}
+	if rest, ok := strings.CutPrefix(strings.ToLower(text), "favorites: "); ok {
+		return fileProblemSentence(rest)
 	}
 	runes := []rune(text)
 	runes[0] = unicode.ToUpper(runes[0])
@@ -63,4 +69,19 @@ func friendly(err error) string {
 		text += "."
 	}
 	return text
+}
+
+// fileProblemSentence words a failure to read or write the saved lists.
+func fileProblemSentence(reason string) string {
+	switch {
+	case strings.Contains(reason, "newer goanime"):
+		return "Your saved lists were written by a newer GoAnime, so this one leaves them alone. Update GoAnime to change them."
+	case strings.Contains(reason, "damaged"):
+		return "Your saved lists file is damaged and could not be moved aside, so nothing was changed."
+	case strings.Contains(reason, "permission denied"), strings.Contains(reason, "read-only"):
+		return "GoAnime could not save your lists: it is not allowed to write to its data folder. Check that the folder is not read-only."
+	case strings.Contains(reason, "no space left"):
+		return "GoAnime could not save your lists: the disk is full."
+	}
+	return "GoAnime could not save your lists (" + reason + ")."
 }
