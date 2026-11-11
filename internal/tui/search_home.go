@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -402,16 +403,36 @@ func (m *searchHomeModel) onFavorites() bool {
 // matches: every one when it is empty, else those whose title, year, type or
 // source contain what was typed, ignoring case.
 func (m *searchHomeModel) matchingFavorites() []int {
-	query := strings.ToLower(strings.TrimSpace(m.input.Value()))
+	terms := strings.Fields(foldForMatch(m.input.Value()))
 	out := make([]int, 0, len(m.favoriteAll))
 	for i, f := range m.favoriteAll {
-		if query == "" || strings.Contains(strings.ToLower(strings.Join([]string{
+		hay := foldForMatch(strings.Join([]string{
 			singleLine(f.Title), singleLine(f.Year), singleLine(f.Media), displaySource(f.Source),
-		}, " ")), query) {
+		}, " "))
+		matched := true
+		for _, term := range terms {
+			if !strings.Contains(hay, term) {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			out = append(out, i)
 		}
 	}
 	return out
+}
+
+// foldForMatch lowercases s and drops its accents, so "pokemon" finds
+// "Pokémon" on a keyboard with no accent keys. Every typed word must match.
+func foldForMatch(s string) string {
+	decomposed := norm.NFD.String(strings.ToLower(s))
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) {
+			return -1
+		}
+		return r
+	}, decomposed)
 }
 
 // scopeChanged puts the screen right after the tab moved: the box takes the
@@ -621,9 +642,13 @@ func (m *searchHomeModel) dropSuggestions() {
 func (m *searchHomeModel) queryChanged() tea.Cmd {
 	if m.onFavorites() {
 		// Nothing is looked up on the FAVORITOS tab: typing filters the list.
-		m.asked = m.suggestKey()
+		// The highlight only goes back to the top when the filter changed.
+		key := m.suggestKey()
 		m.dropSuggestions()
-		m.cursor = 0
+		if key != m.asked {
+			m.asked = key
+			m.cursor = 0
+		}
 		m.rebuildRows()
 		return nil
 	}
@@ -1062,7 +1087,7 @@ func (m *searchHomeModel) View() tea.View {
 func (m *searchHomeModel) helpView(width, height int) string {
 	if help := RenderHelp(&m.theme, "Search", []HelpRow{
 		{Key: "enter", Desc: "search, resume"},
-		{Key: "tab", Desc: "change scope"},
+		{Key: "tab", Desc: "change scope; FAVORITOS lists your favorites"},
 		{Key: "ctrl+s", Desc: "choose sources"},
 		{Key: "r", Desc: "from the start"},
 		{Key: "e", Desc: "episodes"},
@@ -1380,10 +1405,17 @@ func (m *searchHomeModel) favoritesTabView(width, height int) string {
 		head += m.theme.Muted.Render(fmt.Sprintf("  %d of %d", len(m.rows), total))
 	}
 
-	// Rows that fit under the box, the tabs, the heading and the footer.
-	capacity := max(height-9, 3)
-	if m.questionView(width) != "" {
-		capacity = max(capacity-1, 3)
+	// Rows that fit under the box, the tabs, the blank line, the heading and
+	// the question, leaving room for the "more above/below" lines. On a tiny
+	// terminal only the highlighted row shows, so it is never cut off.
+	chrome := lipgloss.Height(m.searchBox(width)) + 1 + 1 + 1
+	if question := m.questionView(width); question != "" {
+		chrome += lipgloss.Height(question)
+	}
+	capacity := height - chrome - 2
+	arrows := true
+	if capacity < 1 {
+		capacity, arrows = 1, false
 	}
 	start := 0
 	if len(m.rows) > capacity {
@@ -1408,11 +1440,11 @@ func (m *searchHomeModel) favoritesTabView(width, height int) string {
 		cursor = m.cursor - start
 	}
 	lines := []string{head}
-	if start > 0 {
+	if start > 0 && arrows {
 		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↑ %d more above", start)))
 	}
 	lines = append(lines, renderHomeRows(&m.theme, items, cursor, width))
-	if end < len(m.rows) {
+	if end < len(m.rows) && arrows {
 		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↓ %d more below", len(m.rows)-end)))
 	}
 	return strings.Join(lines, "\n")

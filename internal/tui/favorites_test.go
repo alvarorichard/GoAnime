@@ -612,7 +612,8 @@ func TestTheTabScrollsAndKeepsTheCursorInView(t *testing.T) {
 
 	view := screen(m)
 	assert.Contains(t, view, "Work 40", "the highlighted row is on screen")
-	assert.NotContains(t, view, "Work 0\n", "the top scrolled away")
+	assert.NotContains(t, view, "Work 0 ", "the top scrolled away")
+	assert.NotContains(t, view, "Work 1 ", "and the rows after it")
 	assert.Contains(t, view, "more above")
 	assert.Contains(t, view, "more below")
 	assert.LessOrEqual(t, strings.Count(view, "\n")+1, 24, "it fits the terminal")
@@ -666,4 +667,88 @@ func TestNoSuggestionsAreAskedOnTheTab(t *testing.T) {
 	assert.Nil(t, m.queryChanged())
 	assert.Zero(t, asked)
 	assert.Empty(t, m.suggestions)
+}
+
+// ---- review follow-ups -------------------------------------------------------------
+
+func TestTheFilterIgnoresAccentsCaseAndExtraSpaces(t *testing.T) {
+	rows := []HomeFavorite{
+		{Key: "a", Title: "Pokémon", Year: "1997", Media: "Anime"},
+		{Key: "b", Title: "ÉCOLE de Magie", Year: "2020", Media: "Anime"},
+		{Key: "c", Title: "Dragon Ball Z", Year: "1989", Media: "Anime"},
+		{Key: "d", Title: "Ação Total", Year: "2001", Media: "Movie"},
+	}
+	for query, want := range map[string]string{
+		"pokemon":      "a",
+		"POKÉMON":      "a",
+		"ecole":        "b",
+		"dragon  ball": "c",
+		"ball dragon":  "c",
+		"acao":         "d",
+		"ação":         "d",
+	} {
+		m := newSearchHomeModel(SearchHomeOptions{Favorites: rows})
+		tabTo(t, m, "FAVORITOS")
+		m.input.SetValue(query)
+		_ = m.queryChanged()
+		require.Len(t, m.rows, 1, "query %q", query)
+		assert.Equal(t, want, rows[m.rows[0].index].Key, "query %q", query)
+	}
+}
+
+func TestEscOnAHighlightedFavoriteKeepsTheHighlight(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(10), nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	downTo(t, m, 5)
+
+	_, _ = m.Update(press(tea.KeyEscape, ""))
+
+	assert.False(t, m.focusInput)
+	assert.Equal(t, 5, m.cursor, "esc with an empty box must not throw the highlight to the top")
+}
+
+func TestTabbingFromAHighlightedFavoriteLandsOnTheBox(t *testing.T) {
+	m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(10), nil, nil))
+	tabTo(t, m, "FAVORITOS")
+	downTo(t, m, 5)
+
+	_, _ = m.Update(press(tea.KeyTab, ""))
+
+	assert.True(t, m.focusInput)
+	assert.Equal(t, 0, m.cursor)
+}
+
+func TestTheHighlightedFavoriteIsAlwaysOnScreen(t *testing.T) {
+	for _, size := range []struct{ w, h int }{{80, 24}, {60, 20}, {50, 24}, {80, 15}, {100, 40}} {
+		for _, question := range []bool{false, true} {
+			m := newSearchHomeModel((&favoritesFake{}).options(manyFavorites(40), nil, nil))
+			_, _ = m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
+			tabTo(t, m, "FAVORITOS")
+			downTo(t, m, 25)
+			if question {
+				_, _ = m.Update(press('X', "X"))
+			}
+			body := ansi.Strip(m.homeView(m.shellWidth(), m.shellHeight()))
+			assert.Contains(t, body, "Work 25", "%dx%d question=%v", size.w, size.h, question)
+			_, h := m.shell.ContentSize()
+			assert.LessOrEqual(t, strings.Count(body, "\n")+1, h, "%dx%d question=%v: the body fits", size.w, size.h, question)
+		}
+	}
+}
+
+func (m *searchHomeModel) shellWidth() int  { w, _ := m.shell.ContentSize(); return w }
+func (m *searchHomeModel) shellHeight() int { _, h := m.shell.ContentSize(); return h }
+
+func TestOpeningOnTheFavoritesTabByIndex(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{Favorites: sampleFavorites, ScopeIndex: 4})
+	assert.Equal(t, "FAVORITOS", m.scopes[m.scopeIdx].Name)
+	assert.Len(t, m.rows, 2)
+	assert.Contains(t, m.input.Placeholder, "filter your favorites")
+}
+
+func TestTheHelpMentionsTheFavoritesTab(t *testing.T) {
+	m := newSearchHomeModel(SearchHomeOptions{})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.showHelp = true
+	assert.Contains(t, screen(m), "FAVORITOS")
 }
