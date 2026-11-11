@@ -44,9 +44,9 @@ func TestTheFavoritesRowSaysWhatTheListIs(t *testing.T) {
 	assert.NotContains(t, screen(narrow), "what you save", "no room on a narrow row")
 	assert.Contains(t, hlLineWith(screen(narrow), "Favorites"), "3 titles")
 
-	edge := homeListsScreen(t, hlThreeLists(), homeListNoteWidth, 24)
+	edge := homeListsScreen(t, hlThreeLists(), 70, 24)
 	assert.Contains(t, screen(edge), "what you save with ctrl+f", "from 70 columns")
-	below := homeListsScreen(t, hlThreeLists(), homeListNoteWidth-1, 24)
+	below := homeListsScreen(t, hlThreeLists(), 69, 24)
 	assert.NotContains(t, screen(below), "what you save with ctrl+f")
 }
 
