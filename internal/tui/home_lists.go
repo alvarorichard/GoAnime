@@ -77,6 +77,9 @@ type homeLists struct {
 	wasFocus bool   // whether the box had the focus before the entry opened
 
 	doomed HomeList // the list the delete question is about
+
+	// removed is the title last taken off the open list, which u puts back.
+	removed *HomeFavorite
 }
 
 // newHomeLists is the state for the host's lists, or nil when it gave none.
@@ -579,6 +582,11 @@ func (m *searchHomeModel) listsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, boo
 			m.newList()
 			return m, nil, true
 		}
+	case "u":
+		if m.lists.level == homeLevelWorks && !m.focusInput && m.lists.removed != nil {
+			m.undoRemove()
+			return m, nil, true
+		}
 	case "r", "e", "x", "X":
 		if !m.focusInput {
 			m.listsRowKey(key)
@@ -705,6 +713,7 @@ func (m *searchHomeModel) openList(l *HomeList) {
 func (m *searchHomeModel) backToLists() {
 	h := m.lists
 	h.level = homeLevelLists
+	h.removed = nil
 	h.reload()
 	m.input.Placeholder = homeListsPlaceholder
 	m.showList(h.open.ID)
@@ -741,11 +750,31 @@ func (m *searchHomeModel) removeWork() {
 		return
 	}
 	h := m.lists
-	if err := h.api.RemoveWork(h.open.ID, h.works[row.index].Key); err != nil {
+	gone := h.works[row.index]
+	if err := h.api.RemoveWork(h.open.ID, gone.Key); err != nil {
 		m.notice = "Could not remove the title. " + friendly(err)
 		return
 	}
+	h.removed = &gone
 	m.worksChanged()
+	if h.level == homeLevelWorks && m.notice == "" {
+		m.notice = "Removed " + singleLine(gone.Title) + ". Press u to put it back."
+	}
+}
+
+// undoRemove puts the title removed last back on the open list.
+func (m *searchHomeModel) undoRemove() {
+	h := m.lists
+	back := *h.removed
+	h.removed = nil
+	if _, err := h.api.ToggleWork(h.open.ID, back); err != nil {
+		m.notice = "Could not put the title back. " + friendly(err)
+		return
+	}
+	m.worksChanged()
+	if h.level == homeLevelWorks && m.notice == "" {
+		m.notice = singleLine(back.Title) + " is back in the list."
+	}
 }
 
 // worksChanged reads the open list again after a removal or a clear, and
@@ -889,6 +918,6 @@ func (m *searchHomeModel) listsHelpRows() []HelpRow {
 		{Key: "esc", Desc: "FAVORITES: back to your lists"},
 		{Key: "n", Desc: "FAVORITES: make a new list"},
 		{Key: "r", Desc: "FAVORITES: rename a list"},
-		{Key: "x", Desc: "FAVORITES: delete a list or remove a title"},
+		{Key: "x", Desc: "FAVORITES: delete a list or remove a title (u puts it back)"},
 	}
 }

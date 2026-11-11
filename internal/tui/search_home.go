@@ -288,6 +288,9 @@ type searchHomeModel struct {
 	clearFavorites func() error
 	clearing       clearTarget
 	notice         string
+	// standing is the opening notice, shown on the FAVORITES tab whenever no
+	// newer notice is up: a damaged file stays worth knowing about.
+	standing string
 
 	// Autocomplete state. seq numbers the typing bursts: a debounce tick or a
 	// lookup answer with an older seq is stale and dropped. asked is the
@@ -377,6 +380,7 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel { //nolint:gocr
 	m.lists = newHomeLists(opts.Lists, &inputStyles)
 	m.asked = m.suggestKey()
 	m.notice = singleLine(opts.Notice)
+	m.standing = m.notice
 	m.searchPlaceholder = input.Placeholder
 	if m.onFavorites() {
 		m.input.Placeholder = favoritesPlaceholder
@@ -1068,6 +1072,9 @@ func (m *searchHomeModel) questionView(width int) string {
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from FAVORITES? y to clear, n to keep.", countOf(len(m.favoriteAll), "favorite", "favorites")), width)
 	case clearListWorks, clearDeleteList:
 		return renderNotice(&m.theme, m.listsQuestion(), width)
+	}
+	if m.notice == "" && m.standing != "" && m.onFavorites() {
+		return renderNotice(&m.theme, m.standing, width)
 	}
 	return renderNotice(&m.theme, singleLine(m.notice), width)
 }

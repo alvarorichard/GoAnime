@@ -161,7 +161,13 @@ func (f *homeListsFake) Delete(id string) error {
 
 func (f *homeListsFake) ToggleWork(id string, w HomeFavorite) (bool, error) {
 	f.record("ToggleWork(" + id + "," + w.Key + ")")
-	return true, f.fail["ToggleWork"]
+	if err := f.fail["ToggleWork"]; err != nil {
+		return false, err
+	}
+	if !slices.ContainsFunc(f.works[id], func(x HomeFavorite) bool { return x.Key == w.Key }) {
+		f.works[id] = append(f.works[id], w)
+	}
+	return true, nil
 }
 
 func (f *homeListsFake) RemoveWork(id, key string) error {
