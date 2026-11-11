@@ -126,6 +126,7 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Notice:         favNotice,
 		DeleteFavorite: forgetFavorite,
 		ClearFavorites: clearFavorites,
+		Lists:          tui.StoreLists(favoritesStore()),
 	})
 }
 
