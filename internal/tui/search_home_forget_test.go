@@ -290,7 +290,7 @@ func TestOtherKeysDoNotAnswerTheQuestionNorLeakThrough(t *testing.T) {
 	_, _ = m.Update(press('X', "X"))
 
 	for _, key := range []tea.KeyPressMsg{
-		press('q', "q"), press('Y', "Y"), press(tea.KeyEnter, ""), press(tea.KeyDown, ""),
+		press('q', "q"), press('Z', "Z"), press(tea.KeyEnter, ""), press(tea.KeyDown, ""),
 		press('x', "x"), press('r', "r"), press(tea.KeyTab, ""), press('?', "?"),
 	} {
 		_, cmd := m.Update(key)
