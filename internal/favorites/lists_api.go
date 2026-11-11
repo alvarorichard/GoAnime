@@ -15,15 +15,17 @@ const (
 	maxLists         = 50
 )
 
-// Errors about lists. Their text is shown to the user as it is.
+// Errors about lists. Their text is a plain-words phrase, lowercase and with
+// no final period (the lint rule for errors); the screens capitalise it and
+// end it with a period when they show it.
 var (
-	ErrNameEmpty    = errors.New("Give the list a name.")
-	ErrNameTooLong  = errors.New("A list name can have at most 40 characters.")
-	ErrNameTaken    = errors.New("You already have a list with that name.")
-	ErrReservedName = errors.New("That name is already used by the Favorites list.")
-	ErrTooManyLists = errors.New("You can have at most 50 lists. Delete one first.")
-	ErrNoSuchList   = errors.New("That list no longer exists.")
-	ErrAutoList     = errors.New("The Favorites list cannot be renamed or deleted.")
+	ErrNameEmpty    = errors.New("give the list a name")
+	ErrNameTooLong  = errors.New("a list name can have at most 40 characters")
+	ErrNameTaken    = errors.New("you already have a list with that name")
+	ErrReservedName = errors.New("that name is already used by the Favorites list")
+	ErrTooManyLists = errors.New("you can have at most 50 lists, delete one first")
+	ErrNoSuchList   = errors.New("that list no longer exists")
+	ErrAutoList     = errors.New("the Favorites list cannot be renamed or deleted")
 )
 
 // Summary is a list as the screens show it.
