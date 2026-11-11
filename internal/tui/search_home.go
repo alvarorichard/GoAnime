@@ -132,6 +132,10 @@ type SearchHomeOptions struct {
 	// ClearFavorites empties the list (X, after a y/n question); nil disables
 	// x or X there.
 	Favorites []HomeFavorite
+	// Lists turns the FAVORITES tab into two levels: first the user's lists
+	// (Favorites, then the ones they made), then the works of the list they
+	// open. nil keeps the single list of Favorites above.
+	Lists FavoriteLists
 	// Notice is a line to show when the screen opens, such as a warning that
 	// a saved file was damaged. It goes at the first key.
 	Notice         string
@@ -200,6 +204,8 @@ const (
 	homeRowContinue homeRowKind = iota
 	homeRowRecent
 	homeRowFavorite
+	homeRowList    // a list on the first level of the FAVORITES tab
+	homeRowNewList // "+ Create a new list" on that level
 )
 
 type homeRow struct {
@@ -242,6 +248,8 @@ const (
 	clearContinueRows
 	clearRecentRows
 	clearFavoriteRows
+	clearListWorks // X on the works of a list (see home_lists.go)
+	clearDeleteList
 )
 
 type searchHomeModel struct {
@@ -255,6 +263,7 @@ type searchHomeModel struct {
 	continueAll       []HomeContinueEntry
 	recentAll         []HomeRecentSearch
 	favoriteAll       []HomeFavorite
+	lists             *homeLists // nil unless Options.Lists is set
 	rows              []homeRow
 	cursor            int
 	focusInput        bool
@@ -354,13 +363,17 @@ func newSearchHomeModel(opts SearchHomeOptions) *searchHomeModel {
 		debounce:       suggestDebounce,
 		sugCursor:      -1,
 	}
+	inputStyles := input.Styles()
+	m.lists = newHomeLists(opts.Lists, &inputStyles)
 	m.asked = m.suggestKey()
 	m.notice = singleLine(opts.Notice)
 	m.searchPlaceholder = input.Placeholder
 	if m.onFavorites() {
 		m.input.Placeholder = favoritesPlaceholder
 	}
+	m.listsOnScope()
 	m.rebuildRows()
+	m.listsLanded()
 	return m
 }
 
@@ -373,9 +386,7 @@ func (m *searchHomeModel) rebuildRows() {
 	m.rows = m.rows[:0]
 	if m.onFavorites() {
 		// The tab shows every favorite that matches the box, and nothing else.
-		for _, i := range m.matchingFavorites() {
-			m.rows = append(m.rows, homeRow{kind: homeRowFavorite, index: i})
-		}
+		m.rows = append(m.rows, m.tabRows()...)
 		if m.cursor >= len(m.rows) {
 			m.cursor = max(len(m.rows)-1, 0)
 		}
@@ -430,19 +441,13 @@ func (m *searchHomeModel) onFavorites() bool {
 // source contain what was typed, ignoring case.
 func (m *searchHomeModel) matchingFavorites() []int {
 	terms := strings.Fields(foldForMatch(m.input.Value()))
-	out := make([]int, 0, len(m.favoriteAll))
-	for i, f := range m.favoriteAll {
+	works := m.tabFavorites()
+	out := make([]int, 0, len(works))
+	for i, f := range works {
 		hay := foldForMatch(strings.Join([]string{
 			singleLine(f.Title), singleLine(f.Year), singleLine(f.Media), displaySource(f.Source),
 		}, " "))
-		matched := true
-		for _, term := range terms {
-			if !strings.Contains(hay, term) {
-				matched = false
-				break
-			}
-		}
-		if matched {
+		if homeListsHasAllTerms(hay, terms) {
 			out = append(out, i)
 		}
 	}
@@ -485,8 +490,11 @@ func (m *searchHomeModel) scopeChanged() tea.Cmd {
 	} else {
 		m.input.Placeholder = m.searchPlaceholder
 	}
+	m.listsOnScope()
 	m.rebuildRows()
-	return m.queryChanged()
+	cmd := m.queryChanged()
+	m.listsLanded()
+	return cmd
 }
 
 func (m *searchHomeModel) currentRow() (homeRow, bool) {
@@ -533,16 +541,10 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateClearQuestion(msg)
 		}
 		if m.showHelp {
-			switch msg.String() {
-			case "?", "esc":
-				m.showHelp = false
-				return m, nil
-			case "ctrl+c":
-				m.err = ErrSearchHomeCancelled
-				return m, tea.Quit
-			default:
-				return m, nil
-			}
+			return m.updateHelp(msg)
+		}
+		if model, cmd, ok := m.listsKey(msg); ok {
+			return model, cmd
 		}
 		switch msg.String() {
 		case "ctrl+c":
@@ -632,6 +634,19 @@ func (m *searchHomeModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// updateHelp answers a key while the help overlay is open: ? or esc closes
+// it, ctrl+c quits and every other key does nothing.
+func (m *searchHomeModel) updateHelp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "?", "esc":
+		m.showHelp = false
+	case "ctrl+c":
+		m.err = ErrSearchHomeCancelled
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 // openSources opens the sources screen when the host provided one.
@@ -844,7 +859,7 @@ func (m *searchHomeModel) confirm() (SearchHomeResult, bool) {
 		if pos < 0 || pos >= len(m.rows) {
 			return SearchHomeResult{}, false
 		}
-		return SearchHomeResult{Action: HomeSearch, Query: searchableTitle(m.favoriteAll[m.rows[pos].index].Title)}, true
+		return SearchHomeResult{Action: HomeSearch, Query: searchableTitle(m.tabFavorites()[m.rows[pos].index].Title)}, true
 	}
 	if m.focusInput {
 		query := strings.TrimSpace(m.input.Value())
@@ -970,9 +985,9 @@ func (m *searchHomeModel) askToClear(kind homeRowKind) {
 // stray key must not type into the box or act on a row behind the question).
 func (m *searchHomeModel) updateClearQuestion(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y":
+	case "y", "Y":
 		m.clearConfirmed()
-	case "n", "esc":
+	case "n", "N", "esc":
 		m.clearing = clearNothing
 	case "ctrl+c":
 		m.err = ErrSearchHomeCancelled
@@ -1005,6 +1020,9 @@ func (m *searchHomeModel) clearConfirmed() {
 			return
 		}
 		m.favoriteAll = nil
+	case clearListWorks, clearDeleteList:
+		m.listsConfirmed(target)
+		return
 	}
 	m.rowsChanged()
 }
@@ -1034,6 +1052,8 @@ func (m *searchHomeModel) questionView(width int) string {
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from RECENT? y to clear, n to keep.", countOf(len(m.recentAll), "search", "searches")), width)
 	case clearFavoriteRows:
 		return renderNotice(&m.theme, fmt.Sprintf("Clear all %s from FAVORITES? y to clear, n to keep.", countOf(len(m.favoriteAll), "favorite", "favorites")), width)
+	case clearListWorks, clearDeleteList:
+		return renderNotice(&m.theme, m.listsQuestion(), width)
 	}
 	return renderNotice(&m.theme, singleLine(m.notice), width)
 }
@@ -1049,6 +1069,7 @@ func countOf(n int, one, many string) string {
 func (m *searchHomeModel) sizeInput() {
 	width, _ := m.shell.ContentSize()
 	m.input.SetWidth(max(width-lipgloss.Width(m.input.Prompt)-2, 8))
+	m.sizeListsEntry()
 }
 
 // isHomeTypeKey reports keys that type into the search box: printable runes,
@@ -1071,6 +1092,9 @@ func (m *searchHomeModel) hints() []Hint {
 			{Key: "?", Desc: "close", Essential: true},
 			{Key: "esc", Desc: "close", Essential: true},
 		}
+	}
+	if modal := m.listsModalHints(); modal != nil {
+		return modal
 	}
 	if m.clearing != clearNothing {
 		return []Hint{
@@ -1107,7 +1131,7 @@ func (m *searchHomeModel) hints() []Hint {
 		}
 		hints = append(hints[:2], append([]Hint{{Key: right, Desc: "complete"}}, hints[2:]...)...)
 	}
-	return hints
+	return m.listsFooter(hints)
 }
 
 // View renders the search box, the scope tabs, the continue and recent
@@ -1130,7 +1154,7 @@ func (m *searchHomeModel) View() tea.View {
 }
 
 func (m *searchHomeModel) helpView(width, height int) string {
-	if help := RenderHelp(&m.theme, "Search", []HelpRow{
+	rows := []HelpRow{
 		{Key: "enter", Desc: "search, resume"},
 		{Key: "tab", Desc: "change scope; FAVORITES lists your favorites"},
 		{Key: "ctrl+s", Desc: "choose sources"},
@@ -1138,7 +1162,8 @@ func (m *searchHomeModel) helpView(width, height int) string {
 		{Key: "e", Desc: "episodes"},
 		{Key: "x", Desc: "remove"},
 		{Key: "X", Desc: "clear the list"},
-	}, nil, width, height); help != "" {
+	}
+	if help := RenderHelp(&m.theme, "Search", append(rows, m.listsHelpRows()...), nil, width, height); help != "" {
 		return help
 	}
 	return ""
@@ -1438,43 +1463,28 @@ func (m *searchHomeModel) continuePanel(e *HomeContinueEntry) *panelContent {
 }
 
 // favoritesTabView is the FAVORITES tab: every favorite the box matches, in a
-// window that follows the cursor, with how many are above and below it.
+// window that follows the cursor, with how many are above and below it. With
+// Options.Lists it is the works of one list, or the lists themselves.
 func (m *searchHomeModel) favoritesTabView(width, height int) string {
-	total := len(m.favoriteAll)
-	head := m.sectionHeader("FAVORITES", "")
+	if m.listsLevelOne() {
+		return m.listsTabView(width, height)
+	}
+	works := m.tabFavorites()
+	total := len(works)
+	head := m.sectionHeader(m.tabLabel(width), "")
 	switch {
 	case total == 0:
-		return head + "\n" + m.theme.Muted.Render("  You have no favorites yet. Search for a title, then press ctrl+f on it to add it here.")
+		return head + "\n" + m.theme.Muted.Render("  "+m.tabEmptyText())
 	case len(m.rows) == 0:
-		return head + "\n" + m.theme.Muted.Render(fmt.Sprintf("  No favorite matches %q. Delete a letter to see them all.", strings.TrimSpace(m.input.Value())))
+		return head + "\n" + m.theme.Muted.Render("  "+m.tabNoMatchText())
 	}
-	if len(m.rows) == total {
-		head += m.theme.Muted.Render(fmt.Sprintf("  %d", total))
-	} else {
-		head += m.theme.Muted.Render(fmt.Sprintf("  %d of %d", len(m.rows), total))
-	}
+	head += m.tabCount(len(m.rows), total)
 
-	// Rows that fit under the box, the tabs, the blank line, the heading and
-	// the question, leaving room for the "more above/below" lines. On a tiny
-	// terminal only the highlighted row shows, so it is never cut off.
-	chrome := lipgloss.Height(m.searchBox(width)) + 1 + 1 + 1
-	if question := m.questionView(width); question != "" {
-		chrome += lipgloss.Height(question)
-	}
-	capacity := height - chrome - 2
-	arrows := true
-	if capacity < 1 {
-		capacity, arrows = 1, false
-	}
-	start := 0
-	if len(m.rows) > capacity {
-		start = min(max(m.cursor-capacity/2, 0), len(m.rows)-capacity)
-	}
-	end := min(start+capacity, len(m.rows))
-
-	items := make([]homeRowItem, 0, end-start)
-	for _, row := range m.rows[start:end] {
-		f := m.favoriteAll[row.index]
+	capacity, arrows := m.tabCapacity(width, height, 0)
+	win := windowAround(len(m.rows), m.cursor, capacity, arrows)
+	items := make([]homeRowItem, 0, win.end-win.start)
+	for _, row := range m.rows[win.start:win.end] {
+		f := works[row.index]
 		var note []string
 		if y := singleLine(f.Year); y != "" {
 			note = append(note, y)
@@ -1484,17 +1494,61 @@ func (m *searchHomeModel) favoritesTabView(width, height int) string {
 		}
 		items = append(items, homeRowItem{title: singleLine(f.Title), note: strings.Join(note, " · "), key: displaySource(f.Source)})
 	}
+	return m.windowLines(head, items, win, width)
+}
+
+// rowWindow is the slice of m.rows a tab draws and whether it says how many
+// rows are above and below it.
+type rowWindow struct {
+	start, end int
+	arrows     bool
+}
+
+// tabAbove is how many lines sit above the tab's heading: the box, the scope
+// tabs, the blank line, the question and anything extra.
+func (m *searchHomeModel) tabAbove(width, extra int) int {
+	above := lipgloss.Height(m.searchBox(width)) + 1 + 1 + extra
+	if question := m.questionView(width); question != "" {
+		above += lipgloss.Height(question)
+	}
+	return above
+}
+
+// tabCapacity is how many rows fit under the tab's heading, leaving room for
+// the "more above/below" lines. On a tiny terminal only the highlighted row
+// shows, so it is never cut off.
+func (m *searchHomeModel) tabCapacity(width, height, extra int) (capacity int, arrows bool) {
+	capacity = height - m.tabAbove(width, extra) - 1 - 2
+	if capacity < 1 {
+		return 1, false
+	}
+	return capacity, true
+}
+
+// windowAround is the window of capacity rows (of total) that keeps cursor in
+// view, as near the middle as the ends allow.
+func windowAround(total, cursor, capacity int, arrows bool) rowWindow {
+	start := 0
+	if total > capacity {
+		start = min(max(cursor-capacity/2, 0), total-capacity)
+	}
+	return rowWindow{start: start, end: min(start+capacity, total), arrows: arrows}
+}
+
+// windowLines draws a heading, the rows of win and the lines that say how many
+// rows are above and below it.
+func (m *searchHomeModel) windowLines(head string, items []homeRowItem, win rowWindow, width int) string {
 	cursor := -1
 	if !m.focusInput {
-		cursor = m.cursor - start
+		cursor = m.cursor - win.start
 	}
 	lines := []string{head}
-	if start > 0 && arrows {
-		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↑ %d more above", start)))
+	if win.start > 0 && win.arrows {
+		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↑ %d more above", win.start)))
 	}
 	lines = append(lines, renderHomeRows(&m.theme, items, cursor, width))
-	if end < len(m.rows) && arrows {
-		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↓ %d more below", len(m.rows)-end)))
+	if win.end < len(m.rows) && win.arrows {
+		lines = append(lines, m.theme.Muted.Render(fmt.Sprintf("  ↓ %d more below", len(m.rows)-win.end)))
 	}
 	return strings.Join(lines, "\n")
 }
