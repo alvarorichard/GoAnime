@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -574,6 +575,44 @@ func TestStoreListsLifeOfAListThroughTheAdapter(t *testing.T) {
 	_, err = lists.Works(made.ID)
 	require.ErrorIs(t, err, favorites.ErrNoSuchList)
 	assert.Equal(t, "That list no longer exists.", friendly(err))
+}
+
+func TestStoreListsCountIsTheStoresNotTheNumberOfTitles(t *testing.T) {
+	// The store may send only a few titles as a preview of a long list.
+	f := &fakeListStore{sums: []favorites.Summary{{ID: "l1", Count: 40, Titles: []string{"A", "B", "C"}}}}
+
+	got, err := StoreLists(f).Lists()
+
+	require.NoError(t, err)
+	assert.Equal(t, 40, got[0].Count)
+	assert.Len(t, got[0].Titles, 3)
+}
+
+func TestStoreListsWorksKeepTheStoresOrderAmongManyEqualTimes(t *testing.T) {
+	// A sort that is not stable shuffles equal times once the list is long.
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var entries []favorites.Entry
+	for i := range 200 {
+		entries = append(entries, favorites.Entry{
+			Key: "k" + strconv.Itoa(i), AddedAt: base.Add(time.Duration(i%3) * time.Hour),
+		})
+	}
+	got, err := StoreLists(&fakeListStore{entries: entries}).Works("l1")
+	require.NoError(t, err)
+
+	want := make([]string, 0, len(entries))
+	for _, bucket := range []int{2, 1, 0} {
+		for i := range entries {
+			if i%3 == bucket {
+				want = append(want, "k"+strconv.Itoa(i))
+			}
+		}
+	}
+	have := make([]string, 0, len(got))
+	for _, w := range got {
+		have = append(have, w.Key)
+	}
+	assert.Equal(t, want, have)
 }
 
 func TestHomeWithListsSetStillOpensTheSearchTab(t *testing.T) {
