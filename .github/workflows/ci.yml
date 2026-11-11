@@ -126,8 +126,17 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt update
-          sudo apt install -y mpv
+          # A stalled mirror used to hang this step until the job timed out:
+          # bound every attempt and retry.
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            if sudo timeout 300 apt-get $apt_opts update && sudo timeout 600 apt-get $apt_opts install -y mpv; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying" >&2
+            sleep 10
+          done
+          exit 1
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -244,8 +253,17 @@ jobs:
 
       - name: Install dependencies (Linux)
         run: |
-          sudo apt update
-          sudo apt install -y mpv
+          # A stalled mirror used to hang this step until the job timed out:
+          # bound every attempt and retry.
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            if sudo timeout 300 apt-get $apt_opts update && sudo timeout 600 apt-get $apt_opts install -y mpv; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying" >&2
+            sleep 10
+          done
+          exit 1
 
       - name: Warm the race build cache
         shell: bash
