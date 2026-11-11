@@ -108,7 +108,7 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 	favs := homeFavorites()
 	favNotice := favoritesNotice()
 
-	return run(tui.SearchHomeOptions{
+	res, err := run(tui.SearchHomeOptions{
 		Query:         query,
 		ScopeIndex:    scopeIndexForSource(util.GlobalSource),
 		SourcesLine:   sourcesLine(),
@@ -126,7 +126,13 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Notice:         favNotice,
 		DeleteFavorite: forgetFavorite,
 		ClearFavorites: clearFavorites,
+
+		Restore: homeRestoreFor(query),
 	})
+	if err == nil {
+		rememberHomeSearch(res)
+	}
+	return res, err
 }
 
 // favoritesStore is the FAVORITES file; a variable so tests use a temporary one.
