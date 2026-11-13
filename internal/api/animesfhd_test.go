@@ -63,3 +63,28 @@ func TestAnimesFHDVersionChoice(t *testing.T) {
 		})
 	}
 }
+
+// A pinned audio the title does not have must still list what exists: the
+// live API reports a single subtitled version for most movies.
+func TestAnimesFHDPinnedAudioNeverHidesTheOnlyVersion(t *testing.T) {
+	t.Parallel()
+	for _, pinned := range []string{"", "Dublado", "Legendado"} {
+		t.Run("pinned="+pinned, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"series":{"id":1,"category":"filme"},"versions":[{"series_id":1,"audio":"legendado"}],"episodes":[{"id":7,"episode_number":1}],"has_more":false}`))
+			}))
+			defer srv.Close()
+			client := animesfhd.NewClientForTest(srv.Client(), srv.URL)
+			pick := func([]string) (int, error) {
+				t.Error("a single version must not prompt")
+				return 0, nil
+			}
+			anime := &models.Anime{URL: srv.URL + "/serie/1", Source: "AnimesFHD"}
+			got, err := getAnimesFHDEpisodes(context.Background(), anime, client, pick, pinned)
+			if err != nil || len(got) != 1 || got[0].Audio != "Legendado" {
+				t.Fatalf("episodes=%+v err=%v", got, err)
+			}
+		})
+	}
+}

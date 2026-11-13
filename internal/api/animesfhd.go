@@ -44,10 +44,12 @@ func getAnimesFHDEpisodes(ctx context.Context, anime *models.Anime, client *anim
 				filtered = append(filtered, v)
 			}
 		}
-		if len(filtered) == 0 {
-			return nil, fmt.Errorf("AnimesFHD: no version with %s audio", wantAudio)
+		// The pin is a preference, as on AnimesROLL and AnimesDigital: it
+		// narrows the list when it can and never hides the only audio a
+		// title has.
+		if len(filtered) > 0 {
+			versions = filtered
 		}
-		versions = filtered
 	}
 	if len(versions) > 0 {
 		index := 0
