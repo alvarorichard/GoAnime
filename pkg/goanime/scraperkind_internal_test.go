@@ -23,6 +23,7 @@ var scraperKindCases = []struct {
 	{scraper.AnimeDriveType, apisource.AnimeDrive, true},
 	{scraper.PobreflixType, apisource.Pobreflix, true},
 	{scraper.AnrollType, apisource.Anroll, true},
+	{scraper.AnimesFHDType, apisource.AnimesFHD, true},
 	{scraper.PomfyType, apisource.Pomfy, true},
 	{scraper.ScraperType(9999), "", false},
 	{scraper.ScraperType(-1), "", false},

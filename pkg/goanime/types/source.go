@@ -33,6 +33,8 @@ const (
 	SourceAnroll
 	// SourcePomfy is Pomfy (movies and series).
 	SourcePomfy
+	// SourceAnimesFHD is AnimesFHD (PT-BR anime and anime movies).
+	SourceAnimesFHD
 
 	sourceCount // not a source: the number of them
 )
@@ -61,6 +63,7 @@ var sourceTable = [sourceCount]sourceInfo{
 	SourceAnimeDrive:    {"AnimeDrive", scraper.AnimeDriveType, []string{"animedrive"}, true, false},
 	SourcePobreflix:     {"Pobreflix", scraper.PobreflixType, []string{"pobreflix"}, false, false},
 	SourceAnroll:        {"AnimesROLL", scraper.AnrollType, []string{"Anroll", "anroll", "animesroll"}, true, false},
+	SourceAnimesFHD:     {"AnimesFHD", scraper.AnimesFHDType, []string{"animesfhd"}, true, false},
 	SourcePomfy:         {"Pomfy", scraper.PomfyType, []string{"pomfy"}, false, false},
 }
 

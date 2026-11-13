@@ -585,6 +585,92 @@ func (p *anrollProvider) FetchStreamURL(ctx context.Context, episode *models.Epi
 	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
+// --- AnimesFHD Provider ---
+
+type animesfhdProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() { source.Register(&animesfhdProvider{}) }
+
+func (p *animesfhdProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnimesFHDType)
+}
+
+func (p *animesfhdProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.AnimesFHD,
+		Priority:    70,
+		Explicit:    []string{"AnimesFHD"},
+		Tags:        []string{"[animesfhd]"},
+		URLMatchers: []string{"animesfhd.net"},
+		ProbeURL:    "https://animesfhd.net",
+	}
+}
+
+func (p *animesfhdProvider) HasSeasons() bool { return true }
+
+func (p *animesfhdProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = contextual.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AnimesFHD)
+	return results, nil
+}
+
+func (p *animesfhdProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return api.GetAnimesFHDEpisodes(ctx, anime)
+}
+
+// FetchStream resolves the episode without writing playback state: the
+// referer, origin and subtitles the scraper reports come back in the Stream.
+func (p *animesfhdProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return source.Stream{}, err
+	}
+	var streamURL string
+	var metadata map[string]string
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
+	} else {
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
+	}
+	if err != nil {
+		return source.Stream{}, fmt.Errorf("animesfhd stream: %w", err)
+	}
+	if streamURL == "" {
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesFHD")
+	}
+	stream := streamFromMetadata(streamURL, metadata)
+	stream.AudioLang = metadata["audio_lang"]
+	return stream, nil
+}
+
+func (p *animesfhdProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
 // --- StartFlix Provider ---
 //
 // StartFlix is the movie/TV source. It needs no browser: the catalog and its

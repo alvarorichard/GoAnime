@@ -21,6 +21,7 @@ const (
 	// the StartFlix panel fallback by TMDB id.
 	Pobreflix SourceKind = "Pobreflix"
 	Anroll    SourceKind = "AnimesROLL"
+	AnimesFHD SourceKind = "AnimesFHD"
 	// Pomfy is the Byse-CDN movie/series catalog keyed by TMDB id; its
 	// playback runs the proof-of-work captcha and AES-256-GCM seal flow.
 	Pomfy SourceKind = "Pomfy"
@@ -59,5 +60,6 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimeDrive:    scraper.AnimeDriveType,
 	Pobreflix:     scraper.PobreflixType,
 	Anroll:        scraper.AnrollType,
+	AnimesFHD:     scraper.AnimesFHDType,
 	Pomfy:         scraper.PomfyType,
 }

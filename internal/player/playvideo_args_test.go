@@ -56,6 +56,26 @@ func TestAppendPlaybackRefererArgsSkipsLocalFiles(t *testing.T) {
 	assert.Equal(t, []string{"--cache=yes"}, args)
 }
 
+// AnimesFHD media plays with mpv's own User-Agent (checked live on
+// 2026-11-12 on the s4 and s6 servers); only the Referer is passed on.
+func TestAnimesFHDPlaybackSendsRefererOnly(t *testing.T) {
+	// These arguments read process-wide playback context, so do not parallelize.
+	restore := snapshotGlobalReferer()
+	defer restore()
+	util.SetGlobalReferer("https://animesfhd.net/")
+	for _, tc := range []struct {
+		url string
+		hls bool
+	}{
+		{"https://animesfhd.net/api/v/s6?source=1&playlist=.m3u8", true},
+		{"https://cdn.example/video.mp4", false},
+	} {
+		args := buildPlaybackArgs(playbackArgsInput{VideoURL: tc.url, IsHLS: tc.hls})
+		assert.NotContains(t, args, "--user-agent="+downloadUserAgent)
+		assert.Contains(t, strings.Join(args, " "), "Referer: https://animesfhd.net/")
+	}
+}
+
 func TestAppendHLSDemuxerArgs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

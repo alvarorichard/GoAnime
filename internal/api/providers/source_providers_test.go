@@ -222,7 +222,7 @@ func TestTopCineProvider_Scraper(t *testing.T) {
 // Model B registry with every live source.
 func TestSourceRegistry_LiveSourcesRegistered(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.StartFlix, source.TopCine, source.AnimeDrive} {
+	for _, kind := range []source.SourceKind{source.HiAnime, source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimesFHD, source.StartFlix, source.TopCine, source.AnimeDrive} {
 		s, ok := source.Registered(kind)
 		require.True(t, ok, "source %s must be registered", kind)
 		assert.Equal(t, kind, s.Describe().Kind)
@@ -256,6 +256,8 @@ func TestResolve_LiveRegistry(t *testing.T) {
 		{"explicit AnimesDigital", &models.Anime{Source: "AnimesDigital"}, source.AnimesDigital},
 		{"animesdigital URL", &models.Anime{URL: "https://animesdigital.org/anime/a/one-piece"}, source.AnimesDigital},
 		{"explicit AnimesROLL", &models.Anime{Source: "AnimesROLL"}, source.Anroll},
+		{"explicit AnimesFHD", &models.Anime{Source: "AnimesFHD"}, source.AnimesFHD},
+		{"AnimesFHD URL", &models.Anime{URL: "https://animesfhd.net/serie/1"}, source.AnimesFHD},
 		{"anroll URL", &models.Anime{URL: "https://anroll.io/anime/one-piece/"}, source.Anroll},
 		// SuperFlix was removed; a title saved under it no longer routes.
 		{"removed SuperFlix", &models.Anime{Source: "SuperFlix"}, source.Unknown},
@@ -302,6 +304,7 @@ func TestResolveURL_LiveRegistry(t *testing.T) {
 		{"https://goyabu.to/ep/naruto-1", source.Goyabu},
 		{"https://animesdigital.org/video/a/139026/", source.AnimesDigital},
 		{"https://anroll.io/68023/", source.Anroll},
+		{"https://animesfhd.net/episod/22882", source.AnimesFHD},
 		// The AllAnime host was removed; its URLs now resolve to nothing.
 		{"https://allanime.to/anime/hHjXnUTda", source.Unknown},
 		// Previous SuperFlix host was removed too.

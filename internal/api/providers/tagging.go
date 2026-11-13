@@ -46,6 +46,8 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "AnimesDigital"
 	case source.Anroll:
 		return "AnimesROLL"
+	case source.AnimesFHD:
+		return "AnimesFHD"
 	default:
 		return string(kind)
 	}
@@ -73,7 +75,7 @@ func cleanPTBRTitle(title string) string {
 // canonical Source field, matching the legacy ScraperManager.tagResults exactly.
 func tagResults(results []*models.Anime, kind source.SourceKind) {
 	name := sourceDisplayName(kind)
-	isPTBR := kind == source.AnimeFire || kind == source.Goyabu || kind == source.AnimesDigital || kind == source.AnimeDrive || kind == source.Anroll
+	isPTBR := kind == source.AnimeFire || kind == source.Goyabu || kind == source.AnimesDigital || kind == source.AnimeDrive || kind == source.Anroll || kind == source.AnimesFHD
 
 	for _, anime := range results {
 		if isPTBR {
