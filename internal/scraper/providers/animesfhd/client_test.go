@@ -35,7 +35,7 @@ func TestSearchAnime(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, query, file, title, id, audio string
-		count int
+		count                               int
 	}{
 		{"search", " frieren ", "search_2026_11_11.json", "Sousou no Frieren", "2751618645542326", "Dubbed and subtitled", 1},
 		{"popular", "", "popular_2026_11_11.json", "", "", "", 5},
@@ -74,7 +74,7 @@ func TestGetAnimeEpisodesFixtures(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, file, id, first string
-		count int
+		count                 int
 	}{
 		{"series", "series_2026_11_11.json", "1709160706373932", "22882", 6},
 		{"movie", "movie_2026_11_11.json", "2110072639862535", "1049086484300956", 1},
@@ -89,7 +89,7 @@ func TestGetAnimeEpisodesFixtures(t *testing.T) {
 				_, _ = w.Write(body)
 			}))
 			defer srv.Close()
-			got, err := NewClientForTest(srv.Client(), srv.URL).GetAnimeEpisodes(srv.URL+"/serie/"+tc.id)
+			got, err := NewClientForTest(srv.Client(), srv.URL).GetAnimeEpisodes(srv.URL + "/serie/" + tc.id)
 			if err != nil || len(got) != tc.count {
 				t.Fatalf("episodes=%d err=%v", len(got), err)
 			}
@@ -104,7 +104,7 @@ func TestEpisodePagination(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, second string
-		wantErr bool
+		wantErr      bool
 	}{
 		{"sort and deduplicate", `{"series":{"id":1},"episodes":[{"id":9,"episode_number":2},{"id":8,"episode_number":1.5}],"has_more":false}`, false},
 		{"repeated page", `{"series":{"id":1},"episodes":[{"id":9,"episode_number":2}],"has_more":true}`, true},
@@ -121,7 +121,7 @@ func TestEpisodePagination(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			}))
 			defer srv.Close()
-			got, err := NewClientForTest(srv.Client(), srv.URL).GetAnimeEpisodes(srv.URL+"/serie/1")
+			got, err := NewClientForTest(srv.Client(), srv.URL).GetAnimeEpisodes(srv.URL + "/serie/1")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("episodes=%v err=%v", got, err)
 			}
@@ -175,7 +175,7 @@ func TestGetEpisodeStreamFixtures(t *testing.T) {
 			if tc.subtitle != "" && (len(got.Subtitles) != 1 || got.Subtitles[0].URL != srv.URL+tc.subtitle) {
 				t.Fatalf("subtitles=%+v", got.Subtitles)
 			}
-			url, err := c.GetEpisodeStreamURL(srv.URL+"/episod/"+tc.id)
+			url, err := c.GetEpisodeStreamURL(srv.URL + "/episod/" + tc.id)
 			if err != nil || url != got.URL {
 				t.Fatalf("URL wrapper=%q err=%v", url, err)
 			}
@@ -187,7 +187,7 @@ func TestStreamFiltersAndRedirects(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, sources, contentType, target string
-		wantErr bool
+		wantErr                            bool
 	}{
 		{"native MP4 after embed and failed player", `{"native_video":true,"kind":"embed","url":"/forbidden"},{"native_video":false,"kind":"file","url":"/forbidden"},{"native_video":true,"kind":"file","url":"/missing"},{"native_video":true,"kind":"file","url":"/api/v/s5?source=4","audio":"dublado"}`, "video/mp4", "/media/video.mp4", false},
 		{"redirect to HLS", `{"native_video":true,"kind":"file","url":"/api/v/s5?source=4"}`, "application/vnd.apple.mpegurl", "/media/master.m3u8", false},
@@ -204,7 +204,7 @@ func TestStreamFiltersAndRedirects(t *testing.T) {
 				}
 				switch r.URL.Path {
 				case "/api/episodes/1":
-					_, _ = w.Write([]byte(`{"episode":{"id":1},"sources":[`+tc.sources+`]}`))
+					_, _ = w.Write([]byte(`{"episode":{"id":1},"sources":[` + tc.sources + `]}`))
 				case "/api/v/s5":
 					http.Redirect(w, r, tc.target, http.StatusTemporaryRedirect)
 				case tc.target:
@@ -232,12 +232,71 @@ func TestStreamFiltersAndRedirects(t *testing.T) {
 	}
 }
 
+// The live API lists a browser-only source first: it is flagged native_video
+// and carries playlist=.m3u8, but answers a JSON descriptor instead of media
+// (seen on /api/episodes/22882, 2026-11-12). It must be skipped, not played.
+func TestStreamSkipsNativeSourceThatAnswersJSON(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/episodes/22882":
+			_, _ = w.Write([]byte(`{"episode":{"id":22882,"series_category":"legendado","subtitle_url":""},"sources":[` +
+				`{"kind":"file","native_video":true,"audio":"legendado","url":"/api/v/s2?source=1&playlist=.m3u8&client=1","subtitle_url":"/api/v/s2?source=1&subtitle=1"},` +
+				`{"kind":"file","native_video":true,"audio":"legendado","url":"/api/v/s6?source=2&playlist=.m3u8","subtitle_url":null}]}`))
+		case "/api/v/s2":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = w.Write([]byte(`{"version":1,"token":"x","metadata":{},"burn":false,"body":{}}`))
+		case "/api/v/s6":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
+			_, _ = w.Write([]byte("#EXTM3U\n"))
+		default:
+			t.Errorf("must not request %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := NewClientForTest(srv.Client(), srv.URL)
+	got, err := c.GetEpisodeStreamContext(context.Background(), srv.URL+"/episod/22882")
+	if err != nil || got.URL != srv.URL+"/api/v/s6?source=2&playlist=.m3u8" {
+		t.Fatalf("stream=%+v err=%v", got, err)
+	}
+	// The skipped source's captions belong to it, not to the one that plays.
+	if len(got.Subtitles) != 0 {
+		t.Fatalf("subtitles of a rejected source leaked: %+v", got.Subtitles)
+	}
+}
+
+func TestAudioNamesAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/series":
+			_, _ = w.Write([]byte(`{"series":[{"id":1,"title":"Show","category":"Legendado","audios":["Dublado","LEGENDADO"]}]}`))
+		case "/api/episodes/1":
+			_, _ = w.Write([]byte(`{"episode":{"id":1},"sources":[{"kind":"file","native_video":true,"audio":"Dublado","url":"/video.mp4"}]}`))
+		case "/video.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("media"))
+		}
+	}))
+	defer srv.Close()
+	c := NewClientForTest(srv.Client(), srv.URL)
+	results, err := c.SearchAnime("show")
+	if err != nil || len(results) != 1 || results[0].Audio != models.AudioLabel(true, true) {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+	stream, err := c.GetEpisodeStreamContext(context.Background(), srv.URL+"/episod/1")
+	if err != nil || stream.AudioLang != "por" {
+		t.Fatalf("stream=%+v err=%v", stream, err)
+	}
+}
+
 func TestAPIErrors(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, body string
-		status int
-		kind netx.DiagnosticKind
+		status     int
+		kind       netx.DiagnosticKind
 	}{
 		{"HTTP status", `{}`, 503, netx.DiagnosticSourceUnavailable},
 		{"challenge", `<html>Just a moment</html>`, 200, netx.DiagnosticBlockedChallenge},
@@ -271,7 +330,7 @@ func TestInvalidPageURLsAndCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := NewClientForTest(srv.Client(), srv.URL)
-	for _, input := range []string{"https://other.example/serie/1", srv.URL+"/serie/abc", srv.URL+"/serie/-1", srv.URL+"/episod/1", srv.URL+"/serie/9223372036854775808"} {
+	for _, input := range []string{"https://other.example/serie/1", srv.URL + "/serie/abc", srv.URL + "/serie/-1", srv.URL + "/episod/1", srv.URL + "/serie/9223372036854775808"} {
 		if _, err := c.GetAnimeEpisodes(input); err == nil {
 			t.Errorf("accepted invalid title URL %q", input)
 		}
