@@ -51,7 +51,7 @@ func sugRows(titles ...string) []HomeSuggestion {
 }
 
 // suggestModel builds a home model whose debounce is instant.
-func suggestModel(t *testing.T, rec *recordingSuggest, opts SearchHomeOptions) *searchHomeModel {
+func suggestModel(t *testing.T, rec *recordingSuggest, opts SearchHomeOptions) *searchHomeModel { //nolint:gocritic // SearchHomeOptions is a configuration bag handed over once when a screen opens
 	t.Helper()
 	opts.Suggest = rec.fn
 	m := newSearchHomeModel(opts)

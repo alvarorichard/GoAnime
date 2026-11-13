@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/suggest"
 	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
@@ -101,7 +103,12 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		}
 	}
 
-	return run(tui.SearchHomeOptions{
+	// Read first: reading a damaged file is what sets it aside and earns the
+	// notice.
+	favs := homeFavorites()
+	favNotice := favoritesNotice()
+
+	res, err := run(tui.SearchHomeOptions{
 		Query:         query,
 		ScopeIndex:    scopeIndexForSource(util.GlobalSource),
 		SourcesLine:   sourcesLine(),
@@ -114,8 +121,55 @@ func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHom
 		Suggest:       homeSuggest,
 		Sources:       homeSources,
 		SetSource:     setHomeSource,
+
+		Favorites:      favs,
+		Notice:         favNotice,
+		DeleteFavorite: forgetFavorite,
+		ClearFavorites: clearFavorites,
+		Lists:          tui.StoreLists(favoritesStore()),
+
+		Restore: homeRestoreFor(query),
 	})
+	if err == nil {
+		rememberHomeSearch(res)
+	}
+	return res, err
 }
+
+// favoritesStore is the FAVORITES file; a variable so tests use a temporary one.
+var favoritesStore = favorites.Default
+
+// homeFavorites reads the FAVORITES rows, newest first.
+func homeFavorites() []tui.HomeFavorite {
+	list, err := favoritesStore().List()
+	if err != nil {
+		util.Debugf("Favorites unavailable: %v", err)
+		return nil
+	}
+	rows := make([]tui.HomeFavorite, 0, len(list))
+	for _, f := range list {
+		if title := tui.SingleLine(f.Title); title != "" {
+			rows = append(rows, tui.HomeFavorite{Key: f.Key, Title: title, Year: f.Year, Media: f.Media, Source: f.Source})
+		}
+	}
+	return rows
+}
+
+// favoritesNotice warns when the favorites file was damaged and set aside, so
+// the empty list is not a mystery.
+func favoritesNotice() string {
+	aside := favoritesStore().TakeDamaged()
+	if aside == "" {
+		return ""
+	}
+	return "Your favorites file was damaged, so the list starts empty. A copy was kept as " + filepath.Base(aside) + "."
+}
+
+// forgetFavorite takes one work off FAVORITES.
+func forgetFavorite(key string) error { return favoritesStore().Remove(key) }
+
+// clearFavorites empties FAVORITES.
+func clearFavorites() error { return favoritesStore().Clear() }
 
 // homeSuggest adapts the keyless suggestion engine (Kitsu for anime, IMDb for
 // movies and series) to the search home's autocomplete.

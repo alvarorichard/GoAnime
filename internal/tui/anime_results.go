@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -275,6 +277,9 @@ type animeGroupItem struct {
 	group  *animeGroup
 	pos    int    // the group's position in the model
 	number string // the row's position, zero padded to the widest one
+	// favs is the model's set of FAVORITES keys, shared so a toggle shows on
+	// the row at once; nil when favorites are not in use.
+	favs map[string]bool
 }
 
 // FilterValue exposes the title and every version's metadata to the fuzzy
@@ -326,6 +331,9 @@ func (i animeGroupItem) row() row {
 	var tags []string
 	if i.group != nil {
 		tags = i.group.badges()
+		if i.favs[normalizeTitleKey(i.group.title)] {
+			tags = append([]string{drawGlyph("★", "*")}, tags...)
+		}
 	}
 	return row{number: i.number, title: i.Title(), desc: i.Description(), tags: tags}
 }
@@ -377,7 +385,25 @@ type animeResultsModel struct {
 	plainPanel string
 	// showHelp replaces the list with the KEYS overlay (tela 10).
 	showHelp bool
+	// favs is the FAVORITES list ctrl+f adds the highlighted work to, and
+	// favKeys the keys in it, read once and kept in step with every toggle.
+	favs    favoritesAPI
+	favKeys map[string]bool
+	// lists is the saved lists ctrl+l puts the work in; nil when the feature
+	// is absent. picker is its overlay while it is open.
+	lists  FavoriteLists
+	picker *pickerState
 }
+
+// favoritesAPI is the part of the favorites store the result screen uses.
+type favoritesAPI interface {
+	Keys() map[string]bool
+	Toggle(e favorites.Entry) (bool, error)
+}
+
+// newFavorites opens the favorites the result screen reads and writes. A
+// variable so tests point it at a temporary file.
+var newFavorites = func() favoritesAPI { return favorites.Default() }
 
 // newAnimeResultsModel creates the styled, filterable anime result screen.
 func newAnimeResultsModel(animes []*models.Anime) *animeResultsModel {
@@ -393,10 +419,15 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		shell.Context = `"` + query + `"`
 	}
 	groups := groupAnimeResults(animes)
+	favs := newFavorites()
+	favKeys := map[string]bool{}
+	if favs != nil {
+		favKeys = favs.Keys()
+	}
 	digits := max(len(strconv.Itoa(len(groups))), 2)
 	items := make([]list.Item, 0, len(groups))
 	for i := range groups {
-		items = append(items, animeGroupItem{group: &groups[i], pos: i, number: fmt.Sprintf("%0*d", digits, i+1)})
+		items = append(items, animeGroupItem{group: &groups[i], pos: i, number: fmt.Sprintf("%0*d", digits, i+1), favs: favKeys})
 	}
 
 	delegate := rowDelegate{theme: &theme, twoLine: true, spacing: 1}
@@ -408,6 +439,9 @@ func newAnimeResultsModelWithQuery(animes []*models.Anime, query string) *animeR
 		versionSel: make(map[int]int),
 		query:      query,
 		notice:     takeResultsNotice(),
+		favs:       favs,
+		favKeys:    favKeys,
+		lists:      newFavoriteLists(),
 	}
 	width, height := shell.ContentSize()
 	results := list.New(items, delegate, width, max(height-m.noticeHeight(width), 1))
@@ -453,6 +487,17 @@ func (m *animeResultsModel) reservePlainPanel() {
 	m.results.SetSize(width, max(height-lipgloss.Height(panel)-1, 1))
 }
 
+// resize fits the list to the shell and the notice above it.
+func (m *animeResultsModel) resize() {
+	width, height := m.shell.ContentSize()
+	listWidth := width
+	if width >= wideResultsBreakpoint && !Plain() {
+		listWidth = resultsListWidth(width) - resultsGutter
+	}
+	m.results.SetSize(listWidth, max(height-m.noticeHeight(width), 1))
+	m.reservePlainPanel()
+}
+
 // noticeHeight is the rows the notice takes above the list at width.
 func (m *animeResultsModel) noticeHeight(width int) int {
 	if m.notice == "" {
@@ -474,16 +519,14 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.shell.Resize(msg.Width, msg.Height)
-		width, height := m.shell.ContentSize()
-		listWidth := width
-		if width >= wideResultsBreakpoint && !Plain() {
-			listWidth = resultsListWidth(width) - resultsGutter
-		}
-		m.results.SetSize(listWidth, max(height-m.noticeHeight(width), 1))
-		m.reservePlainPanel()
+		m.resize()
+		m.fitPicker()
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if m.picker != nil {
+			return m.updatePicker(msg)
+		}
 		if m.showHelp {
 			switch msg.String() {
 			case "?", "esc":
@@ -516,6 +559,17 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.err = ErrSelectionBack
 				return m, tea.Quit
 			}
+		case "ctrl+f":
+			// Add the highlighted work to FAVORITES, or take it off.
+			if !filtering {
+				m.toggleFavorite()
+				return m, nil
+			}
+		case "ctrl+l":
+			// Put the highlighted work in one of the saved lists.
+			if !filtering && m.openPicker() {
+				return m, nil
+			}
 		case "left", "right":
 			// ←→ picks the highlighted work's version (tela 3). While
 			// filtering the arrows move the filter's caret instead.
@@ -542,6 +596,9 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.picker != nil && m.picker.naming {
+		return m, m.picker.forward(msg)
+	}
 	filterBefore := m.results.FilterValue()
 	var cmd tea.Cmd
 	m.results, cmd = m.results.Update(msg)
@@ -550,6 +607,65 @@ func (m *animeResultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.reservePlainPanel()
 	return m, cmd
+}
+
+// favoriteHint is the footer's word for ctrl+f: what it will do to the
+// highlighted work.
+func (m *animeResultsModel) favoriteHint() string {
+	if item, ok := m.results.SelectedItem().(animeGroupItem); ok && m.isFavorite(item.group) {
+		return "unfavorite"
+	}
+	return "favorite"
+}
+
+// favoriteEntry is the FAVORITES record of a work: it is kept by title, so
+// every source's copy of it is one favorite, and remembers the version that
+// was chosen.
+func (m *animeResultsModel) favoriteEntry(item animeGroupItem) favorites.Entry {
+	g := item.group
+	source := ""
+	if v := m.chosenVersion(item.pos); v != nil {
+		source = displaySource(v.Source)
+	}
+	return favorites.Entry{
+		Key:    normalizeTitleKey(g.title),
+		Title:  g.title,
+		Year:   g.year,
+		Media:  g.media,
+		Source: source,
+	}
+}
+
+// isFavorite reports whether the highlighted work is in FAVORITES.
+func (m *animeResultsModel) isFavorite(g *animeGroup) bool {
+	return g != nil && m.favKeys[normalizeTitleKey(g.title)]
+}
+
+// toggleFavorite adds the highlighted work to FAVORITES or takes it off.
+func (m *animeResultsModel) toggleFavorite() {
+	item, ok := m.results.SelectedItem().(animeGroupItem)
+	if !ok || item.group == nil || m.favs == nil {
+		return
+	}
+	entry := m.favoriteEntry(item)
+	on, err := m.favs.Toggle(entry)
+	if err != nil {
+		// The notice takes rows above the list, so the list is resized.
+		m.notice = "Could not update FAVORITES: " + singleLine(err.Error())
+		m.resize()
+		return
+	}
+	if on {
+		m.favKeys[entry.Key] = true
+	} else {
+		delete(m.favKeys, entry.Key)
+	}
+	if strings.HasPrefix(m.notice, "Could not update FAVORITES") {
+		m.notice = ""
+		m.resize()
+		return
+	}
+	m.reservePlainPanel()
 }
 
 // switchVersion moves the highlighted group's chosen version one step.
@@ -601,6 +717,8 @@ func (m *animeResultsModel) View() tea.View {
 	height = max(height-m.noticeHeight(width), 1)
 	body := m.results.View()
 	switch {
+	case m.picker != nil:
+		body = m.picker.view(width, height)
 	case m.showHelp:
 		body = m.helpView(width, height, body)
 	case Plain():
@@ -634,11 +752,15 @@ func (m *animeResultsModel) helpView(width, height int, body string) string {
 	if Plain() {
 		versionKey = "left/right"
 	}
-	if help := RenderHelp(&m.theme, "Results", []HelpRow{
+	rows := []HelpRow{
 		{Key: versionKey, Desc: "choose a version"},
-		{Key: "esc", Desc: "edit the search"},
-		{Key: "q", Desc: "quit"},
-	}, nil, width, height); help != "" {
+		{Key: "ctrl+f", Desc: "add to or remove from FAVORITES"},
+	}
+	if m.lists != nil {
+		rows = append(rows, HelpRow{Key: "ctrl+l", Desc: "put it in a list"})
+	}
+	rows = append(rows, HelpRow{Key: "esc", Desc: "edit the search"}, HelpRow{Key: "q", Desc: "quit"})
+	if help := RenderHelp(&m.theme, "Results", rows, nil, width, height); help != "" {
 		return help
 	}
 	return body
@@ -681,7 +803,6 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 		lines = append(lines, prefix+label+"  "+detail)
 	}
 	lines = append(lines, "", "enter opens it on "+displaySource(group.versions[sel].anime.Source))
-
 	fields := []detailField{}
 	if group.year != "" {
 		fields = append(fields, detailField{"Year", group.year})
@@ -689,16 +810,33 @@ func (m *animeResultsModel) detailsContent() *panelContent {
 	if group.media != "" {
 		fields = append(fields, detailField{"Type", group.media})
 	}
+	title := group.title
+	tip := ""
+	if m.favs != nil {
+		// Said in words, for whoever has never seen the key.
+		tip = "ctrl+f adds it to FAVORITES"
+		if m.isFavorite(group) {
+			title = drawGlyph("★ ", "* ") + title
+			tip = "ctrl+f takes it off FAVORITES"
+		}
+	}
+	if m.lists != nil {
+		tip = strings.TrimPrefix(tip+" · ctrl+l puts it in a list", " · ")
+	}
 	return &panelContent{
 		label:  "Details",
 		gloss:  "詳細",
-		title:  group.title,
+		title:  title,
 		fields: fields,
 		lines:  lines,
+		tip:    tip,
 	}
 }
 
 func (m *animeResultsModel) hints() []Hint {
+	if m.picker != nil {
+		return m.picker.hints()
+	}
 	if m.showHelp {
 		return []Hint{
 			{Key: "?", Desc: "close", Essential: true},
@@ -720,14 +858,19 @@ func (m *animeResultsModel) hints() []Hint {
 			{Key: "esc", Desc: "clear filter", Essential: true},
 		}
 	}
-	return []Hint{
+	hints := []Hint{
 		{Key: "enter", Desc: "open", Essential: true},
 		{Key: version, Desc: "version"},
+		{Key: "ctrl+f", Desc: m.favoriteHint()},
 		{Key: move, Desc: "move"},
 		{Key: "esc", Desc: "edit search", Essential: true},
 		{Key: "?", Desc: "help"},
 		{Key: "q", Desc: "quit"},
 	}
+	if m.lists != nil {
+		hints = slices.Insert(hints, 3, Hint{Key: "ctrl+l", Desc: "lists"})
+	}
+	return hints
 }
 
 type animeResultsRunner func(tea.Model) (tea.Model, error)

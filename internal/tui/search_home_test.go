@@ -186,7 +186,7 @@ func TestSearchHomeNavigation(t *testing.T) {
 	t.Run("tab cycles scopes", func(t *testing.T) {
 		t.Parallel()
 		model := newSearchHomeModel(SearchHomeOptions{})
-		for i, want := range []int{1, 2, 3, 0} {
+		for i, want := range []int{1, 2, 3, 4, 0} {
 			_, _ = model.Update(press(tea.KeyTab, ""))
 			assert.Equal(t, want, model.scopeIdx, "tab %d", i)
 		}
