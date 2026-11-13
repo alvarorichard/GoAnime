@@ -233,44 +233,37 @@ func SearchAnimeAuto(name, src string, pick func([]*models.Anime) *models.Anime)
 // (StartFlix and TopCine) at once, for the -dm downloads.
 const MovieTVSources = "movietv"
 
-func searchAnimeEnhanced(
-	name string,
-	src string,
-	search SearchFetchFunc,
-	selectAnime func([]*models.Anime) (*models.Anime, error),
-	enrich func(*models.Anime) error,
-) (*models.Anime, error) {
-	// Map the optional source selector to the registry kinds to search. Empty
-	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
-	var registryKinds []apisource.SourceKind
-	normalizedSource := strings.ToLower(strings.TrimSpace(src))
+// registryKindsForSource maps the optional source selector to the registry
+// kinds to search. Empty = all sources; a specific kind (or the PT-BR trio)
+// narrows the fan-out.
+func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 	switch normalizedSource {
 	case "hianime":
-		registryKinds = []apisource.SourceKind{apisource.HiAnime}
+		return []apisource.SourceKind{apisource.HiAnime}
 	case "animefire":
-		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
+		return []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
-		registryKinds = []apisource.SourceKind{apisource.Goyabu}
+		return []apisource.SourceKind{apisource.Goyabu}
 	case "animesdigital":
-		registryKinds = []apisource.SourceKind{apisource.AnimesDigital}
+		return []apisource.SourceKind{apisource.AnimesDigital}
 	case "anroll":
-		registryKinds = []apisource.SourceKind{apisource.Anroll}
+		return []apisource.SourceKind{apisource.Anroll}
 	case "animesfhd":
-		registryKinds = []apisource.SourceKind{apisource.AnimesFHD}
+		return []apisource.SourceKind{apisource.AnimesFHD}
 	case "startflix":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix}
+		return []apisource.SourceKind{apisource.StartFlix}
 	case "topcine":
-		registryKinds = []apisource.SourceKind{apisource.TopCine}
+		return []apisource.SourceKind{apisource.TopCine}
 	case "pobreflix":
-		registryKinds = []apisource.SourceKind{apisource.Pobreflix}
+		return []apisource.SourceKind{apisource.Pobreflix}
 	case "pomfy":
-		registryKinds = []apisource.SourceKind{apisource.Pomfy}
+		return []apisource.SourceKind{apisource.Pomfy}
 	case "movietv":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
+		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
 	case "animedrive":
-		registryKinds = []apisource.SourceKind{apisource.AnimeDrive}
+		return []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
-		registryKinds = []apisource.SourceKind{
+		return []apisource.SourceKind{
 			apisource.AnimeFire,
 			apisource.Goyabu,
 			apisource.AnimesDigital,
@@ -283,6 +276,18 @@ func searchAnimeEnhanced(
 			apisource.AnimeDrive,
 		}
 	}
+	return nil
+}
+
+func searchAnimeEnhanced(
+	name string,
+	src string,
+	search SearchFetchFunc,
+	selectAnime func([]*models.Anime) (*models.Anime, error),
+	enrich func(*models.Anime) error,
+) (*models.Anime, error) {
+	normalizedSource := strings.ToLower(strings.TrimSpace(src))
+	registryKinds := registryKindsForSource(normalizedSource)
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
 	var animes []*models.Anime
