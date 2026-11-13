@@ -13,7 +13,7 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 | AnimesDigital | Anime      | Portuguese (Brazil) | Subtitled and dubbed                 |
 | AnimeDrive    | Anime      | Portuguese (Brazil) |                                      |
 | AnimesROLL    | Anime      | Portuguese (Brazil) | Subtitled and dubbed                 |
-| AnimesFHD     | Anime      | Portuguese (Brazil) | Seasons, subtitled/dubbed, native MP4/HLS |
+| AnimesFHD     | Anime      | Portuguese (Brazil) | Seasons, dub/sub, native MP4/HLS     |
 | Goyabu        | Anime      | Portuguese (Brazil) | Off by default, needs cfsolve        |
 | StartFlix     | Movies, TV | Portuguese (Brazil) | Dubbed and subtitled                 |
 | TopCine       | Movies, TV | Portuguese (Brazil) | Catalog only, plays through StartFlix |
@@ -35,18 +35,21 @@ site moves.
 
 - **AnimeDrive**: the host is sometimes unreachable from some networks. Set
   `GOANIME_ANIMEDRIVE_URL` to a mirror, or search another source.
+- **AnimesFHD** (`goanime --source animesfhd "frieren"`): provides Brazilian
+  Portuguese subtitled and dubbed anime, including anime movies. Choose a
+  season/audio version before the episode list. Only native MP4/HLS sources
+  are supported. It uses its public JSON API without a key. Search returns
+  up to 50 matches; episode lists follow pagination for the selected version.
+  Embedded players are skipped. Native sources are tried in API order, with
+  Referer and Portuguese captions passed to playback. The public SDK lists
+  the exact series URL supplied by the caller; the season/audio menu belongs
+  to the CLI.
 - **Pobreflix**: plays public MP4s directly. Pages with a Turnstile-gated
   player need cfsolve; without it GoAnime falls back to the StartFlix panel.
 - **Pomfy**: looks titles up on TMDB (your `TMDB_API_KEY` if set, otherwise a
   public key). A bare TMDB id, such as `550`, also works as a search.
   `GOANIME_POMFY_URL` sets another mirror.
 - **TopCine**: catalog only; playback goes through StartFlix.
-
-AnimesFHD uses its public JSON API without a key. Search returns up to 50
-matches; episode lists follow pagination for the selected version. Embedded
-players are skipped. Native sources are tried in API order, with Referer and
-Portuguese captions passed to playback. The public SDK lists the exact series
-URL supplied by the caller; the season/audio menu belongs to the CLI.
 
 ## Cloudflare (cfsolve)
 
