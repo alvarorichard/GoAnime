@@ -149,7 +149,7 @@ func scopeIndexForSource(src string) int {
 	switch strings.ToLower(strings.TrimSpace(src)) {
 	case "hianime":
 		return 2
-	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll":
+	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
 	case "movietv", "startflix", "topcine", "pobreflix":
 		return 3

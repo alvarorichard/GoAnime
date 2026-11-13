@@ -46,6 +46,7 @@ func TestContinueSourceToken(t *testing.T) {
 		{"StartFlix", "startflix"},
 		{"TopCine", "topcine"},
 		{"AnimeDrive", "animedrive"},
+		{"AnimesFHD", "animesfhd"},
 		{"", ""},
 		{"Weird Site", ""},
 	}
