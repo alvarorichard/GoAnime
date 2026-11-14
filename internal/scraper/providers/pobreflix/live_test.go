@@ -89,12 +89,12 @@ func TestLivePobreflixDubIsGated(t *testing.T) {
 	util.InitLogger()
 	c := NewClient()
 
-	title, err := c.Title(timeoutCtx(t, 60*time.Second), "https://pobreflixtv.gay/filme/interestelar.html")
+	title, err := c.Title(timeoutCtx(t, 60*time.Second), c.BaseURL()+"/filmes/online/interestelar-dublado-157336")
 	if err != nil {
 		t.Fatalf("title: %v", err)
 	}
 	if len(title.Servers) == 0 {
-		t.Fatal("the page lists no servers at all; the embedded JSON may have changed shape")
+		t.Fatal("the page lists no servers at all; the page layout may have changed shape")
 	}
 	if files := DirectServers(title.Servers); len(files) > 0 {
 		t.Fatalf("Pobreflix lists a file again (%s): the dub can play directly; refresh the notes and retire this canary", files[0].URL)

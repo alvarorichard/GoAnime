@@ -334,7 +334,7 @@ func pobreflixDirectSeasonEpisodes(media *models.Anime, title pobreflix.Title, s
 	episodes := make([]models.Episode, 0, len(list))
 	for _, ep := range list {
 		pageURL := ep.URL
-		if !strings.Contains(pageURL, "/assistir/") {
+		if !pobreflix.IsEpisodePage(pageURL) {
 			pageURL = base.EpisodeURL(title, season.Number, ep.Number)
 		}
 		episodes = append(episodes, models.Episode{
@@ -647,7 +647,7 @@ func pobreflixDirectEpisodeURL(ctx context.Context, media *models.Anime, title p
 		return source.Stream{}, fmt.Errorf("pobreflix: episode %q has no season/number", episode.Number)
 	}
 	pageURL := episode.URL
-	if !strings.Contains(pageURL, "/assistir/") {
+	if !pobreflix.IsEpisodePage(pageURL) {
 		pageURL = pbClientFn().EpisodeURL(title, season, number)
 	}
 	if pageURL == "" {

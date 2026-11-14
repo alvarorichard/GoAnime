@@ -24,10 +24,10 @@ import (
 
 const (
 	// DefaultBase is the catalog host. The site moves between mirror domains
-	// (.sale is dead; .gay and .cam redirect to .christmas as of 2026-11-02, and
-	// the client follows such a redirect), so
+	// (.sale is dead; .gay, .cam and .christmas redirect to pobreflixtvfree.cv as
+	// of 2026-11-14, and the client follows such a redirect), so
 	// GOANIME_POBREFLIX_URL can repoint this without waiting for a release.
-	DefaultBase = "https://pobreflixtv.christmas"
+	DefaultBase = "https://pobreflixtvfree.cv"
 
 	// userAgent describes a current Chrome, matching the TLS fingerprint
 	// util.NewFastClient presents. Neither the site nor its player checked it
@@ -251,7 +251,7 @@ var sitemapShardRe = regexp.MustCompile(`file=((?:[a-z0-9_]+_)?videobox_Video_\d
 
 // currentSitemapRe names a current content sitemap. The site publishes one
 // movie and one series file (and, on busier weeks, numbered continuations).
-var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|series)(?:-(\d+))?\.xml$`)
+var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|filmes|series)(?:-(\d+))?\.xml$`)
 
 // sitemapShards lists the content sitemaps the index publishes. The current
 // site replaced the old sitemap.php?file=… shards with two large
@@ -293,7 +293,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 			continue
 		}
 		order := 1
-		if name[1] == "series" {
+		if strings.EqualFold(name[1], "series") {
 			order = 2
 		}
 		if len(name) > 2 && name[2] != "" {
@@ -341,6 +341,11 @@ func (c *Client) Search(ctx context.Context, query string) ([]Media, error) {
 	// the slug. Production asks it first; tests pin the corpus instead so
 	// their request counts stay deterministic.
 	if c.apiEnabled {
+		if results, err := c.buscaSearch(ctx, q); err != nil {
+			util.Debug("Pobreflix busca failed, trying the catalog API", "err", err)
+		} else if len(results) > 0 {
+			return results, nil
+		}
 		if results, err := c.apiSearch(ctx, q); err != nil {
 			util.Debug("Pobreflix catalog API failed, falling back to the sitemap corpus", "err", err)
 		} else if len(results) > 0 {
@@ -511,7 +516,13 @@ func (c *Client) Episode(ctx context.Context, pageURL string) (EpisodeData, erro
 	}
 	raw, ok := embeddedEpisodeData(doc)
 	if !ok {
-		return EpisodeData{}, ErrNoEpisode
+		data, v3 := parseV3Episode(doc, pageURL)
+		if !v3 {
+			return EpisodeData{}, ErrNoEpisode
+		}
+		data.Servers = c.absolutizeServers(data.Servers)
+		c.episodes.Store(pageURL, data)
+		return data, nil
 	}
 	series := titleFromEmbeddedItem(raw.Series, KindSeries, pageURL)
 	series.Audio = audioFromEmbedded(raw.Episode.Audio)
@@ -532,6 +543,13 @@ func (c *Client) Episode(ctx context.Context, pageURL string) (EpisodeData, erro
 
 // EpisodeURL builds the current site's episode-page URL from a series title.
 func (c *Client) EpisodeURL(t Title, season, episode int) string {
+	if s, ok := t.Season(season); ok {
+		for _, e := range s.Episodes {
+			if e.Number == episode && e.URL != "" {
+				return e.URL
+			}
+		}
+	}
 	path := t.EpisodePath(season, episode)
 	if path == "" {
 		return ""

@@ -220,5 +220,5 @@ func TestSearch_APIUsesRealNames(t *testing.T) {
 	assert.Equal(t, "Todo Poderoso", results[0].Title)
 	assert.Equal(t, srv.URL+"/filme/todo-poderoso-53qvb.html", results[0].URL)
 	assert.Equal(t, KindMovie, results[0].Kind)
-	assert.Equal(t, int32(2), requests.Load(), "one catalog request per type")
+	assert.Equal(t, int32(3), requests.Load(), "the new site's busca (404 on this old-theme host), then one catalog request per type")
 }

@@ -61,6 +61,7 @@ Release date: 2026-11-10
 
 ### Sources and search
 
+- Fix Pobreflix after the site moved to `pobreflixtvfree.cv` and was rebuilt (2026-11-14): the old hosts redirect every path to the new home page, so title pages no longer opened ("title page has no video mount") even though search still answered. GoAnime now searches `/api/busca`, reads the new movie, series and episode pages, takes the episode list from the series page and plays the RedeFlixApi player, with no solver. The daily Source Health run now opens a title and plays a movie and an episode, so a break like this shows up as a red run instead of a green search.
 - Fix Pobreflix movies whose catalog entry points at a dead `/api/player?id=<tmdb>` endpoint: the player page is rebuilt from the TMDB id instead of failing the title.
 - Fix Pobreflix listing a gated movie as having no playable episode, and preferring the panel when the wanted audio had no direct file.
 - Fix Pobreflix's player host refusing the shared Chrome TLS fingerprint with a bare HTTP 500: the gate's requests run on netx's plain SSRF-safe transport (measured against the live host, the same headers answer 200 there).

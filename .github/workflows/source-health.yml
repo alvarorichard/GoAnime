@@ -49,7 +49,16 @@ jobs:
           GOANIME_LIVE: '1'
         run: >
           go test
-          -run '^(TestLivePobreflixDubIsGated|TestLivePobreflixSearchCorpusReload)$'
+          -run '^(TestLivePobreflixCatalog|TestLivePobreflixDubIsGated|TestLivePobreflixSearchCorpusReload)$'
+          -count=1 -v -timeout=5m
+          ./internal/scraper/providers/pobreflix
+
+      - name: Run Pobreflix playback canaries (no solver)
+        env:
+          GOANIME_LIVE: '1'
+        run: >
+          go test -tags live
+          -run '^(TestLivePobreflixRedeflixPlaysWithoutASolver|TestLivePobreflixSeriesEpisodePlaysWithoutASolver)$'
           -count=1 -v -timeout=5m
           ./internal/scraper/providers/pobreflix
 
