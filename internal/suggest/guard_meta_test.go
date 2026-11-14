@@ -230,12 +230,12 @@ var suggestMutants = []mutant{
 	},
 	{
 		name:  "switching scope keeps the old scope's rows",
-		edits: []codeEdit{{homeFile, "m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)\n\t\t\tcmd := m.queryChanged()\n\t\t\treturn m, cmd", "m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)\n\t\t\treturn m, nil"}},
+		edits: []codeEdit{{homeFile, "m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)\n\t\t\tcmd := m.scopeChanged()\n\t\t\treturn m, cmd", "m.scopeIdx = (m.scopeIdx + 1) % len(m.scopes)\n\t\t\treturn m, nil"}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomeSuggestFollowsScope"}},
 	},
 	{
 		name:  "a prefilled box asks at once",
-		edits: []codeEdit{{homeFile, "\tm.asked = m.suggestKey()\n\tm.rebuildRows()", "\tm.rebuildRows()"}},
+		edits: []codeEdit{{homeFile, "\tm.asked = m.suggestKey()\n\tm.notice = singleLine(opts.Notice)", "\tm.notice = singleLine(opts.Notice)"}},
 		kills: map[string][]string{tuiPkg: {"TestSearchHomePrefilledQueryDoesNotAutoAsk"}},
 	},
 	{
@@ -266,7 +266,7 @@ var suggestMutants = []mutant{
 	// --- the wiring ---
 	{
 		name:  "the home screen opened without autocomplete",
-		edits: []codeEdit{{handlerFile, "\t\tSuggest:     homeSuggest,\n", ""}},
+		edits: []codeEdit{{handlerFile, "\t\tSuggest:       homeSuggest,\n", ""}},
 		kills: map[string][]string{handlersPkg: {"TestSearchHomeWiresAutocomplete"}},
 	},
 	{
