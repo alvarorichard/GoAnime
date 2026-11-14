@@ -56,13 +56,13 @@ func newHTTP11OnlyTLSServer(t *testing.T, handler http.Handler) *httptest.Server
 	return srv
 }
 
-// TestSurfClient_NoBody_FailsOnHTTP11OnlyServer is the negative control for
-// all the HTTP/1.1-only server tests: a plain h2-capable surf client with an
-// http.NoBody request (nil GetBody) must still fail with the exact issue #193
-// error against these servers. If this test ever stops failing, the other
-// tests in this file no longer reproduce the original bug and must be
-// revisited.
-func TestSurfClient_NoBody_FailsOnHTTP11OnlyServer(t *testing.T) {
+// TestSurfClient_NoBody_FallsBackOnHTTP11OnlyServer records the upstream fix
+// for issue #193. Older surf releases failed a plain h2-capable client with
+// "GetBody is nil ... negotiated ALPN" against HTTP/1.1-only servers when the
+// request used http.NoBody; since surf v1.0.241 (enetx/http preserves the
+// negotiated ALPN connection) the same request succeeds. The tests below keep
+// guarding newSurfDownloadClient, which still forces HTTP/1.1 explicitly.
+func TestSurfClient_NoBody_FallsBackOnHTTP11OnlyServer(t *testing.T) {
 	t.Parallel()
 	srv := newHTTP11OnlyTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -79,10 +79,10 @@ func TestSurfClient_NoBody_FailsOnHTTP11OnlyServer(t *testing.T) {
 	req, err := http.NewRequest(http.MethodHead, srv.URL+"/video.mp4", http.NoBody)
 	require.NoError(t, err)
 
-	_, err = client.Do(req)
-	require.Error(t, err, "control: h2-capable surf client must fail on HTTP/1.1-only servers")
-	assert.Contains(t, err.Error(), "GetBody is nil", "control: must reproduce issue #193 exactly")
-	assert.Contains(t, err.Error(), "negotiated ALPN", "control: must reproduce issue #193 exactly")
+	resp, err := client.Do(req)
+	require.NoError(t, err, "surf must fall back to HTTP/1.1 on its own (issue #193 fixed upstream)")
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 // TestGetContentLength_SurfClient_HTTP11OnlyServer covers the exact failure
