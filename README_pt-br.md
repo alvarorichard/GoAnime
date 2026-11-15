@@ -346,6 +346,7 @@ ambiente cobrem casos menos comuns:
 | ----------------------------- | ------------------------------------------------------------------------ |
 | `GOANIME_ENABLED_SOURCES`     | Fontes a ativar, separadas por vírgula, como `goyabu`                    |
 | `GOANIME_DISABLED_SOURCES`    | Fontes a ignorar, separadas por vírgula                                  |
+| `GOANIME_OFFLINE_CACHE_TTL`   | Por quanto tempo os títulos do AnimeFire sem vídeo ficam fora da busca, como duração do Go, por exemplo `30m` (padrão `6h`; `0` desliga o cache) |
 | `GOANIME_THEME`               | `dark`, `light` ou `auto` (padrão): `auto` pergunta o fundo ao terminal uma vez |
 | `GOANIME_TERMINAL`            | `conhost` mantém o GoAnime no console clássico do Windows em vez de reabri-lo no Windows Terminal |
 | `GOANIME_PLAIN`               | `1` para o modo simples: sem cores, sem glosas em japonês, só ASCII (igual a `--plain`, `NO_COLOR` ou `TERM=dumb`) |
