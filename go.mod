@@ -15,7 +15,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/disintegration/gift v1.2.1
 	github.com/enetx/g v1.1.1
-	github.com/enetx/surf v1.0.252
+	github.com/enetx/surf v1.0.241
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/lrstanley/go-ytdlp v1.5.6
 	github.com/mattn/go-sqlite3 v1.14.53
@@ -48,9 +48,9 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/enetx/http v1.0.47 // indirect
-	github.com/enetx/quic-go v1.0.35 // indirect
-	github.com/enetx/utls v1.8.1 // indirect
+	github.com/enetx/http v1.0.40 // indirect
+	github.com/enetx/quic-go v1.0.27 // indirect
+	github.com/enetx/utls v1.0.6 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.10 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
@@ -59,10 +59,10 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
+	github.com/molecule-man/go-brrr v1.3.1 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nsf/termbox-go v1.1.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/stretchr/objx v0.8.0 // indirect
