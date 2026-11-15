@@ -55,6 +55,12 @@ func (c *HiAnimeClient) extractSearchResults(doc *goquery.Document) []*models.An
 	var out []*models.Anime
 
 	doc.Find(".flw-item").Each(func(_ int, card *goquery.Selection) {
+		// The "top 10" sidebar reuses the result-card markup; those are
+		// trending titles, not matches for the query (ani-cli cuts the page
+		// at #main-sidebar for the same reason).
+		if card.Closest("#main-sidebar").Length() > 0 {
+			return
+		}
 		link := card.Find(".film-name a").First()
 		href := strings.TrimSpace(link.AttrOr("href", ""))
 		m := animeHrefRe.FindStringSubmatch(href)

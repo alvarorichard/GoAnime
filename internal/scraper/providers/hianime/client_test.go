@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -566,4 +567,27 @@ func TestGetEpisodeStreamURL_NoReadableServer(t *testing.T) {
 		context.Background(), srv.URL+"/watch/cowboy-bebop-26?ep=9001", "best")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ZokoAnime")
+}
+
+func TestSearchIgnoresSidebarCards(t *testing.T) {
+	page := `<html><body><div class="flw-item"><div class="film-name"><a href="/naruto-1" title="Naruto">Naruto</a></div></div>
+<div id="main-sidebar"><div class="flw-item"><div class="film-name"><a href="/trending-2" title="Trending">Trending</a></div></div></div></body></html>`
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := NewClientForTest("https://x.test").extractSearchResults(doc)
+	if len(got) != 1 || got[0].Name != "Naruto" {
+		t.Fatalf("want only Naruto, got %d results", len(got))
+	}
+}
+
+func TestEncodeSubtitlesDefaultFirst(t *testing.T) {
+	out := encodeSubtitles([]embedSubtitle{
+		{Label: "Spanish", Src: "a.vtt"},
+		{Label: "English", Src: "b.vtt", Default: true},
+	})
+	if !strings.Contains(out, "English") || strings.Index(out, "English") > strings.Index(out, "Spanish") {
+		t.Fatalf("default track not first: %s", out)
+	}
 }

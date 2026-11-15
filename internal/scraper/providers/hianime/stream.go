@@ -157,8 +157,21 @@ func encodeSubtitles(subs []embedSubtitle) string {
 		Language string `json:"language"`
 		Label    string `json:"label"`
 	}
-	out := make([]track, 0, len(subs))
+	// The player flags one track as its default; list it first so a picker
+	// that takes the head of the list agrees with the site.
+	ordered := make([]embedSubtitle, 0, len(subs))
 	for _, s := range subs {
+		if s.Default {
+			ordered = append(ordered, s)
+		}
+	}
+	for _, s := range subs {
+		if !s.Default {
+			ordered = append(ordered, s)
+		}
+	}
+	out := make([]track, 0, len(ordered))
+	for _, s := range ordered {
 		if strings.TrimSpace(s.Src) == "" {
 			continue
 		}
