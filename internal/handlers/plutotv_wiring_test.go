@@ -27,3 +27,11 @@ func TestASavedPlutoTVURLNamesItsSource(t *testing.T) {
 	assert.Equal(t, "PlutoTV", sourceFromURL("https://www.pluto.tv/on-demand/series/6206bba315c8610013683974/episode/6206bbaa15c8610013683a28"))
 	assert.Equal(t, "StartFlix", sourceFromURL("https://www.startflix.test/series/dark:ep1"), "the neighbours are unmoved")
 }
+
+// "pluto" is the selector's other spelling everywhere else (--source pluto);
+// the home screen opens on the same tab for it, so the search that follows
+// keeps the one source that was asked for instead of widening to all.
+func TestThePlutoAliasOpensOnTheSameTab(t *testing.T) {
+	assert.Equal(t, scopeIndexForSource("plutotv"), scopeIndexForSource("pluto"))
+	assert.Equal(t, 3, scopeIndexForSource(" Pluto "))
+}

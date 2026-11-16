@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -88,4 +90,25 @@ func TestPlutoTVIsSearchedOnTheAnimeTabs(t *testing.T) {
 func TestTheHiAnimeFlagStaysHiAnimeOnly(t *testing.T) {
 	assert.Equal(t, []apisource.SourceKind{apisource.HiAnime}, registryKindsForSource("hianime"))
 	assert.NotContains(t, registryKindsForSource("goyabu"), apisource.PlutoTV)
+}
+
+// A search made on a language tab carries that language to every source, so a
+// source of mixed languages (Pluto TV) can keep the titles that fit the tab.
+func TestASearchCarriesTheLanguageOfItsTab(t *testing.T) {
+	for scope, want := range map[string]string{
+		"english": "EN", "ptbr": "PT", "pt-br": "PT",
+		"": "", "movietv": "", "plutotv": "", "hianime": "", "animefire": "",
+	} {
+		var got string
+		asked := false
+		search := func(ctx context.Context, _ string, _ []apisource.SourceKind) ([]*models.Anime, error) {
+			got, asked = apisource.LanguageFrom(ctx), true
+			return []*models.Anime{{Name: "X", URL: "https://example.test/x", Source: "HiAnime"}}, nil
+		}
+		pick := func(animes []*models.Anime) (*models.Anime, error) { return animes[0], nil }
+		_, err := searchAnimeEnhanced("x", scope, search, pick, func(*models.Anime) error { return nil })
+		require.NoError(t, err, scope)
+		require.True(t, asked, scope)
+		assert.Equal(t, want, got, "scope %q", scope)
+	}
 }

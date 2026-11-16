@@ -30,6 +30,9 @@ type outcome struct {
 	stream  string
 	adFree  bool
 	err     string
+	// playlist is the text handed to the player, the fake's address taken out
+	// so that two runs (two fakes) compare.
+	playlist string
 }
 
 // realClip is where the real fixture's title lives, as a path on the fake CDN.
@@ -103,7 +106,11 @@ func chain(t *testing.T, mutate func(*fakePluto, map[string]string)) outcome {
 		return o
 	}
 	o.stream = strings.TrimPrefix(stream.URL, f.url())
+	if i := strings.Index(o.stream, "?"); i >= 0 {
+		o.stream = o.stream[:i] // the stitcher's query carries the session of this run
+	}
 	o.adFree = stream.AdFree
+	o.playlist = strings.ReplaceAll(stream.Playlist, f.url(), "")
 	return o
 }
 
@@ -352,4 +359,148 @@ func TestTheRecorderTellsAPassFromAFailure(t *testing.T) {
 	assert.True(t, r.try(func() { r.Errorf("x"); r.FailNow() }), "a body that fails the recorder did")
 	assert.Equal(t, []string{"x"}, r.messages)
 	assert.False(t, (&recorder{}).try(func() { panic("a plain panic") }), "a panic that is not a failure of the recorder is not reported as one")
+}
+
+// ---- the playlist assembled when the CDN refuses the title's own ------------
+
+// refuseOwnPlaylists makes the fake CDN answer as the refusing one does: 403
+// for the title's own playlist at every rung, so the title is read out of the
+// stitched playlist.
+func refuseOwnPlaylists(f *fakePluto) {
+	for _, rung := range fakeLadder {
+		f.setRoute(realContentPath(rung.rendition), http.StatusForbidden, "")
+	}
+}
+
+// assembledMutations break (or, for the controls, only disturb) the real
+// stitched playlist while the title's own is refused. What must change is the
+// playlist handed to the player; what must not is anything spliced around the
+// title, which the assembled playlist never carried.
+var assembledMutations = []fixtureMutation{
+	{"a segment of the title is dropped", true, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		lines := strings.Split(files["stitched"], "\n")
+		for i, l := range lines {
+			if strings.Contains(l, "/hls/498333-941317/") && strings.HasSuffix(strings.TrimSpace(l), ".ts") {
+				lines = append(lines[:i-2], lines[i+1:]...) // its key, its duration, itself
+				break
+			}
+		}
+		files["stitched"] = strings.Join(lines, "\n")
+	}},
+	{"a segment of the title changes its duration", true, "assembled", func(t *testing.T, _ *fakePluto, files map[string]string) {
+		lines := strings.Split(files["stitched"], "\n")
+		for i, l := range lines {
+			if strings.Contains(l, "/hls/0-498332/") && strings.HasSuffix(strings.TrimSpace(l), ".ts") {
+				require.True(t, strings.HasPrefix(lines[i-1], "#EXTINF:5,"), lines[i-1])
+				lines[i-1] = "#EXTINF:4,"
+				break
+			}
+		}
+		files["stitched"] = strings.Join(lines, "\n")
+	}},
+	{"an ad changes its duration (control)", false, "assembled", func(t *testing.T, _ *fakePluto, files map[string]string) {
+		// 5.133 is the length of an ad's segment; the title's own are 5 and 5.1.
+		replaceOnce(t, files, "stitched", "#EXTINF:5.133,", "#EXTINF:4.133,")
+	}},
+	{"a key file of the title is another", true, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		files["stitched"] = strings.Replace(files["stitched"], "hls_300_keyfile_0.key", "hls_300_keyfile_9.key", 1)
+	}},
+	{"a segment's IV is another", true, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		files["stitched"] = strings.Replace(files["stitched"], "IV=0x00000000000000000000000000000001", "IV=0x000000000000000000000000000000ff", 1)
+	}},
+	{"a key leaves its IV to the sequence number", true, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		i := strings.Index(files["stitched"], ",IV=0x")
+		files["stitched"] = files["stitched"][:i] + files["stitched"][i+len(",IV=0x")+32:]
+	}},
+	{"two ranges of the title change places", true, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		s := strings.ReplaceAll(files["stitched"], "/hls/498333-941317/", "/hls/@@/")
+		s = strings.ReplaceAll(s, "/hls/941318-1295296/", "/hls/498333-941317/")
+		files["stitched"] = strings.ReplaceAll(s, "/hls/@@/", "/hls/941318-1295296/")
+	}},
+	{"the ads are other ads (control)", false, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		files["stitched"] = strings.ReplaceAll(files["stitched"], "_ad%2Fcreative%2F", "_ad%2Fcreative%2Fzz")
+	}},
+	{"every ad is gone (control)", false, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		var kept []string
+		for _, l := range strings.Split(files["stitched"], "\n") {
+			if l != "" && !strings.HasPrefix(l, "#") && strings.Contains(l, "/mp4/") {
+				if n := len(kept); n > 0 && strings.HasPrefix(kept[n-1], "#EXTINF") {
+					kept = kept[:n-1]
+				}
+				continue
+			}
+			kept = append(kept, l)
+		}
+		files["stitched"] = strings.Join(kept, "\n")
+	}},
+	{"the wall clock of the stitching moves (control)", false, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		files["stitched"] = strings.ReplaceAll(files["stitched"], "#EXT-X-PROGRAM-DATE-TIME:2026-11-16", "#EXT-X-PROGRAM-DATE-TIME:2027-01-01")
+	}},
+	{"the closing bumper is another clip (control)", false, "assembled", func(_ *testing.T, _ *fakePluto, files map[string]string) {
+		files["stitched"] = strings.ReplaceAll(files["stitched"], "ad_bumper_animation_orbit_10", "ad_bumper_animation_orbit_11")
+	}},
+}
+
+func TestTheAssembledPlaylistOverTheRealFixtureIsTheTitleAlone(t *testing.T) {
+	o := chain(t, func(f *fakePluto, _ map[string]string) { refuseOwnPlaylists(f) })
+	require.Empty(t, o.err)
+	assert.True(t, o.adFree)
+	assert.Equal(t, "/v2/stitch/hls/episode/"+fakeEpisodeID+"/master.m3u8", o.stream, "the URL that answers")
+	tags, media := playlistLines(o.playlist)
+	require.NotEmpty(t, media)
+	for _, line := range media {
+		assert.True(t, strings.HasPrefix(line, realClip), "not the title's: %s", line)
+	}
+	assert.Equal(t, 3, countPrefix(tags, "#EXT-X-DISCONTINUITY"), "the real title is four ranges")
+	assert.Equal(t, len(media), countPrefix(tags, "#EXT-X-KEY:METHOD=AES-128"))
+	assert.NotEqual(t, chain(t, nil).playlist, o.playlist, "it is not the title's own playlist: that one was refused")
+}
+
+func TestAssembledPlaylistMutationsAreNoticed(t *testing.T) {
+	baseline := chain(t, func(f *fakePluto, _ map[string]string) { refuseOwnPlaylists(f) })
+	require.Empty(t, baseline.err)
+	require.True(t, baseline.adFree, "the baseline is the title read out of the real stitched playlist")
+
+	for _, m := range assembledMutations {
+		t.Run(m.name, func(t *testing.T) {
+			got := chain(t, func(f *fakePluto, files map[string]string) {
+				refuseOwnPlaylists(f)
+				m.mutate(t, f, files)
+			})
+			if m.mustChange {
+				assert.NotEqual(t, baseline.playlist, got.playlist, "the playlist handed to the player did not notice")
+			} else {
+				assert.Equal(t, baseline, got, "a control changed the outcome: what is spliced around the title leaked into it")
+			}
+		})
+	}
+}
+
+func TestAssembledPlaylistMutationsKeepTheirControls(t *testing.T) {
+	names := map[string]bool{}
+	breaking, controls := 0, 0
+	for _, m := range assembledMutations {
+		assert.False(t, names[m.name], "duplicate mutation %q", m.name)
+		names[m.name] = true
+		assert.Equal(t, "assembled", m.layer)
+		assert.Equal(t, !m.mustChange, strings.HasSuffix(m.name, "(control)"), "%q", m.name)
+		if m.mustChange {
+			breaking++
+		} else {
+			controls++
+		}
+	}
+	assert.GreaterOrEqual(t, breaking, 5, "too few real mutations to mean anything")
+	assert.GreaterOrEqual(t, controls, 3, "too few controls to tell a break from noise")
+}
+
+// The playlist is part of what the chain compares: a mutation that only
+// changed it would otherwise pass for "nothing changed".
+func TestTheOutcomeCarriesThePlaylist(t *testing.T) {
+	a := chain(t, nil)
+	require.NotEmpty(t, a.playlist)
+	assert.NotContains(t, a.playlist, "127.0.0.1", "the fake's own address is taken out, so runs compare")
+	b := a
+	b.playlist += "#x"
+	assert.NotEqual(t, a, b)
 }

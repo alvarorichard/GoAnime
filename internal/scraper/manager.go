@@ -875,7 +875,9 @@ func (a *PlutoTVAdapter) GetStreamURLContext(ctx context.Context, episodeURL str
 	if err != nil {
 		return "", nil, err
 	}
-	return stream.URL, map[string]string{"source": "plutotv"}, nil
+	// The address to play, not the CDN's own URL for the playlist, which one
+	// of the CDNs refuses: the same one the api layer hands the player.
+	return plutotv.PlayURL(stream), map[string]string{"source": "plutotv"}, nil
 }
 
 func (a *PlutoTVAdapter) GetType() ScraperType { return PlutoTVType }

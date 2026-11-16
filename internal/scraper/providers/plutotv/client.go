@@ -68,6 +68,8 @@ var (
 	// streamInfRe / resolutionRe read one #EXT-X-STREAM-INF line.
 	bandwidthRe  = regexp.MustCompile(`[:,]BANDWIDTH=(\d+)`)
 	resolutionRe = regexp.MustCompile(`RESOLUTION=\d+x(\d+)`)
+	// countryRe is an ISO 3166-1 alpha-2 code.
+	countryRe = regexp.MustCompile(`^[A-Z]{2}$`)
 	// tagURIRe matches the URI attribute of a playlist tag (a key file).
 	tagURIRe = regexp.MustCompile(`URI="[^"]*"`)
 	// keyMethodRe reads the method of an #EXT-X-KEY or #EXT-X-SESSION-KEY.
@@ -158,6 +160,10 @@ type session struct {
 	vod            string
 	stitcher       string
 	expires        time.Time
+	// country is the two-letter code of the country the service placed this
+	// session in ("BR", "US"), "" when it did not say. The catalog is that
+	// country's: a VPN changes it, and some countries list nothing on demand.
+	country string
 }
 
 var (
@@ -382,6 +388,9 @@ func (c *Client) boot(ctx context.Context) (*session, error) {
 			VOD      string `json:"vod"`
 			Stitcher string `json:"stitcher"`
 		} `json:"servers"`
+		Session struct {
+			CountryCode string `json:"countryCode"`
+		} `json:"session"`
 	}
 	if _, err := c.getJSON(ctx, c.bootURL+"/v4/start?"+q.Encode(), "", "session", &answer); err != nil {
 		return nil, err
@@ -392,6 +401,9 @@ func (c *Client) boot(ctx context.Context) (*session, error) {
 		search:         strings.TrimRight(answer.Servers.Search, "/"),
 		vod:            strings.TrimRight(answer.Servers.VOD, "/"),
 		stitcher:       strings.TrimRight(answer.Servers.Stitcher, "/"),
+	}
+	if cc := strings.ToUpper(strings.TrimSpace(answer.Session.CountryCode)); countryRe.MatchString(cc) {
+		s.country = cc
 	}
 	if s.token == "" {
 		return nil, netx.NewParserError(SourceName, "session", "the session answer carries no token", nil)
@@ -446,12 +458,21 @@ func (c *Client) Search(ctx context.Context, query string) ([]Title, error) {
 			Language string `json:"language"`
 		} `json:"data"`
 	}
+	country := ""
 	err := c.withSession(ctx, func(s *session) (int, error) {
+		country = s.country
 		q := url.Values{"q": {query}, "limit": {fmt.Sprint(searchLimit)}}
 		return c.getJSON(ctx, s.search+"/v1/search?"+q.Encode(), s.token, "search", &page)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(page.Data) == 0 {
+		// Not an error: the catalog is the session's country's, and that one
+		// has nothing by this name (or nothing on demand at all). Said in the
+		// log because "no results" alone does not tell a title that does not
+		// exist from a VPN that moved the catalog.
+		emptyCatalogFn(countryOrUnknown(country), query)
 	}
 	titles := make([]Title, 0, len(page.Data))
 	seen := make(map[string]bool, len(page.Data))
@@ -465,6 +486,32 @@ func (c *Client) Search(ctx context.Context, query string) ([]Title, error) {
 		titles = append(titles, Title{ID: hit.ID, Name: name, Slug: hit.Slug, Language: hit.Language, Kind: kind})
 	}
 	return titles, nil
+}
+
+// Country is the two-letter code of the country whose catalog the current
+// session reads ("BR", "US"), or "" before any request was made or when the
+// service did not say. It makes no request.
+func (c *Client) Country() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sess == nil {
+		return ""
+	}
+	return c.sess.country
+}
+
+// emptyCatalogFn records a search the session's country had nothing for; a
+// seam, so a test can read what was said.
+var emptyCatalogFn = func(country, query string) {
+	util.Debug("Pluto TV lists nothing for the query in this session's country (a VPN changes the country)", "country", country, "query", query)
+}
+
+// countryOrUnknown is country, or a word for the log when there is none.
+func countryOrUnknown(country string) string {
+	if country == "" {
+		return "unknown"
+	}
+	return country
 }
 
 // ---------------------------------------------------------------------------

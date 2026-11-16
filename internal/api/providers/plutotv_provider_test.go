@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,19 +35,23 @@ type stubPluto struct {
 	episodesErr   error
 	stream        source.Stream
 	streamErr     error
+	// gotCtx is the context the api layer was handed.
+	gotCtx context.Context
 }
 
 func installPlutoStub(t *testing.T) *stubPluto {
 	t.Helper()
 	s := &stubPluto{}
 	prevEpisodes, prevStream := plutoTVEpisodesFn, plutoTVStreamFn
-	plutoTVEpisodesFn = func(a *models.Anime) ([]models.Episode, error) {
+	plutoTVEpisodesFn = func(ctx context.Context, a *models.Anime) ([]models.Episode, error) {
 		s.episodesCalls++
+		s.gotCtx = ctx
 		s.gotAnime = a
 		return s.episodes, s.episodesErr
 	}
-	plutoTVStreamFn = func(a *models.Anime, e *models.Episode, quality string) (source.Stream, error) {
+	plutoTVStreamFn = func(ctx context.Context, a *models.Anime, e *models.Episode, quality string) (source.Stream, error) {
 		s.streamCalls++
+		s.gotCtx = ctx
 		s.gotAnime, s.gotEpisode, s.gotQuality = a, e, quality
 		return s.stream, s.streamErr
 	}
@@ -319,4 +324,77 @@ func TestPlutoTVBuildsItsOwnAdapterOnce(t *testing.T) {
 	second, err := p.scraper()
 	require.NoError(t, err)
 	assert.Same(t, first, second, "built once and kept")
+}
+
+// The caller's context reaches the api layer, so cancelling a search or a
+// playback cancels Pluto TV's requests instead of leaving them to their budget.
+func TestPlutoTVProviderHandsItsContextToTheAPILayer(t *testing.T) {
+	stub := installPlutoStub(t)
+	stub.episodes = []models.Episode{{Number: "1"}}
+	stub.stream = source.Stream{URL: "https://cdn/x.m3u8"}
+	p := &plutoTVProvider{}
+	ctx := context.WithValue(t.Context(), plutoCtxKey{}, "mine")
+
+	_, err := p.FetchEpisodes(ctx, &models.Anime{URL: "https://pluto.tv/on-demand/movies/62b9ea9ec4eb8f00140cb633"})
+	require.NoError(t, err)
+	require.NotNil(t, stub.gotCtx)
+	assert.Equal(t, "mine", stub.gotCtx.Value(plutoCtxKey{}), "listing")
+
+	stub.gotCtx = nil
+	_, err = p.FetchStream(ctx, &models.Episode{URL: "u"}, &models.Anime{}, "best")
+	require.NoError(t, err)
+	require.NotNil(t, stub.gotCtx)
+	assert.Equal(t, "mine", stub.gotCtx.Value(plutoCtxKey{}), "stream")
+}
+
+// ---- the language a tab asks for ---------------------------------------------
+
+func plutoMixedTitles() []*models.Anime {
+	return []*models.Anime{
+		{Name: "[TV] [PT-BR] Naruto", URL: "https://pluto.tv/on-demand/series/aaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Name: "[Movie] [English] Heat", URL: "https://pluto.tv/on-demand/movies/bbbbbbbbbbbbbbbbbbbbbbbb"},
+		{Name: "[TV] [Multilanguage] Mr. Bean", URL: "https://pluto.tv/on-demand/series/cccccccccccccccccccccccc"},
+	}
+}
+
+func plutoNames(titles []*models.Anime) []string {
+	out := make([]string, 0, len(titles))
+	for _, a := range titles {
+		out = append(out, a.Name)
+	}
+	return out
+}
+
+func TestPlutoTitlesInKeepsWhatFitsTheLanguage(t *testing.T) {
+	all := []string{"[TV] [PT-BR] Naruto", "[Movie] [English] Heat", "[TV] [Multilanguage] Mr. Bean"}
+	assert.Equal(t, all, plutoNames(plutoTitlesIn(plutoMixedTitles(), "")), "no language asked for: everything")
+	assert.Equal(t, []string{"[TV] [PT-BR] Naruto", "[TV] [Multilanguage] Mr. Bean"}, plutoNames(plutoTitlesIn(plutoMixedTitles(), "PT")),
+		"the PT-BR tab leaves out what says it is English, and keeps what says neither")
+	assert.Equal(t, []string{"[Movie] [English] Heat", "[TV] [Multilanguage] Mr. Bean"}, plutoNames(plutoTitlesIn(plutoMixedTitles(), "EN")),
+		"the ENGLISH tab leaves out what says it is Portuguese")
+	assert.Equal(t, all, plutoNames(plutoTitlesIn(plutoMixedTitles(), "FR")), "a language no tab asks for filters nothing")
+
+	withNil := append(plutoMixedTitles(), nil)
+	assert.Len(t, plutoTitlesIn(withNil, "EN"), 2, "a missing title is not a title that fits")
+	assert.Len(t, plutoTitlesIn(withNil, ""), 4, "and nothing is touched when nothing is asked")
+	assert.Empty(t, plutoTitlesIn(nil, "PT"))
+}
+
+func TestPlutoTVSearchKeepsTheTitlesOfTheTabsLanguage(t *testing.T) {
+	for lang, want := range map[string][]string{
+		"EN": {"Heat", "Mr. Bean"},
+		"PT": {"Naruto", "Mr. Bean"},
+		"":   {"Naruto", "Heat", "Mr. Bean"},
+	} {
+		adapter := &plutoCtxScraper{plutoPlainScraper: plutoPlainScraper{results: plutoMixedTitles()}}
+		ctx := source.WithLanguage(t.Context(), lang)
+		results, err := providerWith(adapter).Search(ctx, "x")
+		require.NoError(t, err, lang)
+		var names []string
+		for _, r := range results {
+			names = append(names, r.Name[strings.LastIndex(r.Name, "] ")+2:])
+			assert.Equal(t, "PlutoTV", r.Source, "what is kept is still tagged as the source's")
+		}
+		assert.Equal(t, want, names, "language %q", lang)
+	}
 }

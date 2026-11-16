@@ -14,6 +14,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/downloader"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
@@ -294,12 +295,18 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 }
 
 func downloadStartFlixMovie(title *models.Anime) error {
+	// A Pluto TV address says what it is, so a series asked for as a movie is
+	// told so at once. Listing it first would open its season picker, in a
+	// command that was meant to run unattended.
+	if title.Source == plutoTVSourceName && !plutotv.IsMovieURL(title.URL) {
+		return seriesNotMovieErr(title)
+	}
 	eps, err := workflowFetchEpisodesFn(context.Background(), title)
 	if err != nil {
 		return fmt.Errorf("failed to open %q: %w", title.Name, err)
 	}
 	if title.MediaType != models.MediaTypeMovie {
-		return fmt.Errorf("%q is a series on %s: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, sourceOr(title), title.Name)
+		return seriesNotMovieErr(title)
 	}
 	if len(eps) == 0 {
 		return fmt.Errorf("%q lists nothing to download", title.Name)
@@ -333,8 +340,16 @@ func downloadStartFlixSeries(title *models.Anime) error {
 	return errors.Join(failed...)
 }
 
+// seriesNotMovieErr says a title asked for as a movie is a series, and how to
+// download it.
+func seriesNotMovieErr(title *models.Anime) error {
+	return fmt.Errorf("%q is a series on %s: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, sourceOr(title), title.Name)
+}
+
 func seriesErr(title *models.Anime, err error) error {
-	if errors.Is(err, api.ErrStartFlixNotSeries) {
+	// Pluto TV's client refuses to list the seasons of a movie in its own
+	// words; the address says it is one, so the same hint is given.
+	if errors.Is(err, api.ErrStartFlixNotSeries) || (title.Source == plutoTVSourceName && plutotv.IsMovieURL(title.URL)) {
 		return fmt.Errorf("%q is a movie on %s: download it with -dm \"%s\"", title.Name, sourceOr(title), title.Name)
 	}
 	return fmt.Errorf("failed to list %q: %w", title.Name, err)

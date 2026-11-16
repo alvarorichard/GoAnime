@@ -144,8 +144,11 @@ func Normalize(query string) string {
 // movie scope wants movies and series.
 func KindsForScope(scope string) []Kind {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
-	case "ptbr", "hianime", "english":
+	case "ptbr", "hianime":
 		return []Kind{KindAnime}
+	case "english":
+		// HiAnime's anime and Pluto TV's movies and series: every kind.
+		return nil
 	case "movietv":
 		return []Kind{KindMovie, KindSeries}
 	default:

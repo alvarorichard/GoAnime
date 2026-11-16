@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"fmt"
@@ -176,7 +177,11 @@ func useServiceFor(t *testing.T, s *plutoService) {
 	t.Helper()
 	prev := api.PlutoTVClientFn
 	api.PlutoTVClientFn = func() *plutotv.Client { return plutotv.NewClientForTest(s.srv.Client(), s.srv.URL) }
-	t.Cleanup(func() { api.PlutoTVClientFn = prev })
+	api.ForgetPlutoTVListings() // each test reads its own service
+	t.Cleanup(func() {
+		api.PlutoTVClientFn = prev
+		api.ForgetPlutoTVListings()
+	})
 }
 
 func deathNote() *models.Anime {
@@ -255,7 +260,7 @@ func TestPlutoTVDownloadFollowsTheQualityAsked(t *testing.T) {
 
 func TestPlutoTVMovieIsOneDownloadableItem(t *testing.T) {
 	movie := &models.Anime{Name: "Some Movie", URL: plutotv.MovieURL("62b9ea9ec4eb8f00140cb633"), Source: "PlutoTV", MediaType: models.MediaTypeMovie}
-	eps, err := api.GetPlutoTVEpisodes(movie)
+	eps, err := api.GetPlutoTVEpisodes(context.Background(), movie)
 	require.NoError(t, err)
 	require.Len(t, eps, 1, "-dm of a movie downloads exactly one item")
 	assert.Equal(t, movie.URL, eps[0].URL)

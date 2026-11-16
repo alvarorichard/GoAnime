@@ -296,6 +296,10 @@ func searchAnimeEnhanced(
 	registryKinds := registryKindsForSource(normalizedSource)
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
+	// A language tab asks for its language; a source of mixed languages reads
+	// it from the search's context (see apisource.WithLanguage).
+	searchCtx := apisource.WithLanguage(context.Background(), apisource.ScopeLanguage(normalizedSource))
+
 	var animes []*models.Anime
 	var searchErr error
 	var liveChosen *models.Anime
@@ -304,7 +308,7 @@ func searchAnimeEnhanced(
 		// the highlighted title early; otherwise the collected results
 		// continue below exactly as the spinner path returns them.
 		var liveErr error
-		animes, liveChosen, liveErr = runLiveSearch(name, registryKinds)
+		animes, liveChosen, liveErr = runLiveSearchIn(searchCtx, name, registryKinds)
 		if liveErr != nil {
 			// A deliberate quit or back travels like a selection error so
 			// the retry loop below treats it the same way.
@@ -323,7 +327,7 @@ func searchAnimeEnhanced(
 				return
 			}
 			// Model B registry fan-out (providers.SearchAll).
-			animes, searchErr = search(context.Background(), name, registryKinds)
+			animes, searchErr = search(searchCtx, name, registryKinds)
 		})
 	}
 	if searchErr != nil {

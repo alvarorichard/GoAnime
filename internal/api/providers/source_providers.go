@@ -1171,15 +1171,35 @@ func (p *plutoTVProvider) Search(ctx context.Context, query string) ([]*models.A
 	if err != nil {
 		return nil, err
 	}
+	results = plutoTitlesIn(results, source.LanguageFrom(ctx))
 	tagResults(results, source.PlutoTV)
 	return results, nil
+}
+
+// plutoTitlesIn keeps the titles that fit the language a tab asked for ("PT",
+// "EN"; "" keeps all). Pluto TV says each title's language, and its catalog is
+// the session's country's, so the ENGLISH tab would otherwise fill with
+// Portuguese titles in Brazil and the PT-BR tab with English ones elsewhere.
+// A title that names neither language is kept: it may well fit.
+func plutoTitlesIn(titles []*models.Anime, lang string) []*models.Anime {
+	other := map[string]string{"PT": "[English]", "EN": "[PT-BR]"}[lang]
+	if other == "" {
+		return titles
+	}
+	kept := make([]*models.Anime, 0, len(titles))
+	for _, t := range titles {
+		if t != nil && !strings.Contains(t.Name, other) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 func (p *plutoTVProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return plutoTVEpisodesFn(anime)
+	return plutoTVEpisodesFn(ctx, anime)
 }
 
 // FetchStream resolves the episode without writing playback state.
@@ -1187,7 +1207,7 @@ func (p *plutoTVProvider) FetchStream(ctx context.Context, episode *models.Episo
 	if err := ctx.Err(); err != nil {
 		return source.Stream{}, err
 	}
-	return plutoTVStreamFn(anime, episode, quality)
+	return plutoTVStreamFn(ctx, anime, episode, quality)
 }
 
 func (p *plutoTVProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {

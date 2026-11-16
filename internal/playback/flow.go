@@ -31,7 +31,7 @@ type flowEnv struct {
 	handleMovie        func(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error
 	handleSeries       func(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error
 	// pickMovie opens the episodes screen for a title of one item.
-	pickMovie func(episodes []models.Episode) error
+	pickMovie func(episodes []models.Episode) (int, error)
 }
 
 // realFlow is the wiring the program runs with.

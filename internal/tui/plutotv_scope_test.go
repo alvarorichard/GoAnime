@@ -26,3 +26,8 @@ func TestTheEnglishTabSearchesWithItsOwnSelector(t *testing.T) {
 	assert.Equal(t, 2, indexForScope(" English "))
 	assert.Equal(t, 2, indexForScope("hianime"), "--source hianime still opens there")
 }
+
+func TestThePlutoAliasRetriesOnTheSameTab(t *testing.T) {
+	assert.Equal(t, indexForScope("plutotv"), indexForScope("pluto"))
+	assert.Equal(t, 3, indexForScope(" PLUTO "))
+}

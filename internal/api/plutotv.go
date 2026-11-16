@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
@@ -22,6 +23,9 @@ import (
 // PlutoTVClientFn is the Pluto TV client; a seam for tests.
 var PlutoTVClientFn = plutotv.Shared
 
+// plutoPlayURLFn turns a resolved stream into the address to play; a seam.
+var plutoPlayURLFn = plutotv.PlayURL
+
 const (
 	// plutoListBudget bounds a listing: one session and one catalog call.
 	plutoListBudget = 25 * time.Second
@@ -32,18 +36,23 @@ const (
 	// does. Naming it also keeps the player from reusing the referer of
 	// whatever source was played before.
 	plutoReferer = "https://pluto.tv/"
+	// plutoShowTTL is how long a series' listing is reused. One answer holds
+	// every season, and a download of a whole series asks for it once per
+	// season; the catalog does not change in the time that takes.
+	plutoShowTTL = 2 * time.Minute
 )
 
 // GetPlutoTVEpisodes lists what a Pluto TV title plays: the movie itself, or
-// one season of a series, picked by the user when there are several.
-func GetPlutoTVEpisodes(media *models.Anime) ([]models.Episode, error) {
+// one season of a series, picked by the user when there are several. ctx
+// bounds the catalog request; the picker waits for the user regardless.
+func GetPlutoTVEpisodes(ctx context.Context, media *models.Anime) ([]models.Episode, error) {
 	if media == nil || media.URL == "" {
 		return nil, errors.New("no Pluto TV title to list")
 	}
 	if plutotv.IsMovieURL(media.URL) {
 		return []models.Episode{plutoMovieEpisode(media)}, nil
 	}
-	show, err := plutoShow(media)
+	show, err := plutoShow(ctx, media)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +83,7 @@ func GetPlutoTVSeasonNumbers(media *models.Anime) ([]int, error) {
 	if media == nil || media.URL == "" {
 		return nil, errors.New("no Pluto TV title")
 	}
-	show, err := plutoShow(media)
+	show, err := plutoShow(context.Background(), media)
 	if err != nil {
 		return nil, err
 	}
@@ -90,17 +99,59 @@ func GetPlutoTVSeasonEpisodes(media *models.Anime, season int) ([]models.Episode
 	if media == nil || media.URL == "" {
 		return nil, errors.New("no Pluto TV title")
 	}
-	show, err := plutoShow(media)
+	show, err := plutoShow(context.Background(), media)
 	if err != nil {
 		return nil, err
 	}
 	return plutoSeasonEpisodes(media, show, season)
 }
 
-func plutoShow(media *models.Anime) (plutotv.Show, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), plutoListBudget)
+// plutoShows remembers the last listings by series URL (see plutoShowTTL).
+var plutoShows = struct {
+	mu    sync.Mutex
+	byURL map[string]plutoShowEntry
+	now   func() time.Time // a seam for tests
+}{byURL: map[string]plutoShowEntry{}, now: time.Now}
+
+type plutoShowEntry struct {
+	show plutotv.Show
+	at   time.Time
+}
+
+// ForgetPlutoTVListings drops the listings kept for reuse, so the next one is
+// read from the service again.
+func ForgetPlutoTVListings() {
+	plutoShows.mu.Lock()
+	defer plutoShows.mu.Unlock()
+	clear(plutoShows.byURL)
+}
+
+// plutoShow lists a series, within ctx and the listing budget. A listing made
+// moments ago is reused; a failed one is never kept.
+func plutoShow(ctx context.Context, media *models.Anime) (plutotv.Show, error) {
+	plutoShows.mu.Lock()
+	entry, ok := plutoShows.byURL[media.URL]
+	now := plutoShows.now()
+	plutoShows.mu.Unlock()
+	if ok && now.Sub(entry.at) < plutoShowTTL {
+		return entry.show, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, plutoListBudget)
 	defer cancel()
-	return PlutoTVClientFn().Show(ctx, media.URL)
+	show, err := PlutoTVClientFn().Show(ctx, media.URL)
+	if err != nil {
+		return plutotv.Show{}, err
+	}
+	plutoShows.mu.Lock()
+	for url, e := range plutoShows.byURL {
+		if now.Sub(e.at) >= plutoShowTTL {
+			delete(plutoShows.byURL, url) // nothing stale is kept around
+		}
+	}
+	plutoShows.byURL[media.URL] = plutoShowEntry{show: show, at: now}
+	plutoShows.mu.Unlock()
+	return show, nil
 }
 
 func plutoMovieEpisode(media *models.Anime) models.Episode {
@@ -144,14 +195,15 @@ func plutoSeasonEpisodes(media *models.Anime, show plutotv.Show, number int) ([]
 	return nil, fmt.Errorf("%q has no season %d on Pluto TV", media.Name, number)
 }
 
-// ResolvePlutoTVStream resolves a movie or episode to its playlist. It writes
-// no playback state: Pluto TV's media needs no referer, so the Stream is just
-// the URL.
-func ResolvePlutoTVStream(media *models.Anime, episode *models.Episode, quality string) (source.Stream, error) {
+// ResolvePlutoTVStream resolves a movie or episode to what the player is
+// given: the loopback address of the title's playlist (see plutotv.PlayURL),
+// with the site's own referer for the media requests. It writes no playback
+// state. ctx cancels the resolution; the stream budget bounds it.
+func ResolvePlutoTVStream(ctx context.Context, media *models.Anime, episode *models.Episode, quality string) (source.Stream, error) {
 	if episode == nil || episode.URL == "" {
 		return source.Stream{}, errors.New("no Pluto TV episode to play")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), plutoStreamBudget)
+	ctx, cancel := context.WithTimeout(ctx, plutoStreamBudget)
 	defer cancel()
 	stream, err := PlutoTVClientFn().Stream(ctx, episode.URL, quality)
 	if err != nil {
@@ -160,16 +212,5 @@ func ResolvePlutoTVStream(media *models.Anime, episode *models.Episode, quality 
 	if !stream.AdFree && media != nil {
 		util.Debug("Pluto TV title plays with the service's own breaks", "title", media.Name)
 	}
-	target := stream.URL
-	if stream.Playlist != "" {
-		// The playlist is served from loopback: one of the CDNs refuses it at
-		// its own URL (see plutotv_serve.go). Without the local server the URL
-		// still plays wherever the CDN answers.
-		if local, err := plutoPlaylistURLFn(stream.Playlist); err == nil {
-			target = local
-		} else {
-			util.Debug("Pluto TV playlist is played from its own URL", "error", err)
-		}
-	}
-	return source.Stream{URL: target, Referer: plutoReferer}, nil
+	return source.Stream{URL: plutoPlayURLFn(stream), Referer: plutoReferer}, nil
 }

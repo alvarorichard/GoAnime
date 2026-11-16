@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"runtime"
@@ -128,4 +129,71 @@ func TestDashDMReadsTheSourceFlag(t *testing.T) {
 	util.GlobalSource = "hianime"
 	_, _ = searchMovieTitle(&util.DownloadRequest{AnimeName: "x"})
 	assert.Equal(t, []string{"plutotv", "pomfy", "family", "family"}, scopes)
+}
+
+// -dm of a Pluto TV series asked for as a movie says so at once: listing it
+// first would open its season picker in a command meant to run unattended.
+func TestDashDMOfAPlutoTVSeriesAsAMovieSaysSoWithoutListingIt(t *testing.T) {
+	series := &models.Anime{Name: "Death Note", Source: "PlutoTV", URL: plutotv.SeriesURL("6206bba315c8610013683974"), MediaType: models.MediaTypeTV}
+	prevScoped, prevFetch := movieScopedSearchFn, workflowFetchEpisodesFn
+	t.Cleanup(func() { movieScopedSearchFn, workflowFetchEpisodesFn = prevScoped, prevFetch })
+	movieScopedSearchFn = func(string, string) (*models.Anime, error) { return series, nil }
+	workflowFetchEpisodesFn = func(context.Context, *models.Anime) ([]models.Episode, error) {
+		t.Error("the listing, and with it the season picker, must not be reached")
+		return nil, nil
+	}
+
+	err := HandleMovieDownloadRequest(&util.DownloadRequest{AnimeName: "death note", Source: "plutotv"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"Death Note" is a series on PlutoTV`)
+	assert.Contains(t, err.Error(), `-dm --type tv "Death Note" <season> <episode>`)
+}
+
+// -dm --type tv of a Pluto TV movie gets the same hint the other sources give,
+// not the client's own "a movie has no seasons".
+func TestDashDMOfAPlutoTVMovieAsASeriesSaysHowToDownloadIt(t *testing.T) {
+	movie := &models.Anime{Name: "A Espia", Source: "PlutoTV", URL: plutotv.MovieURL("673f4126321c1900133853da"), MediaType: models.MediaTypeMovie}
+	prevScoped := movieScopedSearchFn
+	t.Cleanup(func() { movieScopedSearchFn = prevScoped })
+	movieScopedSearchFn = func(string, string) (*models.Anime, error) { return movie, nil }
+	useServiceFor(t, newPlutoService(t))
+
+	for name, req := range map[string]*util.DownloadRequest{
+		"one episode": {AnimeName: "a espia", Source: "plutotv", IsTV: true, SeasonNum: 1, EpisodeNum: 1},
+		"all seasons": {AnimeName: "a espia", Source: "plutotv", IsTV: true, IsAll: true},
+	} {
+		err := HandleMovieDownloadRequest(req)
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), `"A Espia" is a movie on PlutoTV: download it with -dm "A Espia"`, name)
+	}
+}
+
+func TestSeriesErrOfAnotherSourceIsWhatItWas(t *testing.T) {
+	startflix := &models.Anime{Name: "X", Source: "StartFlix", URL: "https://startflix.test/x"}
+	assert.Contains(t, seriesErr(startflix, api.ErrStartFlixNotSeries).Error(), `"X" is a movie on StartFlix`)
+	assert.Contains(t, seriesErr(startflix, errors.New("boom")).Error(), `failed to list "X": boom`)
+	plutoSeries := &models.Anime{Name: "Y", Source: "PlutoTV", URL: plutotv.SeriesURL("6206bba315c8610013683974")}
+	assert.Contains(t, seriesErr(plutoSeries, errors.New("boom")).Error(), `failed to list "Y": boom`, "a Pluto TV series that fails to list is a failure, not a movie")
+	assert.Contains(t, seriesNotMovieErr(&models.Anime{Name: "Z"}).Error(), `"Z" is a series on StartFlix`, "the source's name, or the family's first when it has none")
+}
+
+// -dm of a Pluto TV movie goes on to download it: the "is it a series" check
+// that spares a series its season picker must not stop a movie.
+func TestDashDMOfPlutoTVMovieDownloadsIt(t *testing.T) {
+	movie := &models.Anime{Name: "A Espia", Source: "PlutoTV", URL: plutotv.MovieURL("673f4126321c1900133853da"), MediaType: models.MediaTypeMovie}
+	prevScoped, prevRange := movieScopedSearchFn, workflowBatchRangeFn
+	t.Cleanup(func() { movieScopedSearchFn, workflowBatchRangeFn = prevScoped, prevRange })
+	movieScopedSearchFn = func(string, string) (*models.Anime, error) { return movie, nil }
+	var got []models.Episode
+	var from, to int
+	workflowBatchRangeFn = func(eps []models.Episode, title *models.Anime, start, end int) error {
+		got, from, to = eps, start, end
+		assert.Same(t, movie, title)
+		return nil
+	}
+
+	require.NoError(t, HandleMovieDownloadRequest(&util.DownloadRequest{AnimeName: "a espia", Source: "plutotv"}))
+	require.Len(t, got, 1, "the movie's one entry")
+	assert.Equal(t, movie.URL, got[0].URL)
+	assert.Equal(t, [2]int{1, 1}, [2]int{from, to})
 }

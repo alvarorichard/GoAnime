@@ -27,7 +27,9 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 `animesdigital`, `anroll`, `animesfhd`, `animedrive`, `startflix`, `topcine`, `pobreflix`,
 `pomfy`, `plutotv`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one,
 `english` HiAnime and Pluto TV. Pluto TV's catalog has anime too, so it is searched on the
-ALL, PT-BR, ENGLISH and MOVIES/TV tabs; `--source hianime` is still HiAnime alone.
+ALL, PT-BR, ENGLISH and MOVIES/TV tabs; `--source hianime` is still HiAnime alone. Pluto TV
+says each title's language, so on the PT-BR tab its English titles are left out and on the
+ENGLISH tab its Portuguese ones are; ALL and MOVIES/TV show every title.
 
 Use
 `GOANIME_ENABLED_SOURCES` / `GOANIME_DISABLED_SOURCES` to turn sources on or
@@ -51,7 +53,10 @@ site moves.
   player need cfsolve; without it GoAnime falls back to the StartFlix panel.
 - **Pluto TV** (`goanime --source plutotv "death note"`): the free service,
   read through the same keyless JSON the website uses; there is no account and
-  no key. The catalog depends on the country you connect from. Movies play at
+  no key. The catalog depends on the country you connect from, and a VPN
+  changes it: some countries list nothing on demand, so a search that finds
+  nothing there is not a title that does not exist. The debug log (`--debug`)
+  names the session's country when a Pluto TV search comes back empty. Movies play at
   once; for a series you choose the season first. Its playlist cuts each title
   into pieces with ad breaks between them; GoAnime plays the title's own
   uninterrupted playlist, taken from the same place, so there are no breaks,

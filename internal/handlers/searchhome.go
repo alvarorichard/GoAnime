@@ -205,7 +205,7 @@ func scopeIndexForSource(src string) int {
 		return 2
 	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
-	case "movietv", "startflix", "topcine", "pobreflix", "plutotv":
+	case "movietv", "startflix", "topcine", "pobreflix", "plutotv", "pluto":
 		return 3
 	default:
 		return 0

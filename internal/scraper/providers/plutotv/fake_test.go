@@ -63,6 +63,9 @@ type fakePluto struct {
 	refresh  int    // refreshInSec of the boot answer
 	reject   int    // the next N authenticated calls answer 401
 	bootBody func(f *fakePluto) string
+	// country is the session's countryCode in the boot answer; "-" leaves the
+	// session object out, as an answer that does not say.
+	country  string
 	bootCode int
 	routes   map[string]fakeRoute
 	hits     map[string]int
@@ -115,6 +118,17 @@ func (f *fakePluto) lastRequest(path string) *http.Request {
 	return nil
 }
 
+// sessionJSON is the boot answer's session object, as a trailing member.
+func (f *fakePluto) sessionJSON() string {
+	switch f.country {
+	case "-":
+		return ""
+	case "":
+		return `, "session": {"countryCode": "BR", "activeRegion": "BR"}`
+	}
+	return fmt.Sprintf(`, "session": {"countryCode": %q}`, f.country)
+}
+
 func (f *fakePluto) bootJSON() string {
 	if f.bootBody != nil {
 		return f.bootBody(f)
@@ -123,8 +137,8 @@ func (f *fakePluto) bootJSON() string {
  "sessionToken": %q,
  "stitcherParams": "appName=web&sid=%s&deviceId=DEV&serverSideAds=false",
  "refreshInSec": %d,
- "servers": {"search": %q, "vod": %q, "stitcher": %q}
-}`, f.token, fakeSID, f.refresh, f.srv.URL, f.srv.URL, f.srv.URL)
+ "servers": {"search": %q, "vod": %q, "stitcher": %q}%s
+}`, f.token, fakeSID, f.refresh, f.srv.URL, f.srv.URL, f.srv.URL, f.sessionJSON())
 }
 
 func (f *fakePluto) serve(w http.ResponseWriter, r *http.Request) {

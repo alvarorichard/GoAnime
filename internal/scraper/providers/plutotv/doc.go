@@ -10,7 +10,9 @@
 //	stream  <stitcher>/v2/stitch/hls/episode/<id>/master.m3u8
 //
 // The catalog depends on the country the request comes from; nothing here
-// tries to change that.
+// tries to change that. The session says which country that is
+// (Client.Country), and a search that finds nothing says it in the log: a VPN
+// moves the catalog, and some countries list nothing on demand at all.
 //
 // # Playback
 //
@@ -23,8 +25,8 @@
 // The media host is several CDNs behind one name, and one of them answers 403
 // for every playlist under a clip while serving the segments and keys the
 // playlist lists. So Stream does not hand over a URL to be fetched again: it
-// returns the playlist's text with every URI absolute (Stream.Playlist), to be
-// served to the player from loopback. When the CDN that answered refuses the
+// returns the playlist's text with every URI absolute (Stream.Playlist), and
+// PlayURL serves that text to the player from loopback (serve.go). When the CDN that answered refuses the
 // playlist, the same title is read out of the stitched one instead: its ranges
 // in order, each segment with the key and duration the stitcher gave it, and
 // nothing of what was spliced between them. The ranges are cut from one

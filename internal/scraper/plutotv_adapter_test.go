@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 // The adapter must stay a ContextualScraper: the registry's fan-out hands it
@@ -59,7 +61,9 @@ func plutoAdapterServer(t *testing.T) *plutotv.Client {
 			}
 			_, _ = w.Write([]byte(b.String()))
 		case strings.HasPrefix(path, "/media/"):
-			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:5,\ns.ts\n#EXT-X-ENDLIST\n"))
+			// The title's own playlist, relative like the real one, named by its rendition.
+			rendition := strings.TrimSuffix(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:], ".m3u8")
+			_, _ = fmt.Fprintf(w, "#EXTM3U\n#EXTINF:5,\n%s-00000.ts\n#EXT-X-ENDLIST\n", rendition)
 		default:
 			http.NotFound(w, r)
 		}
@@ -142,13 +146,36 @@ func TestPlutoTVAdapterStreamHonoursTheQualityOption(t *testing.T) {
 	for _, tc := range cases {
 		url, meta, err := a.GetStreamURL(episode, tc.options...)
 		require.NoError(t, err, "%v", tc.options)
-		assert.Contains(t, url, "/"+tc.want+".m3u8", "%v", tc.options)
+		assert.Contains(t, adapterPlaylist(t, url), "/"+tc.want+"-00000.ts", "%v", tc.options)
 		assert.Equal(t, map[string]string{"source": "plutotv"}, meta)
 	}
 
 	url, _, err := a.GetStreamURLContext(t.Context(), episode, "worst")
 	require.NoError(t, err)
-	assert.Contains(t, url, "/hls_600.m3u8")
+	assert.Contains(t, adapterPlaylist(t, url), "/hls_600-00000.ts")
+}
+
+// adapterPlaylist reads what the adapter's stream URL serves. The adapter
+// hands out the address to play, as the api layer does: the title's playlist
+// from loopback, not the CDN's own URL for it, which one of the CDNs refuses.
+// A library caller therefore gets a URL that plays whichever CDN answers.
+func adapterPlaylist(t *testing.T, target string) string {
+	t.Helper()
+	require.True(t, util.IsLocalProxyURL(target), "the loopback address, not the CDN's: %s", target)
+	resp, err := http.Get(target) //nolint:noctx // GoAnime's own loopback playlist
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	text := string(body)
+	require.True(t, strings.HasPrefix(text, "#EXTM3U"))
+	for _, line := range strings.Fields(text) {
+		if !strings.HasPrefix(line, "#") {
+			assert.True(t, strings.HasPrefix(line, "http://"), "every segment is absolute: %s", line)
+		}
+	}
+	return text
 }
 
 func TestPlutoTVAdapterStreamFailureCarriesNoURL(t *testing.T) {
