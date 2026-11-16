@@ -325,6 +325,7 @@ func PlayEpisode(
 			videoURL, videoErr = altURL, nil
 		case len(tried) > 0:
 			util.Infof("The episode is not available on %s either.", strings.Join(tried, ", "))
+			rememberRemovedTitle(anime, videoErr)
 		}
 	}
 

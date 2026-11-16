@@ -7,86 +7,92 @@ import (
 	"time"
 )
 
-func TestMarkAndExpire(t *testing.T) {
+func TestMarkThenIsOffline(t *testing.T) {
 	c := New("", time.Hour)
-	now := time.Unix(1_000_000, 0)
-	c.now = func() time.Time { return now }
-
-	if c.IsOffline("animefire", "u1") {
-		t.Fatal("unknown title must not be offline")
+	if c.IsOffline("AnimeFire", "u1") {
+		t.Fatal("unrecorded title reported offline")
 	}
-	c.MarkOffline("animefire", "u1")
+	if err := c.MarkOffline("AnimeFire", "u1"); err != nil {
+		t.Fatal(err)
+	}
 	if !c.IsOffline("animefire", "u1") {
-		t.Fatal("marked title should be offline")
+		t.Fatal("recorded title not offline (source match is case-insensitive)")
 	}
-	if c.IsOffline("goyabu", "u1") {
-		t.Fatal("verdict must be per source")
+	if c.IsOffline("Goyabu", "u1") {
+		t.Fatal("verdict leaked to another source")
 	}
+}
 
+func TestExpiry(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	c := New("", time.Hour)
+	c.now = func() time.Time { return now }
+	_ = c.MarkOffline("s", "u")
 	now = now.Add(time.Hour + time.Second)
-	if c.IsOffline("animefire", "u1") {
-		t.Fatal("verdict should expire after the TTL")
+	if c.IsOffline("s", "u") {
+		t.Fatal("expired entry still reported offline")
 	}
 }
 
 func TestPersistsAcrossInstances(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", fileName)
-	a := New(path, time.Hour)
-	a.MarkOffline("animefire", "u1")
-	if err := a.Save(); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	b := New(path, time.Hour)
-	if !b.IsOffline("animefire", "u1") {
-		t.Fatal("a new instance should read the saved verdict")
-	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("cache file should be 0600, got %v (%v)", info, err)
-	}
-}
-
-func TestSaveDropsExpiredEntries(t *testing.T) {
-	path := filepath.Join(t.TempDir(), fileName)
-	a := New(path, time.Hour)
-	now := time.Unix(1_000_000, 0)
-	a.now = func() time.Time { return now }
-	a.MarkOffline("animefire", "old")
-	now = now.Add(2 * time.Hour)
-	a.MarkOffline("animefire", "new")
-	if err := a.Save(); err != nil {
+	if err := New(path, time.Hour).MarkOffline("s", "u"); err != nil {
 		t.Fatal(err)
 	}
-
-	b := New(path, time.Hour)
-	b.now = func() time.Time { return now }
-	if b.IsOffline("animefire", "old") {
-		t.Fatal("expired entry should not survive a save")
-	}
-	if !b.IsOffline("animefire", "new") {
-		t.Fatal("fresh entry should survive")
+	if !New(path, time.Hour).IsOffline("s", "u") {
+		t.Fatal("record not read back from disk")
 	}
 }
 
-func TestCorruptFileIsEmptyCache(t *testing.T) {
+func TestTwoInstancesDoNotEraseEachOther(t *testing.T) {
 	path := filepath.Join(t.TempDir(), fileName)
-	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+	a, b := New(path, time.Hour), New(path, time.Hour)
+	_ = a.IsOffline("s", "x") // a loads an empty file first
+	_ = b.MarkOffline("s", "from-b")
+	_ = a.MarkOffline("s", "from-a")
+	c := New(path, time.Hour)
+	if !c.IsOffline("s", "from-a") || !c.IsOffline("s", "from-b") {
+		t.Fatal("a save dropped the other instance's entry")
+	}
+}
+
+func TestCorruptFileIsReplaced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), fileName)
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c := New(path, time.Hour)
-	if c.IsOffline("animefire", "u1") {
-		t.Fatal("corrupt cache must read as empty")
+	if c.IsOffline("s", "u") {
+		t.Fatal("corrupt file reported a title offline")
 	}
-	c.MarkOffline("animefire", "u1")
-	if err := c.Save(); err != nil {
-		t.Fatalf("save over corrupt file: %v", err)
+	if err := c.MarkOffline("s", "u"); err != nil {
+		t.Fatal(err)
+	}
+	if !New(path, time.Hour).IsOffline("s", "u") {
+		t.Fatal("corrupt file not replaced by a good one")
 	}
 }
 
-func TestZeroTTLDisables(t *testing.T) {
-	c := New("", 0)
-	c.MarkOffline("animefire", "u1")
-	if c.IsOffline("animefire", "u1") || c.Enabled() {
-		t.Fatal("ttl <= 0 must disable the cache")
+func TestUnwritablePathKeepsMemory(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := New(filepath.Join(blocker, "x", fileName), time.Hour) // parent is a file
+	if err := c.MarkOffline("s", "u"); err == nil {
+		t.Fatal("expected a save error")
+	}
+	if !c.IsOffline("s", "u") {
+		t.Fatal("record lost after a failed save")
+	}
+}
+
+func TestHidingEnabled(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "1": true, "0": false, "off": false, "False": false, "no": false} {
+		t.Setenv(EnvHide, v)
+		if got := HidingEnabled(); got != want {
+			t.Errorf("%s=%q: got %v, want %v", EnvHide, v, got, want)
+		}
 	}
 }

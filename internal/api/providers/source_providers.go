@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
@@ -122,92 +121,37 @@ func (p *animeFireProvider) Search(ctx context.Context, query string) ([]*models
 	if err != nil {
 		return nil, err
 	}
-	results = dropOfflineTitles(ctx, offlineStore, string(source.AnimeFire), adapter, results)
+	results = hideOfflineTitles(offlinecache.Shared(), string(source.AnimeFire), results)
 	tagResults(results, source.AnimeFire)
 	return results, nil
 }
 
-// offlineStore is the app-wide cache of titles known to be offline. Its TTL
-// comes from GOANIME_OFFLINE_CACHE_TTL (default 6h; 0 disables it). Tests swap
-// it for a temp-dir cache.
-var offlineStore = offlinecache.Default()
-
-const (
-	// offlineProbeLimit caps how many results are probed per search; each probe
-	// costs a few requests, so only the top of the list is checked.
-	offlineProbeLimit = 8
-	// offlineProbeTimeout bounds the whole filtering step so a slow source can
-	// never hold the search hostage. Titles not checked in time stay listed.
-	offlineProbeTimeout = 6 * time.Second
-)
-
-// dropOfflineTitles removes results whose media the source has deleted. It only
-// removes a title when the check positively says "offline"; a failed or timed
-// out check keeps the title, and a scraper that cannot check is a no-op.
-// If every result is offline the original list is returned, so the user sees
-// the source's own offline warning instead of an empty, silent search.
-//
-// cache remembers positive verdicts per source (sourceKey) until they expire:
-// cached titles are dropped without any request, and only titles with no
-// cached verdict are probed, up to offlineProbeLimit of them per search.
-func dropOfflineTitles(ctx context.Context, cache *offlinecache.Cache, sourceKey string, sc scraper.UnifiedScraper, results []*models.Anime) []*models.Anime {
-	checker, ok := sc.(scraper.OfflineChecker)
-	if !ok || len(results) == 0 {
+// hideOfflineTitles removes titles recorded in cache for sourceKey and says how
+// many it hid. If every result is recorded the original list is kept, so the
+// user is never left with an empty, silent search.
+func hideOfflineTitles(cache *offlinecache.Cache, sourceKey string, results []*models.Anime) []*models.Anime {
+	if !offlinecache.HidingEnabled() || len(results) == 0 {
 		return results
 	}
-	ctx, cancel := context.WithTimeout(ctx, offlineProbeTimeout)
-	defer cancel()
-
-	offline := make([]bool, len(results))
-	var toProbe []int
+	urls := make([]string, len(results))
 	for i, r := range results {
-		switch {
-		case cache.IsOffline(sourceKey, r.URL):
-			offline[i] = true
-		case len(toProbe) < offlineProbeLimit:
-			toProbe = append(toProbe, i)
-		}
+		urls[i] = r.URL
 	}
-
-	var wg sync.WaitGroup
-	for _, i := range toProbe {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			done := make(chan bool, 1)
-			go func() { done <- checker.IsTitleOffline(results[i].URL) }()
-			select {
-			case offline[i] = <-done:
-			case <-ctx.Done():
-			}
-		}()
+	recorded := cache.Set(sourceKey, urls)
+	if len(recorded) == 0 {
+		return results
 	}
-	wg.Wait()
-
-	newlyMarked := false
-	for _, i := range toProbe {
-		if offline[i] {
-			cache.MarkOffline(sourceKey, results[i].URL)
-			newlyMarked = true
-		}
-	}
-	if newlyMarked {
-		if err := cache.Save(); err != nil {
-			util.Debug("offline cache not saved", "err", err)
-		}
-	}
-
 	kept := make([]*models.Anime, 0, len(results))
-	for i, r := range results {
-		if offline[i] {
-			util.Debug("dropping offline title from results", "title", r.Name)
-			continue
+	for _, r := range results {
+		if !recorded[r.URL] {
+			kept = append(kept, r)
 		}
-		kept = append(kept, r)
 	}
 	if len(kept) == 0 {
 		return results
 	}
+	util.Infof("Hid %d title(s) that had no playable video here or on other sources (set %s=0 to show them).",
+		len(results)-len(kept), offlinecache.EnvHide)
 	return kept
 }
 

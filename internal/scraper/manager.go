@@ -82,13 +82,6 @@ type UnifiedScraper interface {
 	GetType() ScraperType
 }
 
-// OfflineChecker is implemented by adapters that can tell, from a search
-// result, whether the source has deleted the media behind a title it still
-// lists. Search uses it to drop dead titles instead of offering them.
-type OfflineChecker interface {
-	IsTitleOffline(animeURL string) bool
-}
-
 // NewAdapter constructs a standalone UnifiedScraper adapter for the given type,
 // wrapping a freshly-built per-source client. It lets the Model B providers own
 // their scraper directly; the clients are cheap, lazy structs so construction
@@ -258,11 +251,6 @@ func (a *AnimefireAdapter) GetStreamURL(episodeURL string, options ...any) (stre
 
 func (a *AnimefireAdapter) GetType() ScraperType {
 	return AnimefireType
-}
-
-// IsTitleOffline implements OfflineChecker.
-func (a *AnimefireAdapter) IsTitleOffline(animeURL string) bool {
-	return a.client.IsTitleOffline(animeURL)
 }
 
 // AnimeDriveAdapter adapts animedrive.AnimeDriveClient to UnifiedScraper interface

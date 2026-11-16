@@ -1,158 +1,130 @@
-// Package offlinecache remembers which titles a source lists but no longer
-// hosts, so a search can drop them without probing the network again.
+// Package offlinecache remembers titles a source still lists but that the user
+// has already watched fail with no copy anywhere else, so later searches can
+// hide them.
 //
-// Entries expire: a source that deleted a file may restore it, so a verdict is
-// only trusted for a limited time. The cache lives in the user's cache
-// directory and is best-effort throughout: any I/O problem degrades to an
-// in-memory cache and never fails a search.
+// Nothing here probes the network: a title is recorded only after playback
+// failed with "video removed" and the fallback found the episode on no other
+// source. Entries expire, because a host may restore deleted files. The store
+// lives in the user's cache directory and is best-effort: any I/O problem
+// degrades to an in-memory store and never fails a search or a playback.
 package offlinecache
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	// DefaultTTL is how long an "offline" verdict is trusted.
-	DefaultTTL = 6 * time.Hour
-	// EnvTTL overrides DefaultTTL with a Go duration such as "30m" or "24h".
-	// A zero or negative value disables the cache.
-	EnvTTL = "GOANIME_OFFLINE_CACHE_TTL"
+	// TTL is how long a recorded title stays hidden.
+	TTL = 6 * time.Hour
+	// EnvHide switches hiding off when set to 0, false, no or off. Titles are
+	// then still listed (and still recorded, so turning it back on works).
+	EnvHide = "GOANIME_HIDE_OFFLINE"
 
 	fileName = "offline_titles.json"
 )
 
-// Cache is a TTL map of (source, title URL) pairs known to be offline.
-// It is safe for concurrent use.
+// Cache is a TTL map of (source, title URL) pairs. It is safe for concurrent use.
 type Cache struct {
 	mu      sync.Mutex
 	path    string // empty means memory-only
 	ttl     time.Duration
 	now     func() time.Time
 	entries map[string]int64 // key -> expiry, unix seconds
-	loaded  bool
 }
 
-// New returns a cache stored at path (memory-only when path is empty) whose
-// entries stay valid for ttl. A ttl <= 0 disables the cache entirely.
+// New returns a store at path (memory-only when path is empty) whose entries
+// stay valid for ttl. A ttl <= 0 makes every entry expire at once.
 func New(path string, ttl time.Duration) *Cache {
 	return &Cache{path: path, ttl: ttl, now: time.Now, entries: map[string]int64{}}
 }
 
-// Default builds the cache the app uses: <user cache dir>/goanime/offline_titles.json,
-// with the TTL taken from GOANIME_OFFLINE_CACHE_TTL when set and valid.
+// Default builds the store the app uses: <user cache dir>/goanime/offline_titles.json.
 func Default() *Cache {
-	ttl := DefaultTTL
-	if v := os.Getenv(EnvTTL); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			ttl = d
-		}
-	}
 	path := ""
 	if dir, err := os.UserCacheDir(); err == nil {
 		path = filepath.Join(dir, "goanime", fileName)
 	}
-	return New(path, ttl)
+	return New(path, TTL)
 }
 
-func key(source, titleURL string) string { return source + "|" + titleURL }
+var (
+	sharedOnce sync.Once
+	shared     *Cache
+)
 
-// Enabled reports whether the cache records and serves verdicts.
-func (c *Cache) Enabled() bool { return c != nil && c.ttl > 0 }
+// Shared is the app-wide store: playback records titles in it and search reads
+// it. It is built on first use.
+func Shared() *Cache {
+	sharedOnce.Do(func() { shared = Default() })
+	return shared
+}
 
-// IsOffline reports whether the title was recorded offline and the verdict has
-// not expired yet.
-func (c *Cache) IsOffline(source, titleURL string) bool {
-	if !c.Enabled() {
-		return false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.loadLocked()
-	exp, ok := c.entries[key(source, titleURL)]
-	if !ok {
-		return false
-	}
-	if c.now().Unix() >= exp {
-		delete(c.entries, key(source, titleURL))
+// HidingEnabled reports whether searches should hide recorded titles.
+func HidingEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvHide))) {
+	case "0", "false", "no", "off":
 		return false
 	}
 	return true
 }
 
-// MarkOffline records the title as offline for the cache's TTL. Call Save to
-// persist a batch of marks.
-func (c *Cache) MarkOffline(source, titleURL string) {
-	if !c.Enabled() {
-		return
+func key(source, titleURL string) string {
+	return strings.ToLower(source) + "|" + titleURL
+}
+
+// IsOffline reports whether the title was recorded and the entry has not
+// expired. It reads the file again each time, so records made by another
+// process are seen; the file is tiny and a search calls this once per result.
+func (c *Cache) IsOffline(source, titleURL string) bool {
+	if c == nil {
+		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.loadLocked()
-	c.entries[key(source, titleURL)] = c.now().Add(c.ttl).Unix()
+	c.mergeDiskLocked()
+	exp, ok := c.entries[key(source, titleURL)]
+	return ok && c.now().Unix() < exp
 }
 
-// Save writes the cache to disk, dropping expired entries first. It is a no-op
-// for a memory-only or disabled cache, and errors are returned for callers that
-// care but are safe to ignore.
-func (c *Cache) Save() error {
-	if !c.Enabled() || c.path == "" {
+// Set returns the recorded titles of source among urls, reading the file once.
+func (c *Cache) Set(source string, urls []string) map[string]bool {
+	out := map[string]bool{}
+	if c == nil {
+		return out
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mergeDiskLocked()
+	now := c.now().Unix()
+	for _, u := range urls {
+		if exp, ok := c.entries[key(source, u)]; ok && now < exp {
+			out[u] = true
+		}
+	}
+	return out
+}
+
+// MarkOffline records the title and persists the store. The returned error is
+// informational: the record is kept in memory either way.
+func (c *Cache) MarkOffline(source, titleURL string) error {
+	if c == nil || titleURL == "" {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.loadLocked()
-
-	nowUnix := c.now().Unix()
-	for k, exp := range c.entries {
-		if nowUnix >= exp {
-			delete(c.entries, k)
-		}
-	}
-
-	data, err := json.Marshal(c.entries)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return err
-	}
-	// Write to a temp file and rename so a crash never leaves a half-written cache.
-	tmp, err := os.CreateTemp(filepath.Dir(c.path), fileName+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, c.path); err != nil {
-		_ = os.Remove(tmpName)
-		return err
-	}
-	return nil
+	c.mergeDiskLocked()
+	c.entries[key(source, titleURL)] = c.now().Add(c.ttl).Unix()
+	return c.saveLocked()
 }
 
-// loadLocked reads the file once. A missing or corrupt file means an empty
-// cache; the next Save replaces it.
-func (c *Cache) loadLocked() {
-	if c.loaded {
-		return
-	}
-	c.loaded = true
+// mergeDiskLocked folds the file's live entries into memory, keeping the later
+// expiry, so two processes do not erase each other's records.
+func (c *Cache) mergeDiskLocked() {
 	if c.path == "" {
 		return
 	}
@@ -162,9 +134,54 @@ func (c *Cache) loadLocked() {
 	}
 	var onDisk map[string]int64
 	if err := json.Unmarshal(data, &onDisk); err != nil {
-		return
+		return // corrupt: the next save replaces it
 	}
 	for k, exp := range onDisk {
-		c.entries[k] = exp
+		if exp > c.entries[k] {
+			c.entries[k] = exp
+		}
 	}
+}
+
+func (c *Cache) saveLocked() error {
+	if c.path == "" {
+		return nil
+	}
+	nowUnix := c.now().Unix()
+	for k, exp := range c.entries {
+		if nowUnix >= exp {
+			delete(c.entries, k)
+		}
+	}
+	data, err := json.Marshal(c.entries)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
+		return err
+	}
+	// Temp file + rename, so a crash never leaves a half-written store.
+	tmp, err := os.CreateTemp(filepath.Dir(c.path), fileName+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	fail := func(err error) error {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fail(err)
+	}
+	if err := os.Chmod(tmpName, 0o600); err != nil {
+		return fail(err)
+	}
+	if err := os.Rename(tmpName, c.path); err != nil {
+		return fail(err)
+	}
+	return nil
 }

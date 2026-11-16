@@ -15,6 +15,7 @@ import (
 	apisource "github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/offlinecache"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
@@ -254,4 +255,20 @@ func findEpisodeNumbered(episodes []models.Episode, numberStr string, num int) *
 func numberIn(label string) (int, bool) {
 	n, err := strconv.Atoi(digitRun.FindString(label))
 	return n, err == nil
+}
+
+// rememberRemovedTitle records an AnimeFire title whose video is gone and that
+// no other source could play, so later searches hide it. It acts only on a
+// failure the user just sat through, and costs no request.
+func rememberRemovedTitle(anime *models.Anime, videoErr error) {
+	if anime == nil || anime.URL == "" || !errors.Is(videoErr, player.ErrSourceVideoRemoved) {
+		return
+	}
+	kind := string(apisource.AnimeFire)
+	if !strings.HasPrefix(strings.ToLower(anime.Source), strings.ToLower(kind)) {
+		return // only AnimeFire's search hides titles today
+	}
+	if err := offlinecache.Shared().MarkOffline(kind, anime.URL); err != nil {
+		util.Debugf("offline titles not saved: %v", err)
+	}
 }

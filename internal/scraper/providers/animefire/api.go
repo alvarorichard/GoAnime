@@ -258,18 +258,8 @@ func (c *AnimefireClient) searchAPI(query string) ([]*models.Anime, error) {
 	return animes, nil
 }
 
-// episodesAPI lists an anime's episodes and warns when the title looks offline.
+// episodesAPI lists an anime's episodes.
 func (c *AnimefireClient) episodesAPI(animeURL string) ([]models.Episode, error) {
-	episodes, err := c.episodesAPIQuiet(animeURL)
-	if err != nil {
-		return nil, err
-	}
-	c.warnIfTitleLooksOffline(episodes)
-	return episodes, nil
-}
-
-// episodesAPIQuiet lists an anime's episodes without any offline probing.
-func (c *AnimefireClient) episodesAPIQuiet(animeURL string) ([]models.Episode, error) {
 	id := idFromURL(animeURL)
 	if id == "" {
 		return nil, fmt.Errorf("AnimeFire: no anime id in %q", animeURL)
@@ -294,6 +284,7 @@ func (c *AnimefireClient) episodesAPIQuiet(animeURL string) ([]models.Episode, e
 		})
 	}
 	numberAcrossSeasons(episodes, out.Data.Seasons)
+	c.warnIfTitleLooksOffline(episodes)
 	return episodes, nil
 }
 
@@ -355,8 +346,13 @@ func numberAcrossSeasons(episodes []models.Episode, seasons []apiSeason) {
 // episode plays costs one probe; one with both offline cost about 0.75s on
 // 2026-10-12 (an API call and a playlist check per track, per probe).
 func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
-	if !c.titleLooksOffline(episodes) {
+	if len(episodes) < 2 {
 		return
+	}
+	for _, idx := range []int{0, len(episodes) / 2} {
+		if _, err := c.streamAPI(episodes[idx].URL); !errors.Is(err, netx.ErrMediaOffline) {
+			return // something is playable; nothing to warn about
+		}
 	}
 	util.Warnf("AnimeFire may have no video files for this title — "+
 		"the first and middle episodes are both offline (%d episodes listed).", len(episodes))
@@ -371,34 +367,6 @@ func (c *AnimefireClient) warnIfTitleLooksOffline(episodes []models.Episode) {
 // whose episodes are probably all offline.
 func titleOfflineNotice(listed int) string {
 	return fmt.Sprintf("AnimeFire may have no video files for this title: the first and middle episodes are both offline (%d episodes listed). Press ESC and pick the same title from StartFlix or HiAnime.", listed)
-}
-
-// titleLooksOffline reports whether the first and middle episodes are both
-// offline. Anything playable, or any error that is not "the media is gone"
-// (network trouble, 5xx), counts as NOT offline: hiding a title that works is
-// worse than listing one that does not.
-func (c *AnimefireClient) titleLooksOffline(episodes []models.Episode) bool {
-	if len(episodes) < 2 {
-		return false
-	}
-	for _, idx := range []int{0, len(episodes) / 2} {
-		if _, err := c.streamAPI(episodes[idx].URL); !errors.Is(err, netx.ErrMediaOffline) {
-			return false
-		}
-	}
-	return true
-}
-
-// IsTitleOffline lists a title's episodes and reports whether the host has
-// deleted the media behind them. It is the search-time counterpart of
-// warnIfTitleLooksOffline: callers use it to drop dead titles from the
-// results instead of warning after the user picked one.
-func (c *AnimefireClient) IsTitleOffline(animeURL string) bool {
-	episodes, err := c.episodesAPIQuiet(animeURL)
-	if err != nil {
-		return false // cannot tell; keep the title listed
-	}
-	return c.titleLooksOffline(episodes)
 }
 
 // streamAPI resolves an episode's playable URL.
