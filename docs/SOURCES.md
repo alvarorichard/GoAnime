@@ -25,7 +25,9 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 
 `--source` limits a search to one source (`hianime`, `animefire`, `goyabu`,
 `animesdigital`, `anroll`, `animesfhd`, `animedrive`, `startflix`, `topcine`, `pobreflix`,
-`pomfy`, `plutotv`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one.
+`pomfy`, `plutotv`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one,
+`english` HiAnime and Pluto TV. Pluto TV's catalog has anime too, so it is searched on the
+ALL, PT-BR, ENGLISH and MOVIES/TV tabs; `--source hianime` is still HiAnime alone.
 
 Use
 `GOANIME_ENABLED_SOURCES` / `GOANIME_DISABLED_SOURCES` to turn sources on or
@@ -53,11 +55,19 @@ site moves.
   once; for a series you choose the season first. Its playlist cuts each title
   into pieces with ad breaks between them; GoAnime plays the title's own
   uninterrupted playlist, taken from the same place, so there are no breaks,
-  and `-d`/`-dm` download that playlist. If a title cannot be read that way
+  and `-d`/`-dm` download that playlist. The playlist is handed to mpv from a
+  local address (`http://127.0.0.1:<port>/plutotv/...`), because one of the
+  service's CDNs refuses it at its own URL; the video itself still comes
+  straight from the CDN, and seeking takes about a second. If a title cannot be read that way
   (for instance when it is made of several clips), the service's own playlist
   is played with its breaks rather than not at all. Titles protected by a DRM
   key system are refused with a message. Live channels are not offered.
   `--quality` picks the rung (`best`, `worst`, `720p`, `480p`...).
+  Downloads: `goanime -dm --source plutotv "Movie"` for a movie,
+  `goanime -dm --source plutotv --type tv "Show" 1 3` for season 1, episode 3
+  (`-r` for a range, `-a` for every season). With `--source plutotv` only
+  Pluto TV is searched; without it `-dm` searches every movie/TV source.
+  `goanime -d --source plutotv "Show" 3` works too; it asks which season.
 - **Pomfy**: looks titles up on TMDB (your `TMDB_API_KEY` if set, otherwise a
   public key). A bare TMDB id, such as `550`, also works as a search.
   `GOANIME_POMFY_URL` sets another mirror.

@@ -23,7 +23,7 @@ import (
 // SearchHomeDecision is the SEARCH home screen's decision.
 type SearchHomeDecision struct {
 	Query        string // new search text
-	Scope        string // source selector: "", "ptbr", "hianime" or "movietv"
+	Scope        string // source selector: "", "ptbr", "english" or "movietv"
 	Title        string // title to search when reopening fails
 	Entry        *tui.HomeContinueEntry
 	FromStart    bool // reopen from zero
@@ -201,7 +201,7 @@ func init() {
 // scopeIndexForSource maps a --source flag to the home screen's scope tab.
 func scopeIndexForSource(src string) int {
 	switch strings.ToLower(strings.TrimSpace(src)) {
-	case "hianime":
+	case "hianime", "english":
 		return 2
 	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1

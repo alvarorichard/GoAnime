@@ -17,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"golang.org/x/term"
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
@@ -30,7 +31,19 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 	env.preWarmMPV()
 	env.setEpisodeListCtx(anime.Name, anime.Source, anime.Audio)
 
+	// A title of one item gets the episodes screen too, as a series does:
+	// enter plays it, and the download and option keys (d, m, ...) are there.
+	// It used to play at once, leaving no way to download a movie from the
+	// interactive flow. A replay does not ask again; a change to another
+	// movie does.
+	pick := true
 	for {
+		if pick {
+			pick = false
+			if err := env.pickMovie(episodes); err != nil {
+				return err
+			}
+		}
 		animeMutex := sync.Mutex{}
 		isPaused := false
 
@@ -132,9 +145,44 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 			case changeToMovie:
 				anime, episodes = change.anime, change.episodes
 				fmt.Printf("Switched to movie: %s\n", anime.Name)
-				continue // Continue with new movie
+				pick = true // a new title: its screen opens before it plays
+				continue    // Continue with new movie
 			}
 		}
+	}
+}
+
+// PlayOneItemDirectly skips the episodes screen of the next title of one
+// item, once: a CONTINUE reopen sets it, since the row already chose what to
+// play. Consumed by the screen it skips.
+var PlayOneItemDirectly bool
+
+// movieStdinIsTerminal reports an interactive terminal; a seam for tests.
+var movieStdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// pickMovieItem opens the episodes screen for a title of one item. Enter
+// plays it; d downloads it; m opens every option (download, upscale, ...).
+// Backing out returns to the results. Without a terminal, or when the screen
+// cannot open, the title plays as it always did. A CONTINUE reopen does not
+// ask (PlayOneItemDirectly).
+func pickMovieItem(episodes []models.Episode) error {
+	if PlayOneItemDirectly {
+		PlayOneItemDirectly = false
+		return nil
+	}
+	if !movieStdinIsTerminal() {
+		return nil
+	}
+	_, _, _, err := SelectInitialEpisode(episodes)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, player.ErrBackRequested):
+		return player.ErrBackToAnimeSelection
+	default:
+		util.Warnf("Could not open the options screen, playing directly: %v", err)
+		player.ClearEpisodeMenu() // whatever it left half-chosen is not a choice
+		return nil
 	}
 }
 

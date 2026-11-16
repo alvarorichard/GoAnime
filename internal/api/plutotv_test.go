@@ -3,6 +3,8 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
+	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
 const (
@@ -104,7 +107,9 @@ func (f *plutoAPIFake) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write([]byte(b.String()))
 	case strings.HasPrefix(path, "/media/"):
-		_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:5.0,\ns.ts\n#EXT-X-ENDLIST\n"))
+		// The title's own playlist, relative like the real one.
+		rendition := strings.TrimSuffix(path[strings.LastIndex(path, "/")+1:], ".m3u8")
+		_, _ = fmt.Fprintf(w, "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:5.0,\n%s-00000.ts\n#EXT-X-ENDLIST\n", rendition)
 	default:
 		http.NotFound(w, r)
 	}
@@ -278,12 +283,36 @@ func TestPlutoTVSeasonNumbersAndEpisodesForDownloads(t *testing.T) {
 
 // ---- stream ----------------------------------------------------------------
 
-func TestResolvePlutoTVStreamReturnsTheTitlesOwnPlaylist(t *testing.T) {
+// servedPlaylist reads the playlist a resolved stream points at, the way the
+// player will.
+func servedPlaylist(t *testing.T, target string) string {
+	t.Helper()
+	require.True(t, strings.HasPrefix(target, "http://127.0.0.1:"), "served from loopback: %s", target)
+	require.True(t, strings.HasSuffix(target, ".m3u8"), "named as a playlist, which is how the player and the downloader tell: %s", target)
+	resp, err := http.Get(target) //nolint:gosec,noctx // a loopback URL made by the code under test
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "application/vnd.apple.mpegurl", resp.Header.Get("Content-Type"))
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(body)
+}
+
+func TestResolvePlutoTVStreamServesTheTitlesOwnPlaylistFromLoopback(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	stream, err := ResolvePlutoTVStream(plutoSeries(), &models.Episode{URL: plutotv.EpisodeURL(ptSeriesID, ptEpisode1)}, "best")
 	require.NoError(t, err)
-	assert.Equal(t, f.srv.URL+f.clip("hls_2400"), stream.URL)
-	assert.Empty(t, stream.Referer, "the media host asks for none")
+	assert.NotEqual(t, f.srv.URL+f.clip("hls_2400"), stream.URL, "not the CDN's own URL: one of the CDNs refuses it")
+	assert.True(t, util.IsLocalProxyURL(stream.URL), "registered, so the download paths let it through their loopback guard")
+
+	playlist := servedPlaylist(t, stream.URL)
+	dir := strings.TrimSuffix(f.srv.URL+f.clip("hls_2400"), "hls_2400.m3u8")
+	assert.True(t, strings.HasPrefix(playlist, "#EXTM3U"))
+	assert.Contains(t, playlist, "\n"+dir+"hls_2400-", "its segments are absolute, on the CDN")
+	assert.NotContains(t, playlist, "\nhls_2400-", "none is left relative to the loopback server")
+
+	assert.Equal(t, "https://pluto.tv/", stream.Referer, "the site's own, so no other source's referer is reused")
 	assert.Empty(t, stream.Origin)
 	assert.Empty(t, stream.Subtitles)
 	assert.Empty(t, stream.AudioLang)
@@ -295,7 +324,8 @@ func TestResolvePlutoTVStreamHonoursTheQuality(t *testing.T) {
 	for quality, rendition := range map[string]string{"best": "hls_2400", "worst": "hls_600", "720p": "hls_2400", "360p": "hls_600"} {
 		stream, err := ResolvePlutoTVStream(plutoSeries(), ep, quality)
 		require.NoError(t, err, quality)
-		assert.Equal(t, f.srv.URL+f.clip(rendition), stream.URL, quality)
+		dir := strings.TrimSuffix(f.srv.URL+f.clip(rendition), rendition+".m3u8")
+		assert.Contains(t, servedPlaylist(t, stream.URL), "\n"+dir+rendition+"-", quality)
 	}
 }
 
@@ -303,8 +333,115 @@ func TestResolvePlutoTVStreamPlaysAMovie(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	stream, err := ResolvePlutoTVStream(plutoMovie(), &models.Episode{URL: plutotv.MovieURL(ptMovieID)}, "best")
 	require.NoError(t, err)
-	assert.Equal(t, f.srv.URL+f.clip("hls_2400"), stream.URL)
+	assert.Contains(t, servedPlaylist(t, stream.URL), "hls_2400-")
 	assert.Equal(t, 1, f.hit("/v2/stitch/hls/episode/"+ptMovieID+"/master.m3u8"))
+}
+
+func TestResolvePlutoTVStreamPlaysTheCDNsURLWhenNothingCanBeServedLocally(t *testing.T) {
+	f := newPlutoAPIFake(t)
+	prev := plutoPlaylistURLFn
+	t.Cleanup(func() { plutoPlaylistURLFn = prev })
+	plutoPlaylistURLFn = func(string) (string, error) { return "", errors.New("no port to listen on") }
+
+	stream, err := ResolvePlutoTVStream(plutoSeries(), &models.Episode{URL: plutotv.EpisodeURL(ptSeriesID, ptEpisode1)}, "best")
+	require.NoError(t, err)
+	assert.Equal(t, f.srv.URL+f.clip("hls_2400"), stream.URL, "it still plays wherever the CDN answers")
+}
+
+// ---- the loopback playlist server -------------------------------------------
+
+func TestPlutoTVPlaylistServerServesOnlyWhatWasPublished(t *testing.T) {
+	s := &plutoPlaylistServer{lists: make(map[string]string)}
+	const playlist = "#EXTM3U\n#EXTINF:5,\nhttps://cdn/a.ts\n#EXT-X-ENDLIST\n"
+	target, err := s.publish(playlist)
+	require.NoError(t, err)
+	assert.Equal(t, playlist, servedPlaylist(t, target))
+
+	other, err := s.publish(playlist)
+	require.NoError(t, err)
+	assert.NotEqual(t, target, other, "each publication has an address of its own, which cannot be guessed")
+	assert.Equal(t, s.base, target[:len(s.base)], "one listener serves them all")
+
+	status := func(method, u string) (int, string) {
+		req, err := http.NewRequestWithContext(t.Context(), method, u, http.NoBody)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(target, s.base+"/plutotv/"), ".m3u8")
+	for name, u := range map[string]string{
+		"an id that was never published": s.base + "/plutotv/" + strings.Repeat("0", 32) + ".m3u8",
+		"the id without the extension":   s.base + "/plutotv/" + id,
+		"the id under another path":      s.base + "/other/" + id + ".m3u8",
+		"the root":                       s.base + "/",
+		"a path above":                   s.base + "/plutotv/../" + id + ".m3u8",
+	} {
+		code, body := status(http.MethodGet, u)
+		assert.Equal(t, http.StatusNotFound, code, name)
+		assert.NotContains(t, body, "EXTM3U", name)
+	}
+	code, body := status(http.MethodPost, target)
+	assert.Equal(t, http.StatusMethodNotAllowed, code)
+	assert.NotContains(t, body, "EXTM3U")
+	code, body = status(http.MethodHead, target)
+	assert.Equal(t, http.StatusOK, code)
+	assert.Empty(t, body)
+}
+
+func TestPlutoTVPlaylistServerRefusesWhatIsNotAPlaylist(t *testing.T) {
+	s := &plutoPlaylistServer{lists: make(map[string]string)}
+	for _, text := range []string{"", "<html>", "https://cdn/x.m3u8"} {
+		_, err := s.publish(text)
+		require.Error(t, err, "%q", text)
+	}
+	assert.Empty(t, s.base, "nothing listens until there is something to serve")
+}
+
+func TestPlutoTVPlaylistServerForgetsTheOldestPastItsBound(t *testing.T) {
+	s := &plutoPlaylistServer{lists: make(map[string]string)}
+	var urls []string
+	for i := range maxPlutoPlaylists + 3 {
+		u, err := s.publish(fmt.Sprintf("#EXTM3U\n# %d\n", i))
+		require.NoError(t, err)
+		urls = append(urls, u)
+	}
+	assert.Len(t, s.lists, maxPlutoPlaylists)
+	assert.Len(t, s.order, maxPlutoPlaylists)
+	for i, u := range urls {
+		resp, err := http.Get(u) //nolint:gosec,noctx // loopback
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		want := http.StatusOK
+		if i < 3 {
+			want = http.StatusNotFound
+		}
+		assert.Equal(t, want, resp.StatusCode, "playlist %d", i)
+	}
+}
+
+func TestPlutoTVPlaylistServerIsSafeToPublishToFromManyResolutions(t *testing.T) {
+	s := &plutoPlaylistServer{lists: make(map[string]string)}
+	var wg sync.WaitGroup
+	seen := make(chan string, 40)
+	for range 40 {
+		wg.Go(func() {
+			u, err := s.publish("#EXTM3U\n")
+			if assert.NoError(t, err) {
+				seen <- u
+			}
+		})
+	}
+	wg.Wait()
+	close(seen)
+	unique := map[string]bool{}
+	for u := range seen {
+		unique[u] = true
+		assert.True(t, strings.HasPrefix(u, s.base+"/plutotv/"), "one listener, started once")
+	}
+	assert.Len(t, unique, 40)
 }
 
 func TestResolvePlutoTVStreamStillPlaysATitleItCannotCleanUp(t *testing.T) {
@@ -337,4 +474,19 @@ func TestResolvePlutoTVStreamPassesAServiceFailureOn(t *testing.T) {
 	f.stitchedBody = "#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES\n#EXTINF:5,\na.ts\n"
 	_, err = ResolvePlutoTVStream(plutoSeries(), &models.Episode{URL: plutotv.EpisodeURL(ptSeriesID, ptEpisode1)}, "best")
 	assert.ErrorIs(t, err, plutotv.ErrProtected)
+}
+
+func TestPlutoTVPlaylistServerReportsThatItCannotListen(t *testing.T) {
+	s := &plutoPlaylistServer{lists: make(map[string]string), listen: func() (net.Listener, error) {
+		return nil, errors.New("no free port")
+	}}
+	_, err := s.publish("#EXTM3U\n")
+	require.ErrorContains(t, err, "local playlist server")
+	require.ErrorContains(t, err, "no free port")
+	assert.Empty(t, s.lists, "nothing is kept for an address that does not exist")
+
+	s.listen = nil
+	target, err := s.publish("#EXTM3U\n")
+	require.NoError(t, err, "and it recovers once a port can be had")
+	assert.Equal(t, "#EXTM3U\n", servedPlaylist(t, target))
 }

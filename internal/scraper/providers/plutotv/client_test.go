@@ -687,31 +687,6 @@ func TestStreamTriesTheNextRungWhenOneCannotBeUsed(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, f.url()+f.contentPath("hls_1600"), stream.URL)
 	})
-	t.Run("its own playlist is forbidden", func(t *testing.T) {
-		f := newFakePluto(t)
-		f.serveEpisode(fakeEpisodeID)
-		f.setRoute(f.contentPath("hls_2400"), http.StatusForbidden, "x")
-		stream, err := f.client().Stream(t.Context(), episodeURL, "best")
-		require.NoError(t, err)
-		assert.Equal(t, f.url()+f.contentPath("hls_1600"), stream.URL)
-		assert.True(t, stream.AdFree)
-	})
-	t.Run("its own playlist is a page", func(t *testing.T) {
-		f := newFakePluto(t)
-		f.serveEpisode(fakeEpisodeID)
-		f.set(f.contentPath("hls_2400"), "<html>blocked</html>")
-		stream, err := f.client().Stream(t.Context(), episodeURL, "best")
-		require.NoError(t, err)
-		assert.Equal(t, f.url()+f.contentPath("hls_1600"), stream.URL)
-	})
-	t.Run("its own playlist lists no media", func(t *testing.T) {
-		f := newFakePluto(t)
-		f.serveEpisode(fakeEpisodeID)
-		f.set(f.contentPath("hls_2400"), "#EXTM3U\n#EXT-X-ENDLIST\n")
-		stream, err := f.client().Stream(t.Context(), episodeURL, "best")
-		require.NoError(t, err)
-		assert.Equal(t, f.url()+f.contentPath("hls_1600"), stream.URL)
-	})
 }
 
 func TestStreamTriesAtMostThreeRungsAndThenPlaysTheStitchedMaster(t *testing.T) {
@@ -1096,12 +1071,14 @@ func TestCheckMediaPlaylist(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f.setRoute("/media/p.m3u8", tc.status, tc.body)
-			err := c.checkMediaPlaylist(t.Context(), f.url()+"/media/p.m3u8")
+			body, err := c.checkMediaPlaylist(t.Context(), f.url()+"/media/p.m3u8")
 			if tc.wantErr == "" {
 				require.NoError(t, err)
+				assert.Equal(t, tc.body, body, "the playlist it checked is the one it hands back")
 				return
 			}
 			require.ErrorContains(t, err, tc.wantErr)
+			assert.Empty(t, body)
 		})
 	}
 }

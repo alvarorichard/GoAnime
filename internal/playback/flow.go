@@ -30,6 +30,8 @@ type flowEnv struct {
 	playEpisode        func(ctx context.Context, anime *models.Anime, episodes []models.Episode, episodeNum int, episodeURL, episodeNumberStr string, discordEnabled bool, isPaused *bool, animeMutex *sync.Mutex) error
 	handleMovie        func(ctx context.Context, anime *models.Anime, episodes []models.Episode, discordEnabled bool) error
 	handleSeries       func(ctx context.Context, anime *models.Anime, episodes []models.Episode, totalEpisodes int, discordEnabled bool) error
+	// pickMovie opens the episodes screen for a title of one item.
+	pickMovie func(episodes []models.Episode) error
 }
 
 // realFlow is the wiring the program runs with.
@@ -48,5 +50,6 @@ func realFlow() flowEnv {
 		playEpisode:        PlayEpisode,
 		handleMovie:        HandleMovie,
 		handleSeries:       HandleSeries,
+		pickMovie:          pickMovieItem,
 	}
 }

@@ -223,6 +223,34 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	return dl.DownloadSingleEpisode(request.EpisodeNum)
 }
 
+// movieScopedSearchFn searches one named source; a seam for tests.
+var movieScopedSearchFn = api.SearchAnimeEnhanced
+
+// movieSearchScope is where a -dm search looks: the one movie/TV source that
+// --source names, or all of them. A source of another family (an anime site)
+// cannot serve -dm, so it is ignored rather than searched in vain.
+func movieSearchScope(source string) string {
+	switch scope := strings.ToLower(strings.TrimSpace(source)); scope {
+	case "startflix", "topcine", "pobreflix", "pomfy", "plutotv", "pluto":
+		return scope
+	}
+	return api.MovieTVSources
+}
+
+// searchMovieTitle finds the title of a -dm request, honouring --source: with
+// "-dm --source plutotv" only Pluto TV is searched, so the title that
+// downloads is the one of the source that was asked for.
+func searchMovieTitle(request *util.DownloadRequest) (*models.Anime, error) {
+	source := request.Source
+	if source == "" {
+		source = util.GlobalSource // -dm does not copy the flag into its request
+	}
+	if scope := movieSearchScope(source); scope != api.MovieTVSources {
+		return movieScopedSearchFn(request.AnimeName, scope)
+	}
+	return movieSearchFn(request.AnimeName)
+}
+
 // HandleMovieDownloadRequest downloads movies and series from the movie/TV
 // sources, StartFlix and TopCine. The -dm forms:
 //
@@ -240,7 +268,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	if strings.TrimSpace(request.AnimeName) == "" {
 		return errors.New("no movie or series name to download")
 	}
-	title, err := movieSearchFn(request.AnimeName)
+	title, err := searchMovieTitle(request)
 	if err != nil {
 		return fmt.Errorf("failed to search the movie/TV sources: %w", err)
 	}

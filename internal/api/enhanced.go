@@ -240,6 +240,9 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 	switch normalizedSource {
 	case "hianime":
 		return []apisource.SourceKind{apisource.HiAnime}
+	case "english":
+		// The ENGLISH tab: HiAnime, and Pluto TV, whose catalog has anime too.
+		return []apisource.SourceKind{apisource.HiAnime, apisource.PlutoTV}
 	case "animefire":
 		return []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
@@ -276,6 +279,7 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 			apisource.Pobreflix,
 			apisource.Pomfy,
 			apisource.AnimeDrive,
+			apisource.PlutoTV,
 		}
 	}
 	return nil

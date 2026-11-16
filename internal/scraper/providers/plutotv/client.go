@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +68,8 @@ var (
 	// streamInfRe / resolutionRe read one #EXT-X-STREAM-INF line.
 	bandwidthRe  = regexp.MustCompile(`[:,]BANDWIDTH=(\d+)`)
 	resolutionRe = regexp.MustCompile(`RESOLUTION=\d+x(\d+)`)
+	// tagURIRe matches the URI attribute of a playlist tag (a key file).
+	tagURIRe = regexp.MustCompile(`URI="[^"]*"`)
 	// keyMethodRe reads the method of an #EXT-X-KEY or #EXT-X-SESSION-KEY.
 	keyMethodRe = regexp.MustCompile(`(?m)^#EXT-X-(?:SESSION-)?KEY:.*?METHOD=([A-Za-z0-9-]+)`)
 	// contentSegmentRe matches a segment of a title's own clip and captures
@@ -121,6 +125,12 @@ type Show struct {
 // Stream is a resolved playlist.
 type Stream struct {
 	URL string
+	// Playlist is the title alone as a media playlist whose every URI is
+	// absolute, set whenever AdFree is. It is what should be played: the CDN
+	// is several, and one of them refuses the playlist at URL while serving
+	// the segments it lists, so a player handed URL fails or not by the DNS
+	// answer it happens to get. Serve this text to the player instead.
+	Playlist string
 	// AdFree is false when the title's own playlist could not be found and
 	// URL is the stitched one, with the service's breaks in it.
 	AdFree bool
@@ -608,20 +618,116 @@ func (c *Client) Stream(ctx context.Context, pageURL, quality string) (Stream, e
 			util.Debug("Pluto TV title does not follow the single-clip layout; playing the stitched playlist")
 			break
 		}
-		if err := c.checkMediaPlaylist(ctx, contentURL); err != nil {
-			if ctx.Err() != nil {
-				return Stream{}, ctx.Err()
-			}
-			if errors.Is(err, ErrProtected) {
-				// The title itself is keyed; another rung of it is too.
-				return Stream{}, err
-			}
-			util.Debug("Pluto TV content playlist unavailable", "bandwidth", v.Bandwidth, "error", err)
-			continue
+		body, err := c.checkMediaPlaylist(ctx, contentURL)
+		if err == nil {
+			return Stream{URL: contentURL, Playlist: absolutePlaylist(body, contentURL), AdFree: true}, nil
 		}
-		return Stream{URL: contentURL, AdFree: true}, nil
+		if ctx.Err() != nil {
+			return Stream{}, ctx.Err()
+		}
+		if errors.Is(err, ErrProtected) {
+			// The title itself is keyed; another rung of it is too.
+			return Stream{}, err
+		}
+		// One of the CDNs answers 403 for every playlist under the clip and
+		// still serves its segments. The stitched playlist lists the same
+		// title in ranges, so the title alone is read out of it instead.
+		util.Debug("Pluto TV content playlist unavailable", "bandwidth", v.Bandwidth, "error", err)
+		if own, ok := titlePlaylist(playlist, v.URL, contentURL); ok {
+			return Stream{URL: masterURL, Playlist: own, AdFree: true}, nil
+		}
 	}
 	return Stream{URL: masterURL}, nil
+}
+
+// absolutePlaylist rewrites every URI of a media playlist (segments and key
+// files) against base, so the text plays from wherever it is served.
+func absolutePlaylist(playlist, base string) string {
+	origin, err := url.Parse(base)
+	if err != nil {
+		return playlist
+	}
+	resolve := func(ref string) string {
+		u, err := url.Parse(strings.TrimSpace(ref))
+		if err != nil {
+			return ref
+		}
+		return origin.ResolveReference(u).String()
+	}
+	lines := strings.Split(strings.ReplaceAll(playlist, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+		case strings.HasPrefix(trimmed, "#"):
+			lines[i] = tagURIRe.ReplaceAllStringFunc(trimmed, func(attr string) string {
+				return `URI="` + resolve(attr[len(`URI="`):len(attr)-1]) + `"`
+			})
+		default:
+			lines[i] = resolve(trimmed)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// titlePlaylist builds the title's own playlist out of the stitched one: the
+// segments of the clip contentURL names, in order, each with the key and the
+// duration the stitcher gave it, and nothing of what was spliced between them.
+// The ranges of a clip are cut from one encode, so their timestamps run on.
+//
+// It answers false when a segment cannot be carried over exactly: one without
+// a duration, or one whose key leaves the IV to the sequence number, which is
+// not the number it has here.
+func titlePlaylist(stitched, base, contentURL string) (string, bool) {
+	cut := strings.LastIndex(contentURL, "0-end/")
+	if cut < 0 {
+		return "", false
+	}
+	dir, rendition := contentURL[:cut], strings.TrimSuffix(contentURL[cut+len("0-end/"):], ".m3u8")
+
+	var body strings.Builder
+	var key, duration, lastRange string
+	segments, longest := 0, 0.0
+	for _, line := range strings.Split(absolutePlaylist(stitched, base), "\n") {
+		switch {
+		case strings.HasPrefix(line, "#EXT-X-KEY:"):
+			key = line
+		case strings.HasPrefix(line, "#EXTINF:"):
+			duration = line
+		case line == "" || strings.HasPrefix(line, "#"):
+		default:
+			m := contentSegmentRe.FindStringSubmatch(line)
+			seconds, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(duration, "#EXTINF:"), ","), 64)
+			segmentDuration := duration
+			duration = "" // a duration belongs to the one segment after it
+			if m == nil || m[1] != dir || m[4] != rendition {
+				continue
+			}
+			if err != nil || seconds <= 0 {
+				return "", false
+			}
+			if key != "" && !strings.Contains(key, "METHOD=NONE") && !strings.Contains(key, "IV=") {
+				return "", false
+			}
+			if r := m[2] + "-" + m[3]; r != lastRange {
+				if lastRange != "" {
+					body.WriteString("#EXT-X-DISCONTINUITY\n")
+				}
+				lastRange = r
+			}
+			if key != "" {
+				body.WriteString(key + "\n")
+			}
+			body.WriteString(segmentDuration + "\n" + line + "\n")
+			segments++
+			longest = max(longest, seconds)
+		}
+	}
+	if segments == 0 {
+		return "", false
+	}
+	header := fmt.Sprintf("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:%d\n#EXT-X-MEDIA-SEQUENCE:0\n", int(math.Ceil(longest)))
+	return header + body.String() + "#EXT-X-ENDLIST\n", true
 }
 
 // isProtected reports a playlist keyed by anything other than plain AES-128.
@@ -766,18 +872,18 @@ func contentPlaylistURL(playlist string) (string, bool) {
 }
 
 // checkMediaPlaylist confirms target answers with a media playlist.
-func (c *Client) checkMediaPlaylist(ctx context.Context, target string) error {
+func (c *Client) checkMediaPlaylist(ctx context.Context, target string) (string, error) {
 	body, _, err := c.getText(ctx, target, "stream")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !strings.HasPrefix(strings.TrimSpace(body), "#EXTM3U") || !strings.Contains(body, "#EXTINF") {
-		return netx.NewParserError(SourceName, "stream", "the content URL is not a media playlist", nil)
+		return "", netx.NewParserError(SourceName, "stream", "the content URL is not a media playlist", nil)
 	}
 	if isProtected(body) {
-		return ErrProtected
+		return "", ErrProtected
 	}
-	return nil
+	return body, nil
 }
 
 // ---------------------------------------------------------------------------

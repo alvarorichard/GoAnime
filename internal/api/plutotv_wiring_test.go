@@ -17,8 +17,8 @@ func TestRegistryKindsForPlutoTV(t *testing.T) {
 		assert.Equal(t, []apisource.SourceKind{apisource.PlutoTV}, registryKindsForSource(selector), selector)
 	}
 	assert.Contains(t, registryKindsForSource("movietv"), apisource.PlutoTV, "-dm and the movie tab search it")
-	assert.NotContains(t, registryKindsForSource("ptbr"), apisource.PlutoTV, "its catalog mixes languages: it is not a Portuguese-only source")
-	assert.NotContains(t, registryKindsForSource("pt-br"), apisource.PlutoTV)
+	assert.Contains(t, registryKindsForSource("ptbr"), apisource.PlutoTV, "its catalog has anime, and in Brazil it is Portuguese")
+	assert.Contains(t, registryKindsForSource("pt-br"), apisource.PlutoTV)
 	assert.Nil(t, registryKindsForSource(""), "no selector searches every registered source, Pluto TV among them")
 }
 
@@ -72,4 +72,20 @@ func TestPlutoTVResultsOpenTheEpisodeFlowWithoutASpinner(t *testing.T) {
 	// media type was lost on the way from a saved entry.
 	assert.True(t, (&models.Media{Source: "PlutoTV"}).HasInteractiveEpisodeFlow())
 	assert.True(t, (&models.Media{Source: "PlutoTV", MediaType: models.MediaTypeMovie}).HasInteractiveEpisodeFlow())
+}
+
+// Pluto TV's catalog has anime, so it is searched on the anime tabs too, not
+// only on MOVIES/TV: the PT-BR group, the ENGLISH tab and ALL.
+func TestPlutoTVIsSearchedOnTheAnimeTabs(t *testing.T) {
+	for _, tab := range []string{"ptbr", "pt-br", "english", "movietv", "plutotv", "pluto"} {
+		assert.Contains(t, registryKindsForSource(tab), apisource.PlutoTV, tab)
+	}
+	assert.Empty(t, registryKindsForSource(""), "ALL passes no kinds, which means every registered source")
+}
+
+// --source hianime still means HiAnime alone: the ENGLISH tab has its own
+// selector, so adding Pluto to the tab did not change the flag.
+func TestTheHiAnimeFlagStaysHiAnimeOnly(t *testing.T) {
+	assert.Equal(t, []apisource.SourceKind{apisource.HiAnime}, registryKindsForSource("hianime"))
+	assert.NotContains(t, registryKindsForSource("goyabu"), apisource.PlutoTV)
 }

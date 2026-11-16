@@ -1419,15 +1419,18 @@ func confirmWithHuh(title, description, yes, no string) (bool, error) {
 }
 
 // downloadMenuItems are the rows of the episode options menu. Enter watches
-// right away: downloading is a shortcut (d/D/A), never the default. The
-// download-all row exists only when there is more than one episode.
+// right away: downloading is a shortcut (d/D/A), never the default. The range
+// and download-all rows exist only when there is more than one episode: a
+// movie has nothing to choose a range of.
 func downloadMenuItems(totalEpisodes int, upscaleStatus string) []tui.PickItem {
 	items := []tui.PickItem{
 		{Label: "Watch now"},
 		{Label: "Download this episode", Key: "d"},
-		{Label: "Download a range...", Key: "D"},
-		{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"},
 	}
+	if totalEpisodes > 1 {
+		items = append(items, tui.PickItem{Label: "Download a range...", Key: "D"})
+	}
+	items = append(items, tui.PickItem{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"})
 	if totalEpisodes > 1 {
 		items = append(items, tui.PickItem{
 			Label: fmt.Sprintf("Download all %d episodes...", totalEpisodes),
@@ -1450,18 +1453,22 @@ func downloadMenuHeader(episodeNum int, animeName string) (breadcrumb, context s
 	return breadcrumb, context
 }
 
-// downloadChoiceFor maps the picked row to its code. A row that does not exist
-// plays the episode: the one thing an unexpected index must never do is start
-// downloading the whole series.
-func downloadChoiceFor(idx int, hasDownloadAll bool) int {
-	switch {
-	case idx == 1:
+// downloadChoiceFor maps the picked row to its code, by the row's key rather
+// than its position, since the rows a title gets depend on its episode count.
+// A row that does not exist plays the episode: the one thing an unexpected
+// index must never do is start downloading the whole series.
+func downloadChoiceFor(items []tui.PickItem, idx int) int {
+	if idx < 0 || idx >= len(items) {
+		return downloadWatch
+	}
+	switch items[idx].Key {
+	case "d":
 		return downloadThis
-	case idx == 2:
+	case "D":
 		return downloadRange
-	case idx == 3:
+	case "u":
 		return downloadUpscale
-	case idx == 4 && hasDownloadAll:
+	case "A":
 		return downloadAll
 	default:
 		return downloadWatch
@@ -1474,7 +1481,8 @@ func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 		return downloadWatch // no TTY: default to play online
 	}
 	breadcrumb, context := downloadMenuHeader(episodeNum, animeName)
-	idx, err := pickItemsFn(downloadMenuItems(totalEpisodes, shaderModeNameFn()), tui.PickOptions{
+	items := downloadMenuItems(totalEpisodes, shaderModeNameFn())
+	idx, err := pickItemsFn(items, tui.PickOptions{
 		Breadcrumb:   breadcrumb,
 		WindowTitle:  "GoAnime - Options",
 		Context:      context,
@@ -1489,7 +1497,7 @@ func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 		util.Errorf("Error showing options menu: %v", err)
 		return downloadWatch // Default to play online on error
 	}
-	return downloadChoiceFor(idx, totalEpisodes > 1)
+	return downloadChoiceFor(items, idx)
 }
 
 // confirmDownloadAll asks before downloading the whole series: the old menu

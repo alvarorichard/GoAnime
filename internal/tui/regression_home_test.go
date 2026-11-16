@@ -248,7 +248,7 @@ func TestRegressionHomeScopeTabs(t *testing.T) {
 	regPin(t, false)
 	// frozen: the tab order, names and the value each runs the search with.
 	wantNames := []string{"ALL", "PT-BR", "ENGLISH", "MOVIES/TV", "FAVORITES"}
-	wantValues := []string{"", "ptbr", "hianime", "movietv", "favorites"}
+	wantValues := []string{"", "ptbr", "english", "movietv", "favorites"}
 	require.Len(t, homeScopes, 5)
 	for i, s := range homeScopes {
 		assert.Equal(t, wantNames[i], s.Name)
@@ -614,7 +614,7 @@ func TestRegressionHomeEnterResults(t *testing.T) {
 		{name: "box, PT-BR", home: regHome{query: "frieren", scope: 1}, keys: []string{"enter"},
 			want: SearchHomeResult{Action: HomeSearch, Query: "frieren", Scope: "ptbr"}, quit: true},
 		{name: "box, ENGLISH", home: regHome{query: "frieren", scope: 2}, keys: []string{"enter"},
-			want: SearchHomeResult{Action: HomeSearch, Query: "frieren", Scope: "hianime"}, quit: true},
+			want: SearchHomeResult{Action: HomeSearch, Query: "frieren", Scope: "english"}, quit: true},
 		{name: "box, MOVIES/TV", home: regHome{query: "heat", scope: 3}, keys: []string{"enter"},
 			want: SearchHomeResult{Action: HomeSearch, Query: "heat", Scope: "movietv"}, quit: true},
 		{name: "box, tab to MOVIES/TV", home: regHome{query: "heat"}, keys: []string{"tab", "tab", "tab", "enter"},
@@ -639,7 +639,7 @@ func TestRegressionHomeEnterResults(t *testing.T) {
 		{name: "recent 1", home: regHome{continues: true, recents: true, favs: 3}, keys: append(downN(7), "enter"),
 			want: SearchHomeResult{Action: HomeSearch, Query: "namakura gatana", Scope: ""}, quit: true},
 		{name: "recent 2 keeps the scope", home: regHome{recents: true, scope: 2}, keys: []string{"down", "down", "enter"},
-			want: SearchHomeResult{Action: HomeSearch, Query: "momotarou", Scope: "hianime"}, quit: true},
+			want: SearchHomeResult{Action: HomeSearch, Query: "momotarou", Scope: "english"}, quit: true},
 		{name: "recent after eight favorites", home: regHome{recents: true, favs: 12}, keys: append(downN(9), "enter"),
 			want: SearchHomeResult{Action: HomeSearch, Query: "namakura gatana"}, quit: true},
 		{name: "FAVORITES box opens the first", home: regHome{favs: 5, scope: 4}, keys: []string{"enter"},

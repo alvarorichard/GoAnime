@@ -277,6 +277,22 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, wa
 	return episodes[idx].URL, episodes[idx].Number, nil
 }
 
+// episodeActions are the episodes screen's action keys. A title of one item (a
+// movie) has no range and no "all" to download: only that item.
+func episodeActions(total int) []tui.PickAction {
+	actions := []tui.PickAction{
+		{Key: "r", Label: "from the start", Hint: "from start"},
+		{Key: "d", Label: "this episode", Hint: "download", Section: true},
+	}
+	if total > 1 {
+		actions = append(actions,
+			tui.PickAction{Key: "D", Label: "a range, from here to ...", Section: true},
+			tui.PickAction{Key: "A", Label: fmt.Sprintf("all %d episodes", total), Section: true},
+		)
+	}
+	return append(actions, tui.PickAction{Key: "m", Label: "every option, upscale included", Section: true})
+}
+
 // episodePickOptions builds the episodes screen (tela 5): the show in the
 // header, its source and audio at the right, the jump hint, the watched
 // count and the download actions.
@@ -309,15 +325,9 @@ func episodePickOptions(episodes []models.Episode, watched map[int]episodeWatch)
 		HelpHint:          true,
 		FilterPlaceholder: "type a number to jump, / to search titles",
 		Context:           header,
-		Actions: []tui.PickAction{
-			{Key: "r", Label: "from the start", Hint: "from start"},
-			{Key: "d", Label: "this episode", Hint: "download", Section: true},
-			{Key: "D", Label: "a range, from here to ...", Section: true},
-			{Key: "A", Label: fmt.Sprintf("all %d episodes", len(episodes)), Section: true},
-			{Key: "m", Label: "every option, upscale included", Section: true},
-		},
-		ActionsLabel: "Download",
-		ActionsGloss: "ダウンロード",
+		Actions:           episodeActions(len(episodes)),
+		ActionsLabel:      "Download",
+		ActionsGloss:      "ダウンロード",
 	}
 }
 

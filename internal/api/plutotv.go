@@ -28,6 +28,10 @@ const (
 	// plutoStreamBudget bounds a stream: the master, up to three renditions
 	// and the content playlist.
 	plutoStreamBudget = 30 * time.Second
+	// plutoReferer is sent with the media requests, as the site's own player
+	// does. Naming it also keeps the player from reusing the referer of
+	// whatever source was played before.
+	plutoReferer = "https://pluto.tv/"
 )
 
 // GetPlutoTVEpisodes lists what a Pluto TV title plays: the movie itself, or
@@ -156,5 +160,16 @@ func ResolvePlutoTVStream(media *models.Anime, episode *models.Episode, quality 
 	if !stream.AdFree && media != nil {
 		util.Debug("Pluto TV title plays with the service's own breaks", "title", media.Name)
 	}
-	return source.Stream{URL: stream.URL}, nil
+	target := stream.URL
+	if stream.Playlist != "" {
+		// The playlist is served from loopback: one of the CDNs refuses it at
+		// its own URL (see plutotv_serve.go). Without the local server the URL
+		// still plays wherever the CDN answers.
+		if local, err := plutoPlaylistURLFn(stream.Playlist); err == nil {
+			target = local
+		} else {
+			util.Debug("Pluto TV playlist is played from its own URL", "error", err)
+		}
+	}
+	return source.Stream{URL: target, Referer: plutoReferer}, nil
 }
