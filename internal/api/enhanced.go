@@ -258,8 +258,10 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 		return []apisource.SourceKind{apisource.Pobreflix}
 	case "pomfy":
 		return []apisource.SourceKind{apisource.Pomfy}
+	case "plutotv", "pluto":
+		return []apisource.SourceKind{apisource.PlutoTV}
 	case "movietv":
-		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
+		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy, apisource.PlutoTV}
 	case "animedrive":
 		return []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
@@ -357,6 +359,7 @@ func searchAnimeEnhanced(
 			"HiAnime", breakdown.HiAnime,
 			"AnimeDrive", breakdown.AnimeDrive,
 			"AnimesFHD", breakdown.AnimesFHD,
+			"PlutoTV", breakdown.PlutoTV,
 		)
 
 		// Sort results by query relevance first, then language: the closest
@@ -439,6 +442,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "TopCine"
 			case "pobreflix":
 				anime.Source = "Pobreflix"
+			case "plutotv", "pluto":
+				anime.Source = "PlutoTV"
 			case "animedrive":
 				anime.Source = "AnimeDrive"
 			}
@@ -463,6 +468,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "TopCine"
 				case strings.Contains(lowerURL, "pobreflixtv"):
 					anime.Source = "Pobreflix"
+				case strings.Contains(lowerURL, "pluto.tv"):
+					anime.Source = "PlutoTV"
 				case strings.Contains(lowerURL, "animesdrive"):
 					anime.Source = "AnimeDrive"
 				}
@@ -588,6 +595,7 @@ type sourceBreakdown struct {
 	AnimesDigital int
 	Anroll        int
 	AnimesFHD     int
+	PlutoTV       int
 	HiAnime       int
 	StartFlix     int
 	TopCine       int
@@ -615,6 +623,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.Anroll++
 		case strings.EqualFold(anime.Source, "AnimesFHD"):
 			b.AnimesFHD++
+		case strings.EqualFold(anime.Source, "PlutoTV"):
+			b.PlutoTV++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
 		case strings.EqualFold(anime.Source, "StartFlix"):

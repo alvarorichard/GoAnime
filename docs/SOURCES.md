@@ -19,12 +19,13 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 | TopCine       | Movies, TV | Portuguese (Brazil) | Catalog only, plays through StartFlix |
 | Pobreflix     | Movies, TV | Portuguese (Brazil) | Some pages need cfsolve              |
 | Pomfy         | Movies, TV | Portuguese (Brazil) | Search by name or TMDB id            |
+| Pluto TV      | Movies, TV | By region (Brazil: mostly Portuguese) | Free, plays without ads            |
 
 ## Choosing a source
 
 `--source` limits a search to one source (`hianime`, `animefire`, `goyabu`,
 `animesdigital`, `anroll`, `animesfhd`, `animedrive`, `startflix`, `topcine`, `pobreflix`,
-`pomfy`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one.
+`pomfy`, `plutotv`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one.
 
 Use
 `GOANIME_ENABLED_SOURCES` / `GOANIME_DISABLED_SOURCES` to turn sources on or
@@ -46,6 +47,17 @@ site moves.
   to the CLI.
 - **Pobreflix**: plays public MP4s directly. Pages with a Turnstile-gated
   player need cfsolve; without it GoAnime falls back to the StartFlix panel.
+- **Pluto TV** (`goanime --source plutotv "death note"`): the free service,
+  read through the same keyless JSON the website uses; there is no account and
+  no key. The catalog depends on the country you connect from. Movies play at
+  once; for a series you choose the season first. Its playlist cuts each title
+  into pieces with ad breaks between them; GoAnime plays the title's own
+  uninterrupted playlist, taken from the same place, so there are no breaks,
+  and `-d`/`-dm` download that playlist. If a title cannot be read that way
+  (for instance when it is made of several clips), the service's own playlist
+  is played with its breaks rather than not at all. Titles protected by a DRM
+  key system are refused with a message. Live channels are not offered.
+  `--quality` picks the rung (`best`, `worst`, `720p`, `480p`...).
 - **Pomfy**: looks titles up on TMDB (your `TMDB_API_KEY` if set, otherwise a
   public key). A bare TMDB id, such as `550`, also works as a search.
   `GOANIME_POMFY_URL` sets another mirror.

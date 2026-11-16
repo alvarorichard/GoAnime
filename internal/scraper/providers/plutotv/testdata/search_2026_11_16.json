@@ -1,0 +1,404 @@
+{
+ "suggestions": {
+  "autocomplete": [
+   {
+    "text": "Naruto: Naruto Uzumaki Chegando!"
+   },
+   {
+    "text": "Boruto: Naruto Next Generations: Naruto Shinden"
+   },
+   {
+    "text": "Naruto Shippuden: O Crescimento De Naruto"
+   },
+   {
+    "text": "Naruto Shippuden - Casamento do Naruto (S21)"
+   },
+   {
+    "text": "Naruto"
+   },
+   {
+    "text": "Naruto Shippuden - Batalha Final: Naruto vs Sasuke (20)"
+   },
+   {
+    "text": "Naruto: O Anbu Desiste? A Lembrança De Naruto"
+   },
+   {
+    "text": "Naruto: O Contra-Ataque De Naruto, Nunca Se Renda!"
+   },
+   {
+    "text": "Naruto Shippuden"
+   },
+   {
+    "text": "Naruto: A Partida"
+   }
+  ]
+ },
+ "data": [
+  {
+   "id": "69fcedd928834670fbd86c43",
+   "slug": "naruto-shippuden-casamento-do-naruto",
+   "name": "Naruto Shippuden - Casamento do Naruto (S21)",
+   "type": "series",
+   "language": "PT",
+   "rating": "A14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd4f068642675fcc3d899c",
+   "slug": "naruto-exame-chuunin-s2",
+   "name": "Naruto: Exame Chuunin",
+   "type": "series",
+   "language": "PT",
+   "rating": "14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd536d86431735d9d964c6",
+   "slug": "naruto-missoes-paralelas-s6",
+   "name": "Naruto: Missões Paralelas",
+   "type": "series",
+   "language": "PT",
+   "rating": "14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69fca62325383e447876b334",
+   "slug": "naruto-shippuden-manual-ninja-de-jiraiya-o-conto-de-naruto-o-heroi",
+   "name": "Naruto Shippuden - Manual Ninja de Jiraiya: O Conto de Naruto, o Herói (S19)",
+   "type": "series",
+   "language": "PT",
+   "rating": "A14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd5e7b1edc179c1d4db831",
+   "slug": "boruto-naruto-next-generations-naruto-shinden-s8",
+   "name": "Boruto: Naruto Next Generations: Naruto Shinden",
+   "type": "series",
+   "language": "PT",
+   "rating": "A14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd523b24a6d521f8a76e69",
+   "slug": "naruto-busca-por-tsunade-s4",
+   "name": "Naruto: Busca por Tsunade",
+   "type": "series",
+   "language": "PT",
+   "rating": "14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd53f28642675fcc3e11b1",
+   "slug": "naruto-missoes-de-konoha-s7",
+   "name": "Naruto: Missões de Konoha",
+   "type": "series",
+   "language": "PT",
+   "rating": "14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "5f6df5a173d7340007c559f7",
+   "slug": "naruto-ptv1",
+   "name": "Naruto",
+   "type": "channel",
+   "language": "PT",
+   "number": 1259
+  },
+  {
+   "id": "604b79c558393100078faeef",
+   "slug": "pluto-tv-anime-acao",
+   "name": "Pluto TV Anime Ação",
+   "type": "channel",
+   "language": "PT",
+   "number": 1254
+  },
+  {
+   "id": "63988c2750108d00072e2686",
+   "slug": "super-onze",
+   "name": "Super Onze",
+   "type": "channel",
+   "language": "PT",
+   "number": 1267
+  },
+  {
+   "id": "6af19b474452050dd572f696",
+   "slug": "6af19b474452050dd572f696",
+   "name": "JoJo's Bizarre Adventure",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T04:03:00Z",
+   "stop": "2026-11-16T04:32:00Z",
+   "channel": {
+    "slug": "jojos-bizarre-adventure-ptv1",
+    "name": "JoJo’s Bizarre Adventure",
+    "number": 1265,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/66c7982f6838ee00085f0d24/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6af19b4843b31fad9753550e",
+   "slug": "6af19b4843b31fad9753550e",
+   "name": "Inuyasha",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T04:00:00Z",
+   "stop": "2026-11-16T04:30:00Z",
+   "channel": {
+    "slug": "inuyasha-ptv1",
+    "name": "Inuyasha",
+    "number": 1279,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/66b26681d2d50d00083abe8b/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6af18d857102b85b82228654",
+   "slug": "6af18d857102b85b82228654",
+   "name": "Boruto: Naruto Next Generations",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T03:59:00Z",
+   "stop": "2026-11-16T04:28:00Z",
+   "channel": {
+    "slug": "boruto-naruto-next-generations-ptv1",
+    "name": "Boruto: Naruto Next Generations",
+    "number": 1261,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/656f389c3944b60008e5bdab/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "624b1c8d4321e200073ee421",
+   "slug": "one-piece-ptv2",
+   "name": "One Piece",
+   "type": "channel",
+   "language": "PT",
+   "number": 1284
+  },
+  {
+   "id": "625464a945b6a200079257d1",
+   "slug": "death-note",
+   "name": "Death Note",
+   "type": "channel",
+   "language": "PT",
+   "number": 1264
+  },
+  {
+   "id": "5f12136385bccc00070142ed",
+   "slug": "pluto-tv-anime-1",
+   "name": "Pluto TV Anime",
+   "type": "channel",
+   "language": "PT",
+   "number": 1251
+  },
+  {
+   "id": "64c92f965580090008084968",
+   "slug": "naruto-shippuden-ptv1",
+   "name": "Naruto Shippuden",
+   "type": "channel",
+   "language": "PT",
+   "number": 1260
+  },
+  {
+   "id": "63988a50be012600070f5db3",
+   "slug": "yu-gi-oh-ptv2",
+   "name": "Yu-Gi-Oh",
+   "type": "channel",
+   "language": "PT",
+   "number": 1269
+  },
+  {
+   "id": "633dc392e0282400071b0d39",
+   "slug": "beyblade-ptv1",
+   "name": "Beyblade",
+   "type": "channel",
+   "language": "PT",
+   "number": 1274
+  },
+  {
+   "id": "6af17facb60195e27e887d9a",
+   "slug": "6af17facb60195e27e887d9a",
+   "name": "Death Note",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T04:07:00Z",
+   "stop": "2026-11-16T04:36:00Z",
+   "channel": {
+    "slug": "death-note",
+    "name": "Death Note",
+    "number": 1264,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/625464a945b6a200079257d1/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6af18db9eb2f854555ca5105",
+   "slug": "6af18db9eb2f854555ca5105",
+   "name": "Hunter x Hunter",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T03:58:00Z",
+   "stop": "2026-11-16T04:27:00Z",
+   "channel": {
+    "slug": "hunter-x-hunter",
+    "name": "Hunter x Hunter",
+    "number": 1263,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/65d9167818036500080e8780/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6af18d5cb60195e27e892c9f",
+   "slug": "6af18d5cb60195e27e892c9f",
+   "name": "Yu-Gi-Oh! Classic BR",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T04:03:00Z",
+   "stop": "2026-11-16T04:28:00Z",
+   "channel": {
+    "slug": "yu-gi-oh-ptv2",
+    "name": "Yu-Gi-Oh",
+    "number": 1269,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/63988a50be012600070f5db3/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6af17fbceb2f854555c76b61",
+   "slug": "6af17fbceb2f854555c76b61",
+   "name": "One Piece",
+   "type": "timeline",
+   "language": "PT",
+   "start": "2026-11-16T03:55:00Z",
+   "stop": "2026-11-16T04:23:00Z",
+   "channel": {
+    "slug": "one-piece-ptv2",
+    "name": "One Piece",
+    "number": 1284,
+    "logo": {
+     "path": "https://images.pluto.tv/channels/624b1c8d4321e200073ee421/logo.png?fit=fill&fm=png&h=80&w=280"
+    }
+   },
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "69dd5479fcb9bf5e30637fa7",
+   "slug": "naruto-missoes-avancadas-de-konoha-s8",
+   "name": "Naruto: Missões Avançadas de Konoha",
+   "type": "series",
+   "language": "PT",
+   "rating": "14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "60466b52b2b870001a056b13",
+   "slug": "o-invasor-da-lamina-br",
+   "name": "Beyblade",
+   "type": "series",
+   "language": "PT",
+   "rating": "L",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "60429480558c290014fa6f6b",
+   "slug": "shaman-king-br",
+   "name": "Shaman King",
+   "type": "series",
+   "language": "PT",
+   "rating": "L",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "62716e4481ecb700133b2aae",
+   "slug": "one-piece-br",
+   "name": "One Piece",
+   "type": "series",
+   "language": "PT",
+   "rating": "A14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "64c7b8ccd0d03200134f8080",
+   "slug": "inuyasha-br",
+   "name": "Inuyasha",
+   "type": "series",
+   "language": "PT",
+   "rating": "A14",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "6206bba315c8610013683974",
+   "slug": "death-note-br",
+   "name": "Death Note",
+   "type": "series",
+   "language": "PT",
+   "rating": "A18",
+   "distributeAs": {
+    "AVOD": true
+   }
+  },
+  {
+   "id": "65ccc8d2b8685b0013c95b76",
+   "slug": "jojos-bizarre-adventure-br",
+   "name": "JoJo's Bizarre Adventure",
+   "type": "series",
+   "language": "PT",
+   "rating": "A16",
+   "distributeAs": {
+    "AVOD": true
+   }
+  }
+ ]
+}

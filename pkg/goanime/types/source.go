@@ -35,6 +35,8 @@ const (
 	SourcePomfy
 	// SourceAnimesFHD is AnimesFHD (PT-BR anime and anime movies).
 	SourceAnimesFHD
+	// SourcePlutoTV is Pluto TV (free movies and series).
+	SourcePlutoTV
 
 	sourceCount // not a source: the number of them
 )
@@ -65,6 +67,7 @@ var sourceTable = [sourceCount]sourceInfo{
 	SourceAnroll:        {"AnimesROLL", scraper.AnrollType, []string{"Anroll", "anroll", "animesroll"}, true, false},
 	SourceAnimesFHD:     {"AnimesFHD", scraper.AnimesFHDType, []string{"animesfhd"}, true, false},
 	SourcePomfy:         {"Pomfy", scraper.PomfyType, []string{"pomfy"}, false, false},
+	SourcePlutoTV:       {"PlutoTV", scraper.PlutoTVType, []string{"plutotv", "pluto"}, false, false},
 }
 
 func (s Source) valid() bool { return s >= 0 && s < sourceCount }

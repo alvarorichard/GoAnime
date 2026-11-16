@@ -22,6 +22,9 @@ const (
 	Pobreflix SourceKind = "Pobreflix"
 	Anroll    SourceKind = "AnimesROLL"
 	AnimesFHD SourceKind = "AnimesFHD"
+	// PlutoTV is the free ad-supported movie/series service, read through its
+	// own JSON services; its titles play without the service breaks.
+	PlutoTV SourceKind = "PlutoTV"
 	// Pomfy is the Byse-CDN movie/series catalog keyed by TMDB id; its
 	// playback runs the proof-of-work captcha and AES-256-GCM seal flow.
 	Pomfy SourceKind = "Pomfy"
@@ -62,4 +65,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	Anroll:        scraper.AnrollType,
 	AnimesFHD:     scraper.AnimesFHDType,
 	Pomfy:         scraper.PomfyType,
+	PlutoTV:       scraper.PlutoTVType,
 }

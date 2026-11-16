@@ -48,6 +48,8 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "AnimesROLL"
 	case source.AnimesFHD:
 		return "AnimesFHD"
+	case source.PlutoTV:
+		return "PlutoTV"
 	default:
 		return string(kind)
 	}

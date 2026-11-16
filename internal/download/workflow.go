@@ -54,26 +54,38 @@ func seriesListingRoute(title *models.Anime) string {
 	if title != nil && title.Source == pomfySourceName {
 		return "pomfy"
 	}
+	if title != nil && title.Source == plutoTVSourceName {
+		return "plutotv"
+	}
 	return "panel"
 }
 
 // seriesSeasonsFor / seriesEpisodesFor dispatch listing by that route.
 func seriesSeasonsFor(title *models.Anime) func(*models.Anime) ([]int, error) {
-	if seriesListingRoute(title) == "pomfy" {
+	switch seriesListingRoute(title) {
+	case "pomfy":
 		return api.GetPomfySeasonNumbers
+	case "plutotv":
+		return api.GetPlutoTVSeasonNumbers
 	}
 	return seriesSeasonsFn
 }
 
 func seriesEpisodesFor(title *models.Anime) func(*models.Anime, int) ([]models.Episode, error) {
-	if seriesListingRoute(title) == "pomfy" {
+	switch seriesListingRoute(title) {
+	case "pomfy":
 		return api.GetPomfySeasonEpisodes
+	case "plutotv":
+		return api.GetPlutoTVSeasonEpisodes
 	}
 	return seriesEpisodesFn
 }
 
 // pomfySourceName is api-providers' canonical Source spelling for Pomfy.
 const pomfySourceName = "Pomfy"
+
+// plutoTVSourceName is the same for Pluto TV.
+const plutoTVSourceName = "PlutoTV"
 
 // fileUnderSeason points the player's download paths at the season being
 // downloaded and refreshes the naming metadata. Called after listing, which

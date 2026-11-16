@@ -205,7 +205,7 @@ func scopeIndexForSource(src string) int {
 		return 2
 	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
-	case "movietv", "startflix", "topcine", "pobreflix":
+	case "movietv", "startflix", "topcine", "pobreflix", "plutotv":
 		return 3
 	default:
 		return 0
@@ -330,6 +330,8 @@ func sourceFromURL(rawURL string) string {
 		return "StartFlix"
 	case strings.Contains(host, "topcine"):
 		return "TopCine"
+	case strings.Contains(host, "pluto.tv"):
+		return "PlutoTV"
 	case strings.Contains(host, "pobreflixtv"):
 		return "Pobreflix"
 	case strings.Contains(host, "animedrive") || strings.Contains(host, "animesdrive"):
