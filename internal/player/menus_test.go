@@ -345,8 +345,7 @@ func TestDownloadChoiceForMeta(t *testing.T) {
 			return downloadWatch
 		},
 		"no bounds check": func(items []tui.PickItem, i int) int {
-			switch items[i].Key {
-			case "d":
+			if items[i].Key == "d" {
 				return downloadThis
 			}
 			return downloadChoiceFor(items, i)

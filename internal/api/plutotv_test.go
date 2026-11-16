@@ -289,7 +289,7 @@ func servedPlaylist(t *testing.T, target string) string {
 	t.Helper()
 	require.True(t, strings.HasPrefix(target, "http://127.0.0.1:"), "served from loopback: %s", target)
 	require.True(t, strings.HasSuffix(target, ".m3u8"), "named as a playlist, which is how the player and the downloader tell: %s", target)
-	resp, err := http.Get(target) //nolint:gosec,noctx // a loopback URL made by the code under test
+	resp, err := http.Get(target) //nolint:noctx // a loopback URL made by the code under test
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -411,7 +411,7 @@ func TestPlutoTVPlaylistServerForgetsTheOldestPastItsBound(t *testing.T) {
 	assert.Len(t, s.lists, maxPlutoPlaylists)
 	assert.Len(t, s.order, maxPlutoPlaylists)
 	for i, u := range urls {
-		resp, err := http.Get(u) //nolint:gosec,noctx // loopback
+		resp, err := http.Get(u) //nolint:noctx // loopback
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		want := http.StatusOK

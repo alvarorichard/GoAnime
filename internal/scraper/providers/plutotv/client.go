@@ -287,7 +287,7 @@ func parsePageURL(raw string) (pageRef, error) {
 		return pageRef{}, netx.NewParserError(SourceName, "url", "not a Pluto TV on-demand URL", err)
 	}
 	m := pagePathRe.FindStringSubmatch(u.Path)
-	if m == nil || (m[1] == "movies" && m[3] != "") {
+	if len(m) < 4 || (m[1] == "movies" && m[3] != "") {
 		// A movie has no episodes: its page and its player are the same id.
 		return pageRef{}, netx.NewParserError(SourceName, "url", "not a Pluto TV on-demand URL", nil)
 	}
@@ -700,7 +700,7 @@ func titlePlaylist(stitched, base, contentURL string) (string, bool) {
 			seconds, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(duration, "#EXTINF:"), ","), 64)
 			segmentDuration := duration
 			duration = "" // a duration belongs to the one segment after it
-			if m == nil || m[1] != dir || m[4] != rendition {
+			if len(m) < 5 || m[1] != dir || m[4] != rendition {
 				continue
 			}
 			if err != nil || seconds <= 0 {

@@ -48,10 +48,11 @@ func TestTheOtherRoutesAreWhereTheyWere(t *testing.T) {
 // source that was named instead of mixing in the other movie/TV catalogs.
 func TestDashDMSearchesOnlyTheSourceItWasGiven(t *testing.T) {
 	for source, want := range map[string]string{
-		"plutotv": "plutotv", " PlutoTV ": "plutotv", "pluto": "pluto",
+		"plutotv": "plutotv", "PlutoTV": "plutotv", "pluto": "pluto",
 		"startflix": "startflix", "topcine": "topcine", "pobreflix": "pobreflix", "pomfy": "pomfy",
 	} {
 		assert.Equal(t, want, movieSearchScope(source), "%q", source)
+		assert.Equal(t, want, movieSearchScope(" "+source+"\t"), "%q, as typed with spaces around it", source)
 	}
 	for _, source := range []string{"", "movietv", "hianime", "animefire", "ptbr", "english", "plutotv2"} {
 		assert.Equal(t, api.MovieTVSources, movieSearchScope(source), "%q is not a movie/TV source: -dm searches them all", source)

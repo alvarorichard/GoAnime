@@ -238,7 +238,7 @@ func (s *plutoPlainScraper) SearchAnime(q string, _ ...any) ([]*models.Anime, er
 	return s.results, s.err
 }
 func (s *plutoPlainScraper) GetAnimeEpisodes(string) ([]models.Episode, error) { return nil, nil }
-func (s *plutoPlainScraper) GetStreamURL(string, ...any) (string, map[string]string, error) {
+func (s *plutoPlainScraper) GetStreamURL(string, ...any) (streamURL string, meta map[string]string, err error) {
 	return "", nil, nil
 }
 func (s *plutoPlainScraper) GetType() scraper.ScraperType { return scraper.PlutoTVType }
@@ -263,7 +263,7 @@ func (s *plutoCtxScraper) SearchAnimeContext(ctx context.Context, q string, _ ..
 func (s *plutoCtxScraper) GetAnimeEpisodesContext(context.Context, string) ([]models.Episode, error) {
 	return nil, nil
 }
-func (s *plutoCtxScraper) GetStreamURLContext(context.Context, string, ...any) (string, map[string]string, error) {
+func (s *plutoCtxScraper) GetStreamURLContext(context.Context, string, ...any) (streamURL string, meta map[string]string, err error) {
 	return "", nil, nil
 }
 

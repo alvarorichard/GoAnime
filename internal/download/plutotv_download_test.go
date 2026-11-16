@@ -222,7 +222,7 @@ func downloadPlutoEpisode(t *testing.T, quality string) (file []byte, svc *pluto
 // playlistAt reads what a stream URL serves.
 func playlistAt(t *testing.T, target string) string {
 	t.Helper()
-	resp, err := http.Get(target) //nolint:gosec,noctx // GoAnime's own loopback playlist
+	resp, err := http.Get(target) //nolint:noctx // GoAnime's own loopback playlist
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
