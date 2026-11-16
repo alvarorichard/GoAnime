@@ -170,3 +170,9 @@ func TestPickMovieItemConsumesTheContinueSkipEvenWithoutATerminal(t *testing.T) 
 	require.NoError(t, pickMovieItem(movieEpisodes()))
 	assert.False(t, PlayOneItemDirectly, "not left over for a later title")
 }
+
+func TestTheRealTerminalCheckAnswersWithoutTouchingTheScreen(t *testing.T) {
+	// The default reads os.Stdin's mode: whatever it answers here, asking must
+	// not fail or block.
+	assert.NotPanics(t, func() { _ = movieStdinIsTerminal() })
+}

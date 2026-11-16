@@ -178,12 +178,16 @@ func (m *tryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.scopeIdx = (m.scopeIdx + 1) % len(searchScopes)
 			return m, nil
 		case "esc":
-			// esc edits: it clears the box, never quits and never leaves.
+			// esc edits first: it clears the box, or returns to it from the
+			// suggestions. On an empty box it goes back to the SEARCH home,
+			// where anything else can be done; it never quits the program.
 			if m.focusBox {
-				if m.input.Value() != "" {
-					m.input.SetValue("")
-					m.replaced = true
+				if m.input.Value() == "" {
+					m.err = ErrSelectionBack
+					return m, tea.Quit
 				}
+				m.input.SetValue("")
+				m.replaced = true
 			} else {
 				m.focusBox = true
 				m.input.Focus()
@@ -284,10 +288,18 @@ func (m *tryModel) hints() []Hint {
 	if Plain() {
 		move = "dn"
 	}
+	// esc names what it does now: clear what was typed, or go back.
+	esc := Hint{Key: "esc", Desc: "back"}
+	if !m.focusBox {
+		esc.Desc = "edit"
+	} else if m.input.Value() != "" {
+		esc.Desc = "clear"
+	}
 	return []Hint{
 		{Key: "enter", Desc: "search", Essential: true},
 		{Key: move, Desc: "suggestions"},
 		tab,
+		esc,
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
 	}
@@ -308,7 +320,7 @@ func (m *tryModel) View() tea.View {
 	if m.showHelp {
 		if help := RenderHelp(&m.theme, "No results", []HelpRow{
 			{Key: "enter", Desc: "search"},
-			{Key: "esc", Desc: "clear"},
+			{Key: "esc", Desc: "clear; on an empty box, back to search"},
 			{Key: "tab", Desc: "sources"},
 		}, nil, width, height); help != "" {
 			body = help

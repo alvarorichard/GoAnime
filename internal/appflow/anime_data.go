@@ -226,10 +226,30 @@ func SearchAnimeWithRetryIn(name, scope string) (*models.Anime, error) {
 			return nil, searchErr
 		}
 
-		switch {
-		case errors.Is(searchErr, api.ErrBackToSearch):
-			// Back from the results screen edits the search on the SEARCH
-			// home screen, with the query kept — never the bare prompt.
+		// Back from the results screen, or from the TRY screen, goes to the
+		// SEARCH home screen with the query kept, never to the bare prompt and
+		// never out of the program: from there anything can be done.
+		back := errors.Is(searchErr, api.ErrBackToSearch)
+		if !back {
+			// A failed search opens the TRY screen (tela 4), which keeps
+			// the query, explains the outcome per source and offers
+			// retries: a spelling fix, fewer words, English sources.
+			// Without a terminal it falls back to the legacy prompt below.
+			decision, err := tryAgain(currentName, loopSource, searchErr)
+			switch {
+			case err == nil:
+				currentName = decision.Query
+				loopSource = decision.Scope
+				continue
+			case errors.Is(err, tui.ErrSelectionBack):
+				back = true
+			case !errors.Is(err, errTryUnavailable):
+				return nil, err
+			default:
+				reportSearchOutcome(currentName, searchErr)
+			}
+		}
+		if back {
 			// A CONTINUE decision travels out via PendingHomeResult with a
 			// (nil, nil) return for the caller to reopen.
 			hb, err := backToSearchHome(currentName)
@@ -245,33 +265,6 @@ func SearchAnimeWithRetryIn(name, scope string) (*models.Anime, error) {
 				return nil, err
 			}
 			util.Infof("Going back to new search...")
-		default:
-			// A failed search opens the TRY screen (tela 4), which keeps
-			// the query, explains the outcome per source and offers
-			// retries: a spelling fix, fewer words, English sources.
-			// Without a terminal it falls back to the legacy prompt below.
-			decision, err := tryAgain(currentName, loopSource, searchErr)
-			if err == nil {
-				currentName = decision.Query
-				loopSource = decision.Scope
-				continue
-			}
-			if !errors.Is(err, errTryUnavailable) {
-				return nil, err
-			}
-			var failure *providers.SearchFailure
-			switch {
-			case errors.As(searchErr, &failure):
-				reportSearchFailure(currentName, failure)
-			case searchErr == nil || errors.Is(searchErr, api.ErrNoResults):
-				// Either every source answered with nothing, or the search
-				// returned no error and no anime — both are "not found".
-				util.Errorf("No anime found with the name: %s", currentName)
-			default:
-				// A transport/source failure is not the same as an empty result;
-				// saying "no anime found" here hides the real reason.
-				util.Errorf("Search failed for %q: %v", currentName, searchErr)
-			}
 		}
 
 		util.Infof("Please enter a new search term.")
@@ -281,6 +274,30 @@ func SearchAnimeWithRetryIn(name, scope string) (*models.Anime, error) {
 			return nil, promptErr
 		}
 		currentName = nextName
+	}
+}
+
+// Where reportSearchOutcome writes; seams for tests.
+var (
+	reportSearchFailureFn = reportSearchFailure
+	searchErrorfFn        = util.Errorf
+)
+
+// reportSearchOutcome says why a search found nothing, for the legacy prompt
+// that follows when the TRY screen cannot open.
+func reportSearchOutcome(query string, searchErr error) {
+	var failure *providers.SearchFailure
+	switch {
+	case errors.As(searchErr, &failure):
+		reportSearchFailureFn(query, failure)
+	case searchErr == nil || errors.Is(searchErr, api.ErrNoResults):
+		// Either every source answered with nothing, or the search
+		// returned no error and no anime — both are "not found".
+		searchErrorfFn("No anime found with the name: %s", query)
+	default:
+		// A transport/source failure is not the same as an empty result;
+		// saying "no anime found" here hides the real reason.
+		searchErrorfFn("Search failed for %q: %v", query, searchErr)
 	}
 }
 
