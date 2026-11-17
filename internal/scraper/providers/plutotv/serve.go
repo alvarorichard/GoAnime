@@ -59,12 +59,13 @@ func listenLoopback() (net.Listener, error) { return net.Listen("tcp", "127.0.0.
 // (a title with no playlist of its own, or no port to serve one from, in which
 // case the URL still plays wherever the CDN answers).
 func PlayURL(s Stream) string {
-	if s.Playlist == "" {
-		return s.URL
-	}
+	// A stream with no playlist has nothing to publish: publishing refuses
+	// what is not one, and the URL is what is left.
 	local, err := publishFn(s.Playlist)
 	if err != nil {
-		util.Debug("Pluto TV playlist is played from its own URL", "error", err)
+		if s.Playlist != "" {
+			util.Debug("Pluto TV playlist is played from its own URL", "error", err)
+		}
 		return s.URL
 	}
 	return local

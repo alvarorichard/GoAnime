@@ -29,7 +29,7 @@ func plutoClock(t *testing.T) *time.Time {
 	return &now
 }
 
-func TestAWholeSeriesIsListedFromOneAnswer(t *testing.T) {
+func TestPlutoTVAWholeSeriesIsListedFromOneAnswer(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	series := plutoSeries()
 
@@ -44,7 +44,7 @@ func TestAWholeSeriesIsListedFromOneAnswer(t *testing.T) {
 	assert.Equal(t, 1, f.hit(ptSeasonsPath), "the numbers and both seasons came from the one answer")
 }
 
-func TestAListingIsReadAgainOnceItIsOld(t *testing.T) {
+func TestPlutoTVAListingIsReadAgainOnceItIsOld(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	now := plutoClock(t)
 	series := plutoSeries()
@@ -62,7 +62,7 @@ func TestAListingIsReadAgainOnceItIsOld(t *testing.T) {
 	assert.Equal(t, 2, f.hit(ptSeasonsPath), "past its time: the catalog is asked again")
 }
 
-func TestAFailedListingIsNotKept(t *testing.T) {
+func TestPlutoTVAFailedListingIsNotKept(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	good := f.seasons
 	f.seasons = `{"_id": "` + ptSeriesID + `", "name": "Death Note", "seasons": []}`
@@ -76,7 +76,7 @@ func TestAFailedListingIsNotKept(t *testing.T) {
 	assert.Equal(t, 2, f.hit(ptSeasonsPath))
 }
 
-func TestOldListingsAreDroppedWhenANewOneIsKept(t *testing.T) {
+func TestPlutoTVOldListingsAreDroppedWhenANewOneIsKept(t *testing.T) {
 	newPlutoAPIFake(t)
 	now := plutoClock(t)
 	plutoShows.mu.Lock()
@@ -104,7 +104,7 @@ func TestForgetPlutoTVListingsReadsTheCatalogAgain(t *testing.T) {
 	assert.Equal(t, 2, f.hit(ptSeasonsPath))
 }
 
-func TestListingsAreSafeToReadFromManyDownloadsAtOnce(t *testing.T) {
+func TestPlutoTVListingsAreSafeToReadFromManyDownloadsAtOnce(t *testing.T) {
 	newPlutoAPIFake(t)
 	var wg sync.WaitGroup
 	for range 16 {
@@ -119,7 +119,7 @@ func TestListingsAreSafeToReadFromManyDownloadsAtOnce(t *testing.T) {
 
 // ---- the caller's context ---------------------------------------------------
 
-func TestACancelledListingStopsAtOnce(t *testing.T) {
+func TestPlutoTVACancelledListingStopsAtOnce(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -130,7 +130,7 @@ func TestACancelledListingStopsAtOnce(t *testing.T) {
 	assert.Zero(t, f.hit(ptSeasonsPath), "nothing was asked of the catalog")
 }
 
-func TestACancelledStreamStopsAtOnce(t *testing.T) {
+func TestPlutoTVACancelledStreamStopsAtOnce(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -139,7 +139,7 @@ func TestACancelledStreamStopsAtOnce(t *testing.T) {
 	assert.Zero(t, f.hit("/v2/stitch/hls/episode/"+ptEpisode1+"/master.m3u8"))
 }
 
-func TestAMovieNeedsNoCatalogEvenWhenTheCallerHasGone(t *testing.T) {
+func TestPlutoTVAMovieNeedsNoCatalogEvenWhenTheCallerHasGone(t *testing.T) {
 	f := newPlutoAPIFake(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
