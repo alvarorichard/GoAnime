@@ -14,6 +14,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/downloader"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
@@ -54,26 +55,38 @@ func seriesListingRoute(title *models.Anime) string {
 	if title != nil && title.Source == pomfySourceName {
 		return "pomfy"
 	}
+	if title != nil && title.Source == plutoTVSourceName {
+		return "plutotv"
+	}
 	return "panel"
 }
 
 // seriesSeasonsFor / seriesEpisodesFor dispatch listing by that route.
 func seriesSeasonsFor(title *models.Anime) func(*models.Anime) ([]int, error) {
-	if seriesListingRoute(title) == "pomfy" {
+	switch seriesListingRoute(title) {
+	case "pomfy":
 		return api.GetPomfySeasonNumbers
+	case "plutotv":
+		return api.GetPlutoTVSeasonNumbers
 	}
 	return seriesSeasonsFn
 }
 
 func seriesEpisodesFor(title *models.Anime) func(*models.Anime, int) ([]models.Episode, error) {
-	if seriesListingRoute(title) == "pomfy" {
+	switch seriesListingRoute(title) {
+	case "pomfy":
 		return api.GetPomfySeasonEpisodes
+	case "plutotv":
+		return api.GetPlutoTVSeasonEpisodes
 	}
 	return seriesEpisodesFn
 }
 
 // pomfySourceName is api-providers' canonical Source spelling for Pomfy.
 const pomfySourceName = "Pomfy"
+
+// plutoTVSourceName is the same for Pluto TV.
+const plutoTVSourceName = "PlutoTV"
 
 // fileUnderSeason points the player's download paths at the season being
 // downloaded and refreshes the naming metadata. Called after listing, which
@@ -211,6 +224,34 @@ func HandleDownloadRequest(request *util.DownloadRequest) error {
 	return dl.DownloadSingleEpisode(request.EpisodeNum)
 }
 
+// movieScopedSearchFn searches one named source; a seam for tests.
+var movieScopedSearchFn = api.SearchAnimeEnhanced
+
+// movieSearchScope is where a -dm search looks: the one movie/TV source that
+// --source names, or all of them. A source of another family (an anime site)
+// cannot serve -dm, so it is ignored rather than searched in vain.
+func movieSearchScope(source string) string {
+	switch scope := strings.ToLower(strings.TrimSpace(source)); scope {
+	case "startflix", "topcine", "pobreflix", "pomfy", "plutotv", "pluto":
+		return scope
+	}
+	return api.MovieTVSources
+}
+
+// searchMovieTitle finds the title of a -dm request, honouring --source: with
+// "-dm --source plutotv" only Pluto TV is searched, so the title that
+// downloads is the one of the source that was asked for.
+func searchMovieTitle(request *util.DownloadRequest) (*models.Anime, error) {
+	source := request.Source
+	if source == "" {
+		source = util.GlobalSource // -dm does not copy the flag into its request
+	}
+	if scope := movieSearchScope(source); scope != api.MovieTVSources {
+		return movieScopedSearchFn(request.AnimeName, scope)
+	}
+	return movieSearchFn(request.AnimeName)
+}
+
 // HandleMovieDownloadRequest downloads movies and series from the movie/TV
 // sources, StartFlix and TopCine. The -dm forms:
 //
@@ -228,7 +269,7 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 	if strings.TrimSpace(request.AnimeName) == "" {
 		return errors.New("no movie or series name to download")
 	}
-	title, err := movieSearchFn(request.AnimeName)
+	title, err := searchMovieTitle(request)
 	if err != nil {
 		return fmt.Errorf("failed to search the movie/TV sources: %w", err)
 	}
@@ -254,12 +295,18 @@ func HandleMovieDownloadRequest(request *util.DownloadRequest) error {
 }
 
 func downloadStartFlixMovie(title *models.Anime) error {
+	// A Pluto TV address says what it is, so a series asked for as a movie is
+	// told so at once. Listing it first would open its season picker, in a
+	// command that was meant to run unattended.
+	if title.Source == plutoTVSourceName && !plutotv.IsMovieURL(title.URL) {
+		return seriesNotMovieErr(title)
+	}
 	eps, err := workflowFetchEpisodesFn(context.Background(), title)
 	if err != nil {
 		return fmt.Errorf("failed to open %q: %w", title.Name, err)
 	}
 	if title.MediaType != models.MediaTypeMovie {
-		return fmt.Errorf("%q is a series on %s: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, sourceOr(title), title.Name)
+		return seriesNotMovieErr(title)
 	}
 	if len(eps) == 0 {
 		return fmt.Errorf("%q lists nothing to download", title.Name)
@@ -293,8 +340,16 @@ func downloadStartFlixSeries(title *models.Anime) error {
 	return errors.Join(failed...)
 }
 
+// seriesNotMovieErr says a title asked for as a movie is a series, and how to
+// download it.
+func seriesNotMovieErr(title *models.Anime) error {
+	return fmt.Errorf("%q is a series on %s: download it with -dm --type tv \"%s\" <season> <episode>, -dm -r or -dm -a", title.Name, sourceOr(title), title.Name)
+}
+
 func seriesErr(title *models.Anime, err error) error {
-	if errors.Is(err, api.ErrStartFlixNotSeries) {
+	// Pluto TV's client refuses to list the seasons of a movie in its own
+	// words; the address says it is one, so the same hint is given.
+	if errors.Is(err, api.ErrStartFlixNotSeries) || (title.Source == plutoTVSourceName && plutotv.IsMovieURL(title.URL)) {
 		return fmt.Errorf("%q is a movie on %s: download it with -dm \"%s\"", title.Name, sourceOr(title), title.Name)
 	}
 	return fmt.Errorf("failed to list %q: %w", title.Name, err)

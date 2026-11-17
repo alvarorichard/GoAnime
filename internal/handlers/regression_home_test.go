@@ -392,8 +392,8 @@ func TestRegressionScopeIndexForSource(t *testing.T) {
 		src  string
 		want int
 	}{
-		{"", 0}, {"   ", 0}, {"all", 0}, {"unknown", 0}, {"favorites", 0}, {"english", 0}, {"en", 0},
-		{"hianime", 2}, {"HiAnime", 2}, {"  HIANIME  ", 2},
+		{"", 0}, {"   ", 0}, {"all", 0}, {"unknown", 0}, {"favorites", 0}, {"en", 0},
+		{"hianime", 2}, {"english", 2}, {"English", 2}, {"HiAnime", 2}, {"  HIANIME  ", 2},
 		{"ptbr", 1}, {"pt-br", 1}, {"PT-BR", 1}, {"animefire", 1}, {"AnimeFire", 1}, {"goyabu", 1}, {"animesdigital", 1}, {"anroll", 1}, {" Goyabu\t", 1},
 		{"movietv", 3}, {"MovieTV", 3}, {"startflix", 3}, {"StartFlix", 3}, {"topcine", 3}, {"pobreflix", 3},
 		// frozen: sources that exist but are not in the lists fall on ALL.

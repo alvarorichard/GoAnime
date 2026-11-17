@@ -39,7 +39,7 @@ func TestDM_SearchesEveryMovieTVSource(t *testing.T) {
 	if !errors.Is(err, api.ErrNoResults) {
 		t.Fatalf("err = %v, want ErrNoResults from the stubbed fan-out", err)
 	}
-	want := []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
+	want := []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy, apisource.PlutoTV}
 	if !slices.Equal(got, want) {
 		t.Errorf("searched %v, want %v", got, want)
 	}

@@ -547,7 +547,7 @@ func TestSearchHomeWithRunnerCarriesTheRestore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, HomeRestore{Tab: TabEnglish, RowKey: "recent:momotarou"}, res.Restore)
 	assert.Equal(t, "momotarou", res.Query)
-	assert.Equal(t, "hianime", res.Scope)
+	assert.Equal(t, "english", res.Scope)
 }
 
 // a time-dependent fixture must not leak into keys

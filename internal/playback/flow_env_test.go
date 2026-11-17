@@ -38,6 +38,16 @@ type fakeFlow struct {
 	subMovies    []subCall
 	subErr       error // returned by the delegated HandleSeries / HandleMovie
 	inputMovie   []bool
+	// pickErr is what the episodes screen of a one-item title answers.
+	pickErr error
+	// pickIdx is the entry that screen says was picked.
+	pickIdx int
+	// picks records, for each time that screen opened, how many events had
+	// been logged before it: the scenario traces stay as they were, and a
+	// test can still tell where in the flow the screen came.
+	picks []int
+	// pickedEps is the episode list the screen was shown.
+	pickedEps [][]models.Episode
 }
 
 type moviePlay struct {
@@ -155,6 +165,13 @@ func newFakeFlow() *fakeFlow {
 			f.mu.Unlock()
 			f.log("sub-series")
 			return f.subErr
+		},
+		pickMovie: func(eps []models.Episode) (int, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.picks = append(f.picks, len(f.events))
+			f.pickedEps = append(f.pickedEps, eps)
+			return f.pickIdx, f.pickErr
 		},
 	}
 	return f

@@ -17,6 +17,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
+	"golang.org/x/term"
 )
 
 // HandleMovie gerencia a reprodução de filmes/OVAs
@@ -30,12 +31,33 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 	env.preWarmMPV()
 	env.setEpisodeListCtx(anime.Name, anime.Source, anime.Audio)
 
+	// A title of one item gets the episodes screen too, as a series does:
+	// enter plays it, and the download and option keys (d, m, ...) are there.
+	// It used to play at once, leaving no way to download a movie from the
+	// interactive flow. A replay does not ask again; a change to another
+	// movie does.
+	//
+	// A movie may list more than one entry (parts, cuts): the one picked on
+	// the screen is the one that plays and downloads, not always the first.
+	pick, part := true, 0
 	for {
+		if pick {
+			pick = false
+			chosen, err := env.pickMovie(episodes)
+			if err != nil {
+				return err
+			}
+			part = 0
+			if chosen > 0 && chosen < len(episodes) {
+				part = chosen
+			}
+		}
+		current := &episodes[part]
 		animeMutex := sync.Mutex{}
 		isPaused := false
 
 		animeMutex.Lock()
-		anime.Episodes = []models.Episode{episodes[0]}
+		anime.Episodes = []models.Episode{*current}
 		animeMutex.Unlock()
 
 		movieData := fetchMovieData(anime)
@@ -43,7 +65,7 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 		// Use static log instead of spinner while fetching video URL
 		// to avoid terminal UI contention if a quality picker opens.
 		util.Infof("Loading video stream...")
-		videoURL, videoErr := env.streamURL(ctx, &episodes[0], anime)
+		videoURL, videoErr := env.streamURL(ctx, current, anime)
 
 		// Keep the metadata only if it is already here; playback never waits
 		// for it.
@@ -64,7 +86,7 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 			return player.ErrBackToAnimeSelection
 		}
 
-		episodeDuration := time.Duration(episodes[0].Duration) * time.Second
+		episodeDuration := time.Duration(current.Duration) * time.Second
 		updater := env.newUpdater(anime, &isPaused, &animeMutex, episodeDuration, discordEnabled)
 
 		// Route downloads to the correct directory (anime/ vs movies/) using exact media type
@@ -83,9 +105,9 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 		playErr := env.downloadAndPlay(
 			videoURL,
 			episodes,
-			1,
+			moviePartNumber(episodes, part),
 			anime.URL,
-			episodes[0].Number,
+			current.Number,
 			anime.MalID,
 			anime.AnilistID,
 			updater,
@@ -132,10 +154,78 @@ func runMovie(env flowEnv, ctx context.Context, anime *models.Anime, episodes []
 			case changeToMovie:
 				anime, episodes = change.anime, change.episodes
 				fmt.Printf("Switched to movie: %s\n", anime.Name)
-				continue // Continue with new movie
+				pick = true // a new title: its screen opens before it plays
+				continue    // Continue with new movie
 			}
 		}
 	}
+}
+
+// PlayOneItemDirectly skips the episodes screen of the next title of one
+// item, once: a CONTINUE reopen sets it, since the row already chose what to
+// play. Consumed by the screen it skips.
+var PlayOneItemDirectly bool
+
+// movieStdinIsTerminal reports an interactive terminal; a seam for tests.
+var movieStdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// pickMovieItem opens the episodes screen for a title of one item. Enter
+// plays it; d downloads it; m opens every option (download, upscale, ...).
+// Backing out returns to the results. Without a terminal, or when the screen
+// cannot open, the title plays as it always did. A CONTINUE reopen does not
+// ask (PlayOneItemDirectly).
+//
+// It answers the index of the entry that was picked: a movie may list several.
+func pickMovieItem(episodes []models.Episode) (int, error) {
+	if PlayOneItemDirectly {
+		PlayOneItemDirectly = false
+		return 0, nil
+	}
+	if !movieStdinIsTerminal() {
+		return 0, nil
+	}
+	url, number, _, err := SelectInitialEpisode(episodes)
+	switch {
+	case err == nil:
+		return pickedEntry(episodes, url, number), nil
+	case errors.Is(err, player.ErrBackRequested):
+		return 0, player.ErrBackToAnimeSelection
+	default:
+		util.Warnf("Could not open the options screen, playing directly: %v", err)
+		player.ClearEpisodeMenu() // whatever it left half-chosen is not a choice
+		return 0, nil
+	}
+}
+
+// pickedEntry finds which entry the screen's answer names: the one with that
+// URL and number, else that URL, else that number, else the first.
+func pickedEntry(episodes []models.Episode, url, number string) int {
+	byURL, byNumber := -1, -1
+	for i, ep := range episodes {
+		if ep.URL == url && ep.Number == number {
+			return i
+		}
+		if byURL < 0 && url != "" && ep.URL == url {
+			byURL = i
+		}
+		if byNumber < 0 && number != "" && ep.Number == number {
+			byNumber = i
+		}
+	}
+	return max(byURL, byNumber, 0)
+}
+
+// moviePartNumber is the number the player is told it plays. The first entry
+// is 1, as it always was for a movie; a later one is its own number, or its
+// place in the list when it has none.
+func moviePartNumber(episodes []models.Episode, part int) int {
+	if part <= 0 || part >= len(episodes) {
+		return 1
+	}
+	if n := episodes[part].Num; n > 0 {
+		return n
+	}
+	return part + 1
 }
 
 // getMovieData is api.GetMovieData; a var so tests can stand in a slow or

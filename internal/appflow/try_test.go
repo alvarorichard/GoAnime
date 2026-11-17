@@ -69,7 +69,7 @@ func TestBuildTrySuggestions(t *testing.T) {
 	assert.Equal(t, "fewer words", got[1].Hint)
 	assert.Equal(t, "namakra gatana", got[2].Label)
 	assert.Equal(t, "English sources only", got[2].Hint)
-	assert.Equal(t, "hianime", got[2].Scope)
+	assert.Equal(t, "english", got[2].Scope)
 }
 
 func TestBuildTrySuggestionsSkips(t *testing.T) {
@@ -282,7 +282,7 @@ func TestBuildTrySuggestionsCarryScope(t *testing.T) {
 	require.Len(t, got, 3)
 	assert.Equal(t, "ptbr", got[0].Scope, "query suggestions keep the loop scope")
 	assert.Equal(t, "ptbr", got[1].Scope)
-	assert.Equal(t, "hianime", got[2].Scope, "english-only always scopes english")
+	assert.Equal(t, "english", got[2].Scope, "english-only always scopes english")
 }
 
 func TestDidYouMeanPrefersEnglish(t *testing.T) {

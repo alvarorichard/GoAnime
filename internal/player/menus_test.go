@@ -105,8 +105,8 @@ var downloadItemCases = []struct {
 }{
 	{"series", 12, "Balanced", []string{"Watch now", "Download this episode", "Download a range...", "Real-time upscale", "Download all 12 episodes..."}, []string{"", "d", "D", "u", "A"}},
 	{"two episodes", 2, "Off", []string{"Watch now", "Download this episode", "Download a range...", "Real-time upscale", "Download all 2 episodes..."}, []string{"", "d", "D", "u", "A"}},
-	{"a movie has no download-all", 1, "Off", []string{"Watch now", "Download this episode", "Download a range...", "Real-time upscale"}, []string{"", "d", "D", "u"}},
-	{"unknown count", 0, "Off", []string{"Watch now", "Download this episode", "Download a range...", "Real-time upscale"}, []string{"", "d", "D", "u"}},
+	{"a movie has no range and no download-all", 1, "Off", []string{"Watch now", "Download this episode", "Real-time upscale"}, []string{"", "d", "u"}},
+	{"unknown count", 0, "Off", []string{"Watch now", "Download this episode", "Real-time upscale"}, []string{"", "d", "u"}},
 }
 
 func downloadItemFailures(impl func(int, string) []tui.PickItem) (f []string) {
@@ -124,8 +124,10 @@ func downloadItemFailures(impl func(int, string) []tui.PickItem) (f []string) {
 		if !slices.Equal(labelsOfItems(items), tc.labels) || !slices.Equal(keys, tc.keys) {
 			f = append(f, fmt.Sprintf("%s: %v %v", tc.name, labelsOfItems(items), keys))
 		}
-		if len(items) > 3 && items[3].Details != tc.status {
-			f = append(f, tc.name+": upscale row does not show the current mode")
+		for _, it := range items {
+			if it.Key == "u" && it.Details != tc.status {
+				f = append(f, tc.name+": upscale row does not show the current mode")
+			}
 		}
 		if items[0].Key != "" {
 			f = append(f, tc.name+": 'Watch now' must be the plain Enter row")
@@ -146,6 +148,13 @@ func TestDownloadMenuItemsMeta(t *testing.T) {
 			it := downloadMenuItems(n, s)
 			if len(it) > 4 {
 				return it[:4]
+			}
+			return it
+		},
+		"a range for a single episode": func(n int, s string) []tui.PickItem {
+			it := downloadMenuItems(n, s)
+			if n <= 1 {
+				it = append(it[:2], append([]tui.PickItem{{Label: "Download a range...", Key: "D"}}, it[2:]...)...)
 			}
 			return it
 		},
@@ -243,22 +252,41 @@ func TestDownloadMenuHeaderMeta(t *testing.T) {
 	}
 }
 
+var (
+	seriesMenu = downloadMenuItems(12, "Off")
+	movieMenu  = downloadMenuItems(1, "Off")
+)
+
 var choiceCases = []struct {
-	idx    int
-	hasAll bool
-	want   int
+	name  string
+	items []tui.PickItem
+	idx   int
+	want  int
 }{
-	{0, true, downloadWatch}, {1, true, downloadThis}, {2, true, downloadRange}, {3, true, downloadUpscale},
-	{4, true, downloadAll},
-	{0, false, downloadWatch}, {1, false, downloadThis}, {2, false, downloadRange}, {3, false, downloadUpscale},
-	{4, false, downloadWatch}, // no such row without download-all
-	{-1, true, downloadWatch}, {9, true, downloadWatch}, {-1, false, downloadWatch},
+	{"series watch", seriesMenu, 0, downloadWatch},
+	{"series this", seriesMenu, 1, downloadThis},
+	{"series range", seriesMenu, 2, downloadRange},
+	{"series upscale", seriesMenu, 3, downloadUpscale},
+	{"series all", seriesMenu, 4, downloadAll},
+	{"movie watch", movieMenu, 0, downloadWatch},
+	{"movie this", movieMenu, 1, downloadThis},
+	{"movie upscale sits where a series has its range", movieMenu, 2, downloadUpscale},
+	{"movie has no fourth row", movieMenu, 3, downloadWatch},
+	{"before the first row", seriesMenu, -1, downloadWatch},
+	{"past the last row", seriesMenu, 9, downloadWatch},
+	{"no rows", nil, 0, downloadWatch},
+	{"a row of no known key", []tui.PickItem{{Label: "x", Key: "z"}}, 0, downloadWatch},
 }
 
-func choiceFailures(impl func(int, bool) int) (f []string) {
+func choiceFailures(impl func([]tui.PickItem, int) int) (f []string) {
+	defer func() {
+		if r := recover(); r != nil {
+			f = append(f, fmt.Sprint("panic: ", r))
+		}
+	}()
 	for _, tc := range choiceCases {
-		if got := impl(tc.idx, tc.hasAll); got != tc.want {
-			f = append(f, fmt.Sprintf("idx %d all=%v: got %d want %d", tc.idx, tc.hasAll, got, tc.want))
+		if got := impl(tc.items, tc.idx); got != tc.want {
+			f = append(f, fmt.Sprintf("%s: got %d want %d", tc.name, got, tc.want))
 		}
 	}
 	return f
@@ -272,35 +300,55 @@ func TestDownloadChoiceFor(t *testing.T) {
 
 func TestDownloadChoiceForMeta(t *testing.T) {
 	require.Empty(t, choiceFailures(downloadChoiceFor))
-	mutants := map[string]func(int, bool) int{
-		"anything else downloads everything": func(i int, h bool) int {
-			if i < 0 || i > 4 {
+	byPosition := func(items []tui.PickItem, i int) int { // the old mapping, by row number
+		switch i {
+		case 1:
+			return downloadThis
+		case 2:
+			return downloadRange
+		case 3:
+			return downloadUpscale
+		case 4:
+			if len(items) > 4 {
 				return downloadAll
 			}
-			return downloadChoiceFor(i, h)
+		}
+		return downloadWatch
+	}
+	mutants := map[string]func([]tui.PickItem, int) int{
+		"by position, which a movie's shorter menu breaks": byPosition,
+		"anything else downloads everything": func(items []tui.PickItem, i int) int {
+			if i < 0 || i >= len(items) {
+				return downloadAll
+			}
+			return downloadChoiceFor(items, i)
 		},
-		"row 4 downloads all even without the row": func(i int, _ bool) int { return downloadChoiceFor(i, true) },
-		"row 4 never downloads all":                func(i int, _ bool) int { return downloadChoiceFor(i, false) },
-		"this and range swapped": func(i int, h bool) int {
-			switch downloadChoiceFor(i, h) {
+		"this and range swapped": func(items []tui.PickItem, i int) int {
+			switch downloadChoiceFor(items, i) {
 			case downloadThis:
 				return downloadRange
 			case downloadRange:
 				return downloadThis
 			}
-			return downloadChoiceFor(i, h)
+			return downloadChoiceFor(items, i)
 		},
-		"watch is back": func(i int, h bool) int {
+		"watch is back": func(items []tui.PickItem, i int) int {
 			if i == 0 {
 				return downloadBack
 			}
-			return downloadChoiceFor(i, h)
+			return downloadChoiceFor(items, i)
 		},
-		"upscale dropped": func(i int, h bool) int {
-			if i == 3 {
-				return downloadWatch
+		"upscale dropped": func(items []tui.PickItem, i int) int {
+			if got := downloadChoiceFor(items, i); got != downloadUpscale {
+				return got
 			}
-			return downloadChoiceFor(i, h)
+			return downloadWatch
+		},
+		"no bounds check": func(items []tui.PickItem, i int) int {
+			if items[i].Key == "d" {
+				return downloadThis
+			}
+			return downloadChoiceFor(items, i)
 		},
 	}
 	for name, m := range mutants {

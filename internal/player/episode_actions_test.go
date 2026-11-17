@@ -198,3 +198,29 @@ func TestPromptRangeEndNoTTY(t *testing.T) {
 	_, err := promptRangeEnd(5)
 	require.Error(t, err)
 }
+
+func episodeActionKeys(actions []tui.PickAction) []string {
+	keys := make([]string, len(actions))
+	for i, a := range actions {
+		keys[i] = a.Key
+	}
+	return keys
+}
+
+// A title of one item (a movie) has nothing to download a range of, and its
+// "all" is the item itself: the screen offers it only "this one".
+func TestEpisodeActionsOfAOneItemTitleHaveNoRangeAndNoAll(t *testing.T) {
+	for _, total := range []int{1, 0} {
+		actions := episodeActions(total)
+		assert.Equal(t, []string{"r", "d", "m"}, episodeActionKeys(actions), "total %d", total)
+	}
+	actions := episodeActions(2)
+	assert.Equal(t, []string{"r", "d", "D", "A", "m"}, episodeActionKeys(actions))
+	assert.Equal(t, "all 2 episodes", actions[3].Label)
+	assert.Equal(t, "download", actions[1].Hint, "the section starts at its first download key")
+	assert.True(t, actions[2].Section && actions[3].Section && actions[4].Section)
+	assert.False(t, actions[0].Section, "from the start is not a download")
+
+	movie := episodePickOptions([]models.Episode{{Number: "1", URL: "u1"}}, nil)
+	assert.Equal(t, []string{"r", "d", "m"}, episodeActionKeys(movie.Actions), "the screen a movie opens with")
+}

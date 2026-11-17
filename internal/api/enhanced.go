@@ -240,6 +240,9 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 	switch normalizedSource {
 	case "hianime":
 		return []apisource.SourceKind{apisource.HiAnime}
+	case "english":
+		// The ENGLISH tab: HiAnime, and Pluto TV, whose catalog has anime too.
+		return []apisource.SourceKind{apisource.HiAnime, apisource.PlutoTV}
 	case "animefire":
 		return []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
@@ -258,8 +261,10 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 		return []apisource.SourceKind{apisource.Pobreflix}
 	case "pomfy":
 		return []apisource.SourceKind{apisource.Pomfy}
+	case "plutotv", "pluto":
+		return []apisource.SourceKind{apisource.PlutoTV}
 	case "movietv":
-		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}
+		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy, apisource.PlutoTV}
 	case "animedrive":
 		return []apisource.SourceKind{apisource.AnimeDrive}
 	case "ptbr", "pt-br":
@@ -274,6 +279,7 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 			apisource.Pobreflix,
 			apisource.Pomfy,
 			apisource.AnimeDrive,
+			apisource.PlutoTV,
 		}
 	}
 	return nil
@@ -290,6 +296,10 @@ func searchAnimeEnhanced(
 	registryKinds := registryKindsForSource(normalizedSource)
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
 
+	// A language tab asks for its language; a source of mixed languages reads
+	// it from the search's context (see apisource.WithLanguage).
+	searchCtx := apisource.WithLanguage(context.Background(), apisource.ScopeLanguage(normalizedSource))
+
 	var animes []*models.Anime
 	var searchErr error
 	var liveChosen *models.Anime
@@ -298,7 +308,7 @@ func searchAnimeEnhanced(
 		// the highlighted title early; otherwise the collected results
 		// continue below exactly as the spinner path returns them.
 		var liveErr error
-		animes, liveChosen, liveErr = runLiveSearch(name, registryKinds)
+		animes, liveChosen, liveErr = runLiveSearchIn(searchCtx, name, registryKinds)
 		if liveErr != nil {
 			// A deliberate quit or back travels like a selection error so
 			// the retry loop below treats it the same way.
@@ -317,7 +327,7 @@ func searchAnimeEnhanced(
 				return
 			}
 			// Model B registry fan-out (providers.SearchAll).
-			animes, searchErr = search(context.Background(), name, registryKinds)
+			animes, searchErr = search(searchCtx, name, registryKinds)
 		})
 	}
 	if searchErr != nil {
@@ -357,6 +367,7 @@ func searchAnimeEnhanced(
 			"HiAnime", breakdown.HiAnime,
 			"AnimeDrive", breakdown.AnimeDrive,
 			"AnimesFHD", breakdown.AnimesFHD,
+			"PlutoTV", breakdown.PlutoTV,
 		)
 
 		// Sort results by query relevance first, then language: the closest
@@ -439,6 +450,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "TopCine"
 			case "pobreflix":
 				anime.Source = "Pobreflix"
+			case "plutotv", "pluto":
+				anime.Source = "PlutoTV"
 			case "animedrive":
 				anime.Source = "AnimeDrive"
 			}
@@ -463,6 +476,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "TopCine"
 				case strings.Contains(lowerURL, "pobreflixtv"):
 					anime.Source = "Pobreflix"
+				case strings.Contains(lowerURL, "pluto.tv"):
+					anime.Source = "PlutoTV"
 				case strings.Contains(lowerURL, "animesdrive"):
 					anime.Source = "AnimeDrive"
 				}
@@ -588,6 +603,7 @@ type sourceBreakdown struct {
 	AnimesDigital int
 	Anroll        int
 	AnimesFHD     int
+	PlutoTV       int
 	HiAnime       int
 	StartFlix     int
 	TopCine       int
@@ -615,6 +631,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.Anroll++
 		case strings.EqualFold(anime.Source, "AnimesFHD"):
 			b.AnimesFHD++
+		case strings.EqualFold(anime.Source, "PlutoTV"):
+			b.PlutoTV++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
 		case strings.EqualFold(anime.Source, "StartFlix"):

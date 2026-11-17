@@ -1148,3 +1148,99 @@ func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *mode
 	stream.Publish()
 	return stream.URL, nil
 }
+
+// --- Pluto TV Provider ---
+
+// Pluto TV plays through its own stitcher; the api package owns the season
+// listing and the stream, as for Pomfy.
+var (
+	plutoTVStreamFn   = api.ResolvePlutoTVStream
+	plutoTVEpisodesFn = api.GetPlutoTVEpisodes
+)
+
+type plutoTVProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&plutoTVProvider{})
+}
+
+func (p *plutoTVProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.PlutoTVType)
+}
+
+func (p *plutoTVProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.PlutoTV,
+		Priority:    49,
+		Explicit:    []string{"PlutoTV", "Pluto TV"},
+		Tags:        []string{"[plutotv]"},
+		URLMatchers: []string{"pluto.tv"},
+		ProbeURL:    "https://pluto.tv",
+	}
+}
+
+// HasSeasons: Pluto TV is a movie/TV catalog organized into seasons.
+func (p *plutoTVProvider) HasSeasons() bool { return true }
+
+func (p *plutoTVProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	results = plutoTitlesIn(results, source.LanguageFrom(ctx))
+	tagResults(results, source.PlutoTV)
+	return results, nil
+}
+
+// plutoTitlesIn keeps the titles that fit the language a tab asked for ("PT",
+// "EN"; "" keeps all). Pluto TV says each title's language, and its catalog is
+// the session's country's, so the ENGLISH tab would otherwise fill with
+// Portuguese titles in Brazil and the PT-BR tab with English ones elsewhere.
+// A title that names neither language is kept: it may well fit.
+func plutoTitlesIn(titles []*models.Anime, lang string) []*models.Anime {
+	other := map[string]string{"PT": "[English]", "EN": "[PT-BR]"}[lang]
+	if other == "" {
+		return titles
+	}
+	kept := make([]*models.Anime, 0, len(titles))
+	for _, t := range titles {
+		if t != nil && !strings.Contains(t.Name, other) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
+}
+
+func (p *plutoTVProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return plutoTVEpisodesFn(ctx, anime)
+}
+
+// FetchStream resolves the episode without writing playback state.
+func (p *plutoTVProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	return plutoTVStreamFn(ctx, anime, episode, quality)
+}
+
+func (p *plutoTVProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}

@@ -1194,15 +1194,27 @@ func findEpisodeIndex(episodes []models.Episode, num int) int {
 	return -1 // Episode not found
 }
 
+// preloadable reports whether an episode address is a page the generic
+// extractor can read ahead. Sources addressed by bare ids are not, and neither
+// is Pluto TV: its address is an identifier the plutotv client resolves, and
+// reading it as a page cost several seconds of the site's own app shell while
+// the episode before it was starting to play.
+func preloadable(episodeURL string) bool {
+	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
+		return false
+	}
+	return !strings.Contains(strings.ToLower(episodeURL), "://pluto.tv/on-demand/") &&
+		!strings.Contains(strings.ToLower(episodeURL), "://www.pluto.tv/on-demand/")
+}
+
 // preloadNextEpisode preloads the next episode
 func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 	if currentIndex+1 >= len(episodes) {
 		return
 	}
 
-	// Skip preloading for sources addressed by bare ids rather than URLs.
 	nextEpisodeURL := episodes[currentIndex+1].URL
-	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
+	if !preloadable(nextEpisodeURL) {
 		return
 	}
 

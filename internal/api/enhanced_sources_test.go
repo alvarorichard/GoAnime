@@ -18,7 +18,7 @@ func TestRegistryKindsForSource(t *testing.T) {
 		{"unknown", nil},
 		{"animesfhd", []apisource.SourceKind{apisource.AnimesFHD}},
 		{"anroll", []apisource.SourceKind{apisource.Anroll}},
-		{"movietv", []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy}},
+		{"movietv", []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy, apisource.PlutoTV}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.src, func(t *testing.T) {

@@ -46,6 +46,7 @@ func fallbackTitle(decision SearchHomeDecision) string {
 // search behaves like a fresh one.
 func clearContinueOverrides() {
 	playback.PreselectEpisodeNum = 0
+	playback.PlayOneItemDirectly = false
 	player.ClearResumeOverride()
 }
 
@@ -108,8 +109,13 @@ func openContinue(decision SearchHomeDecision) error {
 		return err
 	}
 
+	// The episodes screen a title of one item now opens with is skipped by a
+	// CONTINUE reopen, as a series skips its picker: the row already says
+	// what to play. "Episodes" on the row opens the screen.
+	playback.PlayOneItemDirectly = false
 	if !decision.EpisodesOnly {
 		series := !anime.IsMovie() && len(episodes) > 1
+		playback.PlayOneItemDirectly = !series
 		epNum, pos, resume, start := continueTarget(*entry, decision.FromStart)
 		if series {
 			playback.PreselectEpisodeNum = epNum
@@ -157,7 +163,7 @@ func continueSourceToken(source string) string {
 	switch token {
 	case "animesroll":
 		return "anroll"
-	case "animefire", "goyabu", "hianime", "animesdigital", "anroll", "startflix", "topcine", "pobreflix", "animedrive", "animesfhd":
+	case "animefire", "goyabu", "hianime", "animesdigital", "anroll", "startflix", "topcine", "pobreflix", "animedrive", "animesfhd", "plutotv":
 		return token
 	default:
 		return ""

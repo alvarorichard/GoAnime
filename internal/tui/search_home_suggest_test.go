@@ -397,7 +397,7 @@ func TestSearchHomeSuggestFollowsScope(t *testing.T) {
 		settle(m, cmd)
 	}
 	assert.Equal(t, []suggestCall{
-		{"dun", ""}, {"dun", "ptbr"}, {"dun", "hianime"}, {"dun", "movietv"},
+		{"dun", ""}, {"dun", "ptbr"}, {"dun", "english"}, {"dun", "movietv"},
 	}, rec.called(), "every scope change asks again, in the new scope")
 
 	t.Run("tab with no text asks for nothing", func(t *testing.T) {

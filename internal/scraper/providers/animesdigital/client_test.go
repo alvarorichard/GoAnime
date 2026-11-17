@@ -106,11 +106,17 @@ func (r rewriteHost) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestGetEpisodeStreamURLExtractsPlayerOne(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The video host is asked whether the playlist answers before it is
+		// handed over (issue #236); here it does.
+		if strings.HasSuffix(r.URL.Path, "/index.m3u8") {
+			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:10.000,\nseg-1-v1-a1.webp\n#EXT-X-ENDLIST\n"))
+			return
+		}
 		_, _ = w.Write(fixture(t, "episode_2026_10_09.html"))
 	}))
 	defer srv.Close()
-	c := NewClientForTest(srv.Client(), srv.URL)
+	c := NewClientForTest(&http.Client{Transport: rewriteHost{target: srv.URL}}, srv.URL)
 
 	got, err := c.GetEpisodeStreamURL(srv.URL + "/video/a/139026/")
 	if err != nil {

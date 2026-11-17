@@ -32,7 +32,7 @@ type HomeRestore struct {
 const (
 	TabAll       = "all"
 	TabPTBR      = "ptbr"
-	TabEnglish   = "hianime"
+	TabEnglish   = "english"
 	TabMoviesTV  = "movietv"
 	TabFavorites = "favorites"
 )

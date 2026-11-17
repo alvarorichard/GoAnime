@@ -26,12 +26,12 @@ var (
 )
 
 // searchScopes are the search tabs: the row under the search box. Value is
-// the source selector the search runs with ("", "ptbr", "hianime" or
+// the source selector the search runs with ("", "ptbr", "english" or
 // "movietv").
 var searchScopes = []struct{ Name, Value string }{
 	{"ALL", ""},
 	{"PT-BR", "ptbr"},
-	{"ENGLISH", "hianime"},
+	{"ENGLISH", "english"},
 	{"MOVIES/TV", "movietv"},
 }
 

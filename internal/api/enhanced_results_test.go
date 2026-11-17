@@ -55,6 +55,7 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			want []source.SourceKind
 		}{
 			{src: "hianime", want: []source.SourceKind{source.HiAnime}},
+			{src: "english", want: []source.SourceKind{source.HiAnime, source.PlutoTV}},
 			{src: "AnimeFire", want: []source.SourceKind{source.AnimeFire}},
 			{src: " goyabu ", want: []source.SourceKind{source.Goyabu}},
 			{src: "animedrive", want: []source.SourceKind{source.AnimeDrive}},
@@ -66,9 +67,9 @@ func TestSearchAnimeEnhancedCore_ResultScreenCascade(t *testing.T) {
 			{src: "topcine", want: []source.SourceKind{source.TopCine}},
 			{src: "pobreflix", want: []source.SourceKind{source.Pobreflix}},
 			{src: "pomfy", want: []source.SourceKind{source.Pomfy}},
-			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy}},
-			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimesFHD, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive}},
-			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimesFHD, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive}},
+			{src: MovieTVSources, want: []source.SourceKind{source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.PlutoTV}},
+			{src: "ptbr", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimesFHD, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive, source.PlutoTV}},
+			{src: "pt-br", want: []source.SourceKind{source.AnimeFire, source.Goyabu, source.AnimesDigital, source.Anroll, source.AnimesFHD, source.StartFlix, source.TopCine, source.Pobreflix, source.Pomfy, source.AnimeDrive, source.PlutoTV}},
 			{src: "unknown", want: nil},
 			{src: "", want: nil},
 		}
