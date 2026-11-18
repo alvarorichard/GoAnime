@@ -28,6 +28,9 @@ func TestAnimeDriveSearchContext_UsesCallerBudget(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			// surf starts a network-change goroutine per client; built inside
+			// the bubble it would outlive it, so build it out here.
+			client := NewClientForTest("")
 			synctest.Test(t, func(t *testing.T) {
 				requests := 0
 				srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +43,7 @@ func TestAnimeDriveSearchContext_UsesCallerBudget(t *testing.T) {
 					}
 				}))
 				httpClient := srv.Client()
-				client := NewClientForTest(srv.URL)
+				client.baseURL = srv.URL
 				// Keep the production fast-client timeout while replacing only its
 				// network transport with the in-memory test server.
 				httpClient.Timeout = client.client.Timeout
@@ -69,12 +72,13 @@ func TestAnimeDriveSearchContext_UsesCallerBudget(t *testing.T) {
 
 func TestAnimeDriveSearch_WithoutDeadlineKeepsClientTimeout(t *testing.T) {
 	t.Parallel()
+	client := NewClientForTest("") // outside the bubble: see above
 	synctest.Test(t, func(t *testing.T) {
 		srv := httptest.NewTestServer(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done()
 		}))
 		httpClient := srv.Client()
-		client := NewClientForTest(srv.URL)
+		client.baseURL = srv.URL
 		httpClient.Timeout = client.client.Timeout
 		client.SetHTTPClientForTest(httpClient)
 
