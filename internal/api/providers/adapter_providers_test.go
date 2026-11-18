@@ -115,7 +115,7 @@ var adapterProviders = []struct {
 		p.adapter.UnifiedScraper = a
 		p.once.Do(func() {})
 		return p
-	}, false, "animesdigital stream: ", "empty stream URL returned from AnimesDigital", false},
+	}, true, "animesdigital stream: ", "empty stream URL returned from AnimesDigital", false},
 }
 
 const metadataSubs = `[{"url":"https://s.example/pt.vtt","language":"pt","label":"Portuguese"},{"url":"https://s.example/en.vtt","language":"en","label":"English"}]`

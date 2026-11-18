@@ -608,8 +608,13 @@ var streamPublishMutants = []mutant{
 	},
 	{
 		name:  "AnimesDigital hands the scraper a fresh context, not the caller's",
-		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, _, err = adapter.GetStreamURL(episode.URL)", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, _, err = adapter.GetStreamURL(episode.URL)"}},
+		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"animesdigital stream", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"animesdigital stream"}},
 		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+	{
+		name:  "AnimesDigital drops the Referer player 1's video host checks",
+		edits: []codeEdit{{providersFile, "AnimesDigital\")\n\t}\n\treturn streamFromMetadata(streamURL, metadata), nil", "AnimesDigital\")\n\t}\n\treturn source.Stream{URL: streamURL, Referer: metadata[\"\"]}, nil"}},
+		kills: map[string][]string{providersPkg: {"TestAnimesDigitalStreamCarriesThePlayersReferer", "TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
 	},
 }
 

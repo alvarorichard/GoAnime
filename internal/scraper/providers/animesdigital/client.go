@@ -586,34 +586,111 @@ func (c *Client) GetEpisodeStreamURLContext(ctx context.Context, episodeURL stri
 	return "", fmt.Errorf("%s: the video host does not answer for this episode (%v): %w", SourceName, playerOneErr, netx.ErrMediaOffline)
 }
 
-// streamProbeBudget bounds the question "does player 1's playlist answer".
-const streamProbeBudget = 8 * time.Second
+// streamProbeBudget bounds the question "does player 1 serve something the
+// player can play": its playlist and the first piece of video it names.
+const streamProbeBudget = 12 * time.Second
 
-// playlistAnswers reports whether target serves an HLS playlist: nil when it
-// does, and why not otherwise (the status it answered with, or what it sent
+// playlistProbeLimit is how much of a playlist is read to find its first piece.
+const playlistProbeLimit = 256 << 10
+
+// PlayerReferer is the page that embeds player 1. The video host guards its
+// segments by Referer and, for some titles, answers 403 to any other: the
+// generic HLS referer the player falls back on let the playlist load and then
+// failed on every segment, so mpv sat on a black window until it gave up
+// (issue #229: Wind Breaker, and Takagi-san 2 episodes 9 and 10).
+const PlayerReferer = "https://api.anivideo.net/"
+
+// StreamReferer is the Referer the player must send for a stream this client
+// returned: PlayerReferer for player 1's playlist, none for player 2's Blogger
+// video, which is resolved by its own address.
+func StreamReferer(stream string) string {
+	if stream == "" || strings.HasPrefix(stream, bloggerVideoPrefix) {
+		return ""
+	}
+	return PlayerReferer
+}
+
+// playlistAnswers reports whether target is something the player can start: nil
+// when its playlist answers and the first piece of video the playlist names
+// does too, and why not otherwise (the status it answered with, or what it sent
 // instead of a playlist).
+//
+// The playlist alone is not enough. The video host guards the pieces apart from
+// the playlist, and for some titles answered the playlist and then 403 for
+// every piece: the player opened a black window, waited 45 seconds and closed
+// (issue #229). Asking for the first piece with the Referer the player will
+// send finds that now, while player 2 can still be offered instead.
 func (c *Client) playlistAnswers(ctx context.Context, target string) error {
 	ctx, cancel := context.WithTimeout(ctx, streamProbeBudget)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	piece, err := c.firstPiece(ctx, target, 0)
 	if err != nil {
 		return err
 	}
-	c.decorateRequest(req)
-	req.Header.Set("Accept", "application/vnd.apple.mpegurl, application/x-mpegURL, */*")
-	resp, err := c.http.Do(req)
+	return c.pieceAnswers(ctx, piece)
+}
+
+// firstPiece reads the playlist at target and returns the address of the first
+// piece of video it names, following one level of variant playlists.
+func (c *Client) firstPiece(ctx context.Context, target string, depth int) (string, error) {
+	resp, err := c.probe(ctx, target, "application/vnd.apple.mpegurl, application/x-mpegURL, */*", "")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	head, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if !strings.HasPrefix(strings.TrimLeft(string(head), "\ufeff \t\r\n"), "#EXTM3U") {
-		return errors.New("not a playlist")
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, playlistProbeLimit))
+	text := strings.TrimLeft(string(body), "\ufeff \t\r\n")
+	if !strings.HasPrefix(text, "#EXTM3U") {
+		return "", errors.New("not a playlist")
+	}
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		next := c.resolveURL(target, line)
+		if depth == 0 && isPlaylistPath(next) {
+			return c.firstPiece(ctx, next, depth+1)
+		}
+		return next, nil
+	}
+	return "", errors.New("the playlist lists no video")
+}
+
+func isPlaylistPath(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && strings.HasSuffix(strings.ToLower(u.Path), ".m3u8")
+}
+
+// pieceAnswers asks for the first byte of one piece of video.
+func (c *Client) pieceAnswers(ctx context.Context, piece string) error {
+	resp, err := c.probe(ctx, piece, "*/*", "bytes=0-0")
+	if err != nil {
+		return fmt.Errorf("first piece: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("first piece: HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// probe asks for target the way the player will: with the player's Referer.
+func (c *Client) probe(ctx context.Context, target, accept, byteRange string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	c.decorateRequest(req)
+	req.Header.Set("Referer", PlayerReferer)
+	req.Header.Set("Accept", accept)
+	if byteRange != "" {
+		req.Header.Set("Range", byteRange)
+	}
+	return c.http.Do(req)
 }
 
 // bloggerVideoPrefix is how an uploaded Blogger video is embedded; the player

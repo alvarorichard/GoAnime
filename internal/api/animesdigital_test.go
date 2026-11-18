@@ -2,12 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesdigital"
+	"github.com/alvarorichard/Goanime/v2/internal/tui"
 )
 
 func TestGetAnimesDigitalEpisodesAudioChoice(t *testing.T) {
@@ -54,6 +56,39 @@ func TestGetAnimesDigitalEpisodesAudioChoice(t *testing.T) {
 			t.Fatalf("requested %q, want dubbed page", requested)
 		}
 	})
+}
+
+// ESC on "legendado ou dublado" went on with subtitles and listed the episodes
+// the user had just backed out of; every other source goes back to the search.
+func TestGetAnimesDigitalEpisodesGoesBackWhenTheAudioPickerIsLeft(t *testing.T) {
+	oldClient, oldPick := animesDigitalClientFn, animesDigitalPickFn
+	t.Cleanup(func() {
+		animesDigitalClientFn, animesDigitalPickFn = oldClient, oldPick
+	})
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`<html><a href="/video/a/1/">Anime Episódio 1</a></html>`))
+	}))
+	defer srv.Close()
+	animesDigitalClientFn = func() *animesdigital.Client { return animesdigital.NewClientForTest(srv.Client(), srv.URL) }
+	paired := &models.Anime{
+		Source: "AnimesDigital",
+		URL:    pairedAnimesDigitalURLForTest(srv.URL+"/anime/a/show", srv.URL+"/anime/a/show-dublado"),
+	}
+
+	for name, left := range map[string]error{"ESC": tui.ErrPickCancelled, "back": tui.ErrPickBack} {
+		t.Run(name, func(t *testing.T) {
+			animesDigitalPickFn = func([]string) (int, error) { return -1, fmt.Errorf("pick: %w", left) }
+			eps, err := GetAnimesDigitalEpisodes(paired)
+			if !errors.Is(err, ErrBackToSearch) || eps != nil {
+				t.Fatalf("eps=%v err=%v, want ErrBackToSearch", eps, err)
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("%d pages were fetched for a user who went back", requests)
+	}
 }
 
 func TestGetAnimesDigitalEpisodesSkipsPickerForSingleAudio(t *testing.T) {

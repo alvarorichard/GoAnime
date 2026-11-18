@@ -472,8 +472,8 @@ func (p *animesDigitalProvider) FetchEpisodes(ctx context.Context, anime *models
 	return animesDigitalEpisodesFn(anime)
 }
 
-// FetchStream resolves the episode. AnimesDigital's page sets no playback
-// context beyond the URL, so the Stream carries only that.
+// FetchStream resolves the episode. Player 1's video host checks the Referer of
+// every segment, so the adapter's referer travels in the Stream.
 func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
 		return source.Stream{}, err
@@ -483,10 +483,11 @@ func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models
 		return source.Stream{}, err
 	}
 	var streamURL string
+	var metadata map[string]string
 	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
-		streamURL, _, err = contextual.GetStreamURLContext(ctx, episode.URL)
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
 	} else {
-		streamURL, _, err = adapter.GetStreamURL(episode.URL)
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
 	}
 	if err != nil {
 		return source.Stream{}, fmt.Errorf("animesdigital stream: %w", err)
@@ -494,7 +495,7 @@ func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models
 	if streamURL == "" {
 		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesDigital")
 	}
-	return source.Stream{URL: streamURL}, nil
+	return streamFromMetadata(streamURL, metadata), nil
 }
 
 func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {

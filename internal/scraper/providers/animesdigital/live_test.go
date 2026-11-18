@@ -2,6 +2,7 @@ package animesdigital
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
 
@@ -60,5 +62,55 @@ func TestLiveAnimesDigitalChain(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("playlist returned HTTP %d", resp.StatusCode)
+	}
+}
+
+// TestLiveAnimesDigitalReportedTitlesPlay walks every episode of the titles
+// users reported (issue #229 and #236) and requires that what the client
+// returns is something the player can start: for player 1, its playlist and
+// first piece of video with the Referer the player sends; otherwise player 2's
+// Blogger video. An episode neither player has is allowed only as the
+// media-offline error, never as a URL that plays nothing. Opt in with
+// GOANIME_LIVE=1; never runs in CI.
+func TestLiveAnimesDigitalReportedTitlesPlay(t *testing.T) {
+	if os.Getenv("GOANIME_LIVE") == "" || testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("set GOANIME_LIVE=1 to run against the live network")
+	}
+	titles := map[string]string{
+		"Cyberpunk: Edgerunners 2": "/anime/a/cyberpunk-edgerunners-2-2",
+		"Cyberpunk: Edgerunners":   "/anime/a/cyberpunk-edgerunners",
+		"Wind Breaker":             "/anime/a/wind-breaker",
+		"Takagi-san 2":             "/anime/a/karakai-jouzu-no-takagi-san-2",
+	}
+	c := NewClient()
+	for name, path := range titles {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+			defer cancel()
+			episodes, err := c.GetAnimeEpisodesContext(ctx, DefaultBase+path)
+			if err != nil || len(episodes) == 0 {
+				t.Fatalf("episodes: %d, err=%v", len(episodes), err)
+			}
+			for _, episode := range episodes {
+				stream, err := c.GetEpisodeStreamURLContext(ctx, episode.URL)
+				if errors.Is(err, netx.ErrMediaOffline) {
+					t.Logf("%s: offline on both players (reported, not a failure)", episode.Number)
+					continue
+				}
+				if err != nil {
+					t.Errorf("%s: %v", episode.Number, err)
+					continue
+				}
+				if StreamReferer(stream) == "" {
+					if !strings.HasPrefix(stream, bloggerVideoPrefix) {
+						t.Errorf("%s: %q is neither player 1 nor player 2", episode.Number, stream)
+					}
+					continue
+				}
+				if err := c.playlistAnswers(ctx, stream); err != nil {
+					t.Errorf("%s: %s would not play: %v", episode.Number, stream, err)
+				}
+			}
+		})
 	}
 }

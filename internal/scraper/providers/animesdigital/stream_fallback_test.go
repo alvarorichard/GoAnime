@@ -24,6 +24,7 @@ import (
 
 const (
 	fbPlaylist = "/stream/sv/c/cyberpunk-edgerunners-2/05.mp4/index.m3u8"
+	fbPiece    = "/stream/sv/c/cyberpunk-edgerunners-2/05.mp4/seg-1-v1-a1.webp"
 	fbPost     = "https://bulborn.blogspot.com/2026/10/cyberp-ed-2.html"
 )
 
@@ -36,6 +37,12 @@ type fbSite struct {
 	// what the video host answers for player 1's playlist
 	playlistStatus int
 	playlistBody   string
+	// what it answers for the first piece of video; it is 403 whenever the
+	// Referer is not pieceReferer, as the real host does for some titles
+	pieceStatus  int
+	pieceReferer string
+	// a variant playlist, served at /variant.m3u8 beside the main one
+	variantBody string
 	// the episode page's iframes
 	playerOne, playerTwo string
 	// the Blogger post
@@ -51,6 +58,8 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 	s := &fbSite{
 		playlistStatus: http.StatusOK,
 		playlistBody:   "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10.000,\nseg-1-v1-a1.webp\n#EXT-X-ENDLIST\n",
+		pieceStatus:    http.StatusPartialContent,
+		pieceReferer:   PlayerReferer,
 		postStatus:     http.StatusOK,
 		postBody:       fbPostWith(10),
 		hits:           map[string]int{},
@@ -60,6 +69,7 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 		s.hits[r.URL.Path]++
 		playlistStatus, playlistBody := s.playlistStatus, s.playlistBody
 		postStatus, postBody := s.postStatus, s.postBody
+		pieceStatus, pieceReferer := s.pieceStatus, s.pieceReferer
 		page := fbEpisodePage(s.playerOne, s.playerTwo)
 		hook := s.onHit
 		s.mu.Unlock()
@@ -72,6 +82,18 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 		case r.URL.Path == fbPlaylist:
 			w.WriteHeader(playlistStatus)
 			_, _ = w.Write([]byte(playlistBody))
+		case strings.HasSuffix(r.URL.Path, "/variant.m3u8"):
+			s.mu.Lock()
+			body := s.variantBody
+			s.mu.Unlock()
+			_, _ = w.Write([]byte(body))
+		case r.URL.Path == fbPiece:
+			if r.Header.Get("Referer") != pieceReferer {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(pieceStatus)
+			_, _ = w.Write([]byte("x"))
 		case r.URL.Path == "/2026/10/cyberp-ed-2.html":
 			w.WriteHeader(postStatus)
 			_, _ = w.Write([]byte(postBody))
@@ -293,7 +315,7 @@ func TestPlaylistAnswers(t *testing.T) {
 	if err := c.playlistAnswers(t.Context(), target); err != nil {
 		t.Fatalf("a playlist: %v", err)
 	}
-	s.set(func() { s.playlistBody = "\ufeff\r\n #EXTM3U\n" })
+	s.set(func() { s.playlistBody = "\ufeff\r\n #EXTM3U\n#EXTINF:10,\nseg-1-v1-a1.webp\n" })
 	if err := c.playlistAnswers(t.Context(), target); err != nil {
 		t.Fatalf("a playlist behind a byte-order mark and blank lines: %v", err)
 	}
@@ -317,19 +339,119 @@ func TestPlaylistAnswers(t *testing.T) {
 func TestPlaylistAnswersAsksTheWayThePlayerWill(t *testing.T) {
 	var got http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Clone()
-		_, _ = w.Write([]byte("#EXTM3U\n"))
+		if strings.HasSuffix(r.URL.Path, ".m3u8") {
+			got = r.Header.Clone()
+		}
+		_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:10,\npiece.ts\n"))
 	}))
 	defer srv.Close()
 	c := NewClientForTest(srv.Client(), srv.URL)
 	if err := c.playlistAnswers(t.Context(), srv.URL+"/x.m3u8"); err != nil {
 		t.Fatal(err)
 	}
-	if got.Get("Referer") != srv.URL+"/" {
-		t.Fatalf("Referer = %q, want the site's, which the video host expects", got.Get("Referer"))
+	if got.Get("Referer") != PlayerReferer {
+		t.Fatalf("Referer = %q, want the player's, which is what the player sends", got.Get("Referer"))
 	}
 	if got.Get("User-Agent") == "" || !strings.Contains(got.Get("Accept"), "mpegurl") {
 		t.Fatalf("headers = %v", got)
+	}
+}
+
+// The video host answers 403 to every segment when the Referer is not the
+// embedding player's, while the playlist itself still loads (issue #229: Wind
+// Breaker never played, and the player closed after 45 seconds).
+func TestStreamRefererIsThePlayersForPlayerOneOnly(t *testing.T) {
+	cases := map[string]string{
+		"https://cdn-sv01.maximaimg.online/stream/w/wind-breaker/01.mp4/index.m3u8": PlayerReferer,
+		fbToken(3): "",
+		"":         "",
+	}
+	for stream, want := range cases {
+		if got := StreamReferer(stream); got != want {
+			t.Errorf("StreamReferer(%q) = %q, want %q", stream, got, want)
+		}
+	}
+	if PlayerReferer != "https://api.anivideo.net/" {
+		t.Fatalf("PlayerReferer = %q: the video host checks for the embedding player", PlayerReferer)
+	}
+}
+
+// ---- the first piece of video ----------------------------------------------
+
+// The playlist answered and every piece of video was 403 (issue #229, Wind
+// Breaker): the player waited 45 seconds on a black window and closed. The
+// pieces are asked for too now, so such an episode goes to player 2 at once.
+func TestStreamFallsBackWhenOnlyThePiecesAreRefused(t *testing.T) {
+	refusals := map[string]func(s *fbSite){
+		"403, as the host answers a Referer it does not know": func(s *fbSite) { s.pieceStatus = http.StatusForbidden },
+		"404":      func(s *fbSite) { s.pieceStatus = http.StatusNotFound },
+		"HTTP 520": func(s *fbSite) { s.pieceStatus = 520 },
+		"a host that guards pieces by a Referer the client does not send": func(s *fbSite) { s.pieceReferer = "https://streameeeeee.site/" },
+	}
+	for name, refuse := range refusals {
+		t.Run(name, func(t *testing.T) {
+			s, c := newFBSite(t)
+			s.set(func() { refuse(s) })
+			got, err := c.GetEpisodeStreamURL(s.srv.URL + fbEpisode)
+			if err != nil || got != fbToken(4) {
+				t.Fatalf("stream = %q, err = %v; want player 2's video %q", got, err, fbToken(4))
+			}
+			if n := s.hit(fbPiece); n != 1 {
+				t.Fatalf("the first piece was asked for %d times, want once", n)
+			}
+		})
+	}
+}
+
+func TestEpisodeWithRefusedPiecesAndNoPlayerTwoIsOffline(t *testing.T) {
+	s, c := newFBSite(t)
+	s.set(func() { s.pieceStatus, s.playerTwo = http.StatusForbidden, "" })
+	got, err := c.GetEpisodeStreamURL(s.srv.URL + fbEpisode)
+	if got != "" || !errors.Is(err, netx.ErrMediaOffline) {
+		t.Fatalf("stream = %q, err = %v; want the media-offline error, not a URL that plays nothing", got, err)
+	}
+}
+
+func TestPlaylistAnswersFindsThePieceTheWayThePlayerDoes(t *testing.T) {
+	cases := map[string]struct {
+		body    string
+		wantErr string
+	}{
+		"a relative piece":                    {"#EXTM3U\n#EXTINF:10,\nseg-1-v1-a1.webp\n", ""},
+		"an absolute piece":                   {"#EXTM3U\n#EXTINF:10,\n{host}" + fbPiece + "\n", ""},
+		"comments and blank lines first":      {"#EXTM3U\n\n#EXT-X-VERSION:3\n  \n#EXTINF:10,\nseg-1-v1-a1.webp\n", ""},
+		"a master playlist, then its variant": {"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nvariant.m3u8\n", ""},
+		"a playlist that names nothing":       {"#EXTM3U\n#EXT-X-ENDLIST\n", "the playlist lists no video"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, c := newFBSite(t)
+			base := "https://cdn-s01.mywallpaper-4k-image.net"
+			s.set(func() { s.playlistBody = strings.ReplaceAll(tc.body, "{host}", base) })
+			dir := base + fbPlaylist[:strings.LastIndex(fbPlaylist, "/")+1]
+			if strings.Contains(tc.body, "variant.m3u8") {
+				s.set(func() { s.variantBody = "#EXTM3U\n#EXTINF:10,\nseg-1-v1-a1.webp\n" })
+			}
+			err := c.playlistAnswers(t.Context(), dir+"index.m3u8")
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("err = %v", err)
+			case tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr):
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+			if tc.wantErr == "" && s.hit(fbPiece) != 1 {
+				t.Fatalf("the first piece was asked for %d times, want once: the playlist was taken for the piece", s.hit(fbPiece))
+			}
+		})
+	}
+}
+
+func TestPlaylistAnswersSaysWhichPieceFailed(t *testing.T) {
+	s, c := newFBSite(t)
+	s.set(func() { s.pieceStatus = http.StatusForbidden })
+	err := c.playlistAnswers(t.Context(), "https://cdn-s01.mywallpaper-4k-image.net"+fbPlaylist)
+	if err == nil || err.Error() != "first piece: HTTP 403" {
+		t.Fatalf("err = %v, want first piece: HTTP 403", err)
 	}
 }
 
@@ -442,7 +564,11 @@ func TestStreamSkipsPlayerFramesItCannotRead(t *testing.T) {
 	const playlist = "/stream/x/index.m3u8"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == playlist {
-			_, _ = w.Write([]byte("#EXTM3U\n"))
+			_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:10,\npiece.ts\n"))
+			return
+		}
+		if r.URL.Path == "/stream/x/piece.ts" {
+			w.WriteHeader(http.StatusPartialContent)
 			return
 		}
 		_, _ = w.Write([]byte(`<html><body>

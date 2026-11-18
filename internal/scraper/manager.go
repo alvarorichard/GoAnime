@@ -353,7 +353,11 @@ func (a *AnimesDigitalAdapter) GetAnimeEpisodesContext(ctx context.Context, anim
 
 func (a *AnimesDigitalAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
 	streamURL, err = a.client.GetEpisodeStreamURLContext(ctx, episodeURL)
-	return streamURL, map[string]string{"source": "animesdigital"}, err
+	metadata = map[string]string{"source": "animesdigital"}
+	if referer := animesdigital.StreamReferer(streamURL); referer != "" {
+		metadata["referer"] = referer
+	}
+	return streamURL, metadata, err
 }
 
 func (a *AnimesDigitalAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
