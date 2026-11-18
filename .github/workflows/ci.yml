@@ -136,7 +136,10 @@ jobs:
             echo "apt attempt $attempt failed; retrying" >&2
             sleep 10
           done
-          exit 1
+          # The tests drive a fake mpv, so a mirror outage must not fail the
+          # build; say so loudly and go on without the real player.
+          echo "::warning::mpv could not be installed from apt; running without it"
+          exit 0
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -263,7 +266,10 @@ jobs:
             echo "apt attempt $attempt failed; retrying" >&2
             sleep 10
           done
-          exit 1
+          # The tests drive a fake mpv, so a mirror outage must not fail the
+          # build; say so loudly and go on without the real player.
+          echo "::warning::mpv could not be installed from apt; running without it"
+          exit 0
 
       - name: Warm the race build cache
         shell: bash
