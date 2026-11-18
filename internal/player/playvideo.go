@@ -30,6 +30,12 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 // ErrBackToDownloadOptions is returned when user wants to go back to download options
 var ErrBackToDownloadOptions = errors.New("back to download options")
 
+// ErrStreamNotLoaded is returned when the player closed before the video
+// started: the stream did not load (a dead host, an expired link). Offering
+// "watch now" again would only replay the same address and wait as long again
+// (issue #229), so the caller reports it and returns to the episode list.
+var ErrStreamNotLoaded = errors.New("the player closed before the video started")
+
 // errStayInPlayerMenu signals that a menu action was a no-op (playlist
 // boundary hit or back from the episode picker). The in-player menu loop must
 // keep running: returning nil here would unwind handleUserInput and surface
@@ -315,20 +321,37 @@ func isMPVConnectionDead(err error) bool {
 	return strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "no such file") ||
 		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection reset")
+		strings.Contains(msg, "connection reset") ||
+		// Windows names a pipe that no longer exists, or whose server went away,
+		// in its own words (issue #229: the 45 s wait never noticed mpv was gone).
+		strings.Contains(msg, "cannot find the file") ||
+		strings.Contains(msg, "cannot find the path") ||
+		strings.Contains(msg, "pipe has been ended") ||
+		strings.Contains(msg, "pipe is being closed")
+}
+
+// playerGone reports whether the mpv behind socketPath has exited.
+func playerGone(socketPath string) bool {
+	_, err := mpvSendCommand(socketPath, []any{"get_property", "pid"})
+	return err != nil && isMPVConnectionDead(err)
 }
 
 // seekToResumePosition seeks to the saved resume position for HLS streams
-// This function is robust: it waits for video ready, seeks, and verifies the seek worked
-func seekToResumePosition(socketPath string, resumeTime int) {
+// This function is robust: it waits for video ready, seeks, and verifies the seek worked.
+// It reports false only when the player closed before the video was ready.
+func seekToResumePosition(socketPath string, resumeTime int) bool {
 	if resumeTime <= 0 {
-		return
+		return true
 	}
 
 	util.Debugf("HLS resume: will seek to %d seconds", resumeTime)
 
 	// Wait for video to be fully ready first
 	if !waitForVideoReady(socketPath) {
+		if playerGone(socketPath) {
+			util.Debugf("HLS resume: the player closed before the video was ready")
+			return false
+		}
 		util.Debugf("HLS resume: video not ready after timeout, attempting seek anyway")
 	}
 
@@ -358,7 +381,7 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 				// Allow 10 second tolerance for HLS streams
 				if pos >= float64(resumeTime-10) {
 					util.Debugf("HLS resume: SUCCESS - position is %.0f seconds (target: %d)", pos, resumeTime)
-					return
+					return true
 				}
 				util.Debugf("HLS resume: position mismatch - got %.0f, want %d", pos, resumeTime)
 			}
@@ -373,6 +396,7 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 	}
 
 	util.Debugf("HLS resume: FAILED after %d attempts - video may start from beginning", maxAttempts)
+	return true
 }
 
 // applySkipTimes applies skip times to an mpv instance
@@ -694,16 +718,22 @@ func playVideo(
 	}
 
 	// For HLS streams, seek to resume position (includes waiting for video ready)
+	hlsReady := true
 	if isHLSStream && resumeTime > 0 {
 		util.Debugf("HLS stream detected with resume time %d seconds", resumeTime)
 		hlsTimer := util.StartTimer("HLS:SeekToResume")
-		seekToResumePosition(socketPath, resumeTime)
+		hlsReady = seekToResumePosition(socketPath, resumeTime)
 		hlsTimer.Stop()
 	} else if isHLSStream {
 		// Just wait for video ready without seeking
 		hlsTimer := util.StartTimer("HLS:WaitForReady")
-		waitForVideoReady(socketPath)
+		hlsReady = waitForVideoReady(socketPath)
 		hlsTimer.Stop()
+	}
+	// The player gave up on the stream and closed. Say so, rather than opening a
+	// menu for a player that is not there.
+	if !hlsReady && playerGone(socketPath) {
+		return ErrStreamNotLoaded
 	}
 
 	// Apply AniSkip results to skip intros/outros

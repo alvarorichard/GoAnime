@@ -128,13 +128,23 @@ var issue229Mutants = []mutant{
 		kills: map[string][]string{playbackPkg: {"TestReportSourceVideoRemovedPutsTheReasonOnTheList", "TestReportEpisodeVideoErrorPicksTheNoticeByCause", "TestPlayEpisodeExplainsARemovedVideoOnTheListItReturnsTo"}},
 	},
 	{
+		name:  "a stream that never loaded is reported without how to go on",
+		edits: []codeEdit{{playbackFile, "util.Errorf(\"%s\", problem)\n\tnoticeOnNextPicker(problem + \" \" + hint)\n}\n\nfunc SelectEpisodeWithFuzzy", "util.Errorf(\"%s\", problem)\n\tnoticeOnNextPicker(problem + hint[:0])\n}\n\nfunc SelectEpisodeWithFuzzy"}},
+		kills: map[string][]string{playbackPkg: {"TestReportStreamNotLoadedPutsTheReasonOnTheList"}},
+	},
+	{
+		name:  "a player that closed before the video started goes to Watch now again",
+		edits: []codeEdit{{playbackFile, "return player.ErrBackToEpisodeSelection\n\t}\n\treturn playErr", "return playErr\n\t}\n\treturn playErr"}},
+		kills: map[string][]string{playbackPkg: {"TestAfterPlaybackReturnsToTheListWhenTheStreamDidNotLoad"}},
+	},
+	{
 		name:  "the list notice leaves out how to go on",
-		edits: []codeEdit{{playbackFile, "noticeOnNextPicker(problem + \" \" + hint)", "noticeOnNextPicker(problem)"}},
+		edits: []codeEdit{{playbackFile, "util.Infof(\"%s\", hint)\n\tnoticeOnNextPicker(problem + \" \" + hint)", "util.Infof(\"%s\", hint)\n\tnoticeOnNextPicker(problem)"}},
 		kills: map[string][]string{playbackPkg: {"TestReportSourceVideoRemovedPutsTheReasonOnTheList"}},
 	},
 	{
 		name:  "the list notice leaves out what happened",
-		edits: []codeEdit{{playbackFile, "noticeOnNextPicker(problem + \" \" + hint)", "noticeOnNextPicker(hint)"}},
+		edits: []codeEdit{{playbackFile, "util.Infof(\"%s\", hint)\n\tnoticeOnNextPicker(problem + \" \" + hint)", "util.Infof(\"%s\", hint)\n\tnoticeOnNextPicker(hint)"}},
 		kills: map[string][]string{playbackPkg: {"TestReportSourceVideoRemovedPutsTheReasonOnTheList"}},
 	},
 	{

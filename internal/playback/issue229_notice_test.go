@@ -161,3 +161,42 @@ func TestPlayEpisodeSaysNothingWhenTheUserWentBack(t *testing.T) {
 	require.ErrorIs(t, err, player.ErrBackToEpisodeSelection)
 	assert.Empty(t, said, "the user asked to go back; there is nothing to explain")
 }
+
+func TestReportStreamNotLoadedPutsTheReasonOnTheList(t *testing.T) {
+	said := captureNotices(t)
+
+	reportStreamNotLoaded(&models.Anime{Name: "Karakai Jouzu no Takagi-san 2", Source: "AnimesDigital"}, "Episódio 07")
+
+	require.Len(t, *said, 1)
+	assert.Contains(t, (*said)[0], "Episódio 07 did not start")
+	assert.Contains(t, (*said)[0], "AnimesDigital")
+	assert.Contains(t, (*said)[0], "another source")
+}
+
+func TestReportStreamNotLoadedWithoutAnimeOrLabel(t *testing.T) {
+	said := captureNotices(t)
+
+	reportStreamNotLoaded(nil, " ")
+
+	require.Len(t, *said, 1)
+	assert.Contains(t, (*said)[0], "This episode did not start: the video did not load from this source")
+}
+
+// The player closing because the stream never loaded sent the user to the
+// "Watch now" menu, which replayed the same dead address for another minute.
+// It now reports the reason on the episode list and goes back to it.
+func TestAfterPlaybackReturnsToTheListWhenTheStreamDidNotLoad(t *testing.T) {
+	notices := captureNotices(t)
+	anime := &models.Anime{Name: "Takagi-san 2", Source: "AnimesDigital"}
+
+	err := afterPlayback(anime, "Episódio 07", fmt.Errorf("playing: %w", player.ErrStreamNotLoaded))
+
+	require.ErrorIs(t, err, player.ErrBackToEpisodeSelection)
+	require.Len(t, *notices, 1)
+	assert.Contains(t, (*notices)[0], "Episódio 07 did not start")
+
+	other := errors.New("boom")
+	assert.Equal(t, other, afterPlayback(anime, "1", other), "any other outcome is untouched")
+	assert.NoError(t, afterPlayback(anime, "1", nil))
+	assert.Len(t, *notices, 1, "and says nothing")
+}

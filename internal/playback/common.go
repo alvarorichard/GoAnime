@@ -391,7 +391,36 @@ func PlayEpisode(
 	if updater != nil {
 		updater.Stop()
 	}
+	return afterPlayback(anime, episodeNumberStr, playErr)
+}
+
+// afterPlayback maps how playback ended: a player that closed because the
+// stream never loaded is reported and sends the user back to the episode list.
+func afterPlayback(anime *models.Anime, episodeNumberStr string, playErr error) error {
+	if errors.Is(playErr, player.ErrStreamNotLoaded) {
+		reportStreamNotLoaded(anime, episodeNumberStr)
+		return player.ErrBackToEpisodeSelection
+	}
 	return playErr
+}
+
+// reportStreamNotLoaded tells the user the player closed because the stream
+// never loaded, on the episode list they return to (issue #229: they were sent
+// back to "Watch now", which replayed the same dead address for another
+// minute, with no word of why).
+func reportStreamNotLoaded(anime *models.Anime, episodeNumberStr string) {
+	label := strings.TrimSpace(episodeNumberStr)
+	if label == "" {
+		label = "This episode"
+	}
+	src := "this source"
+	if anime != nil && anime.Source != "" {
+		src = anime.Source
+	}
+	problem := fmt.Sprintf("%s did not start: the video did not load from %s, so the player closed.", label, src)
+	hint := "Try another episode, or press ESC and pick the same title from another source."
+	util.Errorf("%s", problem)
+	noticeOnNextPicker(problem + " " + hint)
 }
 
 func SelectEpisodeWithFuzzy(episodes []models.Episode) (episodeURL, episodeNumber string, episodeIndex int, err error) {
