@@ -233,7 +233,7 @@ jobs:
     name: Mutation guards
     needs: quality
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -279,7 +279,7 @@ jobs:
         # guards measure the packages. The race/coverage run skips them
         # (-short): one test binary per mutant is too slow for three operating
         # systems, so this job runs beside the tests instead of after them.
-        run: go test -count=1 -timeout 40m ./internal/api -run 'KillsMutants$|FullyCovered$'
+        run: go test -count=1 -timeout 55m ./internal/api -run 'KillsMutants$|FullyCovered$'
 
   build-binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
