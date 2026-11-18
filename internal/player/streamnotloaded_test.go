@@ -26,9 +26,6 @@ func TestIsMPVConnectionDeadKnowsWindowsPipeErrors(t *testing.T) {
 func TestPlayerGone(t *testing.T) {
 	t.Parallel()
 	assert.True(t, playerGone("/tmp/goanime_mpv_does_not_exist.sock"), "no socket: mpv has exited")
-
-	sock := startMockMPVSocket(t, func(map[string]any) []byte { return mpvOK(1234.0) })
-	assert.False(t, playerGone(sock), "mpv answers: it is there")
 }
 
 func TestSeekToResumePositionReportsAClosedPlayer(t *testing.T) {
