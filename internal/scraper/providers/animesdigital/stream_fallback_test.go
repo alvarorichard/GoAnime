@@ -43,6 +43,12 @@ type fbSite struct {
 	pieceReferer string
 	// a variant playlist, served at /variant.m3u8 beside the main one
 	variantBody string
+	// player 1's page on the video host (/cdn/v1.<token>): it answers
+	// cdnStatus, and only to a request whose Referer is cdnReferer (the
+	// episode), with cdnBody
+	cdnStatus  int
+	cdnBody    string
+	cdnReferer string
 	// the episode page's iframes
 	playerOne, playerTwo string
 	// the Blogger post
@@ -60,6 +66,8 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 		playlistBody:   "#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:10.000,\nseg-1-v1-a1.webp\n#EXT-X-ENDLIST\n",
 		pieceStatus:    http.StatusPartialContent,
 		pieceReferer:   PlayerReferer,
+		cdnStatus:      http.StatusOK,
+		cdnBody:        fbCDNPage("https://cdn-s01.mywallpaper-4k-image.net" + fbPlaylist),
 		postStatus:     http.StatusOK,
 		postBody:       fbPostWith(10),
 		hits:           map[string]int{},
@@ -70,6 +78,7 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 		playlistStatus, playlistBody := s.playlistStatus, s.playlistBody
 		postStatus, postBody := s.postStatus, s.postBody
 		pieceStatus, pieceReferer := s.pieceStatus, s.pieceReferer
+		cdnStatus, cdnBody, cdnReferer := s.cdnStatus, s.cdnBody, s.cdnReferer
 		page := fbEpisodePage(s.playerOne, s.playerTwo)
 		hook := s.onHit
 		s.mu.Unlock()
@@ -79,6 +88,13 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/video/"):
 			_, _ = w.Write([]byte(page))
+		case strings.HasPrefix(r.URL.Path, "/cdn/"):
+			if r.Header.Get("Referer") != cdnReferer {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(cdnStatus)
+			_, _ = w.Write([]byte(cdnBody))
 		case r.URL.Path == fbPlaylist:
 			w.WriteHeader(playlistStatus)
 			_, _ = w.Write([]byte(playlistBody))
@@ -104,8 +120,23 @@ func newFBSite(t *testing.T) (*fbSite, *Client) {
 	t.Cleanup(s.srv.Close)
 	s.playerOne = "https://api.anivideo.net/videohls.php?d=" + strings.ReplaceAll("https://cdn-s01.mywallpaper-4k-image.net"+fbPlaylist, "/", "%2F") + "&nocache1"
 	s.playerTwo = s.playerTwoURL(fbPost, 4)
+	s.cdnReferer = s.srv.URL + fbEpisode
 	c := NewClientForTest(&http.Client{Transport: rewriteHost{target: s.srv.URL}}, s.srv.URL)
 	return s, c
+}
+
+// fbCDNPage is player 1's page as the video host writes it since 2026-11-18:
+// a jwplayer set up with the playlist, its slashes escaped.
+func fbCDNPage(playlist string) string {
+	return `<html><head><title>STCode Player</title></head><body><div id="video-player"></div><script>
+var player = jwplayer('video-player');
+const playerInstance = jwplayer('video-player').setup({
+    image: "https:\/\/animesdigital.org\/wp-content\/uploads\/x.jpg",
+    playlist: [{ id: 'player', sources: [{
+        file: "` + strings.ReplaceAll(playlist, "/", `\/`) + `"            }], type: "video/mp4" }],
+    width: "100%",
+});
+</script></body></html>`
 }
 
 // playerTwoURL is player 2's address for the n-th video of post, as the site

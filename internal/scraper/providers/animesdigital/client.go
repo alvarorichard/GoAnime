@@ -33,6 +33,9 @@ var (
 	dubbedSuffixRe = regexp.MustCompile(`(?i)\s*(?:[-–—]\s*)?dublado\s*$`)
 	episodeNumRe   = regexp.MustCompile(`(?i)(?:epis[oó]dio|ep\.?)\D*(\d+(?:\.\d+)?)`)
 	pageNumRe      = regexp.MustCompile(`/page/(\d+)/?`)
+	// playerFileRe finds the playlist the embedded player is set up with:
+	// jwplayer's `file: "https:\/\/host\/path\/index.m3u8"`.
+	playerFileRe = regexp.MustCompile(`\bfile\s*:\s*"([^"]+)"`)
 )
 
 // Variants are the title pages available for each audio.
@@ -527,7 +530,7 @@ func (c *Client) GetEpisodeStreamURLContext(ctx context.Context, episodeURL stri
 	if err != nil {
 		return "", err
 	}
-	var playerOne, alternate string
+	var playerOne, alternate, cdnPlayer string
 	page.doc.Find("iframe.metaframe.rptss, iframe.rptss.metaframe").Each(func(_ int, s *goquery.Selection) {
 		src, ok := s.Attr("src")
 		if !ok || strings.TrimSpace(src) == "" {
@@ -542,12 +545,29 @@ func (c *Client) GetEpisodeStreamURLContext(ctx context.Context, episodeURL stri
 			if direct := strings.TrimSpace(u.Query().Get("d")); direct != "" {
 				playerOne = direct
 			}
+		} else if isCDNPlayer(u) {
+			if cdnPlayer == "" {
+				cdnPlayer = src
+			}
 		} else if alternate == "" {
 			alternate = src
 		}
 	})
-	if playerOne == "" && alternate == "" {
+	if playerOne == "" && alternate == "" && cdnPlayer == "" {
 		return "", netx.NewParserError(SourceName, "stream", "no supported player iframe found", nil)
+	}
+
+	// Since 2026-11-18 player 1 is a page on the video host, /cdn/v1.<token>,
+	// that sets its player up with the playlist (issue #237). The old
+	// videohls.php?d=<playlist> address is kept for episodes that still use it.
+	var cdnErr error
+	if playerOne == "" && cdnPlayer != "" {
+		if playerOne, cdnErr = c.cdnPlayerFile(ctx, cdnPlayer, episodeURL); cdnErr != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			util.Debug("AnimesDigital player 1's page gave no playlist", "error", cdnErr)
+		}
 	}
 
 	// Player 1 is a playlist on the site's video host, and that host has no
@@ -582,8 +602,52 @@ func (c *Client) GetEpisodeStreamURLContext(ctx context.Context, episodeURL stri
 			return "", netx.NewParserError(SourceName, "stream", "player 1 is unavailable and player 2 could not be read", err)
 		}
 	}
+	if playerOne == "" && cdnErr != nil {
+		return "", fmt.Errorf("%s: the video host does not answer for this episode (%v): %w", SourceName, cdnErr, netx.ErrMediaOffline)
+	}
 	// The site lists the episode and neither player has a file for it.
 	return "", fmt.Errorf("%s: the video host does not answer for this episode (%v): %w", SourceName, playerOneErr, netx.ErrMediaOffline)
+}
+
+// isCDNPlayer reports player 1's current address: a page on the video host
+// under /cdn/.
+func isCDNPlayer(u *url.URL) bool {
+	return strings.EqualFold(u.Hostname(), "api.anivideo.net") && strings.HasPrefix(u.Path, "/cdn/")
+}
+
+// cdnPlayerFile opens player 1's page the way the site's own page does (as a
+// frame of the episode) and answers the playlist it sets its player up with.
+// The host refuses a request that does not name the episode as its Referer
+// (403), and an episode it has no file for.
+func (c *Client) cdnPlayerFile(ctx context.Context, playerURL, episodeURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, playerURL, http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	c.decorateRequest(req)
+	req.Header.Set("Referer", episodeURL)
+	req.Header.Set("Sec-Fetch-Dest", "iframe")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("player 1's page: HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
+	if err != nil {
+		return "", err
+	}
+	for _, m := range playerFileRe.FindAllSubmatch(body, -1) {
+		file := strings.TrimSpace(strings.ReplaceAll(string(m[1]), `\/`, "/"))
+		if strings.HasPrefix(file, "https://") && isPlaylistPath(file) {
+			return file, nil
+		}
+	}
+	return "", errors.New("player 1's page names no playlist")
 }
 
 // streamProbeBudget bounds the question "does player 1 serve something the
@@ -697,29 +761,29 @@ func (c *Client) probe(ctx context.Context, target, accept, byteRange string) (*
 // resolves such an address to its file.
 const bloggerVideoPrefix = "https://www.blogger.com/video.g?token="
 
-// playerTwoStream reads player 2: an address on the site,
-// /<base64 of a Blogger post's URL>/<n>/bg.mp4, standing for the n-th video
-// (from zero) uploaded to that post. It answers that video's Blogger address.
+// playerTwoStream reads player 2: an address on the site that stands for the
+// n-th video (from zero) uploaded to a Blogger post. The post's URL is its
+// first segment in base64, ROT13-scrambled on older episodes, and the path is
+// either /<post>/<n>/bg.mp4 or, on older episodes, /<post>/0/<n>/bg.mp4 (the
+// first number is always 0). It answers that video's Blogger address.
 func (c *Client) playerTwoStream(ctx context.Context, playerURL string) (string, error) {
 	u, err := url.Parse(playerURL)
 	if err != nil {
 		return "", err
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) != 3 || parts[2] != "bg.mp4" {
+	if (len(parts) != 3 && len(parts) != 4) || parts[len(parts)-1] != "bg.mp4" {
 		return "", errors.New("player 2 has an address this client does not know")
 	}
-	index, err := strconv.Atoi(parts[1])
+	index, err := strconv.Atoi(parts[len(parts)-2])
 	if err != nil || index < 0 {
 		return "", errors.New("player 2 names no video")
 	}
-	raw, err := base64.StdEncoding.DecodeString(parts[0])
-	if err != nil {
-		if raw, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[0], "=")); err != nil {
-			return "", errors.New("player 2 names no post")
-		}
+	raw, ok := decodePlayerTwoPost(parts[0])
+	if !ok {
+		return "", errors.New("player 2 names no post")
 	}
-	post, err := url.Parse(strings.TrimSpace(string(raw)))
+	post, err := url.Parse(raw)
 	if err != nil || post.Scheme != "https" || post.User != nil || !c.isBlogHost(post.Hostname()) {
 		return "", errors.New("player 2 points outside Blogger")
 	}
@@ -737,6 +801,33 @@ func (c *Client) playerTwoStream(ctx context.Context, playerURL string) (string,
 		return "", fmt.Errorf("player 2's post holds %d videos, not the %d this episode needs", len(videos), index+1)
 	}
 	return videos[index], nil
+}
+
+// decodePlayerTwoPost turns player 2's first path segment into the Blogger
+// post's address: base64 of the URL, or of its ROT13 scramble.
+func decodePlayerTwoPost(segment string) (string, bool) {
+	for _, candidate := range []string{segment, rot13(segment)} {
+		raw, err := base64.StdEncoding.DecodeString(candidate)
+		if err != nil {
+			raw, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(candidate, "="))
+		}
+		if text := strings.TrimSpace(string(raw)); err == nil && strings.HasPrefix(text, "https://") {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+func rot13(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return 'a' + (r-'a'+13)%26
+		case r >= 'A' && r <= 'Z':
+			return 'A' + (r-'A'+13)%26
+		}
+		return r
+	}, s)
 }
 
 // isBlogHost reports a host player 2's post may live on: a Blogger blog, or a

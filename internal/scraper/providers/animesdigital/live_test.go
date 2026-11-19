@@ -66,7 +66,7 @@ func TestLiveAnimesDigitalChain(t *testing.T) {
 }
 
 // TestLiveAnimesDigitalReportedTitlesPlay walks every episode of the titles
-// users reported (issue #229 and #236) and requires that what the client
+// users reported (issues #229, #236 and #237) and requires that what the client
 // returns is something the player can start: for player 1, its playlist and
 // first piece of video with the Referer the player sends; otherwise player 2's
 // Blogger video. An episode neither player has is allowed only as the
@@ -81,7 +81,11 @@ func TestLiveAnimesDigitalReportedTitlesPlay(t *testing.T) {
 		"Cyberpunk: Edgerunners":   "/anime/a/cyberpunk-edgerunners",
 		"Wind Breaker":             "/anime/a/wind-breaker",
 		"Takagi-san 2":             "/anime/a/karakai-jouzu-no-takagi-san-2",
+		// Issue #237. An older title: its episodes are on player 2 only.
+		"Bleach": "/anime/a/bleach",
 	}
+	// Bleach lists 366 episodes; the first few say whether the title plays.
+	limits := map[string]int{"Bleach": 8}
 	c := NewClient()
 	for name, path := range titles {
 		t.Run(name, func(t *testing.T) {
@@ -90,6 +94,9 @@ func TestLiveAnimesDigitalReportedTitlesPlay(t *testing.T) {
 			episodes, err := c.GetAnimeEpisodesContext(ctx, DefaultBase+path)
 			if err != nil || len(episodes) == 0 {
 				t.Fatalf("episodes: %d, err=%v", len(episodes), err)
+			}
+			if limit := limits[name]; limit > 0 && len(episodes) > limit {
+				episodes = episodes[:limit]
 			}
 			for _, episode := range episodes {
 				stream, err := c.GetEpisodeStreamURLContext(ctx, episode.URL)

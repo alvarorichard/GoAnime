@@ -21,6 +21,10 @@ var animesDigitalGuards = map[string][]string{
 		"TestPlaylistAnswersFindsThePieceTheWayThePlayerDoes", "TestPlaylistAnswersSaysWhichPieceFailed",
 		"TestPlaylistAnswersAsksTheWayThePlayerWill", "TestStreamRefererIsThePlayersForPlayerOneOnly",
 		"TestStreamIsPlayerOneWhenItsPlaylistAnswers", "TestStreamFallsBackToPlayerTwoWhenPlayerOneDoesNotAnswer",
+		// Issue #237: the players the site changed to on 2026-11-18.
+		"TestStreamReadsPlayerOnesPageWhenItIsACDNFrame", "TestStreamFallsToPlayerTwoWhenPlayerOnesPageIsRefused",
+		"TestStreamFallsToPlayerTwoWhenPlayerOnesPageNamesNoPlaylist", "TestEpisodeWhosePlayerOnesPageIsRefusedAndHasNoPlayerTwoIsOffline",
+		"TestPlayerTwoReadsTheOlderAddress", "TestPlayerTwoRefusesAnOlderAddressThatIsWrong", "TestTheLegacyPlayerOneAddressStillWorks",
 	},
 	providersPkg: {
 		"TestAnimesDigitalStreamCarriesThePlayersReferer",
@@ -31,6 +35,41 @@ var animesDigitalGuards = map[string][]string{
 }
 
 var animesDigitalMutants = []mutant{
+	{
+		name:  "player 1's /cdn/ page is not read",
+		edits: []codeEdit{{animesDigitalClient, "} else if isCDNPlayer(u) {", "} else if false && isCDNPlayer(u) {"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestStreamReadsPlayerOnesPageWhenItIsACDNFrame"}},
+	},
+	{
+		name:  "player 1's page is asked for with the site's address, not the episode's",
+		edits: []codeEdit{{animesDigitalClient, "req.Header.Set(\"Referer\", episodeURL)", "req.Header.Set(\"Referer\", PlayerReferer)"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestStreamReadsPlayerOnesPageWhenItIsACDNFrame"}},
+	},
+	{
+		name:  "the page's escaped slashes are left as they are",
+		edits: []codeEdit{{animesDigitalClient, "strings.TrimSpace(strings.ReplaceAll(string(m[1]), `\\/`, \"/\"))", "strings.TrimSpace(string(m[1]))"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestStreamReadsPlayerOnesPageWhenItIsACDNFrame"}},
+	},
+	{
+		name:  "any file the page names is taken for the playlist",
+		edits: []codeEdit{{animesDigitalClient, "strings.HasPrefix(file, \"https://\") && isPlaylistPath(file)", "file != \"\""}},
+		kills: map[string][]string{animesDigitalPkg: {"TestStreamFallsToPlayerTwoWhenPlayerOnesPageNamesNoPlaylist"}},
+	},
+	{
+		name:  "player 2's ROT13-scrambled post is not unscrambled",
+		edits: []codeEdit{{animesDigitalClient, "[]string{segment, rot13(segment)}", "[]string{segment}"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestPlayerTwoReadsTheOlderAddress"}},
+	},
+	{
+		name:  "player 2's older four-part address is refused",
+		edits: []codeEdit{{animesDigitalClient, "(len(parts) != 3 && len(parts) != 4)", "len(parts) != 3"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestPlayerTwoReadsTheOlderAddress"}},
+	},
+	{
+		name:  "player 2's video is picked by the constant segment, not the index",
+		edits: []codeEdit{{animesDigitalClient, "strconv.Atoi(parts[len(parts)-2])", "strconv.Atoi(parts[1])"}},
+		kills: map[string][]string{animesDigitalPkg: {"TestPlayerTwoReadsTheOlderAddress"}},
+	},
 	{
 		name:  "the playlist is trusted without asking for its first piece",
 		edits: []codeEdit{{animesDigitalClient, "\treturn c.pieceAnswers(ctx, piece)\n", "\t_ = piece\n\treturn nil\n"}},
