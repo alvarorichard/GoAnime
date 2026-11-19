@@ -541,15 +541,16 @@ func (c *Client) GetEpisodeStreamURLContext(ctx context.Context, episodeURL stri
 		if err != nil {
 			return
 		}
-		if strings.EqualFold(u.Hostname(), "api.anivideo.net") && strings.Contains(u.Path, "videohls.php") {
+		switch {
+		case strings.EqualFold(u.Hostname(), "api.anivideo.net") && strings.Contains(u.Path, "videohls.php"):
 			if direct := strings.TrimSpace(u.Query().Get("d")); direct != "" {
 				playerOne = direct
 			}
-		} else if isCDNPlayer(u) {
+		case isCDNPlayer(u):
 			if cdnPlayer == "" {
 				cdnPlayer = src
 			}
-		} else if alternate == "" {
+		case alternate == "":
 			alternate = src
 		}
 	})

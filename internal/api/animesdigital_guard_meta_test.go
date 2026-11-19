@@ -37,7 +37,7 @@ var animesDigitalGuards = map[string][]string{
 var animesDigitalMutants = []mutant{
 	{
 		name:  "player 1's /cdn/ page is not read",
-		edits: []codeEdit{{animesDigitalClient, "} else if isCDNPlayer(u) {", "} else if false && isCDNPlayer(u) {"}},
+		edits: []codeEdit{{animesDigitalClient, "case isCDNPlayer(u):", "case false && isCDNPlayer(u):"}},
 		kills: map[string][]string{animesDigitalPkg: {"TestStreamReadsPlayerOnesPageWhenItIsACDNFrame"}},
 	},
 	{
