@@ -1,10 +1,12 @@
 # GoAnime Release Notes - Version 2.0.1
 
-Release date: 2026-11-10
+Release date: 2026-11-18
 
 ## Highlights
 
-- **97 commits since 2.0.0** (2026-10-28), by 3 contributors: 288 files changed, +58,289 / −2,868 lines. 150 of those files are tests; the new features each ship with unit, cascade and mutation tests (`go test -overlay`) that must fail on every mutant.
+- **183 commits since 2.0.0** (2026-10-28), by 3 contributors: 463 files changed, +114,701 / −3,253 lines. 259 of those files are tests; the new features each ship with unit, cascade and mutation tests (`go test -overlay`) that must fail on every mutant.
+- **AnimesDigital plays again** (#229, #236). Its video host answered the playlist but refused every video piece unless the request carried the player's own `Referer`, so mpv opened, found nothing to play and closed (users could not watch Cyberpunk: Edgerunners season 2, among other titles). GoAnime now sends that Referer, checks the first piece of video before offering an episode, and falls back to the second player, or says the episode is offline, instead of handing mpv a dead address. All ten episodes of Cyberpunk: Edgerunners season 2 and of season 1 (subtitled and dubbed) were played live.
+- **When mpv closes without loading the stream, you are told** (#229), and "Watch now" takes you back to the episode list instead of replaying the same dead address.
 - **An episode that will not load plays from another source** (#229). When the source you picked cannot give a video, GoAnime looks for the same episode of the same title on the other anime sources and plays the first that has it. History and CONTINUE keep pointing at the title you chose.
 - **Autocomplete in the search box**, with no key and no setup: titles appear as you type, with the rest of the best match as ghost text after the cursor.
 - **A sources screen (`ctrl+s`)** turns each search source on or off and remembers the choice.
@@ -61,6 +63,9 @@ Release date: 2026-11-10
 
 ### Sources and search
 
+- Fix AnimesDigital episodes that never played (#229): the video host returns 403 for every video piece unless the `Referer` is `https://api.anivideo.net/`, while the playlist itself still loads, so the old check passed and mpv closed. The Referer now travels from the client to mpv, the check requests the first video piece the way the player will (following a master playlist to its variant), and an episode whose pieces are refused falls back to the second (Blogger) player or is reported as offline. Covered by offline tests with a host that checks the Referer, a guard of 11 mutants, and an opt-in live test (`GOANIME_LIVE=1`) over the reported titles.
+- Fix `esc` in the AnimesDigital Subtitled/Dubbed picker choosing Subtitled: it goes back to the search now.
+- Fix AnimesDigital episodes answered with a dead playlist (HTTP 520) leaving no way to play them (#236): the second player is tried first.
 - Fix Pobreflix after the site moved to `pobreflixtvfree.cv` and was rebuilt (2026-11-14): the old hosts redirect every path to the new home page, so title pages no longer opened ("title page has no video mount") even though search still answered. GoAnime now searches `/api/busca`, reads the new movie, series and episode pages, takes the episode list from the series page and plays the RedeFlixApi player, with no solver. The daily Source Health run now opens a title and plays a movie and an episode, so a break like this shows up as a red run instead of a green search.
 - Fix Pobreflix movies whose catalog entry points at a dead `/api/player?id=<tmdb>` endpoint: the player page is rebuilt from the TMDB id instead of failing the title.
 - Fix Pobreflix listing a gated movie as having no playable episode, and preferring the panel when the wanted audio had no direct file.
@@ -71,6 +76,7 @@ Release date: 2026-11-10
 
 ### Player and downloads
 
+- Fix mpv closing without loading the stream going unnoticed for 45 seconds (#229): the player is seen to be gone, the notice says the stream did not load and why, and Windows' pipe errors ("The system cannot find the file specified.", "The pipe is being closed.") count as a dead mpv like the Unix ones.
 - Fix a failed yt-dlp install panicking: it is an error now.
 - Fix the Blogger chunk download retrying forever.
 - Fix a data race in the mpv launcher, which read mpv's stderr from a buffer while `os/exec` was still copying into it; the buffer is locked now, and a test with a noisy mpv reproduces the race on the old code under `-race`.
@@ -96,6 +102,11 @@ Release date: 2026-11-10
 - `docs/CFSOLVE.md` covers the Pobreflix Turnstile flow and its live test, and both READMEs describe cfsolve as the solver for Goyabu and Pobreflix.
 - Emojis left the changelog and `ADDING_A_SOURCE.md`.
 
+## Thanks and New Contributors
+
+- **Welcome, @animesfhd!** Your first contribution, **AnimesFHD** (#232), is in this release: a whole PT-BR anime source with subtitled and dubbed versions, movies, paginated episodes and native MP4/HLS playback, with the follow-up fixes for `--audio`, movies in CONTINUE and mpv's User-Agent. Thank you for the time and care.
+- Thanks to @william-navarro for **AnimesROLL** (#225) and, earlier, **AnimesDigital** (#211), and to everyone who reported playback problems on #229 and #236 and on Discord: the AnimesDigital fix above comes from those reports.
+
 ## Dependencies
 
 **Direct dependencies:**
@@ -103,15 +114,20 @@ Release date: 2026-11-10
 | Module | From | To |
 |---|---|---|
 | `charm.land/bubbletea/v2` | `v2.1.0` | `v2.1.1` |
-| `github.com/enetx/surf` | `v1.0.206` | `v1.0.207` |
+| `charm.land/lipgloss/v2` | `v2.0.6` | `v2.1.1` |
+| `github.com/PuerkitoBio/goquery` | `v1.13.0` | `v1.14.0` |
+| `github.com/enetx/surf` | `v1.0.206` | `v1.0.256` |
 | `github.com/mattn/go-sqlite3` | `v1.14.52` | `v1.14.53` |
+| `github.com/charmbracelet/x/ansi` | `v0.11.9` | `v0.11.10` |
 | `github.com/charmbracelet/x/term` | indirect | direct, `v0.2.2` |
+| `golang.org/x/crypto`, `net`, `sys`, `term`, `text` | `v0.58.0`, `v0.62.0`, `v0.49.0`, `v0.47.0`, `v0.43.0` | `v0.59.0`, `v0.63.0`, `v0.50.0`, `v0.48.0`, `v0.44.0` |
 
-**Notable indirect updates:** `andybalholm/brotli` `v1.2.7` → `v1.2.8`, `xo/terminfo` `v1.2.0` → `v1.3.1`, `stretchr/objx` `v0.5.3` → `v0.8.0`, `go.yaml.in/yaml/v3` `v3.0.5` → `v3.0.6`.
+**Notable indirect updates:** `enetx/http` `v1.0.29` → `v1.0.49`, `enetx/utls` `v1.0.10` and `enetx/quic-go` `v1.0.40` (the surf stack replaces `quic-go/quic-go`, `enetx/http2` and `enetx/http3`), `andybalholm/brotli` `v1.2.7` → `v1.3.0`, `xo/terminfo` `v1.2.0` → `v1.3.1`, `stretchr/objx` `v0.5.3` → `v0.8.0`, `go.yaml.in/yaml/v3` `v3.0.5` → `v3.0.6`.
 
 **Watch list:**
 
-- `quic-go/quic-go` is pinned to `v0.64.1`: `v0.65.0` breaks `enetx/http3` `v1.0.9`. Move it when `enetx/http3` does.
+- `charm.land/bubbletea/v2` stays on `v2.1.1`: `v2.1.2` hangs on Windows when there is no console (the spinner blocks closing the console input), which timed out `appflow` and `download` in CI.
+- `enetx/utls` stays on `v1.0.10`, the version surf asks for: `v1.8.1` imports another module's internal package and does not build.
 - cfsolve is pinned to `d94de047` in `cfsolve.lock`.
 
 ---
