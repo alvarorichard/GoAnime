@@ -2,6 +2,7 @@ package rangedl
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -218,4 +219,10 @@ func TestCombine_MissingPartReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "v.mp4")
 	require.Error(t, Combine(dest, 2))
+}
+
+func TestSplitWithAPartCountPastTheFileSize(t *testing.T) {
+	got := Split(3, math.MaxInt)
+	assert.Equal(t, []ByteRange{{0, 0}, {1, 1}, {2, 2}}, got)
+	assert.Equal(t, []ByteRange{{0, math.MaxInt64 - 1}}, Split(math.MaxInt64, 1))
 }

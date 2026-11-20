@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -668,7 +669,11 @@ func (m Media) ToAnimeModel() *models.Anime {
 		ImageURL: m.Poster,
 		Source:   SourceName,
 		Year:     m.Year,
-		TMDBID:   int(m.TMDBID),
+	}
+	// TMDB ids are a few million; a value int cannot hold on a 32-bit build is
+	// not an id, so it is left out rather than wrapped into another title's.
+	if m.TMDBID > 0 && m.TMDBID <= math.MaxInt32 {
+		anime.TMDBID = int(m.TMDBID)
 	}
 	anime.MediaType = models.MediaTypeTV
 	if m.Kind == KindMovie {

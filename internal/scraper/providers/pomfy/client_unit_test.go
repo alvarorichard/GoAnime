@@ -327,3 +327,14 @@ func TestForTestHelpersRoundTrip(t *testing.T) {
 	assert.True(t, CheckForTest("feprefix:", sol, 5), "the solver's own answer must pass its judge")
 	assert.False(t, CheckForTest("feprefix:", "0", 5))
 }
+
+func TestToAnimeModelLeavesOutAnIDAnIntCannotHold(t *testing.T) {
+	for name, id := range map[string]int64{
+		"past 32 bits": 1 << 40,
+		"negative":     -5,
+		"zero":         0,
+	} {
+		assert.Zero(t, Media{Title: "x", TMDBID: id, Kind: KindMovie}.ToAnimeModel().TMDBID, name)
+	}
+	assert.Equal(t, 1396, Media{Title: "x", TMDBID: 1396, Kind: KindSeries}.ToAnimeModel().TMDBID)
+}

@@ -65,16 +65,13 @@ func Split(contentLength int64, n int) []ByteRange {
 	if contentLength <= 0 {
 		return nil
 	}
-	n = max(n, 1)
-	if int64(n) > contentLength {
-		n = int(contentLength)
-	}
-	chunk := contentLength / int64(n)
-	ranges := make([]ByteRange, n)
+	count := min(int64(max(n, 1)), contentLength)
+	chunk := contentLength / count
+	ranges := make([]ByteRange, count)
 	for i := range ranges {
 		from := int64(i) * chunk
 		to := from + chunk - 1
-		if i == n-1 {
+		if i == len(ranges)-1 {
 			to = contentLength - 1
 		}
 		ranges[i] = ByteRange{From: from, To: to}
