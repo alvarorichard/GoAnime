@@ -36,6 +36,7 @@ var (
 	GlobalSubtitles     []SubtitleInfo                 // Global variable to store current subtitles for playback
 	GlobalNoSubs        bool                           // Global flag to disable subtitles
 	GlobalReferer       string                         // Global variable to store referer for stream requests
+	GlobalOrigin        string                         // Global variable to store an explicit Origin header
 	GlobalOutputDir     string                         // Global variable to store custom download output directory
 	GlobalAnimeSource   string                         // Global variable to store the current anime source (e.g. "9Anime")
 	// GlobalDownloadMenu opens the episode OPTIONS menu before every
@@ -108,6 +109,30 @@ func ClearGlobalReferer() {
 	playbackStateMu.Lock()
 	defer playbackStateMu.Unlock()
 	GlobalReferer = ""
+}
+
+// SetGlobalOrigin stores the CORS origin for stream requests.
+func SetGlobalOrigin(origin string) {
+	playbackStateMu.Lock()
+	GlobalOrigin = origin
+	playbackStateMu.Unlock()
+	if origin != "" {
+		Debugf("Stored origin for stream requests: %s", origin)
+	}
+}
+
+// GetGlobalOrigin returns the explicit CORS origin for stream requests.
+func GetGlobalOrigin() string {
+	playbackStateMu.RLock()
+	defer playbackStateMu.RUnlock()
+	return GlobalOrigin
+}
+
+// ClearGlobalOrigin clears the explicit CORS origin.
+func ClearGlobalOrigin() {
+	playbackStateMu.Lock()
+	defer playbackStateMu.Unlock()
+	GlobalOrigin = ""
 }
 
 // SetGlobalAnimeSource stores the current anime source (e.g. "HiAnime", "Goyabu")
@@ -224,6 +249,7 @@ var (
 	ErrDownloadRequested      = errors.New("download requested")
 	ErrUpscaleRequested       = errors.New("upscale requested")
 	ErrMovieDownloadRequested = errors.New("movie download requested")
+	ErrClearRequested         = errors.New("clear history requested")
 )
 
 // DownloadRequest holds download command parameters
@@ -267,6 +293,20 @@ var GlobalDownloadRequest *DownloadRequest
 // Global variable to store upscale request
 var GlobalUpscaleRequest *UpscaleRequest
 
+// probeTerminal asks the terminal what the interface needs to know before
+// anything is drawn. It is a variable so a test can tell whether it ran.
+var probeTerminal = func() {
+	// Ask the terminal for its background once, before the first RunClean
+	// suppresses capability probes (tela 8). No TTY answers: keeps dark.
+	tui.EnsureThemeDetected()
+	// Look for a Japanese font before RunClean rewrites TERM: without one the
+	// glosses are hidden instead of drawn as boxes.
+	tui.EnsureJapaneseDetected()
+	// Ask the fonts what flavor glyphs they draw with (❯ ▶ ✓ …): uncovered
+	// ones degrade to the ASCII forms instead of drawing boxes.
+	tui.EnsureGlyphsDetected()
+}
+
 // FlagParser parses the -flags and returns the anime name
 func FlagParser() (string, error) {
 	// Override the default flag.Usage to show our custom help
@@ -288,7 +328,7 @@ func FlagParser() (string, error) {
 	rangeFlag := fs.Bool("r", false, "download episode range (use with -d)")
 	allFlag := fs.Bool("a", false, "download ALL episodes/seasons (use with -d or -dm)")
 	movieDownloadFlag := fs.Bool("dm", false, "download a movie or TV show")
-	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix, animedrive, movietv, ptbr)")
+	sourceFlag := fs.String("source", "", "specify source (hianime, animefire, goyabu, animesdigital, anroll, animesfhd, startflix, topcine, pobreflix, plutotv, animedrive, movietv, ptbr)")
 	qualityFlag := fs.String("quality", "best", "specify video quality (best, worst, 720p, 1080p, etc.)")
 	mediaTypeFlag := fs.String("type", "", "with -dm, download a single TV episode instead of a movie (movie, tv)")
 	subsLanguageFlag := fs.String("subs", "english", "preferred subtitle language for movies and TV shows")
@@ -296,6 +336,11 @@ func FlagParser() (string, error) {
 	noSubsFlag := fs.Bool("no-subs", false, "disable subtitles")
 	downloadMenuFlag := fs.Bool("download-menu", false, "always show the episode options menu before playing (tela 6)")
 	outputDirFlag := fs.String("o", "", "output directory for downloads (default: ~/.local/goanime/downloads/anime/)")
+	clearContinueFlag := fs.Bool("clear-continue", false, "empty the CONTINUE list of the home screen (watch history) and exit")
+	clearRecentFlag := fs.Bool("clear-recent", false, "empty the RECENT searches of the home screen and exit")
+	clearHistoryFlag := fs.Bool("clear-history", false, "empty both the CONTINUE list and the RECENT searches, and exit")
+	yesFlag := fs.Bool("yes", false, "with --clear-*, do not ask before clearing")
+	yesShortFlag := fs.Bool("y", false, "same as --yes")
 	plainFlag := fs.Bool("plain", false, "plain interface: no colors, no Japanese glosses, ASCII only (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1)")
 
 	// Upscale flags
@@ -330,15 +375,13 @@ func FlagParser() (string, error) {
 	if *plainFlag {
 		tui.SetPlain(true)
 	}
-	// Ask the terminal for its background once, before the first RunClean
-	// suppresses capability probes (tela 8). No TTY answers: keeps dark.
-	tui.EnsureThemeDetected()
-	// Look for a Japanese font before RunClean rewrites TERM: without one the
-	// glosses are hidden instead of drawn as boxes.
-	tui.EnsureJapaneseDetected()
-	// Ask the fonts what flavor glyphs they draw with (❯ ▶ ✓ …): uncovered
-	// ones degrade to the ASCII forms instead of drawing boxes.
-	tui.EnsureGlyphsDetected()
+	// The clear commands print plain text and ask their question on stdin, so
+	// they skip the terminal probes: a probe the terminal never answers leaves
+	// a reader on stdin that swallows the answer to the question.
+	clearRequest := clearRequestFrom(*clearContinueFlag, *clearRecentFlag, *clearHistoryFlag, *yesFlag || *yesShortFlag)
+	if clearRequest == nil {
+		probeTerminal()
+	}
 
 	// Set performance profiling mode
 	PerfEnabled = *perf
@@ -380,6 +423,12 @@ func FlagParser() (string, error) {
 
 	if *updateFlag {
 		return "", ErrUpdateRequested // Signal update request
+	}
+
+	// Forgetting history: --clear-continue, --clear-recent, --clear-history.
+	if clearRequest != nil {
+		GlobalClearRequest = clearRequest
+		return "", ErrClearRequested
 	}
 
 	// Handle download mode

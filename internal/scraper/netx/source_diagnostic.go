@@ -413,7 +413,7 @@ func ProbeOriginStatus(parent context.Context, probeURL string, budget time.Dura
 	if err != nil {
 		return 0
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode
 }
 

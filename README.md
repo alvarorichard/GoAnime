@@ -205,8 +205,9 @@ run `sudo goanime --update`.
 Run `goanime` without arguments to open search home. Type a name and press
 enter, or press `↓` to pick from the lists below: Continue reopens an
 episode where you stopped (`enter` resumes, `r` starts over, `e` lists
-episodes, `x` removes it) and Recent repeats a past search with its result
-count. `tab` switches scope between ALL, PT-BR, ENGLISH and MOVIES/TV.
+episodes, `x` removes it), Favorites lists the works you marked with
+`ctrl+f` and Recent repeats a past search with its result count. `tab`
+switches between ALL, PT-BR, ENGLISH, MOVIES/TV and FAVORITES.
 From a result, choose a version with `←` `→` and, for a series, an episode.
 You can also pass the name directly:
 
@@ -248,6 +249,7 @@ goanime --source animefire "jujutsu kaisen"   # search a single source
 goanime --upscale --upscale-hq video.mp4      # upscale a file with Anime4K
 goanime --update                              # update to the latest release
 goanime --debug "naruto"                      # write a debug log
+goanime --clear-history                       # empty CONTINUE and RECENT on the home screen
 ```
 
 Run `goanime -h` for the full list of options.
@@ -263,7 +265,10 @@ Run `goanime -h` for the full list of options.
 | `Esc`                 | Go back                   |
 | `tab`                 | Switch search scope (search home) |
 | `←` `→`               | Choose a version (results) |
-| `r` `e` `x`           | From start, episodes, remove (Continue list) |
+| `ctrl+f`              | Add the highlighted work to Favorites, or take it off (results) |
+| `r` `e`              | From start, episodes (Continue list) |
+| `x`                   | Remove the highlighted row (Continue, Favorites or Recent list) |
+| `X`                   | Clear the whole list the row is in, after a `y`/`n` question |
 | `d` `D` `A` `m`       | Download one, range, all, options (episodes) |
 
 In a menu that shows a letter beside each option, that letter picks the
@@ -271,6 +276,53 @@ option at once; any other key still filters.
 
 The episode list marks the episodes you finished with ✓ and the one you
 stopped partway with ◐, and opens where you left off.
+
+### Favorites and your own lists
+
+Press `ctrl+f` on a result to add the work to Favorites, and again to take it
+off; a favorite wears a star on its row and in the details. Press `ctrl+l` to
+put it in one of your own lists instead (or as well): a screen opens with
+"+ Create a new list" on top and every list below it, each with its number of
+titles and a mark when the work is already in it. `enter` adds the work to the
+highlighted list, or takes it off when it is there, and the screen stays open
+so you can choose several lists; `esc` closes it. To make a list, choose
+"+ Create a new list" and type a name (up to 40 characters, such as "Weekend
+marathon"). The footer and the details always say which key does what.
+
+The FAVORITES tab, beside MOVIES/TV, opens at your lists: "+ Create a new
+list" (or press `n`), Favorites (the list `ctrl+f` fills) and the lists you
+made, with their number of titles and the day they were created, and on a
+wide terminal a panel with the titles inside. `enter` opens a list: its
+titles scroll, typing filters them (accents and capitals do not matter),
+`enter` on a title searches it, `x` takes it off the list, `X` empties the
+list after a `y`/`n` question, and `esc` goes back to your lists. On a list
+`x` deletes it after a `y`/`n` question (its titles are not deleted from
+anywhere, only the list goes) and `r` renames it. Favorites itself cannot be
+renamed or deleted. The home screen also shows the first eight Favorites
+between CONTINUE and RECENT, with a "+N more" line; coming back from a search
+reopens the tab and row you left. Everything is one small file,
+`favorites.json`, next to the watch history (`~/.local/goanime/tracking/` on
+Linux and macOS, `%LOCALAPPDATA%\GoAnime\tracking\` on Windows), so it works
+on every platform and without SQLite.
+
+### Forgetting your history
+
+The search home screen keeps two lists: CONTINUE, the shows you have watched,
+and RECENT, your latest searches. Remove a row with `x`, or empty a whole list
+with `X`. Removing a show from CONTINUE removes every episode of it you have
+watched, so it does not come back with an older one.
+
+From the command line:
+
+```bash
+goanime --clear-continue    # empty CONTINUE (the watch history)
+goanime --clear-recent      # empty RECENT
+goanime --clear-history     # both
+goanime --clear-history --yes    # without asking (also needed in a script)
+```
+
+Each one asks first. Without a terminal to ask on, and without `--yes`, nothing
+is cleared.
 
 ### While watching
 
@@ -300,42 +352,38 @@ Real-time Upscale, in the menu before playback, applies
 choose Setup shaders to download them, then pick a mode. Each mode's label
 says what it is for, from Performance for a weak GPU to Ultra for SD sources.
 
+### Your mpv configuration
+
+When GoAnime finds a configuration of yours, it starts mpv with it, so
+`mpv.conf`, `input.conf`, scripts (uosc, thumbfast), script-opts and shaders in
+`~/.config/mpv/` (`%APPDATA%\mpv` on Windows) apply as they do when you run mpv
+yourself. GoAnime looks in `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`,
+`~/.config/mpv` and the legacy `~/.mpv`, and counts a folder only if it holds an
+`mpv.conf`, `input.conf`, `scripts`, `script-opts`, `script-modules`,
+`shaders`, `fonts` or `lua-settings`. With no such config, GoAnime keeps its
+own tuned start (`--no-config`, `--profile=fast`), which is lighter on weak
+machines.
+
+Command-line options win over `mpv.conf`, so a few settings that GoAnime
+depends on are fixed for its playback: `keep-open`, `idle`, `loop-file` and
+`loop-playlist` are off so mpv exits when the episode ends, and
+`resume-playback` is off because GoAnime resumes from its own saved position.
+GoAnime also sets `hwdec=auto-safe` and the `vo` fallback chain, so it can
+start on machines where mpv's default output fails; a `vo` or `hwdec`
+in your `mpv.conf` is overridden, so to use your own, play the file in mpv
+directly. It
+does not force `profile=fast` when your config is loaded.
+
+To start mpv with `--no-config`, as earlier versions did, set
+`GOANIME_MPV_CONFIG=off` (also `0`, `false`, `no` or `none`). Do this first
+when playback fails and your config is the suspect.
+
 ## Sources
 
-| Source        | Content    | Language                   | Notes                                         |
-| ------------- | ---------- | -------------------------- | --------------------------------------------- |
-| HiAnime       | Anime      | English, subbed and dubbed | Subbed by default                             |
-| AnimeFire     | Anime      | Portuguese (Brazil)        |                                               |
-| AnimesDigital | Anime      | Portuguese (Brazil)        | Subtitled and dubbed                          |
-| AnimeDrive    | Anime      | Portuguese (Brazil)        | Host override: `GOANIME_ANIMEDRIVE_URL`       |
-| Goyabu        | Anime      | Portuguese (Brazil)        | Disabled by default, see below                |
-| StartFlix     | Movies, TV | Portuguese (Brazil)        | Dubbed and subtitled                          |
-| TopCine       | Movies, TV | Portuguese (Brazil)        | Catalog only; playback goes through StartFlix |
-| Pobreflix     | Movies, TV | Portuguese (Brazil)        | Direct MP4 playback; StartFlix panel fallback |
-
-`--source` limits a search to one source: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `animedrive`, `startflix`, `topcine` or `pobreflix`.
-`movietv` covers StartFlix, TopCine and Pobreflix; `ptbr` covers every
-Portuguese source.
-
-Pobreflix asks the site's `/api` catalog first and falls back to its sitemap
-index. Current movie and episode pages embed public MP4 servers, so playback is
-direct and needs no browser. Old-theme pages still use the StartFlix panel.
-
-AnimeDrive's host is intermittently unreachable from some networks. If the
-site moves or your network blocks it, `GOANIME_ANIMEDRIVE_URL` points the
-source at a reachable mirror.
-
-Goyabu is behind a Cloudflare managed challenge and is disabled by default. It
-works on networks that Cloudflare does not challenge; on a challenged network
-no browserless HTTP client can clear the challenge. Enable it with
-`GOANIME_ENABLED_SOURCES=goyabu`.
-
-GoAnime depends on third-party websites, and those websites change without
-notice. When one does, the corresponding source can stop working until it is
-updated. A [scheduled workflow](.github/workflows/source-health.yml) checks
-every source daily, so breakage is usually visible there before it is
-reported.
+GoAnime searches several anime and movie/TV sites at once, in English and
+Portuguese. They are third-party websites and change without notice, so one
+can stop working until it is updated. The list of sources, how to pick one
+with `--source` and per-source notes are in [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Configuration
 
@@ -355,9 +403,11 @@ common needs:
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Address of AnimeDrive                                                    |
 | `GOANIME_POBREFLIX_URL`       | Address of Pobreflix                                                     |
+| `GOANIME_POBREFLIX_PLAYER_URL`| Address of its Turnstile-gated player (`https://streambetter.lat`)       |
 | `GOANIME_STARTFLIX_URL`       | Address of StartFlix                                                     |
 | `GOANIME_STARTFLIX_PANEL_URL` | Address of the StartFlix video panel                                     |
 | `GOANIME_TOPCINE_URL`         | Address of TopCine                                                       |
+| `GOANIME_POMFY_URL`           | Address of Pomfy (`https://pomfy.my`)                                    |
 | `TMDB_API_KEY`                | A [TMDB](https://www.themoviedb.org/settings/api) key for movie, TV and season details |
 | `OMDB_API_KEY`                | An [OMDb](https://www.omdbapi.com/apikey.aspx) key to use instead of the shared demo key |
 
@@ -411,8 +461,15 @@ and attach a debug log to it:
    | macOS   | `~/Library/Logs/GoAnime`       |
    | Linux   | `~/.local/share/goanime/logs`  |
 
-3. Attach the newest file to the issue, together with the output of
-   `goanime --version`, your operating system and the command you ran.
+3. Attach the newest file to the issue, together with the command you ran.
+   The log already starts with your operating system, terminal, the versions
+   of mpv, yt-dlp and ffmpeg, which sources are on, and how each provider
+   answered. Passwords, tokens, one-time tickets and your home folder are
+   removed before anything is written, so it is safe to attach as it is.
+
+If GoAnime crashes, it saves a `crash_<date>_<time>_<id>.log` in the same
+folder without needing `--debug`, and prints its path. Attach that file.
+[What is collected, and what never is](docs/DIAGNOSTICS.md).
 
 The log lists the titles you searched and paths on your computer, which can
 include your user name. Read it before attaching if that matters to you.

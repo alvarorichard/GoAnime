@@ -67,6 +67,7 @@ type Episode struct {
 	SkipTimes SkipTimes
 	DataID    string // Used for FlixHQ episode identification
 	SeasonID  string // Season identifier for TV shows
+	Audio     string // Audio of the list the episode came from (catalogue sources), "" when unknown
 }
 
 // TitleDetails contains title information in multiple languages
@@ -139,7 +140,7 @@ func AudioLabel(dubbed, subtitled bool) string {
 // whatever the title's type.
 // SFlix is a legacy movie/TV label matched the same way.
 func (m *Media) HasInteractiveEpisodeFlow() bool {
-	return m.Source == "SFlix" || m.Source == "StartFlix" || m.Source == "TopCine" || m.Source == "Pobreflix" || m.Source == "AnimesDigital" ||
+	return m.Source == "SFlix" || m.Source == "StartFlix" || m.Source == "TopCine" || m.Source == "Pobreflix" || m.Source == "AnimesDigital" || m.Source == "AnimesROLL" || m.Source == "AnimesFHD" || m.Source == "PlutoTV" ||
 		m.MediaType == MediaTypeMovie || m.MediaType == MediaTypeTV
 }
 

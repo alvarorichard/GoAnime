@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-// Clearing a Cloudflare challenge needs a real browser. Goyabu serves a managed
-// challenge (403, cf-mitigated: challenge, "Just a moment…"), which no amount
-// of header tuning gets past.
+// Clearing a Cloudflare managed challenge (403, cf-mitigated: challenge,
+// "Just a moment…") is beyond header tuning. Goyabu serves one.
 //
 // The capability is declared here, where every scraper already looks, and
-// whoever owns a browser registers it. netx keeps no dependency on any
-// provider. No package registers one today — GoAnime no longer ships a browser
-// — so ChallengeSolverAvailable reports false and a gated source reports the
-// challenge as blocked instead of solving it.
+// whoever owns a solver registers it. netx keeps no dependency on any provider.
+// GoAnime ships no browser: the only solver is internal/scraper/cfsolver, which
+// drives the optional external cfsolve tool and registers only when it is
+// installed. Without one, ChallengeSolverAvailable reports false and a gated
+// source reports the challenge as blocked instead of solving it.
 
 // ChallengeSolveResult is what clearing a gate yields: the cookies that prove it
 // and the User-Agent they are bound to.
@@ -78,13 +78,57 @@ type ChallengeSolver interface {
 	SolveChallenge(ctx context.Context, targetURL string, timeout time.Duration, reveal RevealPolicy) (*ChallengeSolveResult, error)
 }
 
+// TurnstileRequest names a Turnstile widget a page renders from script. The
+// page itself is not fetched by the solver: the caller keeps the session that
+// loaded it, because some sites bind their own gate to that session.
+type TurnstileRequest struct {
+	PageURL string
+	SiteKey string
+	Action  string // optional
+	CData   string // optional
+}
+
+// TurnstileSolver is the optional capability of answering a standalone
+// Turnstile widget. A ChallengeSolver that only clears full challenge pages
+// does not implement it; callers then keep their usual "cannot pass" path.
+type TurnstileSolver interface {
+	SolveTurnstile(ctx context.Context, r TurnstileRequest, timeout time.Duration) (string, error)
+}
+
+// SolveTurnstileFor answers a Turnstile widget through the registered solver.
+//
+// ok is false when no solver is registered or the registered one cannot answer
+// widgets. That is a plain "cannot help here", not an error to surface: the
+// caller treats the player as gated and takes its fallback.
+func SolveTurnstileFor(ctx context.Context, r TurnstileRequest, timeout time.Duration) (token string, ok bool, err error) {
+	challengeSolverMu.RLock()
+	s := challengeSolver
+	challengeSolverMu.RUnlock()
+
+	ts, ok := s.(TurnstileSolver)
+	if !ok {
+		return "", false, nil
+	}
+	token, err = ts.SolveTurnstile(ctx, r, timeout)
+	return token, true, err
+}
+
+// TurnstileSolverAvailable reports whether the registered solver can answer a
+// standalone Turnstile widget.
+func TurnstileSolverAvailable() bool {
+	challengeSolverMu.RLock()
+	defer challengeSolverMu.RUnlock()
+	_, ok := challengeSolver.(TurnstileSolver)
+	return ok
+}
+
 var (
 	challengeSolverMu sync.RWMutex
 	challengeSolver   ChallengeSolver
 )
 
-// RegisterChallengeSolver installs the process-wide browser solver. Called from
-// the package that owns the browser; passing nil clears it, which is how a test
+// RegisterChallengeSolver installs the process-wide challenge solver. Called from
+// the package that owns the solver; passing nil clears it, which is how a test
 // restores the previous state.
 func RegisterChallengeSolver(s ChallengeSolver) {
 	challengeSolverMu.Lock()

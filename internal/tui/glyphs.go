@@ -19,7 +19,7 @@ import (
 // glosses. A glyph newly used in a screen string must be added here, or the
 // probes cannot ask about it and TestGlyphFontCoversEveryDecorativeGlyph
 // rejects the change.
-var flavorRunes = []rune{'❯', '▶', '✓', '◐', '●', '○', '⁖', '━', '•'}
+var flavorRunes = []rune{'❯', '▶', '✓', '◐', '●', '○', '⁖', '━', '•', '★'}
 
 // spinnerDotFrames are huh spinner.Dots' bubbles frames. Its poster asks
 // SpinnerDots and posts spinner.Line — ASCII every console font carries —

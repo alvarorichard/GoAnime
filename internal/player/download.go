@@ -23,13 +23,15 @@ import (
 	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/api/providers"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
-	"github.com/lrstanley/go-ytdlp"
+	"github.com/alvarorichard/Goanime/v2/internal/ytdlpdl"
 	"golang.org/x/term"
 )
 
@@ -95,168 +97,22 @@ func applyDownloadAuthHeaders(req *http.Request, url string) {
 	}
 }
 
-// downloadPart downloads a part of the video file using HTTP Range Requests.
-// Automatically retries with resume on connection drops (up to 20 stale retries).
+// downloadPart downloads one byte range into its part file, resuming on
+// connection drops. The mechanics live in rangedl; this wires in the progress
+// model and the auth headers.
 func downloadPart(url string, from, to int64, part int, client *http.Client, destPath string, m *model) error {
-	partFilePath, err := safePartPath(destPath, part)
-	if err != nil {
-		return err
+	var sink rangedl.Sink
+	if m != nil {
+		sink = modelSink{m}
 	}
-	// #nosec G304: path validated by safePartPath to remain within destination directory
-	file, err := os.Create(partFilePath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			util.Logger.Warn("Error closing file", "error", err)
-		}
-	}()
-
-	current := from
-	maxStaleRetries := 20
-	staleRetries := 0
-
-	for attempt := 0; current <= to; attempt++ {
-		if staleRetries >= maxStaleRetries {
-			return fmt.Errorf("part %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
-		}
-		if attempt > 0 {
-			util.Debugf("Download part %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(downloadPartRetryDelay)
-		}
-
-		beforeRead := current
-
-		req, err := http.NewRequest("GET", url, http.NoBody)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
-		applyDownloadAuthHeaders(req, url)
-
-		resp, err := client.Do(req) // #nosec G704
-		if err != nil {
-			util.Debugf("Download part %d: request error: %v", part, err)
-			staleRetries++
-			continue
-		}
-
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			statusCode := resp.StatusCode
-			status := resp.Status
-			if cErr := resp.Body.Close(); cErr != nil {
-				util.Logger.Warn("Error closing response body", "error", cErr)
-			}
-			if statusCode == http.StatusForbidden || statusCode == http.StatusNotFound {
-				return netx.NewDownloadExpiredError("Download", "http-range", statusCode, fmt.Errorf("HTTP %d: %s", statusCode, status))
-			}
-			util.Debugf("Download part %d: unexpected status %d", part, statusCode)
-			staleRetries++
-			continue
-		}
-
-		buf := make([]byte, 256*1024)
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
-					if cErr := resp.Body.Close(); cErr != nil {
-						util.Logger.Warn("Error closing response body", "error", cErr)
-					}
-					return writeErr
-				}
-				current += int64(n)
-				m.addProgressReceived(int64(n))
-			}
-			if readErr == io.EOF {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				break
-			}
-			if readErr != nil {
-				if cErr := resp.Body.Close(); cErr != nil {
-					util.Logger.Warn("Error closing response body", "error", cErr)
-				}
-				util.Debugf("Download part %d: read error after %d bytes: %v", part, current-from, readErr)
-				break
-			}
-		}
-
-		if current > to {
-			break
-		}
-
-		if current == beforeRead {
-			staleRetries++
-		} else {
-			staleRetries = 0
-		}
-	}
-
-	return nil
-}
-
-// combineParts combines downloaded parts into a single final file.
-func combineParts(destPath string, numThreads int) error {
-	outFile, err := os.Create(filepath.Clean(destPath))
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := outFile.Close(); err != nil {
-			util.Logger.Warn("Error closing output file", "error", err)
-		}
-	}()
-	for i := range numThreads {
-		partFilePath, err := safePartPath(destPath, i)
-		if err != nil {
-			return err
-		}
-		// #nosec G304: path validated by safePartPath to remain within destination directory
-		partFile, err := os.Open(partFilePath)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(outFile, partFile); err != nil {
-			if closeErr := partFile.Close(); closeErr != nil {
-				util.Logger.Warn("Error closing part file", "error", closeErr)
-			}
-			return err
-		}
-		if err := partFile.Close(); err != nil {
-			util.Logger.Warn("Error closing part file", "error", err)
-		}
-		if err := os.Remove(partFilePath); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// safePartPath builds the part file path and ensures it stays within the destination directory
-func safePartPath(destPath string, part int) (string, error) {
-	dir := filepath.Clean(filepath.Dir(destPath))
-	base := filepath.Base(destPath)
-	name := fmt.Sprintf("%s.part%d", base, part)
-	joined := filepath.Join(dir, name)
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	absFile, err := filepath.Abs(joined)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(absDir, absFile)
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("invalid part path: %s", joined)
-	}
-	return joined, nil
+	return rangedl.FetchPart(rangedl.Part{
+		URL: url, From: from, To: to, Index: part, Dest: destPath,
+	}, client, rangedl.Options{
+		Prepare:        func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
+		Progress:       sink,
+		RetryDelay:     downloadPartRetryDelay,
+		ExpiredIsFinal: true,
+	})
 }
 
 // isBloggerProxyURL returns true if the URL points to the local Blogger proxy.
@@ -332,7 +188,7 @@ func resolveDownloadURL(videoURL string) (string, error) {
 	}
 
 	util.Debug("Resolving AnimeFire video API URL for download", "url", videoURL)
-	resp, err := api.SafeGet(videoURL)
+	resp, err := safeGetFn(videoURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch AnimeFire video API: %w", err)
 	}
@@ -436,7 +292,7 @@ func resolveAnimeFireFallbackDownloadURL(videoAPIURL, failedURL string) (string,
 		return "", errors.New("source URL is not an AnimeFire video API URL")
 	}
 
-	resp, err := api.SafeGet(videoAPIURL)
+	resp, err := safeGetFn(videoAPIURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch AnimeFire fallback sources: %w", err)
 	}
@@ -455,6 +311,12 @@ func resolveAnimeFireFallbackDownloadURL(videoAPIURL, failedURL string) (string,
 	if err != nil {
 		return "", err
 	}
+	return pickFallbackCandidate(candidates, failedURL)
+}
+
+// pickFallbackCandidate is the first usable source that is not the one that
+// just failed. The list is already ordered by preference.
+func pickFallbackCandidate(candidates []string, failedURL string) (string, error) {
 	for _, candidate := range candidates {
 		if candidate != "" && candidate != failedURL {
 			return candidate, nil
@@ -530,6 +392,19 @@ func (e batchDownloadError) Error() string {
 		return fmt.Sprintf("1 episode failed: episode %d: %v", failure.Episode, failure.Err)
 	}
 
+	// Every episode failed for the same reason (one broken source, typically):
+	// say it once instead of repeating it per episode.
+	same := true
+	for _, failure := range e.Failures[1:] {
+		if fmt.Sprint(failure.Err) != fmt.Sprint(e.Failures[0].Err) {
+			same = false
+			break
+		}
+	}
+	if same {
+		return fmt.Sprintf("%d episodes failed, all with the same error: %v", len(e.Failures), e.Failures[0].Err)
+	}
+
 	const maxDetails = 5
 	parts := make([]string, 0, min(len(e.Failures), maxDetails))
 	for i, failure := range e.Failures {
@@ -575,7 +450,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	// SSRF protection: validate the URL resolves to a public IP before using
 	// the Chrome-impersonation surf client (whose transport we cannot replace).
-	if err := api.ValidateExternalURL(directURL); err != nil {
+	if err := validateURLFn(directURL); err != nil {
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
 
@@ -584,7 +459,7 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 	}
 
 	// Use download client that follows redirects (googlevideo uses 302s)
-	headClient := newSurfDownloadClient().Std()
+	headClient := newBloggerClientFn()
 	contentLength, err := getContentLength(directURL, headClient)
 	if err != nil {
 		return fmt.Errorf("failed to get content length: %w", err)
@@ -595,143 +470,41 @@ func downloadBloggerDirect(directURL, destPath string, numThreads int, m *model)
 
 	m.setProgressTotal(contentLength)
 
-	chunkSize := contentLength / int64(numThreads)
-	var downloadWg sync.WaitGroup
-	errChan := make(chan error, numThreads)
-
-	for i := range numThreads {
-		from := int64(i) * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
-		downloadWg.Add(1)
-		go func(from, to int64, part int) {
-			defer downloadWg.Done()
-			if err := downloadBloggerChunk(directURL, from, to, part, destPath, m); err != nil {
-				util.Logger.Error("Blogger download chunk failed", "thread", part, "error", err)
-				errChan <- err
-			}
-		}(from, to, i)
-	}
-
-	downloadWg.Wait()
-	close(errChan)
-
-	// Check if any chunk failed
-	for err := range errChan {
+	err = rangedl.Download(contentLength, numThreads, destPath, func(p rangedl.Part) error {
+		err := downloadBloggerChunk(directURL, p.From, p.To, p.Index, destPath, m)
 		if err != nil {
-			return fmt.Errorf("chunk download failed: %w", err)
+			util.Logger.Error("Blogger download chunk failed", "thread", p.Index, "error", err)
 		}
-	}
-
-	if err := combineParts(destPath, numThreads); err != nil {
-		return fmt.Errorf("failed to combine parts: %w", err)
+		return err
+	})
+	if err != nil {
+		return err
 	}
 
 	util.Debug("downloadBloggerDirect completed", "duration", time.Since(start))
 	return nil
 }
 
-// downloadBloggerChunk downloads a single chunk from googlevideo CDN.
-// Creates its own independent surf client (fresh TCP+TLS connection) to avoid
-// HTTP/2 multiplexing and surf's per-client timeout.
-// Automatically retries with resume on connection drops.
+// downloadBloggerChunk downloads a single chunk from the googlevideo CDN.
+// Each attempt uses its own fresh client (new TCP+TLS connection) to avoid
+// HTTP/2 multiplexing and surf's per-client timeout, and resumes on drops.
 func downloadBloggerChunk(url string, from, to int64, part int, destPath string, m *model) error {
 	// SSRF protection: reject URLs that resolve to private/internal IPs.
-	if err := api.ValidateExternalURL(url); err != nil {
+	if err := validateURLFn(url); err != nil {
 		return fmt.Errorf("SSRF blocked: %w", err)
 	}
-
-	partFilePath, err := safePartPath(destPath, part)
-	if err != nil {
-		return err
+	var sink rangedl.Sink
+	if m != nil {
+		sink = modelSink{m}
 	}
-
-	// Create/truncate the part file
-	file, err := os.Create(partFilePath) /* #nosec G304 -- path validated by safePartPath (traversal checked) */
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			util.Logger.Warn("Error closing part file", "error", err)
-		}
-	}()
-
-	current := from
-	maxStaleRetries := 20 // Only count retries where no data was received
-	staleRetries := 0
-
-	for attempt := 0; current <= to; attempt++ {
-		if staleRetries >= maxStaleRetries {
-			return fmt.Errorf("chunk %d: max retries (%d) exceeded at offset %d/%d", part, maxStaleRetries, current, to)
-		}
-		if attempt > 0 {
-			util.Debugf("Blogger chunk %d: resuming at byte %d (attempt %d)", part, current, attempt+1)
-			time.Sleep(500 * time.Millisecond) // Brief pause before retry
-		}
-
-		beforeRead := current
-
-		// Fresh download client per attempt — follows redirects and has a long timeout
-		client := newSurfDownloadClient().Std()
-
-		req, err := http.NewRequest("GET", url, http.NoBody)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", current, to))
-
-		resp, err := client.Do(req)
-		if err != nil {
-			util.Debugf("Blogger chunk %d: request error: %v", part, err)
-			continue // Retry
-		}
-
-		if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-			_ = resp.Body.Close()
-			util.Debugf("Blogger chunk %d: unexpected status %d", part, resp.StatusCode)
-			continue
-		}
-
-		// Read data from this connection until it drops
-		buf := make([]byte, 64*1024) // 64KB buffer
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				if _, writeErr := file.Write(buf[:n]); writeErr != nil {
-					_ = resp.Body.Close()
-					return writeErr
-				}
-				current += int64(n)
-				m.addProgressReceived(int64(n))
-			}
-			if readErr == io.EOF {
-				_ = resp.Body.Close()
-				break // Done with this connection
-			}
-			if readErr != nil {
-				_ = resp.Body.Close()
-				util.Debugf("Blogger chunk %d: read error after %d bytes: %v", part, current-from, readErr)
-				break // Will retry from current offset
-			}
-		}
-
-		// Check if we got all the data
-		if current > to {
-			break
-		}
-
-		// Only count as stale retry if no progress was made
-		if current == beforeRead {
-			staleRetries++
-		} else {
-			staleRetries = 0 // Reset on progress
-		}
-	}
-
-	return nil
+	return rangedl.FetchPart(rangedl.Part{
+		URL: url, From: from, To: to, Index: part, Dest: destPath,
+	}, nil, rangedl.Options{
+		Progress:   sink,
+		NewClient:  newBloggerClientFn,
+		Sleep:      chunkRetrySleep,
+		RetryDelay: 500 * time.Millisecond,
+	})
 }
 
 // downloadTransport is the SSRF-guarded transport for media downloads, except
@@ -770,8 +543,6 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	httpClient := &http.Client{
 		Transport: downloadTransport(10 * time.Second),
 	}
-	chunkSize := int64(0)
-	var contentLength int64
 	contentLength, err := getContentLength(url, httpClient)
 	if err != nil {
 		return err
@@ -786,37 +557,15 @@ func DownloadVideo(url, destPath string, numThreads int, m *model) error {
 	if numThreads > 1 && util.IsLocalProxyURL(url) {
 		numThreads = 1
 	}
-	chunkSize = contentLength / int64(numThreads)
-	var downloadWg sync.WaitGroup
-	errChan := make(chan error, numThreads)
-	for i := range numThreads {
-		from := int64(i) * chunkSize
-		to := from + chunkSize - 1
-		if i == numThreads-1 {
-			to = contentLength - 1
-		}
-		downloadWg.Add(1)
-		go func(from, to int64, part int, httpClient *http.Client) {
-			defer downloadWg.Done()
-			if err := downloadPart(url, from, to, part, httpClient, destPath, m); err != nil {
-				util.Logger.Error("Download part failed", "thread", part, "error", err)
-				errChan <- err
-			}
-		}(from, to, i, httpClient)
-	}
-	downloadWg.Wait()
-	close(errChan)
-
-	// Check if any chunk failed
-	for err := range errChan {
+	err = rangedl.Download(contentLength, numThreads, destPath, func(p rangedl.Part) error {
+		err := downloadPart(url, p.From, p.To, p.Index, httpClient, destPath, m)
 		if err != nil {
-			return fmt.Errorf("chunk download failed: %w", err)
+			util.Logger.Error("Download part failed", "thread", p.Index, "error", err)
 		}
-	}
-
-	err = combineParts(destPath, numThreads)
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("failed to combine parts: %v", err)
+		return err
 	}
 	util.Debug("DownloadVideo completed", "url", url, "duration", time.Since(start))
 	return nil
@@ -848,153 +597,44 @@ func downloadWithYtDlp(url, path string, m *model) error {
 	if m != nil && util.IsDebug {
 		util.Debugf("Preparing yt-dlp engine (first run may take a moment)...")
 	}
-
-	// Try to install yt-dlp with timeout and error handling
-	_, installErr := ytdlp.Install(ctx, nil)
-	if installErr != nil {
+	engine := newYtdlpEngine()
+	if installErr := engine.Install(ctx); installErr != nil {
 		return fmt.Errorf("failed to install yt-dlp: %w", installErr)
 	}
 
 	if m != nil && util.IsDebug {
 		util.Debugf("Starting yt-dlp download...")
 	}
-
-	// Use yt-dlp's native HLS downloader (not ffmpeg) so that obfuscated
-	// segment extensions (.js, .html, .jpg) from CDNs are accepted without
-	// issues. ffmpeg's allowed_segment_extensions check rejects them.
-	dl := ytdlp.New().
-		Output(safePath).
-		Format("bestvideo+bestaudio/best").
-		ConcurrentFragments(24).
-		BufferSize("32M").
-		FragmentRetries("5").
-		Retries("5").
-		SocketTimeout(30)
-
-	if util.YtdlpCanImpersonate() {
-		dl.Impersonate("chrome")
+	spec := ytdlpdl.Spec{
+		URL:         safeURL,
+		Output:      safePath,
+		Impersonate: ytdlpCanImpersonate(),
+		// Forward the stored referer/origin so the CDN accepts the request
+		Headers: ytdlpdl.Headers(downloadReferer(url)),
 	}
-
-	// Forward the stored referer/origin so the CDN accepts the request
-	if ref := downloadReferer(url); ref != "" {
-		dl.AddHeaders("Referer:" + ref)
-		origin := strings.TrimSuffix(ref, "/")
-		if u, e := neturl.Parse(origin); e == nil {
-			origin = u.Scheme + "://" + u.Host
-		}
-		dl.AddHeaders("Origin:" + origin)
-	}
-
-	// Real-time progress via yt-dlp's native callback.
-	// Track per-file totals so video+audio sizes are summed correctly
-	// (yt-dlp downloads them as separate files then merges).
-	var lastReportedBytes int64
-	var lastProgressFile string
-	fileTotals := make(map[string]int64)
+	var sink ytdlpdl.Sink
 	if m != nil {
-		dl.ProgressFunc(200*time.Millisecond, func(update ytdlp.ProgressUpdate) {
-			if update.Status == ytdlp.ProgressStatusPostProcessing ||
-				update.Status == ytdlp.ProgressStatusFinished {
-				return
-			}
-
-			if update.Filename != "" && update.Filename != lastProgressFile {
-				lastProgressFile = update.Filename
-				lastReportedBytes = 0
-			}
-
-			downloaded := int64(update.DownloadedBytes)
-			if delta := downloaded - lastReportedBytes; delta > 0 {
-				m.addProgressReceived(delta)
-				lastReportedBytes = downloaded
-			}
-
-			// Sum totals across all files (video + audio) for accurate progress.
-			if update.TotalBytes > 0 {
-				fname := update.Filename
-				if fname == "" {
-					fname = "_default"
-				}
-				fileTotals[fname] = int64(update.TotalBytes)
-				var sum int64
-				for _, v := range fileTotals {
-					sum += v
-				}
-				m.setProgressTotal(sum)
-			} else if update.FragmentCount > 0 && update.FragmentIndex > 0 {
-				// HLS streams: TotalBytes is 0 because the size is unknown
-				// upfront. Use fragment index/count as a monotonically
-				// increasing progress ratio so the bar never goes backward.
-				pct := float64(update.FragmentIndex) / float64(update.FragmentCount)
-				if pct > 0.99 {
-					pct = 0.99 // reserve 100% for actual completion
-				}
-				m.setProgressPeak(pct)
-			}
-		})
+		sink = modelSink{m}
 	}
-
-	// Run with --hls-use-mpegts as raw arg (no typed method available) + retry logic
-	var runErr error
-	maxRetries := 2
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			if m != nil && util.IsDebug {
-				util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, maxRetries+1)
-			}
-			time.Sleep(time.Duration(attempt*2) * time.Second)
-			lastReportedBytes = 0
-			lastProgressFile = ""
+	runErr := ytdlpdl.Run(ctx, engine, spec, sink, ytdlpSleep, func(attempt int) {
+		if m != nil && util.IsDebug {
+			util.Debugf("Retrying download (attempt %d/%d)...", attempt+1, ytdlpdl.MaxRetries+1)
 		}
-
-		_, runErr = dl.Run(ctx, safeURL, "--hls-use-mpegts")
-
-		if runErr == nil {
-			break
-		}
-
-		if attempt < maxRetries && isRetryableError(runErr) {
-			continue
-		} else {
-			break
-		}
-	}
-
-	if runErr != nil {
-		// yt-dlp rejects URLs with unusual extensions (.aspx, etc.) as a security
-		// measure (CVE-2024-38519). Fall back to direct HTTP download.
-		if isUnsafeExtensionError(runErr) {
-			util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
-			return downloadDirectHTTP(safeURL, safePath, m)
-		}
-		return fmt.Errorf("go-ytdlp download failed: %w", runErr)
-	}
-
-	return nil
+	})
+	return ytdlpdl.Outcome(runErr, func() error {
+		util.Debugf("yt-dlp rejected URL extension, falling back to direct HTTP: %s", safeURL)
+		return downloadDirectHTTPFn(safeURL, safePath, m)
+	})
 }
 
-// isUnsafeExtensionError returns true if the error is yt-dlp's unsafe extension check.
-func isUnsafeExtensionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := err.Error()
-	return strings.Contains(s, "unsafe") && strings.Contains(s, "extension") ||
-		strings.Contains(s, "unusual") && strings.Contains(s, "extension") ||
-		strings.Contains(s, "is unusual and will be skipped")
-}
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "connection") ||
-		strings.Contains(errStr, "network") ||
-		strings.Contains(errStr, "temporary") ||
-		strings.Contains(errStr, "reset") ||
-		strings.Contains(errStr, "refused")
-}
+// Seams for the yt-dlp download; tests replace them so no binary is installed
+// or run.
+var (
+	newYtdlpEngine       = func() ytdlpdl.Engine { return ytdlpdl.GoEngine{} }
+	ytdlpCanImpersonate  = util.YtdlpCanImpersonate
+	ytdlpSleep           = time.Sleep
+	downloadDirectHTTPFn = downloadDirectHTTP
+)
 
 // downloadWithNativeHLS downloads HLS streams using native implementation instead of yt-dlp
 // This avoids issues with yt-dlp where ffmpeg rejects obfuscated segment extensions (.jpg, .png)
@@ -1035,7 +675,11 @@ func downloadWithNativeHLS(streamURL, path string, m *model) error {
 
 	if referer != "" {
 		headers["Referer"] = referer
-		headers["Origin"] = strings.TrimSuffix(referer, "/")
+		origin := downloadOrigin(streamURL)
+		if origin == "" {
+			origin = strings.TrimSuffix(referer, "/")
+		}
+		headers["Origin"] = origin
 	}
 
 	ctx := context.Background()
@@ -1237,7 +881,7 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 		return nil, err
 	}
 	if strings.Contains(videoSrc, "animefire.io/video/") {
-		resp, err := api.SafeGet(videoSrc)
+		resp, err := safeGetFn(videoSrc)
 		if err != nil {
 			return nil, err
 		}
@@ -1246,79 +890,85 @@ func ExtractVideoSources(episodeURL string) ([]struct {
 				util.Logger.Warn("Error closing response body", "error", err)
 			}
 		}()
-		var videoResponse struct {
-			Data []struct {
-				Src   string `json:"src"`
-				Label string `json:"label"`
-			}
-		}
+		var videoResponse videoEnvelope
 		// Streamed: the response bytes are only used for this decode.
 		if err := jsonx.Decode(resp.Body, 5*1024*1024, &videoResponse); err == nil && len(videoResponse.Data) > 0 {
-			var sources []struct {
-				Quality int
-				URL     string
-			}
-			for _, v := range videoResponse.Data {
-				labelDigits := digitsRe.FindString(v.Label)
-				q := 0
-				if labelDigits != "" {
-					q, _ = strconv.Atoi(labelDigits)
-				}
-				sources = append(sources, struct {
-					Quality int
-					URL     string
-				}{Quality: q, URL: v.Src})
-			}
-			return sources, nil
+			return sourcesFromEntries(videoResponse.Data), nil
 		}
 	}
-	var respStruct struct {
-		Data []struct {
-			Src   string `json:"src"`
-			Label string `json:"label"`
-		}
-	}
+	var respStruct videoEnvelope
 	if err := jsonx.Unmarshal([]byte(videoSrc), &respStruct); err == nil && len(respStruct.Data) > 0 {
-		var sources []struct {
-			Quality int
-			URL     string
-		}
-		for _, v := range respStruct.Data {
-			labelDigits := digitsRe.FindString(v.Label)
-			q := 0
-			if labelDigits != "" {
-				q, _ = strconv.Atoi(labelDigits)
-			}
-			sources = append(sources, struct {
-				Quality int
-				URL     string
-			}{Quality: q, URL: v.Src})
-		}
-		return sources, nil
-	}
-	matches := resolutionMp4Re.FindStringSubmatch(videoSrc)
-	if len(matches) > 1 {
-		q, _ := strconv.Atoi(matches[1])
-		return []struct {
-			Quality int
-			URL     string
-		}{{Quality: q, URL: videoSrc}}, nil
+		return sourcesFromEntries(respStruct.Data), nil
 	}
 	return []struct {
 		Quality int
 		URL     string
-	}{{Quality: 0, URL: videoSrc}}, nil
+	}{{Quality: qualityOfURL(videoSrc), URL: videoSrc}}, nil
 }
 
-// getBestQualityURL returns the best available quality for an episode.
-// It uses the anime context to route to the correct source-specific stream resolver.
-func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, error) {
+// videoEntry is one quality in a source's video JSON.
+type videoEntry struct {
+	Src   string `json:"src"`
+	Label string `json:"label"`
+}
+
+// videoEnvelope is the JSON a video endpoint answers with.
+type videoEnvelope struct {
+	Data []videoEntry
+}
+
+// qualityOfLabel is the number in a quality label ("720p" is 720); 0 when the
+// label has none ("Auto", "FHD").
+func qualityOfLabel(label string) int {
+	digits := digitsRe.FindString(label)
+	if digits == "" {
+		return 0
+	}
+	q, _ := strconv.Atoi(digits)
+	return q
+}
+
+// qualityOfURL is the resolution a direct MP4 link spells in its name
+// ("..._720p.mp4"), 0 when it spells none.
+func qualityOfURL(u string) int {
+	matches := resolutionMp4Re.FindStringSubmatch(u)
+	if len(matches) > 1 {
+		q, _ := strconv.Atoi(matches[1])
+		return q
+	}
+	return 0
+}
+
+// sourcesFromEntries lists the entries' links with the quality their labels
+// state, in the order given.
+func sourcesFromEntries(entries []videoEntry) []struct {
+	Quality int
+	URL     string
+} {
+	sources := make([]struct {
+		Quality int
+		URL     string
+	}, 0, len(entries))
+	for _, v := range entries {
+		sources = append(sources, struct {
+			Quality int
+			URL     string
+		}{Quality: qualityOfLabel(v.Label), URL: v.Src})
+	}
+	return sources
+}
+
+// getBestQualityStream resolves an episode to the best stream available, with
+// its playback context (referer, subtitles, ...) in the Stream rather than in
+// the player's globals. It uses the anime context to route to the correct
+// source-specific stream resolver.
+func getBestQualityStream(episode models.Episode, anime *models.Anime) (source.Stream, error) {
 	// Source-aware routing: use anime.Source to determine the correct resolver.
 	// Sources like StartFlix, FlixHQ, 9Anime, Goyabu, and AnimeDrive use
 	// source-specific identifiers or HTTP pages that need scraper-specific
 	// resolution instead of the legacy generic page extractor.
-	source := anime.Source
-	if source != "" {
+	src := anime.Source
+	if src != "" {
 		// Use episode.Number; fall back to Num if Number is empty
 		epNumber := episode.Number
 		if epNumber == "" && episode.Num > 0 {
@@ -1332,15 +982,15 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 			SeasonID: episode.SeasonID,
 		}
 
-		util.Debugf("getBestQualityURL: using source-aware resolver for %s (episode %s)", source, epNumber)
-		url, err := providers.FetchStreamURL(context.Background(), ep, anime, util.GlobalQuality)
+		util.Debugf("getBestQualityStream: using source-aware resolver for %s (episode %s)", src, epNumber)
+		stream, err := providers.FetchStream(context.Background(), ep, anime, util.GlobalQuality)
 		if err != nil {
-			return "", fmt.Errorf("failed to get stream URL from %s for episode %s: %w", source, epNumber, err)
+			return source.Stream{}, fmt.Errorf("failed to get stream URL from %s for episode %s: %w", src, epNumber, err)
 		}
-		if url == "" {
-			return "", fmt.Errorf("empty stream URL from %s for episode %s", source, epNumber)
+		if stream.URL == "" {
+			return source.Stream{}, fmt.Errorf("empty stream URL from %s for episode %s", src, epNumber)
 		}
-		return url, nil
+		return stream, nil
 	}
 
 	// Legacy HTTP page URL path. Keep this after source-aware routing so
@@ -1348,10 +998,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 	if strings.HasPrefix(strings.ToLower(episode.URL), "http://") || strings.HasPrefix(strings.ToLower(episode.URL), "https://") {
 		sources, err := ExtractVideoSources(episode.URL)
 		if err != nil {
-			return "", fmt.Errorf("failed to extract video sources: %w", err)
+			return source.Stream{}, fmt.Errorf("failed to extract video sources: %w", err)
 		}
 		if len(sources) == 0 {
-			return "", fmt.Errorf("no video sources available")
+			return source.Stream{}, fmt.Errorf("no video sources available")
 		}
 		best := sources[0]
 		for _, s := range sources {
@@ -1359,10 +1009,10 @@ func getBestQualityURL(episode models.Episode, anime *models.Anime) (string, err
 				best = s
 			}
 		}
-		return best.URL, nil
+		return source.Stream{URL: best.URL}, nil
 	}
 
-	return "", fmt.Errorf("unsupported episode identifier: %s", episode.URL)
+	return source.Stream{}, fmt.Errorf("unsupported episode identifier: %s", episode.URL)
 }
 
 // buildQualityMenu sorts sources highest-quality-first and produces stable,
@@ -1609,12 +1259,13 @@ type batchEpisode struct {
 	url       string // what is downloaded
 	sourceURL string // the stream URL before resolveDownloadURL (AnimeFire fallback)
 	referer   string
+	origin    string
 	subtitles []util.SubtitleInfo
 }
 
 // Per-episode stream resolution and subtitle muxing; seams for tests.
 var (
-	resolveEpisodeStreamFn = getBestQualityURL
+	resolveEpisodeStreamFn = getBestQualityStream
 	embedSubtitlesFn       = downloadSubtitleFiles
 )
 
@@ -1624,16 +1275,50 @@ var (
 // half with nothing on screen. A seam for tests.
 var batchStatusf = func(format string, a ...any) { fmt.Printf(format, a...) }
 
-// downloadReferers maps a download URL to the referer its resolver gave, so
+// downloadContext is the request context a download's resolver gave: the
+// referer, and the origin when the resolver stated one.
+type downloadContext struct {
+	referer, origin string
+	hasOrigin       bool // origin is the resolver's own answer, empty included
+}
+
+// downloadContexts maps a download URL to the context its resolver gave, so
 // concurrent batch downloads each send their own instead of the global.
-var downloadReferers sync.Map // url -> referer
+var downloadContexts sync.Map // url -> downloadContext
+
+// rememberDownloadReferer pins referer to url until the returned func is
+// called, so a download keeps the referer its resolver gave even when the
+// global one changes under it. The origin keeps following the global one.
+func rememberDownloadReferer(url, referer string) (forget func()) {
+	downloadContexts.Store(url, downloadContext{referer: referer})
+	return func() { downloadContexts.Delete(url) }
+}
+
+// rememberDownloadContext pins both the referer and the origin to url until
+// the returned func is called. An empty origin is pinned too: the resolver
+// gave none, so the global one is not stood in for it.
+func rememberDownloadContext(url, referer, origin string) (forget func()) {
+	downloadContexts.Store(url, downloadContext{referer: referer, origin: origin, hasOrigin: true})
+	return func() { downloadContexts.Delete(url) }
+}
 
 // downloadReferer is the referer to send when downloading url.
 func downloadReferer(url string) string {
-	if v, ok := downloadReferers.Load(url); ok {
-		return v.(string)
+	if v, ok := downloadContexts.Load(url); ok {
+		return v.(downloadContext).referer
 	}
 	return util.GetGlobalReferer()
+}
+
+// downloadOrigin is the explicit Origin to send when downloading url, "" when
+// the resolver stated none.
+func downloadOrigin(url string) string {
+	if v, ok := downloadContexts.Load(url); ok {
+		if c := v.(downloadContext); c.hasOrigin {
+			return c.origin
+		}
+	}
+	return util.GetGlobalOrigin()
 }
 
 // episodeAlreadyDownloaded reports whether path holds a finished episode.
@@ -1653,36 +1338,58 @@ func episodeAlreadyDownloaded(path string) bool {
 	return false
 }
 
-// resolveBatchEpisode resolves one episode's stream and captures the
-// referer and subtitles its resolver set, before the next episode's
-// resolution replaces them.
+// resolveBatchEpisode resolves one episode's stream and keeps the referer and
+// subtitles it came with. They travel in the Stream, so resolving the next
+// episode cannot replace them.
 func resolveBatchEpisode(episode models.Episode, anime *models.Anime) (batchEpisode, error) {
 	nineAnime := util.Is9AnimeSource()
 	if !nineAnime {
-		// Tracks left by an earlier resolution must not be taken for this
-		// episode's. (9Anime keeps the user's language choice there instead.)
+		// A batch leaves the player no tracks of its own unless the user picks
+		// some (chooseBatchSubtitles); the ones an earlier episode left behind
+		// must not be offered for a downloaded file. (9Anime keeps the user's
+		// language choice there instead.) This is the one write to the player's
+		// state the batch still makes besides the source tag: it goes when the
+		// player stops reading the tracks from there.
 		util.ClearGlobalSubtitles()
 	}
+	// The tracking of what is watched afterwards, a downloaded episode
+	// included, reads the current source; resolving used to set it as a side
+	// effect.
+	if anime != nil && anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
 	be := batchEpisode{num: episode.Num, episode: episode}
-	videoURL, err := resolveEpisodeStreamFn(episode, anime)
-	if err != nil || videoURL == "" {
+	stream, err := resolveEpisodeStreamFn(episode, anime)
+	if err != nil || stream.URL == "" {
 		if err == nil {
 			err = errors.New("empty stream URL")
 		}
 		return be, fmt.Errorf("failed to resolve stream: %w", err)
 	}
-	be.sourceURL = videoURL
-	if be.url, err = resolveDownloadURL(videoURL); err != nil || be.url == "" {
+	be.sourceURL = stream.URL
+	if be.url, err = resolveDownloadURL(stream.URL); err != nil || be.url == "" {
 		if err == nil {
 			err = errors.New("empty download URL")
 		}
 		return be, err
 	}
-	be.referer = util.GetGlobalReferer()
+	be.referer, be.origin = stream.Referer, stream.Origin
 	if !nineAnime {
-		be.subtitles = util.GetGlobalSubtitles()
+		be.subtitles = streamSubtitles(stream)
 	}
 	return be, nil
+}
+
+// streamSubtitles is the stream's subtitle tracks as the player holds them.
+func streamSubtitles(s source.Stream) []util.SubtitleInfo {
+	if len(s.Subtitles) == 0 {
+		return nil
+	}
+	subs := make([]util.SubtitleInfo, 0, len(s.Subtitles))
+	for _, sub := range s.Subtitles {
+		subs = append(subs, util.SubtitleInfo{URL: sub.URL, Language: sub.Language, Label: sub.Label})
+	}
+	return subs
 }
 
 // chooseBatchSubtitles asks once, for the whole batch, which subtitle tracks
@@ -1721,8 +1428,7 @@ func keepChosenSubtitles(subs, chosen []util.SubtitleInfo) []util.SubtitleInfo {
 // its own subtitles. A failed download removes whatever it wrote, so the
 // next run fetches the episode again instead of skipping a partial file.
 func downloadBatchEpisode(be *batchEpisode, anime *models.Anime, progressModel *model, printFn func(string, ...any)) error {
-	downloadReferers.Store(be.url, be.referer)
-	defer downloadReferers.Delete(be.url)
+	defer rememberDownloadContext(be.url, be.referer, be.origin)()
 
 	var dlErr error
 	videoURL, episodePath, epNum := be.url, be.path, be.num
@@ -1996,33 +1702,18 @@ func getEpisodeRange() (startNum, endNum int, err error) {
 			huh.NewInput().
 				Title("Enter start episode number").
 				Value(&startStr).
-				Validate(func(v string) error {
-					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
-						return fmt.Errorf("invalid number")
-					}
-					return nil
-				}),
+				Validate(validEpisodeNumber),
 			huh.NewInput().
 				Title("Enter end episode number").
 				Value(&endStr).
-				Validate(func(v string) error {
-					if _, e := strconv.Atoi(strings.TrimSpace(v)); e != nil {
-						return fmt.Errorf("invalid number")
-					}
-					return nil
-				}),
+				Validate(validEpisodeNumber),
 		),
 	)
 
 	if err := tui.RunClean(form.WithTheme(tui.FormTheme()).Run); err != nil {
 		return 0, 0, err
 	}
-	startNum, _ = strconv.Atoi(strings.TrimSpace(startStr))
-	endNum, _ = strconv.Atoi(strings.TrimSpace(endStr))
-	if startNum > endNum {
-		return 0, 0, fmt.Errorf("start cannot be greater than end")
-	}
-	return startNum, endNum, nil
+	return parseEpisodeRange(startStr, endStr)
 }
 
 // findEpisode returns the episode struct by number.
@@ -2114,191 +1805,165 @@ func fileExists(path string) bool {
 }
 
 // handleExistingEpisodes handles the case when all episodes in the requested range already exist
+// and offers to play one of them.
 func handleExistingEpisodes(episodes []models.Episode, animeURL string, startNum, endNum int) error {
 	fmt.Printf("All episodes in range %d-%d already exist!\n\n", startNum, endNum)
-
-	// Collect existing episodes in the range
-	var existingEpisodes []models.Episode
-	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
-		episode, found := findEpisode(episodes, episodeNum)
-		if !found {
-			continue
-		}
-
-		episodePath, err := createEpisodePath(animeURL, episodeNum)
-		if err != nil {
-			continue
-		}
-
-		if fileExists(episodePath) {
-			existingEpisodes = append(existingEpisodes, episode)
-		}
-	}
-
-	if len(existingEpisodes) == 0 {
-		fmt.Println("No downloaded episodes found in the specified range.")
-		return nil
-	}
-
-	// Create options for the interactive menu
-	type menuOption struct {
-		Label string
-		Value string
-	}
-	var menuItems []menuOption
-	for _, ep := range existingEpisodes {
-		title := fmt.Sprintf("Episode %d", ep.Num)
-		if ep.Title.English != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
-		} else if ep.Title.Romaji != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
-		}
-		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
-	}
-
-	// Add option to not watch anything
-	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
-
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
-	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Download > Watch",
-		WindowTitle:  "GoAnime - Watch Downloaded",
-		ItemSingular: "episode",
-		ItemPlural:   "episodes",
-	})
-
-	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return ErrUserQuit
-		}
-		return fmt.Errorf("episode selection error: %w", err)
-	}
-
-	selectedEpisode := menuItems[idx].Value
-	if selectedEpisode == "exit" {
-		fmt.Println("No episode selected.")
-		return ErrUserQuit
-	}
-
-	// Find and play the selected episode
-	episodeNum, err := strconv.Atoi(selectedEpisode)
-	if err != nil {
-		return fmt.Errorf("invalid episode number: %w", err)
-	}
-
-	// Verify the episode exists in our list
-	_, found := findEpisode(existingEpisodes, episodeNum)
-	if !found {
-		return fmt.Errorf("selected episode not found")
-	}
-
-	fmt.Printf("Playing Episode %d...\n", episodeNum)
-
-	// Get the episode path and play it
-	episodePath, err := createEpisodePath(animeURL, episodeNum)
-	if err != nil {
-		return fmt.Errorf("failed to get episode path: %w", err)
-	}
-
-	// Play the episode using the existing player logic
-	// Note: We use the local file path as the video URL since it's already downloaded
-	// IDs set to 0 since we don't have that context here, updater set to nil
-	return playVideo(episodePath, episodes, episodeNum, 0, 0, nil)
+	return watchDownloadedRange(episodes, animeURL, startNum, endNum, "Download > Watch")
 }
 
 // askAndPlayDownloadedEpisode asks the user which episode from the downloaded range they want to play
 func askAndPlayDownloadedEpisode(episodes []models.Episode, animeURL string, startNum, endNum int) error {
-	// Collect downloaded episodes in the range
-	var downloadedEpisodes []models.Episode
+	return watchDownloadedRange(episodes, animeURL, startNum, endNum, "Download > Watch Range")
+}
+
+// Seams for the "watch what you downloaded" menu.
+var (
+	episodePathFn = createEpisodePath
+	pathExistsFn  = fileExists
+	pickLabelsFn  = tui.PickLabels
+	playLocalFn   = func(path string, episodes []models.Episode, num int) error {
+		return playVideo(path, episodes, num, 0, 0, nil)
+	}
+	watchExitValue = "exit"
+)
+
+// downloadedEpisodesInRange lists the episodes of [startNum, endNum] that are in
+// the list and already on disk, in number order.
+func downloadedEpisodesInRange(episodes []models.Episode, animeURL string, startNum, endNum int) []models.Episode {
+	var found []models.Episode
 	for episodeNum := startNum; episodeNum <= endNum; episodeNum++ {
-		episode, found := findEpisode(episodes, episodeNum)
-		if !found {
+		episode, ok := findEpisode(episodes, episodeNum)
+		if !ok {
 			continue
 		}
-
-		episodePath, err := createEpisodePath(animeURL, episodeNum)
+		episodePath, err := episodePathFn(animeURL, episodeNum)
 		if err != nil {
 			continue
 		}
-
-		if fileExists(episodePath) {
-			downloadedEpisodes = append(downloadedEpisodes, episode)
+		if pathExistsFn(episodePath) {
+			found = append(found, episode)
 		}
 	}
+	return found
+}
 
-	if len(downloadedEpisodes) == 0 {
+// watchMenuEntry is one row of the downloaded-episodes menu.
+type watchMenuEntry struct{ label, value string }
+
+// watchMenuEntries labels each episode ("Episode 3: English title", the
+// Romaji one when there is no English one) and closes the list with the exit
+// row.
+func watchMenuEntries(episodes []models.Episode) []watchMenuEntry {
+	entries := make([]watchMenuEntry, 0, len(episodes)+1)
+	for _, ep := range episodes {
+		label := fmt.Sprintf("Episode %d", ep.Num)
+		if ep.Title.English != "" {
+			label = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
+		} else if ep.Title.Romaji != "" {
+			label = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
+		}
+		entries = append(entries, watchMenuEntry{label: label, value: strconv.Itoa(ep.Num)})
+	}
+	return append(entries, watchMenuEntry{label: "Don't watch anything", value: watchExitValue})
+}
+
+// watchPickError turns the picker's failure into what the caller returns:
+// backing out or cancelling leaves like quitting does.
+func watchPickError(err error) error {
+	if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+		return ErrUserQuit
+	}
+	return fmt.Errorf("episode selection error: %w", err)
+}
+
+// watchDownloadedRange offers the episodes of the range that are on disk and
+// plays the one chosen.
+func watchDownloadedRange(episodes []models.Episode, animeURL string, startNum, endNum int, breadcrumb string) error {
+	downloaded := downloadedEpisodesInRange(episodes, animeURL, startNum, endNum)
+	if len(downloaded) == 0 {
 		fmt.Println("No downloaded episodes found in the specified range.")
 		return nil
 	}
 
-	// Create options for the interactive menu
-	type menuOption struct {
-		Label string
-		Value string
+	entries := watchMenuEntries(downloaded)
+	labels := make([]string, len(entries))
+	for i, e := range entries {
+		labels[i] = e.label
 	}
-	var menuItems []menuOption
-	for _, ep := range downloadedEpisodes {
-		title := fmt.Sprintf("Episode %d", ep.Num)
-		if ep.Title.English != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.English)
-		} else if ep.Title.Romaji != "" {
-			title = fmt.Sprintf("Episode %d: %s", ep.Num, ep.Title.Romaji)
-		}
-		menuItems = append(menuItems, menuOption{Label: title, Value: strconv.Itoa(ep.Num)})
-	}
-
-	// Add option to not watch anything
-	menuItems = append(menuItems, menuOption{Label: "Don't watch anything", Value: "exit"})
-
-	labels := make([]string, len(menuItems))
-	for i, it := range menuItems {
-		labels[i] = it.Label
-	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   "Download > Watch Range",
+	idx, err := pickLabelsFn(labels, tui.PickOptions{
+		Breadcrumb:   breadcrumb,
 		WindowTitle:  "GoAnime - Watch Downloaded",
 		ItemSingular: "episode",
 		ItemPlural:   "episodes",
 	})
-
 	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return ErrUserQuit
-		}
-		return fmt.Errorf("episode selection error: %w", err)
+		return watchPickError(err)
+	}
+	if idx < 0 || idx >= len(entries) {
+		return fmt.Errorf("selected episode not found")
 	}
 
-	selectedEpisode := menuItems[idx].Value
-	if selectedEpisode == "exit" {
+	selected := entries[idx].value
+	if selected == watchExitValue {
 		fmt.Println("No episode selected.")
 		return ErrUserQuit
 	}
-
-	// Find and play the selected episode
-	episodeNum, err := strconv.Atoi(selectedEpisode)
+	episodeNum, err := strconv.Atoi(selected)
 	if err != nil {
 		return fmt.Errorf("invalid episode number: %w", err)
 	}
-
-	// Verify the episode exists in our list
-	_, found := findEpisode(downloadedEpisodes, episodeNum)
-	if !found {
+	if _, ok := findEpisode(downloaded, episodeNum); !ok {
 		return fmt.Errorf("selected episode not found")
 	}
 
 	fmt.Printf("Playing Episode %d...\n", episodeNum)
-
-	// Get the episode path and play it
-	episodePath, err := createEpisodePath(animeURL, episodeNum)
+	episodePath, err := episodePathFn(animeURL, episodeNum)
 	if err != nil {
 		return fmt.Errorf("failed to get episode path: %w", err)
 	}
-
-	// Play the episode using the existing player logic
-	// Note: We use the local file path as the video URL since it's already downloaded
-	// IDs set to 0 since we don't have that context here, updater set to nil
-	return playVideo(episodePath, episodes, episodeNum, 0, 0, nil)
+	// The file is already local; the IDs are 0 because there is no tracking
+	// context here, and no Discord updater.
+	return playLocalFn(episodePath, episodes, episodeNum)
 }
+
+// parseEpisodeRange validates the two numbers typed into the range form.
+func parseEpisodeRange(startStr, endStr string) (start, end int, err error) {
+	start, err = strconv.Atoi(strings.TrimSpace(startStr))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid number")
+	}
+	end, err = strconv.Atoi(strings.TrimSpace(endStr))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid number")
+	}
+	if start > end {
+		return 0, 0, fmt.Errorf("start cannot be greater than end")
+	}
+	return start, end, nil
+}
+
+// validEpisodeNumber is the form field's check.
+func validEpisodeNumber(v string) error {
+	if _, err := strconv.Atoi(strings.TrimSpace(v)); err != nil {
+		return fmt.Errorf("invalid number")
+	}
+	return nil
+}
+
+// safeGetFn is the SSRF-guarded GET every page and video-API fetch in this
+// package goes through; tests replace it, because the guard refuses the
+// loopback servers they stand up.
+var safeGetFn = api.SafeGet
+
+// Seams for the Blogger/googlevideo parallel download: tests substitute a
+// plain client and a no-op guard, because the real ones impersonate Chrome and
+// refuse the loopback servers a test starts.
+var (
+	// validateURLFn is the SSRF guard applied before any request.
+	validateURLFn = api.ValidateExternalURL
+	// newBloggerClientFn builds a fresh client for each attempt: independent
+	// connections avoid HTTP/2 multiplexing and the per-client timeout.
+	newBloggerClientFn = func() *http.Client { return newSurfDownloadClient().Std() }
+	// chunkRetrySleep is the pause before a chunk resumes.
+	chunkRetrySleep = time.Sleep
+)

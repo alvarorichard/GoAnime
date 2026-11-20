@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"regexp"
 	"runtime"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/huh/v2"
 	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/discord"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -30,6 +30,12 @@ var ErrChangeAnime = errors.New("user requested to change anime")
 // ErrBackToDownloadOptions is returned when user wants to go back to download options
 var ErrBackToDownloadOptions = errors.New("back to download options")
 
+// ErrStreamNotLoaded is returned when the player closed before the video
+// started: the stream did not load (a dead host, an expired link). Offering
+// "watch now" again would only replay the same address and wait as long again
+// (issue #229), so the caller reports it and returns to the episode list.
+var ErrStreamNotLoaded = errors.New("the player closed before the video started")
+
 // errStayInPlayerMenu signals that a menu action was a no-op (playlist
 // boundary hit or back from the episode picker). The in-player menu loop must
 // keep running: returning nil here would unwind handleUserInput and surface
@@ -40,6 +46,16 @@ var errStayInPlayerMenu = errors.New("stay in player menu")
 var dubSubTagRe = regexp.MustCompile(`\s*\((?i:Dublado|Legendado|SUB|DUB|Subbed|Dubbed)\)\s*`)
 
 const defaultHLSReferer = "https://streameeeeee.site/"
+
+// isDirectBloggerGoogleVideo reports whether u is a Blogger video on the
+// googlevideo CDN itself (not our local proxy in front of one).
+func isDirectBloggerGoogleVideo(u string) bool {
+	parsed, err := neturl.Parse(strings.TrimSpace(u))
+	if err != nil || !strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".googlevideo.com") {
+		return false
+	}
+	return parsed.Query().Get("source") == "blogger" // nosemgrep: go_sql_rule-concat-sqli -- URL query comparison, no SQL
+}
 
 func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bool) (args []string, refererURL string) {
 	lowerURL := strings.ToLower(strings.TrimSpace(videoURL))
@@ -55,7 +71,11 @@ func appendPlaybackRefererArgs(mpvArgs []string, videoURL string, isHLSStream bo
 	if referer == "" {
 		return mpvArgs, ""
 	}
-	return append(mpvArgs, "--http-header-fields=Referer: "+referer), referer
+	headers := "Referer: " + referer
+	if origin := util.GetGlobalOrigin(); origin != "" {
+		headers += ",Origin: " + origin
+	}
+	return append(mpvArgs, "--http-header-fields="+headers), referer
 }
 
 // hlsAllowAllExtensionsArg relaxes ffmpeg's HLS segment-extension allowlist so
@@ -99,6 +119,10 @@ type playbackArgsInput struct {
 	SubsLang         string
 	SubArgs          []string
 	ResumeTime       int
+	// UserMPVConfig lets mpv load the user's own config. False keeps the
+	// isolated --no-config profile. Upscaling always loads it (the shader
+	// chain needs the user's GPU settings).
+	UserMPVConfig bool
 }
 
 // videoOutputArg picks the mpv --vo chain for goos. mpv takes the first output
@@ -138,13 +162,19 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 		"--audio-display=no",
 	}
 
-	if in.UpscalingEnabled {
+	switch {
+	case in.UpscalingEnabled:
 		// Shader-based upscaling: no hw decode so shaders can process frames.
 		// gpu-next leads the chain; a machine it can't start on still plays,
 		// unscaled if only a non-GPU output works.
 		mpvArgs = append(mpvArgs, defaultVideoOutputArg(), "--hwdec=no")
 		mpvArgs = append(mpvArgs, in.ShaderArgs...)
-	} else {
+	case in.UserMPVConfig:
+		// The user's config decides profile and render quality, so no
+		// --profile=fast or latency hacks here. hwdec and the VO chain stay:
+		// they are what lets mpv start on machines where the default fails.
+		mpvArgs = append(mpvArgs, "--hwdec=auto-safe", defaultVideoOutputArg())
+	default:
 		mpvArgs = append(mpvArgs,
 			"--no-config",
 			"--hwdec=auto-safe",
@@ -155,6 +185,10 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 			"--profile=fast",
 			"--video-latency-hacks=yes",
 		)
+	}
+
+	if in.UpscalingEnabled || in.UserMPVConfig {
+		mpvArgs = append(mpvArgs, userConfigGuardArgs()...)
 	}
 
 	if in.Wayland {
@@ -186,6 +220,12 @@ func buildPlaybackArgs(in playbackArgsInput) []string {
 	// yt-dlp so mpv fetches from 127.0.0.1 directly.
 	if strings.Contains(in.VideoURL, "127.0.0.1") && strings.Contains(in.VideoURL, "blogger_proxy") {
 		mpvArgs = append(mpvArgs, "--ytdl=no")
+	}
+
+	// A direct Blogger googlevideo link (AnimesROLL) is signed for the
+	// User-Agent that requested it; mpv's own ("libmpv") gets HTTP 403.
+	if isDirectBloggerGoogleVideo(in.VideoURL) {
+		mpvArgs = append(mpvArgs, "--user-agent="+downloadUserAgent)
 	}
 
 	if in.Title != "" {
@@ -281,20 +321,37 @@ func isMPVConnectionDead(err error) bool {
 	return strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "no such file") ||
 		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection reset")
+		strings.Contains(msg, "connection reset") ||
+		// Windows names a pipe that no longer exists, or whose server went away,
+		// in its own words (issue #229: the 45 s wait never noticed mpv was gone).
+		strings.Contains(msg, "cannot find the file") ||
+		strings.Contains(msg, "cannot find the path") ||
+		strings.Contains(msg, "pipe has been ended") ||
+		strings.Contains(msg, "pipe is being closed")
+}
+
+// playerGone reports whether the mpv behind socketPath has exited.
+func playerGone(socketPath string) bool {
+	_, err := mpvSendCommand(socketPath, []any{"get_property", "pid"})
+	return err != nil && isMPVConnectionDead(err)
 }
 
 // seekToResumePosition seeks to the saved resume position for HLS streams
-// This function is robust: it waits for video ready, seeks, and verifies the seek worked
-func seekToResumePosition(socketPath string, resumeTime int) {
+// This function is robust: it waits for video ready, seeks, and verifies the seek worked.
+// It reports false only when the player closed before the video was ready.
+func seekToResumePosition(socketPath string, resumeTime int) bool {
 	if resumeTime <= 0 {
-		return
+		return true
 	}
 
 	util.Debugf("HLS resume: will seek to %d seconds", resumeTime)
 
 	// Wait for video to be fully ready first
 	if !waitForVideoReady(socketPath) {
+		if playerGone(socketPath) {
+			util.Debugf("HLS resume: the player closed before the video was ready")
+			return false
+		}
 		util.Debugf("HLS resume: video not ready after timeout, attempting seek anyway")
 	}
 
@@ -324,7 +381,7 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 				// Allow 10 second tolerance for HLS streams
 				if pos >= float64(resumeTime-10) {
 					util.Debugf("HLS resume: SUCCESS - position is %.0f seconds (target: %d)", pos, resumeTime)
-					return
+					return true
 				}
 				util.Debugf("HLS resume: position mismatch - got %.0f, want %d", pos, resumeTime)
 			}
@@ -339,6 +396,7 @@ func seekToResumePosition(socketPath string, resumeTime int) {
 	}
 
 	util.Debugf("HLS resume: FAILED after %d attempts - video may start from beginning", maxAttempts)
+	return true
 }
 
 // applySkipTimes applies skip times to an mpv instance
@@ -367,39 +425,29 @@ func applySkipTimes(socketPath string, episode *models.Episode) {
 // showResumeDialog displays a compact dialog asking if user wants to resume playback.
 // For movies (single-title playback) the wording avoids "episode N".
 func showResumeDialog(episodeNum, timeSeconds int, isMovie bool) (bool, error) {
-	// Fail fast without a TTY: huh blocks on Windows console input headless.
-	if !tui.HasTerminal() {
+	return askToResume(tui.HasTerminal, confirmFn, episodeNum, timeSeconds, isMovie)
+}
+
+// askToResume asks the resume question through confirm. Without a terminal it
+// fails fast instead of prompting: huh blocks on Windows console input headless.
+func askToResume(
+	hasTerminal func() bool,
+	confirm func(title, description, yes, no string) (bool, error),
+	episodeNum, timeSeconds int,
+	isMovie bool,
+) (bool, error) {
+	if !hasTerminal() {
 		return false, fmt.Errorf("no terminal: stdin is not a TTY")
 	}
-	var resume bool
-
-	// Convert seconds to minutes and seconds for better readability
-	minutes := timeSeconds / 60
-	seconds := timeSeconds % 60
-
-	var timeStr string
-	if minutes > 0 {
-		timeStr = fmt.Sprintf("%dm %ds", minutes, seconds)
-	} else {
-		timeStr = fmt.Sprintf("%ds", seconds)
-	}
-
-	title := fmt.Sprintf("Resume episode %d from %s?", episodeNum, timeStr)
-	if isMovie {
-		title = fmt.Sprintf("Resume movie from %s?", timeStr)
-	}
-
-	confirm := huh.NewConfirm().
-		Title(title).
-		Description("You can continue watching from where you left off.").
-		Affirmative("Yes, resume").
-		Negative("No, start from beginning").
-		Value(&resume)
-
-	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+	resume, err := confirm(
+		resumeTitle(episodeNum, timeSeconds, isMovie),
+		"You can continue watching from where you left off.",
+		"Yes, resume",
+		"No, start from beginning",
+	)
+	if err != nil {
 		return false, fmt.Errorf("error showing dialog: %w", err)
 	}
-
 	return resume, nil
 }
 
@@ -625,6 +673,11 @@ func playVideo(
 		canImpersonate = util.YtdlpCanImpersonate()
 	}
 
+	userConfig := shouldLoadMPVUserConfig(os.Getenv, mpvUserConfigPresent)
+	if userConfig {
+		util.Debugf("mpv will load the user's configuration (%s=off to isolate it)", mpvConfigEnv)
+	}
+
 	wayland := runtime.GOOS == "linux" && os.Getenv("WAYLAND_DISPLAY") != ""
 	if upscalingEnabled {
 		util.Infof("Real-time Anime4K upscaling enabled: %s", upscaler.GetShaderModeName(upscaler.GetShaderMode()))
@@ -650,6 +703,7 @@ func playVideo(
 		SubsLang:         subsLang,
 		SubArgs:          subArgs,
 		ResumeTime:       resumeTime,
+		UserMPVConfig:    userConfig,
 	})
 
 	// Fetch AniSkip data asynchronously (AniSkip API is keyed on MAL ID)
@@ -664,16 +718,22 @@ func playVideo(
 	}
 
 	// For HLS streams, seek to resume position (includes waiting for video ready)
+	hlsReady := true
 	if isHLSStream && resumeTime > 0 {
 		util.Debugf("HLS stream detected with resume time %d seconds", resumeTime)
 		hlsTimer := util.StartTimer("HLS:SeekToResume")
-		seekToResumePosition(socketPath, resumeTime)
+		hlsReady = seekToResumePosition(socketPath, resumeTime)
 		hlsTimer.Stop()
 	} else if isHLSStream {
 		// Just wait for video ready without seeking
 		hlsTimer := util.StartTimer("HLS:WaitForReady")
-		waitForVideoReady(socketPath)
+		hlsReady = waitForVideoReady(socketPath)
 		hlsTimer.Stop()
+	}
+	// The player gave up on the stream and closed. Say so, rather than opening a
+	// menu for a player that is not there.
+	if !hlsReady && playerGone(socketPath) {
+		return ErrStreamNotLoaded
 	}
 
 	// Apply AniSkip results to skip intros/outros
@@ -866,61 +926,80 @@ func initTracking(anilistID int, episode *models.Episode, episodeNum int) (resul
 		}
 	}
 
-	key := trackingKey(episode.URL, episodeNum)
-	util.Debugf("Tracking lookup: anilistID=%d, key=%s", anilistID, key)
+	util.Debugf("Tracking lookup: anilistID=%d, key=%s", anilistID, trackingKey(episode.URL, episodeNum))
 
-	// Try episode-specific key first
-	progress, err := tracker.GetAnime(anilistID, key)
+	progress, err := findProgress(tracker, anilistID, episode.URL, episodeNum)
 	if err != nil {
 		util.Debugf("Tracking lookup error: %v", err)
 		return tracker, 0
 	}
+	return tracker, resumePositionFor(progress, episodeNum, takeResumeOverride, func(ep, seconds int) bool {
+		ok, _ := showResumeDialog(ep, seconds, IsCurrentMediaMovie())
+		return ok
+	})
+}
 
-	// Fallback: try legacy key (without episode number) for backward compatibility
+// progressStore is where watch progress is looked up.
+type progressStore interface {
+	GetAnime(anilistID int, allanimeID string) (*tracking.Anime, error)
+}
+
+// findProgress looks the episode up under its own key first and, failing that,
+// under the legacy key (the bare episode URL) older versions wrote. A lookup
+// error ends the search: the legacy key is only tried after a clean miss.
+func findProgress(store progressStore, anilistID int, episodeURL string, episodeNum int) (*tracking.Anime, error) {
+	progress, err := store.GetAnime(anilistID, trackingKey(episodeURL, episodeNum))
+	if err != nil {
+		return nil, err
+	}
 	if progress == nil {
-		progress, err = tracker.GetAnime(anilistID, episode.URL)
-		if err != nil {
-			util.Debugf("Tracking legacy lookup error: %v", err)
-			return tracker, 0
-		}
+		return store.GetAnime(anilistID, episodeURL)
 	}
+	return progress, nil
+}
 
-	if progress == nil {
-		util.Debugf("Tracking lookup: no progress found")
-		return tracker, 0
+// resumePositionFor decides where playback starts from the saved progress:
+// 0 for the beginning, otherwise the saved second.
+//   - no progress, or none worth resuming (0 seconds or less), starts over;
+//   - progress saved for another episode is ignored (some sources share one URL
+//     across episodes, so episode 3's position must not be offered on episode 4);
+//   - a pending override (the CONTINUE list) decides without asking;
+//   - otherwise the user is asked.
+func resumePositionFor(progress *tracking.Anime, episodeNum int, takeOverride func() (position int, fromStart, ok bool), ask func(episodeNum, seconds int) bool) int {
+	if progress == nil || progress.PlaybackTime <= 0 {
+		return 0
 	}
-	if progress.PlaybackTime <= 0 {
-		util.Debugf("Tracking lookup: playback time is 0 or negative")
-		return tracker, 0
-	}
-
-	// Safety check: verify the saved progress belongs to the current episode.
-	// This prevents offering a resume from episode 3's position when the user
-	// has switched to episode 4 (some sources share one URL across episodes).
 	if progress.EpisodeNumber != episodeNum {
 		util.Debugf("Tracking: saved progress is for episode %d, current is %d - skipping resume",
 			progress.EpisodeNumber, episodeNum)
-		return tracker, 0
+		return 0
 	}
-
-	util.Debugf("Tracking found: PlaybackTime=%d seconds for episode %d", progress.PlaybackTime, episodeNum)
-
-	if position, fromStart, ok := takeResumeOverride(); ok {
+	if position, fromStart, ok := takeOverride(); ok {
 		if fromStart {
-			util.Debugf("Starting from the beginning (requested)")
-			return tracker, 0
+			return 0
 		}
-		util.Debugf("Resuming from %d seconds without asking (requested)", position)
-		return tracker, position
+		return position
 	}
-
-	if ok, _ := showResumeDialog(episodeNum, progress.PlaybackTime, IsCurrentMediaMovie()); ok {
-		util.Debugf("Resuming from saved time: %d seconds for episode %d", progress.PlaybackTime, episodeNum)
-		return tracker, progress.PlaybackTime
+	if ask(episodeNum, progress.PlaybackTime) {
+		return progress.PlaybackTime
 	}
+	return 0
+}
 
-	util.Debugf("User declined to resume")
-	return tracker, 0
+// resumeClock words a position as "3m 5s", or "42s" under a minute.
+func resumeClock(seconds int) string {
+	if minutes := seconds / 60; minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds%60)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
+// resumeTitle is the resume question; a movie has no episode number to name.
+func resumeTitle(episodeNum, seconds int, isMovie bool) string {
+	if isMovie {
+		return fmt.Sprintf("Resume movie from %s?", resumeClock(seconds))
+	}
+	return fmt.Sprintf("Resume episode %d from %s?", episodeNum, resumeClock(seconds))
 }
 
 // InitTrackerAsync initializes the tracker in the background.
@@ -1063,21 +1142,26 @@ func updateEpisodeDuration(socketPath string, updater *discord.RichPresenceUpdat
 // updateTrackingWithDuration updates the local tracker with episode info and duration
 func updateTrackingWithDuration(tracker *tracking.LocalTracker, anilistID int, episode *models.Episode, episodeNum int, dur time.Duration) {
 	if tracker != nil && dur > 0 {
-		ctx := snapshotMediaContext()
-		anime := tracking.Anime{
-			AnilistID:     anilistID,
-			AllanimeID:    episode.URL,
-			EpisodeNumber: episodeNum,
-			Duration:      int(dur.Seconds()),
-			Title:         getEpisodeTitle(episode.Title),
-			AnimeTitle:    ctx.animeTitle,
-			Source:        ctx.source,
-			Audio:         ctx.audio,
-			LastUpdated:   time.Now(),
-		}
+		anime := trackingRecord(anilistID, episode, episodeNum, dur, snapshotMediaContext(), time.Now())
 		if err := tracker.UpdateProgress(anime); err != nil {
 			util.Errorf("Failed to update tracking: %v", err)
 		}
+	}
+}
+
+// trackingRecord is the row saved when an episode starts: what it is, which
+// show and source it belongs to, and how long it is.
+func trackingRecord(anilistID int, episode *models.Episode, episodeNum int, dur time.Duration, ctx mediaContext, now time.Time) tracking.Anime {
+	return tracking.Anime{
+		AnilistID:     anilistID,
+		AllanimeID:    episode.URL,
+		EpisodeNumber: episodeNum,
+		Duration:      int(dur.Seconds()),
+		Title:         getEpisodeTitle(episode.Title),
+		AnimeTitle:    ctx.animeTitle,
+		Source:        ctx.source,
+		Audio:         ctx.audio,
+		LastUpdated:   now,
 	}
 }
 
@@ -1140,15 +1224,27 @@ func findEpisodeIndex(episodes []models.Episode, num int) int {
 	return -1 // Episode not found
 }
 
+// preloadable reports whether an episode address is a page the generic
+// extractor can read ahead. Sources addressed by bare ids are not, and neither
+// is Pluto TV: its address is an identifier the plutotv client resolves, and
+// reading it as a page cost several seconds of the site's own app shell while
+// the episode before it was starting to play.
+func preloadable(episodeURL string) bool {
+	if len(episodeURL) < 30 && !strings.Contains(episodeURL, "http") {
+		return false
+	}
+	return !strings.Contains(strings.ToLower(episodeURL), "://pluto.tv/on-demand/") &&
+		!strings.Contains(strings.ToLower(episodeURL), "://www.pluto.tv/on-demand/")
+}
+
 // preloadNextEpisode preloads the next episode
 func preloadNextEpisode(episodes []models.Episode, currentIndex int) {
 	if currentIndex+1 >= len(episodes) {
 		return
 	}
 
-	// Skip preloading for sources addressed by bare ids rather than URLs.
 	nextEpisodeURL := episodes[currentIndex+1].URL
-	if len(nextEpisodeURL) < 30 && !strings.Contains(nextEpisodeURL, "http") {
+	if !preloadable(nextEpisodeURL) {
 		return
 	}
 
@@ -1372,6 +1468,46 @@ func showPlayerMenu(socketPath, animeName string, currentEpisodeNum int) (string
 	return menuItems[idx].Value, nil
 }
 
+// playerLoop holds what the in-player menu loop acts through. The real set
+// talks to mpv and the terminal; tests swap in fakes, so the loop's routing
+// can be exercised without either.
+type playerLoop struct {
+	send     func(socketPath string, command []any) (any, error)
+	menu     func(socketPath, animeName string, episodeNum int) (string, error)
+	next     func(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	previous func(newIndex int, episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	selectEp func(episodes []models.Episode, malID, anilistID int, updater *discord.RichPresenceUpdater, stopTracking chan struct{}, socketPath string) error
+	audio    func(socketPath string)
+	subtitle func(socketPath string)
+	skip     func(socketPath string, episode *models.Episode)
+}
+
+// realPlayerLoop is the set that talks to mpv and the terminal.
+func realPlayerLoop() playerLoop {
+	return playerLoop{
+		send:     mpvSendCommand,
+		menu:     showPlayerMenu,
+		next:     playNextEpisode,
+		previous: playPreviousEpisode,
+		selectEp: selectEpisode,
+		audio:    selectAudioTrack,
+		subtitle: selectSubtitleTrack,
+		skip:     skipIntro,
+	}
+}
+
+// playerAnimeName is the name the player menu shows. The Discord updater
+// only exists while Discord is running; the name HandleDownloadAndPlay stored
+// is there either way.
+func playerAnimeName(updater *discord.RichPresenceUpdater) string {
+	if updater != nil && updater.GetAnime() != nil {
+		if name := updater.GetAnime().Name; name != "" {
+			return name
+		}
+	}
+	return snapshotMedia().AnimeName
+}
+
 // handleUserInput manages user input
 func handleUserInput(
 	socketPath string,
@@ -1384,64 +1520,73 @@ func handleUserInput(
 	stopTracking chan struct{},
 	currentEpisode *models.Episode,
 ) error {
-	// Get anime name for display. The Discord updater only exists while
-	// Discord is running; the name HandleDownloadAndPlay stored is there
-	// either way.
-	var animeName string
-	if updater != nil && updater.GetAnime() != nil {
-		animeName = updater.GetAnime().Name
-	}
-	if animeName == "" {
-		animeName = snapshotMedia().AnimeName
-	}
+	return runPlayerMenu(realPlayerLoop(), socketPath, episodes, currentIndex, currentEpisodeNum, malID, anilistID, updater, stopTracking, currentEpisode)
+}
+
+// runPlayerMenu shows the player menu until a choice ends playback. Choices
+// that stay in the menu (audio, subtitles, skip, or a next/previous/select
+// that reports errStayInPlayerMenu) loop; every other outcome returns.
+func runPlayerMenu(
+	pl playerLoop,
+	socketPath string,
+	episodes []models.Episode,
+	currentIndex int,
+	currentEpisodeNum int,
+	malID int,
+	anilistID int,
+	updater *discord.RichPresenceUpdater,
+	stopTracking chan struct{},
+	currentEpisode *models.Episode,
+) error {
+	animeName := playerAnimeName(updater)
 
 	for {
 		// Check if mpv is still running before showing the menu.
 		// If mpv exited (e.g., due to a bad URL), quit gracefully instead of
 		// showing a menu that the user cannot meaningfully interact with.
-		if _, pingErr := mpvSendCommand(socketPath, []any{"get_property", "pid"}); pingErr != nil {
+		if _, pingErr := pl.send(socketPath, []any{"get_property", "pid"}); pingErr != nil {
 			util.Debugf("mpv process appears to have exited, returning to caller")
 			return ErrBackToDownloadOptions
 		}
 
-		choice, err := showPlayerMenu(socketPath, animeName, currentEpisodeNum)
+		choice, err := pl.menu(socketPath, animeName, currentEpisodeNum)
 		if err != nil {
 			// If the menu was disrupted (e.g., by a concurrent terminal writer),
 			// treat it as "go back" rather than a fatal error.
 			util.Debugf("Player menu interrupted: %v", err)
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		}
 
 		switch choice {
 		case "download_options":
 			// Stop playback and go back to download options
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrBackToDownloadOptions
 		case "next":
-			if err := playNextEpisode(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.next(currentIndex+1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "previous":
-			if err := playPreviousEpisode(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.previous(currentIndex-1, episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "quit":
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrUserQuit
 		case "change":
-			_, _ = mpvSendCommand(socketPath, []any{"quit"})
+			_, _ = pl.send(socketPath, []any{"quit"})
 			return ErrChangeAnime
 		case "select":
-			if err := selectEpisode(episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
+			if err := pl.selectEp(episodes, malID, anilistID, updater, stopTracking, socketPath); !errors.Is(err, errStayInPlayerMenu) {
 				return err
 			}
 		case "audio":
-			selectAudioTrack(socketPath)
+			pl.audio(socketPath)
 		case "subtitle":
-			selectSubtitleTrack(socketPath)
+			pl.subtitle(socketPath)
 		case "skip":
-			skipIntro(socketPath, currentEpisode)
+			pl.skip(socketPath, currentEpisode)
 		}
 	}
 }

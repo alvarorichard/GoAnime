@@ -134,9 +134,9 @@ func buildTrySuggestions(query, loopSource string) []tui.TrySuggestion {
 			Label: shorter, Hint: "fewer words", Query: shorter, Scope: loopSource,
 		})
 	}
-	if !strings.EqualFold(strings.TrimSpace(loopSource), "hianime") {
+	if scope := strings.ToLower(strings.TrimSpace(loopSource)); scope != "hianime" && scope != "english" {
 		out = append(out, tui.TrySuggestion{
-			Label: query, Hint: "English sources only", Query: query, Scope: "hianime",
+			Label: query, Hint: "English sources only", Query: query, Scope: "english",
 		})
 	}
 	return out
@@ -241,6 +241,9 @@ func ChangeAnimeHome() (*models.Anime, []models.Episode, error) {
 		if len(episodes) == 0 {
 			return nil, nil, fmt.Errorf("no episodes for %q", anime.Name)
 		}
+		// Only now is this the title being played, so only now is this the
+		// search to come back to.
+		rememberSearch(res.Query, res.Scope)
 		return anime, episodes, nil
 	}
 }
@@ -298,6 +301,7 @@ func legacyChangeAnime() (*models.Anime, []models.Episode, error) {
 			return nil, nil, fmt.Errorf("failed to get episodes after %d attempts", maxRetries)
 		}
 
+		rememberSearch(animeName, "")
 		return anime, episodes, nil
 	}
 

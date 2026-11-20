@@ -119,11 +119,11 @@ func indexForScope(scope string) int {
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "":
 		return 0
-	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital":
+	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
-	case "hianime":
+	case "hianime", "english":
 		return 2
-	case "movietv", "startflix", "topcine", "pobreflix":
+	case "movietv", "startflix", "topcine", "pobreflix", "plutotv", "pluto":
 		return 3
 	default:
 		return 0
@@ -138,7 +138,7 @@ func (m *tryModel) sizeInput() {
 // scopeValue is the failed search's scope unless tabbed elsewhere. The tabs
 // stay hidden on ALL (tela 4); touching tab reveals them.
 func (m *tryModel) scopeValue() string {
-	return homeScopes[m.scopeIdx].Value
+	return searchScopes[m.scopeIdx].Value
 }
 
 // Init starts the cursor without background work.
@@ -175,15 +175,19 @@ func (m *tryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "tab":
-			m.scopeIdx = (m.scopeIdx + 1) % len(homeScopes)
+			m.scopeIdx = (m.scopeIdx + 1) % len(searchScopes)
 			return m, nil
 		case "esc":
-			// esc edits: it clears the box, never quits and never leaves.
+			// esc edits first: it clears the box, or returns to it from the
+			// suggestions. On an empty box it goes back to the SEARCH home,
+			// where anything else can be done; it never quits the program.
 			if m.focusBox {
-				if m.input.Value() != "" {
-					m.input.SetValue("")
-					m.replaced = true
+				if m.input.Value() == "" {
+					m.err = ErrSelectionBack
+					return m, tea.Quit
 				}
+				m.input.SetValue("")
+				m.replaced = true
 			} else {
 				m.focusBox = true
 				m.input.Focus()
@@ -284,10 +288,18 @@ func (m *tryModel) hints() []Hint {
 	if Plain() {
 		move = "dn"
 	}
+	// esc names what it does now: clear what was typed, or go back.
+	esc := Hint{Key: "esc", Desc: "back"}
+	if !m.focusBox {
+		esc.Desc = "edit"
+	} else if m.input.Value() != "" {
+		esc.Desc = "clear"
+	}
 	return []Hint{
 		{Key: "enter", Desc: "search", Essential: true},
 		{Key: move, Desc: "suggestions"},
 		tab,
+		esc,
 		{Key: "?", Desc: "help"},
 		{Key: "ctrl+c", Desc: "quit", Essential: true},
 	}
@@ -295,10 +307,10 @@ func (m *tryModel) hints() []Hint {
 
 // scopeTabName is the scope tab's name.
 func scopeTabName(idx int) string {
-	if idx < 0 || idx >= len(homeScopes) {
+	if idx < 0 || idx >= len(searchScopes) {
 		return "ALL"
 	}
-	return homeScopes[idx].Name
+	return searchScopes[idx].Name
 }
 
 // View renders the box, the notice, the TRY rows and the SOURCES panel.
@@ -308,7 +320,7 @@ func (m *tryModel) View() tea.View {
 	if m.showHelp {
 		if help := RenderHelp(&m.theme, "No results", []HelpRow{
 			{Key: "enter", Desc: "search"},
-			{Key: "esc", Desc: "clear"},
+			{Key: "esc", Desc: "clear; on an empty box, back to search"},
 			{Key: "tab", Desc: "sources"},
 		}, nil, width, height); help != "" {
 			body = help
@@ -420,13 +432,13 @@ func (m *tryModel) summary() string { return m.searchSummary }
 func renderScopeTabs(theme *Theme, idx int) string {
 	var sb strings.Builder
 	sb.WriteString(theme.Muted.Render("in "))
-	for i, scope := range homeScopes {
+	for i, scope := range searchScopes {
 		if i == idx {
 			sb.WriteString(theme.Tag.Render(scope.Name))
 		} else {
 			sb.WriteString(theme.Muted.Render(scope.Name))
 		}
-		if i < len(homeScopes)-1 {
+		if i < len(searchScopes)-1 {
 			sb.WriteString("   ")
 		}
 	}

@@ -1,0 +1,13 @@
+#EXTM3U
+#EXT-X-VERSION:5
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="pt",NAME="Portuguese [Original]",AUTOSELECT=YES,DEFAULT=YES,CHANNELS="2",URI="audio/audio/Portuguese/audio.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN"
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1042180,AUDIO="audio"
+1042180/playlist.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1577180,AUDIO="audio"
+1577180/playlist.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=2294080,AUDIO="audio"
+2294080/playlist.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3321280,AUDIO="audio"
+3321280/playlist.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=640930,AUDIO="audio"
+640930/playlist.m3u8?sid=SESSION&deviceId=SESSION&appName=web&deviceMake=chrome&jwt=TOKEN

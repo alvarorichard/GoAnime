@@ -45,7 +45,10 @@ type panelContent struct {
 	progress *panelProgress
 	fields   []detailField
 	lines    []string // text, wrapped to the panel
-	command  string   // a command line, drawn on ink
+	// tip is a plain-words hint drawn last. It is the first thing to go on a
+	// short screen: the panel is never left out for want of room for it.
+	tip     string
+	command string // a command line, drawn on ink
 	// keys are action hints drawn as ink chips, two per line, after lines:
 	// enter to resume, single letters for the rest.
 	keys []Hint
@@ -74,12 +77,25 @@ func fitPanel(theme *Theme, content *panelContent, width, maxHeight int) string 
 	panelWidth := width - 1 // the shadow column
 	inner := panelWidth - 4 // two cells of padding each side
 	for _, compact := range []bool{false, true} {
-		lines := panelLines(theme, content, inner, compact)
-		if len(lines)+2+1 <= maxHeight { // padding rows and the shadow row
-			return addShadow(theme, renderPanelBlock(theme, lines, panelWidth))
+		for _, c := range withAndWithoutTip(content) {
+			lines := panelLines(theme, c, inner, compact)
+			if len(lines)+2+1 <= maxHeight { // padding rows and the shadow row
+				return addShadow(theme, renderPanelBlock(theme, lines, panelWidth))
+			}
 		}
 	}
 	return ""
+}
+
+// withAndWithoutTip is content as it is, then without its tip: the layouts to
+// try, fullest first.
+func withAndWithoutTip(c *panelContent) []*panelContent {
+	if c.tip == "" {
+		return []*panelContent{c}
+	}
+	bare := *c
+	bare.tip = ""
+	return []*panelContent{c, &bare}
 }
 
 // panelLines lays out content within inner cells.
@@ -145,6 +161,13 @@ func panelLines(theme *Theme, c *panelContent, inner int, compact bool) []string
 		}
 	}
 
+	if tip := singleLine(c.tip); tip != "" {
+		gap()
+		for line := range strings.SplitSeq(ansi.Wrap(tip, inner, ""), "\n") {
+			out = append(out, theme.PanelMuted.Render(line))
+		}
+	}
+
 	if command := singleLine(c.command); command != "" {
 		gap()
 		code := ansi.Truncate(" $ "+command, inner, "…")
@@ -178,6 +201,14 @@ func renderPlainPanel(theme *Theme, c *panelContent, width, maxHeight int) strin
 	_ = theme
 	if width < minPanelWidth {
 		return ""
+	}
+	if c.tip != "" {
+		bare := *c
+		bare.tip = ""
+		if with := renderPlainPanel(theme, &bare, width, maxHeight-1); with != "" {
+			return with + "\n" + ansi.Truncate(singleLine(c.tip), width, "…")
+		}
+		return renderPlainPanel(theme, &bare, width, maxHeight)
 	}
 	var lines []string
 	head := strings.ToUpper(singleLine(c.label))

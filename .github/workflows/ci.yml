@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.27.3'
+  GO_VERSION: '1.27.4'
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
 
@@ -126,8 +126,20 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt update
-          sudo apt install -y mpv
+          # A stalled mirror used to hang this step until the job timed out:
+          # bound every attempt and retry.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          for attempt in 1 2 3 4; do
+            if sudo timeout 90 apt-get "${apt_opts[@]}" update && sudo timeout 240 apt-get "${apt_opts[@]}" install -y --no-install-recommends mpv; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying" >&2
+            sleep 10
+          done
+          # The tests drive a fake mpv, so a mirror outage must not fail the
+          # build; say so loudly and go on without the real player.
+          echo "::warning::mpv could not be installed from apt; running without it"
+          exit 0
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -220,9 +232,64 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  mutation:
+    name: Mutation guards
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download and verify dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Install dependencies (Linux)
+        run: |
+          # A stalled mirror used to hang this step until the job timed out:
+          # bound every attempt and retry.
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          for attempt in 1 2 3 4; do
+            if sudo timeout 90 apt-get "${apt_opts[@]}" update && sudo timeout 240 apt-get "${apt_opts[@]}" install -y --no-install-recommends mpv; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying" >&2
+            sleep 10
+          done
+          # The tests drive a fake mpv, so a mirror outage must not fail the
+          # build; say so loudly and go on without the real player.
+          echo "::warning::mpv could not be installed from apt; running without it"
+          exit 0
+
+      - name: Warm the race build cache
+        shell: bash
+        # One mutant is checked under -race. In the test job the race run
+        # before it has built the instrumented dependencies; here nothing has,
+        # and building them inside the mutant's five minutes is not enough.
+        run: go test -race -count=1 -run '^$' ./internal/player
+
+      - name: Mutation guards
+        shell: bash
+        # The tests of the tests: each builds a mutant of the code with an
+        # overlay and requires a guard test to fail on it, and the coverage
+        # guards measure the packages. The race/coverage run skips them
+        # (-short): one test binary per mutant is too slow for three operating
+        # systems, so this job runs beside the tests instead of after them.
+        run: go test -count=1 -timeout 55m ./internal/api -run 'KillsMutants$|FullyCovered$'
+
   build-binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [quality, security, test]
+    needs: [quality, security, test, mutation]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -313,7 +380,7 @@ jobs:
   # Windows Installer Job - Creates an offline installer with bundled mpv
   build-windows-installer:
     name: Build Windows installer
-    needs: [quality, security, test]
+    needs: [quality, security, test, mutation]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -675,7 +742,7 @@ jobs:
             Assert-True -Condition (Test-Path -LiteralPath $appExe) `
               -Message 'goanime.exe was not installed'
             $versionOutput = (& $appExe --version 2>&1 | Out-String).Trim()
-            Assert-True -Condition ($versionOutput -match '^GoAnime v2\.0\.0') `
+            Assert-True -Condition ($versionOutput -match '^GoAnime v2\.\d+\.\d+') `
               -Message "unexpected --version output: $versionOutput"
             $appSignature = Get-AuthenticodeSignature -LiteralPath $appExe
             Assert-True -Condition ($appSignature.Status -eq 'NotSigned') `
@@ -719,7 +786,7 @@ jobs:
               $env:PATH = [Environment]::ExpandEnvironmentVariables($rawPath)
               $pathOutput = (& $env:ComSpec /D /C 'goanime.exe --version' 2>&1 |
                 Out-String).Trim()
-              Assert-True -Condition ($pathOutput -match '^GoAnime v2\.0\.0') `
+              Assert-True -Condition ($pathOutput -match '^GoAnime v2\.\d+\.\d+') `
                 -Message "goanime.exe was not found through PATH: $pathOutput"
             } finally {
               $env:PATH = $savedProcessPath

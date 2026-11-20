@@ -1,0 +1,6 @@
+# The cfsolve commit GoAnime is built and tested against. Never track upstream's
+# HEAD: bump this with scripts/update-cfsolve.sh, which also refreshes the
+# embedded profile from the same commit. The release workflow builds this
+# commit and attaches the binaries to each GoAnime release.
+repo=https://github.com/chris124567/cfsolve
+sha=06d58d64f1f2292e77341576d05b00af15d90960

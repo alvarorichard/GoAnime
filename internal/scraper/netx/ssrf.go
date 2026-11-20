@@ -90,3 +90,21 @@ func SafeScraperTransport(timeout time.Duration) *http.Transport {
 		IdleConnTimeout:     90 * time.Second,
 	}
 }
+
+// SafeScraperHTTP1Transport is the HTTP/1.1-only counterpart used by hosts
+// that reject otherwise identical iframe navigation requests over HTTP/2.
+func SafeScraperHTTP1Transport(timeout time.Duration) *http.Transport {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return SafeDialContext(ctx, network, addr, timeout, nil)
+		},
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return SafeDialContext(ctx, network, addr, timeout, tlsConfig)
+		},
+		TLSHandshakeTimeout: timeout,
+		MaxIdleConns:        20,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout:     90 * time.Second,
+	}
+}

@@ -68,7 +68,7 @@ func TestMovieFailureCascade(t *testing.T) {
 			assert.NotContains(t, notice, "failed to get", "the internal chain stays out")
 			assert.NotContains(t, notice, "audio unavailable", "no jargon rides the chain either")
 			assert.NotContains(t, notice, "swap refused", "the internal causes stay out")
-			for _, drawn := range []string{"⚠", "🚀", "★", "💬", "🎙", "↩"} {
+			for _, drawn := range []string{"\u26a0", "\U0001f680", "\u2605", "\U0001f4ac", "\U0001f399", "\u21a9"} {
 				assert.NotContainsf(t, notice, drawn,
 					"the notice is plain text — %q never lands on a console", drawn)
 			}

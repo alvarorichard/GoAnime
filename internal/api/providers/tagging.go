@@ -38,10 +38,18 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "TopCine"
 	case source.Pobreflix:
 		return "Pobreflix"
+	case source.Pomfy:
+		return "Pomfy"
 	case source.AnimeDrive:
 		return "AnimeDrive"
 	case source.AnimesDigital:
 		return "AnimesDigital"
+	case source.Anroll:
+		return "AnimesROLL"
+	case source.AnimesFHD:
+		return "AnimesFHD"
+	case source.PlutoTV:
+		return "PlutoTV"
 	default:
 		return string(kind)
 	}
@@ -69,7 +77,7 @@ func cleanPTBRTitle(title string) string {
 // canonical Source field, matching the legacy ScraperManager.tagResults exactly.
 func tagResults(results []*models.Anime, kind source.SourceKind) {
 	name := sourceDisplayName(kind)
-	isPTBR := kind == source.AnimeFire || kind == source.Goyabu || kind == source.AnimesDigital || kind == source.AnimeDrive
+	isPTBR := kind == source.AnimeFire || kind == source.Goyabu || kind == source.AnimesDigital || kind == source.AnimeDrive || kind == source.Anroll || kind == source.AnimesFHD
 
 	for _, anime := range results {
 		if isPTBR {
@@ -85,7 +93,7 @@ func tagResults(results []*models.Anime, kind source.SourceKind) {
 			strings.Contains(anime.Name, "[TV]")
 
 		if !hasLanguageTag {
-			if kind == source.StartFlix || kind == source.TopCine || kind == source.Pobreflix {
+			if kind == source.StartFlix || kind == source.TopCine || kind == source.Pobreflix || kind == source.Pomfy {
 				switch anime.MediaType {
 				case models.MediaTypeMovie:
 					anime.Name = fmt.Sprintf("[Movie] [PT-BR] %s", anime.Name)

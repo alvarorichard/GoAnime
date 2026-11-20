@@ -209,3 +209,10 @@ func tickCmd() tea.Cmd {
 		return tickMsg(t)
 	})
 }
+
+// modelSink lets a yt-dlp download report into the progress model.
+type modelSink struct{ m *model }
+
+func (s modelSink) AddProgressReceived(delta int64) { s.m.addProgressReceived(delta) }
+func (s modelSink) SetProgressTotal(total int64)    { s.m.setProgressTotal(total) }
+func (s modelSink) SetProgressPeak(pct float64)     { s.m.setProgressPeak(pct) }

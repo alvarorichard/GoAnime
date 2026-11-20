@@ -233,6 +233,58 @@ func SearchAnimeAuto(name, src string, pick func([]*models.Anime) *models.Anime)
 // (StartFlix and TopCine) at once, for the -dm downloads.
 const MovieTVSources = "movietv"
 
+// registryKindsForSource maps the optional source selector to the registry
+// kinds to search. Empty = all sources; a specific kind (or the PT-BR trio)
+// narrows the fan-out.
+func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
+	switch normalizedSource {
+	case "hianime":
+		return []apisource.SourceKind{apisource.HiAnime}
+	case "english":
+		// The ENGLISH tab: HiAnime, and Pluto TV, whose catalog has anime too.
+		return []apisource.SourceKind{apisource.HiAnime, apisource.PlutoTV}
+	case "animefire":
+		return []apisource.SourceKind{apisource.AnimeFire}
+	case "goyabu":
+		return []apisource.SourceKind{apisource.Goyabu}
+	case "animesdigital":
+		return []apisource.SourceKind{apisource.AnimesDigital}
+	case "anroll":
+		return []apisource.SourceKind{apisource.Anroll}
+	case "animesfhd":
+		return []apisource.SourceKind{apisource.AnimesFHD}
+	case "startflix":
+		return []apisource.SourceKind{apisource.StartFlix}
+	case "topcine":
+		return []apisource.SourceKind{apisource.TopCine}
+	case "pobreflix":
+		return []apisource.SourceKind{apisource.Pobreflix}
+	case "pomfy":
+		return []apisource.SourceKind{apisource.Pomfy}
+	case "plutotv", "pluto":
+		return []apisource.SourceKind{apisource.PlutoTV}
+	case "movietv":
+		return []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix, apisource.Pomfy, apisource.PlutoTV}
+	case "animedrive":
+		return []apisource.SourceKind{apisource.AnimeDrive}
+	case "ptbr", "pt-br":
+		return []apisource.SourceKind{
+			apisource.AnimeFire,
+			apisource.Goyabu,
+			apisource.AnimesDigital,
+			apisource.Anroll,
+			apisource.AnimesFHD,
+			apisource.StartFlix,
+			apisource.TopCine,
+			apisource.Pobreflix,
+			apisource.Pomfy,
+			apisource.AnimeDrive,
+			apisource.PlutoTV,
+		}
+	}
+	return nil
+}
+
 func searchAnimeEnhanced(
 	name string,
 	src string,
@@ -240,41 +292,13 @@ func searchAnimeEnhanced(
 	selectAnime func([]*models.Anime) (*models.Anime, error),
 	enrich func(*models.Anime) error,
 ) (*models.Anime, error) {
-	// Map the optional source selector to the registry kinds to search. Empty
-	// = all sources; a specific kind (or the PT-BR trio) narrows the fan-out.
-	var registryKinds []apisource.SourceKind
 	normalizedSource := strings.ToLower(strings.TrimSpace(src))
-	switch normalizedSource {
-	case "hianime":
-		registryKinds = []apisource.SourceKind{apisource.HiAnime}
-	case "animefire":
-		registryKinds = []apisource.SourceKind{apisource.AnimeFire}
-	case "goyabu":
-		registryKinds = []apisource.SourceKind{apisource.Goyabu}
-	case "animesdigital":
-		registryKinds = []apisource.SourceKind{apisource.AnimesDigital}
-	case "startflix":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix}
-	case "topcine":
-		registryKinds = []apisource.SourceKind{apisource.TopCine}
-	case "pobreflix":
-		registryKinds = []apisource.SourceKind{apisource.Pobreflix}
-	case "movietv":
-		registryKinds = []apisource.SourceKind{apisource.StartFlix, apisource.TopCine, apisource.Pobreflix}
-	case "animedrive":
-		registryKinds = []apisource.SourceKind{apisource.AnimeDrive}
-	case "ptbr", "pt-br":
-		registryKinds = []apisource.SourceKind{
-			apisource.AnimeFire,
-			apisource.Goyabu,
-			apisource.AnimesDigital,
-			apisource.StartFlix,
-			apisource.TopCine,
-			apisource.Pobreflix,
-			apisource.AnimeDrive,
-		}
-	}
+	registryKinds := registryKindsForSource(normalizedSource)
 	util.Debug("Searching for anime/media", "query", name, "kinds", registryKinds)
+
+	// A language tab asks for its language; a source of mixed languages reads
+	// it from the search's context (see apisource.WithLanguage).
+	searchCtx := apisource.WithLanguage(context.Background(), apisource.ScopeLanguage(normalizedSource))
 
 	var animes []*models.Anime
 	var searchErr error
@@ -284,7 +308,7 @@ func searchAnimeEnhanced(
 		// the highlighted title early; otherwise the collected results
 		// continue below exactly as the spinner path returns them.
 		var liveErr error
-		animes, liveChosen, liveErr = runLiveSearch(name, registryKinds)
+		animes, liveChosen, liveErr = runLiveSearchIn(searchCtx, name, registryKinds)
 		if liveErr != nil {
 			// A deliberate quit or back travels like a selection error so
 			// the retry loop below treats it the same way.
@@ -303,7 +327,7 @@ func searchAnimeEnhanced(
 				return
 			}
 			// Model B registry fan-out (providers.SearchAll).
-			animes, searchErr = search(context.Background(), name, registryKinds)
+			animes, searchErr = search(searchCtx, name, registryKinds)
 		})
 	}
 	if searchErr != nil {
@@ -342,6 +366,8 @@ func searchAnimeEnhanced(
 			"AnimesDigital", breakdown.AnimesDigital,
 			"HiAnime", breakdown.HiAnime,
 			"AnimeDrive", breakdown.AnimeDrive,
+			"AnimesFHD", breakdown.AnimesFHD,
+			"PlutoTV", breakdown.PlutoTV,
 		)
 
 		// Sort results by query relevance first, then language: the closest
@@ -414,12 +440,18 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "HiAnime"
 			case "animesdigital":
 				anime.Source = "AnimesDigital"
+			case "anroll":
+				anime.Source = "AnimesROLL"
+			case "animesfhd":
+				anime.Source = "AnimesFHD"
 			case "startflix":
 				anime.Source = "StartFlix"
 			case "topcine":
 				anime.Source = "TopCine"
 			case "pobreflix":
 				anime.Source = "Pobreflix"
+			case "plutotv", "pluto":
+				anime.Source = "PlutoTV"
 			case "animedrive":
 				anime.Source = "AnimeDrive"
 			}
@@ -434,12 +466,18 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "HiAnime"
 				case strings.Contains(lowerURL, "animesdigital.org"):
 					anime.Source = "AnimesDigital"
+				case strings.Contains(lowerURL, "anroll.io"):
+					anime.Source = "AnimesROLL"
+				case strings.Contains(lowerURL, "animesfhd.net"):
+					anime.Source = "AnimesFHD"
 				case strings.Contains(lowerURL, "startflix"):
 					anime.Source = "StartFlix"
 				case strings.Contains(lowerURL, "topcine"):
 					anime.Source = "TopCine"
 				case strings.Contains(lowerURL, "pobreflixtv"):
 					anime.Source = "Pobreflix"
+				case strings.Contains(lowerURL, "pluto.tv"):
+					anime.Source = "PlutoTV"
 				case strings.Contains(lowerURL, "animesdrive"):
 					anime.Source = "AnimeDrive"
 				}
@@ -563,6 +601,9 @@ type sourceBreakdown struct {
 	AnimeFire     int
 	Goyabu        int
 	AnimesDigital int
+	Anroll        int
+	AnimesFHD     int
+	PlutoTV       int
 	HiAnime       int
 	StartFlix     int
 	TopCine       int
@@ -586,6 +627,12 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.Goyabu++
 		case strings.EqualFold(anime.Source, "AnimesDigital"):
 			b.AnimesDigital++
+		case strings.EqualFold(anime.Source, "AnimesROLL"):
+			b.Anroll++
+		case strings.EqualFold(anime.Source, "AnimesFHD"):
+			b.AnimesFHD++
+		case strings.EqualFold(anime.Source, "PlutoTV"):
+			b.PlutoTV++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
 		case strings.EqualFold(anime.Source, "StartFlix"):

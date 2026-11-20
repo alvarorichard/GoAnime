@@ -2,7 +2,7 @@
 ; This script is designed to be run from CI with files staged in the build directory
 
 #define MyAppName "GoAnime"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "GoAnime Team"
 #define MyAppURL "https://github.com/alvarorichard/GoAnime"
 #define MyAppExeName "goanime.exe"
@@ -49,6 +49,7 @@ Source: "staging\goanime.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; MPV binary and required DLLs for video playback
 Source: "staging\bin\mpv.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "staging\bin\*.dll"; DestDir: "{app}\bin"; Flags: ignoreversion skipifsourcedoesntexist
+
 
 [Icons]
 ; Start Menu shortcuts

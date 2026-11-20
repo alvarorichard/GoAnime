@@ -12,12 +12,19 @@ and [pkg/goanime/examples](../pkg/goanime/examples) has complete programs.
 ## Current limits
 
 - Search covers every enabled source.
-- Episode lists and stream URLs are available for AnimeFire results only.
-  `types.Source` has a single value, `types.SourceAnimeFire`, and passing a
-  result from another source to `GetEpisodeStreamURL` returns an
-  `unknown source` error.
-- `StreamOptions` is accepted but not applied yet: the stream comes back in
-  the source's default quality.
+- Episode lists and stream URLs are available for the anime sources
+  (AnimeFire, Goyabu, HiAnime, AnimesDigital, AnimeDrive, AnimesROLL) and for
+  StartFlix (`Source.SupportsEpisodes()`). StartFlix is a movie and series
+  catalogue: use `GetSeasons` and `GetSeasonEpisodes` for its series, and pass
+  `StreamOptions.Audio` for the audio. TopCine, Pobreflix and Pomfy can only be
+  searched for now; asking them for episodes or a stream returns
+  `goanime.ErrEpisodesUnsupported`. A result whose `Source` name is unknown
+  makes `GetEpisodeStreamURL` return an `unknown source` error.
+- Goyabu is off by default; enable it with `GOANIME_ENABLED_SOURCES=Goyabu`.
+  Pointing a call at a disabled source returns no results.
+- `StreamOptions.Quality` and `Mode` are accepted but not applied yet: the
+  stream comes back in the source's default quality. `Audio` is applied for
+  catalogue sources.
 
 ## Installation
 
@@ -62,7 +69,7 @@ Passing `nil` searches every enabled source. Result names carry a language tag
 such as `[English]` or `[PT-BR]`, and `Source` holds the name of the source the
 result came from.
 
-To search AnimeFire only, pass its source:
+To search one source only, pass it (here AnimeFire; `types.Sources()` lists them all):
 
 ```go
 import "github.com/alvarorichard/Goanime/v2/pkg/goanime/types"
@@ -117,6 +124,7 @@ An episode whose video the host no longer has returns an error ending in
 ```bash
 go run ./pkg/goanime/examples/search
 go run ./pkg/goanime/examples/source_specific
+go run ./pkg/goanime/examples/series
 go run ./pkg/goanime/examples/episodes
 go run ./pkg/goanime/examples/stream
 ```
@@ -132,6 +140,6 @@ go test -short ./pkg/goanime/...
 ## Contributing to the library
 
 Keep the API small and backward compatible: other projects depend on it.
-Adding sources to `types.Source` changes the public API, so discuss it in an
-issue first. New behavior needs tests, and this guide and
+New `types.Source` values are only ever appended, so existing values keep
+their meaning. New behavior needs tests, and this guide and
 [pkg/goanime/README.md](../pkg/goanime/README.md) need to be updated with it.

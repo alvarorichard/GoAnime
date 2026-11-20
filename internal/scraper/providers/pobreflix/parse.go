@@ -38,6 +38,9 @@ func parseTitle(doc *goquery.Document, pageURL string) (Title, bool) {
 	if t, ok := parseEmbeddedTitle(doc, pageURL); ok {
 		return t, true
 	}
+	if t, ok := parseV3Title(doc, pageURL); ok {
+		return t, true
+	}
 	mount := doc.Find(`div#view`).First()
 	if mount.Length() == 0 {
 		mount = doc.Find(`.vbEpisodes`).First()

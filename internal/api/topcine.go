@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/topcine"
@@ -265,4 +266,10 @@ func GetTopCineSeasonEpisodes(media *models.Anime, seasonNum int) ([]models.Epis
 // mpv/the downloader the referer, subtitles and audio preference.
 func GetTopCineStreamURL(media *models.Anime, episode *models.Episode, quality string) (string, error) {
 	return GetStartFlixStreamURL(media, episode, quality)
+}
+
+// ResolveTopCineStream is GetTopCineStreamURL without the side effects: the
+// referer, subtitles and audio preference come back in the Stream.
+func ResolveTopCineStream(media *models.Anime, episode *models.Episode, quality string) (source.Stream, error) {
+	return ResolveStartFlixStream(media, episode, quality)
 }

@@ -24,9 +24,10 @@ import (
 
 const (
 	// DefaultBase is the catalog host. The site moves between mirror domains
-	// (the old .sale host is dead; .gay is live as of 2026-10-24), so
+	// (.sale is dead; .gay, .cam and .christmas redirect to pobreflixtvfree.cv as
+	// of 2026-11-14, and the client follows such a redirect), so
 	// GOANIME_POBREFLIX_URL can repoint this without waiting for a release.
-	DefaultBase = "https://pobreflixtv.gay"
+	DefaultBase = "https://pobreflixtvfree.cv"
 
 	// userAgent describes a current Chrome, matching the TLS fingerprint
 	// util.NewFastClient presents. Neither the site nor its player checked it
@@ -40,10 +41,19 @@ const (
 // pages. It owns the corpus so the index is built once and shared.
 type Client struct {
 	http       *http.Client
-	baseURL    string
+	baseMu     sync.RWMutex
+	baseURL    string // the catalog host; followed to a mirror by followMirror
+	playerBase string
 	userAgent  string
 	maxRetries int
 	retryDelay time.Duration
+	// playerTransport carries the player-gate requests. The player host runs
+	// on Cloudflare and its worker answers the shared Chrome-impersonating
+	// TLS fingerprint with a bare HTTP 500 (measured 2026-11-01), so
+	// production sends the player over netx's SSRF-safe plain transport and
+	// describes itself as userAgent; the site's catalog keeps the shared
+	// fingerprint. Tests leave it nil and use net/http's own transport.
+	playerTransport http.RoundTripper
 
 	// search is the sitemap-backed index, built lazily when the site's own
 	// search API misses and cached on disk across runs.
@@ -63,15 +73,17 @@ func NewClient() *Client {
 		base = DefaultBase
 	}
 	c := &Client{
-		http:       util.NewFastClient(),
-		baseURL:    base,
-		userAgent:  userAgent,
-		maxRetries: 2,
-		retryDelay: 400 * time.Millisecond,
-		apiEnabled: true,
+		http:            util.NewFastClient(),
+		baseURL:         base,
+		playerBase:      playerBaseFromEnv(),
+		playerTransport: netx.SafeScraperTransport(playerHTTPTimeout),
+		userAgent:       userAgent,
+		maxRetries:      2,
+		retryDelay:      400 * time.Millisecond,
+		apiEnabled:      true,
 	}
 	c.search.cachePath, _ = corpusCachePath()
-	c.search.loadCache(c.baseURL)
+	c.search.loadCache(c.base())
 	return c
 }
 
@@ -80,10 +92,11 @@ func NewClient() *Client {
 // the user's cache.
 func NewClientForTest(hc *http.Client, baseURL, cachePath string) *Client {
 	return &Client{
-		http:      hc,
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		userAgent: userAgent,
-		search:    corpus{cachePath: cachePath},
+		http:       hc,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		playerBase: playerBaseFromEnv(),
+		userAgent:  userAgent,
+		search:     corpus{cachePath: cachePath},
 	}
 }
 
@@ -101,7 +114,60 @@ func Shared() *Client {
 }
 
 // BaseURL is the catalog host this client searches.
-func (c *Client) BaseURL() string { return c.baseURL }
+func (c *Client) BaseURL() string { return c.base() }
+
+func (c *Client) base() string {
+	c.baseMu.RLock()
+	defer c.baseMu.RUnlock()
+	return c.baseURL
+}
+
+// mirrorOf reports the origin to adopt when a request to base ended on final.
+// The site moves between mirror domains (.sale, .gay, .cam, .christmas) and
+// leaves redirects behind, so the client follows one instead of paying a hop on
+// every request. It adopts only a host whose first label is the same
+// ("pobreflixtv"), on the same scheme: a redirect to anything else is a
+// redirect, never a new catalog.
+func mirrorOf(base string, final *url.URL) (string, bool) {
+	b, err := url.Parse(base)
+	if err != nil || final == nil || b.Hostname() == "" || final.Hostname() == "" {
+		return "", false
+	}
+	if final.Scheme != b.Scheme || strings.EqualFold(final.Host, b.Host) {
+		return "", false
+	}
+	first := func(h string) string { return strings.ToLower(strings.SplitN(h, ".", 2)[0]) }
+	if first(final.Hostname()) != first(b.Hostname()) {
+		return "", false
+	}
+	return final.Scheme + "://" + final.Host, true
+}
+
+// followMirror makes the catalog host the one a redirect of a catalog request
+// ended on, when mirrorOf accepts it. The common case — no redirect — costs a
+// read lock; only a real move takes the write lock, once.
+func (c *Client) followMirror(requested *url.URL, resp *http.Response) {
+	c.baseMu.RLock()
+	current := c.baseURL
+	c.baseMu.RUnlock()
+	b, err := url.Parse(current)
+	if err != nil || requested == nil || !strings.EqualFold(requested.Host, b.Host) {
+		return // not a request to the catalog itself (the player, a CDN)
+	}
+	next, ok := mirrorOf(current, resp.Request.URL)
+	if !ok {
+		return
+	}
+	c.baseMu.Lock()
+	if c.baseURL != current { // another request moved it first
+		c.baseMu.Unlock()
+		return
+	}
+	c.baseURL = next
+	c.baseMu.Unlock()
+	util.Debug("Pobreflix moved to a mirror domain", "from", current, "to", next)
+	c.search.rehost(current, next)
+}
 
 type getOptions struct {
 	referer string
@@ -158,6 +224,9 @@ func (c *Client) getOnce(ctx context.Context, rawURL string, opt getOptions) (bo
 		return nil, true, err
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		c.followMirror(req.URL, resp)
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return body, false, nil
 	}
 	return nil, resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
@@ -182,14 +251,14 @@ var sitemapShardRe = regexp.MustCompile(`file=((?:[a-z0-9_]+_)?videobox_Video_\d
 
 // currentSitemapRe names a current content sitemap. The site publishes one
 // movie and one series file (and, on busier weeks, numbered continuations).
-var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|series)(?:-(\d+))?\.xml$`)
+var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|filmes|series)(?:-(\d+))?\.xml$`)
 
 // sitemapShards lists the content sitemaps the index publishes. The current
 // site replaced the old sitemap.php?file=… shards with two large
 // sitemap-movies.xml / sitemap-series.xml files; both layouts are supported so
 // a mirror still running the old theme keeps working.
 func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
-	body, err := c.get(ctx, c.baseURL+"/sitemap.php", getOptions{
+	body, err := c.get(ctx, c.base()+"/sitemap.php", getOptions{
 		accept: "text/xml,application/xml,text/html,*/*;q=0.8",
 	})
 	if err == nil {
@@ -201,7 +270,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 				continue
 			}
 			seen[name[1]] = true
-			out = append(out, shard{name: name[1], url: c.baseURL + "/sitemap.php?file=" + name[1]})
+			out = append(out, shard{name: name[1], url: c.base() + "/sitemap.php?file=" + name[1]})
 		}
 		if len(out) > 0 {
 			sortShards(out)
@@ -209,7 +278,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 		}
 	}
 
-	body, err = c.get(ctx, c.baseURL+"/sitemap.xml", getOptions{
+	body, err = c.get(ctx, c.base()+"/sitemap.xml", getOptions{
 		accept: "text/xml,application/xml,text/html,*/*;q=0.8",
 	})
 	if err != nil {
@@ -224,7 +293,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 			continue
 		}
 		order := 1
-		if name[1] == "series" {
+		if strings.EqualFold(name[1], "series") {
 			order = 2
 		}
 		if len(name) > 2 && name[2] != "" {
@@ -272,6 +341,11 @@ func (c *Client) Search(ctx context.Context, query string) ([]Media, error) {
 	// the slug. Production asks it first; tests pin the corpus instead so
 	// their request counts stay deterministic.
 	if c.apiEnabled {
+		if results, err := c.buscaSearch(ctx, q); err != nil {
+			util.Debug("Pobreflix busca failed, trying the catalog API", "err", err)
+		} else if len(results) > 0 {
+			return results, nil
+		}
 		if results, err := c.apiSearch(ctx, q); err != nil {
 			util.Debug("Pobreflix catalog API failed, falling back to the sitemap corpus", "err", err)
 		} else if len(results) > 0 {
@@ -346,7 +420,7 @@ func (c *Client) apiSearch(ctx context.Context, query string) ([]Media, error) {
 			if res.kind == KindSeries {
 				path = "/serie/"
 			}
-			rawURL := c.baseURL + path + url.PathEscape(slug) + ".html"
+			rawURL := c.base() + path + url.PathEscape(slug) + ".html"
 			if seen[rawURL] {
 				continue
 			}
@@ -395,9 +469,9 @@ func (c *Client) catalog(ctx context.Context, kind, query string) ([]embeddedIte
 	params.Set("limit", strconv.Itoa(maxSearchResults))
 	params.Set("sort", "recent")
 	params.Set("search", query)
-	body, err := c.get(ctx, c.baseURL+"/api?"+params.Encode(), getOptions{
+	body, err := c.get(ctx, c.base()+"/api?"+params.Encode(), getOptions{
 		accept:  "application/json",
-		referer: c.baseURL + "/",
+		referer: c.base() + "/",
 	})
 	if err != nil {
 		return nil, err
@@ -415,7 +489,7 @@ func (c *Client) Title(ctx context.Context, pageURL string) (Title, error) {
 	if t, ok := c.titles.Load(pageURL); ok {
 		return t.(Title), nil
 	}
-	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.baseURL + "/"})
+	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.base() + "/"})
 	if err != nil {
 		return Title{}, err
 	}
@@ -436,13 +510,19 @@ func (c *Client) Episode(ctx context.Context, pageURL string) (EpisodeData, erro
 	if e, ok := c.episodes.Load(pageURL); ok {
 		return e.(EpisodeData), nil
 	}
-	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.baseURL + "/"})
+	doc, err := c.getDocument(ctx, pageURL, getOptions{referer: c.base() + "/"})
 	if err != nil {
 		return EpisodeData{}, err
 	}
 	raw, ok := embeddedEpisodeData(doc)
 	if !ok {
-		return EpisodeData{}, ErrNoEpisode
+		data, v3 := parseV3Episode(doc, pageURL)
+		if !v3 {
+			return EpisodeData{}, ErrNoEpisode
+		}
+		data.Servers = c.absolutizeServers(data.Servers)
+		c.episodes.Store(pageURL, data)
+		return data, nil
 	}
 	series := titleFromEmbeddedItem(raw.Series, KindSeries, pageURL)
 	series.Audio = audioFromEmbedded(raw.Episode.Audio)
@@ -463,11 +543,18 @@ func (c *Client) Episode(ctx context.Context, pageURL string) (EpisodeData, erro
 
 // EpisodeURL builds the current site's episode-page URL from a series title.
 func (c *Client) EpisodeURL(t Title, season, episode int) string {
+	if s, ok := t.Season(season); ok {
+		for _, e := range s.Episodes {
+			if e.Number == episode && e.URL != "" {
+				return e.URL
+			}
+		}
+	}
 	path := t.EpisodePath(season, episode)
 	if path == "" {
 		return ""
 	}
-	return c.baseURL + path
+	return c.base() + path
 }
 
 // absolutizeServers resolves the site's relative download endpoints against
@@ -487,14 +574,14 @@ func (c *Client) absoluteURL(raw string) string {
 		return raw
 	}
 	if strings.HasPrefix(raw, "//") {
-		if u, err := url.Parse(c.baseURL); err == nil {
+		if u, err := url.Parse(c.base()); err == nil {
 			return u.Scheme + ":" + raw
 		}
 	}
 	if !strings.HasPrefix(raw, "/") {
 		raw = "/" + raw
 	}
-	return c.baseURL + raw
+	return c.base() + raw
 }
 
 // ResolveDownload follows an episode's download endpoint to its final media
@@ -511,7 +598,7 @@ func (c *Client) ResolveDownload(ctx context.Context, rawURL string) string {
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
-	req.Header.Set("Referer", c.baseURL+"/")
+	req.Header.Set("Referer", c.base()+"/")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return rawURL

@@ -47,9 +47,15 @@ func canShowLiveSearch() bool {
 // answered or the budget ran out, the collected results for the RESULTS
 // screen. Cancelling or going back surfaces the screen's error.
 func runLiveSearch(name string, kinds []apisource.SourceKind) (animes []*models.Anime, chosen *models.Anime, err error) {
+	return runLiveSearchIn(context.Background(), name, kinds)
+}
+
+// runLiveSearchIn is runLiveSearch under parent, whose values (the language a
+// tab asks for) reach every source searched.
+func runLiveSearchIn(parent context.Context, name string, kinds []apisource.SourceKind) (animes []*models.Anime, chosen *models.Anime, err error) {
 	events := make(chan models.SearchEvent, 64)
 	finished := make(chan liveOutcome, 1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	// Capture the seams up front: the fetch goroutine must keep working
 	// with the hook it started with, even if SearchAnimeAuto swaps the

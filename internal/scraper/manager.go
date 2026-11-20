@@ -19,9 +19,13 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animedrive"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animefire"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesdigital"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/animesfhd"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/anroll"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/startflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/topcine"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
@@ -44,6 +48,10 @@ const (
 	// NOTE: appended at the end on purpose — the iota values stitch into
 	// serialized/tracked positions; reordering the middle ones would migrate
 	// user history.
+	AnrollType    // AnimesROLL PT-BR anime source
+	PomfyType     // Pomfy movie/series catalog, Byse HLS with a PoW captcha
+	AnimesFHDType // AnimesFHD PT-BR anime source
+	PlutoTVType   // Pluto TV free movies and series
 )
 
 // SearchContextScraper is the optional search-only cancellation capability.
@@ -98,6 +106,14 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &AnimeDriveAdapter{client: animedrive.NewAnimeDriveClient()}, nil
 	case PobreflixType:
 		return &PobreflixAdapter{client: pobreflix.Shared(), panel: startflix.Shared()}, nil
+	case AnrollType:
+		return &AnrollAdapter{client: anroll.Shared()}, nil
+	case AnimesFHDType:
+		return &AnimesFHDAdapter{client: animesfhd.NewAnimesFHDClient()}, nil
+	case PomfyType:
+		return &PomfyAdapter{client: pomfy.Shared()}, nil
+	case PlutoTVType:
+		return &PlutoTVAdapter{client: plutotv.Shared()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -123,6 +139,14 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return "AnimeDrive"
 	case PobreflixType:
 		return pobreflix.SourceName
+	case AnrollType:
+		return anroll.SourceName
+	case AnimesFHDType:
+		return animesfhd.SourceName
+	case PomfyType:
+		return pomfy.SourceName
+	case PlutoTVType:
+		return plutotv.SourceName
 	default:
 		return "Desconhecido"
 	}
@@ -137,7 +161,15 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case HiAnimeType:
 		return "[English]"
-	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType:
+	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType, AnimesFHDType:
+		return "[PT-BR]"
+	case PlutoTVType:
+		// Pluto TV mixes languages per title; the title itself carries the
+		// language tag (see plutotv.Title.ToAnimeModel).
+		return "[Multilanguage]"
+	case PomfyType:
+		// Pomfy serves PT-BR audio tracks (the HLS masters spell lang/por)
+		// but its catalog mixes dubbed and subtitled; label like StartFlix.
 		return "[PT-BR]"
 	default:
 		return "[Unknown]"
@@ -321,7 +353,11 @@ func (a *AnimesDigitalAdapter) GetAnimeEpisodesContext(ctx context.Context, anim
 
 func (a *AnimesDigitalAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
 	streamURL, err = a.client.GetEpisodeStreamURLContext(ctx, episodeURL)
-	return streamURL, map[string]string{"source": "animesdigital"}, err
+	metadata = map[string]string{"source": "animesdigital"}
+	if referer := animesdigital.StreamReferer(streamURL); referer != "" {
+		metadata["referer"] = referer
+	}
+	return streamURL, metadata, err
 }
 
 func (a *AnimesDigitalAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
@@ -341,6 +377,61 @@ func (a *AnimesDigitalAdapter) GetType() ScraperType { return AnimesDigitalType 
 // NewAnimesDigitalAdapterWithClient builds an adapter around a test client.
 func NewAnimesDigitalAdapterWithClient(client *animesdigital.Client) *AnimesDigitalAdapter {
 	return &AnimesDigitalAdapter{client: client}
+}
+
+// AnrollAdapter adapts the plain-HTTP AnimesROLL client.
+type AnrollAdapter struct {
+	client *anroll.Client
+}
+
+// SearchAnimeContext searches AnimesROLL for query.
+func (a *AnrollAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
+}
+
+// GetAnimeEpisodesContext lists the episodes of an AnimesROLL title.
+func (a *AnrollAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
+}
+
+// GetStreamURLContext resolves an episode to its stream URL and the
+// Referer/Origin the CDN expects.
+func (a *AnrollAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.GetEpisodeStreamContext(ctx, episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	metadata = map[string]string{"source": "anroll"}
+	if stream.Referer != "" {
+		metadata["referer"] = stream.Referer
+	}
+	if stream.Origin != "" {
+		metadata["origin"] = stream.Origin
+	}
+	return stream.URL, metadata, nil
+}
+
+// SearchAnime is SearchAnimeContext with a background context.
+func (a *AnrollAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// GetAnimeEpisodes is GetAnimeEpisodesContext with a background context.
+func (a *AnrollAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+// GetStreamURL is GetStreamURLContext with a background context.
+func (a *AnrollAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetType reports AnrollType.
+func (a *AnrollAdapter) GetType() ScraperType { return AnrollType }
+
+// NewAnrollAdapterWithClient builds an adapter around a test client.
+func NewAnrollAdapterWithClient(client *anroll.Client) *AnrollAdapter {
+	return &AnrollAdapter{client: client}
 }
 
 // HiAnimeAdapter adapts hianime.HiAnimeClient to the UnifiedScraper interface.
@@ -449,7 +540,14 @@ func (a *StartFlixAdapter) GetStreamURLContext(ctx context.Context, episodeURL s
 	if err != nil {
 		return "", nil, err
 	}
-	metadata = map[string]string{
+	metadata = startFlixStreamMetadata(stream)
+	return stream.URL, metadata, nil
+}
+
+// startFlixStreamMetadata is the playback metadata contract of a StartFlix
+// stream: "referer", "host", and "subtitles" as a JSON array.
+func startFlixStreamMetadata(stream *startflix.Stream) map[string]string {
+	metadata := map[string]string{
 		"source":  "startflix",
 		"referer": stream.Referer,
 		"host":    stream.Host,
@@ -463,7 +561,7 @@ func (a *StartFlixAdapter) GetStreamURLContext(ctx context.Context, episodeURL s
 			metadata["subtitles"] = string(raw)
 		}
 	}
-	return stream.URL, metadata, nil
+	return metadata
 }
 
 func (a *StartFlixAdapter) GetType() ScraperType {
@@ -614,4 +712,185 @@ func (a *PobreflixAdapter) GetClient() *pobreflix.Client {
 // tests that point them at a mock server.
 func NewPobreflixAdapterWithClients(client *pobreflix.Client, panel *startflix.Client) *PobreflixAdapter {
 	return &PobreflixAdapter{client: client, panel: panel}
+}
+
+// PomfyAdapter adapts pomfy.Client to the UnifiedScraper interface.
+//
+// The title "URL" a Pomfy result carries names the TMDB id (the catalog's own
+// key): pomfy.my/assistir/<tmdb> for movies, pomfy.my/serie/<tmdb> for
+// series. Search needs TMDB_API_KEY because Pomfy never maps words to ids —
+// see the pomfy package docs.
+type PomfyAdapter struct {
+	client *pomfy.Client
+}
+
+func (a *PomfyAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes PomfyAdapter a ContextualScraper.
+func (a *PomfyAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	results, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(results))
+	for _, m := range results {
+		animes = append(animes, m.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. Pomfy lists seasons and episodes in the api package, not here.
+func (a *PomfyAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *PomfyAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for Pomfy, use GetPomfyEpisodes in the api package")
+}
+
+func (a *PomfyAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return "", nil, fmt.Errorf("for Pomfy, use GetPomfyStreamURL in the api package")
+}
+
+func (a *PomfyAdapter) GetType() ScraperType {
+	return PomfyType
+}
+
+// GetClient returns the underlying Pomfy client.
+func (a *PomfyAdapter) GetClient() *pomfy.Client {
+	return a.client
+}
+
+// NewPomfyAdapterWithClient builds an adapter around a given client, for
+// tests that point it at a mock server.
+func NewPomfyAdapterWithClient(client *pomfy.Client) *PomfyAdapter {
+	return &PomfyAdapter{client: client}
+}
+
+// AnimesFHDAdapter adapts the plain-HTTP AnimesFHD client.
+type AnimesFHDAdapter struct {
+	client *animesfhd.Client
+}
+
+// SearchAnimeContext searches AnimesFHD for query.
+func (a *AnimesFHDAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnimeContext(ctx, query)
+}
+
+// GetAnimeEpisodesContext lists the episodes of an AnimesFHD title.
+func (a *AnimesFHDAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodesContext(ctx, animeURL)
+}
+
+// GetStreamURLContext resolves an episode to its stream URL and the
+// Referer, audio and captions the player needs.
+func (a *AnimesFHDAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, _ ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.GetEpisodeStreamContext(ctx, episodeURL)
+	if err != nil {
+		return "", nil, err
+	}
+	metadata = map[string]string{"source": "animesfhd"}
+	if stream.Referer != "" {
+		metadata["referer"] = stream.Referer
+	}
+	if stream.AudioLang != "" {
+		metadata["audio_lang"] = stream.AudioLang
+	}
+	if len(stream.Subtitles) > 0 {
+		encoded, err := jsonx.Marshal(stream.Subtitles)
+		if err != nil {
+			return "", nil, err
+		}
+		metadata["subtitles"] = string(encoded)
+	}
+	return stream.URL, metadata, nil
+}
+
+// SearchAnime is SearchAnimeContext with a background context.
+func (a *AnimesFHDAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// GetAnimeEpisodes is GetAnimeEpisodesContext with a background context.
+func (a *AnimesFHDAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+// GetStreamURL is GetStreamURLContext with a background context.
+func (a *AnimesFHDAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetType reports AnimesFHDType.
+func (a *AnimesFHDAdapter) GetType() ScraperType { return AnimesFHDType }
+
+// NewAnimesFHDAdapterWithClient builds an adapter around a test client.
+func NewAnimesFHDAdapterWithClient(client *animesfhd.Client) *AnimesFHDAdapter {
+	return &AnimesFHDAdapter{client: client}
+}
+
+// PlutoTVAdapter adapts plutotv.Client to the UnifiedScraper interface.
+//
+// Like the other movie/TV catalogs it lists seasons and resolves streams in
+// the api package (GetPlutoTVEpisodes, ResolvePlutoTVStream); the adapter
+// carries the search and the plain stream lookup.
+type PlutoTVAdapter struct {
+	client *plutotv.Client
+}
+
+func (a *PlutoTVAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+// SearchAnimeContext makes PlutoTVAdapter a ContextualScraper.
+func (a *PlutoTVAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	titles, err := a.client.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	animes := make([]*models.Anime, 0, len(titles))
+	for _, t := range titles {
+		animes = append(animes, t.ToAnimeModel())
+	}
+	return animes, nil
+}
+
+// GetAnimeEpisodesContext exists so the adapter satisfies ContextualScraper as
+// a whole. Pluto TV lists seasons in the api package, not through this adapter.
+func (a *PlutoTVAdapter) GetAnimeEpisodesContext(_ context.Context, animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodes(animeURL)
+}
+
+func (a *PlutoTVAdapter) GetAnimeEpisodes(string) ([]models.Episode, error) {
+	return nil, fmt.Errorf("for Pluto TV, use GetPlutoTVEpisodes in the api package")
+}
+
+func (a *PlutoTVAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+// GetStreamURLContext resolves the movie or episode at episodeURL. The first
+// string option is the quality, as for the other adapters.
+func (a *PlutoTVAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	stream, err := a.client.Stream(ctx, episodeURL, qualityOption(options))
+	if err != nil {
+		return "", nil, err
+	}
+	// The address to play, not the CDN's own URL for the playlist, which one
+	// of the CDNs refuses: the same one the api layer hands the player.
+	return plutotv.PlayURL(stream), map[string]string{"source": "plutotv"}, nil
+}
+
+func (a *PlutoTVAdapter) GetType() ScraperType { return PlutoTVType }
+
+// GetClient returns the underlying Pluto TV client.
+func (a *PlutoTVAdapter) GetClient() *plutotv.Client { return a.client }
+
+// NewPlutoTVAdapterWithClient builds an adapter around a given client, for
+// tests that point it at a mock server.
+func NewPlutoTVAdapterWithClient(client *plutotv.Client) *PlutoTVAdapter {
+	return &PlutoTVAdapter{client: client}
 }

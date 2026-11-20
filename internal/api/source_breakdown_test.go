@@ -71,6 +71,8 @@ func TestCountSourceBreakdown_AnimeFireCaseInsensitive(t *testing.T) {
 		{Source: "StartFlix"},
 		{Source: "TopCine"},
 		{Source: "AnimeDrive"},
+		{Source: "AnimesFHD"},
+		{Source: "animesfhd"},
 	}
 
 	got := countSourceBreakdown(animes)
@@ -81,6 +83,7 @@ func TestCountSourceBreakdown_AnimeFireCaseInsensitive(t *testing.T) {
 	assert.Equal(t, 1, got.StartFlix)
 	assert.Equal(t, 1, got.TopCine)
 	assert.Equal(t, 1, got.AnimeDrive)
+	assert.Equal(t, 2, got.AnimesFHD)
 }
 
 // TestCountSourceBreakdown_RealisticPayload mirrors the user-reported log:

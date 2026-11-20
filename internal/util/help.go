@@ -91,6 +91,11 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(descriptionStyle.Render("    Direct search for anime (use spaces, not hyphens)"))
 	helpContent.WriteString("\n")
 	helpContent.WriteString(exampleStyle.Render("Example: goanime \"one piece\" (not \"one-piece\")"))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(commandStyle.Render("  goanime logs "))
+	helpContent.WriteString(parameterStyle.Render("[-f] [-n N] [file]"))
+	helpContent.WriteString("\n")
+	helpContent.WriteString(descriptionStyle.Render("    Show the newest debug log in colour; -f follows it live and moves to the next session"))
 	helpContent.WriteString("\n\n")
 
 	// Options section
@@ -107,7 +112,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
 	addOption(&helpContent, "-dm", "Movie and TV download mode. Downloads a movie, or episodes of a TV show with -r, -a or --type tv.")
-	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, goyabu, animesdigital, startflix, topcine, pobreflix or animedrive; use movietv for movie/TV sources or ptbr for Portuguese sources. Default: search all enabled sources.")
+	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, goyabu, animesdigital, anroll, animesfhd, startflix, topcine, pobreflix, plutotv or animedrive; use movietv for movie/TV sources or ptbr for Portuguese sources. Default: search all enabled sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--type", "With -dm, set to tv to download one episode of a TV show instead of a movie. Takes the show, the season and the episode.")
 	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")
@@ -115,6 +120,10 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "--no-subs", "Disable subtitles.")
 	addOption(&helpContent, "--download-menu", "Always show the episode options menu before playing (tela 6).")
 	addOption(&helpContent, "-o", "Output directory for downloads (default: ~/.local/goanime/downloads/anime/, or ~/.local/goanime/downloads/movies/ with -dm). Must be inside your home folder. Files use Plex naming: Anime - S01E01.mp4.")
+	addOption(&helpContent, "--clear-continue", "Empty the CONTINUE list of the home screen (the watch history) and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--clear-recent", "Empty the RECENT searches of the home screen and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--clear-history", "Empty both the CONTINUE list and the RECENT searches, and exit. Asks first; add --yes to skip the question.")
+	addOption(&helpContent, "--yes / -y", "With --clear-*, do not ask before clearing (needed when there is no terminal to ask on).")
 	addOption(&helpContent, "--plain", "Plain interface: no colors, no Japanese glosses, ASCII marks (also with NO_COLOR, TERM=dumb or GOANIME_PLAIN=1).")
 	helpContent.WriteString("\n")
 
@@ -140,7 +149,7 @@ func ShowBeautifulHelp() {
 	helpContent.WriteString(sectionTitleStyle.Render("Features:"))
 	helpContent.WriteString("\n")
 
-	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire, AnimesDigital, AnimeDrive, StartFlix, TopCine and Pobreflix, with direct MP4 playback where the source offers it.")
+	addFeature(&helpContent, "Multi-Source Support", "Stream from HiAnime, AnimeFire, AnimesDigital, AnimesROLL, AnimesFHD, AnimeDrive, StartFlix, TopCine, Pobreflix and Pluto TV, with direct MP4 playback where the source offers it.")
 	addFeature(&helpContent, "Smart Search", "Intelligent search with fuzzy matching and suggestions.")
 	addFeature(&helpContent, "Quality Selection", "Choose video quality from multiple available sources.")
 	addFeature(&helpContent, "Batch Downloads", "Download single episodes, ranges, or entire seasons for offline viewing.")

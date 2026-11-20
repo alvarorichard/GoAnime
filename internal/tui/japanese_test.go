@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,18 @@ import (
 func TestMain(m *testing.M) {
 	SetJapanese(true)
 	SetGlyphs(true)
-	os.Exit(m.Run())
+	// The result screen reads and writes FAVORITES: keep tests off the real file.
+	dir, err := os.MkdirTemp("", "goanime-favs-")
+	if err != nil {
+		panic(err)
+	}
+	newFavorites = func() favoritesAPI { return favorites.Open(filepath.Join(dir, "favorites.json")) }
+	// The saved lists are off in tests unless a test installs its own; they
+	// would otherwise read the real file and add ctrl+l to every footer.
+	newFavoriteLists = func() FavoriteLists { return nil }
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // isJapanese reports whether r is a kana, a kanji or the long vowel mark.

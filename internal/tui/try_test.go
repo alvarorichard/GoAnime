@@ -137,7 +137,7 @@ func TestTryNavigation(t *testing.T) {
 		_, _ = model.Update(tryPress(tea.KeyTab, ""))
 		updated, cmd := model.Update(tryPress(tea.KeyEnter, ""))
 		require.NotNil(t, cmd)
-		assert.Equal(t, "hianime", updated.(*tryModel).result.Scope)
+		assert.Equal(t, "english", updated.(*tryModel).result.Scope)
 	})
 
 	t.Run("esc clears the box, never quits", func(t *testing.T) {

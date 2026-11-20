@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -99,6 +100,11 @@ type PickOptions struct {
 	BackDesc string
 	// HelpHint adds "? help" to the footer.
 	HelpHint bool
+	// Notice is shown above the list, saying why the user is back on this
+	// screen ("the video was removed", ...). Anything printed to the terminal
+	// before a screen opens is hidden behind it, so this is how a step that
+	// sends the user back explains itself.
+	Notice string
 }
 
 const (
@@ -168,6 +174,12 @@ type pickerModel struct {
 	keys      []string
 	// actionKeys maps a screen action's key to the actions slice.
 	actionKeys map[string]int
+
+	// notice is the text above the list; see PickOptions.Notice.
+	notice string
+	// areaHeight is the height left for the list and its panel once the
+	// notice has taken its rows; layout sets it, and View draws within it.
+	areaHeight int
 
 	panel      *PickPanel
 	progress   panelProgress
@@ -259,6 +271,7 @@ func newPickerModel(items []PickItem, opts PickOptions) *pickerModel {
 		keys:          keys,
 		actionKeys:    actionKeys,
 		panel:         opts.Panel,
+		notice:        singleLine(opts.Notice),
 	}
 	if m.panel != nil && m.panel.Progress != nil && !m.panel.Live {
 		m.setProgress(m.panel.Progress())
@@ -388,6 +401,8 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // In plain mode the panel is always plain text below the list (tela 9).
 func (m *pickerModel) layout() {
 	width, height := m.shell.ContentSize()
+	height = max(height-m.noticeHeight(width), 1)
+	m.areaHeight = height
 	m.panelSide, m.panelWidth, m.plainPanel = false, 0, ""
 	listWidth, listHeight := width, height
 	if m.panel != nil {
@@ -407,6 +422,14 @@ func (m *pickerModel) layout() {
 		}
 	}
 	m.entries.SetSize(listWidth, max(listHeight, 1))
+}
+
+// noticeHeight is the rows the notice takes above the list at width.
+func (m *pickerModel) noticeHeight(width int) int {
+	if m.notice == "" {
+		return 0
+	}
+	return lipgloss.Height(renderNotice(&m.theme, m.notice, width))
 }
 
 // panelRoomAbove is the height a panel above the list may take out of
@@ -509,6 +532,10 @@ func (m *pickerModel) actionsSection() string {
 // View renders the list, with the panel beside or above it when there is one.
 func (m *pickerModel) View() tea.View {
 	width, height := m.shell.ContentSize()
+	// The help overlay takes the whole screen; the notice is for the list.
+	if !m.showHelp {
+		height = m.areaHeight
+	}
 	body := m.entries.View()
 	if m.showHelp {
 		if help := RenderHelp(&m.theme, helpScreenName(m.options.Breadcrumb), nil, m.helpExtra(), width, height); help != "" {
@@ -548,6 +575,11 @@ func (m *pickerModel) View() tea.View {
 		}
 	} else if section := m.actionsSection(); section != "" {
 		body += "\n\n" + section
+	}
+	if !m.showHelp {
+		if notice := renderNotice(&m.theme, m.notice, width); notice != "" {
+			body = notice + "\n" + body
+		}
 	}
 
 	view := tea.NewView(m.shell.Render(body, m.hints()))
@@ -706,6 +738,44 @@ func isTypeToFilterKey(msg tea.KeyPressMsg) bool {
 
 type pickRunner func(tea.Model) (tea.Model, error)
 
+// pickerNotice holds a message for the next picker to show above its list.
+var pickerNotice struct {
+	sync.Mutex
+	text string
+}
+
+// NoticeOnNextPicker makes the next picker (PickActioned, and so Pick) show
+// text above its list, once.
+//
+// It is how a step that sends the user back to a list, such as an episode
+// whose video was removed, says why: the terminal text printed before the
+// picker opens is hidden behind it, so the user saw the list come straight
+// back with no word of what happened.
+func NoticeOnNextPicker(text string) {
+	pickerNotice.Lock()
+	pickerNotice.text = singleLine(text)
+	pickerNotice.Unlock()
+}
+
+// withPendingNotice gives opts the pending notice when it has none of its own,
+// and clears the pending one either way: it was meant for this picker.
+func withPendingNotice(opts PickOptions) PickOptions {
+	if pending := takePickerNotice(); opts.Notice == "" {
+		opts.Notice = pending
+	}
+	return opts
+}
+
+// takePickerNotice returns the pending notice and clears it, so it is shown
+// once.
+func takePickerNotice() string {
+	pickerNotice.Lock()
+	defer pickerNotice.Unlock()
+	text := pickerNotice.text
+	pickerNotice.text = ""
+	return text
+}
+
 // Pick opens a styled fuzzy picker and returns the chosen item index.
 func Pick(items []PickItem, opts PickOptions) (int, error) {
 	index, _, err := PickActioned(items, opts)
@@ -715,6 +785,9 @@ func Pick(items []PickItem, opts PickOptions) (int, error) {
 // PickActioned opens a picker that also offers screen actions (tela 5). It
 // returns the chosen item index, or -1 with the picked action's key.
 func PickActioned(items []PickItem, opts PickOptions) (index int, action string, err error) {
+	// Taken first, so a picker that cannot open does not leave the notice for
+	// some later, unrelated one.
+	opts = withPendingNotice(opts)
 	if len(items) == 0 {
 		return -1, "", ErrNoPickItems
 	}

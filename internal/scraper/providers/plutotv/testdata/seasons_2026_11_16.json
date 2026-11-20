@@ -1,0 +1,71 @@
+{
+ "_id": "6206bba315c8610013683974",
+ "name": "Death Note",
+ "summary": "Light Yagami é um aluno exemplar com um futuro promissor, mas ele não aguenta mais tanto tédio. Mas essa situação toda vai muda quando ele encontra o Caderno da Morte, o artefato de um ardiloso deus da morte Shinigami…",
+ "description": "Light Yagami é um aluno exemplar com um futuro promissor, mas ele não aguenta mais tanto tédio. Mas essa situação toda vai muda quando ele encontra o Caderno da Morte, o artefato de um ardiloso deus da morte Shinigami…",
+ "slug": "death-note-br",
+ "type": "series",
+ "rating": "A18",
+ "genre": "Anime",
+ "offset": 1000,
+ "page": 1,
+ "seasons": [
+  {
+   "episodes": [
+    {
+     "_id": "6206bbaa15c8610013683a28",
+     "name": "Renascimento",
+     "description": "O brilhante, mas entediado estudante da escola Light Yagami encontra-se mantendo o poder da vida e da morte em suas mãos, o Death Note.",
+     "allotment": 1740,
+     "rating": "A18",
+     "slug": "renascimento-2007-1-1",
+     "duration": 1740000,
+     "originalContentDuration": 1395000,
+     "genre": "Anime",
+     "type": "episode",
+     "number": 1,
+     "season": 1,
+     "stitched": {
+      "path": "/stitch/hls/episode/6206bbaa15c8610013683a28/master.m3u8"
+     }
+    },
+    {
+     "_id": "6206bbb015c8610013683d63",
+     "name": "Confronto",
+     "description": "Enquanto os criminosos do mundo continuam a morrer, L atende representantes de várias nações.",
+     "allotment": 1740,
+     "rating": "A18",
+     "slug": "confronto-2007-1-2",
+     "duration": 1740000,
+     "originalContentDuration": 1410000,
+     "genre": "Anime",
+     "type": "episode",
+     "number": 2,
+     "season": 1,
+     "stitched": {
+      "path": "/stitch/hls/episode/6206bbb015c8610013683d63/master.m3u8"
+     }
+    },
+    {
+     "_id": "6206bbb015c8610013683d89",
+     "name": "Negociações",
+     "description": "Ryuk o Shinigami que deixou cair o Death Note no mundo humano, avisa a Light que alguém está no seu encalço.",
+     "allotment": 1740,
+     "rating": "A18",
+     "slug": "negociaciones-2007-1-3-ptv4",
+     "duration": 1740000,
+     "originalContentDuration": 1410000,
+     "genre": "Anime",
+     "type": "episode",
+     "number": 3,
+     "season": 1,
+     "stitched": {
+      "path": "/stitch/hls/episode/6206bbb015c8610013683d89/master.m3u8"
+     }
+    }
+   ],
+   "number": 1
+  }
+ ],
+ "avail": {}
+}

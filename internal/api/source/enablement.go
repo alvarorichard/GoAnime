@@ -36,16 +36,22 @@ func IsEnabled(d Descriptor) bool {
 	return !util.SourceDisabled(string(d.Kind))
 }
 
-// IsSearchEnabled reports whether d joins the search fan-out. A source that
-// ships off by default has to be asked for by name.
+// IsSearchEnabled reports whether d joins the search fan-out. The order of
+// authority is: the hard kill-switch (GOANIME_DISABLED_SOURCES) first; then
+// GOANIME_ENABLED_SOURCES, which opts in whatever was saved; then the user's
+// saved choice from the SOURCES screen; and last the source's own default.
 func IsSearchEnabled(d Descriptor) bool {
 	if !IsEnabled(d) {
 		return false
 	}
-	if d.DefaultDisabled {
-		return util.SourceForceEnabled(string(d.Kind))
+	name := string(d.Kind)
+	if util.SourceForceEnabled(name) {
+		return true
 	}
-	return true
+	if on, set := util.SourcePref(name); set {
+		return on
+	}
+	return !d.DefaultDisabled
 }
 
 // filterEnabled returns only the currently-enabled sources, logging each

@@ -1,15 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/appflow"
+	"github.com/alvarorichard/Goanime/v2/internal/favorites"
+	"github.com/alvarorichard/Goanime/v2/internal/suggest"
 	"github.com/alvarorichard/Goanime/v2/internal/tracking"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
@@ -19,7 +23,7 @@ import (
 // SearchHomeDecision is the SEARCH home screen's decision.
 type SearchHomeDecision struct {
 	Query        string // new search text
-	Scope        string // source selector: "", "ptbr", "hianime" or "movietv"
+	Scope        string // source selector: "", "ptbr", "english" or "movietv"
 	Title        string // title to search when reopening fails
 	Entry        *tui.HomeContinueEntry
 	FromStart    bool // reopen from zero
@@ -62,9 +66,22 @@ func HandleSearchHome() (SearchHomeDecision, error) {
 // The retry loop uses it to go back to search (tela 3's "edit search").
 // Empty query starts blank. Cancel surfaces tui.ErrSearchHomeCancelled.
 func OpenSearchHome(query string) (tui.SearchHomeResult, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return tui.SearchHomeResult{}, fmt.Errorf("no interactive terminal available for search")
 	}
+	return openSearchHome(query, runSearchHome)
+}
+
+// Seams for tests: whether stdin is a terminal, and the screen runner.
+var (
+	stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	runSearchHome   = tui.SearchHome
+)
+
+// openSearchHome gathers the home screen's lists and options, with the
+// autocomplete attached, and hands them to run (tui.SearchHome in
+// production, a capture in tests).
+func openSearchHome(query string, run func(tui.SearchHomeOptions) (tui.SearchHomeResult, error)) (tui.SearchHomeResult, error) {
 
 	continueAll, err := tracking.ContinueEntries()
 	if err != nil {
@@ -86,14 +103,95 @@ func OpenSearchHome(query string) (tui.SearchHomeResult, error) {
 		}
 	}
 
-	return tui.SearchHome(tui.SearchHomeOptions{
-		Query:       query,
-		ScopeIndex:  scopeIndexForSource(util.GlobalSource),
-		SourcesLine: sourcesLine(),
-		Continue:    entries,
-		Recent:      recent,
-		DeleteEntry: deleteContinueEntry,
+	// Read first: reading a damaged file is what sets it aside and earns the
+	// notice.
+	favs := homeFavorites()
+	favNotice := favoritesNotice()
+
+	res, err := run(tui.SearchHomeOptions{
+		Query:         query,
+		ScopeIndex:    scopeIndexForSource(util.GlobalSource),
+		SourcesLine:   sourcesLine(),
+		Continue:      entries,
+		Recent:        recent,
+		DeleteEntry:   deleteContinueEntry,
+		DeleteRecent:  forgetRecentSearch,
+		ClearContinue: clearContinueHistory,
+		ClearRecent:   clearRecentHistory,
+		Suggest:       homeSuggest,
+		Sources:       homeSources,
+		SetSource:     setHomeSource,
+
+		Favorites:      favs,
+		Notice:         favNotice,
+		DeleteFavorite: forgetFavorite,
+		ClearFavorites: clearFavorites,
+		Lists:          tui.StoreLists(favoritesStore()),
+
+		Restore: homeRestoreFor(query),
 	})
+	if err == nil {
+		rememberHomeSearch(res)
+	}
+	return res, err
+}
+
+// favoritesStore is the FAVORITES file; a variable so tests use a temporary one.
+var favoritesStore = favorites.Default
+
+// homeFavorites reads the FAVORITES rows, newest first.
+func homeFavorites() []tui.HomeFavorite {
+	list, err := favoritesStore().List()
+	if err != nil {
+		util.Debugf("Favorites unavailable: %v", err)
+		return nil
+	}
+	rows := make([]tui.HomeFavorite, 0, len(list))
+	for _, f := range list {
+		if title := tui.SingleLine(f.Title); title != "" {
+			rows = append(rows, tui.HomeFavorite{Key: f.Key, Title: title, Year: f.Year, Media: f.Media, Source: f.Source})
+		}
+	}
+	return rows
+}
+
+// favoritesNotice warns when the favorites file was damaged and set aside, so
+// the empty list is not a mystery.
+func favoritesNotice() string {
+	aside := favoritesStore().TakeDamaged()
+	if aside == "" {
+		return ""
+	}
+	return "Your favorites file was damaged, so the list starts empty. A copy was kept as " + filepath.Base(aside) + "."
+}
+
+// forgetFavorite takes one work off FAVORITES.
+func forgetFavorite(key string) error { return favoritesStore().Remove(key) }
+
+// clearFavorites empties FAVORITES.
+func clearFavorites() error { return favoritesStore().Clear() }
+
+// homeSuggest adapts the keyless suggestion engine (Kitsu for anime, IMDb for
+// movies and series) to the search home's autocomplete.
+func homeSuggest(ctx context.Context, query, scope string) ([]tui.HomeSuggestion, error) {
+	return homeSuggestWith(ctx, query, scope, suggest.Default().Suggest)
+}
+
+// homeSuggestWith narrows the lookup to the scope's kinds and adapts the rows.
+func homeSuggestWith(ctx context.Context, query, scope string, ask func(context.Context, string, []suggest.Kind) ([]suggest.Suggestion, error)) ([]tui.HomeSuggestion, error) {
+	return adaptSuggestions(ask(ctx, query, suggest.KindsForScope(scope)))
+}
+
+// adaptSuggestions turns engine suggestions into autocomplete rows.
+func adaptSuggestions(items []suggest.Suggestion, err error) ([]tui.HomeSuggestion, error) {
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]tui.HomeSuggestion, 0, len(items))
+	for _, s := range items {
+		rows = append(rows, tui.HomeSuggestion{Title: s.Title, Detail: s.Detail()})
+	}
+	return rows, nil
 }
 
 func init() {
@@ -103,11 +201,11 @@ func init() {
 // scopeIndexForSource maps a --source flag to the home screen's scope tab.
 func scopeIndexForSource(src string) int {
 	switch strings.ToLower(strings.TrimSpace(src)) {
-	case "hianime":
+	case "hianime", "english":
 		return 2
-	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital":
+	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
-	case "movietv", "startflix", "topcine", "pobreflix":
+	case "movietv", "startflix", "topcine", "pobreflix", "plutotv", "pluto":
 		return 3
 	default:
 		return 0
@@ -116,21 +214,42 @@ func scopeIndexForSource(src string) int {
 
 // sourcesLine reads "6 sources on · Goyabu off" at the right of the header.
 func sourcesLine() string {
-	active := source.ActiveSources()
-	disabled := source.DisabledSources()
-	sep := " · "
-	if tui.Plain() {
-		sep = " - "
+	return tui.SourcesSummary(homeSources())
+}
+
+// Seams for tests: where the choices are saved and how.
+var (
+	sourcePrefsPath   = util.SourcePrefsPath
+	persistSourcePref = util.PersistSourcePref
+)
+
+// homeSources lists the registered sources for the ctrl+s screen.
+func homeSources() []tui.SourceRow {
+	return homeSourceRows(source.SourceStates())
+}
+
+// homeSourceRows adapts source states to the screen's rows.
+func homeSourceRows(states []source.State) []tui.SourceRow {
+	rows := make([]tui.SourceRow, 0, len(states))
+	for _, st := range states {
+		rows = append(rows, tui.SourceRow{
+			ID:     string(st.Kind),
+			Name:   string(st.Kind),
+			Note:   st.Note,
+			On:     st.On,
+			Locked: st.Locked,
+		})
 	}
-	line := fmt.Sprintf("%d sources on", len(active))
-	if len(disabled) > 0 {
-		names := make([]string, 0, len(disabled))
-		for _, kind := range disabled {
-			names = append(names, string(kind))
-		}
-		line += sep + strings.Join(names, ", ") + " off"
+	return rows
+}
+
+// setHomeSource saves the user's choice for one source.
+func setHomeSource(id string, on bool) error {
+	path, err := sourcePrefsPath()
+	if err != nil {
+		return err
 	}
-	return line
+	return persistSourcePref(path, id, on)
 }
 
 // groupContinueEntries collapses watch history to one row per show: episodes
@@ -205,10 +324,14 @@ func sourceFromURL(rawURL string) string {
 		return "HiAnime"
 	case strings.Contains(host, "animesdigital"):
 		return "AnimesDigital"
+	case strings.Contains(host, "anroll"):
+		return "AnimesROLL"
 	case strings.Contains(host, "startflix"):
 		return "StartFlix"
 	case strings.Contains(host, "topcine"):
 		return "TopCine"
+	case strings.Contains(host, "pluto.tv"):
+		return "PlutoTV"
 	case strings.Contains(host, "pobreflixtv"):
 		return "Pobreflix"
 	case strings.Contains(host, "animedrive") || strings.Contains(host, "animesdrive"):
@@ -251,8 +374,18 @@ func continueTarget(entry tui.HomeContinueEntry, fromStart bool) (episodeNum, po
 	return entry.EpisodeNum + 1, 0, false, false
 }
 
-// deleteContinueEntry removes one CONTINUE row from watch history.
-func deleteContinueEntry(key string) error {
+// Seams for forgetting history, so a test can say what the history answers and
+// read back what was asked of it.
+var (
+	continueRows    = tracking.ContinueEntries
+	deleteTracked   = deleteTrackedRow
+	forgetSearchFn  = tracking.ForgetSearch
+	clearContinueFn = tracking.ClearContinue
+	clearRecentFn   = tracking.ClearRecent
+)
+
+// deleteTrackedRow removes one episode's row from watch history.
+func deleteTrackedRow(key string) error {
 	tracker := tracking.GetGlobalTracker()
 	if tracker == nil {
 		tracker = tracking.NewLocalTracker(tracking.DBPath())
@@ -261,4 +394,60 @@ func deleteContinueEntry(key string) error {
 		return fmt.Errorf("watch history unavailable")
 	}
 	return tracker.DeleteAnime(0, key)
+}
+
+// keysOfShow is the history key of every episode of the show the row with key
+// belongs to. The CONTINUE list shows one row per show, standing for the
+// latest episode watched, so removing the row has to remove them all or the
+// show would come back with an older episode. A key not in rows is just itself.
+func keysOfShow(rows []tracking.Anime, key string) []string {
+	var group string
+	for _, r := range rows {
+		if r.AllanimeID == key {
+			group = continueGroupKey(r)
+			break
+		}
+	}
+	if group == "" {
+		return []string{key}
+	}
+	var keys []string
+	for _, r := range rows {
+		if continueGroupKey(r) == group {
+			keys = append(keys, r.AllanimeID)
+		}
+	}
+	return keys
+}
+
+// deleteContinueEntry removes one CONTINUE row, and so the show it stands
+// for, from watch history.
+func deleteContinueEntry(key string) error {
+	rows, err := continueRows()
+	if err != nil {
+		return err
+	}
+	for _, k := range keysOfShow(rows, key) {
+		if err := deleteTracked(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// forgetRecentSearch removes one search from the RECENT list.
+func forgetRecentSearch(query string) error {
+	return forgetSearchFn(query)
+}
+
+// clearContinueHistory empties the CONTINUE list.
+func clearContinueHistory() error {
+	_, err := clearContinueFn()
+	return err
+}
+
+// clearRecentHistory empties the RECENT list.
+func clearRecentHistory() error {
+	_, err := clearRecentFn()
+	return err
 }

@@ -59,6 +59,24 @@ type downloaderOptions struct {
 	httpClient *http.Client                   // override SafeTransport client
 	sleep      func(time.Duration)            // override time.Sleep (skip waits)
 	newSender  func(tea.Model) progressSender // override tui.NewProgram
+
+	videoURL func(episodeURL string) (string, error)                         // override player.GetVideoURLForEpisode
+	scan     func(a ...any) (int, error)                                     // override fmt.Scanln (the prompts' input)
+	play     func(path string, args []string) (socketPath string, err error) // override player.StartVideo
+	install  func(ctx context.Context) error                                 // override the yt-dlp install
+}
+
+// ensureYtDlp makes sure the yt-dlp binary is there, downloading it on first
+// use. A failed download is an error, not a panic: the host can be offline or
+// GitHub can answer 5xx, and neither may take the whole app down.
+func (d *EpisodeDownloader) ensureYtDlp(ctx context.Context) error {
+	if d.opts.install != nil {
+		return d.opts.install(ctx)
+	}
+	if _, err := ytdlp.Install(ctx, nil); err != nil {
+		return fmt.Errorf("install yt-dlp: %w", err)
+	}
+	return nil
 }
 
 // httpClient returns the injected HTTP client when set, else builds the
@@ -91,6 +109,30 @@ func (d *EpisodeDownloader) newSender(m tea.Model) progressSender {
 		return d.opts.newSender(m)
 	}
 	return tui.NewProgram(m)
+}
+
+// resolveVideoURL returns the stream URL of an episode page.
+func (d *EpisodeDownloader) resolveVideoURL(episodeURL string) (string, error) {
+	if d.opts.videoURL != nil {
+		return d.opts.videoURL(episodeURL)
+	}
+	return player.GetVideoURLForEpisode(episodeURL)
+}
+
+// scanln reads one line of input for the prompts.
+func (d *EpisodeDownloader) scanln(a ...any) (int, error) {
+	if d.opts.scan != nil {
+		return d.opts.scan(a...)
+	}
+	return fmt.Scanln(a...)
+}
+
+// startVideo opens a local file in the player.
+func (d *EpisodeDownloader) startVideo(path string, args []string) (string, error) {
+	if d.opts.play != nil {
+		return d.opts.play(path, args)
+	}
+	return player.StartVideo(path, args)
 }
 
 // NewEpisodeDownloader creates a new episode downloader
@@ -220,22 +262,7 @@ func (d *EpisodeDownloader) DownloadEpisodeRange(startEp, endEp int) error {
 		return fmt.Errorf("start episode (%d) cannot be greater than end episode (%d)", startEp, endEp)
 	}
 
-	// Collect episodes to download
-	var episodesToDownload []int
-	var existingEpisodes []int
-	for epNum := startEp; epNum <= endEp; epNum++ {
-		_, found := d.findEpisodeByNumber(epNum)
-		if !found {
-			util.Warnf("Episode %d not found, skipping", epNum)
-			continue
-		}
-		episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
-		if d.fileExists(episodePath) {
-			existingEpisodes = append(existingEpisodes, epNum)
-		} else {
-			episodesToDownload = append(episodesToDownload, epNum)
-		}
-	}
+	episodesToDownload, existingEpisodes := d.partitionRange(startEp, endEp)
 	// Handle case where all episodes already exist
 	if len(episodesToDownload) == 0 {
 		fmt.Printf("All episodes in range %d-%d already exist!\n", startEp, endEp)
@@ -256,26 +283,7 @@ func (d *EpisodeDownloader) DownloadAllEpisodes() error {
 
 	fmt.Printf("Found %d episode(s) total for download-all\n", len(d.episodes))
 
-	// Collect all episode numbers and check which already exist
-	var episodesToDownload []int
-	var existingCount int
-	for _, ep := range d.episodes {
-		epNum := ep.Num
-		if epNum <= 0 {
-			// Try parsing from the Number string field
-			if n, err := strconv.Atoi(ep.Number); err == nil && n > 0 {
-				epNum = n
-			} else {
-				continue // skip episodes with no valid number
-			}
-		}
-		episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
-		if d.fileExists(episodePath) {
-			existingCount++
-		} else {
-			episodesToDownload = append(episodesToDownload, epNum)
-		}
-	}
+	episodesToDownload, existingCount := d.pendingEpisodes()
 
 	if existingCount > 0 {
 		fmt.Printf("Skipping %d already-downloaded episode(s)\n", existingCount)
@@ -351,7 +359,7 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 	}
 
 	m.totalBytes = totalBytes
-	p := tui.NewProgram(m)
+	p := d.newSender(m)
 
 	// Start downloads with progress tracking
 	downloadComplete := make(chan error, 1)
@@ -362,13 +370,13 @@ func (d *EpisodeDownloader) downloadConcurrentWithProgress(episodeNums []int) er
 			m.done = true
 			m.failed = err != nil
 			m.mu.Unlock()
-			time.Sleep(500 * time.Millisecond)
+			d.sleepFn(500 * time.Millisecond)
 			if err != nil {
 				p.Send(statusMsg("Some downloads failed"))
 			} else {
 				p.Send(statusMsg("All downloads complete"))
 			}
-			time.Sleep(200 * time.Millisecond)
+			d.sleepFn(200 * time.Millisecond)
 			p.Quit()
 		}()
 
@@ -399,7 +407,7 @@ func (d *EpisodeDownloader) downloadMultipleWithProgress(episodeNums []int, epis
 	videoURL string
 	path     string
 	size     int64
-}, progressModel *progressModel, program *tea.Program) error {
+}, progressModel *progressModel, program progressSender) error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, d.config.Concurrent) // Limit concurrent downloads
 	errChan := make(chan error, len(episodeNums))
@@ -461,19 +469,13 @@ func (d *EpisodeDownloader) downloadMultipleWithProgress(episodeNums []int, epis
 }
 
 // downloadEpisodeWithSharedProgress downloads an episode while updating shared progress
-func (d *EpisodeDownloader) downloadEpisodeWithSharedProgress(videoURL, destPath string, episodeReceived, totalReceived *int64, mu *sync.Mutex, progressModel *progressModel, program *tea.Program) error {
+func (d *EpisodeDownloader) downloadEpisodeWithSharedProgress(videoURL, destPath string, episodeReceived, totalReceived *int64, mu *sync.Mutex, progressModel *progressModel, program progressSender) error {
 	if strings.Contains(videoURL, "blogger.com") {
 		return d.downloadWithYtDlp(videoURL, destPath)
 	}
 
-	// Create HTTP client with longer timeout for video downloads
-	client := &http.Client{
-		Transport: api.SafeTransport(10 * time.Minute), // Much longer transport timeout
-		Timeout:   0,                                   // No overall timeout - let it download completely
-	}
-
-	// Get the file
-	resp, err := client.Get(videoURL)
+	// The shared client has no overall timeout: a video must download completely.
+	resp, err := d.httpClient().Get(videoURL)
 	if err != nil {
 		return fmt.Errorf("failed to start download: %w", err)
 	}
@@ -645,22 +647,13 @@ func (d *EpisodeDownloader) episodeDir(epNum int) string {
 
 func (d *EpisodeDownloader) getBestQualityURL(episodeURL string) (string, error) {
 	// Use existing player functionality to get video URL
-	videoURL, err := player.GetVideoURLForEpisode(episodeURL)
-	if err != nil {
-		return "", err
-	}
-	return videoURL, nil
+	return d.resolveVideoURL(episodeURL)
 }
 
 func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 	// Some CDNs answer without a Content-Length header; those need an estimate.
 	// Based on ani-cli patterns
-	isOpaqueStreamURL := strings.Contains(url, "sharepoint.com") ||
-		strings.Contains(url, "wixmp.com") ||
-		strings.Contains(url, "repackager.wixmp.com") ||
-		strings.Contains(url, "master.m3u8") ||
-		strings.Contains(url, ".m3u8") ||
-		strings.Contains(url, "blogger.com")
+	opaque := isOpaqueStreamURL(url)
 
 	// For streaming URLs that we know won't have Content-Length, return estimate immediately
 	if strings.Contains(url, ".m3u8") || strings.Contains(url, "master.m3u8") {
@@ -669,14 +662,11 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 	}
 
 	// Simple HTTP HEAD request to get content length
-	httpClient := &http.Client{
-		Transport: api.SafeTransport(10 * time.Second),
-		Timeout:   10 * time.Second,
-	}
+	httpClient := d.headClient()
 
 	req, err := http.NewRequest("HEAD", url, http.NoBody)
 	if err != nil {
-		if isOpaqueStreamURL {
+		if opaque {
 			fmt.Printf("HEAD request failed for opaque stream URL, using estimate: %v\n", err)
 			return 300 * 1024 * 1024, nil // 300MB default for opaque streams
 		}
@@ -684,13 +674,13 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 	}
 
 	// Add a referer for hosts that require one.
-	if isOpaqueStreamURL {
+	if opaque {
 		req.Header.Set("Referer", "https://allmanga.to")
 	}
 
 	resp, err := httpClient.Do(req) // #nosec G704
 	if err != nil {
-		if isOpaqueStreamURL {
+		if opaque {
 			fmt.Printf("HEAD request failed for opaque stream URL, using estimate: %v\n", err)
 			return 300 * 1024 * 1024, nil // 300MB default for opaque streams
 		}
@@ -705,7 +695,7 @@ func (d *EpisodeDownloader) getContentLength(url string) (int64, error) {
 	contentLength := resp.Header.Get("Content-Length")
 	if contentLength == "" {
 		// No Content-Length: fall back to an estimate.
-		if isOpaqueStreamURL {
+		if opaque {
 			fmt.Println("Content-Length header missing, using fallback estimate")
 			return d.estimateStreamContentLength(url, httpClient)
 		}
@@ -1027,7 +1017,10 @@ func (d *EpisodeDownloader) downloadM3U8WithYtDlp(videoURL, destPath string, pro
 
 	// Ensure yt-dlp is installed
 	ctx := context.Background()
-	ytdlp.MustInstall(ctx, nil)
+	if err := d.ensureYtDlp(ctx); err != nil {
+		done <- true // Stop progress simulation
+		return err
+	}
 
 	// Configure downloader using the basic API that we know works
 	dl := ytdlp.New().
@@ -1088,7 +1081,9 @@ func (d *EpisodeDownloader) downloadWithYtDlp(url, path string) error {
 
 	// Use go-ytdlp library instead of command line
 	ctx := context.Background()
-	ytdlp.MustInstall(ctx, nil)
+	if err := d.ensureYtDlp(ctx); err != nil {
+		return err
+	}
 
 	// Configure downloader
 	dl := ytdlp.New().
@@ -1123,12 +1118,12 @@ func isUnsafeExtError(err error) bool {
 func (d *EpisodeDownloader) promptPlayExisting(episodeNum int, episodePath string) error {
 	fmt.Printf("Would you like to play episode %d? (y/n): ", episodeNum)
 	var response string
-	if _, err := fmt.Scanln(&response); err != nil {
+	if _, err := d.scanln(&response); err != nil {
 		util.Warnf("Failed to read input: %v", err)
 		return nil
 	}
 
-	if strings.EqualFold(response, "y") || strings.EqualFold(response, "yes") {
+	if isYes(response) {
 		return d.playEpisode(episodePath, episodeNum)
 	}
 	return nil
@@ -1137,12 +1132,12 @@ func (d *EpisodeDownloader) promptPlayExisting(episodeNum int, episodePath strin
 func (d *EpisodeDownloader) promptPlayDownloaded(episodeNum int, episodePath string) error {
 	fmt.Printf("Would you like to play the downloaded episode %d? (y/n): ", episodeNum)
 	var response string
-	if _, err := fmt.Scanln(&response); err != nil {
+	if _, err := d.scanln(&response); err != nil {
 		util.Warnf("Failed to read input: %v", err)
 		return nil
 	}
 
-	if strings.EqualFold(response, "y") || strings.EqualFold(response, "yes") {
+	if isYes(response) {
 		return d.playEpisode(episodePath, episodeNum)
 	}
 	return nil
@@ -1165,25 +1160,18 @@ func (d *EpisodeDownloader) promptPlayDownloadedRangeHuh(episodeNums []int) erro
 	fmt.Print(", or 0 to exit): ")
 
 	var choice int
-	_, err := fmt.Scanln(&choice)
-	if err != nil {
+	if _, err := d.scanln(&choice); err != nil {
 		return fmt.Errorf("failed to read input: %w", err)
 	}
-
 	if choice == 0 {
 		return nil
 	}
-
-	// Check if choice is in the downloaded episodes
-	for _, epNum := range episodeNums {
-		if epNum == choice {
-			episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
-			return d.playEpisode(episodePath, epNum)
-		}
+	epNum, ok := episodeChoice(choice, episodeNums)
+	if !ok {
+		fmt.Printf("Episode %d not found in downloaded episodes.\n", choice)
+		return nil
 	}
-
-	fmt.Printf("Episode %d not found in downloaded episodes.\n", choice)
-	return nil
+	return d.playEpisode(filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum)), epNum)
 }
 
 // promptPlayExistingRangeHuh shows a proper UI for existing episode selection
@@ -1196,32 +1184,25 @@ func (d *EpisodeDownloader) promptPlayExistingRangeHuh(episodeNums []int) error 
 	fmt.Printf("Which episode would you like to play? (1-%d, or 0 to exit): ", episodeNums[len(episodeNums)-1])
 
 	var choice int
-	_, err := fmt.Scanln(&choice)
-	if err != nil {
+	if _, err := d.scanln(&choice); err != nil {
 		return fmt.Errorf("failed to read input: %w", err)
 	}
-
 	if choice == 0 {
 		return nil
 	}
-
-	// Check if choice is in the existing episodes
-	for _, epNum := range episodeNums {
-		if epNum == choice {
-			episodePath := filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))
-			return d.playEpisode(episodePath, epNum)
-		}
+	epNum, ok := episodeChoice(choice, episodeNums)
+	if !ok {
+		fmt.Printf("Episode %d not found in downloaded episodes.\n", choice)
+		return nil
 	}
-
-	fmt.Printf("Episode %d not found in downloaded episodes.\n", choice)
-	return nil
+	return d.playEpisode(filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum)), epNum)
 }
 
 func (d *EpisodeDownloader) playEpisode(episodePath string, episodeNum int) error {
 	fmt.Printf("Playing episode %d from: %s\n", episodeNum, episodePath)
 
 	// Use StartVideo to play the local file with mpv
-	socketPath, err := player.StartVideo(episodePath, []string{})
+	socketPath, err := d.startVideo(episodePath, []string{})
 	if err != nil {
 		return fmt.Errorf("failed to start video: %w", err)
 	}
@@ -1287,6 +1268,25 @@ func (m *progressModel) Init() tea.Cmd {
 	return tickCmd()
 }
 
+// monotonicPercent is the fraction the bar shows for received of total bytes.
+// It never goes below peak (an estimate that shrinks must not pull the bar
+// back) and never reaches 1 before the download is marked done, so the bar
+// is not full while the file is still being finished. It returns the percent
+// to show and the new peak.
+func monotonicPercent(received, total int64, peak float64) (pct, newPeak float64) {
+	if total > 0 && received > 0 {
+		pct = float64(received) / float64(total)
+	}
+	if pct < peak {
+		return peak, peak
+	}
+	if pct > 0 {
+		pct = min(pct, 0.99)
+		return pct, pct
+	}
+	return pct, peak
+}
+
 func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -1306,19 +1306,8 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.mu.Lock()
 		m.rate.Observe(m.received, time.Time(msg))
-		pct := 0.0
-		if m.totalBytes > 0 && m.received > 0 {
-			pct = float64(m.received) / float64(m.totalBytes)
-		}
-		// Monotonic: never go backward
-		if pct < m.peakPct {
-			pct = m.peakPct
-		} else if pct > 0 {
-			if pct > 0.99 {
-				pct = 0.99
-			}
-			m.peakPct = pct
-		}
+		var pct float64
+		pct, m.peakPct = monotonicPercent(m.received, m.totalBytes, m.peakPct)
 		if pct > 0 {
 			cmd := m.progress.SetPercent(pct)
 			m.mu.Unlock()
@@ -1333,19 +1322,8 @@ func (m *progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.received = msg.received
 		m.totalBytes = msg.totalBytes
-		// Compute pct with monotonic guarantee
-		pct := 0.0
-		if m.totalBytes > 0 {
-			pct = float64(m.received) / float64(m.totalBytes)
-		}
-		if pct < m.peakPct {
-			pct = m.peakPct
-		} else if pct > 0 {
-			if pct > 0.99 {
-				pct = 0.99
-			}
-			m.peakPct = pct
-		}
+		var pct float64
+		pct, m.peakPct = monotonicPercent(m.received, m.totalBytes, m.peakPct)
 		var cmd tea.Cmd
 		if pct > 0 {
 			cmd = m.progress.SetPercent(pct)
@@ -1384,4 +1362,85 @@ func (m *progressModel) View() tea.View {
 		t.Stats = tui.DoneStats(max(m.totalBytes, m.received), time.Since(m.started))
 	}
 	return tea.NewView(tui.RenderTransfer(&t, m.width))
+}
+
+// partitionRange splits startEp..endEp into the episodes still to download
+// and those already on disk. Numbers the source does not have are skipped.
+func (d *EpisodeDownloader) partitionRange(startEp, endEp int) (toDownload, existing []int) {
+	for epNum := startEp; epNum <= endEp; epNum++ {
+		if _, found := d.findEpisodeByNumber(epNum); !found {
+			util.Warnf("Episode %d not found, skipping", epNum)
+			continue
+		}
+		if d.fileExists(filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))) {
+			existing = append(existing, epNum)
+		} else {
+			toDownload = append(toDownload, epNum)
+		}
+	}
+	return toDownload, existing
+}
+
+// pendingEpisodes lists the episodes of the whole show that are not on disk
+// yet, and counts those that are. An episode's number is its Num, else its
+// Number text; one with neither is left out.
+func (d *EpisodeDownloader) pendingEpisodes() (toDownload []int, existingCount int) {
+	for _, ep := range d.episodes {
+		epNum := ep.Num
+		if epNum <= 0 {
+			n, err := strconv.Atoi(ep.Number)
+			if err != nil || n <= 0 {
+				continue
+			}
+			epNum = n
+		}
+		if d.fileExists(filepath.Join(d.episodeDir(epNum), d.episodeFilename(epNum))) {
+			existingCount++
+		} else {
+			toDownload = append(toDownload, epNum)
+		}
+	}
+	return toDownload, existingCount
+}
+
+// isYes reports whether a typed answer means yes.
+func isYes(response string) bool {
+	return strings.EqualFold(response, "y") || strings.EqualFold(response, "yes")
+}
+
+// episodeChoice resolves a typed number against the listed episodes; 0 and
+// numbers not in the list resolve to nothing.
+func episodeChoice(choice int, episodeNums []int) (int, bool) {
+	if choice == 0 {
+		return 0, false
+	}
+	for _, n := range episodeNums {
+		if n == choice {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// isOpaqueStreamURL reports whether the host serves streams that usually
+// carry no Content-Length, so the size has to be estimated.
+func isOpaqueStreamURL(url string) bool {
+	for _, host := range []string{"sharepoint.com", "wixmp.com", ".m3u8", "blogger.com"} {
+		if strings.Contains(url, host) {
+			return true
+		}
+	}
+	return false
+}
+
+// headClient is the client for the size probe: short timeouts, since a slow
+// HEAD must fall back to an estimate rather than stall the batch.
+func (d *EpisodeDownloader) headClient() *http.Client {
+	if d.opts.httpClient != nil {
+		return d.opts.httpClient
+	}
+	return &http.Client{
+		Transport: api.SafeTransport(10 * time.Second),
+		Timeout:   10 * time.Second,
+	}
 }

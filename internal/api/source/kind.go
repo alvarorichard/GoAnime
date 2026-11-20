@@ -20,6 +20,14 @@ const (
 	// whose current pages embed public MP4 servers. Old-theme pages keep
 	// the StartFlix panel fallback by TMDB id.
 	Pobreflix SourceKind = "Pobreflix"
+	Anroll    SourceKind = "AnimesROLL"
+	AnimesFHD SourceKind = "AnimesFHD"
+	// PlutoTV is the free ad-supported movie/series service, read through its
+	// own JSON services; its titles play without the service breaks.
+	PlutoTV SourceKind = "PlutoTV"
+	// Pomfy is the Byse-CDN movie/series catalog keyed by TMDB id; its
+	// playback runs the proof-of-work captcha and AES-256-GCM seal flow.
+	Pomfy SourceKind = "Pomfy"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -34,6 +42,17 @@ func ScraperTypeFor(kind SourceKind) (scraper.ScraperType, bool) {
 	return st, ok
 }
 
+// KindFor is the inverse of ScraperTypeFor: the SourceKind of a ScraperType,
+// or ("", false) when none has it.
+func KindFor(st scraper.ScraperType) (SourceKind, bool) {
+	for kind, t := range scraperTypeMap {
+		if t == st {
+			return kind, true
+		}
+	}
+	return "", false
+}
+
 var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimeFire:     scraper.AnimefireType,
 	Goyabu:        scraper.GoyabuType,
@@ -43,4 +62,8 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimesDigital: scraper.AnimesDigitalType,
 	AnimeDrive:    scraper.AnimeDriveType,
 	Pobreflix:     scraper.PobreflixType,
+	Anroll:        scraper.AnrollType,
+	AnimesFHD:     scraper.AnimesFHDType,
+	Pomfy:         scraper.PomfyType,
+	PlutoTV:       scraper.PlutoTVType,
 }

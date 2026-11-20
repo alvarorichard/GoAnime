@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -8,8 +9,11 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"github.com/alvarorichard/Goanime/v2/internal/debugreport"
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
+	"github.com/alvarorichard/Goanime/v2/internal/logview"
 	"github.com/alvarorichard/Goanime/v2/internal/player"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/updater"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
@@ -27,6 +31,15 @@ func main() {
 		exitCode = 1
 	}
 
+	// "goanime logs" only reads a file: it starts none of what the program
+	// does, so it is answered before any of that is set up.
+	if len(os.Args) > 1 && os.Args[1] == "logs" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		exitCode = logview.Main(ctx, os.Args[2:])
+		return
+	}
+
 	// A double-click on Windows lands in conhost, which has no font fallback
 	// and limited VT support; the TUI would degrade to ASCII. Hand a standalone
 	// launch to Windows Terminal (installing it once if needed) and let this
@@ -39,6 +52,26 @@ func main() {
 	// staged files only after this binary has started and its digest matches
 	// the one recorded by the updater. No marker means nothing to clean up.
 	updater.CleanupAfterUpdate()
+
+	// The sources the user switched on or off in the SOURCES screen. A file
+	// that cannot be read is reported and ignored: sources keep their defaults.
+	if err := util.LoadSavedSourcePrefs(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (using the default sources)\n", err)
+	}
+
+	// Challenge-gated sources (Goyabu) are only reachable through the optional
+	// cfsolve tool. Use it when installed; otherwise fetch the pinned build in
+	// the background (silent on failure) and Goyabu joins the search once it lands.
+	if !cfsolver.Register() {
+		cfsolver.InstallInBackground()
+	}
+
+	// With --debug, record the machine, the terminal, the tools and each
+	// provider's state in the log once it is open. Background: it never
+	// delays the start.
+	util.OnDebugSession(debugreport.Start)
+	// A crash report carries the same environment, with or without --debug.
+	util.SetReportCollector(debugreport.Report)
 
 	// Enable ANSI/VT processing on Windows consoles (classic cmd.exe leaves it
 	// off). Must run before any colored log/TUI output or users see raw escape
@@ -89,7 +122,14 @@ func main() {
 			restoreTerminal()
 			stack := debug.Stack()
 			util.Errorf("GoAnime crashed: %v\n%s", r, stack)
-			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\nStack trace logged to debug log.\n", r)
+			fmt.Fprintf(os.Stderr, "\nGoAnime crashed unexpectedly: %v\n", util.LogSafe(r))
+			// Always saved, with or without --debug: the person who hit the
+			// crash did not know to ask for a log.
+			if path, err := util.WriteCrashReport(r, stack); err == nil {
+				fmt.Fprintf(os.Stderr, "A crash report was saved to:\n  %s\nIt has no passwords or personal paths; please attach it to a bug report.\n", path)
+			} else {
+				fmt.Fprintf(os.Stderr, "The crash report could not be saved (%v).\n", err)
+			}
 			exitCode = 1
 		}
 	}()
@@ -149,6 +189,13 @@ func main() {
 			// returns an explanatory error (scrapers removed) — log it
 			// unconditionally.
 			fail(handlers.HandleMovieDownloadRequest())
+			return
+		}
+		// Check if error is a request to forget history
+		if err == util.ErrClearRequested {
+			if clearErr := handlers.HandleClearRequest(); clearErr != nil {
+				fail(clearErr)
+			}
 			return
 		}
 		// Check if error is upscale request

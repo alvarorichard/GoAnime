@@ -304,43 +304,38 @@ Setup shaders para baixá-los e depois escolha um modo. O nome de cada modo diz
 para que ele serve, de Performance, para GPUs fracas, a Ultra, para fontes em
 SD.
 
+### Sua configuração do mpv
+
+Quando o GoAnime encontra uma configuração sua, ele inicia o mpv com ela, então
+`mpv.conf`, `input.conf`, scripts (uosc, thumbfast), script-opts e shaders em
+`~/.config/mpv/` (`%APPDATA%\mpv` no Windows) valem como quando você roda o
+mpv sozinho. O GoAnime procura em `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`,
+`~/.config/mpv` e no antigo `~/.mpv`, e só conta uma pasta que tenha
+`mpv.conf`, `input.conf`, `scripts`, `script-opts`, `script-modules`,
+`shaders`, `fonts` ou `lua-settings`. Sem essa config, o GoAnime mantém o
+início otimizado de antes (`--no-config`, `--profile=fast`), mais leve em
+máquinas fracas.
+
+Opções de linha de comando vencem o `mpv.conf`, então algumas que o GoAnime
+precisa ficam fixas na reprodução dele: `keep-open`, `idle`, `loop-file` e
+`loop-playlist` ficam desligados para o mpv fechar no fim do episódio, e
+`resume-playback` fica desligado porque o GoAnime retoma da própria posição
+salva. O GoAnime também define `hwdec=auto-safe` e a cadeia de fallback de
+`vo`, para iniciar em máquinas onde a saída padrão do mpv falha; um `vo` ou
+`hwdec` do seu `mpv.conf` é sobrescrito, então para usar o seu, abra o
+arquivo direto no mpv. Ele não força `profile=fast` quando a sua config é carregada.
+
+Para iniciar o mpv com `--no-config`, como nas versões anteriores, defina
+`GOANIME_MPV_CONFIG=off` (também `0`, `false`, `no` ou `none`). Faça isso
+primeiro quando a reprodução falhar e sua config for a suspeita.
+
 ## Fontes
 
-| Fonte         | Conteúdo       | Idioma                      | Observações                                   |
-| ------------- | -------------- | --------------------------- | --------------------------------------------- |
-| HiAnime       | Animes         | Inglês, legendado e dublado | Legendado por padrão                          |
-| AnimeFire     | Animes         | Português (Brasil)          |                                               |
-| AnimesDigital | Animes         | Português (Brasil)          | Legendado e dublado                           |
-| AnimeDrive    | Animes         | Português (Brasil)          | Endereço configurável: `GOANIME_ANIMEDRIVE_URL` |
-| Goyabu        | Animes         | Português (Brasil)          | Desativada por padrão, veja abaixo            |
-| StartFlix     | Filmes, séries | Português (Brasil)          | Dublado e legendado                           |
-| TopCine       | Filmes, séries | Português (Brasil)          | Apenas catálogo; a reprodução usa o StartFlix |
-| Pobreflix     | Filmes, séries | Português (Brasil)          | MP4 direto; painel StartFlix como reserva     |
-
-`--source` limita a busca a uma fonte: `hianime`, `animefire`, `goyabu`,
-`animesdigital`, `animedrive`, `startflix`, `topcine` ou `pobreflix`.
-`movietv` cobre StartFlix, TopCine e Pobreflix; `ptbr` cobre todas as fontes
-em português.
-
-O Pobreflix consulta primeiro o catálogo `/api` do site e usa o índice de
-sitemaps como reserva. As páginas atuais de filmes e episódios trazem servidores
-MP4 públicos, então a reprodução é direta e não precisa de navegador. Páginas
-do tema antigo ainda usam o painel do StartFlix.
-
-O endereço da AnimeDrive fica intermitentemente inacessível em algumas redes.
-Se o site mudar ou a sua rede bloquear o endereço, `GOANIME_ANIMEDRIVE_URL`
-aponta a fonte para um espelho acessível.
-
-O Goyabu fica atrás de uma verificação gerenciada do Cloudflare e vem
-desativado. Ele funciona em redes que o Cloudflare não verifica; em uma rede
-verificada, nenhum cliente HTTP sem navegador consegue passar pela verificação.
-Para ativá-lo, use `GOANIME_ENABLED_SOURCES=goyabu`.
-
-O GoAnime depende de sites de terceiros, e esses sites mudam sem aviso. Quando
-isso acontece, a fonte correspondente pode parar de funcionar até ser
-atualizada. Um [workflow agendado](.github/workflows/source-health.yml) testa
-todas as fontes diariamente, então a falha costuma aparecer lá antes de ser
-reportada.
+O GoAnime busca em vários sites de anime e de filmes e séries ao mesmo tempo,
+em inglês e português. São sites de terceiros e mudam sem aviso, então uma
+fonte pode parar de funcionar até ser atualizada. A lista de fontes, como
+escolher uma com `--source` e as notas de cada uma estão em
+[docs/SOURCES.md](docs/SOURCES.md) (em inglês).
 
 ## Configuração
 
@@ -360,9 +355,11 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Endereço da AnimeDrive                                                   |
 | `GOANIME_POBREFLIX_URL`       | Endereço do Pobreflix                                                    |
+| `GOANIME_POBREFLIX_PLAYER_URL`| Endereço do player com Turnstile (`https://streambetter.lat`)            |
 | `GOANIME_STARTFLIX_URL`       | Endereço do StartFlix                                                    |
 | `GOANIME_STARTFLIX_PANEL_URL` | Endereço do painel de vídeo do StartFlix                                 |
 | `GOANIME_TOPCINE_URL`         | Endereço do TopCine                                                      |
+| `GOANIME_POMFY_URL`           | Endereço do Pomfy (`https://pomfy.my`)                                   |
 | `TMDB_API_KEY`                | Uma chave do [TMDB](https://www.themoviedb.org/settings/api) para detalhes de filmes, séries e temporadas |
 | `OMDB_API_KEY`                | Uma chave do [OMDb](https://www.omdbapi.com/apikey.aspx) para usar no lugar da chave de demonstração compartilhada |
 
@@ -416,8 +413,15 @@ e anexe um log de depuração:
    | macOS   | `~/Library/Logs/GoAnime`       |
    | Linux   | `~/.local/share/goanime/logs`  |
 
-3. Anexe o arquivo mais recente à issue, junto com a saída de
-   `goanime --version`, o seu sistema operacional e o comando que você usou.
+3. Anexe o arquivo mais recente à issue, junto com o comando que você usou.
+   O log já começa com o seu sistema operacional, o terminal, as versões do
+   mpv, yt-dlp e ffmpeg, quais fontes estão ligadas e como cada provider
+   respondeu. Senhas, tokens, tickets de uso único e a sua pasta pessoal são
+   removidos antes de qualquer gravação, então é seguro anexar como está.
+
+Se o GoAnime travar, ele grava um `crash_<data>_<hora>_<id>.log` na mesma
+pasta, sem precisar de `--debug`, e mostra o caminho. Anexe esse arquivo.
+[O que é coletado, e o que nunca é](docs/DIAGNOSTICS.md).
 
 O log lista os títulos que você buscou e caminhos do seu computador, que podem
 incluir o seu nome de usuário. Leia antes de anexar, se isso for importante

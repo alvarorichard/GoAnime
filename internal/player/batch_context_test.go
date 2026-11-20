@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/stretchr/testify/require"
@@ -18,24 +19,24 @@ import (
 
 // These tests swap package seams and process globals; none run in parallel.
 
-// fakeResolver stands in for a source's stream resolution: like StartFlix,
-// it hands each episode's referer and subtitles over in the globals.
+// fakeResolver stands in for a source's stream resolution: each episode comes
+// back with its own referer and subtitles in the Stream.
 func fakeResolver(t *testing.T, streams map[int]struct {
 	url, referer, sub string
 }) {
 	t.Helper()
 	prev := resolveEpisodeStreamFn
 	prevRef := util.GetGlobalReferer()
-	resolveEpisodeStreamFn = func(ep models.Episode, _ *models.Anime) (string, error) {
+	resolveEpisodeStreamFn = func(ep models.Episode, _ *models.Anime) (source.Stream, error) {
 		s, ok := streams[ep.Num]
 		if !ok {
-			return "", errors.New("no stream")
+			return source.Stream{}, errors.New("no stream")
 		}
-		util.SetGlobalReferer(s.referer)
+		stream := source.Stream{URL: s.url, Referer: s.referer}
 		if s.sub != "" {
-			util.SetGlobalSubtitles([]util.SubtitleInfo{{URL: s.sub, Language: "pt-br", Label: "Português"}})
+			stream.Subtitles = []source.Subtitle{{URL: s.sub, Language: "pt-br", Label: "Português"}}
 		}
-		return s.url, nil
+		return stream, nil
 	}
 	t.Cleanup(func() {
 		resolveEpisodeStreamFn = prev
@@ -206,8 +207,8 @@ func TestHandleDownloadAll_CoversEveryListedEpisode(t *testing.T) {
 	SetAnimeName("Show", 1)
 	SetExactMediaType("tv")
 	prev := resolveEpisodeStreamFn
-	resolveEpisodeStreamFn = func(models.Episode, *models.Anime) (string, error) {
-		return "", errors.New("offline") // stop each episode at resolution: no UI, no network
+	resolveEpisodeStreamFn = func(models.Episode, *models.Anime) (source.Stream, error) {
+		return source.Stream{}, errors.New("offline") // stop each episode at resolution: no UI, no network
 	}
 	t.Cleanup(func() { resolveEpisodeStreamFn = prev })
 
@@ -278,7 +279,9 @@ func TestBatchReportsEachEpisodeWhilePreparing(t *testing.T) {
 	prevResolve, prevStatus := resolveEpisodeStreamFn, batchStatusf
 	var status []string
 	batchStatusf = func(format string, a ...any) { status = append(status, strings.TrimSpace(fmt.Sprintf(format, a...))) }
-	resolveEpisodeStreamFn = func(models.Episode, *models.Anime) (string, error) { return "", errors.New("offline") }
+	resolveEpisodeStreamFn = func(models.Episode, *models.Anime) (source.Stream, error) {
+		return source.Stream{}, errors.New("offline")
+	}
 	t.Cleanup(func() { resolveEpisodeStreamFn, batchStatusf = prevResolve, prevStatus })
 
 	eps := []models.Episode{{Num: 1}, {Num: 2}, {Num: 3}}

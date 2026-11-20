@@ -12,6 +12,8 @@ linters:
     - bidichk
     - bodyclose
     - gocheckcompilerdirectives
+    - cyclop
+    - funlen
     - gocritic
     - gosec
     - nilerr
@@ -20,6 +22,11 @@ linters:
     - rowserrcheck
     - sqlclosecheck
   settings:
+    funlen:
+      lines: 150
+      statements: 80
+    cyclop:
+      max-complexity: 40
     gocritic:
       enable-all: true
       settings:
@@ -36,7 +43,6 @@ linters:
     generated: lax
     presets:
       - comments
-      - std-error-handling
       - common-false-positives
     rules:
       - path: _test\.go
@@ -45,6 +51,12 @@ linters:
           - errcheck
           - gosec
           - dupl
+          - funlen
+          - cyclop
+      # Known debt: each function below is over the funlen/cyclop limits and is
+      # waiting to be split. Remove its line when it is; never add one.
+      - linters: [funlen, cyclop]
+        text: "(runBatchDownload|downloadAndPlayEpisode|'main'|'DownloadWithProgress'|playVideo|'update'|ShowBeautifulHelp|'FlagParser'|handleDownloadModeWithSmart)"
 
 issues:
   max-issues-per-linter: 0

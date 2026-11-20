@@ -1,17 +1,27 @@
 package util
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
+	"github.com/alvarorichard/Goanime/v2/internal/diag"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 )
 
 var Logger *log.Logger
@@ -23,7 +33,187 @@ var consoleLogSuppressions int
 var fileLogger *log.Logger
 
 // logFile holds the reference to the open log file so it can be closed on cleanup
-var logFile *os.File
+var logFile *logSink
+
+// logFileMu guards logFile: the debug report is written from a goroutine that
+// can outlive the log, and CloseLogFile runs on the main one.
+var logFileMu sync.RWMutex
+
+func currentLogFile() *logSink {
+	logFileMu.RLock()
+	defer logFileMu.RUnlock()
+	return logFile
+}
+
+func setLogFile(s *logSink) {
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+	logFile = s
+}
+
+// Retention: a debug session writes a file each run, so without a limit the
+// folder only grows. The newest are kept; crash reports are kept apart so a
+// busy week of debugging does not push out the one report that matters.
+const (
+	maxSessionLogs = 30
+	maxCrashLogs   = 10
+)
+
+var (
+	sessionID    = newSessionID()
+	sessionStart = time.Now()
+	warnCount    atomic.Int32
+	errorCount   atomic.Int32
+	// sessionReport is the environment block written at the start of the
+	// session, kept so a crash report can carry it too.
+	sessionReport atomic.Value // string
+)
+
+var (
+	debugHooksMu   sync.Mutex
+	debugHooks     []func()
+	debugHooksOnce sync.Once
+)
+
+// OnDebugSession registers f to run once, as soon as a debug session's log
+// file is open (never without --debug). The program uses it to record the
+// machine and the providers: the util package cannot know about either.
+func OnDebugSession(f func()) {
+	debugHooksMu.Lock()
+	defer debugHooksMu.Unlock()
+	debugHooks = append(debugHooks, f)
+}
+
+func runDebugHooks() {
+	debugHooksOnce.Do(func() {
+		debugHooksMu.Lock()
+		hooks := append([]func(){}, debugHooks...)
+		debugHooksMu.Unlock()
+		for _, f := range hooks {
+			f()
+		}
+	})
+}
+
+func newSessionID() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// SessionID names this run. It is in the log header, in the summary and in any
+// crash report, so a report and a log from the same run can be matched.
+func SessionID() string { return sessionID }
+
+// logSink is the one place the log file is written. Everything that reaches it
+// — log lines, the environment report, a subprocess's output — has credentials,
+// tickets and the home directory removed first, so a log can be attached to a
+// bug report as it is.
+type logSink struct {
+	mu     sync.Mutex
+	f      *os.File
+	closed bool
+
+	subMu sync.Mutex
+	sub   *lineWriter
+}
+
+func (s *logSink) Write(p []byte) (int, error) {
+	// Text only: no escape sequence reaches the file, whether the logger put it
+	// there or it came in with the data (mpv's colours, a scraped title).
+	clean := ansi.Strip(diag.Redact(string(p)))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, os.ErrClosed
+	}
+	if _, err := s.f.WriteString(clean); err != nil {
+		return 0, err
+	}
+	return len(p), nil // the caller wrote len(p) bytes; redaction may shorten them
+}
+
+// lines is the writer for output that arrives in arbitrary chunks (a
+// subprocess's pipe): it hands the sink whole lines only.
+func (s *logSink) lines() io.Writer {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if s.sub == nil {
+		s.sub = &lineWriter{sink: s}
+	}
+	return s.sub
+}
+
+func (s *logSink) close() { s.finish("") }
+
+// finish empties the partial subprocess line, writes footer (redacted like
+// everything else) and closes the file. Later writes answer os.ErrClosed.
+func (s *logSink) finish(footer string) {
+	s.subMu.Lock()
+	sub := s.sub
+	s.subMu.Unlock()
+	if sub != nil {
+		sub.flush()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	if footer != "" {
+		_, _ = s.f.WriteString(diag.Redact(footer))
+	}
+	s.closed = true
+	_ = s.f.Sync()
+	_ = s.f.Close()
+}
+
+// maxPartialLine bounds what lineWriter holds waiting for a newline.
+const maxPartialLine = 8 << 10
+
+// lineWriter buffers input up to each newline before it reaches the sink. A
+// secret split across two writes matches no rule in either half, so redaction
+// has to see the whole line. A line that never ends is flushed at
+// maxPartialLine rather than held without limit.
+type lineWriter struct {
+	mu   sync.Mutex
+	sink *logSink
+	buf  []byte
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		if _, err := l.sink.Write(l.buf[:i+1]); err != nil {
+			return 0, err
+		}
+		l.buf = append(l.buf[:0], l.buf[i+1:]...)
+	}
+	if len(l.buf) > maxPartialLine {
+		if _, err := l.sink.Write(l.buf); err != nil {
+			return 0, err
+		}
+		l.buf = l.buf[:0]
+	}
+	return len(p), nil
+}
+
+func (l *lineWriter) flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.buf) > 0 {
+		_, _ = l.sink.Write(append(l.buf, '\n'))
+		l.buf = nil
+	}
+}
 
 // LogFilePath stores the path to the current debug log file (exported for user visibility)
 var LogFilePath string
@@ -83,7 +273,7 @@ func GetLogDir() string {
 // initFileLogger creates the log file and initializes the file-only logger.
 // Each run creates a unique log file (date + time) so logs are never overwritten or mixed.
 // Returns the file handle (caller must close) or nil on error.
-func initFileLogger() *os.File {
+func initFileLogger() *logSink {
 	logDir := GetLogDir()
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not create log directory %s: %v\n", logDir, err)
@@ -120,21 +310,143 @@ func initFileLogger() *os.File {
 		}
 	}
 
-	// Write session header
-	header := fmt.Sprintf("===== GoAnime Debug Session — %s =====\n\n", now.Format("2006-01-02 15:04:05"))
-	_, _ = f.WriteString(header)
+	sink := &logSink{f: f}
+	pruneLogs(logDir, "goanime_", maxSessionLogs, logPath)
+	pruneLogs(logDir, "crash_", maxCrashLogs, "")
+
+	_, _ = sink.Write([]byte(sessionHeader(now, logPath)))
 
 	// Create a plain-text logger that writes to the file (no ANSI colors)
-	fileLogger = log.NewWithOptions(f, log.Options{
-		ReportCaller:    true,
+	fileLogger = log.NewWithOptions(sink, log.Options{
+		// The code location is for whoever debugs GoAnime itself, so it is
+		// off unless asked for; the file is for the person reading what
+		// happened.
+		ReportCaller:    os.Getenv("GOANIME_LOG_SOURCE") != "",
 		ReportTimestamp: true,
 		TimeFormat:      "15:04:05",
-		Prefix:          "GoAnime",
 	})
+	fileLogger.SetStyles(fileLogStyles())
 	fileLogger.SetLevel(log.DebugLevel)
-	fileLogger.SetColorProfile(colorprofile.ASCII) // no colors in the file
+	// NoTTY, not ASCII: ASCII drops the colours but keeps bold and faint, which
+	// leave "^[[1mDEBUG^[[m" in every line of a file read in an editor or less.
+	fileLogger.SetColorProfile(colorprofile.NoTTY)
 
-	return f
+	return sink
+}
+
+// sessionHeader opens the log: who this run is and the promise that the file
+// is safe to share.
+func sessionHeader(now time.Time, path string) string {
+	return fmt.Sprintf(`===== GoAnime debug session =====
+Session  %s
+Started  %s
+Log      %s
+
+This file is safe to attach to a bug report: credentials, one-time tickets and
+your home folder are removed before anything is written.
+`, sessionID, now.Format("2006-01-02 15:04:05 -07:00"), path)
+}
+
+// fileLogStyles is the look of a line in the log file: the time, then the
+// message and its fields. A debug line, which is nearly every line, has no
+// level label and no "GoAnime:" (the file is all GoAnime's); the few INFO,
+// WARN and ERROR lines are labelled so they stand out. No colour: the file
+// holds text.
+func fileLogStyles() *log.Styles {
+	label := func(text string) lipgloss.Style { return lipgloss.NewStyle().SetString(text) }
+	return &log.Styles{
+		Levels: map[log.Level]lipgloss.Style{
+			log.DebugLevel: lipgloss.NewStyle(), // renders as "", which the formatter skips
+			log.InfoLevel:  label("INFO "),
+			log.WarnLevel:  label("WARN "),
+			log.ErrorLevel: label("ERROR"),
+			log.FatalLevel: label("FATAL"),
+		},
+		Keys:   map[string]lipgloss.Style{},
+		Values: map[string]lipgloss.Style{},
+	}
+}
+
+// pruneLogs keeps the newest `keep` files named prefix*.log in dir and removes
+// the rest. Names carry their timestamp, so the order of the names is the order
+// of the runs. keepFile (the file just created) is never removed.
+func pruneLogs(dir, prefix string, keep int, keepFile string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".log") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	for len(names) > keep {
+		victim := filepath.Join(dir, names[0])
+		names = names[1:]
+		if victim == keepFile {
+			continue
+		}
+		_ = os.Remove(victim)
+	}
+}
+
+// WriteSessionReport records the environment report (machine, terminal,
+// tools, sources) in the debug log and keeps it for any crash report. It does
+// nothing when no log file is open.
+func WriteSessionReport(text string) {
+	sessionReport.Store(text)
+	sink := currentLogFile()
+	if sink == nil {
+		return
+	}
+	// The log may close between the check and the write: a closed sink answers
+	// with an error, which is dropped.
+	_, _ = sink.Write([]byte("\n--- Environment ---\n" + text + "\n--- Log ---\n"))
+}
+
+// themedLogStyles gives the console log the look of the screens: the level is
+// the site's accent, an inverted badge or the crimson "!" block of a notice,
+// instead of the library's own cyan, yellow, pink and violet. Everything is a
+// theme style, so a light terminal and NO_COLOR follow the theme as the
+// screens do.
+func themedLogStyles(theme *tui.Theme) *log.Styles {
+	level := func(text string, st lipgloss.Style) lipgloss.Style {
+		return st.SetString(text).Padding(0, 1)
+	}
+	return &log.Styles{
+		Timestamp: theme.Muted,
+		Caller:    theme.Faint,
+		Prefix:    lipgloss.NewStyle(),
+		Message:   theme.Text,
+		Key:       theme.Muted,
+		Value:     theme.Soft,
+		Separator: theme.Faint,
+		Levels: map[log.Level]lipgloss.Style{
+			log.DebugLevel: level("DEBUG", theme.Muted.Bold(true)),
+			log.InfoLevel:  level("INFO ", theme.Primary),
+			log.WarnLevel:  level("WARN ", theme.Tag.Padding(0, 0)),
+			log.ErrorLevel: level("ERROR", theme.Notice.Padding(0, 0)),
+			log.FatalLevel: level("FATAL", theme.Notice.Padding(0, 0)),
+		},
+		Keys:   map[string]lipgloss.Style{},
+		Values: map[string]lipgloss.Style{},
+	}
+}
+
+// newConsoleLogger builds the console logger for w at the given profile.
+func newConsoleLogger(w io.Writer, profile colorprofile.Profile, timestamps bool) *log.Logger {
+	l := log.NewWithOptions(w, log.Options{
+		ReportTimestamp: timestamps,
+		TimeFormat:      "15:04:05",
+		Prefix:          prefixForProfile(profile),
+	})
+	theme := tui.CurrentTheme()
+	l.SetStyles(themedLogStyles(&theme))
+	l.SetLevel(log.InfoLevel)
+	l.SetColorProfile(profile)
+	return l
 }
 
 // InitLogger initializes the beautiful charmbracelet logger.
@@ -147,27 +459,21 @@ func InitLogger() {
 	// when classic cmd.exe cannot process ANSI (avoids raw ←[38;2;...m garbage).
 	profile := tui.ConsoleColorProfile(os.Stderr)
 
-	Logger = log.NewWithOptions(os.Stderr, log.Options{
-		ReportTimestamp: IsDebug,
-		TimeFormat:      "15:04:05",
-		Prefix:          prefixForProfile(profile),
-	})
-
 	// Console logger is always InfoLevel to keep the terminal clean for TUI.
 	// Debug-level messages are routed exclusively to the log file.
-	Logger.SetLevel(log.InfoLevel)
-	Logger.SetColorProfile(profile)
+	Logger = newConsoleLogger(os.Stderr, profile, IsDebug)
 
 	if IsDebug {
 		// Initialize file logging — all debug output goes here
-		logFile = initFileLogger()
-		if logFile != nil {
+		setLogFile(initFileLogger())
+		if currentLogFile() != nil {
 			RegisterCleanup(CloseLogFile)
 			// Reset first so the banner starts on its own fresh line rather
 			// than risking a glue-on with whatever column the shell's
 			// prompt left the cursor at when this process started.
 			tui.ResetTerminal()
 			showDebugBanner()
+			runDebugHooks()
 		} else {
 			Logger.Info("Debug mode enabled (file logging unavailable — logs will appear in console)")
 			// Fallback: if we can't write to a file, allow debug on console
@@ -185,7 +491,7 @@ func InitLogger() {
 			note = "Japanese labels hidden: this terminal cannot draw them (GOANIME_JAPANESE=1 shows them anyway)"
 		}
 		if note != "" {
-			if IsDebug && logFile != nil {
+			if IsDebug && currentLogFile() != nil {
 				Debug(note)
 			}
 			Info(note)
@@ -241,6 +547,11 @@ func showDebugBanner() {
 		return
 	}
 
+	if panel := tui.DebugPanel(LogFilePath, followCmd, debugPanelWidth()); panel != "" {
+		fmt.Fprintln(os.Stderr, panel)
+		return
+	}
+
 	theme := tui.CurrentTheme()
 	banner := theme.Header.Render(" DEBUG ")
 	path := theme.Soft.Render(LogFilePath)
@@ -250,19 +561,52 @@ func showDebugBanner() {
 	fmt.Fprintf(os.Stderr, "%s Debug log → %s\n       %s %s\n", banner, path, tailCmd, hint)
 }
 
+// debugPanelWidth is the room for the panel: the terminal's width, capped so a
+// wide window does not stretch it, with a sensible default when unknown.
+func debugPanelWidth() int {
+	w, _, err := term.GetSize(os.Stderr.Fd())
+	if err != nil || w <= 0 {
+		w = 80
+	}
+	return min(w, 120)
+}
+
 // CloseLogFile flushes and closes the debug log file
 func CloseLogFile() {
-	if logFile != nil {
-		_ = logFile.Sync()
-		_ = logFile.Close()
-		logFile = nil
+	logFileMu.Lock()
+	sink := logFile
+	logFile = nil
+	logFileMu.Unlock()
+	if sink != nil {
+		sink.finish(sessionFooter(time.Now()))
 	}
+}
+
+// sessionFooter closes the log with how the run went, so the first thing a
+// reader of the tail learns is whether anything went wrong.
+func sessionFooter(now time.Time) string {
+	plural := func(n int32, word string) string {
+		if n == 1 {
+			return fmt.Sprintf("1 %s", word)
+		}
+		return fmt.Sprintf("%d %ss", n, word)
+	}
+	return fmt.Sprintf("\n===== Session %s ended %s · ran %s · %s · %s =====\n",
+		sessionID, now.Format("15:04:05"), now.Sub(sessionStart).Round(time.Second),
+		plural(warnCount.Load(), "warning"), plural(errorCount.Load(), "error"))
 }
 
 // writeToFile writes a message to the file logger if active
 func writeToFile(level log.Level, msg string, keyvals ...any) {
 	if fileLogger == nil {
 		return
+	}
+	fileLogger.Helper()
+	switch level {
+	case log.WarnLevel:
+		warnCount.Add(1)
+	case log.ErrorLevel, log.FatalLevel:
+		errorCount.Add(1)
 	}
 	switch level {
 	case log.DebugLevel:
@@ -281,16 +625,23 @@ func writeToFile(level log.Level, msg string, keyvals ...any) {
 // GetLogFileWriter returns the log file as an io.Writer for external use (e.g., capturing subprocess output).
 // Returns nil if file logging is not active.
 func GetLogFileWriter() io.Writer {
-	if logFile == nil {
+	sink := currentLogFile()
+	if sink == nil {
 		return nil
 	}
-	return logFile
+	return sink.lines() // whole lines through the redacting sink, never the bare file
 }
 
 // Debug logs a debug message (only when debug mode is enabled).
 // Debug messages are written exclusively to the log file to avoid
 // corrupting interactive TUI elements on the terminal.
 func Debug(msg any, keyvals ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if IsDebug {
 		formatted := fmt.Sprintf("%v", msg)
 		if fileLogger != nil {
@@ -304,6 +655,12 @@ func Debug(msg any, keyvals ...any) {
 
 // Info logs an info message
 func Info(msg any, keyvals ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf("%v", msg)
 		Logger.Info(formatted, keyvals...)
@@ -313,6 +670,12 @@ func Info(msg any, keyvals ...any) {
 
 // Warn logs a warning message
 func Warn(msg any, keyvals ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf("%v", msg)
 		Logger.Warn(formatted, keyvals...)
@@ -322,6 +685,12 @@ func Warn(msg any, keyvals ...any) {
 
 // Error logs an error message
 func Error(msg any, keyvals ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf("%v", msg)
 		Logger.Error(formatted, keyvals...)
@@ -331,6 +700,12 @@ func Error(msg any, keyvals ...any) {
 
 // Fatal logs a fatal message and exits
 func Fatal(msg any, keyvals ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf("%v", msg)
 		writeToFile(log.FatalLevel, formatted, keyvals...)
@@ -342,6 +717,12 @@ func Fatal(msg any, keyvals ...any) {
 // Debugf logs a formatted debug message (only when debug mode is enabled).
 // Debug messages are written exclusively to the log file.
 func Debugf(format string, args ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if IsDebug {
 		formatted := fmt.Sprintf(format, args...)
 		if fileLogger != nil {
@@ -355,6 +736,12 @@ func Debugf(format string, args ...any) {
 
 // Infof logs a formatted info message
 func Infof(format string, args ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf(format, args...)
 		Logger.Info(formatted)
@@ -364,6 +751,12 @@ func Infof(format string, args ...any) {
 
 // Warnf logs a formatted warning message
 func Warnf(format string, args ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf(format, args...)
 		Logger.Warn(formatted)
@@ -373,6 +766,12 @@ func Warnf(format string, args ...any) {
 
 // Errorf logs a formatted error message
 func Errorf(format string, args ...any) {
+	if fileLogger != nil {
+		fileLogger.Helper() // log lines name whoever logged, not this wrapper
+	}
+	if Logger != nil {
+		Logger.Helper()
+	}
 	if Logger != nil {
 		formatted := fmt.Sprintf(format, args...)
 		Logger.Error(formatted)

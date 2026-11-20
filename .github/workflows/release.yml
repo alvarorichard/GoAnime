@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: '1.27.3'
+  GO_VERSION: '1.27.4'
   BINARY_NAME: goanime
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
@@ -241,6 +241,172 @@ jobs:
           retention-days: 1
 
   # =============================================================================
+  # Job 2b: Build cfsolve (clears Goyabu's Cloudflare gate; optional, no browser)
+  # =============================================================================
+  # GoAnime downloads the binary for its own version from this release on first
+  # use. It is optional: a failure here must never block a release, it only
+  # leaves that platform without Goyabu. The binaries join the signed
+  # checksums-sha256.txt below, which is what the downloader verifies.
+  # Windows has its own job below (MinGW-w64 toolchain).
+  cfsolve:
+    name: Build cfsolve ${{ matrix.asset }}
+    runs-on: ${{ matrix.runner }}
+    needs: test
+    continue-on-error: true
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { asset: challenge-linux-amd64,  runner: ubuntu-24.04 }
+          - { asset: challenge-linux-arm64,  runner: ubuntu-24.04-arm }
+          - { asset: challenge-darwin-arm64, runner: macos-latest }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned cfsolve commit
+        id: pin
+        shell: bash
+        run: |
+          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
+          {
+            echo "repo=${repo#https://github.com/}"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out cfsolve at that commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: cfsolve-src
+          persist-credentials: false
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Install the pinned Rust toolchain
+        working-directory: cfsolve-src
+        run: rustup toolchain install
+
+      - name: Build
+        working-directory: cfsolve-src
+        run: cargo build --release --locked --bin challenge
+
+      - name: Smoke test
+        run: ./cfsolve-src/target/release/challenge --help >/dev/null
+
+      - name: Stage
+        run: |
+          mkdir -p dist
+          cp cfsolve-src/target/release/challenge "dist/${{ matrix.asset }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 1
+
+  # Tested on a real Windows 11: the solver cleared Goyabu's gate (HTTP 403 -> 200).
+  cfsolve-windows:
+    name: Build cfsolve challenge-windows-amd64.exe
+    runs-on: windows-latest
+    needs: test
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned cfsolve commit
+        id: pin
+        shell: bash
+        run: |
+          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
+          {
+            echo "repo=${repo#https://github.com/}"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out cfsolve at that commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: cfsolve-src
+          persist-credentials: false
+
+      - name: Install MinGW-w64 and the BoringSSL build tools
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            git patch perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-clang
+
+      - name: Install the pinned Rust toolchain and the windows-gnu target
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        env:
+          LIBCLANG_PATH: ${{ steps.msys2.outputs.msys2-location }}\mingw64\bin
+        run: cargo build --release --locked --bin challenge --target x86_64-pc-windows-gnu
+
+      - name: Smoke test
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          exe=target/x86_64-pc-windows-gnu/release/challenge.exe
+          "$exe" --help >/dev/null
+          if objdump -p "$exe" | grep -qiE 'libstdc\+\+|libgcc_s|libwinpthread'; then
+            echo "::error::the .exe imports a MinGW runtime DLL that a clean Windows does not have"
+            exit 1
+          fi
+
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp cfsolve-src/target/x86_64-pc-windows-gnu/release/challenge.exe dist/challenge-windows-amd64.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: challenge-windows-amd64.exe
+          path: dist/challenge-windows-amd64.exe
+          retention-days: 1
+
+  # =============================================================================
   # Job 3: Merge macOS binaries into a single universal (x86_64 + arm64) binary
   # =============================================================================
   macos-universal:
@@ -440,7 +606,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-24.04
-    needs: [build, macos-universal, windows-installer]
+    needs: [build, macos-universal, windows-installer, cfsolve, cfsolve-windows]
     # The environment holds the minisign secret key and requires a reviewer's
     # approval, so nothing is signed or published without a human saying yes.
     environment: release
@@ -479,6 +645,15 @@ jobs:
           name: windows-installer
           path: artifacts/windows-installer
 
+      - name: Download cfsolve binaries
+        # Optional: with none built, the release simply has no solver assets.
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          path: cfsolve-assets
+          pattern: challenge-*
+          merge-multiple: true
+
       - name: Prepare release assets
         run: |
           mkdir -p release
@@ -512,6 +687,21 @@ jobs:
           
           echo "Release assets prepared:"
           ls -la release/
+
+      - name: Add cfsolve binaries to the release assets
+        run: |
+          # Before the checksums are generated, so they are covered by the signed
+          # checksums-sha256.txt that GoAnime verifies before running one.
+          shopt -s nullglob
+          found=(cfsolve-assets/challenge-*)
+          for f in "${found[@]}"; do
+            cp "$f" "release/$(basename "$f")"
+            chmod +x "release/$(basename "$f")"
+          done
+          if [ ! -f release/challenge-linux-amd64 ]; then
+            echo "::warning::no cfsolve linux/amd64 binary; this release ships without the Goyabu solver"
+          fi
+          ls -l release/challenge-* 2>/dev/null || true
 
       - name: Generate checksums
         run: |
@@ -687,6 +877,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
+      - name: Attach cfsolve binaries
+        run: |
+          shopt -s nullglob
+          files=(release/challenge-*)
+          if [ "${#files[@]}" -gt 0 ]; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release summary
         run: |

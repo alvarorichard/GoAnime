@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"testing"
 
 	"github.com/alvarorichard/Goanime/v2/internal/api"
@@ -47,7 +48,7 @@ func TestProviders_FetchStreamURL_CancelledContext(t *testing.T) {
 func restoreStreamFns(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
-		startFlixStreamFn = api.GetStartFlixStreamURL
+		startFlixStreamFn = api.ResolveStartFlixStream
 	})
 }
 
@@ -62,9 +63,9 @@ func TestStartFlixProvider_FetchStreamURL(t *testing.T) {
 		var gotAnime *models.Anime
 		var gotEp *models.Episode
 		var gotQuality string
-		startFlixStreamFn = func(a *models.Anime, e *models.Episode, q string) (string, error) {
+		startFlixStreamFn = func(a *models.Anime, e *models.Episode, q string) (source.Stream, error) {
 			gotAnime, gotEp, gotQuality = a, e, q
-			return "https://cdn.example/sfx.m3u8", nil
+			return source.Stream{URL: "https://cdn.example/sfx.m3u8"}, nil
 		}
 		url, err := p.FetchStreamURL(context.Background(), ep, anime, "best")
 		require.NoError(t, err)
@@ -77,8 +78,8 @@ func TestStartFlixProvider_FetchStreamURL(t *testing.T) {
 
 	t.Run("error passthrough", func(t *testing.T) {
 		restoreStreamFns(t)
-		startFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (string, error) {
-			return "", assert.AnError
+		startFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (source.Stream, error) {
+			return source.Stream{}, assert.AnError
 		}
 		_, err := p.FetchStreamURL(context.Background(), ep, anime, "")
 		require.ErrorIs(t, err, assert.AnError)
@@ -86,9 +87,9 @@ func TestStartFlixProvider_FetchStreamURL(t *testing.T) {
 
 	t.Run("cancelled context returns immediately", func(t *testing.T) {
 		restoreStreamFns(t)
-		startFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (string, error) {
+		startFlixStreamFn = func(_ *models.Anime, _ *models.Episode, _ string) (source.Stream, error) {
 			t.Error("must not fetch with cancelled context")
-			return "", nil
+			return source.Stream{}, nil
 		}
 		_, err := p.FetchStreamURL(cancelledCtx(), ep, anime, "best")
 		require.ErrorIs(t, err, context.Canceled)

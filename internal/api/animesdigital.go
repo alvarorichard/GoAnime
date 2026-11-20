@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +46,9 @@ func GetAnimesDigitalEpisodes(media *models.Anime) ([]models.Episode, error) {
 			useDubbed = strings.EqualFold(string(pinned), "Dublado")
 		} else if idx, err := animesDigitalPickFn([]string{"Legendado", "Dublado"}); err == nil {
 			useDubbed = idx == 1
+		} else if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+			// ESC is an answer: the user went back, not "subtitles, please".
+			return nil, ErrBackToSearch
 		} else {
 			util.Debug("AnimesDigital: audio picker unavailable, taking subtitles", "err", err)
 		}

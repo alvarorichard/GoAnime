@@ -41,6 +41,9 @@ type mutant struct {
 	// stopsAt, for a cascade, is the stage the run must stop at: the stages
 	// after it must not run.
 	stopsAt string
+	// race runs the guard tests under the race detector, for a mutant whose
+	// only symptom is a data race.
+	race bool
 }
 
 const (
@@ -58,7 +61,7 @@ var audioGuardMutants = []mutant{
 		name: "pre-fix: original audio passed off as the dub",
 		edits: []codeEdit{
 			{sfxAPIFile, "\tif have != want {\n\t\tif err := acceptAudioSwap(", "\tif false && have != want {\n\t\tif err := acceptAudioSwap("},
-			{sfxAPIFile, "util.SetGlobalAudioLanguage(audioLangForStartFlix(have))", "util.SetGlobalAudioLanguage(audioLangForStartFlix(startflix.AudioDubbed))"},
+			{sfxAPIFile, "out.AudioLang = audioLangForStartFlix(have)", "out.AudioLang = audioLangForStartFlix(startflix.AudioDubbed)"},
 		},
 		kills: map[string][]string{apiPkg: {"TestTopCineTodoPoderosoCascade", "TestTopCineTodoPoderosoOriginalOnlyWhenAsked", "TestPobreflixDeadPanelPlaysThroughVIDSRC"}},
 	},
@@ -69,7 +72,7 @@ var audioGuardMutants = []mutant{
 	},
 	{
 		name:  "mpv told the wanted audio, not the one playing",
-		edits: []codeEdit{{sfxAPIFile, "util.SetGlobalAudioLanguage(audioLangForStartFlix(have))", "util.SetGlobalAudioLanguage(audioLangForStartFlix(want))"}},
+		edits: []codeEdit{{sfxAPIFile, "out.AudioLang = audioLangForStartFlix(have)", "out.AudioLang = audioLangForStartFlix(want)"}},
 		kills: map[string][]string{apiPkg: {"TestTopCineTodoPoderosoOriginalOnlyWhenAsked", "TestPanelMovieLegendadoOnlyPlaysUnasked"}},
 	},
 	{
@@ -129,6 +132,7 @@ var audioGuardMutants = []mutant{
 }
 
 func TestAudioGuardKillsMutants(t *testing.T) {
+	skipMutantsWhenShort(t)
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Skip("no go toolchain on PATH to build the mutants with")
@@ -219,11 +223,12 @@ func writeMutantOverlay(t *testing.T, root string, edits []codeEdit) string {
 
 // runGuardTests runs the named tests of one package, with the overlay when
 // one is given, and returns the verbose output.
-func runGuardTests(t *testing.T, goBin, root, overlay, pkg string, tests []string) (string, error) {
+func runGuardTests(t *testing.T, goBin, root, overlay, pkg string, tests []string, extraFlags ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	args := []string{"test", "-count=1", "-v", "-run", "^(" + strings.Join(tests, "|") + ")$"}
+	args = append(args, extraFlags...)
 	if overlay != "" {
 		args = append(args, "-overlay="+overlay)
 	}

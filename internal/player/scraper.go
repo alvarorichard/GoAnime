@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 
 	// Blank import: the providers package self-registers every live Source in
@@ -27,6 +26,7 @@ import (
 	_ "github.com/alvarorichard/Goanime/v2/internal/api/providers"
 	"github.com/alvarorichard/Goanime/v2/internal/api/source"
 	"github.com/alvarorichard/Goanime/v2/internal/models"
+	"github.com/alvarorichard/Goanime/v2/internal/rangedl"
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
@@ -85,9 +85,11 @@ func DownloadFolderFormatter(str string) string {
 	return ""
 }
 
-// getContentLength retrieves the content length of the given URL.
+// getContentLength retrieves the content length of the given URL. The probing
+// lives in rangedl; this adds the auth headers and what to do when the server
+// does not say.
 func getContentLength(url string, client *http.Client) (int64, error) {
-	// Check if this is a URL that might not have Content-Length header
+	// A URL that might not have a Content-Length header
 	isKnownStreamURL := strings.Contains(url, "sharepoint.com") ||
 		strings.Contains(url, "wixmp.com") ||
 		strings.Contains(url, "master.m3u8") ||
@@ -97,72 +99,18 @@ func getContentLength(url string, client *http.Client) (int64, error) {
 		strings.Contains(url, "animesfire") ||
 		strings.Contains(url, "repackager.wixmp.com")
 
-	// Attempts to create an HTTP HEAD request to retrieve headers without downloading the body.
-	req, err := http.NewRequest("HEAD", url, http.NoBody)
-	if err != nil {
-		// Returns 0 and the error if the request creation fails.
-		return 0, err
-	}
-	applyDownloadAuthHeaders(req, url)
-
-	// Sends the HEAD request to the server.
-	resp, err := client.Do(req) // #nosec G704
-	if err != nil || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
-		if resp != nil {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				util.Debugf("Failed to close HEAD response body: %v", closeErr)
+	return rangedl.ContentLength(url, client, rangedl.ProbeOptions{
+		Prepare: func(req *http.Request) { applyDownloadAuthHeaders(req, url) },
+		OnMissing: func() (int64, error) {
+			if isKnownStreamURL {
+				util.Debugf("Content-Length header missing for streaming URL, using fallback method")
+				return estimateStreamContentLength(url, client)
 			}
-		}
-		// If the HEAD request fails or is not supported, fall back to a GET request.
-		req.Method = "GET"
-		req.Header.Set("Range", "bytes=0-0") // Requests only the first byte to minimize data transfer.
-		resp, err = client.Do(req)           // #nosec G704 -- Sends the modified GET request.
-		if err != nil {
-			// Returns 0 and the error if the GET request fails.
-			return 0, err
-		}
-	}
-
-	// Ensures that the response body is closed after it is used to avoid resource leaks.
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			// Logs a warning if closing the response body fails.
-			util.Debugf("Failed to close response body: %v", err)
-		}
-	}()
-
-	// Checks if the server responded with a 200 OK or 206 Partial Content status.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return 0, netx.NewDownloadExpiredError("Download", "content-length", resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status))
-		}
-		// Returns an error if the server does not support partial content (required for ranged requests).
-		return 0, fmt.Errorf("server does not support partial content: status code %d", resp.StatusCode)
-	}
-
-	// Retrieves the "Content-Length" header from the response.
-	contentLengthHeader := resp.Header.Get("Content-Length")
-	if contentLengthHeader == "" {
-		// For known streaming URLs that might not have Content-Length, return a default size
-		if isKnownStreamURL {
-			util.Debugf("Content-Length header missing for streaming URL, using fallback method")
-			return estimateStreamContentLength(url, client)
-		}
-		// For any other URL without Content-Length, use a reasonable default instead of failing
-		util.Debugf("Content-Length header missing, using default estimate")
-		return 200 * 1024 * 1024, nil // 200MB default
-	}
-
-	// Converts the "Content-Length" header from a string to an int64.
-	contentLength, err := strconv.ParseInt(contentLengthHeader, 10, 64)
-	if err != nil {
-		// Returns 0 and an error if the conversion fails.
-		return 0, err
-	}
-
-	// Returns the content length in bytes.
-	return contentLength, nil
+			// For any other URL without Content-Length, use a reasonable default instead of failing
+			util.Debugf("Content-Length header missing, using default estimate")
+			return 200 * 1024 * 1024, nil // 200MB default
+		},
+	})
 }
 
 // estimateStreamContentLength estimates the size of a stream whose server
@@ -329,6 +277,22 @@ func selectEpisodeWithPicker(pick episodePickFunc, episodes []models.Episode, wa
 	return episodes[idx].URL, episodes[idx].Number, nil
 }
 
+// episodeActions are the episodes screen's action keys. A title of one item (a
+// movie) has no range and no "all" to download: only that item.
+func episodeActions(total int) []tui.PickAction {
+	actions := []tui.PickAction{
+		{Key: "r", Label: "from the start", Hint: "from start"},
+		{Key: "d", Label: "this episode", Hint: "download", Section: true},
+	}
+	if total > 1 {
+		actions = append(actions,
+			tui.PickAction{Key: "D", Label: "a range, from here to ...", Section: true},
+			tui.PickAction{Key: "A", Label: fmt.Sprintf("all %d episodes", total), Section: true},
+		)
+	}
+	return append(actions, tui.PickAction{Key: "m", Label: "every option, upscale included", Section: true})
+}
+
 // episodePickOptions builds the episodes screen (tela 5): the show in the
 // header, its source and audio at the right, the jump hint, the watched
 // count and the download actions.
@@ -361,15 +325,9 @@ func episodePickOptions(episodes []models.Episode, watched map[int]episodeWatch)
 		HelpHint:          true,
 		FilterPlaceholder: "type a number to jump, / to search titles",
 		Context:           header,
-		Actions: []tui.PickAction{
-			{Key: "r", Label: "from the start", Hint: "from start"},
-			{Key: "d", Label: "this episode", Hint: "download", Section: true},
-			{Key: "D", Label: "a range, from here to ...", Section: true},
-			{Key: "A", Label: fmt.Sprintf("all %d episodes", len(episodes)), Section: true},
-			{Key: "m", Label: "every option, upscale included", Section: true},
-		},
-		ActionsLabel: "Download",
-		ActionsGloss: "ダウンロード",
+		Actions:           episodeActions(len(episodes)),
+		ActionsLabel:      "Download",
+		ActionsGloss:      "ダウンロード",
 	}
 }
 
@@ -401,8 +359,13 @@ func episodePickNum(episodes []models.Episode, idx int) int {
 	if num := episodes[idx].Num; num > 0 {
 		return num
 	}
-	if num, err := strconv.Atoi(ExtractEpisodeNumber(episodes[idx].Number)); err == nil && num > 0 {
-		return num
+	// ExtractEpisodeNumber answers "1" for a label with no number at all; only
+	// a label that really has digits may set the range start.
+	label := episodes[idx].Number
+	if strings.ContainsAny(label, "0123456789") {
+		if num, err := strconv.Atoi(ExtractEpisodeNumber(label)); err == nil && num > 0 {
+			return num
+		}
 	}
 	return idx + 1
 }
@@ -464,6 +427,15 @@ func GetVideoURLForEpisode(episodeURL string) (string, error) {
 	return extractActualVideoURL(videoURL)
 }
 
+// clearPlaybackHeaders drops the previous stream's Referer/Origin before a
+// source resolves the next one, so one source's CDN headers are never sent to
+// another (AnimeFire, for one, only sets its own Referer when none is set).
+// providers.FetchStreamURL does the same on the download path.
+func clearPlaybackHeaders() {
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
+}
+
 // GetVideoURLForEpisodeEnhanced gets the video URL through the source registry.
 // ctx is honored at entry today; full downstream propagation lands when this
 // becomes a thin wrapper over source.Resolve → FetchStreamURL(ctx, …).
@@ -505,6 +477,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		if episode.Number == "" {
 			episode.Number = "1"
 		}
+		clearPlaybackHeaders()
 		return src.FetchStreamURL(ctx, episode, urlOnlyAnime, util.GlobalQuality)
 	}
 
@@ -532,6 +505,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 		return "", err
 	}
 
+	clearPlaybackHeaders()
 	streamURL, err := src.FetchStreamURL(ctx, episode, anime, util.GlobalQuality)
 	if err != nil {
 		// Transitional error policy — mirrors the legacy chain exactly.
@@ -622,7 +596,7 @@ func extractVideoURL(url string) (string, error) {
 		util.Debugf("Extracting video URL from page: %s", url)
 	}
 
-	response, err := api.SafeGet(url)
+	response, err := safeGetFn(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch URL: %+v", err)
 	}
@@ -717,7 +691,7 @@ func extractVideoURL(url string) (string, error) {
 }
 
 func fetchContent(url string) (string, error) {
-	resp, err := api.SafeGet(url)
+	resp, err := safeGetFn(url)
 	if err != nil {
 		return "", err
 	}
@@ -1436,7 +1410,7 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 		}
 
 		// Fetch the video page
-		response, err := api.SafeGet(videoSrc)
+		response, err := safeGetFn(videoSrc)
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch video page: %w", err)
 		}
@@ -1452,111 +1426,22 @@ func extractActualVideoURL(videoSrc string) (string, error) {
 			return "", fmt.Errorf("failed to read video page: %w", err)
 		}
 
-		// Try to parse as JSON
-		var videoResponse VideoResponse
-		err = jsonx.Unmarshal(body, &videoResponse)
-		if err == nil && len(videoResponse.Data) > 0 {
-			if util.IsDebug {
-				util.Debugf("Found video data with %d qualities", len(videoResponse.Data))
-				for _, v := range videoResponse.Data {
-					util.Debugf("Available quality: %s -> %s", v.Label, v.Src)
-				}
-			}
-
-			// If only one quality, use it directly
-			if len(videoResponse.Data) == 1 {
-				return videoResponse.Data[0].Src, nil
-			}
-
-			// Auto-select quality only when the user has already picked a
-			// specific quality during this session (e.g. "720p").
-			// When GlobalQuality is "best" (the default) we still show the
-			// interactive prompt so the user can choose manually.
-			if util.GlobalQuality != "" && util.GlobalQuality != "best" {
-				selectedSrc := selectQualityFromOptions(videoResponse.Data, util.GlobalQuality)
-				if selectedSrc != "" {
-					if util.IsDebug {
-						util.Debugf("Auto-selected quality preference: %s -> %s", util.GlobalQuality, selectedSrc)
-					}
-					return selectedSrc, nil
-				}
-			}
-
-			// Prompt user for quality selection via fancy list (type-to-filter).
-			// Logic fixes (descending sort, mirror-N disambiguation, friendly
-			// fallback labels, abort routing, index-based selection) live in
-			// buildAnimeFireQualityItems and are pinned by
-			// animefire_quality_menu_test.go.
-			sortedData, qualityLabels := buildAnimeFireQualityItems(videoResponse.Data)
-
-			resolutions := make([]int, len(sortedData))
-			for i, v := range sortedData {
-				resolutions[i] = extractResolution(v.Label)
-			}
-			qIdx, err := tui.Pick(qualityPickItems(qualityLabels, resolutions), tui.PickOptions{
-				Breadcrumb:   "Playback > Quality",
-				WindowTitle:  "GoAnime - Quality",
-				ItemSingular: "quality",
-				ItemPlural:   "qualities",
-				Panel:        qualityFlagPanel(),
-			})
-			if err != nil {
-				if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-					return "", ErrBackRequested
-				}
-				return "", fmt.Errorf("failed to select quality: %w", err)
-			}
-			if qIdx < 0 || qIdx >= len(sortedData) {
-				return "", fmt.Errorf("invalid quality selection: index %d out of range", qIdx)
-			}
-			picked := sortedData[qIdx]
-			selectedSrc := picked.Src
-
-			// Store the selected quality for future use in this session.
-			// Persist a canonical "Np" form so selectQualityFromOptions can
-			// match it deterministically next time, even if the upstream
-			// label changes (e.g. "FHD" → "1080p").
-			if util.GlobalQuality == "" || util.GlobalQuality == "best" {
-				if res := extractResolution(picked.Label); res > 0 {
-					util.GlobalQuality = fmt.Sprintf("%dp", res)
-				} else {
-					util.GlobalQuality = strings.ToLower(strings.TrimSpace(picked.Label))
-				}
-				if util.IsDebug {
-					util.Debugf("Storing selected quality for session: %s", util.GlobalQuality)
-				}
-			}
-
-			// Return the selected source URL
-			return selectedSrc, nil
+		resolved, err := resolveAnimeFireBody(body, util.GlobalQuality, pickQualityWithTUI)
+		if err != nil {
+			return "", err
 		}
-
-		// When Data is empty, check the Token field for a Blogger URL
-		if err == nil && len(videoResponse.Data) == 0 && videoResponse.Token != "" {
+		if resolved.remember != "" {
+			// Remember the pick for the rest of the session.
+			util.GlobalQuality = resolved.remember
 			if util.IsDebug {
-				util.Debugf("AnimeFire returned empty data with token: %s", videoResponse.Token)
-			}
-			if strings.Contains(videoResponse.Token, "blogger.com") {
-				return extractBloggerVideoURL(videoResponse.Token)
+				util.Debugf("Storing selected quality for session: %s", util.GlobalQuality)
 			}
 		}
-
-		// Fallback: Try to find a direct video URL in the content
-		matches := videoURLPatternRe.FindString(string(body))
-		if matches != "" {
-			if util.IsDebug {
-				util.Debugf("Found direct video URL: %s", matches)
-			}
-			return matches, nil
+		if resolved.blogger != "" {
+			return extractBloggerVideoURL(resolved.blogger)
 		}
-
-		// Try to find a blogger link and extract the actual video URL
-		bloggerLink, err := findBloggerLink(string(body))
-		if err == nil && bloggerLink != "" {
-			if util.IsDebug {
-				util.Debugf("Found blogger link: %s, extracting actual video URL...", bloggerLink)
-			}
-			return extractBloggerVideoURL(bloggerLink)
+		if resolved.src != "" {
+			return resolved.src, nil
 		}
 	}
 
@@ -1722,4 +1607,91 @@ type VideoData struct {
 type VideoResponse struct {
 	Data  []VideoData `json:"data"`
 	Token string      `json:"token"`
+}
+
+// animeFireResolution is what an AnimeFire video response resolves to.
+type animeFireResolution struct {
+	src      string // a playable URL
+	blogger  string // a Blogger link that still has to be resolved
+	remember string // the quality to keep for the session; empty leaves it alone
+}
+
+// qualityPicker asks which of the (already sorted) qualities to play and
+// returns its index.
+type qualityPicker func(labels []string, resolutions []int) (int, error)
+
+// pickQualityWithTUI is the quality menu the user sees.
+func pickQualityWithTUI(labels []string, resolutions []int) (int, error) {
+	return tui.Pick(qualityPickItems(labels, resolutions), tui.PickOptions{
+		Breadcrumb:   "Playback > Quality",
+		WindowTitle:  "GoAnime - Quality",
+		ItemSingular: "quality",
+		ItemPlural:   "qualities",
+		Panel:        qualityFlagPanel(),
+	})
+}
+
+// resolveAnimeFireBody decides what an AnimeFire video response means:
+//   - one quality is used as is;
+//   - once the user has chosen a quality in this session (anything but ""
+//     or "best") the matching source is used without asking;
+//   - otherwise the user picks, and that pick is remembered in the canonical
+//     "Np" form so it matches deterministically next time, even if the label
+//     changes (FHD becomes 1080p);
+//   - an empty list with a Blogger token resolves through Blogger;
+//   - anything else is searched for a direct video URL or a Blogger link.
+//
+// The zero resolution with a nil error means nothing usable was found.
+func resolveAnimeFireBody(body []byte, quality string, pick qualityPicker) (animeFireResolution, error) {
+	var response VideoResponse
+	parseErr := jsonx.Unmarshal(body, &response)
+
+	if parseErr == nil && len(response.Data) > 0 {
+		if len(response.Data) == 1 {
+			return animeFireResolution{src: response.Data[0].Src}, nil
+		}
+		if quality != "" && quality != "best" {
+			if src := selectQualityFromOptions(response.Data, quality); src != "" {
+				return animeFireResolution{src: src}, nil
+			}
+		}
+
+		sorted, labels := buildAnimeFireQualityItems(response.Data)
+		resolutions := make([]int, len(sorted))
+		for i, v := range sorted {
+			resolutions[i] = extractResolution(v.Label)
+		}
+		idx, err := pick(labels, resolutions)
+		if err != nil {
+			if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+				return animeFireResolution{}, ErrBackRequested
+			}
+			return animeFireResolution{}, fmt.Errorf("failed to select quality: %w", err)
+		}
+		if idx < 0 || idx >= len(sorted) {
+			return animeFireResolution{}, fmt.Errorf("invalid quality selection: index %d out of range", idx)
+		}
+
+		picked := sorted[idx]
+		out := animeFireResolution{src: picked.Src}
+		if quality == "" || quality == "best" {
+			if res := extractResolution(picked.Label); res > 0 {
+				out.remember = fmt.Sprintf("%dp", res)
+			} else {
+				out.remember = strings.ToLower(strings.TrimSpace(picked.Label))
+			}
+		}
+		return out, nil
+	}
+
+	if parseErr == nil && len(response.Data) == 0 && strings.Contains(response.Token, "blogger.com") {
+		return animeFireResolution{blogger: response.Token}, nil
+	}
+	if match := videoURLPatternRe.FindString(string(body)); match != "" {
+		return animeFireResolution{src: match}, nil
+	}
+	if link, err := findBloggerLink(string(body)); err == nil && link != "" {
+		return animeFireResolution{blogger: link}, nil
+	}
+	return animeFireResolution{}, nil
 }

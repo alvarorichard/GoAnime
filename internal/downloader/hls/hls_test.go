@@ -1,6 +1,7 @@
 package hls
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUnwrapDisguisedSegment(t *testing.T) {
+	t.Parallel()
+	png := append([]byte(nil), pngSignature...)
+	png = append(png, 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0, 0, 0, 0)
+
+	t.Run("plain transport stream after PNG", func(t *testing.T) {
+		want := []byte{0x47, 0x40, 0x00, 0x10}
+		got, err := unwrapDisguisedSegment(append(png, want...))
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("optional TSPXOR marker", func(t *testing.T) {
+		want := []byte{0x47, 0x40, 0x00, 0x10}
+		encoded := make([]byte, len(want))
+		for i := range want {
+			encoded[i] = want[i] ^ 0xa5
+		}
+		wrapped := append(append(append([]byte(nil), png...), []byte("TSPXOR1\x00")...), encoded...)
+		got, err := unwrapDisguisedSegment(wrapped)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("ordinary segment unchanged", func(t *testing.T) {
+		want := []byte{0x47, 0x40, 0x00, 0x10}
+		got, err := unwrapDisguisedSegment(want)
+		require.NoError(t, err)
+		assert.True(t, bytes.Equal(want, got))
+	})
+}
 
 // ---------------------------------------------------------------------------
 // Playlist fixtures — reproduce real-world CDN responses that triggered bugs

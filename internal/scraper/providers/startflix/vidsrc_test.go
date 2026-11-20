@@ -101,7 +101,10 @@ const movieMasterPlaylist = `#EXTM3U
 //     eps-map JSON naming a default season/episode;
 //   - mastersBroken makes every master request fail, so the chain reports
 //     how many candidates it refused;
-//   - generate.php always answers "testtoken", masters always play.
+//   - generate.php answers "testtoken" only to a request carrying an api_token
+//     that the stream-data call has not spent, as the live hosts do (HTTP 403
+//     "invalid or mismatched api token" otherwise); a repeated player render
+//     mints a distinct token, masters always play.
 type fakeVIDSRC struct {
 	kind           MediaKind
 	id             string
@@ -113,9 +116,15 @@ type fakeVIDSRC struct {
 	tokenFailFirst bool
 	token429First  bool
 	mastersBroken  bool
+	// generateStaleFirst makes the first generate.php call answer the 403
+	// "invalid or mismatched api token" whatever it carries (a token that
+	// went stale between the render and the call).
+	generateStaleFirst bool
 
 	playerRenders int
 	token429Seen  int32
+	spentTokens   map[string]bool // tokens the stream-data call consumed
+	hostAuths     []string        // api_token values generate.php saw
 	dataFetched   []string
 	masterHits    int
 }
@@ -132,7 +141,7 @@ func (f *fakeVIDSRC) start(t *testing.T) *httptest.Server {
 			if id == "" {
 				id = "tt0315327"
 			}
-			assert.Equal(t, string(f.kind), r.URL.Query().Get("type"))
+			assert.Equal(t, vidsrcTypeWord(f.kind), r.URL.Query().Get("type"))
 			assert.Equal(t, id, r.URL.Query().Get("id"))
 			_, _ = w.Write([]byte(`{"src":"` + base + `/embed/` + string(f.kind) + `/` + id + `?vs=abc"}`))
 
@@ -148,7 +157,12 @@ func (f *fakeVIDSRC) start(t *testing.T) *httptest.Server {
 			if idx >= len(f.playerPages) {
 				idx = len(f.playerPages) - 1
 			}
-			_, _ = w.Write([]byte(body(f.playerPages[idx])))
+			page := f.playerPages[idx]
+			if f.playerRenders > len(f.playerPages) {
+				// A render past the scripted pages mints a distinct token.
+				page = strings.Replace(page, `"apiToken":"`, `"apiToken":"r`+strconv.Itoa(f.playerRenders)+`-`, 1)
+			}
+			_, _ = w.Write([]byte(body(page)))
 
 		case strings.HasPrefix(r.URL.Path, "/embed/"):
 			_, _ = w.Write([]byte(`<!doctype html><script>window.CFG = {"playerUrl":"` +
@@ -165,6 +179,10 @@ func (f *fakeVIDSRC) start(t *testing.T) *httptest.Server {
 				return
 			}
 			f.dataFetched = append(f.dataFetched, r.URL.RawQuery)
+			if f.spentTokens == nil {
+				f.spentTokens = map[string]bool{}
+			}
+			f.spentTokens[r.URL.Query().Get("api_token")] = true
 			if f.tokenFailFirst && len(f.dataFetched) == 1 {
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"status_code":"403","error":"invalid api token"}`))
@@ -177,6 +195,13 @@ func (f *fakeVIDSRC) start(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(body(payload)))
 
 		case strings.HasSuffix(r.URL.Path, "/generate.php"):
+			auth := r.URL.Query().Get("api_token")
+			f.hostAuths = append(f.hostAuths, auth)
+			if auth == "" || f.spentTokens[auth] || (f.generateStaleFirst && len(f.hostAuths) == 1) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte("invalid or mismatched api token"))
+				return
+			}
 			if f.token429First && atomic.AddInt32(&f.token429Seen, 1) == 1 {
 				w.WriteHeader(http.StatusTooManyRequests)
 				_, _ = w.Write([]byte(`{"error":"too many requests"}`))
@@ -244,7 +269,9 @@ func TestVIDSRCMovieChainFixture(t *testing.T) {
 	require.NotEmpty(t, f.dataFetched)
 	assert.Contains(t, f.dataFetched[0], "api_token=tok1")
 	assert.Contains(t, f.dataFetched[0], "stream_urls=")
-	assert.Equal(t, 1, f.playerRenders, "one render, one single-use token")
+	assert.Equal(t, 2, f.playerRenders, "one render for the stream-data token, one for the host token")
+	require.Len(t, f.hostAuths, 1)
+	assert.NotEqual(t, "tok1", f.hostAuths[0], "the host token endpoint gets a fresh api token, not the spent one")
 	assert.Equal(t, 1, f.masterHits)
 	assert.Equal(t, AudioSubtitled, stream.Audio, "the fallback is the original audio, never the dub")
 }
@@ -331,7 +358,7 @@ func TestVIDSRCStaleTokenRefreshes(t *testing.T) {
 	stream, err := MovieFallback(context.Background(), "tt0315327", 310)
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, f.playerRenders, "a fresh render for the fresh token")
+	assert.Equal(t, 3, f.playerRenders, "a fresh render for the fresh token, one more for the host token")
 	require.Len(t, f.dataFetched, 2)
 	assert.Contains(t, f.dataFetched[0], "api_token=tok1")
 	assert.Contains(t, f.dataFetched[1], "api_token=tok2")
@@ -428,7 +455,7 @@ func TestVIDSRCFallbackSecondBaseRecovers(t *testing.T) {
 
 	assert.Greater(t, primaryHits, 0, "the walk starts at the primary")
 	assert.Equal(t, secondSrv.URL+"/pl/mirror/master.m3u8?token=testtoken", stream.URL)
-	assert.Equal(t, 1, second.playerRenders)
+	assert.Equal(t, 2, second.playerRenders)
 }
 
 // TestVIDSRCFallbackSecondBaseRecoversSeries pins the same walk for series.
@@ -454,7 +481,7 @@ func TestVIDSRCFallbackSecondBaseRecoversSeries(t *testing.T) {
 
 	_, err := EpisodeFallback(context.Background(), 1429, 2, 3)
 	require.NoError(t, err)
-	assert.Equal(t, 1, second.playerRenders)
+	assert.Equal(t, 2, second.playerRenders)
 }
 
 // TestVIDSRCFallbackAllBasesMissKeepsLastError: both primaries down — the

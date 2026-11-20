@@ -77,19 +77,19 @@ func TestStartFlixCascade_SearchToFetch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, eps, 1)
 
-	startFlixStreamFn = func(a *models.Anime, e *models.Episode, q string) (string, error) {
+	startFlixStreamFn = func(a *models.Anime, e *models.Episode, q string) (source.Stream, error) {
 		require.Same(t, anime, a)
 		require.Same(t, &eps[0], e)
 		assert.Equal(t, "best", q)
-		return "https://cdn.example/sfx.m3u8", nil
+		return source.Stream{URL: "https://cdn.example/sfx.m3u8"}, nil
 	}
 	got, err := p.FetchStreamURL(ctx, &eps[0], anime, "best")
 	require.NoError(t, err)
 	assert.Equal(t, "https://cdn.example/sfx.m3u8", got)
 	assert.Equal(t, "StartFlix", util.GetGlobalAnimeSource())
 
-	startFlixStreamFn = func(*models.Anime, *models.Episode, string) (string, error) {
-		return "", assert.AnError
+	startFlixStreamFn = func(*models.Anime, *models.Episode, string) (source.Stream, error) {
+		return source.Stream{}, assert.AnError
 	}
 	_, err = p.FetchStreamURL(ctx, &eps[0], anime, "best")
 	require.ErrorIs(t, err, assert.AnError, "a dead episode must fail, not return empty")

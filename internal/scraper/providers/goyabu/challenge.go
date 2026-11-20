@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 )
@@ -23,11 +25,12 @@ import (
 // cf-mitigated: challenge, __cf_chl markers and "Just a moment…". No header
 // tuning gets past it — it wants a real browser.
 //
-// A browser is offered through netx.ChallengeSolver when a build registers
-// one. This transport is the piece that uses it: it notices a challenge, has
-// the browser clear it once, and replays the request with the resulting
-// clearance. No solver is registered today (GoAnime no longer ships a
-// browser), so a challenge is reported as blocked.
+// A solver is offered through netx.ChallengeSolver when one is registered.
+// This transport is the piece that uses it: it notices a challenge, has the
+// solver clear it once, and replays the request with the resulting clearance.
+// The only solver is the optional external cfsolve tool (see
+// internal/scraper/cfsolver), which needs no browser; without it a challenge
+// is reported as blocked.
 //
 // Two measurements shaped the design. The first, taken with the profile wiped
 // between runs — the COLD case only:
@@ -284,7 +287,7 @@ func (t *gateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	restoreBody(resp, body)
 
 	if !netx.ChallengeSolverAvailable() {
-		util.Debug("Goyabu: challenged, but no browser solver is registered", "url", req.URL.String())
+		util.Debug("Goyabu: challenged, but no challenge solver is registered (install cfsolve)", "url", req.URL.String())
 		return resp, nil
 	}
 
@@ -452,6 +455,9 @@ func (t *gateTransport) solve(req *http.Request) (string, bool) {
 	res, _, err := netx.SolveChallengeFor(ctx, target.String(), gateSolveTimeout, netx.RevealWhenStuck)
 	if err != nil || res == nil {
 		util.Debug("Goyabu: challenge solve failed", "url", target.String(), "err", err)
+		if errors.Is(err, cfsolver.ErrProfileMismatch) {
+			util.Warn("Goyabu needs a newer cfsolve: reinstall it with scripts/get-cfsolve.sh --build (or delete the installed one so GoAnime downloads the matching build).")
+		}
 		return "", false
 	}
 	if len(res.Cookies) > 0 {

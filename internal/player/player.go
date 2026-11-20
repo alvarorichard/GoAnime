@@ -474,18 +474,25 @@ func (m *model) setProgressPeak(pct float64) {
 	m.mu.Unlock()
 }
 
-// StartVideo opens mpv with a socket for IPC
-// Modify the StartVideo function in player.go
+// StartVideo opens mpv with a socket for IPC. It starts the mpv the system
+// finds first and, when that one will not start, the others it finds; see
+// startVideoAcross.
 func StartVideo(link string, args []string) (string, error) {
-	// Verify MPV is installed (cached after first lookup to avoid repeated filesystem searches)
-	cachedMPVPathOnce.Do(func() {
-		cachedMPVPath, cachedMPVPathErr = findMPVPath()
-	})
-	if cachedMPVPathErr != nil {
-		return "", fmt.Errorf("mpv not found: %w\nPlease install mpv: https://mpv.io/installation/", cachedMPVPathErr)
+	paths, err := mpvPaths()
+	if err != nil {
+		return "", err
 	}
-	mpvPath := cachedMPVPath
+	return startVideoAcross(paths, link, args)
+}
 
+// mpvStartTimeout is how long launchMPV waits for mpv's IPC socket. A variable
+// so a test of the wait does not take twelve seconds.
+var mpvStartTimeout = 12 * time.Second
+
+// launchMPV starts one mpv, opens link in it and waits for its IPC socket. It
+// is one attempt: whether to try another mpv, or the same one with fewer
+// options, is startVideoAcross's call.
+func launchMPV(mpvPath, safeLink string, args []string) (string, error) {
 	randomNumber := fmt.Sprintf("%x", time.Now().UnixNano())
 	var socketPath string
 
@@ -512,14 +519,24 @@ func StartVideo(link string, args []string) (string, error) {
 	// Validate and filter any additional args before passing to mpv
 	mpvArgs = append(mpvArgs, filterMPVArgs(args)...)
 
-	// Sanitize media target (URL or local file path)
-	safeLink, err := sanitizeMediaTarget(link)
-	if err != nil {
-		return "", fmt.Errorf("invalid media target: %w", err)
+	// --no-terminal silences stderr, so an mpv that dies at startup (bad
+	// option, VO/driver failure, missing DLL) would leave nothing to report.
+	// Its own log file keeps the real reason for the early-exit error.
+	logPath := ""
+	if lf, lerr := os.CreateTemp("", "goanime_mpv_*.log"); lerr == nil {
+		logPath = lf.Name()
+		_ = lf.Close()
+		mpvArgs = append(mpvArgs, "--log-file="+logPath)
+		if util.IsDebug {
+			// Verbose: VO/AO selection, hwdec probing, demuxer and network errors.
+			mpvArgs = append(mpvArgs, "--msg-level=all=v")
+		}
 	}
+
 	mpvArgs = append(mpvArgs, safeLink)
 
 	util.Debugf("Starting mpv with arguments: %v", mpvArgs)
+	logMPVLaunch(mpvPath, mpvArgs)
 
 	// #nosec G204: mpvArgs are validated via filterMPVArgs and sanitizeMediaTarget
 	cmd := exec.Command(mpvPath, mpvArgs...)
@@ -527,28 +544,30 @@ func StartVideo(link string, args []string) (string, error) {
 
 	// Capture stderr so crash/GPU errors are visible when IPC never appears.
 	// Intentionally not using --quiet: silent exits on VMs hide the real cause.
-	var stderr bytes.Buffer
+	var stderr lockedBuffer
 	cmd.Stderr = &stderr
 
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())
+		if logPath != "" {
+			_ = os.Remove(logPath)
+		}
+		util.Debugf("mpv failed to start: %v (path=%s)", err, mpvPath)
+		return "", &mpvStartError{err: fmt.Errorf("failed to start mpv: %w (stderr: %s)", err, stderr.String())}
 	}
+	util.Debugf("mpv process started: pid=%d", cmd.Process.Pid)
 
 	// Reap the process in the background so we can detect early exit (common on
 	// Windows VMs when --vo=gpu fails / bundled mpv is missing DLLs). Without
 	// this, StartVideo waits the full timeout then Process.Kill returns
 	// "Access is denied" because the process is already dead.
-	waitErrCh := make(chan error, 1)
-	go func() {
-		waitErrCh <- cmd.Wait()
-	}()
+	exitCh := reapMPV(cmd, logPath, &stderr, startTime)
 
 	util.Debugf("mpv started (pid probe), waiting for socket creation: %s", socketPath)
 
 	// Wait for socket creation with adaptive timeout and exponential backoff.
 	// VMs / cold media opens can take longer than a local GPU host.
-	maxWaitTime := 12 * time.Second
+	maxWaitTime := mpvStartTimeout
 	initialInterval := 5 * time.Millisecond
 	maxInterval := 100 * time.Millisecond
 	currentInterval := initialInterval
@@ -556,8 +575,11 @@ func StartVideo(link string, args []string) (string, error) {
 	for time.Since(startTime) < maxWaitTime {
 		// Detect early mpv death before wasting the full timeout.
 		select {
-		case waitErr := <-waitErrCh:
-			return "", formatMPVEarlyExitError(waitErr, stderr.String(), mpvPath)
+		case ex := <-exitCh:
+			return "", &mpvEarlyExitError{
+				code: ex.code,
+				err:  formatMPVEarlyExitError(ex.err, joinMPVDiagnostics(stderr.String(), mpvProblemLines(ex.log, 15)), mpvPath),
+			}
 		default:
 		}
 
@@ -593,19 +615,23 @@ func StartVideo(link string, args []string) (string, error) {
 		}
 	}
 	// Drain Wait so we don't leak the reaper goroutine's result unnoticed.
+	var timeoutLog string
 	select {
-	case waitErr := <-waitErrCh:
-		if waitErr != nil {
-			util.Debugf("mpv wait after timeout: %v", waitErr)
-		}
+	case ex := <-exitCh:
+		timeoutLog = mpvProblemLines(ex.log, 15)
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	stderrHint := strings.TrimSpace(stderr.String())
+	stderrHint := joinMPVDiagnostics(stderr.String(), timeoutLog)
 	if stderrHint != "" {
 		return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv stderr: %s\nmpv path: %s\nPossible issues:\n1. MPV crashed or GPU/video output failed (common on VMs — try updating GPU drivers or reinstall mpv)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nCheck debug logs with -debug flag", elapsed.Seconds(), stderrHint, mpvPath)
 	}
 	return "", fmt.Errorf("timeout waiting for mpv socket after %.1fs.\nmpv path: %s\nPossible issues:\n1. MPV hung before creating IPC (GPU/driver issue on VMs)\n2. MPV installation corrupted / missing DLLs\n3. Invalid video URL\nRun: \"%s\" --version\nCheck debug logs with -debug flag", elapsed.Seconds(), mpvPath, mpvPath)
+}
+
+// joinMPVDiagnostics merges mpv's stderr and log tail, dropping empties.
+func joinMPVDiagnostics(stderrOut, logTail string) string {
+	return strings.TrimSpace(strings.TrimSpace(stderrOut) + "\n" + strings.TrimSpace(logTail))
 }
 
 // formatMPVEarlyExitError builds a clear error when mpv dies before the IPC
@@ -638,6 +664,11 @@ func filterMPVArgs(args []string) []string {
 		"--demuxer-max-bytes=",
 		"--demuxer-readahead-secs=",
 		"--video-latency-hacks=",
+		"--keep-open=",       // user-config guards (see userConfigGuardArgs)
+		"--idle=",            //
+		"--loop-file=",       //
+		"--loop-playlist=",   //
+		"--resume-playback=", //
 		"--audio-display=",
 		"--start=",
 		"--alang=",                     // Audio language preference
@@ -742,6 +773,12 @@ func sanitizeOutputPath(p string) (string, error) {
 	return cleaned, nil
 }
 
+// mpvDebugf is where the mpv conversation writes its diagnostics; tests replace
+// it. Only an unexpected answer is written: the position, duration, pause state
+// and speed are asked for several times a second, and logging each answer put
+// 70 lines (and as many blank ones) in a 15 second session.
+var mpvDebugf = util.Debugf
+
 // mpvSendCommand sends a JSON command to MPV via the IPC socket and receives the response.
 func mpvSendCommand(socketPath string, command []any) (any, error) {
 	conn, err := dialMPVSocket(socketPath)
@@ -773,8 +810,6 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 		return nil, err
 	}
 
-	util.Debugf("Raw response from mpv: %s", string(buffer[:n]))
-
 	// Tratar múltiplos JSONs na mesma resposta
 	responses := bytes.SplitSeq(buffer[:n], []byte("\n"))
 	for resp := range responses {
@@ -788,9 +823,12 @@ func mpvSendCommand(socketPath string, command []any) (any, error) {
 			continue
 		}
 		if errStr, ok := response["error"].(string); ok && errStr == "property unavailable" {
-			// Propriedade ainda não disponível, ignore sem erro
-			util.Debugf("Property not yet available, ignoring...")
+			// Propriedade ainda não disponível, ignore sem erro. Expected
+			// before a file is loaded, so it is not logged.
 			continue
+		}
+		if errStr, ok := response["error"].(string); ok && errStr != "success" {
+			mpvDebugf("mpv answered %q to %v", errStr, command)
 		}
 		// Check for success response (set_property returns {"error":"success"} without data)
 		if errStr, ok := response["error"].(string); ok && errStr == "success" {
@@ -864,18 +902,17 @@ func HandleDownloadAndPlay(
 	util.Debug("Stream type", "isHLS", isHLSStream)
 
 	for {
-		downloadOption := downloadMenuOption(selectedEpisodeNum, len(episodes), animeName)
-		switch downloadOption {
-		case 0:
+		switch downloadMenuOptionFn(selectedEpisodeNum, len(episodes), animeName) {
+		case downloadBack:
 			// User wants to go back to server selection
 			return ErrBackToEpisodeSelection
-		case 1:
+		case downloadThis:
 			// Download the current episode
 			if isHLSStream {
 				// HLS streams need special download handling
 				util.Debugf("HLS download requested - using stream URL")
 			}
-			err := downloadAndPlayEpisode(
+			err := downloadAndPlayEpisodeFn(
 				videoURL,
 				episodes,
 				selectedEpisodeNum,
@@ -888,31 +925,25 @@ func HandleDownloadAndPlay(
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
 					// Go back to download options menu
-					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					requestEpisodeMenuFn(EpisodeMenuRequest{ShowMenu: true})
 					continue
 				}
 				return err
 			}
 			return nil
-		case 2:
+		case downloadRange:
 			// Download episodes in a range
 			if start := takeRangeStart(); start > 0 {
-				if err := downloadRangeFrom(start, episodes, anime); err != nil {
-					return err
-				}
-				return nil
+				return downloadRangeFromFn(start, episodes, anime)
 			}
-			if err := HandleBatchDownload(episodes, anime); err != nil {
-				return err
-			}
-			return nil
-		case 3:
+			return handleBatchDownloadFn(episodes, anime)
+		case downloadUpscale:
 			// Upscale video with Anime4K
-			if err := handleUpscaleFromMenu(); err != nil {
+			if err := upscaleMenuFn(); err != nil {
 				util.Errorf("Upscale error: %v", err)
 			}
 			continue // Return to menu after upscaling
-		case 5:
+		case downloadAll:
 			// Download ALL episodes
 			if len(episodes) == 0 {
 				util.Errorf("No episodes available to download")
@@ -921,7 +952,7 @@ func HandleDownloadAndPlay(
 			if !confirmDownloadAll(len(episodes)) {
 				continue
 			}
-			if err := HandleDownloadAll(episodes, anime); err != nil {
+			if err := handleDownloadAllFn(episodes, anime); err != nil {
 				if errors.Is(err, ErrUserQuit) {
 					return nil
 				}
@@ -929,76 +960,20 @@ func HandleDownloadAndPlay(
 			}
 			return nil
 		default:
-			// Play online - determine the best approach based on URL type
-			videoURLToPlay := ""
-
-			switch {
-			case isHLSStream:
-				// HLS streams are already resolved, play directly
-				videoURLToPlay = videoURL
-				if util.IsDebug {
-					util.Debugf("HLS stream detected, playing directly: %s", videoURLToPlay)
-				}
-			case videoURL != "" && needsVideoExtraction(videoURL):
-				// Intermediate URL (e.g. animefire.io/video/) needs resolution
-				// to obtain the final CDN video URL.
-				if util.IsDebug {
-					util.Debugf("Intermediate URL detected, resolving: %s", videoURL)
-				}
-				if resolved, err := extractActualVideoURL(videoURL); err == nil && resolved != "" {
-					videoURLToPlay = resolved
-				}
-			case videoURL != "" && strings.HasPrefix(videoURL, "http"):
-				// The enhanced API already resolved a direct stream URL (CDN,
-				// mp4, etc.). Use it directly — re-extracting may trigger
-				// duplicate quality prompts or cause CDN URLs to expire.
-				videoURLToPlay = videoURL
-				if util.IsDebug {
-					util.Debugf("Using resolved stream URL directly: %s", videoURLToPlay)
-				}
-			case videoURL != "":
-				// Non-HTTP URL (e.g. episode ID). Try legacy extraction.
-				if len(episodes) > 0 && selectedEpisodeNum > 0 {
-					selectedEp, found := findEpisode(episodes, selectedEpisodeNum)
-					if found {
-						if util.IsDebug {
-							util.Debugf("Extracting URL from episode page: %s", selectedEp.URL)
-						}
-						url, err := ExtractVideoSourcesWithPrompt(selectedEp.URL)
-						if errors.Is(err, ErrBackRequested) {
-							continue
-						}
-						if err == nil && url != "" {
-							videoURLToPlay = url
-						}
-					}
-				}
-				// Fallback: try to extract from original videoURL
-				if videoURLToPlay == "" {
-					if util.IsDebug {
-						util.Debugf("Fallback: extracting from original URL: %s", videoURL)
-					}
-					url, err := ExtractVideoSourcesWithPrompt(videoURL)
-					if errors.Is(err, ErrBackRequested) {
-						continue
-					}
-					if err == nil && url != "" {
-						videoURLToPlay = url
-					}
-				}
+			// Play online
+			videoURLToPlay, back := resolvePlaybackURL(routeForPlayback(videoURL, isHLSStream), videoURL, episodes, selectedEpisodeNum)
+			if back {
+				continue
 			}
-
-			// Final validation
 			if videoURLToPlay == "" {
 				util.Debugf("No valid video URL found")
 				return fmt.Errorf("no valid video URL found")
 			}
-
 			if util.IsDebug {
 				util.Debugf("Final video URL: %s", videoURLToPlay)
 			}
 
-			err := playVideo(
+			err := playVideoFn(
 				videoURLToPlay,
 				episodes,
 				selectedEpisodeNum,
@@ -1009,13 +984,95 @@ func HandleDownloadAndPlay(
 			if err != nil {
 				if errors.Is(err, ErrBackToDownloadOptions) {
 					// Go back to download options menu
-					RequestEpisodeMenu(EpisodeMenuRequest{ShowMenu: true})
+					requestEpisodeMenuFn(EpisodeMenuRequest{ShowMenu: true})
 					continue
 				}
 				return err
 			}
 			return nil
 		}
+	}
+}
+
+// playbackRoute is how a stream URL becomes the URL mpv plays.
+type playbackRoute int
+
+const (
+	routeNone    playbackRoute = iota // nothing to play
+	routeHLS                          // an HLS stream, already resolved: played as is
+	routeResolve                      // an intermediate page (AnimeFire video API, Blogger) to resolve to the CDN URL
+	routeDirect                       // a direct http(s) stream the source already resolved
+	routeLegacy                       // a bare id: resolved through the episode page
+)
+
+// routeForPlayback classifies videoURL. A direct URL is played untouched:
+// re-extracting it could raise a second quality prompt or let a CDN URL expire.
+func routeForPlayback(videoURL string, isHLS bool) playbackRoute {
+	switch {
+	case isHLS:
+		return routeHLS
+	case videoURL != "" && needsVideoExtraction(videoURL):
+		return routeResolve
+	case videoURL != "" && strings.HasPrefix(videoURL, "http"):
+		return routeDirect
+	case videoURL != "":
+		return routeLegacy
+	default:
+		return routeNone
+	}
+}
+
+// Seams for the playback flow; tests replace them, so no menu opens, nothing is
+// downloaded and mpv never starts.
+var (
+	downloadMenuOptionFn     = downloadMenuOption
+	downloadAndPlayEpisodeFn = downloadAndPlayEpisode
+	downloadRangeFromFn      = downloadRangeFrom
+	handleBatchDownloadFn    = HandleBatchDownload
+	handleDownloadAllFn      = HandleDownloadAll
+	upscaleMenuFn            = handleUpscaleFromMenu
+	playVideoFn              = playVideo
+	requestEpisodeMenuFn     = RequestEpisodeMenu
+	extractActualVideoURLFn  = extractActualVideoURL
+	extractWithPromptFn      = ExtractVideoSourcesWithPrompt
+)
+
+// resolvePlaybackURL turns the route into the URL to play, "" when none could
+// be found. back is true when the user backed out of a quality prompt, which
+// sends them back to the options menu.
+func resolvePlaybackURL(route playbackRoute, videoURL string, episodes []models.Episode, selectedEpisodeNum int) (url string, back bool) {
+	switch route {
+	case routeHLS, routeDirect:
+		return videoURL, false
+	case routeResolve:
+		if resolved, err := extractActualVideoURLFn(videoURL); err == nil && resolved != "" {
+			return resolved, false
+		}
+		return "", false
+	case routeLegacy:
+		// The episode page first, when the episode is known.
+		if len(episodes) > 0 && selectedEpisodeNum > 0 {
+			if ep, found := findEpisode(episodes, selectedEpisodeNum); found {
+				u, err := extractWithPromptFn(ep.URL)
+				if errors.Is(err, ErrBackRequested) {
+					return "", true
+				}
+				if err == nil && u != "" {
+					return u, false
+				}
+			}
+		}
+		// Fallback: extract from the original URL.
+		u, err := extractWithPromptFn(videoURL)
+		if errors.Is(err, ErrBackRequested) {
+			return "", true
+		}
+		if err == nil && u != "" {
+			return u, false
+		}
+		return "", false
+	default:
+		return "", false
 	}
 }
 
@@ -1033,7 +1090,10 @@ func downloadAndPlayEpisode(
 	if videoURL == "" {
 		return fmt.Errorf("empty video URL provided for episode %s", episodeNumberStr)
 	}
-	util.SetSubtitleContext(snapshotMedia().AnimeName, util.GetGlobalAnimeSource(), "", "")
+	// One consistent view of the media for the whole download: the file path
+	// and the progress title must come from the same state.
+	snap := snapshotMedia()
+	util.SetSubtitleContext(snap.AnimeName, util.GetGlobalAnimeSource(), "", "")
 
 	// Resolve intermediate URLs (e.g., animefire.io/video/ JSON API) to actual CDN URLs
 	if strings.Contains(videoURL, "animefire.io/video/") {
@@ -1048,49 +1108,11 @@ func downloadAndPlayEpisode(
 		}
 	}
 
-	// Use Plex-compatible naming when anime name is available
-	var downloadPath, episodePath string
-	snap := snapshotMedia()
-	if snap.AnimeName != "" {
-		// Route to the correct base directory: movies/ for movies/TV, anime/ for anime
-		var baseDir string
-		if snap.IsMovieOrTV {
-			baseDir = util.DefaultMovieDownloadDir()
-		} else {
-			baseDir = util.DefaultDownloadDir()
-		}
-
-		// Check if this is a standalone movie (flat path) vs TV/anime (season structure)
-		if snap.MediaType == "movie" {
-			// Movies: flat structure <baseDir>/<MovieName (Year) {ids}>/
-			downloadPath = util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta)
-			episodePath = util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
-		} else {
-			// TV Shows and Anime: season/episode structure
-			// Use the int episode number directly; fall back to parsing the string only if needed
-			epNum := selectedEpisodeNum
-			if epNum < 1 {
-				parsed, _ := strconv.Atoi(episodeNumberStr)
-				if parsed > 0 {
-					epNum = parsed
-				} else {
-					epNum = 1
-				}
-			}
-			season, relEp := resolveSeasonForEpisode(snap, epNum)
-			downloadPath = util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta)
-			episodePath = util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
-		}
-		util.Debugf("Download routing: mediaType=%s, isMovieOrTV=%v, baseDir=%s, path=%s", snap.MediaType, snap.IsMovieOrTV, baseDir, episodePath)
-	} else {
-		// Fallback: route based on media type even without anime name
-		fallbackBase := util.DefaultDownloadDir()
-		if snap.IsMovieOrTV {
-			fallbackBase = util.DefaultMovieDownloadDir()
-		}
-		downloadPath = filepath.Join(fallbackBase, DownloadFolderFormatter(animeURL))
-		episodePath = filepath.Join(downloadPath, episodeNumberStr+".mp4")
+	if ref := util.GetGlobalReferer(); ref != "" {
+		defer rememberDownloadReferer(videoURL, ref)()
 	}
+
+	downloadPath, episodePath := episodeDownloadPaths(snap, animeURL, episodeNumberStr, selectedEpisodeNum)
 
 	if _, err := os.Stat(downloadPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(downloadPath, 0o700); err != nil {
@@ -1111,8 +1133,8 @@ func downloadAndPlayEpisode(
 		numThreads := 4 // Define the number of threads for downloading
 
 		// Check URL type and use appropriate download method
-		switch {
-		case isBloggerProxyURL(videoURL):
+		switch downloadKindFor(videoURL) {
+		case downloadKindBlogger:
 			// Download directly from googlevideo CDN, bypassing the proxy.
 			// Uses independent surf clients per chunk for parallel download
 			// with Chrome TLS and automatic resume on connection drops.
@@ -1126,7 +1148,7 @@ func downloadAndPlayEpisode(
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			go func() {
@@ -1162,11 +1184,8 @@ func downloadAndPlayEpisode(
 				return fmt.Errorf("download failed: file was not created")
 			}
 
-			const minEpisodeSize int64 = 10 * 1024 * 1024
-			if stat, err := os.Stat(episodePath); err == nil && stat.Size() < minEpisodeSize {
-				_ = os.Remove(episodePath)
-				return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
-					stat.Size(), float64(stat.Size())/(1024*1024), float64(minEpisodeSize)/(1024*1024))
+			if err := checkBloggerEpisodeSize(episodePath); err != nil {
+				return err
 			}
 
 			fmt.Printf("Download of episode %s completed!\n", episodeNumberStr)
@@ -1175,16 +1194,13 @@ func downloadAndPlayEpisode(
 				fmt.Printf(format, a...)
 			})
 
-		case strings.Contains(videoURL, "blogger.com") ||
-			LooksLikeHLS(videoURL) ||
-			strings.Contains(videoURL, "wixmp.com") ||
-			strings.Contains(videoURL, "sharepoint.com"):
+		case downloadKindStream:
 			// Fail fast without a TTY (see above): progress UI hangs on Windows.
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
 			// Use yt-dlp with progress bar
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Estimate/obtain total size for progress percentage.
@@ -1206,38 +1222,7 @@ func downloadAndPlayEpisode(
 				// Native HLS first for .m3u8 — handles obfuscated segment extensions
 				// (.js, .html, .jpg) that break yt-dlp/ffmpeg.
 				// SharePoint URLs (.aspx) may serve HLS or direct video; yt-dlp rejects the extension.
-				var dlErr error
-				switch {
-				case LooksLikeHLS(videoURL) || hasUnsafeExtension(videoURL):
-					dlErr = downloadWithNativeHLS(videoURL, episodePath, m)
-					if dlErr != nil && stderrors.Is(dlErr, hls.ErrSeparateAudioTracks) {
-						// Separate audio tracks need yt-dlp for proper audio/video merging
-						util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", dlErr)
-						// Reset progress — native HLS didn't produce output
-						m.mu.Lock()
-						m.received = 0
-						m.totalBytes = 0
-						m.peakPct = 0
-						m.mu.Unlock()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-					} else if dlErr != nil {
-						// Native HLS failed for another reason — try yt-dlp, then direct HTTP
-						util.Debugf("Native HLS failed, trying yt-dlp: %v", dlErr)
-						// Reset progress for yt-dlp fallback
-						m.mu.Lock()
-						m.received = 0
-						m.totalBytes = 0
-						m.peakPct = 0
-						m.mu.Unlock()
-						dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-						if dlErr != nil {
-							util.Debugf("yt-dlp failed, trying direct HTTP: %v", dlErr)
-							dlErr = downloadDirectHTTP(videoURL, episodePath, m)
-						}
-					}
-				default:
-					dlErr = downloadWithYtDlp(videoURL, episodePath, m)
-				}
+				dlErr := downloadStreamWithFallbacks(videoURL, episodePath, m, streamDownloaders)
 				if dlErr == nil {
 					dlErr = validateDownloadedVideo(episodePath)
 					if dlErr != nil {
@@ -1287,13 +1272,13 @@ func downloadAndPlayEpisode(
 				fmt.Printf(format, a...)
 			})
 
-		default:
+		case downloadKindDirect:
 			// Fail fast without a TTY (see above): progress UI hangs on Windows.
 			if !tui.HasTerminal() {
 				return fmt.Errorf("no terminal: progress UI requires a TTY")
 			}
 			// Initialize progress model
-			m := newDownloadModel(snapshotMedia().AnimeName, downloadDetail(episodeNumberStr), 0)
+			m := newDownloadModel(snap.AnimeName, downloadDetail(episodeNumberStr), 0)
 			p := tui.NewProgram(m)
 
 			// Get content length
@@ -1346,7 +1331,7 @@ func downloadAndPlayEpisode(
 		fmt.Println("Video already downloaded.")
 		// Check if the file is actually valid (not empty)
 		if stat, err := os.Stat(episodePath); err == nil {
-			if stat.Size() < 1024 {
+			if episodeTooSmall(stat.Size()) {
 				fmt.Println("File is too small, re-downloading...")
 				if removeErr := os.Remove(episodePath); removeErr != nil {
 					util.Warnf("Failed to remove invalid file: %v", removeErr)
@@ -1392,39 +1377,112 @@ func takeRangeStart() int {
 	return start
 }
 
-// askForDownload presents the episode options. Enter watches right away:
-// downloading is a shortcut (d/D/A), never the default (tela 6). Return
-// codes: 0 back, 1 this episode, 2 range, 3 upscale, 4 watch now, 5 all.
-func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return 4 // no TTY: default to play online
-	}
-	// Build the upscale option label with current status
-	upscaleStatus := upscaler.GetShaderModeName(upscaler.GetShaderMode())
+// The codes askForDownload returns, which the playback loop switches on.
+const (
+	downloadBack    = 0 // back out of the options
+	downloadThis    = 1 // download this episode
+	downloadRange   = 2 // download a range
+	downloadUpscale = 3 // open the upscaling menu
+	downloadWatch   = 4 // watch now
+	downloadAll     = 5 // download every episode
+)
 
+// Seams for the interactive menus in this file. The defaults open the real
+// terminal UI; tests replace them, so no menu needs a TTY to be exercised.
+var (
+	stdinIsTerminal     = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	pickItemsFn         = tui.Pick
+	confirmFn           = confirmWithHuh
+	shaderModeNameFn    = func() string { return upscaler.GetShaderModeName(upscaler.GetShaderMode()) }
+	shadersInstalledFn  = upscaler.ShadersInstalled
+	ganInstalledFn      = upscaler.GANShadersInstalled
+	setShaderModeFn     = upscaler.SetShaderMode
+	installShadersFn    = upscaler.InstallShaders
+	installGANShadersFn = upscaler.InstallGANShaders
+	infoFn              = util.Info
+	warnFn              = util.Warn
+)
+
+// confirmWithHuh asks a yes/no question in the terminal.
+func confirmWithHuh(title, description, yes, no string) (bool, error) {
+	var confirmed bool
+	confirm := huh.NewConfirm().
+		Title(title).
+		Description(description).
+		Affirmative(yes).
+		Negative(no).
+		Value(&confirmed)
+	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+		return false, err
+	}
+	return confirmed, nil
+}
+
+// downloadMenuItems are the rows of the episode options menu. Enter watches
+// right away: downloading is a shortcut (d/D/A), never the default. The range
+// and download-all rows exist only when there is more than one episode: a
+// movie has nothing to choose a range of.
+func downloadMenuItems(totalEpisodes int, upscaleStatus string) []tui.PickItem {
 	items := []tui.PickItem{
 		{Label: "Watch now"},
 		{Label: "Download this episode", Key: "d"},
-		{Label: "Download a range...", Key: "D"},
-		{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"},
 	}
+	if totalEpisodes > 1 {
+		items = append(items, tui.PickItem{Label: "Download a range...", Key: "D"})
+	}
+	items = append(items, tui.PickItem{Label: "Real-time upscale", Details: upscaleStatus, Key: "u"})
 	if totalEpisodes > 1 {
 		items = append(items, tui.PickItem{
 			Label: fmt.Sprintf("Download all %d episodes...", totalEpisodes),
 			Key:   "A",
 		})
 	}
+	return items
+}
 
-	breadcrumb := "Playback > Options"
+// downloadMenuHeader is the breadcrumb and the one-line context of the menu.
+func downloadMenuHeader(episodeNum int, animeName string) (breadcrumb, context string) {
+	breadcrumb = "Playback > Options"
 	if episodeNum > 0 {
 		breadcrumb = fmt.Sprintf("Episode %d > Options", episodeNum)
 	}
-	context := tui.SingleLine(animeName)
+	context = tui.SingleLine(animeName)
 	if episodeNum > 0 && context != "" {
 		context = fmt.Sprintf("%s · Episode %d", context, episodeNum)
 	}
+	return breadcrumb, context
+}
 
-	idx, err := tui.Pick(items, tui.PickOptions{
+// downloadChoiceFor maps the picked row to its code, by the row's key rather
+// than its position, since the rows a title gets depend on its episode count.
+// A row that does not exist plays the episode: the one thing an unexpected
+// index must never do is start downloading the whole series.
+func downloadChoiceFor(items []tui.PickItem, idx int) int {
+	if idx < 0 || idx >= len(items) {
+		return downloadWatch
+	}
+	switch items[idx].Key {
+	case "d":
+		return downloadThis
+	case "D":
+		return downloadRange
+	case "u":
+		return downloadUpscale
+	case "A":
+		return downloadAll
+	default:
+		return downloadWatch
+	}
+}
+
+// askForDownload presents the episode options and returns a download* code.
+func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
+	if !stdinIsTerminal() {
+		return downloadWatch // no TTY: default to play online
+	}
+	breadcrumb, context := downloadMenuHeader(episodeNum, animeName)
+	items := downloadMenuItems(totalEpisodes, shaderModeNameFn())
+	idx, err := pickItemsFn(items, tui.PickOptions{
 		Breadcrumb:   breadcrumb,
 		WindowTitle:  "GoAnime - Options",
 		Context:      context,
@@ -1434,43 +1492,28 @@ func askForDownload(episodeNum, totalEpisodes int, animeName string) int {
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPickBack) {
-			return 0
+			return downloadBack
 		}
 		util.Errorf("Error showing options menu: %v", err)
-		return 4 // Default to play online on error
+		return downloadWatch // Default to play online on error
 	}
-
-	// Determines the selected option based on position
-	switch idx {
-	case 0:
-		return 4
-	case 1:
-		return 1
-	case 2:
-		return 2
-	case 3:
-		return 3
-	default:
-		return 5
-	}
+	return downloadChoiceFor(items, idx)
 }
 
 // confirmDownloadAll asks before downloading the whole series: the old menu
 // put "Download ALL" one arrow from enter, so one wrong tap fetched the
-// entire series (tela 6).
+// entire series.
 func confirmDownloadAll(totalEpisodes int) bool {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return true
 	}
-	var confirmed bool
-	confirm := huh.NewConfirm().
-		Title(fmt.Sprintf("Download all %d episodes?", totalEpisodes)).
-		Description("This downloads the whole series.").
-		Affirmative("Yes, download all").
-		Negative("No, back").
-		Value(&confirmed)
-
-	if err := tui.RunClean(confirm.WithTheme(tui.FormTheme()).Run); err != nil {
+	confirmed, err := confirmFn(
+		fmt.Sprintf("Download all %d episodes?", totalEpisodes),
+		"This downloads the whole series.",
+		"Yes, download all",
+		"No, back",
+	)
+	if err != nil {
 		util.Errorf("Error showing download confirmation: %v", err)
 		return false
 	}
@@ -1478,10 +1521,10 @@ func confirmDownloadAll(totalEpisodes int) bool {
 }
 
 func askForPlayOffline() bool {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return false // no TTY: default to no
 	}
-	idx, err := tui.PickLabels([]string{"Yes", "No"}, tui.PickOptions{
+	idx, err := pickLabelsFn([]string{"Yes", "No"}, tui.PickOptions{
 		Breadcrumb:   "Playback > Offline",
 		WindowTitle:  "GoAnime - Play Offline",
 		ItemSingular: "option",
@@ -1657,127 +1700,130 @@ func GetCurrentSubtitleTrack(socketPath string) (int, error) {
 	return 0, fmt.Errorf("unexpected sid format")
 }
 
-// handleUpscaleFromMenu shows the real-time upscaling options menu
-func handleUpscaleFromMenu() error {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return fmt.Errorf("no TTY available for interactive menu")
-	}
-	// Check if shaders are installed
-	shadersInstalled := upscaler.ShadersInstalled()
-	currentMode := upscaler.GetShaderModeName(upscaler.GetShaderMode())
+// upscaleEntry is one row of the upscaling menu.
+type upscaleEntry struct{ label, value string }
 
-	prompt := fmt.Sprintf("Upscaling [%s]: ", currentMode)
-	if !shadersInstalled {
-		prompt = "Upscaling (install shaders first): "
-	}
-
-	type menuOption struct {
-		Label string
-		Value string
-	}
-
-	items := []menuOption{
+// upscaleMenuEntries are the rows of the upscaling menu. The modes appear only
+// once the Anime4K shaders are installed, and the GAN row offers installing
+// them when they are not.
+func upscaleMenuEntries(shadersInstalled, ganInstalled bool) []upscaleEntry {
+	items := []upscaleEntry{
 		{"Back", "back"},
 		{"Off (no upscaling)", "off"},
 	}
-
 	if shadersInstalled {
 		items = append(items,
-			menuOption{"Performance (weak GPU)", "performance"},
-			menuOption{"Fast (Mode A - text-heavy)", "fast"},
-			menuOption{"Balanced (Mode B - general)", "balanced"},
-			menuOption{"Quality (Mode C - films)", "quality"},
-			menuOption{"Ultra (Max Enhancement - SD sources)", "ultra"},
-			menuOption{"--- Advanced Modes ---", "separator"},
-			menuOption{"A+A (Max Perceptual - 1080p)", "advanced_aa"},
-			menuOption{"B+B (720p Optimized)", "advanced_bb"},
-			menuOption{"C+A (Upscaled/Downscaled Content)", "advanced_ca"},
+			upscaleEntry{"Performance (weak GPU)", "performance"},
+			upscaleEntry{"Fast (Mode A - text-heavy)", "fast"},
+			upscaleEntry{"Balanced (Mode B - general)", "balanced"},
+			upscaleEntry{"Quality (Mode C - films)", "quality"},
+			upscaleEntry{"Ultra (Max Enhancement - SD sources)", "ultra"},
+			upscaleEntry{"--- Advanced Modes ---", "separator"},
+			upscaleEntry{"A+A (Max Perceptual - 1080p)", "advanced_aa"},
+			upscaleEntry{"B+B (720p Optimized)", "advanced_bb"},
+			upscaleEntry{"C+A (Upscaled/Downscaled Content)", "advanced_ca"},
 		)
-
-		// Add GAN UUL option (check if GAN shaders are installed)
-		if upscaler.GANShadersInstalled() {
-			items = append(items,
-				menuOption{"GAN UUL (360p to 4K - HEAVY)", "gan_uul"},
-			)
+		if ganInstalled {
+			items = append(items, upscaleEntry{"GAN UUL (360p to 4K - HEAVY)", "gan_uul"})
 		} else {
-			items = append(items,
-				menuOption{"GAN UUL (not installed)", "setup_gan"},
-			)
+			items = append(items, upscaleEntry{"GAN UUL (not installed)", "setup_gan"})
 		}
 	}
+	return append(items, upscaleEntry{"Setup shaders (download)", "setup"})
+}
 
-	items = append(items, menuOption{"Setup shaders (download)", "setup"})
-
-	labels := make([]string, len(items))
-	for i, it := range items {
-		labels[i] = it.Label
+// upscaleBreadcrumb names the menu after the current mode, or asks for the
+// shaders when there are none.
+func upscaleBreadcrumb(shadersInstalled bool, currentMode string) string {
+	if !shadersInstalled {
+		return "Upscaling (install shaders first)"
 	}
-	idx, err := tui.PickLabels(labels, tui.PickOptions{
-		Breadcrumb:   tui.SingleLine(strings.TrimSuffix(prompt, ": ")),
-		WindowTitle:  "GoAnime - Upscale",
-		ItemSingular: "mode",
-		ItemPlural:   "modes",
-	})
-	if err != nil {
-		if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
-			return nil
-		}
-		return fmt.Errorf("cancelled: %w", err)
-	}
+	return tui.SingleLine(fmt.Sprintf("Upscaling [%s]", currentMode))
+}
 
-	choice := items[idx].Value
+// upscaleModes maps a menu value to the shader mode it selects and the
+// message that announces it.
+var upscaleModes = map[string]struct {
+	mode upscaler.ShaderMode
+	info string
+}{
+	"off":         {upscaler.ShaderModeOff, "Real-time upscaling disabled"},
+	"performance": {upscaler.ShaderModePerformance, "Real-time upscaling: Performance mode (minimal shaders)"},
+	"fast":        {upscaler.ShaderModeFast, "Real-time upscaling: Fast mode (Mode A - good for subtitled anime)"},
+	"balanced":    {upscaler.ShaderModeBalanced, "Real-time upscaling: Balanced mode (Mode B - general purpose)"},
+	"quality":     {upscaler.ShaderModeQuality, "Real-time upscaling: Quality mode (Mode C - best for films)"},
+	"ultra":       {upscaler.ShaderModeUltra, "Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)"},
+	"advanced_aa": {upscaler.ShaderModeAdvancedAA, "Real-time upscaling: Advanced A+A (highest perceptual quality, may cause ringing)"},
+	"advanced_bb": {upscaler.ShaderModeAdvancedBB, "Real-time upscaling: Advanced B+B (optimized for 720p with aliasing)"},
+	"advanced_ca": {upscaler.ShaderModeAdvancedCA, "Real-time upscaling: Advanced C+A (quality + restore for downscaled content)"},
+	"gan_uul":     {upscaler.ShaderModeGAN_UUL, "Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)"},
+}
+
+// applyUpscaleChoice carries out one pick of the upscaling menu. again is true
+// when the menu should be shown once more (the separator row was chosen).
+func applyUpscaleChoice(choice string) (again bool, err error) {
 	switch choice {
 	case "back":
-		return nil
+		return false, nil
 	case "separator":
-		// Do nothing for separator, show menu again
-		return handleUpscaleFromMenu()
-	case "off":
-		upscaler.SetShaderMode(upscaler.ShaderModeOff)
-		util.Info("Real-time upscaling disabled")
-	case "performance":
-		upscaler.SetShaderMode(upscaler.ShaderModePerformance)
-		util.Info("Real-time upscaling: Performance mode (minimal shaders)")
-	case "fast":
-		upscaler.SetShaderMode(upscaler.ShaderModeFast)
-		util.Info("Real-time upscaling: Fast mode (Mode A - good for subtitled anime)")
-	case "balanced":
-		upscaler.SetShaderMode(upscaler.ShaderModeBalanced)
-		util.Info("Real-time upscaling: Balanced mode (Mode B - general purpose)")
-	case "quality":
-		upscaler.SetShaderMode(upscaler.ShaderModeQuality)
-		util.Info("Real-time upscaling: Quality mode (Mode C - best for films)")
-	case "ultra":
-		upscaler.SetShaderMode(upscaler.ShaderModeUltra)
-		util.Info("Real-time upscaling: Ultra mode (Maximum enhancement for SD sources)")
-	case "advanced_aa":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedAA)
-		util.Info("Real-time upscaling: Advanced A+A (highest perceptual quality, may cause ringing)")
-	case "advanced_bb":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedBB)
-		util.Info("Real-time upscaling: Advanced B+B (optimized for 720p with aliasing)")
-	case "advanced_ca":
-		upscaler.SetShaderMode(upscaler.ShaderModeAdvancedCA)
-		util.Info("Real-time upscaling: Advanced C+A (quality + restore for downscaled content)")
-	case "gan_uul":
-		upscaler.SetShaderMode(upscaler.ShaderModeGAN_UUL)
-		util.Info("Real-time upscaling: GAN UUL mode (360p→4K - requires powerful GPU!)")
-		util.Warn("This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+		return true, nil
 	case "setup_gan":
-		util.Info("Setting up experimental GAN UUL shaders...")
-		if err := upscaler.InstallGANShaders(); err != nil {
-			return fmt.Errorf("failed to install GAN shaders: %w", err)
+		infoFn("Setting up experimental GAN UUL shaders...")
+		if err := installGANShadersFn(); err != nil {
+			return false, fmt.Errorf("failed to install GAN shaders: %w", err)
 		}
-		util.Info("GAN UUL shaders installed! Select 'GAN UUL' to enable 360p→4K upscaling.")
+		infoFn("GAN UUL shaders installed! Select 'GAN UUL' to enable 360p→4K upscaling.")
+		return false, nil
 	case "setup":
-		util.Info("Setting up Anime4K shaders...")
-		if err := upscaler.InstallShaders(); err != nil {
-			return fmt.Errorf("failed to install shaders: %w", err)
+		infoFn("Setting up Anime4K shaders...")
+		if err := installShadersFn(); err != nil {
+			return false, fmt.Errorf("failed to install shaders: %w", err)
 		}
-		util.Info("Anime4K shaders installed! Select a mode to enable upscaling.")
+		infoFn("Anime4K shaders installed! Select a mode to enable upscaling.")
+		return false, nil
 	}
+	if m, ok := upscaleModes[choice]; ok {
+		setShaderModeFn(m.mode)
+		infoFn(m.info)
+		if choice == "gan_uul" {
+			warnFn("This mode is VERY heavy! If you experience lag, switch to a lighter mode.")
+		}
+	}
+	return false, nil
+}
 
-	return nil
+// handleUpscaleFromMenu shows the real-time upscaling options menu
+func handleUpscaleFromMenu() error {
+	if !stdinIsTerminal() {
+		return fmt.Errorf("no TTY available for interactive menu")
+	}
+	for {
+		shadersInstalled := shadersInstalledFn()
+		items := upscaleMenuEntries(shadersInstalled, ganInstalledFn())
+		labels := make([]string, len(items))
+		for i, it := range items {
+			labels[i] = it.label
+		}
+		idx, err := pickLabelsFn(labels, tui.PickOptions{
+			Breadcrumb:   upscaleBreadcrumb(shadersInstalled, shaderModeNameFn()),
+			WindowTitle:  "GoAnime - Upscale",
+			ItemSingular: "mode",
+			ItemPlural:   "modes",
+		})
+		if err != nil {
+			if errors.Is(err, tui.ErrPickBack) || errors.Is(err, tui.ErrPickCancelled) {
+				return nil
+			}
+			return fmt.Errorf("cancelled: %w", err)
+		}
+		if idx < 0 || idx >= len(items) {
+			return nil
+		}
+		again, err := applyUpscaleChoice(items[idx].value)
+		if err != nil || !again {
+			return err
+		}
+	}
 }
 
 // printDownloadLocation prints the absolute path of the downloaded file so
@@ -1809,69 +1855,137 @@ func downloadSubtitleFiles(videoPath string, subs []util.SubtitleInfo, printFn f
 			fmt.Printf(format, a...)
 		}
 	}
-
 	if len(subs) == 0 {
 		return
 	}
 
-	// Check ffmpeg availability — required for muxing subtitles into the video
-	ffmpegPath, err := exec.LookPath("ffmpeg")
+	// ffmpeg is required for muxing subtitles into the video.
+	ffmpegPath, err := resolveFFmpeg()
 	if err != nil {
-		util.Debugf("ffmpeg not found — cannot embed subtitles into the video file")
-		printFn("Warning: ffmpeg not found — cannot embed subtitles\n")
+		util.Debugf("%v", err)
+		if errors.Is(err, errFFmpegMissing) {
+			printFn("Warning: ffmpeg not found — cannot embed subtitles\n")
+		} else if errors.Is(err, errFFmpegUnresolvable) {
+			printFn("Warning: failed to resolve ffmpeg path\n")
+		}
 		return
 	}
-	// Resolve symlinks and validate the binary path to prevent PATH-based injection.
-	ffmpegPath, err = filepath.EvalSymlinks(ffmpegPath)
+
+	entries := fetchSubtitleFiles(subtitleHTTPClientFn(), filepath.Dir(videoPath), subs)
+	if len(entries) == 0 {
+		return
+	}
+
+	printFn("Embedding %d subtitle(s) into video...\n", len(entries))
+	run := func(args []string) error { return runFFmpegFn(ffmpegPath, args) }
+	switch muxSubtitles(run, videoPath, entries) {
+	case muxedMP4:
+		printFn("Subtitles embedded successfully!\n")
+	case muxedMKV:
+		printFn("Note: saved as .mkv for better subtitle compatibility\n")
+		printFn("Subtitles embedded successfully!\n")
+	default:
+		util.Debugf("Could not embed subtitles — both MP4 and MKV muxing failed")
+		printFn("Warning: Could not embed subtitles — both MP4 and MKV muxing failed\n")
+	}
+
+	// Clean up temp subtitle files
+	for _, e := range entries {
+		_ = os.Remove(e.tmpPath)
+	}
+}
+
+var (
+	errFFmpegMissing      = errors.New("ffmpeg not found — cannot embed subtitles into the video file")
+	errFFmpegUnresolvable = errors.New("failed to resolve the ffmpeg path")
+	errFFmpegUnsafe       = errors.New("ffmpeg is not a regular absolute file — refusing to execute")
+)
+
+// Seams for the subtitle muxing; tests replace them so no ffmpeg is looked up
+// or run.
+var (
+	lookPathFn     = exec.LookPath
+	evalSymlinksFn = filepath.EvalSymlinks
+	statFn         = os.Stat
+	runFFmpegFn    = func(path string, args []string) error {
+		util.Debugf("ffmpeg mux cmd: %s %v", path, args)
+		cmd := exec.Command(path, args...) // #nosec G204 -- path is validated by resolveFFmpeg: resolved via EvalSymlinks, confirmed absolute and a regular file
+		var stderr bytes.Buffer
+		cmd.Stdout = nil
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			util.Debugf("ffmpeg mux failed: %v\nstderr: %s", err, stderr.String())
+			return err
+		}
+		return nil
+	}
+)
+
+// resolveFFmpeg finds ffmpeg and checks it before anything runs it: symlinks
+// are resolved, and the result must be an absolute path to a regular file, so
+// a poisoned PATH entry cannot turn into an arbitrary command.
+func resolveFFmpeg() (string, error) {
+	path, err := lookPathFn("ffmpeg")
 	if err != nil {
-		util.Debugf("failed to resolve ffmpeg path: %v", err)
-		printFn("Warning: failed to resolve ffmpeg path\n")
-		return
+		return "", errFFmpegMissing
 	}
-	if !filepath.IsAbs(ffmpegPath) {
-		util.Debugf("ffmpeg resolved to a non-absolute path — refusing to execute")
-		return
+	path, err = evalSymlinksFn(path)
+	if err != nil {
+		return "", errFFmpegUnresolvable
 	}
-	if fi, statErr := os.Stat(ffmpegPath); statErr != nil || fi.IsDir() {
-		util.Debugf("ffmpeg path is not a valid file: %s", ffmpegPath)
-		return
+	if !filepath.IsAbs(path) {
+		return "", errFFmpegUnsafe
 	}
+	if fi, statErr := statFn(path); statErr != nil || fi.IsDir() {
+		return "", errFFmpegUnsafe
+	}
+	return path, nil
+}
 
-	dir := filepath.Dir(videoPath)
-	client := subtitleHTTPClientFn()
+// subtitleEntry is a subtitle track downloaded next to the video, waiting to
+// be muxed into it.
+type subtitleEntry struct {
+	tmpPath  string
+	label    string
+	langCode string
+}
 
-	// Collect subtitle files to mux
-	type subEntry struct {
-		tmpPath  string
-		label    string
-		langCode string
+// subtitleExt is the file extension a subtitle URL points at; WebVTT unless it
+// names SRT or ASS.
+func subtitleExt(subURL string) string {
+	lower := strings.ToLower(subURL)
+	switch {
+	case strings.Contains(lower, ".srt"):
+		return "srt"
+	case strings.Contains(lower, ".ass"):
+		return "ass"
+	default:
+		return "vtt"
 	}
-	var entries []subEntry
+}
 
+// subtitleLang names a track for a file name: its label, else its language,
+// else "unknown".
+func subtitleLang(label, language string) string {
+	if lang := util.SanitizeForFilename(label); lang != "" {
+		return lang
+	}
+	if lang := util.SanitizeForFilename(language); lang != "" {
+		return lang
+	}
+	return "unknown"
+}
+
+// fetchSubtitleFiles downloads each track with a URL into dir and returns the
+// ones that arrived; a track that fails is skipped, not fatal.
+func fetchSubtitleFiles(client *http.Client, dir string, subs []util.SubtitleInfo) []subtitleEntry {
+	var entries []subtitleEntry
 	for _, sub := range subs {
 		if sub.URL == "" {
 			continue
 		}
-
-		// Determine extension
-		ext := "vtt"
-		lower := strings.ToLower(sub.URL)
-		if strings.Contains(lower, ".srt") {
-			ext = "srt"
-		} else if strings.Contains(lower, ".ass") {
-			ext = "ass"
-		}
-
-		lang := util.SanitizeForFilename(sub.Label)
-		if lang == "" {
-			lang = util.SanitizeForFilename(sub.Language)
-		}
-		if lang == "" {
-			lang = "unknown"
-		}
-
-		// Download to a temp file
-		tmpPath := filepath.Join(dir, fmt.Sprintf(".tmp_sub_%s.%s", lang, ext))
+		lang := subtitleLang(sub.Label, sub.Language)
+		tmpPath := filepath.Join(dir, fmt.Sprintf(".tmp_sub_%s.%s", lang, subtitleExt(sub.URL)))
 		req, reqErr := http.NewRequest("GET", sub.URL, http.NoBody)
 		if reqErr != nil {
 			util.Warnf("Failed to create subtitle request (%s): %v", sub.Label, reqErr)
@@ -1884,7 +1998,6 @@ func downloadSubtitleFiles(videoPath string, subs []util.SubtitleInfo, printFn f
 			util.Warnf("Failed to download subtitle (%s): %v", sub.Label, respErr)
 			continue
 		}
-
 		func() {
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
@@ -1905,95 +2018,206 @@ func downloadSubtitleFiles(videoPath string, subs []util.SubtitleInfo, printFn f
 			if langCode == "" {
 				langCode = lang
 			}
-			entries = append(entries, subEntry{tmpPath: tmpPath, label: sub.Label, langCode: langCode})
+			entries = append(entries, subtitleEntry{tmpPath: tmpPath, label: sub.Label, langCode: langCode})
 		}()
 	}
+	return entries
+}
 
-	if len(entries) == 0 {
-		return
+// subtitleMuxArgs is the ffmpeg command line that copies the video's video and
+// audio streams, adds each subtitle track with subCodec and writes outPath.
+// Only video and audio are mapped from the input: data streams such as
+// timed_id3, present in the MPEG-TS of HLS downloads, crash MP4/MKV muxing.
+func subtitleMuxArgs(videoPath string, entries []subtitleEntry, subCodec, outPath string) []string {
+	a := []string{"-y", "-fflags", "+genpts", "-i", filepath.Clean(videoPath)}
+	for _, e := range entries {
+		a = append(a, "-i", filepath.Clean(e.tmpPath))
 	}
-
-	// --- Mux subtitles into the video container ---
-	printFn("Embedding %d subtitle(s) into video...\n", len(entries))
-
-	// buildMuxArgs builds the ffmpeg arguments for a given subtitle codec and output path.
-	buildMuxArgs := func(subCodec, outPath string) []string {
-		a := []string{"-y", "-fflags", "+genpts", "-i", filepath.Clean(videoPath)}
-		for _, e := range entries {
-			a = append(a, "-i", filepath.Clean(e.tmpPath))
-		}
-		// Map only video and audio from input — skip data streams like timed_id3
-		// which are present in MPEG-TS from HLS downloads and crash MP4/MKV muxing.
-		a = append(a, "-map", "0:v", "-map", "0:a")
-		for i := range entries {
-			a = append(a, "-map", fmt.Sprintf("%d", i+1))
-		}
-		a = append(a, "-c:v", "copy", "-c:a", "copy", "-c:s", subCodec)
-		for i, e := range entries {
-			a = append(a,
-				fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode),
-				fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label),
-			)
-		}
-		a = append(a, filepath.Clean(outPath))
-		return a
+	a = append(a, "-map", "0:v", "-map", "0:a")
+	for i := range entries {
+		a = append(a, "-map", fmt.Sprintf("%d", i+1))
 	}
+	a = append(a, "-c:v", "copy", "-c:a", "copy", "-c:s", subCodec)
+	for i, e := range entries {
+		a = append(a,
+			fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("language=%s", e.langCode),
+			fmt.Sprintf("-metadata:s:s:%d", i), fmt.Sprintf("title=%s", e.label),
+		)
+	}
+	return append(a, filepath.Clean(outPath))
+}
 
-	// runMux executes ffmpeg and captures stderr for diagnostics.
-	runMux := func(subCodec, outPath string) error {
-		args := buildMuxArgs(subCodec, outPath)
-		util.Debugf("ffmpeg mux cmd: %s %v", ffmpegPath, args)
-		cmd := exec.Command(ffmpegPath, args...) // #nosec G204 -- ffmpegPath is validated: resolved via EvalSymlinks, confirmed absolute and a regular file
-		var stderrBuf bytes.Buffer
-		cmd.Stdout = nil
-		cmd.Stderr = &stderrBuf
-		if err := cmd.Run(); err != nil {
-			util.Debugf("ffmpeg mux failed: %v\nstderr: %s", err, stderrBuf.String())
+// muxResult is how embedding the subtitles ended.
+type muxResult int
+
+const (
+	muxFailed muxResult = iota
+	muxedMP4            // replaced the video in place
+	muxedMKV            // saved next to it as .mkv
+)
+
+// muxSubtitles embeds the subtitles: first as an MP4 with mov_text, replacing
+// the video; if that fails, as an MKV, which tolerates more subtitle formats
+// and TS inputs. A failed attempt leaves no partial output behind.
+func muxSubtitles(run func(args []string) error, videoPath string, entries []subtitleEntry) muxResult {
+	attempt := func(subCodec, outPath string) error {
+		args := subtitleMuxArgs(videoPath, entries, subCodec, outPath)
+		if err := run(args); err != nil {
 			_ = os.Remove(outPath)
 			return err
 		}
 		return nil
 	}
 
-	embedded := false
-
-	// Attempt 1: MP4 container with mov_text subtitle codec
 	tmpMP4 := videoPath + ".muxing.mp4"
-	if err := runMux("mov_text", tmpMP4); err == nil {
-		if renErr := os.Rename(tmpMP4, videoPath); renErr != nil {
-			util.Warnf("Failed to replace video: %v", renErr)
-			_ = os.Remove(tmpMP4)
-		} else {
-			embedded = true
+	if err := attempt("mov_text", tmpMP4); err == nil {
+		renErr := os.Rename(tmpMP4, videoPath)
+		if renErr == nil {
+			return muxedMP4
 		}
+		util.Warnf("Failed to replace video: %v", renErr)
+		_ = os.Remove(tmpMP4)
 	} else {
 		util.Debugf("MP4 mux failed: %v — trying MKV fallback", err)
 	}
 
-	// Attempt 2: MKV container (more tolerant of various subtitle formats / TS inputs)
-	if !embedded {
-		mkvPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".mkv"
-		tmpMKV := mkvPath + ".tmp.mkv"
-		if err := runMux("srt", tmpMKV); err == nil {
-			if renErr := os.Rename(tmpMKV, mkvPath); renErr != nil {
-				util.Warnf("Failed to save MKV: %v", renErr)
-				_ = os.Remove(tmpMKV)
-			} else {
-				embedded = true
-				printFn("Note: saved as .mkv for better subtitle compatibility\n")
-			}
+	mkvPath := strings.TrimSuffix(videoPath, filepath.Ext(videoPath)) + ".mkv"
+	tmpMKV := mkvPath + ".tmp.mkv"
+	if err := attempt("srt", tmpMKV); err == nil {
+		renErr := os.Rename(tmpMKV, mkvPath)
+		if renErr == nil {
+			return muxedMKV
+		}
+		util.Warnf("Failed to save MKV: %v", renErr)
+		_ = os.Remove(tmpMKV)
+	}
+	return muxFailed
+}
+
+// minReusableEpisodeSize is the size under which an already-downloaded file
+// is treated as a failed download and fetched again.
+const minReusableEpisodeSize int64 = 1024
+
+// minBloggerEpisodeSize is the size under which a Blogger download is
+// rejected as truncated.
+const minBloggerEpisodeSize int64 = 10 * 1024 * 1024
+
+// episodeTooSmall reports whether an existing file is too small to keep.
+func episodeTooSmall(size int64) bool { return size < minReusableEpisodeSize }
+
+// checkBloggerEpisodeSize verifies a finished Blogger download exists and is
+// not truncated; a truncated file is removed so the next try starts clean.
+func checkBloggerEpisodeSize(path string) error {
+	stat, err := statFn(path)
+	if err != nil {
+		return fmt.Errorf("download failed: file was not created")
+	}
+	if stat.Size() < minBloggerEpisodeSize {
+		_ = os.Remove(path)
+		return fmt.Errorf("download incomplete: file is only %d bytes (%.1f MB), expected at least %.0f MB",
+			stat.Size(), float64(stat.Size())/(1024*1024), float64(minBloggerEpisodeSize)/(1024*1024))
+	}
+	return nil
+}
+
+// episodeDownloadPaths decides the folder and file an episode is saved to.
+// With an anime name it follows the Plex/Jellyfin layout (movies flat,
+// anime and TV by season); without one it falls back to a folder derived
+// from the anime URL. Movies and TV go under the movie base directory.
+func episodeDownloadPaths(snap mediaSnapshot, animeURL, episodeNumberStr string, selectedEpisodeNum int) (dir, file string) {
+	baseDir := util.DefaultDownloadDir()
+	if snap.IsMovieOrTV {
+		baseDir = util.DefaultMovieDownloadDir()
+	}
+	if snap.AnimeName == "" {
+		dir = filepath.Join(baseDir, DownloadFolderFormatter(animeURL))
+		return dir, filepath.Join(dir, episodeNumberStr+".mp4")
+	}
+	if snap.MediaType == "movie" {
+		return util.FormatPlexMovieDir(baseDir, snap.AnimeName, snap.Meta),
+			util.FormatPlexMoviePath(baseDir, snap.AnimeName, "", snap.Meta)
+	}
+	epNum := selectedEpisodeNum
+	if epNum < 1 {
+		epNum = 1
+		if parsed, _ := strconv.Atoi(episodeNumberStr); parsed > 0 {
+			epNum = parsed
 		}
 	}
+	season, relEp := resolveSeasonForEpisode(snap, epNum)
+	return util.FormatPlexEpisodeDir(baseDir, snap.AnimeName, season, snap.Meta),
+		util.FormatPlexEpisodePath(baseDir, snap.AnimeName, season, relEp, snap.Meta)
+}
 
-	if embedded {
-		printFn("Subtitles embedded successfully!\n")
-	} else {
-		util.Debugf("Could not embed subtitles — both MP4 and MKV muxing failed")
-		printFn("Warning: Could not embed subtitles — both MP4 and MKV muxing failed\n")
-	}
+// downloadKind is the way a video URL is downloaded.
+type downloadKind int
 
-	// Clean up temp subtitle files
-	for _, e := range entries {
-		_ = os.Remove(e.tmpPath)
+const (
+	downloadKindDirect  downloadKind = iota // parallel ranged HTTP
+	downloadKindBlogger                     // googlevideo CDN behind the proxy
+	downloadKindStream                      // HLS, yt-dlp hosts, SharePoint
+)
+
+// downloadKindFor picks the download method for a video URL.
+func downloadKindFor(videoURL string) downloadKind {
+	switch {
+	case isBloggerProxyURL(videoURL):
+		return downloadKindBlogger
+	case strings.Contains(videoURL, "blogger.com") ||
+		LooksLikeHLS(videoURL) ||
+		strings.Contains(videoURL, "wixmp.com") ||
+		strings.Contains(videoURL, "sharepoint.com"):
+		return downloadKindStream
+	default:
+		return downloadKindDirect
 	}
+}
+
+// streamEngines are the engines downloadStreamWithFallbacks chains.
+type streamEngines struct {
+	nativeHLS  func(url, path string, m *model) error
+	ytdlp      func(url, path string, m *model) error
+	directHTTP func(url, path string, m *model) error
+}
+
+var streamDownloaders = streamEngines{
+	nativeHLS:  downloadWithNativeHLS,
+	ytdlp:      downloadWithYtDlp,
+	directHTTP: downloadDirectHTTP,
+}
+
+// resetProgress clears the progress a failed engine left behind so the next
+// one starts the bar from zero.
+func resetProgress(m *model) {
+	m.mu.Lock()
+	m.received = 0
+	m.totalBytes = 0
+	m.peakPct = 0
+	m.mu.Unlock()
+}
+
+// downloadStreamWithFallbacks downloads a stream. HLS (or an unsafe
+// extension) goes to the native HLS engine first; separate audio tracks
+// need yt-dlp to merge, and any other native failure falls back to yt-dlp
+// and then plain HTTP. Anything else goes straight to yt-dlp.
+func downloadStreamWithFallbacks(videoURL, path string, m *model, e streamEngines) error {
+	if !LooksLikeHLS(videoURL) && !hasUnsafeExtension(videoURL) {
+		return e.ytdlp(videoURL, path, m)
+	}
+	err := e.nativeHLS(videoURL, path, m)
+	if err == nil {
+		return nil
+	}
+	if stderrors.Is(err, hls.ErrSeparateAudioTracks) {
+		util.Debugf("HLS has separate audio tracks, using yt-dlp: %v", err)
+		resetProgress(m)
+		return e.ytdlp(videoURL, path, m)
+	}
+	util.Debugf("Native HLS failed, trying yt-dlp: %v", err)
+	resetProgress(m)
+	if err = e.ytdlp(videoURL, path, m); err == nil {
+		return nil
+	}
+	util.Debugf("yt-dlp failed, trying direct HTTP: %v", err)
+	return e.directHTTP(videoURL, path, m)
 }

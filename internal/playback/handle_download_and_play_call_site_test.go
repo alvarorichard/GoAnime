@@ -49,11 +49,18 @@ func TestHandleDownloadAndPlay_CallSites_PassDistinctIDFields(t *testing.T) {
 					return true
 				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "HandleDownloadAndPlay" {
+				if !ok {
 					return true
 				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || pkg.Name != "player" {
+				recv, ok := sel.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				// The call is player.HandleDownloadAndPlay itself, or the
+				// flowEnv field that stands in for it (same arguments).
+				direct := recv.Name == "player" && sel.Sel.Name == "HandleDownloadAndPlay"
+				viaEnv := recv.Name == "env" && sel.Sel.Name == "downloadAndPlay"
+				if !direct && !viaEnv {
 					return true
 				}
 				found = true
@@ -92,7 +99,7 @@ func TestHandleDownloadAndPlay_CallSites_PassDistinctIDFields(t *testing.T) {
 			})
 
 			if !found {
-				t.Fatalf("no player.HandleDownloadAndPlay call found in %s — "+
+				t.Fatalf("no player.HandleDownloadAndPlay (or env.downloadAndPlay) call found in %s — "+
 					"either the call site was moved (update this test) or removed", path)
 			}
 		})

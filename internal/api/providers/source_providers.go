@@ -13,6 +13,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
 )
@@ -25,22 +26,28 @@ var (
 	// startFlixStreamFn / startFlixEpisodesFn keep StartFlix delegating to the
 	// api package's interactive paths (season picker, then Dublado/Legendado).
 	// HiAnime/AnimeFire/Goyabu are self-contained (adapter-direct).
-	startFlixStreamFn   = api.GetStartFlixStreamURL
+	startFlixStreamFn   = api.ResolveStartFlixStream
 	startFlixEpisodesFn = api.GetStartFlixEpisodes
 
 	// topCineStreamFn / topCineEpisodesFn do the same for TopCine, whose titles
 	// play through the StartFlix panel by TMDB id.
-	topCineStreamFn   = api.GetTopCineStreamURL
+	topCineStreamFn   = api.ResolveTopCineStream
 	topCineEpisodesFn = api.GetTopCineEpisodes
 
 	// pobreflixStreamFn / pobreflixEpisodesFn do the same for Pobreflix, whose
 	// titles play through the StartFlix panel by TMDB id.
-	pobreflixStreamFn   = api.GetPobreflixStreamURL
+	pobreflixStreamFn   = api.ResolvePobreflixStream
 	pobreflixEpisodesFn = api.GetPobreflixEpisodes
+
+	// Pomfy plays through its own Byse CDN (the PoW captcha flow); the api
+	// package owns the season/episode listing on top of the site's JSON.
+	pomfyStreamFn   = api.ResolvePomfyStream
+	pomfyEpisodesFn = api.GetPomfyEpisodes
 
 	// AnimesDigital keeps dubbed and subtitled releases on separate title
 	// pages. The api path owns the one interactive audio choice.
 	animesDigitalEpisodesFn = api.GetAnimesDigitalEpisodes
+	anrollEpisodesFn        = api.GetAnrollEpisodes
 )
 
 // lazyGetAdapter returns a standalone adapter for a scraper type, built once and
@@ -125,31 +132,32 @@ func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-// FetchStreamURL mirrors api.GetEpisodeStreamURL's AnimeFire branch: same
-// global side effects, same adapter call including the quality argument.
-func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode with the quality argument the AnimeFire
+// adapter expects ("best" when none is given). AnimeFire's own page sets no
+// playback context beyond the URL, so the Stream carries only that.
+func (p *animeFireProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	if quality == "" {
 		quality = "best"
 	}
 	url, _, err := adapter.GetStreamURL(episode.URL, quality)
 	if err != nil {
-		return "", fmt.Errorf("animeFire stream: %w", err)
+		return source.Stream{}, fmt.Errorf("animeFire stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from Animefire.io")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from Animefire.io")
 	}
-	return url, nil
+	return source.Stream{URL: url}, nil
+}
+
+func (p *animeFireProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- HiAnime Provider ---
@@ -245,17 +253,15 @@ func (p *hianimeProvider) FetchEpisodes(ctx context.Context, anime *models.Anime
 // Referer — on two of three titles sampled 2026-09-22 the variant playlist was
 // 403 without one — so dropping the metadata means the URL resolves and then
 // some titles play nothing.
-func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, origin and subtitles the scraper reports come back in the Stream.
+func (p *hianimeProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	var url string
 	var metadata map[string]string
@@ -265,44 +271,49 @@ func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 		url, metadata, err = adapter.GetStreamURL(episode.URL, quality)
 	}
 	if err != nil {
-		return "", fmt.Errorf("hianime stream: %w", err)
+		return source.Stream{}, fmt.Errorf("hianime stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from HiAnime")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from HiAnime")
 	}
-	applyPlaybackMetadata(metadata)
-	return url, nil
+	return streamFromMetadata(url, metadata), nil
 }
 
-// applyPlaybackMetadata moves a scraper's playback hints into the globals mpv
+func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
+// streamFromMetadata moves a scraper's playback hints into the globals mpv
 // and the downloader read.
 //
-// The two keys are a contract on the metadata map, not something specific to
+// These keys are a contract on the metadata map, not something specific to
 // one source, so a future scraper can fill them and be played correctly without
 // touching this function:
 //
 //	referer    the origin to send with every media request
+//	origin     the explicit CORS origin to send with every media request
 //	subtitles  a JSON array of {"url","language","label"}
 //
 // A malformed subtitle payload is logged and dropped rather than failing the
 // episode: subtitles are an enhancement, and refusing to play a video because
 // its caption list did not parse would be the wrong trade.
-func applyPlaybackMetadata(metadata map[string]string) {
-	if referer := strings.TrimSpace(metadata["referer"]); referer != "" {
-		util.SetGlobalReferer(referer)
+func streamFromMetadata(url string, metadata map[string]string) source.Stream {
+	s := source.Stream{
+		URL:     url,
+		Referer: strings.TrimSpace(metadata["referer"]),
+		Origin:  strings.TrimSpace(metadata["origin"]),
 	}
 	raw := strings.TrimSpace(metadata["subtitles"])
 	if raw == "" {
-		return
+		return s
 	}
-	var tracks []util.SubtitleInfo
+	var tracks []source.Subtitle
 	if err := jsonx.Unmarshal([]byte(raw), &tracks); err != nil {
 		util.Debug("could not read the subtitle list from the scraper", "error", err)
-		return
+		return s
 	}
-	if len(tracks) > 0 {
-		util.SetGlobalSubtitles(tracks)
-	}
+	s.Subtitles = tracks
+	return s
 }
 
 // --- Goyabu Provider ---
@@ -328,40 +339,29 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 		Tags:        []string{"[goyabu]"},
 		URLMatchers: []string{"goyabu"},
 		ProbeURL:    "https://goyabu.io",
-		// PARKED, not retired. Off until we find a way past the gate:
-		// GOANIME_ENABLED_SOURCES=goyabu turns it back on at any time.
+		// Goyabu is the only source behind a bot gate: a Cloudflare managed
+		// challenge that many networks get and no plain HTTP client clears.
+		// It therefore searches by default only when a challenge solver is
+		// registered (the optional cfsolve tool, see internal/scraper/cfsolver);
+		// otherwise it stays off rather than adding a blocked source to every
+		// search. GOANIME_ENABLED_SOURCES=goyabu forces it on for a network that
+		// is not challenged, GOANIME_DISABLED_SOURCES=goyabu forces it off.
 		//
-		// Goyabu is the only source behind a bot gate. Everything else here is
-		// plain HTTP; this one sits behind a Cloudflare managed challenge, and
-		// GoAnime no longer ships the browser that used to try clearing it — on
-		// a flagged network even that browser returned nothing. It stays disabled rather than deleted because the
-		// scraper is complete and correct: it works today on a network that is
-		// not flagged.
-		//
-		// What is known, so the next attempt does not restart from zero
-		// (measured 2026-09-25):
-		//
-		//   - In a real browser the gate clears on its own in about ten seconds
-		//     and leaves three cookies. It is not unsolvable.
-		//   - Those cookies do NOT replay. Tried: the plain transport and the
-		//     Chrome-impersonating one, each with the solving browser's
-		//     User-Agent and with our own, plus curl with the same cookie and
-		//     UA. All 403. Cloudflare is binding the clearance to something no
-		//     HTTP client here presents.
-		//   - Installing real Chrome (GOANIME_SF_CHROME_CHANNEL=chrome) instead
-		//     of Playwright's bundled Chromium did not change that.
-		//   - The site's own banner says ISPs are blocking it and recommends a
-		//     VPN, and a datacenter IP reaches it unchallenged while a flagged
-		//     residential one does not. The rule is reputation, not the path.
-		//
-		// The avenue NOT yet tried, and the most promising one: stop replaying
-		// cookies and fetch through the browser itself — the solver already has
-		// a context that passed the gate, so a transport that returns that
-		// page's HTML would sidestep the binding entirely. It is real work
-		// (every scraper call would route through it) and it was not started,
-		// so it is written down rather than half-built.
-		DefaultDisabled: true,
+		// Measured 2026-11-01: cfsolve clears the gate in about 8s and the
+		// resulting cf_clearance is accepted by GoAnime's own HTTP client, so
+		// the old "clearance does not replay" finding no longer holds for it.
+		DefaultDisabled: !netx.ChallengeSolverAvailable(),
+		Note:            goyabuNote(netx.ChallengeSolverAvailable()),
 	}
+}
+
+// goyabuNote is the caveat the SOURCES screen shows for Goyabu: without the
+// cfsolve helper, turning it on finds nothing, and the screen says why.
+func goyabuNote(solverAvailable bool) string {
+	if solverAvailable {
+		return ""
+	}
+	return "needs cfsolve to pass Cloudflare (docs/CFSOLVE.md)"
 }
 
 func (p *goyabuProvider) HasSeasons() bool { return false }
@@ -392,26 +392,28 @@ func (p *goyabuProvider) FetchEpisodes(_ context.Context, anime *models.Anime) (
 
 // FetchStreamURL mirrors api.GetEpisodeStreamURL's Goyabu branch: same global
 // side effects, same adapter call (Goyabu takes no quality argument).
-func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+// FetchStream resolves the episode. Goyabu's page sets no playback context
+// beyond the URL, so the Stream carries only that.
+func (p *goyabuProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	url, _, err := adapter.GetStreamURL(episode.URL)
 	if err != nil {
-		return "", fmt.Errorf("goyabu stream: %w", err)
+		return source.Stream{}, fmt.Errorf("goyabu stream: %w", err)
 	}
 	if url == "" {
-		return "", fmt.Errorf("empty stream URL returned from Goyabu")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from Goyabu")
 	}
-	return url, nil
+	return source.Stream{URL: url}, nil
+}
+
+func (p *goyabuProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- AnimesDigital Provider ---
@@ -470,31 +472,204 @@ func (p *animesDigitalProvider) FetchEpisodes(ctx context.Context, anime *models
 	return animesDigitalEpisodesFn(anime)
 }
 
-func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, _ string) (string, error) {
+// FetchStream resolves the episode. Player 1's video host checks the Referer of
+// every segment, so the adapter's referer travels in the Stream.
+func (p *animesDigitalProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 	var streamURL string
+	var metadata map[string]string
 	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
-		streamURL, _, err = contextual.GetStreamURLContext(ctx, episode.URL)
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
 	} else {
-		streamURL, _, err = adapter.GetStreamURL(episode.URL)
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
 	}
 	if err != nil {
-		return "", fmt.Errorf("animesdigital stream: %w", err)
+		return source.Stream{}, fmt.Errorf("animesdigital stream: %w", err)
 	}
 	if streamURL == "" {
-		return "", fmt.Errorf("empty stream URL returned from AnimesDigital")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesDigital")
 	}
-	return streamURL, nil
+	return streamFromMetadata(streamURL, metadata), nil
+}
+
+func (p *animesDigitalProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
+// --- AnimesROLL Provider ---
+
+type anrollProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() { source.Register(&anrollProvider{}) }
+
+func (p *anrollProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnrollType)
+}
+
+func (p *anrollProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.Anroll,
+		Priority:    35,
+		Explicit:    []string{"AnimesROLL"},
+		Tags:        []string{"[animesroll]"},
+		URLMatchers: []string{"anroll.io"},
+		ProbeURL:    "https://anroll.io",
+	}
+}
+
+func (p *anrollProvider) HasSeasons() bool { return false }
+
+func (p *anrollProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = contextual.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Anroll)
+	return results, nil
+}
+
+func (p *anrollProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return anrollEpisodesFn(anime)
+}
+
+// FetchStream resolves the episode without writing playback state: the
+// referer, origin and subtitles the scraper reports come back in the Stream.
+func (p *anrollProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return source.Stream{}, err
+	}
+	var streamURL string
+	var metadata map[string]string
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
+	} else {
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
+	}
+	if err != nil {
+		return source.Stream{}, fmt.Errorf("anroll stream: %w", err)
+	}
+	if streamURL == "" {
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesROLL")
+	}
+	return streamFromMetadata(streamURL, metadata), nil
+}
+
+func (p *anrollProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
+// --- AnimesFHD Provider ---
+
+type animesfhdProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() { source.Register(&animesfhdProvider{}) }
+
+func (p *animesfhdProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.AnimesFHDType)
+}
+
+func (p *animesfhdProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.AnimesFHD,
+		Priority:    70,
+		Explicit:    []string{"AnimesFHD"},
+		Tags:        []string{"[animesfhd]"},
+		URLMatchers: []string{"animesfhd.net"},
+		ProbeURL:    "https://animesfhd.net",
+	}
+}
+
+func (p *animesfhdProvider) HasSeasons() bool { return true }
+
+func (p *animesfhdProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = contextual.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.AnimesFHD)
+	return results, nil
+}
+
+func (p *animesfhdProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return api.GetAnimesFHDEpisodes(ctx, anime)
+}
+
+// FetchStream resolves the episode without writing playback state: the
+// referer, origin and subtitles the scraper reports come back in the Stream.
+func (p *animesfhdProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, _ string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return source.Stream{}, err
+	}
+	var streamURL string
+	var metadata map[string]string
+	if contextual, ok := adapter.(scraper.ContextualScraper); ok {
+		streamURL, metadata, err = contextual.GetStreamURLContext(ctx, episode.URL)
+	} else {
+		streamURL, metadata, err = adapter.GetStreamURL(episode.URL)
+	}
+	if err != nil {
+		return source.Stream{}, fmt.Errorf("animesfhd stream: %w", err)
+	}
+	if streamURL == "" {
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimesFHD")
+	}
+	stream := streamFromMetadata(streamURL, metadata)
+	stream.AudioLang = metadata["audio_lang"]
+	return stream, nil
+}
+
+func (p *animesfhdProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- StartFlix Provider ---
@@ -563,15 +738,17 @@ func (p *startFlixProvider) FetchEpisodes(ctx context.Context, anime *models.Ani
 	return startFlixEpisodesFn(anime)
 }
 
-func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *startFlixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return startFlixStreamFn(anime, episode, quality)
+}
+
+func (p *startFlixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- TopCine Provider ---
@@ -639,15 +816,17 @@ func (p *topCineProvider) FetchEpisodes(ctx context.Context, anime *models.Anime
 	return topCineEpisodesFn(anime)
 }
 
-func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *topCineProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return topCineStreamFn(anime, episode, quality)
+}
+
+func (p *topCineProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- Pobreflix Provider ---
@@ -721,15 +900,95 @@ func (p *pobreflixProvider) FetchEpisodes(ctx context.Context, anime *models.Ani
 	return pobreflixEpisodesFn(anime)
 }
 
-func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer and audio hint come back in the Stream.
+func (p *pobreflixProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 	return pobreflixStreamFn(anime, episode, quality)
+}
+
+func (p *pobreflixProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
+// --- Pomfy Provider ---
+//
+// Pomfy is the Byse-CDN catalog keyed by TMDB id. Search filters TMDB hits
+// through the site's catalog (needs TMDB_API_KEY); movies are one episode,
+// series list per season from the site's keyless season API, and playback
+// runs the Byse proof-of-work captcha — all inside the pomfy package.
+
+type pomfyProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&pomfyProvider{})
+}
+
+func (p *pomfyProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.PomfyType)
+}
+
+func (p *pomfyProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:     source.Pomfy,
+		Priority: 47,
+		Explicit: []string{"Pomfy"},
+		Tags:     []string{"[pomfy]"},
+		// The title page is the identifier: assistir/<tmdb> for movies and
+		// serie/<tmdb> for series, both on pomfy.my (the old pomfy.online
+		// spelling stays accepted: shell aliases and history carry it).
+		URLMatchers: []string{"pomfy"},
+		ProbeURL:    pomfy.DefaultBase,
+	}
+}
+
+// HasSeasons: Pomfy is a movie/TV catalog organized into seasons.
+func (p *pomfyProvider) HasSeasons() bool { return true }
+
+func (p *pomfyProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Pomfy)
+	return results, nil
+}
+
+func (p *pomfyProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return pomfyEpisodesFn(anime)
+}
+
+// FetchStream resolves the episode without writing playback state: the
+// referer, audio hint and subtitles come back in the Stream.
+func (p *pomfyProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	return pomfyStreamFn(anime, episode, quality)
+}
+
+func (p *pomfyProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
 // --- AnimeDrive Provider ---
@@ -799,24 +1058,16 @@ func (p *animeDriveProvider) FetchEpisodes(ctx context.Context, anime *models.An
 	return adapter.GetAnimeEpisodes(anime.URL)
 }
 
-func (p *animeDriveProvider) FetchStreamURL(
-	ctx context.Context,
-	episode *models.Episode,
-	anime *models.Anime,
-	quality string,
-) (string, error) {
+// FetchStream resolves the episode without writing playback state: the
+// referer, origin and subtitles the scraper reports come back in the Stream.
+func (p *animeDriveProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {
 	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
-	util.ClearGlobalSubtitles()
-	if anime.Source != "" {
-		util.SetGlobalAnimeSource(anime.Source)
+		return source.Stream{}, err
 	}
 
 	adapter, err := p.scraper()
 	if err != nil {
-		return "", err
+		return source.Stream{}, err
 	}
 
 	if quality == "" {
@@ -829,15 +1080,137 @@ func (p *animeDriveProvider) FetchStreamURL(
 		// duplicate the prefix, so only wrap unclassified errors.
 		var diag *netx.SourceDiagnostic
 		if errors.As(err, &diag) {
-			return "", err
+			return source.Stream{}, err
 		}
-		return "", fmt.Errorf("AnimeDrive stream: %w", err)
+		return source.Stream{}, fmt.Errorf("AnimeDrive stream: %w", err)
 	}
-	applyPlaybackMetadata(metadata)
 
 	if streamURL == "" {
-		return "", fmt.Errorf("empty stream URL returned from AnimeDrive")
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from AnimeDrive")
 	}
 
-	return streamURL, nil
+	return streamFromMetadata(streamURL, metadata), nil
+}
+
+func (p *animeDriveProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
+// fetchAndPublish is the one place a StreamFetcher's result reaches the
+// player: it clears what the previous stream left, resolves, and publishes the
+// Stream's playback context. A failed resolve publishes nothing.
+func fetchAndPublish(ctx context.Context, sf source.StreamFetcher, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Playback context belongs to one resolved stream: whatever the previous
+	// one left is gone before this one publishes its own.
+	util.ClearGlobalReferer()
+	util.ClearGlobalOrigin()
+	util.ClearGlobalSubtitles()
+	if anime.Source != "" {
+		util.SetGlobalAnimeSource(anime.Source)
+	}
+	stream, err := sf.FetchStream(ctx, episode, anime, quality)
+	if err != nil {
+		return "", err
+	}
+	stream.Publish()
+	return stream.URL, nil
+}
+
+// --- Pluto TV Provider ---
+
+// Pluto TV plays through its own stitcher; the api package owns the season
+// listing and the stream, as for Pomfy.
+var (
+	plutoTVStreamFn   = api.ResolvePlutoTVStream
+	plutoTVEpisodesFn = api.GetPlutoTVEpisodes
+)
+
+type plutoTVProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&plutoTVProvider{})
+}
+
+func (p *plutoTVProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.PlutoTVType)
+}
+
+func (p *plutoTVProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.PlutoTV,
+		Priority:    49,
+		Explicit:    []string{"PlutoTV", "Pluto TV"},
+		Tags:        []string{"[plutotv]"},
+		URLMatchers: []string{"pluto.tv"},
+		ProbeURL:    "https://pluto.tv",
+	}
+}
+
+// HasSeasons: Pluto TV is a movie/TV catalog organized into seasons.
+func (p *plutoTVProvider) HasSeasons() bool { return true }
+
+func (p *plutoTVProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	results = plutoTitlesIn(results, source.LanguageFrom(ctx))
+	tagResults(results, source.PlutoTV)
+	return results, nil
+}
+
+// plutoTitlesIn keeps the titles that fit the language a tab asked for ("PT",
+// "EN"; "" keeps all). Pluto TV says each title's language, and its catalog is
+// the session's country's, so the ENGLISH tab would otherwise fill with
+// Portuguese titles in Brazil and the PT-BR tab with English ones elsewhere.
+// A title that names neither language is kept: it may well fit.
+func plutoTitlesIn(titles []*models.Anime, lang string) []*models.Anime {
+	other := map[string]string{"PT": "[English]", "EN": "[PT-BR]"}[lang]
+	if other == "" {
+		return titles
+	}
+	kept := make([]*models.Anime, 0, len(titles))
+	for _, t := range titles {
+		if t != nil && !strings.Contains(t.Name, other) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
+}
+
+func (p *plutoTVProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return plutoTVEpisodesFn(ctx, anime)
+}
+
+// FetchStream resolves the episode without writing playback state.
+func (p *plutoTVProvider) FetchStream(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	return plutoTVStreamFn(ctx, anime, episode, quality)
+}
+
+func (p *plutoTVProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
 }

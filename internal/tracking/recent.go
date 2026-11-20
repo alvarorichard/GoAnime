@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -16,8 +15,13 @@ func DBPath() string {
 	if err != nil {
 		return ""
 	}
-	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
+	return dbPathFor(runtime.GOOS, home, os.Getenv("LOCALAPPDATA"))
+}
+
+// dbPathFor is DBPath's pure core: the layout per OS, given the home directory
+// and (Windows) %LOCALAPPDATA%.
+func dbPathFor(goos, home, localAppData string) string {
+	if goos == "windows" {
 		if localAppData == "" {
 			localAppData = filepath.Join(home, "AppData", "Local")
 		}
@@ -46,7 +50,7 @@ func sharedTracker() *LocalTracker {
 // RecordSearch remembers a successful search and its result count for the
 // SEARCH home screen's RECENT list. Best-effort: never fails the search.
 func RecordSearch(query string, resultCount int) error {
-	query = strings.Join(strings.Fields(query), " ")
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}
@@ -63,7 +67,7 @@ func (t *LocalTracker) RecordRecentSearch(query string, resultCount int) error {
 	if t == nil || t.db == nil || t.recentUpsertPS == nil {
 		return ErrTrackerNotInited
 	}
-	query = strings.Join(strings.Fields(query), " ")
+	query = normalizeQuery(query)
 	if query == "" {
 		return nil
 	}

@@ -1,3 +1,156 @@
+# GoAnime Release Notes - Version 2.0.1
+
+Release date: 2026-11-20
+
+## Highlights
+
+- **186 commits since 2.0.0** (2026-10-28), by 4 contributors: 464 files changed, +115,061 / −3,256 lines. 260 of those files are tests; the new features each ship with unit, cascade and mutation tests (`go test -overlay`) that must fail on every mutant.
+- **AnimesDigital plays again** (#229, #236). Its video host answered the playlist but refused every video piece unless the request carried the player's own `Referer`, so mpv opened, found nothing to play and closed (users could not watch Cyberpunk: Edgerunners season 2, among other titles). GoAnime now sends that Referer, checks the first piece of video before offering an episode, and falls back to the second player, or says the episode is offline, instead of handing mpv a dead address. It also follows the site's new player addresses (#237). All ten episodes of Cyberpunk: Edgerunners season 2 and of season 1 (subtitled and dubbed) were played live.
+- **When mpv closes without loading the stream, you are told** (#229), and "Watch now" takes you back to the episode list instead of replaying the same dead address.
+- **An episode that will not load plays from another source** (#229). When the source you picked cannot give a video, GoAnime looks for the same episode of the same title on the other anime sources and plays the first that has it. History and CONTINUE keep pointing at the title you chose.
+- **Autocomplete in the search box**, with no key and no setup: titles appear as you type, with the rest of the best match as ghost text after the cursor.
+- **A sources screen (`ctrl+s`)** turns each search source on or off and remembers the choice.
+- **mpv loads your own configuration** (#228): `mpv.conf`, `input.conf`, scripts such as uosc and shaders apply again.
+- **Three new sources, Pomfy, AnimesROLL and AnimesFHD** (the last one by @animesfhd, #232), and **Pobreflix plays again without a solver**: its RedeFlixApi player needs no Turnstile.
+- **Diagnostics grew up**: `--debug` captures the machine, logs are redacted and safe to attach, `goanime logs` shows them in colour, and a panic saves a crash report.
+- **Forget history** from the home screen and from the command line.
+- **FAVORITES and your own lists**, like the "My List" of the streaming services: `ctrl+f` on a result marks the work, `ctrl+l` puts it in a list you named ("Weekend marathon"), and the FAVORITES tab beside MOVIES/TV shows your lists with their titles, number of titles and creation date. Coming back from a search reopens the tab and row you left.
+
+## Features
+
+### Playback
+
+- **Another source plays the episode** (#229). When the source cannot give an episode's video (AnimeFire has stretches of instability), the same episode of the same title is looked for on the other anime sources and played from the first that has it. Only the video comes from there. A candidate is taken only when its title is the same title (a season marker keeps it another entry) and it lists the episode's number, because a wrong episode is worse than none. You leaving, or the program stopping, is not a source failing and tries nothing; sources turned off are not tried.
+- **mpv loads your own configuration.** When GoAnime finds an mpv config (`mpv.conf`, `input.conf`, scripts, script-opts, shaders in `$MPV_HOME`, `$XDG_CONFIG_HOME/mpv`, `~/.config/mpv`, `~/.mpv` or `%APPDATA%\mpv`), it no longer starts mpv with `--no-config` (#228), so `mpv.conf`, `input.conf`, scripts such as uosc, script-opts and shaders in your mpv folder apply. The options GoAnime depends on (`keep-open`, `idle`, `loop-file`, `loop-playlist`, `resume-playback`) are fixed on the command line so the episode still ends and resumes correctly, and `--profile=fast` is no longer forced over your quality settings. Without a config the start is unchanged. `GOANIME_MPV_CONFIG=off` brings back the isolated `--no-config` start. See "Your mpv configuration" in the README.
+- **Other mpv installations are tried when the one on PATH will not start** (#229). On Windows, PATH can find `WindowsApps\mpv.exe`, a Microsoft Store app alias that exits with status 1, before the mpv the installer puts in `{app}\bin`. GoAnime now lists every mpv it can find, tries them in turn and remembers the one that came up. An mpv that exits with status 1 is tried once more with only the options playback needs (no `--vo`, `--hwdec`, `--profile`, cache sizes or shaders). If none works, the error is the first mpv's own, with what the others said and, for a Store alias, how to turn it off.
+- **mpv's startup log is kept**, so an early exit says why, and `--debug` logs everything about the launch.
+
+### Search
+
+- **Your own lists.** `ctrl+l` on a result opens "Add to a list": "+ Create a new list" first, then every list with its count and a mark where the work already is; `enter` adds or takes it off and the screen stays open, `esc` closes. Names are trimmed, at most 40 characters, unique ignoring case and accents, and "Favorites" is reserved; up to 50 lists of 500 titles. The FAVORITES tab opens at the lists (`n` makes one, `enter` opens it, `r` renames, `x` deletes after a y/n question that says the titles stay available, a panel lists the titles on wide terminals); inside a list the titles scroll and filter without regard to accents, `x` takes a title off, `X` empties it, `esc` goes back. Errors about the file are written in plain words ("GoAnime could not save your lists: it is not allowed to write to its data folder"). The file keeps one more key, `lists`, beside `entries` (the Favorites), so files from before still load. The packages are `internal/favorites` (store) and, on the screens, `internal/tui`.
+- **FAVORITES.** `ctrl+f` on a result adds the highlighted work to FAVORITES or takes it off (a star marks it on the row and in the details, at any terminal width). A work is one favorite whatever the source; the version you had chosen is remembered. The search home gets a FAVORITES list between CONTINUE and RECENT, eight rows with a "+N more" line, shown from the first launch with a hint when it is empty, and a FAVORITES tab beside MOVIES/TV that lists them all (it scrolls, and typing filters by title, year, type or source; nothing is searched on that tab until one is opened): `enter` searches the title in every scope (so a movie found from the PT-BR tab still turns up), `x` removes a row and `X` clears the list after a y/n question. It is stored in `favorites.json` beside the watch history, written atomically, a damaged file is moved aside (`favorites.json.corrupt.<time>`) instead of blocking the feature, a file from a newer GoAnime is never rewritten, and it needs neither SQLite nor CGO, so it works on every platform. The package is `internal/favorites`.
+- **Autocomplete in the search box.** Pause while typing and up to six titles appear under the box, anime, movies and series, each with its kind and year (`Anime · 2002`). Like a code editor, the rest of the best match also shows as dim inline text after the cursor (type `nar` and see `uto` ghosted); it follows the highlighted row. `↑`/`↓` pick one and `enter` searches it, `→` at the end of the text accepts the inline completion without searching, `esc` closes the list (a second `esc` clears the box). The list follows the scope tab: PT-BR and ENGLISH suggest anime, MOVIES/TV suggests movies and series. It needs no key or setup: anime come from Kitsu (which matches partial words) and movies and series from IMDb's public suggestion feed. Lookups wait 180 ms after the last key, a newer keystroke cancels the one in flight so an old answer never shows under new text, answers are cached for ten minutes, and when a provider is down the other still answers; when both are, the box simply works without suggestions. The engine is `internal/suggest`.
+- **A sources screen on `ctrl+s`.** A checklist on the search home (`space`/`enter` flips, `esc` closes) saves each choice to `<config>/goanime/sources.json` at once and updates the header. It is a search choice only, so history from a source switched off still opens. Precedence: `GOANIME_DISABLED_SOURCES`, `GOANIME_ENABLED_SOURCES`, the saved choice, the source's default. Sources locked by the environment stay listed.
+- **Forget history.** On the search home, `x` now removes a row of RECENT as well as CONTINUE, and `X` clears the whole list the highlighted row is in, after a y/n question; a removal that fails keeps the rows and says why. From the command line, `--clear-continue`, `--clear-recent` and `--clear-history` empty the lists and exit. They ask first, and with no terminal to ask on they clear nothing unless `--yes` (or `-y`) is given. Removing a show from CONTINUE now removes every episode of it; before, the show came back with an older episode.
+
+### Diagnostics
+
+- **`--debug` captures the machine, not just the run.** The log opens with an environment report: OS, distribution, kernel, memory, terminal and colour support, locale, every `GOANIME_*` variable and proxy, the versions of mpv, yt-dlp, ffmpeg and ffprobe, which sources are on and why one is off, and whether cfsolve is installed. In the background it then asks each provider's homepage how it answers (`ok`, `challenge`, `blocked`, `down`, `slow`, `dns`, `refused`, `tls`, and `moved_to=` when a site changed domain). See [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).
+- **Logs are safe to attach as they are.** Everything written to the log file passes one filter that removes credentials in URLs and headers, secret-named parameters and fields (`token`, `signature`, `ticket`, `password`, `clearance`, ...), the RedeFlix one-time tickets, JSON web tokens and your home folder.
+- **A more professional log.** Each run has a session id, the file says it is safe to share, ends with a one-line summary (duration, warnings, errors), names the code that logged each line instead of the logger's own file, and only the newest 30 session logs are kept.
+- **Log lines are the time and the message.** No `GoAnime:` (the file is all GoAnime's), no `<file:line>` tag and no `DEBUG` label on every line; only `INFO`, `WARN` and `ERROR` are labelled. `GOANIME_LOG_SOURCE=1` brings the source location back for development. The file holds plain text, with no colour escape codes, and the per-second answers mpv gives to status queries are no longer logged.
+- **`goanime logs` shows the debug log in colour.** `goanime logs` prints the newest log in the interface's colours, `-f` follows it live (and moves to the new session when `goanime --debug` is started again), `-n N` shows the last N lines, and a file name picks another. The file stays plain text; the colour is added at display and never changes a character. Piped, with `NO_COLOR` or `--plain`, it prints the text as it is.
+- **Crash reports.** A panic saves `crash_<date>_<time>_<id>.log` (the panic, the stack and the environment) whether or not `--debug` was on, and prints its path. The newest 10 are kept.
+- **The debug screen follows the new design.** The `--debug` notice is a paper panel with the crimson shadow, and the console log levels use the site's palette (crimson `INFO`, an inverted `WARN` badge, a crimson `ERROR` block) instead of the library's cyan, yellow, pink and violet.
+- **cfsolve says how to fix a binary/profile mismatch** instead of failing with a bare error.
+
+### Sources
+
+- **New source: AnimesFHD** (`animesfhd.net`) as a PT-BR anime source, including movies, with subtitled and dubbed season/audio versions, paginated episodes and native MP4/HLS playback through its public JSON API (#232, by @animesfhd).
+- **New source: Pomfy** (`pomfy.my`), the movie/TV catalog keyed by TMDB id. Search matches names through TMDB's multi search, with the user's `TMDB_API_KEY` when set and without any key on the public key pool the site itself ships in its browser bundle (rotated like the site does), filtered by the catalog's membership, so a title that is not there never shows. A bare TMDB id answers keyless from the site's own SSR payloads. Movies resolve to one episode; series list their seasons through the shared picker with per-episode availability read from the site's keyless season API (`api.pomfy.stream/api/tmdb-season`, names included).
+- **Pomfy plays the Byse player with its proof-of-work captcha.** The partner player's flow (`/embed/details`, `/embed/captcha`, `/embed/captcha/verify` with a browser-style fingerprint, then `/embed/playback` under an `X-Captcha-Token`) is reproduced in Go, including the ChaCha-derived custom hash the bundle uses (locked to the original JavaScript with reference vectors in tests). The answers come back AES-256-GCM sealed with thirty key parts; version `v` selects parts `v` and `31-v` exactly as the bundle's `reorderKeyParts` does. Typical solve: sub-second at the difficulty 16-18 the server hands out. The resolved stream is the HLS master on the Byse edge; series episodes spell their audio language in the path (`lang/por`), which is passed to mpv as the audio preference.
+- **New source: AnimesROLL** (`anroll.io`) as a PT-BR anime source, subtitled and dubbed. It plays HLS streams whose segments are wrapped in a 1x1 PNG (sometimes XOR-masked) and Blogger MP4s, and the HLS downloader strips the envelope before joining the segments. Referer and Origin are cleared before each stream resolution, so one source's headers never reach another CDN.
+- **Pobreflix plays its RedeFlixApi player without cfsolve.** On 2026-11-02 the site began listing `redeflixapi.bar` players, which have no Turnstile: the page hands out a ticket that the player's own script trades in two POSTs (`playback-resolve.php`, then `playerkys/source.php`) for the media URL. GoAnime now does the same, sending the player's own origin and never another site's, and the title plays with no solver installed. The Turnstile player and the cfsolve path are unchanged and are tried when the page is in the old format. `GOANIME_POBREFLIX_OPEN_PLAYER_HOSTS` adds hosts that serve this player when the site moves it. The client also follows the catalog's redirect to its current mirror domain (`pobreflixtv.christmas` now) instead of paying a hop on every request.
+- **Pobreflix plays its Turnstile-gated player.** The pages Pobreflix lists for movies and episodes no longer have to fall back to the StartFlix panel: GoAnime solves the widget with cfsolve, exchanges the token for the page proof, and plays the source behind it with the proof-bearing page as `Referer`. The dubbed version plays through the same gate. A title whose embedded MP4 already carries the wanted audio still plays directly. Without cfsolve nothing changes: gated titles keep the panel fallback and its explanation. `GOANIME_POBREFLIX_PLAYER_URL` repoints the player host without a release.
+- **Goyabu clears its Cloudflare gate with the optional cfsolve tool**, a browserless solver, so GoAnime stays browser-free. The binary is found through `GOANIME_CFSOLVE_BIN`, next to goanime, the config folder or PATH; when none is installed, the build pinned in `cfsolve.lock` is fetched in the background from GoAnime's releases, and only after its checksums carry a minisign signature by the key the updater trusts. Every failure is silent: Goyabu just stays out of the search, and a failed attempt is not retried for 24 hours. Goyabu searches by default exactly when a solver is registered. The Windows solver ships with each release. See [docs/CFSOLVE.md](docs/CFSOLVE.md).
+
+### Library
+
+- **`pkg/goanime` covers every source.** `types.Source` gains Goyabu, HiAnime, StartFlix, TopCine, AnimesDigital, AnimeDrive, Pobreflix, AnimesROLL and Pomfy beside AnimeFire, and `types.Sources()` lists them. All can be searched; episode lists and stream URLs work for the anime sources and StartFlix (`Source.SupportsEpisodes()`, the list `GetAvailableSources` returns), while TopCine, Pobreflix and Pomfy answer `goanime.ErrEpisodesUnsupported` until they get the same treatment. `ParseSource` accepts each name `Source.String()` returns. `SourceAnimeFire` keeps value 0 and new values are only appended, so a stored `Source` keeps its meaning.
+- **Movies and series through the library, no menus.** For a catalogue source (StartFlix first, `Source.IsCatalog()`), `GetSeasons` lists a series' seasons with their audios, `GetSeasonEpisodes(anime, season, audio)` lists one, a movie is its one episode, and `StreamOptions.Audio` picks Dublado or Legendado. A season or audio that does not exist is `ErrSeasonNotFound` or `ErrAudioUnavailable` and says what does; the other audio is never played in its place. Built on a new optional `CatalogScraper` capability, so the CLI's pickers are untouched. When the panel's servers fail or only play the other audio, a Legendado request is retried on the vidsrc fallback by the title's ids (never for Dublado, which that fallback cannot serve, and never for a series episode without its season and number, which it would read as the Pilot). `types.Episode` gains `Season` and `Audio`.
+
+## Bug Fixes
+
+### Sources and search
+
+- Fix AnimesDigital episodes that never played (#229): the video host returns 403 for every video piece unless the `Referer` is `https://api.anivideo.net/`, while the playlist itself still loads, so the old check passed and mpv closed. The Referer now travels from the client to mpv, the check requests the first video piece the way the player will (following a master playlist to its variant), and an episode whose pieces are refused falls back to the second (Blogger) player or is reported as offline. Covered by offline tests with a host that checks the Referer, a guard of 11 mutants, and an opt-in live test (`GOANIME_LIVE=1`) over the reported titles.
+- Fix AnimesDigital after the site moved its players (#237): player 1 is now a page at `api.anivideo.net/cdn/v1.<token>` that sets the player up with the playlist and answers 403 unless the episode is its `Referer`, and older episodes' player 2 became a ROT13-scrambled, four-part address. Both are read, the old address keeps working, and when the page names no playlist the second player is used. Covered by offline tests with a host that checks the Referer and a guard of mutants.
+- Fix `esc` in the AnimesDigital Subtitled/Dubbed picker choosing Subtitled: it goes back to the search now.
+- Fix AnimesDigital episodes answered with a dead playlist (HTTP 520) leaving no way to play them (#236): the second player is tried first.
+- Fix Pobreflix after the site moved to `pobreflixtvfree.cv` and was rebuilt (2026-11-14): the old hosts redirect every path to the new home page, so title pages no longer opened ("title page has no video mount") even though search still answered. GoAnime now searches `/api/busca`, reads the new movie, series and episode pages, takes the episode list from the series page and plays the RedeFlixApi player, with no solver. The daily Source Health run now opens a title and plays a movie and an episode, so a break like this shows up as a red run instead of a green search.
+- Fix Pobreflix movies whose catalog entry points at a dead `/api/player?id=<tmdb>` endpoint: the player page is rebuilt from the TMDB id instead of failing the title.
+- Fix Pobreflix listing a gated movie as having no playable episode, and preferring the panel when the wanted audio had no direct file.
+- Fix Pobreflix's player host refusing the shared Chrome TLS fingerprint with a bare HTTP 500: the gate's requests run on netx's plain SSRF-safe transport (measured against the live host, the same headers answer 200 there).
+- Fix Pomfy's proof-of-work deadline, which is now checked after every candidate.
+- Fix backing out of a title showing a different list: it now shows the results of the search that found it (#229).
+- Fix an episode that did not load leaving no explanation: the list it returns to now says why (#229).
+
+### Player and downloads
+
+- Fix mpv closing without loading the stream going unnoticed for 45 seconds (#229): the player is seen to be gone, the notice says the stream did not load and why, and Windows' pipe errors ("The system cannot find the file specified.", "The pipe is being closed.") count as a dead mpv like the Unix ones.
+- Fix a failed yt-dlp install panicking: it is an error now.
+- Fix the Blogger chunk download retrying forever.
+- Fix a data race in the mpv launcher, which read mpv's stderr from a buffer while `os/exec` was still copying into it; the buffer is locked now, and a test with a noisy mpv reproduces the race on the old code under `-race`.
+- Fix `go run cmd/goanime/main.go` no longer building: `main.go` is self-contained again.
+
+## Improvements
+
+### Architecture
+
+- **Every provider returns a `Stream`** instead of writing playback state: StartFlix, TopCine, Pobreflix, HiAnime, AnimesROLL, AnimeDrive, AnimeFire, Goyabu and AnimesDigital. The playback context is handed over in one place, and batch downloads take theirs from the `Stream`.
+- **The player is split into engines**: yt-dlp (`ytdlpdl`) and ranged downloads (`rangedl`, one parallel driver for HTTP and Blogger, with the size probe moved out of `player`) are packages of their own. Download routing, the stream fallback chain, the resume decision, subtitle muxing and the menus are pure functions or sit behind injectable seams.
+
+### Tests and CI
+
+- The playback, downloader and player loops run over injectable environments and are covered, including the batch pipeline and the progress screen.
+- Mutation tests (`go test -overlay`) guard the fallback, the sources screen, the mpv launcher and forget history; each puts back one way the code can fail and requires the tests to fail against it. Forget history alone has 88 mutants.
+- CI runs the mutation guards in a job of their own beside the tests, warms the race build cache before them, and gives the race run 25 minutes. Tests keep the stand-in mpv's temp files out of the shared temp dir, and the Windows runs skip what needs the stand-in mpv or file permissions.
+- golangci-lint now gates function size and enables strict errcheck.
+
+### Documentation
+
+- New [docs/SOURCES.md](docs/SOURCES.md) with each source's information and usage; both READMEs are updated (mpv configuration, forget history, sources screen).
+- `docs/CFSOLVE.md` covers the Pobreflix Turnstile flow and its live test, and both READMEs describe cfsolve as the solver for Goyabu and Pobreflix.
+- Emojis left the changelog and `ADDING_A_SOURCE.md`.
+
+## Thanks and New Contributors
+
+- **Welcome, @animesfhd!** Your first contribution, **AnimesFHD** (#232), is in this release: a whole PT-BR anime source with subtitled and dubbed versions, movies, paginated episodes and native MP4/HLS playback, with the follow-up fixes for `--audio`, movies in CONTINUE and mpv's User-Agent. Thank you for the time and care.
+- Thanks to @william-navarro for **AnimesROLL** (#225) and, earlier, **AnimesDigital** (#211), and to everyone who reported playback problems on #229, #236 and #237 and on Discord: the AnimesDigital fix above comes from those reports.
+
+## Dependencies
+
+**Direct dependencies:**
+
+| Module | From | To |
+|---|---|---|
+| `charm.land/bubbletea/v2` | `v2.1.0` | `v2.1.1` |
+| `charm.land/lipgloss/v2` | `v2.0.6` | `v2.1.1` |
+| `github.com/PuerkitoBio/goquery` | `v1.13.0` | `v1.14.0` |
+| `github.com/enetx/surf` | `v1.0.206` | `v1.0.256` |
+| `github.com/mattn/go-sqlite3` | `v1.14.52` | `v1.14.53` |
+| `github.com/charmbracelet/x/ansi` | `v0.11.9` | `v0.11.10` |
+| `github.com/charmbracelet/x/term` | indirect | direct, `v0.2.2` |
+| `golang.org/x/crypto`, `net`, `sys`, `term`, `text` | `v0.58.0`, `v0.62.0`, `v0.49.0`, `v0.47.0`, `v0.43.0` | `v0.59.0`, `v0.63.0`, `v0.50.0`, `v0.48.0`, `v0.44.0` |
+
+**Notable indirect updates:** `enetx/http` `v1.0.29` → `v1.0.49`, `enetx/utls` `v1.0.10` and `enetx/quic-go` `v1.0.40` (the surf stack replaces `quic-go/quic-go`, `enetx/http2` and `enetx/http3`), `andybalholm/brotli` `v1.2.7` → `v1.3.0`, `xo/terminfo` `v1.2.0` → `v1.3.1`, `stretchr/objx` `v0.5.3` → `v0.8.0`, `go.yaml.in/yaml/v3` `v3.0.5` → `v3.0.6`.
+
+**Watch list:**
+
+- `charm.land/bubbletea/v2` stays on `v2.1.1`: `v2.1.2` hangs on Windows when there is no console (the spinner blocks closing the console input), which timed out `appflow` and `download` in CI.
+- `enetx/utls` stays on `v1.0.10`, the version surf asks for: `v1.8.1` imports another module's internal package and does not build.
+- cfsolve is pinned to `06d58d64` in `cfsolve.lock`.
+
+---
+
+## Environment Variables & Flags
+
+New in this release:
+
+| Variable / Flag | Effect |
+|---|---|
+| `GOANIME_MPV_CONFIG=off` | Start mpv with `--no-config` even when you have an mpv config |
+| `GOANIME_POBREFLIX_PLAYER_URL` | Repoint the Pobreflix player host |
+| `GOANIME_POBREFLIX_OPEN_PLAYER_HOSTS` | Hosts that serve the RedeFlixApi player |
+| `GOANIME_CFSOLVE_BIN` | Path to the cfsolve binary |
+| `GOANIME_LOG_SOURCE=1` | Put the `<file:line>` tag back in log lines |
+| `TMDB_API_KEY` | Optional; Pomfy search uses it instead of the public key pool |
+| `--clear-continue`, `--clear-recent`, `--clear-history` | Empty the lists and exit (asks first) |
+| `--yes`, `-y` | Answer the clear question, so it works without a terminal |
+| `goanime logs [-f] [-n N] [file]` | Show the debug log in colour |
+
+---
+
 # GoAnime Release Notes - Version 2.0.0
 
 Release date: 2026-10-28
@@ -85,7 +238,7 @@ Release date: 2026-10-28
 - **CJK renders without boxes everywhere**: Japanese glosses (音声, 続き, 最近…) now go through a font-coverage probe. On a Windows console whose fonts lack Japanese — Windows Sandbox ships none — GoAnime installs an embedded `GoAnime Glyphs` subset of Noto Sans Mono CJK JP into the user's font set and re-checks at the next launch; nothing degrades into tofu boxes.
 - **Decorative glyphs degrade to ASCII**: the `❯` prompt, `▶` cursor, `✓`/`◐`/`●` marks, `⁖` and the braille halftone/spinner are now drawn only when the console font verifiably covers them (probed through the console's own font and, under Windows Terminal, any installed face); otherwise their ASCII pair (`> x o -`, `= -`) takes over. Strings with no verifiable font draw nothing but ASCII.
 - **UTF-8 consoles**: GoAnime sets the output code page to 65001 in classic Windows consoles (restoring it on exit), so UTF-8 status lines decode as written regardless of the host's legacy code page.
-- **Every emoji left the source code**: update prompts, warning messages (`⚠️` prefixes are now plain wording), audio picker labels, perf-report headers and ratings (`★ 8.7` → `8.7/10`) are emoji-free. Scraper-title sanitization still strips the web's emoji source tags — the regexes spell them by code point (`\x{1F525}`) so no emoji glyph appears in the tree.
+- **Every emoji left the source code**: update prompts, warning messages (warning prefixes are now plain wording), audio picker labels, perf-report headers and ratings (star ratings now read `8.7/10`) are emoji-free. Scraper-title sanitization still strips the web's emoji source tags — the regexes spell them by code point (`\x{1F525}`) so no emoji glyph appears in the tree.
 - **A rework-proofing scan** (`TestGlyphFontCoversEveryDecorativeGlyph`) fails the build when any future string literal carries a console glyph outside the safe classes (ASCII, latin-1, cp1252 extras, WGL4 shapes, basic arrows) without registering the rune and its ASCII fallback in `flavorRunes`.
 
 #### The font actually installs

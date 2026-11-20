@@ -57,8 +57,8 @@ func TestNeedsRegistrationClasses(t *testing.T) {
 		{'◐', true, "outside WGL4 — flavorRunes registers it"},
 		{'❯', true, "the prompt mark needs the probe"},
 		{'⁖', true, "the asking mark needs the probe"},
-		{'☎', true, "a symbol no listed class draws"},
-		{'🚀', true, "an emoji"},
+		{'☾', true, "a symbol no listed class draws"},
+		{'\U0001F680', true, "an emoji"},
 		{'\ufffd', false, "data-only: the replacement"},
 	}
 	for _, it := range cases {
@@ -114,31 +114,31 @@ func Prompt() string {
 	// An unregistered symbol in a literal is what the guards must catch.
 	scratchSource(t, filepath.Join(root, "utility", "dial.go"), `package utility
 
-// ☎ in a comment reads as nothing.
+// ☾ in a comment reads as nothing.
 func Dial() string {
-	return "☎ reach"
+	return "☾ reach"
 }
 `)
 	// A test file never runs on a console, and testdata never draws one.
 	scratchSource(t, filepath.Join(root, "utility", "dial_test.go"), `package utility
 
-func TheTestString() string { return "☎ far from a console" }
+func TheTestString() string { return "☾ far from a console" }
 `)
 	scratchSource(t, filepath.Join(root, "fixture", "testdata", "buried.go"), `package buried
 
-const Where = "☎ nowhere"
+const Where = "☾ nowhere"
 `)
 
 	used := scanUsedRunes(t, root)
 	require.Len(t, used, 2, "exactly the two literal-drawn runes showed up")
-	require.Equal(t, []rune{'☎', '❯'}, runesIn(used), "no other rune reached the findings")
+	require.Equal(t, []rune{'☾', '❯'}, runesIn(used), "no other rune reached the findings")
 
 	promptFiles := used['❯']
 	require.Len(t, promptFiles, 1, "one literal, one file")
 	require.True(t, strings.HasSuffix(promptFiles[0], filepath.Join("gloss", "tui.go")),
 		"the finding names the file that drew it")
 
-	dialFiles := used['☎']
+	dialFiles := used['☾']
 	require.Len(t, dialFiles, 1, "the comment, the test and the testdata stay out")
 	require.True(t, strings.HasSuffix(dialFiles[0], filepath.Join("utility", "dial.go")),
 		"the finding names the file that drew it")

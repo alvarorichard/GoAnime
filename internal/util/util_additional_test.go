@@ -33,6 +33,7 @@ func snapshotGlobalRequest(t *testing.T) {
 	t.Helper()
 	prevDl := GlobalDownloadRequest
 	prevUp := GlobalUpscaleRequest
+	prevClear := GlobalClearRequest
 	prevOut := GlobalOutputDir
 	prevSrc := GlobalSource
 	prevQual := GlobalQuality
@@ -47,6 +48,7 @@ func snapshotGlobalRequest(t *testing.T) {
 	t.Cleanup(func() {
 		GlobalDownloadRequest = prevDl
 		GlobalUpscaleRequest = prevUp
+		GlobalClearRequest = prevClear
 		GlobalOutputDir = prevOut
 		GlobalSource = prevSrc
 		GlobalQuality = prevQual

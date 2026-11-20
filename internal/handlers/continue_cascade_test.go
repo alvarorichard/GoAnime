@@ -22,6 +22,8 @@ type continueCascade struct {
 	seriesCalls int
 	movieCalls  int
 	preSelect   int
+	// direct is playback.PlayOneItemDirectly as the playback flow saw it.
+	direct      bool
 	fallbackTo  string
 	resumePos   int
 	resumeStart bool
@@ -58,12 +60,14 @@ func stubContinueFlow(t *testing.T, anime *models.Anime, episodes []models.Episo
 	handleSeriesFn = func(_ context.Context, _ *models.Anime, _ []models.Episode, _ int, _ bool) error {
 		c.seriesCalls++
 		c.preSelect = playback.PreselectEpisodeNum
+		c.direct = playback.PlayOneItemDirectly
 		c.resumePos, c.resumeStart, c.resumeSet = player.PeekResumeOverride()
 		return seriesErr
 	}
 	handleMovieFn = func(_ context.Context, _ *models.Anime, _ []models.Episode, _ bool) error {
 		c.movieCalls++
 		c.preSelect = playback.PreselectEpisodeNum
+		c.direct = playback.PlayOneItemDirectly
 		c.resumePos, c.resumeStart, c.resumeSet = player.PeekResumeOverride()
 		return movieErr
 	}
@@ -251,4 +255,39 @@ func TestDrainPendingHome(t *testing.T) {
 		assert.Equal(t, 1, c.seriesCalls)
 		assert.Equal(t, 5, c.preSelect)
 	})
+}
+
+// A movie reopened from CONTINUE plays at once: its episodes screen, which a
+// one-item title opens with otherwise, is skipped once.
+func TestOpenContinue_MovieSkipsItsEpisodesScreen(t *testing.T) {
+	t.Cleanup(func() { playback.PlayOneItemDirectly = false })
+	anime := &models.Anime{Name: "A Espia", Source: "PlutoTV", MediaType: models.MediaTypeMovie, URL: "https://pluto.tv/on-demand/movies/673f4126321c1900133853da"}
+	c := stubContinueFlow(t, anime, cascadeEpisodes(1), nil, nil)
+
+	entry := &tui.HomeContinueEntry{Key: "k", AnimeTitle: "A Espia", EpisodeNum: 1, Position: 300, Duration: 6000, Source: "PlutoTV", MediaType: "movie"}
+	require.NoError(t, openContinue(SearchHomeDecision{Entry: entry}))
+	assert.Equal(t, 1, c.movieCalls)
+	assert.True(t, c.direct, "the row already chose what to play")
+}
+
+func TestOpenContinue_SeriesAndTheEpisodesListDoNotSkipTheScreen(t *testing.T) {
+	t.Cleanup(func() { playback.PlayOneItemDirectly = false })
+
+	series := &models.Anime{Name: "Show", Source: "Animefire.io", MediaType: models.MediaTypeAnime}
+	c := stubContinueFlow(t, series, cascadeEpisodes(12), nil, nil)
+	playback.PlayOneItemDirectly = true // left over from somewhere
+	require.NoError(t, openContinue(SearchHomeDecision{Entry: &tui.HomeContinueEntry{Key: "k", AnimeTitle: "Show", EpisodeNum: 5, Position: 10, Duration: 600, MediaType: "anime"}}))
+	assert.False(t, c.direct, "a series preselects its episode instead; the flag is not left set for the next movie")
+
+	movie := &models.Anime{Name: "Film", Source: "StartFlix", MediaType: models.MediaTypeMovie}
+	c = stubContinueFlow(t, movie, cascadeEpisodes(1), nil, nil)
+	require.NoError(t, openContinue(SearchHomeDecision{Entry: &tui.HomeContinueEntry{Key: "k", AnimeTitle: "Film", EpisodeNum: 1, Position: 10, Duration: 600, MediaType: "movie"}, EpisodesOnly: true}))
+	assert.False(t, c.direct, "asking for the episodes list is asking for the screen")
+}
+
+func TestClearContinueOverridesDropsTheDirectPlay(t *testing.T) {
+	playback.PlayOneItemDirectly = true
+	t.Cleanup(func() { playback.PlayOneItemDirectly = false })
+	clearContinueOverrides()
+	assert.False(t, playback.PlayOneItemDirectly, "a fallback search is a fresh one")
 }
