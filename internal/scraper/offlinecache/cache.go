@@ -77,20 +77,6 @@ func key(source, titleURL string) string {
 	return strings.ToLower(source) + "|" + titleURL
 }
 
-// IsOffline reports whether the title was recorded and the entry has not
-// expired. It reads the file again each time, so records made by another
-// process are seen; the file is tiny and a search calls this once per result.
-func (c *Cache) IsOffline(source, titleURL string) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.mergeDiskLocked()
-	exp, ok := c.entries[key(source, titleURL)]
-	return ok && c.now().Unix() < exp
-}
-
 // Set returns the recorded titles of source among urls, reading the file once.
 func (c *Cache) Set(source string, urls []string) map[string]bool {
 	out := map[string]bool{}

@@ -121,15 +121,15 @@ func (p *animeFireProvider) Search(ctx context.Context, query string) ([]*models
 	if err != nil {
 		return nil, err
 	}
-	results = hideOfflineTitles(offlinecache.Shared(), string(source.AnimeFire), results)
+	results = HideOfflineTitles(offlinecache.Shared(), string(source.AnimeFire), results)
 	tagResults(results, source.AnimeFire)
 	return results, nil
 }
 
-// hideOfflineTitles removes titles recorded in cache for sourceKey and says how
+// HideOfflineTitles removes titles recorded in cache for sourceKey and says how
 // many it hid. If every result is recorded the original list is kept, so the
 // user is never left with an empty, silent search.
-func hideOfflineTitles(cache *offlinecache.Cache, sourceKey string, results []*models.Anime) []*models.Anime {
+func HideOfflineTitles(cache *offlinecache.Cache, sourceKey string, results []*models.Anime) []*models.Anime {
 	if !offlinecache.HidingEnabled() || len(results) == 0 {
 		return results
 	}
