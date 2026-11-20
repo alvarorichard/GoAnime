@@ -262,3 +262,30 @@ func TestParseTurnstileAcceptsWidgetAttributesAndScriptRendering(t *testing.T) {
 	_, _, _, ok = parseTurnstile([]byte(`<html><body>no widget here</body></html>`))
 	assert.False(t, ok)
 }
+
+// A player address the catalog lists is the site's data, not ours: with the
+// production transport, one that names a loopback or private host is refused
+// before the page is read and before any Turnstile token is posted to it.
+func TestResolvePlayerNeverReachesAPrivateHost(t *testing.T) {
+	clearChallengeSolver(t)
+	registerWidgetSolver(t, &fakeWidgetSolver{})
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path == "/api/turnstile-verify" {
+			_, _ = fmt.Fprintf(w, `{"success":true,"proof":%q}`, testProof)
+			return
+		}
+		_, _ = fmt.Fprint(w, playerPageWith(nil))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewClientForTest(srv.Client(), srv.URL, filepath.Join(t.TempDir(), "cache.json"))
+	c.playerTransport = netx.SafeScraperTransport(playerHTTPTimeout)
+	_, err := c.ResolvePlayer(context.Background(), srv.URL+"/filme/310",
+		PlayerTarget{TMDBID: 310, Kind: KindMovie}, AudioDubbed)
+
+	require.Error(t, err)
+	assert.Zero(t, hits.Load(), "the private host answered a request")
+}
