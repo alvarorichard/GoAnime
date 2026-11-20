@@ -1,11 +1,11 @@
 # GoAnime Release Notes - Version 2.0.1
 
-Release date: 2026-11-18
+Release date: 2026-11-20
 
 ## Highlights
 
-- **183 commits since 2.0.0** (2026-10-28), by 3 contributors: 463 files changed, +114,701 / −3,253 lines. 259 of those files are tests; the new features each ship with unit, cascade and mutation tests (`go test -overlay`) that must fail on every mutant.
-- **AnimesDigital plays again** (#229, #236). Its video host answered the playlist but refused every video piece unless the request carried the player's own `Referer`, so mpv opened, found nothing to play and closed (users could not watch Cyberpunk: Edgerunners season 2, among other titles). GoAnime now sends that Referer, checks the first piece of video before offering an episode, and falls back to the second player, or says the episode is offline, instead of handing mpv a dead address. All ten episodes of Cyberpunk: Edgerunners season 2 and of season 1 (subtitled and dubbed) were played live.
+- **186 commits since 2.0.0** (2026-10-28), by 4 contributors: 464 files changed, +115,061 / −3,256 lines. 260 of those files are tests; the new features each ship with unit, cascade and mutation tests (`go test -overlay`) that must fail on every mutant.
+- **AnimesDigital plays again** (#229, #236). Its video host answered the playlist but refused every video piece unless the request carried the player's own `Referer`, so mpv opened, found nothing to play and closed (users could not watch Cyberpunk: Edgerunners season 2, among other titles). GoAnime now sends that Referer, checks the first piece of video before offering an episode, and falls back to the second player, or says the episode is offline, instead of handing mpv a dead address. It also follows the site's new player addresses (#237). All ten episodes of Cyberpunk: Edgerunners season 2 and of season 1 (subtitled and dubbed) were played live.
 - **When mpv closes without loading the stream, you are told** (#229), and "Watch now" takes you back to the episode list instead of replaying the same dead address.
 - **An episode that will not load plays from another source** (#229). When the source you picked cannot give a video, GoAnime looks for the same episode of the same title on the other anime sources and plays the first that has it. History and CONTINUE keep pointing at the title you chose.
 - **Autocomplete in the search box**, with no key and no setup: titles appear as you type, with the rest of the best match as ghost text after the cursor.
@@ -64,6 +64,7 @@ Release date: 2026-11-18
 ### Sources and search
 
 - Fix AnimesDigital episodes that never played (#229): the video host returns 403 for every video piece unless the `Referer` is `https://api.anivideo.net/`, while the playlist itself still loads, so the old check passed and mpv closed. The Referer now travels from the client to mpv, the check requests the first video piece the way the player will (following a master playlist to its variant), and an episode whose pieces are refused falls back to the second (Blogger) player or is reported as offline. Covered by offline tests with a host that checks the Referer, a guard of 11 mutants, and an opt-in live test (`GOANIME_LIVE=1`) over the reported titles.
+- Fix AnimesDigital after the site moved its players (#237): player 1 is now a page at `api.anivideo.net/cdn/v1.<token>` that sets the player up with the playlist and answers 403 unless the episode is its `Referer`, and older episodes' player 2 became a ROT13-scrambled, four-part address. Both are read, the old address keeps working, and when the page names no playlist the second player is used. Covered by offline tests with a host that checks the Referer and a guard of mutants.
 - Fix `esc` in the AnimesDigital Subtitled/Dubbed picker choosing Subtitled: it goes back to the search now.
 - Fix AnimesDigital episodes answered with a dead playlist (HTTP 520) leaving no way to play them (#236): the second player is tried first.
 - Fix Pobreflix after the site moved to `pobreflixtvfree.cv` and was rebuilt (2026-11-14): the old hosts redirect every path to the new home page, so title pages no longer opened ("title page has no video mount") even though search still answered. GoAnime now searches `/api/busca`, reads the new movie, series and episode pages, takes the episode list from the series page and plays the RedeFlixApi player, with no solver. The daily Source Health run now opens a title and plays a movie and an episode, so a break like this shows up as a red run instead of a green search.
@@ -105,7 +106,7 @@ Release date: 2026-11-18
 ## Thanks and New Contributors
 
 - **Welcome, @animesfhd!** Your first contribution, **AnimesFHD** (#232), is in this release: a whole PT-BR anime source with subtitled and dubbed versions, movies, paginated episodes and native MP4/HLS playback, with the follow-up fixes for `--audio`, movies in CONTINUE and mpv's User-Agent. Thank you for the time and care.
-- Thanks to @william-navarro for **AnimesROLL** (#225) and, earlier, **AnimesDigital** (#211), and to everyone who reported playback problems on #229 and #236 and on Discord: the AnimesDigital fix above comes from those reports.
+- Thanks to @william-navarro for **AnimesROLL** (#225) and, earlier, **AnimesDigital** (#211), and to everyone who reported playback problems on #229, #236 and #237 and on Discord: the AnimesDigital fix above comes from those reports.
 
 ## Dependencies
 
@@ -128,7 +129,7 @@ Release date: 2026-11-18
 
 - `charm.land/bubbletea/v2` stays on `v2.1.1`: `v2.1.2` hangs on Windows when there is no console (the spinner blocks closing the console input), which timed out `appflow` and `download` in CI.
 - `enetx/utls` stays on `v1.0.10`, the version surf asks for: `v1.8.1` imports another module's internal package and does not build.
-- cfsolve is pinned to `d94de047` in `cfsolve.lock`.
+- cfsolve is pinned to `19efa316` in `cfsolve.lock`.
 
 ---
 
