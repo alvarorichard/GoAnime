@@ -129,7 +129,7 @@ Release date: 2026-11-20
 
 - `charm.land/bubbletea/v2` stays on `v2.1.1`: `v2.1.2` hangs on Windows when there is no console (the spinner blocks closing the console input), which timed out `appflow` and `download` in CI.
 - `enetx/utls` stays on `v1.0.10`, the version surf asks for: `v1.8.1` imports another module's internal package and does not build.
-- cfsolve is pinned to `19efa316` in `cfsolve.lock`.
+- cfsolve is pinned to `06d58d64` in `cfsolve.lock`.
 
 ---
 

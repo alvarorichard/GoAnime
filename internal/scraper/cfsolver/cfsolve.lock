@@ -3,4 +3,4 @@
 # embedded profile from the same commit. The release workflow builds this
 # commit and attaches the binaries to each GoAnime release.
 repo=https://github.com/chris124567/cfsolve
-sha=19efa31656328528457376ae0895a61164b22da0
+sha=06d58d64f1f2292e77341576d05b00af15d90960
