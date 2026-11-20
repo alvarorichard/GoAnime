@@ -394,6 +394,7 @@ common needs:
 | ----------------------------- | ------------------------------------------------------------------------ |
 | `GOANIME_ENABLED_SOURCES`     | Comma-separated sources to enable, such as `goyabu`                      |
 | `GOANIME_DISABLED_SOURCES`    | Comma-separated sources to skip                                          |
+| `GOANIME_HIDE_OFFLINE`        | Set to `0` to stop hiding AnimeFire titles that already failed with no video on any source (they are hidden for 6h by default) |
 | `GOANIME_THEME`               | `dark`, `light` or `auto` (default): `auto` asks the terminal once for its background |
 | `GOANIME_TERMINAL`            | `conhost` keeps Windows GoAnime in the classic console instead of reopening it in Windows Terminal |
 | `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
