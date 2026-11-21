@@ -135,3 +135,46 @@ func TestLiveSearchIgnoresChannels(t *testing.T) {
 		assert.Regexp(t, idRe, title.ID)
 	}
 }
+
+// TestLiveEveryMoviePlaysMoreThanAnAd walks the movies the catalog lists for a
+// few queries and holds what Stream hands over to the one thing that went
+// wrong in production (2026-11-21, "Jumper"): a title whose segment layout was
+// not known was played as the five-second ad bumper at the end of its playlist.
+// Whatever layout a title is in, its playlist must be most of a film, or be the
+// stitched master (which has the whole film in it).
+func TestLiveEveryMoviePlaysMoreThanAnAd(t *testing.T) {
+	c := liveClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
+	defer cancel()
+
+	seen := map[string]bool{}
+	checked := 0
+	for _, query := range []string{"jumper", "matrix", "action", "terror", "comedia", "star", "dragon", "guerra"} {
+		titles, err := c.Search(ctx, query)
+		require.NoError(t, err)
+		for _, title := range titles {
+			if title.Kind != KindMovie || seen[title.ID] || checked >= 25 {
+				continue
+			}
+			seen[title.ID] = true
+			stream, err := c.Stream(ctx, title.URL(), "best")
+			if err != nil {
+				t.Logf("%s: %v (not playable here)", title.Name, err)
+				continue
+			}
+			checked++
+			if stream.Playlist == "" {
+				assert.Contains(t, stream.URL, "/stitch/", "%s: with no playlist of its own, the stitched master", title.Name)
+				continue
+			}
+			segments := strings.Count(stream.Playlist, "#EXTINF")
+			total := seconds(stream.Playlist)
+			t.Logf("%s: %d segments, %.0f min, adFree=%v", title.Name, segments, total/60, stream.AdFree)
+			assert.Greater(t, total, 20*60.0, "%s: a film, not an ad (%d segments)", title.Name, segments)
+			assert.NotRegexp(t, adMarkerRe, stream.Playlist, "%s: no ad in the title's playlist", title.Name)
+		}
+	}
+	if checked == 0 {
+		t.Skip("the catalog of this country lists no movie for these queries")
+	}
+}

@@ -310,3 +310,28 @@ func TestStreamPlaysTheStitchedMasterWhenNoRungYieldsTheTitle(t *testing.T) {
 	assert.Contains(t, stream.URL, "/master.m3u8")
 	assert.Zero(t, f.hitCount(f.contentPath("hls_600")), "three rungs at most, as before")
 }
+
+// Newer titles name their segments seg_NNNNN.ts under hls/video_<lang>_<n>.
+// The ad bumper at the end of the playlist is the only clip in the older
+// layout, so a reader that knows only that one takes the bumper for the title
+// and plays five seconds.
+func TestTitlePlaylistReadsTheSegLayoutAndNotTheBumper(t *testing.T) {
+	const clip = "https://cdn.example/529_pluto/clip/abc/720pDRM/x_1/"
+	const bumper = "https://cdn.example/259_Pluto_TV_OandO/clip/b_ad_bumper/1080pDRM/x/hls/0-end/hls_300-00000.ts"
+	stitched := "#EXTM3U\n#EXT-X-VERSION:5\n" +
+		"#EXTINF:6,\n" + clip + "0-100/hls/video_pt_video_300/seg_00000.ts\n" +
+		"#EXTINF:6,\n" + clip + "0-100/hls/video_pt_video_300/seg_00001.ts\n" +
+		"#EXT-X-DISCONTINUITY\n#EXTINF:6,\nhttps://cdn.example/v1/mp4/c(ts)/p(0_ad%2Fcreative%2Fz)/frag(1-2)/seg.ts\n" +
+		"#EXT-X-DISCONTINUITY\n#EXTINF:6,\n" + clip + "100-end/hls/video_pt_video_300/seg_00002.ts\n" +
+		"#EXT-X-DISCONTINUITY\n#EXTINF:5,\n" + bumper + "\n#EXT-X-ENDLIST\n"
+
+	contentURL, ok := contentPlaylistURL(stitched)
+	require.True(t, ok)
+	assert.Equal(t, clip+"0-end/hls/video_pt_video_300.m3u8", contentURL)
+
+	own, ok := titlePlaylist(stitched, "https://stitcher.example/x.m3u8", contentURL)
+	require.True(t, ok)
+	assert.Equal(t, 3, strings.Count(own, "#EXTINF"))
+	assert.NotContains(t, own, "_ad")
+	assert.NotContains(t, own, "/v1/mp4")
+}
