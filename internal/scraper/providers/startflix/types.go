@@ -2,6 +2,7 @@ package startflix
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -229,4 +230,12 @@ type Stream struct {
 	// Dublado, Legendado (the original audio), or "" when nothing said. The
 	// vidsrc fallback always serves the original audio.
 	Audio Audio
+	// HLS is set by a resolver that knows URL is an HLS playlist (it read it,
+	// or the host said so). The player cannot tell from an address with no
+	// playlist extension, so ResolveStreamFor relays such a stream under one
+	// (hlsrelay.go).
+	HLS bool
+	// client is the one that read the playlist, so the relay reads it the
+	// same way; nil means the StartFlix client's own.
+	client *http.Client
 }

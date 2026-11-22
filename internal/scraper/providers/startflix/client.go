@@ -381,6 +381,14 @@ func (c *Client) ResolveStream(ctx context.Context, players []Player) (*Stream, 
 // audio is still returned when it is all that plays; Stream.Audio says so,
 // and the caller decides whether the user wants it.
 func (c *Client) ResolveStreamFor(ctx context.Context, players []Player, want Audio) (*Stream, error) {
+	s, err := c.resolveStreamFor(ctx, players, want)
+	if err != nil {
+		return nil, err
+	}
+	return nameThePlaylist(s, c.proxyClient()), nil
+}
+
+func (c *Client) resolveStreamFor(ctx context.Context, players []Player, want Audio) (*Stream, error) {
 	if len(players) == 0 {
 		return nil, ErrNoPlayers
 	}
