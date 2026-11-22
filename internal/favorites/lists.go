@@ -216,7 +216,7 @@ func (s *Store) CreateList(name string) (Summary, error) {
 		return Summary{}, ErrTooManyLists
 	}
 	now := s.clock().UTC()
-	l := list{ID: newListID(&f, now), Name: name, CreatedAt: now}
+	l := list{ID: s.newListID(&f, now), Name: name, CreatedAt: now}
 	f.Lists = append(f.Lists, l)
 	if err := s.save(f); err != nil {
 		return Summary{}, err
@@ -226,14 +226,24 @@ func (s *Store) CreateList(name string) (Summary, error) {
 
 // newListID returns an ID no list has: "l" and the base 36 of the time in
 // nanoseconds, bumped until it is free. It is URL-safe and never FavoritesID.
-func newListID(f *file, now time.Time) string {
+//
+// The number also stays above every one this store handed out before, so a
+// deleted list's ID is not handed out again. Being free is not enough: where
+// the clock is coarse (Windows), a list made just after one was deleted reads
+// the same instant, and would take the deleted list's ID, which anything that
+// still names the deleted list would then find. The caller holds s.mu.
+func (s *Store) newListID(f *file, now time.Time) string {
 	n := now.UnixNano()
 	if n < 0 {
 		n = -n
 	}
+	if n <= s.lastID {
+		n = s.lastID + 1
+	}
 	for {
 		id := "l" + strconv.FormatInt(n, 36)
 		if f.find(id) < 0 {
+			s.lastID = n
 			return id
 		}
 		n++
