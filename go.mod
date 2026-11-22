@@ -19,6 +19,7 @@ require (
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/lrstanley/go-ytdlp v1.5.6
 	github.com/mattn/go-sqlite3 v1.14.53
+	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tetratelabs/wazero v1.12.0
@@ -60,7 +61,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
-	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/nsf/termbox-go v1.1.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

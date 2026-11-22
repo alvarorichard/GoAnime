@@ -12,6 +12,8 @@ Release date: 2026-11-20
 - **A sources screen (`ctrl+s`)** turns each search source on or off and remembers the choice.
 - **mpv loads your own configuration** (#228): `mpv.conf`, `input.conf`, scripts such as uosc and shaders apply again.
 - **Pluto TV plays movies and series with no ad breaks.** It is free, needs no account or key, and `-d`/`-dm` download the same ad-free video.
+- **Pluto TV films play whole and can be sought in.** Some titles (Jumper, Super, O Monge à Prova de Balas) were cut in a layout GoAnime did not read, and the closing 5-second ad bumper was played as the film. The title is now read in that layout too, and a clip that is a sliver of the playlist, or is named as an ad, is never taken for the title. In those titles each piece is a file whose clock restarts, so seeking froze the player; GoAnime now serves their segments from the local address with the pieces put on one timeline, and the seek works in mpv and in downloads.
+- **The first menu no longer ignores keys in tmux, the Linux console or over SSH.** At start GoAnime asks the terminal for its background colour; a terminal that does not answer left that question's read running, and it took the next keys typed, so the first episode picker looked frozen. The read is now called off when the answer does not come.
 - **Four new sources, Pluto TV, Pomfy, AnimesROLL and AnimesFHD** (the last one by @animesfhd, #232), and **Pobreflix plays again without a solver**: its RedeFlixApi player needs no Turnstile.
 - **Diagnostics grew up**: `--debug` captures the machine, logs are redacted and safe to attach, `goanime logs` shows them in colour, and a panic saves a crash report.
 - **Forget history** from the home screen and from the command line.

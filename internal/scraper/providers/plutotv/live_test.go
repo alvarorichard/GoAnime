@@ -172,9 +172,40 @@ func TestLiveEveryMoviePlaysMoreThanAnAd(t *testing.T) {
 			t.Logf("%s: %d segments, %.0f min, adFree=%v", title.Name, segments, total/60, stream.AdFree)
 			assert.Greater(t, total, 20*60.0, "%s: a film, not an ad (%d segments)", title.Name, segments)
 			assert.NotRegexp(t, adMarkerRe, stream.Playlist, "%s: no ad in the title's playlist", title.Name)
+			assertLiveTimeline(t, ctx, title.Name, stream)
 		}
 	}
 	if checked == 0 {
 		t.Skip("the catalog of this country lists no movie for these queries")
 	}
+}
+
+// assertLiveTimeline holds a title that is served from here to the one thing
+// the rebase is for: the first segment of every range, as the player gets it,
+// starts where the playlist's durations say, so a seek finds what it looks for.
+// A title the CDN plays as it is has nothing to hold.
+func assertLiveTimeline(t *testing.T, ctx context.Context, name string, stream Stream) {
+	t.Helper()
+	plan := stream.rebase
+	if plan == nil {
+		return
+	}
+	var keys keyCache
+	elapsed, first := 0.0, int64(-1)
+	for i, s := range plan.segs {
+		if i == 0 || s.group != plan.segs[i-1].group {
+			data, err := plan.segment(ctx, i, &keys)
+			require.NoError(t, err, "%s: segment %d", name, i)
+			require.NoError(t, checkTS(data), "%s: segment %d", name, i)
+			at, ok := firstTimestamp(data)
+			require.True(t, ok, "%s: segment %d", name, i)
+			if first < 0 {
+				first = at
+			}
+			want := first + int64(elapsed*90000)
+			assert.InDelta(t, float64(want), float64(at), 10*90000, "%s: range starting at segment %d", name, i)
+		}
+		elapsed += extinfSeconds(s.extinf)
+	}
+	t.Logf("%s: %d ranges on one timeline", name, plan.segs[len(plan.segs)-1].group+1)
 }

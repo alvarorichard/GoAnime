@@ -29,8 +29,15 @@
 // PlayURL serves that text to the player from loopback (serve.go). When the CDN that answered refuses the
 // playlist, the same title is read out of the stitched one instead: its ranges
 // in order, each segment with the key and duration the stitcher gave it, and
-// nothing of what was spliced between them. The ranges are cut from one
-// encode, so the timeline runs on and a seek lands where it was asked to.
+// nothing of what was spliced between them.
+//
+// Some titles are cut from one encode, and their timeline runs on across the
+// ranges. In others each range is a file of its own whose clock restarts at
+// about one second, and a player that seeks looks for a timestamp no later file
+// reaches: it freezes. Stream reads where each range starts its clock and, for
+// those titles, PlayURL serves the segments from loopback as well as the
+// playlist: decrypted, with each range's offset added to the PTS, DTS and PCR
+// inside (rebase.go, ts.go). The title is then one timeline and a seek works.
 //
 // When a title does not follow that layout the stitched playlist is returned
 // instead, so it still plays, with the service's own breaks.

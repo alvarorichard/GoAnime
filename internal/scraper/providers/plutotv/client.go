@@ -141,6 +141,10 @@ type Stream struct {
 	// AdFree is false when the title's own playlist could not be found and
 	// URL is the stitched one, with the service's breaks in it.
 	AdFree bool
+
+	// rebase is set when the title's ranges do not share one clock and PlayURL
+	// must serve its segments itself (see rebase.go).
+	rebase *rebasePlan
 }
 
 // Client talks to Pluto TV with an anonymous session.
@@ -686,7 +690,16 @@ func (c *Client) Stream(ctx context.Context, pageURL, quality string) (Stream, e
 		// title in ranges, so the title alone is read out of it instead.
 		util.Debug("Pluto TV content playlist unavailable", "bandwidth", v.Bandwidth, "error", err)
 		if own, ok := titlePlaylist(playlist, v.URL, contentURL); ok {
-			return Stream{URL: masterURL, Playlist: own, AdFree: true}, nil
+			plan, err := c.planRebase(ctx, own)
+			if err != nil {
+				if ctx.Err() != nil {
+					return Stream{}, ctx.Err()
+				}
+				// Not knowing the clocks leaves the title as the CDN has it:
+				// it plays, and a seek may not.
+				util.Debug("Pluto TV could not read the clocks of the ranges", "error", err)
+			}
+			return Stream{URL: masterURL, Playlist: own, AdFree: true, rebase: plan}, nil
 		}
 	}
 	return Stream{URL: masterURL}, nil
