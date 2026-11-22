@@ -494,7 +494,7 @@ func Test2EmbedRidesBehindVIDSRCFallback(t *testing.T) {
 
 	stream, err := MovieFallback(context.Background(), "tt0315327", 310)
 	require.NoError(t, err, "the vidsrc miss hands over to 2Embed, which plays")
-	assert.Equal(t, srv.URL+"/_stream?id=var-ref-vny", stream.URL)
+	assertRelayedRendition(t, stream, srv.URL+"/_stream?id=var-ref-vny")
 	assert.Equal(t, []play2EmbedCall{{ref: "ref-vny"}}, f.playCalls)
 	assert.Contains(t, f.otherHits, "/vs_src.php",
 		"the vidsrc chain actually ran and missed against this fake first")
@@ -524,7 +524,7 @@ func Test2EmbedEpisodeRidesBehindVIDSRCFallback(t *testing.T) {
 
 	stream, err := EpisodeFallback(context.Background(), 147826, 2, 7)
 	require.NoError(t, err)
-	assert.Equal(t, srv.URL+"/_stream?id=var-ref-xpm", stream.URL)
+	assertRelayedRendition(t, stream, srv.URL+"/_stream?id=var-ref-xpm")
 	require.Len(t, f.embedPaths, 1)
 	assert.Equal(t, "/embed/tv/147826/2/7", f.embedPaths[0])
 }
@@ -567,4 +567,22 @@ func Test2EmbedLiveTodoPoderoso(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "stream status: %d", resp.StatusCode)
 	assert.True(t, strings.Contains(string(body), "#EXTM3U"), "the stream URL serves a playlist")
+}
+
+// assertRelayedRendition holds a fallback stream to what the player needs: the
+// 2Embed rendition sits at /_stream?id=… — no playlist name, which FFmpeg will
+// not take for HLS — so the stream handed over is the loopback relay of it,
+// and reading the relay gives the rendition's own segments.
+func assertRelayedRendition(t *testing.T, stream *Stream, upstream string) {
+	t.Helper()
+	require.True(t, stream.HLS, "the play call said hls")
+	require.True(t, hasPlaylistName(stream.URL), "handed over under a playlist name: %s", stream.URL)
+	require.True(t, strings.HasPrefix(stream.URL, "http://127.0.0.1:"), stream.URL)
+	id := strings.TrimSuffix(stream.URL[strings.LastIndex(stream.URL, "/")+1:], ".m3u8")
+	p, ok := sharedPlaylistRelay().lookup(id)
+	require.True(t, ok)
+	assert.Equal(t, upstream, p.upstream, "the relay reads the validated rendition")
+	status, _, body := getText(t, stream.URL)
+	require.Equal(t, http.StatusOK, status)
+	assert.Contains(t, body, "https://relay3.videm.xyz/seg?u=", "and leads to its segments")
 }

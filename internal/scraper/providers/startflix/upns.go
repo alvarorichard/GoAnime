@@ -399,5 +399,7 @@ func resolveUPNsPanelPlayer(ctx context.Context, u *url.URL) (*Stream, error) {
 		Host:    u.Host,
 		Height:  bestHeight,
 		Audio:   "",
+		HLS:     true, // its master was read to rank it
+		client:  vidsrcHTTPFn(),
 	}, nil
 }

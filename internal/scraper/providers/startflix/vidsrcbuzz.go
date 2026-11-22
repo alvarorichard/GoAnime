@@ -340,6 +340,8 @@ func play2EmbedRefOnce(ctx context.Context, base, pageURL, ref, token string, fr
 		Host:    mu.Host,
 		Height:  height,
 		Audio:   AudioSubtitled,
+		HLS:     true, // play answered type "hls", and the master was read
+		client:  buzzHTTPFn(),
 	}, nil
 }
 

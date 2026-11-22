@@ -1,13 +1,16 @@
 package plutotv
 
 import (
+	"bytes"
 	"container/list"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +43,14 @@ type playlistServer struct {
 	listen func() (net.Listener, error)
 }
 
-type servedPlaylist struct{ id, text string }
+type servedPlaylist struct {
+	id, text string
+	// plan is set for a title whose segments are served from here (see
+	// rebase.go); text is then its playlist.
+	plan  *rebasePlan
+	keys  keyCache
+	cache segmentCache
+}
 
 func newPlaylistServer() *playlistServer {
 	return &playlistServer{lists: make(map[string]*list.Element), recent: list.New()}
@@ -51,6 +61,9 @@ var playlists = newPlaylistServer()
 // publishFn publishes a playlist and returns its local URL; a seam.
 var publishFn = playlists.publish
 
+// publishPlanFn publishes a rebased title and returns its local URL; a seam.
+var publishPlanFn = playlists.publishPlan
+
 // listenLoopback asks the system for a free port on 127.0.0.1.
 func listenLoopback() (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") }
 
@@ -59,6 +72,13 @@ func listenLoopback() (net.Listener, error) { return net.Listen("tcp", "127.0.0.
 // (a title with no playlist of its own, or no port to serve one from, in which
 // case the URL still plays wherever the CDN answers).
 func PlayURL(s Stream) string {
+	if s.rebase != nil {
+		local, err := publishPlanFn(s.rebase)
+		if err == nil {
+			return local
+		}
+		util.Debug("Pluto TV title is played from the CDN's own timeline", "error", err)
+	}
 	// A stream with no playlist has nothing to publish: publishing refuses
 	// what is not one, and the URL is what is left.
 	local, err := publishFn(s.Playlist)
@@ -80,6 +100,18 @@ func (s *playlistServer) publish(playlist string) (string, error) {
 	if !strings.HasPrefix(playlist, "#EXTM3U") {
 		return "", errors.New("not a playlist")
 	}
+	return s.register(func(string) string { return playlist }, nil)
+}
+
+// publishPlan registers a title whose segments are served from here.
+func (s *playlistServer) publishPlan(plan *rebasePlan) (string, error) {
+	if plan == nil || len(plan.segs) == 0 {
+		return "", errors.New("no segments")
+	}
+	return s.register(plan.render, plan)
+}
+
+func (s *playlistServer) register(render func(id string) string, plan *rebasePlan) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.base == "" {
@@ -102,7 +134,7 @@ func (s *playlistServer) publish(playlist string) (string, error) {
 	var raw [16]byte
 	_, _ = rand.Read(raw[:]) // never fails since Go 1.24
 	id := hex.EncodeToString(raw[:])
-	s.lists[id] = s.recent.PushFront(&servedPlaylist{id: id, text: playlist})
+	s.lists[id] = s.recent.PushFront(&servedPlaylist{id: id, text: render(id), plan: plan})
 	for s.recent.Len() > maxPlaylists {
 		oldest := s.recent.Back()
 		s.recent.Remove(oldest)
@@ -118,23 +150,134 @@ func (s *playlistServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	rest := strings.TrimPrefix(r.URL.Path, "/plutotv/")
+	if id, n, ok := strings.Cut(rest, "/"); ok {
+		s.serveSegment(w, r, id, n)
+		return
+	}
 	// An id is 32 hex digits, so a path that is not /plutotv/<id>.m3u8 leaves
 	// something that is no id and is simply not found.
-	id, isPlaylist := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/plutotv/"), ".m3u8")
-	s.mu.Lock()
-	entry, found := s.lists[id]
-	playlist := ""
-	if found && isPlaylist {
-		s.recent.MoveToFront(entry) // in use: not the one to forget
-		playlist = entry.Value.(*servedPlaylist).text
-	}
-	s.mu.Unlock()
+	id, isPlaylist := strings.CutSuffix(rest, ".m3u8")
+	entry, found := s.lookup(id)
 	if !isPlaylist || !found {
 		http.NotFound(w, r)
 		return
 	}
+	playlist := entry.text
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", fmt.Sprint(len(playlist)))
 	_, _ = w.Write([]byte(playlist)) // net/http sends no body for a HEAD
+}
+
+// lookup finds a published playlist and marks it as in use.
+func (s *playlistServer) lookup(id string) (*servedPlaylist, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	el, ok := s.lists[id]
+	if !ok {
+		return nil, false
+	}
+	s.recent.MoveToFront(el) // in use: not the one to forget
+	return el.Value.(*servedPlaylist), true
+}
+
+// serveSegment answers /plutotv/<id>/<n>.ts for a title served from here.
+func (s *playlistServer) serveSegment(w http.ResponseWriter, r *http.Request, id, name string) {
+	num, isSegment := strings.CutSuffix(name, ".ts")
+	n, err := strconv.Atoi(num)
+	entry, found := s.lookup(id)
+	if !isSegment || err != nil || n < 0 || !found || entry.plan == nil || n >= len(entry.plan.segs) {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := entry.segment(r.Context(), n)
+	if err != nil {
+		if r.Context().Err() == nil {
+			util.Debug("Pluto TV segment unavailable", "segment", n, "error", err)
+		}
+		http.Error(w, "segment unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data)) // ranges and HEAD
+}
+
+// segmentCache keeps the few segments around the one being played, and has a
+// segment that two requests ask for at once fetched once.
+type segmentCache struct {
+	mu    sync.Mutex
+	items map[int]*segmentResult
+}
+
+type segmentResult struct {
+	done chan struct{}
+	data []byte
+	err  error
+}
+
+// segment returns segment n, and starts fetching the ones after it.
+func (e *servedPlaylist) segment(ctx context.Context, n int) ([]byte, error) {
+	res := e.cache.start(n, func() ([]byte, error) {
+		// Not the request's context: a prefetch outlives it, and a request
+		// that gives up must not poison what another is waiting for.
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		return e.plan.segment(bg, n, &e.keys)
+	})
+	for k := 1; k <= segmentPrefetch && n+k < len(e.plan.segs); k++ {
+		k := k
+		e.cache.start(n+k, func() ([]byte, error) {
+			bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			return e.plan.segment(bg, n+k, &e.keys)
+		})
+	}
+	e.cache.trim(n)
+	select {
+	case <-res.done:
+		return res.data, res.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// start begins fetching segment n unless that is under way or done, and
+// returns its result.
+func (c *segmentCache) start(n int, fetch func() ([]byte, error)) *segmentResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if res, ok := c.items[n]; ok {
+		return res
+	}
+	if c.items == nil {
+		c.items = make(map[int]*segmentResult)
+	}
+	res := &segmentResult{done: make(chan struct{})}
+	c.items[n] = res
+	go func() {
+		res.data, res.err = fetch()
+		close(res.done)
+		if res.err != nil { // a failure is not remembered: the next ask retries
+			c.mu.Lock()
+			if c.items[n] == res {
+				delete(c.items, n)
+			}
+			c.mu.Unlock()
+		}
+	}()
+	return res
+}
+
+// trim forgets the segments far from n, behind it by more than a seek back
+// would need and ahead of it by more than the prefetch.
+func (c *segmentCache) trim(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k := range c.items {
+		if k < n-segmentKeepBehind || k > n+segmentPrefetch {
+			delete(c.items, k)
+		}
+	}
 }

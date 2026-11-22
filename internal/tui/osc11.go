@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/muesli/cancelreader"
 	"golang.org/x/term"
 )
 
@@ -43,7 +45,14 @@ func queryBackgroundIsLight(timeout time.Duration) (light, ok bool) {
 	}
 	defer func() { _ = term.Restore(fd, state) }()
 
-	reply, ok := readOSCReply(fd, timeout)
+	in, err := newReplyReader()
+	if err != nil {
+		// No way to stop a read once started: asking would leave a reader
+		// behind that takes the user's keys, so the theme is not asked for.
+		return false, false
+	}
+	defer func() { _ = in.Close() }()
+	reply, ok := readOSCReply(in, timeout)
 	// Delayed bytes must never leak into the next prompt as literal text.
 	DrainTerminalResponses(30 * time.Millisecond)
 	if !ok {
@@ -52,9 +61,29 @@ func queryBackgroundIsLight(timeout time.Duration) (light, ok bool) {
 	return parseBackgroundIsLight(reply)
 }
 
+// replyReader is the terminal's input, read so that a read under way can be
+// called off.
+type replyReader interface {
+	io.Reader
+	Cancel() bool
+	Close() error
+}
+
+// newReplyReader opens stdin for the reply; a seam for the tests.
+var newReplyReader = func() (replyReader, error) { return cancelreader.NewReader(os.Stdin) }
+
+// osc11Drain bounds how long a cancelled read may take to return.
+const osc11Drain = time.Second
+
 // readOSCReply reads until BEL or ST (ESC \) or the timeout. The OSC 11
 // reply looks like "]11;rgb:0000/0000/0000" wrapped in ESC ] ... (BEL|ST).
-func readOSCReply(_ int, timeout time.Duration) (string, bool) {
+//
+// When the terminal does not answer, the read under way is cancelled and
+// waited for before this returns. A read left running would take the next
+// keys the user types (up to 64 bytes) from whatever screen comes next: in a
+// terminal that never answers (tmux, the Linux console, many SSH sessions)
+// the first menu would look frozen.
+func readOSCReply(in replyReader, timeout time.Duration) (string, bool) {
 	type result struct {
 		data string
 		ok   bool
@@ -65,7 +94,7 @@ func readOSCReply(_ int, timeout time.Duration) (string, bool) {
 		buf := make([]byte, 1)
 		prevESC := false
 		for sb.Len() < 64 {
-			n, err := os.Stdin.Read(buf)
+			n, err := in.Read(buf)
 			if n <= 0 || err != nil {
 				break
 			}
@@ -85,10 +114,17 @@ func readOSCReply(_ int, timeout time.Duration) (string, bool) {
 		ch <- result{sb.String(), sb.Len() > 0}
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case r := <-ch:
 		return r.data, r.ok
-	case <-time.After(timeout):
+	case <-timer.C:
+		in.Cancel()
+		select {
+		case <-ch: // the read returned: nothing is left reading the terminal
+		case <-time.After(osc11Drain):
+		}
 		return "", false
 	}
 }

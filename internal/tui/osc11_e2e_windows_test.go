@@ -26,8 +26,11 @@ import (
 //
 // Scenario timing is tuned so events land DURING the probe: the crash-then-freeze
 // mode exercised here is exactly the WezTerm input-eating bug.
-
-const e2eProbeTimeout = 80 * time.Millisecond
+//
+// The events are injected 10 and 30 ms in; the probe waits far longer than
+// that, since a loaded CI runner may wake a sleeping goroutine late (80 ms was
+// once missed: a714f08, windows-latest, REPLY-NOT-PARSED).
+const e2eProbeTimeout = 500 * time.Millisecond
 
 var (
 	procAllocConsole = modkernel32.NewProc("AllocConsole")

@@ -149,7 +149,7 @@ func MovieFallback(ctx context.Context, imdbID string, tmdbID int) (*Stream, err
 	}
 	stream, err := resolveVIDSRC(ctx, KindMovie, id, 0, 0)
 	if err == nil {
-		return stream, nil
+		return nameThePlaylist(stream, nil), nil
 	}
 	// 2Embed's own player rides behind the vidsrc family (vidsrcbuzz.go): a
 	// wholly different engine on the same id keys, off unless
@@ -157,7 +157,7 @@ func MovieFallback(ctx context.Context, imdbID string, tmdbID int) (*Stream, err
 	// error is what explains a panel situation to the caller — so only a
 	// 2Embed success replaces the vidsrc result.
 	if buzzStream, buzzErr := resolve2Embed(ctx, KindMovie, imdbID, tmdbID, 0, 0); buzzErr == nil {
-		return buzzStream, nil
+		return nameThePlaylist(buzzStream, nil), nil
 	}
 	return nil, err
 }
@@ -173,13 +173,13 @@ func EpisodeFallback(ctx context.Context, tmdbID, season, episode int) (*Stream,
 	}
 	stream, err := resolveVIDSRC(ctx, KindSeries, strconv.Itoa(tmdbID), season, episode)
 	if err == nil {
-		return stream, nil
+		return nameThePlaylist(stream, nil), nil
 	}
 	// Same shape as MovieFallback: 2Embed's chain rides behind the vidsrc
 	// family, only when GOANIME_2EMBED_URL names a base, and only its
 	// success replaces the vidsrc outcome.
 	if buzzStream, buzzErr := resolve2Embed(ctx, KindSeries, "", tmdbID, season, episode); buzzErr == nil {
-		return buzzStream, nil
+		return nameThePlaylist(buzzStream, nil), nil
 	}
 	return nil, err
 }
@@ -492,6 +492,8 @@ func resolveVIDSRCMaster(ctx context.Context, raw, referer, playerURL, apiToken 
 		Host:    u.Host,
 		Height:  height,
 		Audio:   AudioSubtitled,
+		HLS:     true, // its master was read to rank it
+		client:  vidsrcHTTPFn(),
 	}, u.Host, nil
 }
 

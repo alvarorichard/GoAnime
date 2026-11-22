@@ -78,6 +78,11 @@ var (
 	// the clip directory, the range and the rendition name:
 	// …/hls/498333-941317/hls_600-00012.ts
 	contentSegmentRe = regexp.MustCompile(`^(https?://[^\s?#]+/hls/)(\d+)-(\d+|end)/(hls_\d+)-\d+\.ts$`)
+	// contentSegmentV2Re is the layout newer titles use, with the rendition
+	// one level deeper and the segments numbered on their own:
+	// …/x_3ca47b98/593227-1124058/hls/video_pt_video_300/seg_00012.ts
+	// The rendition captured keeps its "hls/" prefix.
+	contentSegmentV2Re = regexp.MustCompile(`^(https?://[^\s?#]+/)(\d+)-(\d+|end)/(hls/video_[A-Za-z0-9_]+)/seg_\d+\.ts$`)
 	// qualityDigitsRe pulls "1080" out of "1080p".
 	qualityDigitsRe = regexp.MustCompile(`(\d{3,4})`)
 )
@@ -136,6 +141,10 @@ type Stream struct {
 	// AdFree is false when the title's own playlist could not be found and
 	// URL is the stitched one, with the service's breaks in it.
 	AdFree bool
+
+	// rebase is set when the title's ranges do not share one clock and PlayURL
+	// must serve its segments itself (see rebase.go).
+	rebase *rebasePlan
 }
 
 // Client talks to Pluto TV with an anonymous session.
@@ -681,7 +690,16 @@ func (c *Client) Stream(ctx context.Context, pageURL, quality string) (Stream, e
 		// title in ranges, so the title alone is read out of it instead.
 		util.Debug("Pluto TV content playlist unavailable", "bandwidth", v.Bandwidth, "error", err)
 		if own, ok := titlePlaylist(playlist, v.URL, contentURL); ok {
-			return Stream{URL: masterURL, Playlist: own, AdFree: true}, nil
+			plan, err := c.planRebase(ctx, own)
+			if err != nil {
+				if ctx.Err() != nil {
+					return Stream{}, ctx.Err()
+				}
+				// Not knowing the clocks leaves the title as the CDN has it:
+				// it plays, and a seek may not.
+				util.Debug("Pluto TV could not read the clocks of the ranges", "error", err)
+			}
+			return Stream{URL: masterURL, Playlist: own, AdFree: true, rebase: plan}, nil
 		}
 	}
 	return Stream{URL: masterURL}, nil
@@ -743,7 +761,7 @@ func titlePlaylist(stitched, base, contentURL string) (string, bool) {
 			duration = line
 		case line == "" || strings.HasPrefix(line, "#"):
 		default:
-			m := contentSegmentRe.FindStringSubmatch(line)
+			m := matchContentSegment(line)
 			seconds, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimPrefix(duration, "#EXTINF:"), ","), 64)
 			segmentDuration := duration
 			duration = "" // a duration belongs to the one segment after it
@@ -872,6 +890,24 @@ func orderVariants(variants []variant, quality string) []variant {
 	return append(within, above...)
 }
 
+// adCreativeRe matches a segment of an ad creative, which the stitcher serves
+// from its own mp4 service and never as part of a title.
+var adCreativeRe = regexp.MustCompile(`(?i)(?:ad%2f|/v1/mp4/|/mp4/v1/)`)
+
+// adClipRe matches the directory of a clip the service names as an ad or a
+// bumper, which is never the title.
+var adClipRe = regexp.MustCompile(`(?i)(?:_ad_|_ad/|/ad/|ad%2f|bumper)`)
+
+// matchContentSegment matches a segment of a title's own clip in either of the
+// layouts above, and returns the full match followed by the clip directory,
+// the range's two ends and the rendition, or nil.
+func matchContentSegment(line string) []string {
+	if m := contentSegmentRe.FindStringSubmatch(line); m != nil {
+		return m
+	}
+	return contentSegmentV2Re.FindStringSubmatch(line)
+}
+
 // contentPlaylistURL reads a stitched rendition playlist and returns the URL
 // of the title's own uninterrupted playlist (see doc.go).
 //
@@ -885,8 +921,13 @@ func contentPlaylistURL(playlist string) (string, bool) {
 	}
 	var clips []*clip
 	byKey := make(map[string]*clip)
+	total := 0 // every segment line that is not an ad creative, in whatever layout
 	for _, line := range strings.Split(playlist, "\n") {
-		m := contentSegmentRe.FindStringSubmatch(strings.TrimSpace(line))
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") && !adCreativeRe.MatchString(line) {
+			total++
+		}
+		m := matchContentSegment(line)
 		if m == nil {
 			continue
 		}
@@ -908,6 +949,13 @@ func contentPlaylistURL(playlist string) (string, bool) {
 		}
 	}
 	if title == nil || !title.fromStart || !title.toTheEnd {
+		return "", false
+	}
+	// A title is most of what it is listed with, ads apart. When the clip read
+	// as the title is not even half of that, the layout of the real title is
+	// one this code does not know and the clip is a bumper that happens to be
+	// in a known one: say nothing and let the stitched playlist play whole.
+	if title.segments*2 < total || adClipRe.MatchString(title.dir) {
 		return "", false
 	}
 	for _, c := range clips {
