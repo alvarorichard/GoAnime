@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	htmlent "html"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -599,7 +600,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 		matches := re.FindStringSubmatch(pageHTML)
 		if len(matches) >= 2 {
 			util.Debug("Goyabu strategy 3 hit: video URL pattern", "patternIdx", i, "url", matches[1])
-			return netx.ValidateStreamURL(matches[1], "Goyabu")
+			return netx.ValidateStreamURL(unwrapPlayerURL(matches[1]), "Goyabu")
 		}
 	}
 	util.Debug("Goyabu strategy 3 miss: no video URL patterns matched")
@@ -607,7 +608,7 @@ func (c *GoyabuClient) GetEpisodeStreamURL(episodeURL string) (string, error) {
 	// Strategy 4: Return Blogger embed URL as last resort (video player can handle it)
 	if bloggerURL != "" {
 		util.Debug("Using Blogger embed URL as fallback", "url", bloggerURL)
-		return netx.ValidateStreamURL(bloggerURL, "Goyabu")
+		return netx.ValidateStreamURL(unwrapPlayerURL(bloggerURL), "Goyabu")
 	}
 
 	c.dumpEpisodePageDiagnostic(episodeURL, body, resp)
@@ -830,4 +831,25 @@ func NewClientForTest(serverURL string) *GoyabuClient {
 	c.maxRetries = 0
 	c.retryDelay = 0
 	return c
+}
+
+// unwrapPlayerURL returns the address a player URL stands for. The page's
+// player data is HTML-escaped ("&amp;"), and some entries are the
+// api.anivideo.net/videohls.php wrapper, whose d parameter is the HLS
+// playlist itself. The wrapper answers 404 "File not found" even for a file
+// that plays from its own address (checked 2026-11-22 with One Piece 01:
+// the d URL 200, the wrapper 404), so the player is handed the d URL, as the
+// AnimesDigital scraper does. Anything else comes back unescaped, unchanged.
+func unwrapPlayerURL(raw string) string {
+	s := htmlent.UnescapeString(strings.TrimSpace(raw))
+	u, err := url.Parse(s)
+	if err != nil {
+		return s
+	}
+	if strings.EqualFold(u.Hostname(), "api.anivideo.net") && strings.Contains(u.Path, "videohls.php") {
+		if d := strings.TrimSpace(u.Query().Get("d")); d != "" {
+			return d
+		}
+	}
+	return s
 }
