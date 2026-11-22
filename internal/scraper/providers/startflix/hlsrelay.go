@@ -200,7 +200,8 @@ func (r *playlistRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Length", fmt.Sprint(len(text)))
-	_, _ = io.WriteString(w, text) // net/http sends no body for a HEAD
+	// net/http sends no body for a HEAD.
+	_, _ = io.WriteString(w, text) // #nosec G705 -- an HLS playlist for the local player, served as one, never as HTML
 }
 
 // read fetches the host's playlist the way its player does.

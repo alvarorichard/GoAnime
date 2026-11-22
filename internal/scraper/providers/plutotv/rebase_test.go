@@ -355,12 +355,23 @@ func TestSegmentsAheadAreFetchedWhileThePlayerIsBusy(t *testing.T) {
 
 	get(t, seg+"/3.ts")
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && (f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00005.ts") == 0) {
+	// The two are fetched side by side: either may arrive first.
+	for time.Now().Before(deadline) && (f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00004.ts") == 0 ||
+		f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00005.ts") == 0) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	assert.Positive(t, f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00004.ts"), "the next segment")
 	assert.Positive(t, f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00005.ts"), "and the one after")
-	assert.Zero(t, f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00007.ts"), "and no more")
+	// Those ahead of them would be asked for side by side with them: watch a
+	// while for any, since one seen absent at a single instant may be late.
+	beyond := func() int {
+		return f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00006.ts") +
+			f.hitCount(fakeClipRoot+"0-100/hls/video_pt_video_300/seg_00007.ts")
+	}
+	for settle := time.Now().Add(300 * time.Millisecond); time.Now().Before(settle) && beyond() == 0; {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.Zero(t, beyond(), "and no more")
 }
 
 func TestTwoRequestsForOneSegmentFetchItOnce(t *testing.T) {

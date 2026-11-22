@@ -87,7 +87,7 @@ var audioGuardMutants = []mutant{
 	},
 	{
 		name:  "vidsrc stream does not say it is the original audio",
-		edits: []codeEdit{{"internal/scraper/providers/startflix/vidsrc.go", "\t\tAudio:   AudioSubtitled,\n\t}, u.Host, nil", "\t}, u.Host, nil"}},
+		edits: []codeEdit{{"internal/scraper/providers/startflix/vidsrc.go", "\t\tAudio:   AudioSubtitled,\n\t\tHLS:     true,", "\t\tHLS:     true,"}},
 		kills: map[string][]string{startflixPkg: {"TestVIDSRCMovieChainFixture", "TestVIDSRCTVSeasonAndEpisode"}},
 	},
 	{
