@@ -2,6 +2,8 @@ package tui
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -75,34 +77,41 @@ func TestRestoreTerminalStateEndsAtColumnZero(t *testing.T) {
 	}
 }
 
-// TestClearViewport verifies the exit-time screen clear scrolls content into
-// scrollback (bottom-jump + height newlines) instead of erasing it in place,
-// then homes the cursor and erases the blank viewport.
-func TestClearViewport(t *testing.T) {
-	tests := []struct {
-		name         string
-		height       int
-		wantNewlines int
-	}{
-		{"real height", 24, 24},
-		{"zero height falls back to default", 0, defaultViewportHeight},
-		{"negative height falls back to default", -3, defaultViewportHeight},
+// Resetting the scroll region moves the cursor to the top-left corner. Unless
+// the cursor is saved before and restored after, the shell's prompt is written
+// over the top of the screen, on top of what GoAnime printed last.
+func TestRestoreTerminalStateLeavesTheCursorWhereItWas(t *testing.T) {
+	seq := TerminalResetSequence
+	save, region, restore := strings.Index(seq, "\x1b7"), strings.Index(seq, "\x1b[r"), strings.Index(seq, "\x1b8")
+	if region < 0 {
+		t.Fatal("the scroll region is no longer reset; update this test with the sequence")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			ClearViewport(&buf, tt.height)
-			got := buf.String()
+	if save < 0 || save > region {
+		t.Errorf("the cursor must be saved (ESC 7) before the scroll region is reset (ESC [r) in %q", seq)
+	}
+	if restore < 0 || restore < region {
+		t.Errorf("the cursor must be restored (ESC 8) after the scroll region is reset (ESC [r) in %q", seq)
+	}
+	if leave := strings.Index(seq, "\x1b[?1049l"); leave < save {
+		t.Errorf("the cursor must be saved before the alternate screen is left: leaving it restores the cursor of when the last full-screen view opened, above what was printed since: %q", seq)
+	}
+	for _, home := range []string{"\x1b[H", "\x1b[1;1H", "\x1b[9999;1H"} {
+		if strings.Contains(seq, home) {
+			t.Errorf("the reset moves the cursor (%q): the prompt would land away from the last line printed", home)
+		}
+	}
+}
 
-			want := "\x1b[9999;1H" + strings.Repeat("\n", tt.wantNewlines) + "\x1b[H\x1b[2J"
-			if got != want {
-				t.Errorf("ClearViewport(%d) wrote %q, want %q", tt.height, got, want)
-			}
-			// Scrollback safety: the destructive erase must come only AFTER
-			// the newlines that push the old content into scrollback.
-			if strings.Contains(got[:len(got)-len("\x1b[H\x1b[2J")], "\x1b[2J") {
-				t.Errorf("erase must be the final step, after content is scrolled out")
-			}
-		})
+// The exit must never take away what the run printed last: no erase of the
+// screen, and nothing that scrolls it out of view.
+func TestTheExitClearsNothing(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "cmd", "goanime", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, clear := range []string{"ClearViewport", "ClearScreen", `\x1b[2J`, `\033[2J`, `\x1bc`} {
+		if strings.Contains(string(src), clear) {
+			t.Errorf("cmd/goanime/main.go clears the screen (%s): --version, --help and the last error would be pushed out of sight", clear)
+		}
 	}
 }

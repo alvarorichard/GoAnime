@@ -112,7 +112,7 @@ func ShowBeautifulHelp() {
 	addOption(&helpContent, "-r", "Range download mode - download multiple episodes (use with -d or -dm).")
 	addOption(&helpContent, "-a", "Download ALL episodes/seasons. Use with -d (anime) or -dm (TV/series/dorama).")
 	addOption(&helpContent, "-dm", "Movie and TV download mode. Downloads a movie, or episodes of a TV show with -r, -a or --type tv.")
-	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, goyabu, animesdigital, anroll, animesfhd, startflix, topcine, pobreflix, plutotv or animedrive; use movietv for movie/TV sources or ptbr for Portuguese sources. Default: search all enabled sources.")
+	addOption(&helpContent, "--source", "Search a single source: hianime, animefire, goyabu, animesdigital, anroll, animesfhd, startflix, topcine, pobreflix, pomfy, plutotv or animedrive; use movietv for movie/TV sources or ptbr for Portuguese sources. Default: search all enabled sources.")
 	addOption(&helpContent, "--quality", "Specify video quality (best, worst, 720p, 1080p, etc.). Default: best.")
 	addOption(&helpContent, "--type", "With -dm, set to tv to download one episode of a TV show instead of a movie. Takes the show, the season and the episode.")
 	addOption(&helpContent, "--subs", "Preferred subtitle language for movies and TV shows. Default: english.")

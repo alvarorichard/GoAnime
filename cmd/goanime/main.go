@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"github.com/alvarorichard/Goanime/v2/internal/api"
 	"github.com/alvarorichard/Goanime/v2/internal/debugreport"
 	"github.com/alvarorichard/Goanime/v2/internal/handlers"
 	"github.com/alvarorichard/Goanime/v2/internal/logview"
@@ -106,11 +107,10 @@ func main() {
 				// tui.TerminalResetSequence.
 				_ = term.Restore(intFd, origState)
 				tui.RestoreTerminalStdout()
-				// Hand the shell a blank screen: leftover TUI frames (spinner,
-				// fuzzyfinder, progress bars) otherwise stay glued around the
-				// next prompt. Scrolls the old content into scrollback rather
-				// than erasing it, so final messages remain reachable.
-				tui.ClearViewportStdout()
+				// Nothing is cleared: what the run printed last (--version,
+				// --help, an error, "All episodes downloaded") is what the
+				// user needs to read once the prompt is back. The reset keeps
+				// the cursor below it, so the prompt never lands on top.
 			}
 		}
 	}
@@ -167,6 +167,14 @@ func main() {
 	util.PreWarmConnections()
 
 	animeName, err := util.FlagParser()
+	// A --source that names no source is said so before anything is searched
+	// or downloaded; it used to search every source without a word.
+	if err == nil || err == util.ErrDownloadRequested || err == util.ErrMovieDownloadRequested {
+		if srcErr := api.CheckSourceSelector(util.GlobalSource); srcErr != nil {
+			fail(srcErr)
+			return
+		}
+	}
 	if err != nil {
 		// Check if error is update request
 		if err == util.ErrUpdateRequested {
