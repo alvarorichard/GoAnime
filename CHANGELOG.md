@@ -1,3 +1,30 @@
+# GoAnime Release Notes - Version 2.0.2
+
+Release date: 2026-11-22
+
+A hotfix for 2.0.1: four playback and input bugs that shipped in it, each found by playing real titles in the app the way a user would, and each fixed with offline tests and a guard of code mutants the tests must fail on. Nothing new is added. 33 files changed, +5,216 / −50 lines; 17 of those files are tests.
+
+## Bug Fixes
+
+- **The first menu no longer ignores keys in tmux, the Linux console or over SSH.** At start GoAnime asks the terminal for its background colour; a terminal that does not answer left that question's read running, and it took the next keys typed, so the first episode picker looked frozen. The read is now called off when the answer does not come, and waited for, so no key is taken.
+- **Pluto TV films play whole and can be sought in.** Some titles (Jumper, Super, O Monge à Prova de Balas) were cut in a layout GoAnime did not read (`hls/video_<lang>_<n>/seg_NNNNN.ts`), and the closing 5-second ad bumper was played as the film. The title is now read in that layout too, and a clip that is a sliver of the playlist, or is named as an ad, is never taken for the title. In those titles each piece is a file whose clock restarts, so seeking froze the player; GoAnime now serves their segments from the local address, decrypted and with the pieces put on one timeline, and the seek works in mpv and in downloads. Titles already on one timeline still play straight from the CDN.
+- **StartFlix, TopCine and Pobreflix titles on unnamed HLS hosts play.** Some titles (Oppenheimer, Jujutsu Kaisen) resolve to a host that serves its playlist at an address with no `.m3u8` and a token every rendition and segment must carry; mpv quit on them in a third of a second. GoAnime now relays such a playlist from a local address named as one, with every URI absolute and the token handed on, and the downloader gets the same address.
+- **Goyabu episodes behind the anivideo player play.** When an episode's only player was `api.anivideo.net/videohls.php?d=…` (also what AnimeDrive falls back to), GoAnime handed mpv that wrapper, still HTML-escaped; the wrapper answers 404 for every file. The playlist in its `d` parameter is played instead, as AnimesDigital already did.
+
+## Tested
+
+Played in the app from search to seek (start, then seek to 50% and 90%): Pluto TV 18 of 18 titles; the movie sources 27 of 32 (the rest: a source's API down, a CDN too slow to start); the anime sources 39 of 42 (the rest: files the sources deleted).
+
+## Dependencies
+
+- `github.com/muesli/cancelreader` v0.2.2 is now a direct dependency (it was already an indirect one); it is what lets the terminal's colour question be called off.
+
+## Known Limitations
+
+- Everything listed under 2.0.1 still applies, including the Cloudflare Turnstile in front of most Pobreflix and TopCine dubs.
+
+---
+
 # GoAnime Release Notes - Version 2.0.1
 
 Release date: 2026-11-20
@@ -12,10 +39,6 @@ Release date: 2026-11-20
 - **A sources screen (`ctrl+s`)** turns each search source on or off and remembers the choice.
 - **mpv loads your own configuration** (#228): `mpv.conf`, `input.conf`, scripts such as uosc and shaders apply again.
 - **Pluto TV plays movies and series with no ad breaks.** It is free, needs no account or key, and `-d`/`-dm` download the same ad-free video.
-- **Pluto TV films play whole and can be sought in.** Some titles (Jumper, Super, O Monge à Prova de Balas) were cut in a layout GoAnime did not read, and the closing 5-second ad bumper was played as the film. The title is now read in that layout too, and a clip that is a sliver of the playlist, or is named as an ad, is never taken for the title. In those titles each piece is a file whose clock restarts, so seeking froze the player; GoAnime now serves their segments from the local address with the pieces put on one timeline, and the seek works in mpv and in downloads.
-- **The first menu no longer ignores keys in tmux, the Linux console or over SSH.** At start GoAnime asks the terminal for its background colour; a terminal that does not answer left that question's read running, and it took the next keys typed, so the first episode picker looked frozen. The read is now called off when the answer does not come.
-- **StartFlix, TopCine and Pobreflix titles on unnamed HLS hosts play.** Some titles (Oppenheimer, Jujutsu Kaisen) resolve to a host that serves its playlist at an address with no `.m3u8` and a token every rendition and segment must carry; mpv quit on them in a third of a second. GoAnime now relays such a playlist from a local address named as one, with every URI absolute and the token handed on, and the downloader gets the same address.
-- **Goyabu episodes behind the anivideo player play.** When an episode's only player was `api.anivideo.net/videohls.php?d=…` (also what AnimeDrive falls back to), GoAnime handed mpv that wrapper, still HTML-escaped; the wrapper answers 404 for every file. The playlist in its `d` parameter is played instead, as AnimesDigital already did.
 - **Four new sources, Pluto TV, Pomfy, AnimesROLL and AnimesFHD** (the last one by @animesfhd, #232), and **Pobreflix plays again without a solver**: its RedeFlixApi player needs no Turnstile.
 - **Diagnostics grew up**: `--debug` captures the machine, logs are redacted and safe to attach, `goanime logs` shows them in colour, and a panic saves a crash report.
 - **Forget history** from the home screen and from the command line.
