@@ -1,3 +1,40 @@
+# GoAnime Release Notes - Version 2.0.3
+
+Release date: 2026-11-23
+
+A hotfix for 2.0.2. The results screen no longer folds a remake into its original (iCarly 2021 could not be reached), Pobreflix works again after the site was rebuilt, two bugs from the first minutes of a run are fixed, and the build no longer depends on a GitHub account that disappeared. Nothing new is added. 41 files changed, +2,915 / −119 lines, not counting `vendor/`; 17 of those files are tests, and four of the fixes ship a guard of code mutants the tests must fail on (43 mutants in all).
+
+## Bug Fixes
+
+- **A remake or revival is its own row in the results.** The screen grouped results by title alone, so iCarly (2007) and iCarly (2021), which TopCine and StartFlix list under one name, became one row showing the first result's year; the 2021 series, the one that plays, could not be picked. A movie or a series now groups by title, kind (a movie never joins its own series) and release year. An anime never splits by year, because each source reports the year of a different season, and a copy that names no year joins the first row it fits.
+- **StartFlix names the year of titles that share a name.** Its search page gives no year for those results (only the IMDb score). When a search returns the same title more than once without a year, GoAnime now reads the year from each title page (at most six pages, remembered, and a page that fails leaves the result as it was). Note that StartFlix's slugs run the other way from TopCine's: `/series/icarly-2/` is the 2021 one.
+- **A copy with no year gets the original's year.** Pluto TV lists series with no year, so its iCarly (2007) joined the 2021 row. When the results already disagree about a title's year and one copy has none, GoAnime asks IMDb's keyless suggestion list and gives the copy the earliest year IMDb lists for that exact title and kind. It runs only in that case, asks at most three titles per search, remembers the answer, and a failed lookup changes nothing.
+- **Pobreflix works again.** The site was rebuilt on 2026-11-23 and four things broke: the client started on `pobreflixtvfree.cv`, which redirects to `.cc` with the query string dropped, so the first search of every run came back empty (it now starts on `.cc`, and asks the new mirror again, once, when a redirect drops the query); the old `/api?action=catalog` endpoint became a redirect loop that was retried three times for nothing (it is tried once); the sitemap fallback did not know the new `sitemap-posttype-filme.<year>.xml` and `sitemap-posttype-serie.<year>.xml` files and reported "no movie/series files" (it reads them); and the year the site's search names was thrown away (it is kept).
+- **What a run prints stays on the screen at exit.** `goanime --version`, `-h` and every error printed after a screen ("download failed", "Search cancelled.", "All episodes downloaded") were pushed out of sight the moment they appeared, because every exit cleared the viewport. That clear hid a cursor bug in the exit reset, which is fixed, and the exit now clears nothing. A `--source` that names no source (`animfire`) searched every source without a word; it is refused now, naming the valid ones, and Pomfy is in the `--source` help.
+- **A deleted favorites list never gives its ID to the next one.** A list ID is the time in nanoseconds, and Windows' clock is coarse: a list made right after another was deleted could take the deleted list's ID, which the home screen, keeping its highlight by ID, could then find.
+- **`go get -u` and `go mod tidy` no longer break the build.** `github.com/enetx/utls` has a stale September 2025 tag, v1.8.1, that sorts above the real v1.0.x releases of November 2026 and imports an internal package of the upstream project; a tree that picked it stopped at `go run ./cmd/goanime` with "use of internal package … not allowed". `go.mod` now excludes it, and a guard test fails if the exclude goes or the version comes back.
+
+## Supply chain
+
+- **The `github.com/enetx` account is gone from GitHub.** `github.com/enetx` and its `surf`, `g`, `utls` repositories answer 404; the Go proxy's last releases are from 2026-11-15 and 2026-11-16, and the Software Heritage archive found the repository on 2026-09-11 and not on 2026-11-19. Why is not known. GoAnime depends on `surf` (and through it on `utls`, `http` and `quic-go`) for its TLS-fingerprinted HTTP client.
+- **The versions GoAnime uses are safe and now kept in the repository.** They are pinned by `go.sum` and still served by the Go proxy; `vendor/` now holds every dependency (67 MB, 13 MB compressed), so a checkout builds with an empty module cache and no network, and with `GOPROXY=direct`. CI checks `vendor/` against `go.mod`.
+- **Dependabot ignores `github.com/enetx/*`.** The name is free to register, and a new version under it would not be the author's.
+- `go install github.com/alvarorichard/Goanime/v2/cmd/goanime@latest` ignores `vendor/` and still downloads through the Go proxy.
+
+## Tested
+
+Played in the app: the iCarly (2021) series from the results screen through TopCine, first episode (the results show the 2007 and 2021 series as separate rows, the Pluto TV copy on the 2007 row); a Pobreflix search from a fresh run, which finds iCarly. The new offline tests run over recorded pages; four mutation guards (the results grouping, the StartFlix years, the IMDb years, Pobreflix's rebuild) build code mutants with `go test -overlay` and require a guard test to fail on each.
+
+## Known Limitations
+
+- Everything listed under 2.0.2 and 2.0.1 still applies.
+- The year given to a copy that names none is a rule, not a fact: it takes the original's. A catalog whose only copy of a title is the remake would show the original's year.
+- "iCarly: A Reunião" (a TopCine movie) still does not play: TopCine gives its TMDB id, 1399732, and no database links it to an IMDb id, which the video panel needs.
+- The Pobreflix sitemap fallback only knows the titles added in 2026; the site's own search covers the rest.
+- `github.com/enetx/surf` has no maintainer to take fixes from. `vendor/` keeps the build working, and replacing the HTTP client is the way out; it is not part of this release.
+
+---
+
 # GoAnime Release Notes - Version 2.0.2
 
 Release date: 2026-11-22
