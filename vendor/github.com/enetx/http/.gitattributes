@@ -1,0 +1,4 @@
+# Keep Go source and module files stable across Windows and Unix checkouts.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

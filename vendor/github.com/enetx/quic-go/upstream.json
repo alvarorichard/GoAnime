@@ -1,0 +1,62 @@
+{
+  "source": "https://github.com/quic-go/quic-go",
+  "version": "master@b638c8b5",
+  "commit": "b638c8b53731c23d9a5471ba9829fc84e93ed2ec",
+  "module": "github.com/enetx/quic-go",
+  "minimum_go": "1.27",
+  "corrections": [
+    {
+      "source": "https://github.com/quic-go/quic-go/pull/6011",
+      "revision": "ec20e6e567f417325633c6aedc4810b216fc4230",
+      "status": "proposed upstream fix, unmerged at import",
+      "local_extension": "Synchronize parameter publication with public state and datagram snapshots."
+    },
+    {
+      "source": "https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1",
+      "status": "local protocol validation correction, not an upstream merge",
+      "local_extension": "Reject HTTP/2-reserved SETTINGS identifiers 2 through 5 in authenticated initial peer input and the real HTTP/3 control stream; preserve unknown extension settings. Shared mechanism in http3/client_peer_settings.go with a minimal parser/control error hook.",
+      "source_check": "QUICHE 132bfd90ea370faeacee616c70d10210bb12ba66, quiche/quic/core/http/quic_spdy_session.cc:1302-1315"
+    }
+  ],
+  "review": {
+    "date": "2026-11-15",
+    "head": "b638c8b53731c23d9a5471ba9829fc84e93ed2ec",
+    "report": "UPSTREAM_AUDIT.md",
+    "strategy": "full source integration, with documented fork adaptations and repository-owned CI",
+    "commits_reviewed": 55
+  },
+  "release_anchor": {
+    "version": "v0.65.0",
+    "commit": "aa265c3fc6489e3bfa8071b333be95e0e887a51d"
+  },
+  "extensions": {
+    "authenticated_http3_peer_settings": {
+      "owned_files": [
+        "http3/client_peer_settings.go"
+      ],
+      "hooks": [
+        "http3/transport.go: Transport.InitialPeerSettings",
+        "http3/stream_priority.go: newConfiguredClientConn",
+        "http3/client.go: ordinary RoundTrip and raw OpenRequestStream",
+        "http3/conn.go: apply wire SETTINGS",
+        "http3/frames.go: shared setting validation and boolean presence",
+        "http3/client_session_settings.go: effective peer field-section limit"
+      ],
+      "reason": "Generic authenticated peer prelude before ordinary headers, sharing the existing QPACK/session owners without fabricating wire SETTINGS or ticket state."
+    },
+    "selected_connection_http3_headers": {
+      "owned_files": [
+        "http3/request_preparation.go"
+      ],
+      "hooks": [
+        "http3/transport.go: Transport.PrepareHeaders, header validation and optional body-close owner",
+        "http3/stream_priority.go: newConfiguredClientConn",
+        "http3/client.go: private preparation after TLS/settings gates",
+        "http3/client_early_restart.go: terminal RequestPreparationError",
+        "http3/connection_reuse.go: optional shared body-close owner for both cached request paths"
+      ],
+      "reason": "Prepare an unsent private request for its selected connection, preserve derived context and exactly-once body ownership, and reject local errors without replay. A context getter exposes the frozen skipped-initialization decision to the header callback without reading concurrent handshake state.",
+      "public_observer": "http3.IsEarlyRequest(*http.Request) bool: frozen private preparation-path context, not packet encryption"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+/.cache/
+
+/cmd/infocmp/infocmp
+/cmd/infocmp/.out/
+
+/infocmp
+/.out/
+
+*.txt
+
+# The Claude Code permissions of one person.
+.claude/settings.local.json

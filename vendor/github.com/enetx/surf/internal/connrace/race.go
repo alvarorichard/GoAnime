@@ -1,0 +1,481 @@
+// Package connrace coordinates connection preparation without sending requests.
+package connrace
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/enetx/http"
+	"github.com/enetx/quic-go"
+	"github.com/enetx/surf/profiles"
+)
+
+// Result identifies the prepared transport that owns the application exchange.
+type Result struct {
+	Protocol int
+	HTTP1    bool
+}
+
+type tcpPreparation struct {
+	http1 bool
+	err   error
+}
+
+// Racer owns shared connection attempts and per-origin observations.
+// Construct it with New. Transports retain ownership of prepared connections.
+type Racer struct {
+	// TCPFallbackAfterQUICStart holds the delay until the actual QUIC attempt
+	// starts. A reusable H2 pool or an existing DNS-only TCP group releases
+	// this hold independently of the configured delay.
+	TCPFallbackAfterQUICStart bool
+	// HTTP2ConnectionAvailable is configured before use. The callback observes
+	// the request's real pool without dialing or reserving an application stream.
+	HTTP2ConnectionAvailable func(*http.Request) bool
+	// ConnectionGroupAvailable observes existing TCP pool ownership, including
+	// occupied sockets and pending dials, without creating a new connection.
+	ConnectionGroupAvailable func(*http.Request) bool
+	// DNSOnly identifies a DNS-discovered candidate without an Alt-Svc job.
+	DNSOnly    func(*http.Request) bool
+	generation uint64
+	mu         sync.Mutex
+	closed     bool
+	quicWorked bool
+	origins    map[string]*originState
+	flights    map[*flight]struct{}
+	wg         sync.WaitGroup
+	policy     profiles.ConnectionRacingPolicy
+	quic       func(context.Context, string, bool) error
+	tcp        func(*http.Request) (bool, error)
+}
+
+type quicStartedKey struct{}
+
+// QUICStarted reports initialization of the shared pooled QUIC attempt. The
+// transport adapter calls it from its per-waiter preparation observer.
+func QUICStarted(ctx context.Context) {
+	if notify, _ := ctx.Value(quicStartedKey{}).(func()); notify != nil {
+		notify()
+	}
+}
+
+const maxOrigins = 256
+
+type originState struct {
+	flights [2]*flight // Full-handshake and early-ready waiters select separately.
+	info    profiles.ConnectionRacingInfo
+	conn    *quic.Conn
+}
+
+type flight struct {
+	generation uint64
+	done       chan struct{}
+	cancel     context.CancelFunc
+	waiters    int
+	chosen     bool
+	protocol   int
+	err        error
+	tcpHTTP1   bool
+	early      bool
+	dnsOnly    bool
+}
+
+// New retains the supplied policy and connection-only preparation callbacks.
+// The TCP callback reports whether preparation selected HTTP/1 instead of HTTP/2.
+func New(
+	policy profiles.ConnectionRacingPolicy,
+	quic func(context.Context, string, bool) error,
+	tcp func(*http.Request) (bool, error),
+) *Racer {
+	return &Racer{policy: policy, quic: quic, tcp: tcp}
+}
+
+// SelectProtocol shares preparation among waiters, with independent cancellation.
+func (r *Racer) SelectProtocol(req *http.Request, address string, early bool) (Result, error) {
+	if err := req.Context().Err(); err != nil {
+		return Result{}, context.Cause(req.Context())
+	}
+
+	hasHTTP2 := r.HTTP2ConnectionAvailable != nil && r.HTTP2ConnectionAvailable(req)
+	hasGroup := r.ConnectionGroupAvailable != nil && r.ConnectionGroupAvailable(req)
+	dnsOnly := r.DNSOnly != nil && r.DNSOnly(req)
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return Result{}, errors.New("surf: connection racer is closed")
+	}
+
+	if req.Context().Err() != nil {
+		r.mu.Unlock()
+		return Result{}, context.Cause(req.Context())
+	}
+
+	if r.origins == nil {
+		r.origins = make(map[string]*originState)
+		r.flights = make(map[*flight]struct{})
+	}
+
+	origin := r.origins[address]
+	if origin == nil {
+		origin = &originState{info: profiles.ConnectionRacingInfo{Origin: "https://" + address}}
+		r.origins[address] = origin
+	}
+
+	slot := 0
+	if early {
+		slot = 1
+	}
+
+	f := origin.flights[slot]
+	// A selected TCP result belongs to its existing waiters. New requests
+	// reconsider it if QUIC confirmed in the background or the actual H2 pool
+	// became unavailable, including GOAWAY while QUIC remains pending.
+	// https://github.com/chromium/chromium/blob/158.0.8127.18/net/http/http_stream_factory_job_controller.cc
+	if f != nil && f.chosen && f.protocol == 2 &&
+		((f.tcpHTTP1 && r.ConnectionGroupAvailable != nil && !hasGroup) ||
+			(!f.tcpHTTP1 && r.HTTP2ConnectionAvailable != nil && !hasHTTP2) ||
+			f.dnsOnly != dnsOnly ||
+			(origin.conn != nil && origin.conn.ConnectionState().TLS.HandshakeComplete && origin.conn.Context().Err() == nil)) {
+		f = nil
+	}
+
+	if f == nil {
+		ctx, cancel := context.WithCancel(context.WithoutCancel(req.Context()))
+
+		f = &flight{done: make(chan struct{}), cancel: cancel, early: early, generation: r.generation, dnsOnly: dnsOnly}
+		origin.flights[slot] = f
+		r.flights[f] = struct{}{}
+
+		// Freeze the preparation request: neither worker owns the application body.
+		preparation := req.Clone(ctx)
+		preparation.Body, preparation.GetBody = nil, nil
+
+		info := r.snapshotLocked(address, origin)
+		info.HTTP2Available = hasHTTP2
+		info.TCPConnectionGroup = hasGroup
+		info.DNSOnly = dnsOnly
+
+		r.wg.Add(1)
+		go r.run(preparation, address, origin, f, info)
+	}
+
+	f.waiters++
+	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		f.waiters--
+		if f.waiters == 0 && !f.chosen {
+			f.cancel()
+			if origin.flights[slot] == f {
+				origin.flights[slot] = nil
+			}
+		}
+		r.mu.Unlock()
+	}()
+
+	select {
+	case <-req.Context().Done():
+		return Result{}, context.Cause(req.Context())
+	case <-f.done:
+		if req.Context().Err() != nil {
+			return Result{}, context.Cause(req.Context())
+		}
+		return Result{Protocol: f.protocol, HTTP1: f.tcpHTTP1}, f.err
+	}
+}
+
+func (r *Racer) run(
+	req *http.Request,
+	address string,
+	origin *originState,
+	f *flight,
+	info profiles.ConnectionRacingInfo,
+) {
+	defer r.wg.Done()
+	defer f.cancel()
+	defer func() {
+		r.mu.Lock()
+		for i := range origin.flights {
+			if origin.flights[i] == f {
+				origin.flights[i] = nil
+			}
+		}
+
+		delete(r.flights, f)
+		r.trimHistoryLocked()
+		r.mu.Unlock()
+	}()
+
+	finish := func(protocol int, err error) {
+		r.mu.Lock()
+		if !f.chosen {
+			f.protocol, f.err, f.chosen = protocol, err, true
+			close(f.done)
+		}
+		r.mu.Unlock()
+	}
+
+	delay := 100 * time.Millisecond
+
+	if r.policy != nil {
+		delay = r.policy(info)
+	}
+
+	if delay < 0 {
+		finish(0, errors.New("surf: negative TCP fallback delay"))
+		return
+	}
+
+	qctx, cancelQUIC := context.WithCancel(req.Context())
+	defer cancelQUIC()
+
+	tctx, cancelTCP := context.WithCancel(req.Context())
+	defer cancelTCP()
+
+	quicDone := make(chan error, 1)
+	tcpDone := make(chan tcpPreparation, 1)
+	var started <-chan struct{}
+
+	if r.TCPFallbackAfterQUICStart && !info.HTTP2Available && !(info.DNSOnly && info.TCPConnectionGroup) {
+		signal := make(chan struct{})
+		var once sync.Once
+		qctx = context.WithValue(qctx, quicStartedKey{}, func() {
+			once.Do(func() { close(signal) })
+		})
+		started = signal
+	}
+
+	var workers sync.WaitGroup
+	defer workers.Wait()
+
+	early := f.early && info.LastQUICError == nil
+	workers.Go(func() { quicDone <- r.quic(qctx, address, early) })
+
+	var timer *time.Timer
+	var timeout <-chan time.Time
+
+	if started == nil {
+		timer = time.NewTimer(delay)
+		timeout = timer.C
+	}
+
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
+	tcpStarted := false
+	startTCP := func() {
+		if !tcpStarted && req.Context().Err() == nil {
+			tcpStarted = true
+			workers.Go(func() {
+				if err := tctx.Err(); err != nil {
+					tcpDone <- tcpPreparation{err: context.Cause(tctx)}
+					return
+				}
+
+				http1, err := r.tcp(req.WithContext(tctx))
+				tcpDone <- tcpPreparation{http1: http1, err: err}
+			})
+		}
+	}
+
+	var quicErr, tcpErr error
+	quicFinished, tcpFinished := false, false
+
+	for {
+		select {
+		case <-req.Context().Done():
+			cancelQUIC()
+			cancelTCP()
+			finish(0, context.Cause(req.Context()))
+			return
+		case <-started:
+			started = nil
+			timer = time.NewTimer(delay)
+			timeout = timer.C
+		case <-timeout:
+			timeout = nil
+			startTCP()
+		case err := <-quicDone:
+			quicFinished, quicErr = true, err
+			r.mu.Lock()
+			if f.generation == r.generation {
+				if err == nil && !early {
+					r.quicWorked = true
+					origin.info.QUICWorked = true
+					origin.info.LastQUICError = nil
+				} else if err != nil && !errors.Is(err, context.Canceled) {
+					origin.info.LastQUICError = err
+				}
+			}
+			r.mu.Unlock()
+			if err == nil {
+				cancelTCP()
+				finish(3, nil)
+				return
+			}
+			startTCP()
+		case prepared := <-tcpDone:
+			err := prepared.err
+			f.tcpHTTP1 = prepared.http1
+			tcpFinished, tcpErr = true, err
+			if err == nil {
+				finish(2, nil)
+				// Keep the connection-only QUIC attempt in the shared pool after
+				// TCP wins. It remains bounded by handshake timeout and Client.Close.
+				if quicFinished {
+					return
+				}
+			}
+		}
+
+		if quicFinished && tcpFinished {
+			finish(0, fmt.Errorf("surf: QUIC and TCP preparation failed: %w", errors.Join(quicErr, tcpErr)))
+			return
+		}
+	}
+}
+
+// Close cancels selected background attempts, or all attempts when idleOnly is false.
+// A full close waits for preparation workers and prevents new races.
+func (r *Racer) Close(idleOnly bool) {
+	r.mu.Lock()
+	if !idleOnly {
+		r.closed = true
+	}
+
+	for f := range r.flights {
+		if !idleOnly || f.chosen {
+			f.cancel()
+		}
+	}
+
+	r.mu.Unlock()
+	if !idleOnly {
+		r.wg.Wait()
+	}
+}
+
+// ResetPreparations cancels old shared attempts without erasing confirmed
+// support or RTT observations. ClearFailures also resets failure observations.
+// New requests start independent flights; late old results cannot restore errors.
+func (r *Racer) ResetPreparations(clearFailures bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.generation++
+	for f := range r.flights {
+		f.cancel()
+	}
+
+	for _, origin := range r.origins {
+		origin.flights = [2]*flight{}
+		if clearFailures {
+			origin.info.LastQUICError = nil
+		}
+	}
+}
+
+// Snapshot returns origin observations and confirmed session-wide support.
+// It never starts a connection or calls an application policy.
+func (r *Racer) Snapshot(address string) profiles.ConnectionRacingInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.snapshotLocked(address, r.origins[address])
+}
+
+func (r *Racer) snapshotLocked(address string, origin *originState) profiles.ConnectionRacingInfo {
+	if !r.quicWorked {
+		for _, known := range r.origins {
+			if known.conn != nil && known.conn.ConnectionState().TLS.HandshakeComplete {
+				r.quicWorked = true
+				break
+			}
+		}
+	}
+
+	info := profiles.ConnectionRacingInfo{Origin: "https://" + address}
+	if origin != nil {
+		info = origin.info
+		info.Origin = "https://" + address
+		if origin.conn != nil && origin.conn.ConnectionState().TLS.HandshakeComplete {
+			info.QUICWorked = true
+			// An old confirmed connection cannot clear a newer failure.
+			if stats := origin.conn.ConnectionStats(); stats.RTTMeasured {
+				info.SmoothedRTT = stats.SmoothedRTT
+			}
+		}
+	}
+
+	info.QUICWorkedInClient = r.quicWorked
+
+	return info
+}
+
+// ConfirmQUIC records the verified 1-RTT readiness event. It does not clear an
+// origin's later preparation failure and does not require a running TCP race.
+func (r *Racer) ConfirmQUIC(address string, conn *quic.Conn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed || conn == nil {
+		return
+	}
+
+	r.quicWorked = true
+	r.observeLocked(address, conn)
+}
+
+// ObserveQUIC retains a pending/ready connection for the next policy snapshot.
+func (r *Racer) ObserveQUIC(address string, conn *quic.Conn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed || conn == nil {
+		return
+	}
+
+	r.observeLocked(address, conn)
+}
+
+func (r *Racer) observeLocked(address string, conn *quic.Conn) {
+	if r.origins == nil {
+		r.origins = make(map[string]*originState)
+		r.flights = make(map[*flight]struct{})
+	}
+
+	origin := r.origins[address]
+	if origin == nil {
+		origin = &originState{info: profiles.ConnectionRacingInfo{Origin: "https://" + address}}
+		r.origins[address] = origin
+	}
+
+	origin.conn = conn
+	r.trimHistoryLocked()
+}
+
+func (r *Racer) trimHistoryLocked() {
+	// Transports own the connections. Only bound observation entries; active
+	// preparation flights and session-wide confirmed support retain ownership.
+	for len(r.origins) > maxOrigins {
+		removed := false
+		for address, cached := range r.origins {
+			if cached.flights[0] == nil && cached.flights[1] == nil {
+				delete(r.origins, address)
+				removed = true
+				break
+			}
+		}
+
+		if !removed {
+			break
+		}
+	}
+}

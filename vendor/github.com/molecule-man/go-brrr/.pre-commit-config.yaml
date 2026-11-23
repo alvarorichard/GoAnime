@@ -1,0 +1,38 @@
+fail_fast: false
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+        args:
+          - --unsafe
+      - id: end-of-file-fixer
+        exclude: '\.bin$'
+      - id: trailing-whitespace
+        exclude: '\.bin$'
+
+  - repo: local
+    hooks:
+      - id: embedmd
+        name: embedmd
+        entry: embedmd -d README.md
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lint
+        name: lint
+        entry: golangci-lint run ./...
+        types: [go]
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: test
+        name: test
+        entry: go test -short ./...
+        types: [go]
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

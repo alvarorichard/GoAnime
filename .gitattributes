@@ -1,1 +1,2 @@
 internal/**/testdata/** text eol=lf
+vendor/** linguist-vendored -diff

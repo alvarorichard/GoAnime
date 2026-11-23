@@ -1,0 +1,139 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Enabled by default linters:
+    - errcheck      # Check for unchecked errors
+    - govet         # Reports suspicious constructs
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Go static analysis (includes gosimple in v2)
+    - modernize     # Suggest simplifications using modern Go features
+    - misspell      # Finds commonly misspelled English words
+    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Find unused function parameters
+    # - dupl          # Check for duplicate code
+    - gocritic      # Highly extensible Go linter
+    - nilerr        # Find code that returns nil even though it checks that error is not nil
+    - errorlint     # Find misuses of errors
+    - prealloc      # Find slice declarations that could potentially be pre-allocated
+    - decorder      # Check declaration order and count of types, constants, variables and functions
+    - funcorder     # Check function order within Go files
+    - depguard       # Enforce import restrictions
+    - unused         # Check for unused constants, variables, functions and types
+    - nolintlint     # Find ill-formed or unnecessary nolint directives
+
+  disable:
+    # Additional useful linters:
+    - bodyclose     # Check if HTTP response body is closed
+    - gosec         # Security-focused linter
+
+  settings:
+    decorder:
+      dec-order:
+        - const
+        - var
+        - type
+        - func
+      disable-dec-order-check: false
+      disable-dec-num-check: true
+      disable-init-func-first-check: false
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - unnamedResult
+
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+        - name: package-comments
+          disabled: false
+
+    depguard:
+      rules:
+        no-fmt:
+          list-mode: lax
+          files:
+            - "*.go"
+            - "!*_test.go"
+          deny:
+            - pkg: "fmt$"
+              desc: "use strconv, errors, or io instead of fmt"
+
+    errcheck:
+      check-blank: false
+      check-type-assertions: false
+
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (covered by errcheck)
+
+    govet:
+      enable-all: true
+      disable:
+        - shadow
+
+  exclusions:
+    generated: strict
+    rules:
+      # Exclude some linters from running on test files.
+      - path: _test\.go
+        linters:
+          - gosec
+          - gocritic
+          - decorder
+      - path: _test\.go
+        linters:
+          - govet
+        text: "fieldalignment"
+
+      # C-ported Huffman table code: gosec's slice-bounds (G602) and
+      # int-overflow (G115) heuristics produce false positives here.
+      - path: entropy\.go
+        linters:
+          - gosec
+      - path: huffman\.go
+        linters:
+          - gosec
+
+      # Allow panic in main package
+      - path: main\.go
+        linters:
+          - gocritic
+        text: "exitAfterDefer"
+
+      # CGo files: dupImport is required (import "C" must be separate),
+      # and dupSubExpr false-positives on CGo return value comparisons.
+      - path: _cgo\.go
+        linters:
+          - gocritic
+
+formatters:
+  enable:
+    - gofmt         # Check if code is formatted with gofmt
+    - goimports     # Check import statements are formatted well
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      colors: true
+  sort-order:
+    - linter
+    - severity
+    - file

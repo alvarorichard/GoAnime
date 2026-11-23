@@ -1,0 +1,56 @@
+package quic
+
+import (
+	"github.com/enetx/quic-go/http3"
+	"github.com/enetx/surf/profiles"
+)
+
+// ConfigureQPACK follows Neqo's encoder-before-decoder order and initial type
+// writes. Capacity updates are queued after processing the peer's SETTINGS.
+func ConfigureQPACK(h profiles.H3Config) {
+	// The Firefox header glue preserves Cookie as one field; Neqo does not
+	// apply Chromium's cookie crumbling or unconditional QPACK N-bit rules.
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/netwerk/socket/neqo_glue/src/lib.rs
+	// Neqo starts with last_send_priority equal to the request's priority.
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/third_party/rust/neqo-http3/src/priority.rs
+	// Neqo inserts only when no name exists, uses literal Insert names, and
+	// fixes Base before encoding, using post-base references for new entries.
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/third_party/rust/neqo-qpack/src/encoder.rs
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/third_party/rust/neqo-qpack/src/header_block.rs
+	// Neqo initializes SETTINGS and both QPACK send streams before transport
+	// output; the final Initial can share a datagram with their early bytes.
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/third_party/rust/neqo-http3/src/connection.rs
+	// SendData stages the transaction, including its bodyless FIN, before
+	// ProcessOutput constructs datagrams. Coalescing also stages ready encoder
+	// instructions with HEADERS instead of awaiting a competing writer.
+	// No priority update is introduced.
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/netwerk/protocol/http/Http3Session.cpp
+	// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/netwerk/protocol/http/Http3Stream.cpp
+	h.CoalesceInitialSettings(true).CoalesceRequestHeaders(true).QpackDynamicTable(true).
+		QpackHuffman(http3.QPACKHuffmanAlways).
+		QpackIndexing(http3.QPACKIndexNewNames).
+		QpackIndexingPolicy(nil).
+		// Neqo reports a reduction as SETTINGS_ERROR before its QPACK check.
+		// https://github.com/mozilla-firefox/firefox/blob/FIREFOX_160_0_RELEASE/third_party/rust/neqo-http3/src/connection.rs
+		QpackResumptionErrorCode(func(previous, current uint64) http3.ErrCode {
+			if current < previous {
+				return http3.ErrCodeSettingsError
+			}
+			return http3.ErrCodeQPACKDecoderStreamError
+		}).
+		QpackDrainingFraction(0).
+		QpackPostBaseReferences(true).
+		QpackLiteralInsertNames(true).
+		QpackStopOnInsertionFailure(true).
+		QpackMaxTrackedSections(0).
+		QpackEncoderZeroCapacity(false).
+		QpackNeverIndex().
+		QpackSplitCookies(false).
+		PriorityUpdates(false).
+		CompactPriorityUpdates(true).
+		ControlGreaseFramesFactory(NewControlGreaseFrames).
+		QpackStreamOrder(http3.QPACKEncoderStream, http3.QPACKDecoderStream).
+		QpackEagerStreamTypes(true).
+		QpackEncoderTableCapacity(65536).
+		QpackEncoderCapacityTiming(http3.QPACKCapacityOnSettings)
+}
