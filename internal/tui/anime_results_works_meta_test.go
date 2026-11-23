@@ -55,7 +55,7 @@ var worksMutants = []worksMutant{
 	},
 	{
 		name:  "different titles merge",
-		edits: []worksEdit{{resultsFile, "\tif g.key != key {\n\t\treturn false\n\t}", "\tif false {\n\t\treturn false\n\t}"}},
+		edits: []worksEdit{{resultsFile, "\tif g.key != titleKey {\n\t\treturn false\n\t}", "\tif false {\n\t\treturn false\n\t}"}},
 		kills: []string{"TestGroupSameWorkRules", "TestGroupSameTitleRemakesStayApart"},
 	},
 	{

@@ -140,8 +140,8 @@ func isFilmOrShow(media string) bool { return media == "Movie" || media == "TV" 
 // same title, not a movie next to a series, and not two different release
 // years of a movie or series. An unknown year or an anime result never splits
 // a group.
-func (g *animeGroup) sameWork(key, media, year string) bool {
-	if g.key != key {
+func (g *animeGroup) sameWork(titleKey, media, year string) bool {
+	if g.key != titleKey {
 		return false
 	}
 	if !isFilmOrShow(media) {
@@ -182,17 +182,17 @@ func groupAnimeResults(animes []*models.Anime) []animeGroup {
 		if anime == nil {
 			continue
 		}
-		key := normalizeTitleKey(anime.Name)
+		titleKey := normalizeTitleKey(anime.Name)
 		media, year := mediaTypeLabel(anime.MediaType), singleLine(anime.Year)
 		pos := -1
 		for i := range groups {
-			if groups[i].sameWork(key, media, year) {
+			if groups[i].sameWork(titleKey, media, year) {
 				pos = i
 				break
 			}
 		}
 		if pos < 0 {
-			groups = append(groups, animeGroup{title: cleanResultTitle(anime.Name), key: key})
+			groups = append(groups, animeGroup{title: cleanResultTitle(anime.Name), key: titleKey})
 			pos = len(groups) - 1
 		}
 		groups[pos].add(anime)
