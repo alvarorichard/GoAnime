@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/alvarorichard/Goanime/v2/internal/downloader/hls"
-	"github.com/enetx/surf"
+	"github.com/alvarorichard/enetx-surf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

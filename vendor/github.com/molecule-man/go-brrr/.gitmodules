@@ -1,3 +1,0 @@
-[submodule "brotli-ref"]
-	path = brotli-ref
-	url = git@github.com:google/brotli.git

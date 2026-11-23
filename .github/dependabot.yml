@@ -8,11 +8,6 @@ updates:
       time: '08:00'
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 10
-    ignore:
-      # The github.com/enetx account left GitHub in November 2026 and the name
-      # is free to register: a new version under it would not be the author's.
-      # The versions in go.mod are pinned by go.sum and kept in vendor/.
-      - dependency-name: "github.com/enetx/*"
     groups:
       go-minor-and-patch:
         update-types:

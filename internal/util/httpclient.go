@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/enetx/surf"
+	"github.com/alvarorichard/enetx-surf"
 )
 
 // SharedHTTPClient is a global HTTP client with Chrome TLS fingerprint

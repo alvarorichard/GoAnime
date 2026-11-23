@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/enetx/surf"
+	"github.com/alvarorichard/enetx-surf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

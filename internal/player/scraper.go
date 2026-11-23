@@ -30,8 +30,8 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/tui"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
 	"github.com/alvarorichard/Goanime/v2/internal/util/jsonx"
-	g "github.com/enetx/g"
-	"github.com/enetx/surf"
+	g "github.com/alvarorichard/enetx-g"
+	"github.com/alvarorichard/enetx-surf"
 )
 
 // Pre-compiled regexes for player scraper (avoid per-call compilation)

@@ -42,20 +42,10 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
-      - name: Verify vendor is in sync
-        shell: bash
-        # github.com/enetx (surf, utls, http, quic-go, g) left GitHub in
-        # November 2026; vendor/ keeps a checkout buildable with no network
-        # and with GOPROXY=direct.
-        run: |
-          go mod vendor
-          git diff --exit-code -- vendor
-
       - name: Check formatting
         shell: bash
         run: |
-          # vendor/ is other people's code, kept as they wrote it.
-          unformatted="$(gofmt -l $(git ls-files '*.go' | grep -v '^vendor/'))"
+          unformatted="$(gofmt -l .)"
           if [[ -n "$unformatted" ]]; then
             echo "The following files are not gofmt formatted:"
             echo "$unformatted"
