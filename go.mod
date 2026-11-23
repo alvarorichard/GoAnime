@@ -75,3 +75,9 @@ require (
 	golang.org/x/sync v0.25.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
+
+// enetx/utls v1.8.1 is a stale September 2025 tag that sorts above the real
+// v1.0.x line (2026-11) and is a broken mirror of refraction-networking/utls:
+// it imports that module's internal/boring and does not build. `go get -u` and
+// `go mod tidy` pick it as the "latest" release; keep them off it.
+exclude github.com/enetx/utls v1.8.1
