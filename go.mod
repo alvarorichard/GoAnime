@@ -10,12 +10,12 @@ require (
 	charm.land/log/v2 v2.0.1
 	github.com/Microsoft/go-winio v0.6.4
 	github.com/PuerkitoBio/goquery v1.14.0
+	github.com/alvarorichard/enetx-g v1.1.1
+	github.com/alvarorichard/enetx-surf v1.0.256
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.10
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/disintegration/gift v1.2.1
-	github.com/enetx/g v1.1.1
-	github.com/enetx/surf v1.0.256
 	github.com/ktr0731/go-fuzzyfinder v0.9.0
 	github.com/lrstanley/go-ytdlp v1.5.6
 	github.com/mattn/go-sqlite3 v1.14.53
@@ -34,6 +34,9 @@ require (
 
 require (
 	github.com/ProtonMail/go-crypto v1.5.2 // indirect
+	github.com/alvarorichard/enetx-http v1.0.49 // indirect
+	github.com/alvarorichard/enetx-quic-go v1.0.40 // indirect
+	github.com/alvarorichard/enetx-utls v1.0.10 // indirect
 	github.com/andybalholm/brotli v1.3.0 // indirect
 	github.com/andybalholm/cascadia v1.3.5 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -49,9 +52,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/enetx/http v1.0.49 // indirect
-	github.com/enetx/quic-go v1.0.40 // indirect
-	github.com/enetx/utls v1.0.10 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/gdamore/tcell/v2 v2.13.10 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect

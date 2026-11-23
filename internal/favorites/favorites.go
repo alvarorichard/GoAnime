@@ -67,6 +67,9 @@ type Store struct {
 	damaged string
 	// now is the clock; nil means time.Now. Tests set it.
 	now func() time.Time
+	// lastID is the number of the last list ID handed out, so a list made
+	// right after one was deleted never gets that one's ID back.
+	lastID int64
 }
 
 func (s *Store) clock() time.Time {

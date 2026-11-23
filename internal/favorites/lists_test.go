@@ -311,6 +311,20 @@ func TestListIDsAreUniqueUrlSafeAndNeverFavorites(t *testing.T) {
 	assert.Len(t, seen, maxLists+1)
 }
 
+// Windows' clock is coarse: a list made right after one was deleted reads the
+// same instant. A frozen clock makes that happen on every system.
+func TestADeletedListsIDIsNeverHandedOutAgain(t *testing.T) {
+	s := newStore(t)
+	s.now = func() time.Time { return t0 }
+	seen := map[string]bool{}
+	for i := range 20 {
+		sum := mkList(t, s, "n"+strconv.Itoa(i))
+		assert.False(t, seen[sum.ID], "ID %s handed out again after its list was deleted", sum.ID)
+		seen[sum.ID] = true
+		require.NoError(t, s.DeleteList(sum.ID))
+	}
+}
+
 func TestIDsAreUniqueUnderRapidCreateAndDelete(t *testing.T) {
 	s := newStore(t) // real clock: successive calls may share a nanosecond reading
 	seen := map[string]bool{}
@@ -336,7 +350,16 @@ func TestAnIDIsBumpedPastOneAlreadyInUse(t *testing.T) {
 	assert.Equal(t, "l102", c.ID)
 	require.NoError(t, s.DeleteList(b.ID))
 	d := mkList(t, s, "d")
-	assert.Equal(t, "l101", d.ID, "the first free ID is taken again")
+	assert.Equal(t, "l103", d.ID, "a deleted list's ID is not handed out again")
+
+	// Another store on the same file (the next run) knows nothing it handed
+	// out, and still bumps past the IDs the file holds.
+	again := Open(s.path)
+	again.now = s.now
+	e := mkList(t, again, "e")
+	assert.Equal(t, "l101", e.ID, "the first ID no list holds")
+	f := mkList(t, again, "f")
+	assert.Equal(t, "l104", f.ID, "past l102 and l103, held by c and d")
 }
 
 func TestAnIDIsFreeOfAnInstantBeforeTheEpoch(t *testing.T) {

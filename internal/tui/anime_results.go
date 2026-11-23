@@ -120,6 +120,57 @@ type animeGroup struct {
 	versions []animeVersion
 	year     string
 	media    string // "Anime", "Movie" or "TV"
+
+	// key is the normalized title the versions share.
+	key string
+	// filmKind and filmYear are the "Movie"/"TV" label and release year of the
+	// first movie or series version that carried them. They keep a remake or a
+	// revival (iCarly 2007, iCarly 2021) from collapsing into the original.
+	filmKind string
+	filmYear string
+}
+
+// isFilmOrShow reports whether a media label is a movie or a series, the
+// kinds whose release year tells two works of one title apart. Anime sources
+// report the year of a season, which differs between sources for one work, so
+// anime never splits by year.
+func isFilmOrShow(media string) bool { return media == "Movie" || media == "TV" }
+
+// sameWork reports whether a result is another copy of the group's work: the
+// same title, not a movie next to a series, and not two different release
+// years of a movie or series. An unknown year or an anime result never splits
+// a group.
+func (g *animeGroup) sameWork(titleKey, media, year string) bool {
+	if g.key != titleKey {
+		return false
+	}
+	if !isFilmOrShow(media) {
+		return true
+	}
+	if g.filmKind != "" && g.filmKind != media {
+		return false
+	}
+	return g.filmYear == "" || year == "" || g.filmYear == year
+}
+
+// add records a result as a version of the group.
+func (g *animeGroup) add(anime *models.Anime) {
+	g.versions = append(g.versions, makeVersion(anime))
+	year, media := singleLine(anime.Year), mediaTypeLabel(anime.MediaType)
+	if g.year == "" {
+		g.year = year
+	}
+	if g.media == "" {
+		g.media = media
+	}
+	if isFilmOrShow(media) {
+		if g.filmKind == "" {
+			g.filmKind = media
+		}
+		if g.filmYear == "" {
+			g.filmYear = year
+		}
+	}
 }
 
 // groupAnimeResults groups search results by work, keeping the incoming
@@ -127,29 +178,24 @@ type animeGroup struct {
 // dropped; a nil-heavy list still yields no groups.
 func groupAnimeResults(animes []*models.Anime) []animeGroup {
 	var groups []animeGroup
-	index := make(map[string]int)
 	for _, anime := range animes {
 		if anime == nil {
 			continue
 		}
 		titleKey := normalizeTitleKey(anime.Name)
-		if pos, ok := index[titleKey]; ok {
-			groups[pos].versions = append(groups[pos].versions, makeVersion(anime))
-			if groups[pos].year == "" {
-				groups[pos].year = singleLine(anime.Year)
+		media, year := mediaTypeLabel(anime.MediaType), singleLine(anime.Year)
+		pos := -1
+		for i := range groups {
+			if groups[i].sameWork(titleKey, media, year) {
+				pos = i
+				break
 			}
-			if groups[pos].media == "" {
-				groups[pos].media = mediaTypeLabel(anime.MediaType)
-			}
-			continue
 		}
-		index[titleKey] = len(groups)
-		groups = append(groups, animeGroup{
-			title:    cleanResultTitle(anime.Name),
-			versions: []animeVersion{makeVersion(anime)},
-			year:     singleLine(anime.Year),
-			media:    mediaTypeLabel(anime.MediaType),
-		})
+		if pos < 0 {
+			groups = append(groups, animeGroup{title: cleanResultTitle(anime.Name), key: titleKey})
+			pos = len(groups) - 1
+		}
+		groups[pos].add(anime)
 	}
 	return groups
 }

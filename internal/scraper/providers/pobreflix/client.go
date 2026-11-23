@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,10 +25,10 @@ import (
 
 const (
 	// DefaultBase is the catalog host. The site moves between mirror domains
-	// (.sale is dead; .gay, .cam and .christmas redirect to pobreflixtvfree.cv as
-	// of 2026-11-14, and the client follows such a redirect), so
-	// GOANIME_POBREFLIX_URL can repoint this without waiting for a release.
-	DefaultBase = "https://pobreflixtvfree.cv"
+	// (.sale is dead; .cv now redirects to pobreflixtvfree.cc as of 2026-11-23,
+	// and the client follows such a redirect), so GOANIME_POBREFLIX_URL can
+	// repoint this without waiting for a release.
+	DefaultBase = "https://pobreflixtvfree.cc"
 
 	// userAgent describes a current Chrome, matching the TLS fingerprint
 	// util.NewFastClient presents. Neither the site nor its player checked it
@@ -169,9 +170,35 @@ func (c *Client) followMirror(requested *url.URL, resp *http.Response) {
 	c.search.rehost(current, next)
 }
 
+// rehostedURL returns the request to repeat on the host a mirror redirect led
+// to, when the redirect dropped the query string: the original path and query
+// on the new origin. It accepts only what mirrorOf accepts, a mirror of the
+// same site, so a redirect to anything else is never followed with the query.
+func rehostedURL(requested, final *url.URL) (string, bool) {
+	if requested == nil || final == nil || requested.RawQuery == "" || final.RawQuery != "" {
+		return "", false
+	}
+	origin, ok := mirrorOf(requested.Scheme+"://"+requested.Host, final)
+	if !ok {
+		return "", false
+	}
+	return origin + requested.RequestURI(), true
+}
+
+// isRedirectLoop reports whether a request failed because the site redirected
+// it in a circle, which the HTTP client gives up on with ErrUseLastResponse.
+func isRedirectLoop(err error) bool {
+	return err != nil && (errors.Is(err, http.ErrUseLastResponse) ||
+		strings.Contains(err.Error(), http.ErrUseLastResponse.Error()) ||
+		strings.Contains(err.Error(), "stopped after 10 redirects"))
+}
+
 type getOptions struct {
 	referer string
 	accept  string
+	// rehosted marks the second try of a request whose first answer came from
+	// a mirror redirect that dropped the query; it never rehosts twice.
+	rehosted bool
 }
 
 func (c *Client) get(ctx context.Context, rawURL string, opt getOptions) ([]byte, error) {
@@ -215,7 +242,9 @@ func (c *Client) getOnce(ctx context.Context, rawURL string, opt getOptions) (bo
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, ctx.Err() == nil, err
+		// A redirect loop answers the same way every time: retrying it only
+		// makes the caller wait.
+		return nil, ctx.Err() == nil && !isRedirectLoop(err), err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -225,8 +254,14 @@ func (c *Client) getOnce(ctx context.Context, rawURL string, opt getOptions) (bo
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.followMirror(req.URL, resp)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if next, ok := rehostedURL(req.URL, resp.Request.URL); ok && !opt.rehosted {
+			// The old mirror redirected to the new one and left the query
+			// behind, so what answered is the bare endpoint's reply ("[]" for
+			// a search), not this request's. Ask the new mirror directly.
+			opt.rehosted = true
+			util.Debug("Pobreflix mirror redirect dropped the query, asking the new host", "url", req.URL.String(), "to", next)
+			return c.getOnce(ctx, next, opt)
+		}
 		return body, false, nil
 	}
 	return nil, resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
@@ -251,7 +286,10 @@ var sitemapShardRe = regexp.MustCompile(`file=((?:[a-z0-9_]+_)?videobox_Video_\d
 
 // currentSitemapRe names a current content sitemap. The site publishes one
 // movie and one series file (and, on busier weeks, numbered continuations).
-var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(movies|filmes|series)(?:-(\d+))?\.xml$`)
+//
+// The WordPress rebuild of 2026-11-23 names them per post type and year:
+// /sitemap-posttype-filme.2026.xml and /sitemap-posttype-serie.2026.xml.
+var currentSitemapRe = regexp.MustCompile(`(?i)/sitemap-(?:posttype-)?(movies|filmes|filme|series|serie)(?:[-.](\d+))?\.xml$`)
 
 // sitemapShards lists the content sitemaps the index publishes. The current
 // site replaced the old sitemap.php?file=… shards with two large
@@ -293,7 +331,7 @@ func (c *Client) sitemapShards(ctx context.Context) ([]shard, error) {
 			continue
 		}
 		order := 1
-		if strings.EqualFold(name[1], "series") {
+		if strings.EqualFold(name[1], "series") || strings.EqualFold(name[1], "serie") {
 			order = 2
 		}
 		if len(name) > 2 && name[2] != "" {

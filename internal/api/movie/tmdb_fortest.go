@@ -14,3 +14,9 @@ func NewTMDBClientForTest(hc *http.Client, baseURL, apiKey string) *TMDBClient {
 		imageBase: TMDBImageBaseURL,
 	}
 }
+
+// NewIMDbClientForTest builds an IMDb client over a caller-supplied client and
+// base URL, so the suggestion parsing runs over recorded answers.
+func NewIMDbClientForTest(hc *http.Client, baseURL string) *IMDbClient {
+	return &IMDbClient{client: hc, baseURL: baseURL}
+}

@@ -47,6 +47,7 @@ type Client struct {
 
 	panels  sync.Map // title page URL -> Panel
 	seasons sync.Map // panel URL -> []Season
+	years   sync.Map // title page URL -> release year ("" when the page names none)
 }
 
 // NewClient builds a client. It performs no network I/O.
@@ -200,6 +201,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]Media, error) {
 		return nil, err
 	}
 	results := parseSearchResults(doc)
+	c.fillAmbiguousYears(ctx, results)
 	util.Debug("StartFlix search", "query", q, "results", len(results))
 	return results, nil
 }

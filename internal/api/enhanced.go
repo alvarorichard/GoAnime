@@ -285,6 +285,25 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 	return nil
 }
 
+// SourceSelectors are the names --source takes, as the help lists them.
+var SourceSelectors = []string{
+	"hianime", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd",
+	"startflix", "topcine", "pobreflix", "pomfy", "plutotv", "animedrive",
+	"movietv", "ptbr",
+}
+
+// CheckSourceSelector refuses a --source that names no source. Searching
+// every source in its place said nothing about the name being wrong: a typo
+// ("animfire") ran a search of all of them and the user never learned why.
+// An empty selector means every source and is fine.
+func CheckSourceSelector(src string) error {
+	normalized := strings.ToLower(strings.TrimSpace(src))
+	if normalized == "" || registryKindsForSource(normalized) != nil {
+		return nil
+	}
+	return fmt.Errorf("unknown source %q: use one of %s", src, strings.Join(SourceSelectors, ", "))
+}
+
 func searchAnimeEnhanced(
 	name string,
 	src string,
@@ -346,6 +365,7 @@ func searchAnimeEnhanced(
 				validAnimes = append(validAnimes, anime)
 			}
 		}
+		resolveAmbiguousYears(validAnimes)
 		animes = filterPanelDead(validAnimes)
 
 		if len(animes) == 0 {
