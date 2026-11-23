@@ -84,12 +84,6 @@ func tagResults(results []*models.Anime, kind source.SourceKind) {
 			anime.Name = cleanPTBRTitle(anime.Name)
 		}
 
-		if kind == source.TopCine && anime.Year != "" && !strings.Contains(anime.Name, "("+anime.Year+")") {
-			// TopCine lists a remake or revival under the same title as the
-			// original (iCarly 2007 and 2021), so the year is what tells them apart.
-			anime.Name = fmt.Sprintf("%s (%s)", anime.Name, anime.Year)
-		}
-
 		hasLanguageTag := strings.Contains(anime.Name, "[English]") ||
 			strings.Contains(anime.Name, "[PT-BR]") ||
 			strings.Contains(anime.Name, "[Portuguese]") ||

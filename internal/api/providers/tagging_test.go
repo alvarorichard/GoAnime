@@ -80,26 +80,3 @@ func TestCleanPTBRTitle(t *testing.T) {
 		assert.Equal(t, tt.want, cleanPTBRTitle(tt.in))
 	}
 }
-
-// TopCine lists iCarly (2007), iCarly (2021) and the 2021 reunion movie under
-// near-identical names; without the year the user could not tell the working
-// 2021 series from the movie that has no playable record.
-func TestTagResults_TopCineKeepsSameTitleEntriesApart(t *testing.T) {
-	t.Parallel()
-	res := []*models.Anime{
-		{Name: "iCarly: A Reunião", Year: "2021", MediaType: models.MediaTypeMovie, URL: "/filme/icarly-a-reuniao"},
-		{Name: "iCarly", Year: "2007", MediaType: models.MediaTypeTV, URL: "/serie/icarly-2"},
-		{Name: "iCarly", Year: "2021", MediaType: models.MediaTypeTV, URL: "/serie/icarly"},
-		{Name: "Sem Ano", MediaType: models.MediaTypeTV, URL: "/serie/sem-ano"},
-	}
-	tagResults(res, source.TopCine)
-	assert.Equal(t, "[Movie] [PT-BR] iCarly: A Reunião (2021)", res[0].Name)
-	assert.Equal(t, "[TV] [PT-BR] iCarly (2007)", res[1].Name)
-	assert.Equal(t, "[TV] [PT-BR] iCarly (2021)", res[2].Name)
-	assert.NotEqual(t, res[1].Name, res[2].Name)
-	assert.Equal(t, "[TV] [PT-BR] Sem Ano", res[3].Name)
-
-	// Tagging twice must not stack the year.
-	tagResults(res, source.TopCine)
-	assert.Equal(t, "[TV] [PT-BR] iCarly (2021)", res[2].Name)
-}
