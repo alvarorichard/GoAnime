@@ -365,6 +365,7 @@ func searchAnimeEnhanced(
 				validAnimes = append(validAnimes, anime)
 			}
 		}
+		resolveAmbiguousYears(validAnimes)
 		animes = filterPanelDead(validAnimes)
 
 		if len(animes) == 0 {
