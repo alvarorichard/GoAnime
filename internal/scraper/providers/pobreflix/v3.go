@@ -180,11 +180,16 @@ func (c *Client) buscaSearch(ctx context.Context, query string) ([]Media, error)
 		if kind == "" || id <= 0 || strings.TrimSpace(f.Title) == "" {
 			continue
 		}
+		year := ""
+		if f.Year >= 1888 && f.Year <= 2200 {
+			year = strconv.Itoa(f.Year)
+		}
 		out = append(out, Media{
 			Title:   strings.Join(strings.Fields(f.Title), " "),
 			URL:     c.absoluteURL(f.URL),
 			Kind:    kind,
 			Audio:   audio,
+			Year:    year,
 			VideoID: id,
 		})
 	}

@@ -52,6 +52,10 @@ type Media struct {
 	URL   string // title page, e.g. https://pobreflixtv.gay/filme/verity-dublado.html
 	Kind  MediaKind
 	Audio Audio
+	// Year is the release year when the search names one ("" for the sitemap
+	// corpus, which only has slugs). It is what tells a remake or revival from
+	// the original when both are listed under one title.
+	Year string
 	// VideoID is the site's own record id when the URL carries one. Old
 	// records end in it; current slugs end in a random suffix or the TMDB id,
 	// so it is 0 for most current results and is only a recency tie-break.
@@ -67,6 +71,7 @@ func (m Media) ToAnimeModel() *models.Anime {
 		URL:    m.URL,
 		Source: SourceName,
 		Audio:  models.AudioLabel(m.Audio == AudioDubbed, m.Audio == AudioSubtitled),
+		Year:   m.Year,
 	}
 	if m.Kind == KindMovie {
 		anime.MediaType = models.MediaTypeMovie
