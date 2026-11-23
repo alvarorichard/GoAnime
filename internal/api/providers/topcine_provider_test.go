@@ -58,8 +58,8 @@ func TestTopCineProvider_SearchTagsResults(t *testing.T) {
 	results, err := p.Search(context.Background(), "dexter")
 	require.NoError(t, err)
 	require.Len(t, results, 2)
-	assert.Equal(t, "[TV] [PT-BR] Dexter", results[0].Name)
-	assert.Equal(t, "[Movie] [PT-BR] Dexter", results[1].Name)
+	assert.Equal(t, "[TV] [PT-BR] Dexter (2006)", results[0].Name)
+	assert.Equal(t, "[Movie] [PT-BR] Dexter (2020)", results[1].Name)
 	for _, r := range results {
 		assert.Equal(t, "TopCine", r.Source)
 		kind, _ := source.Resolve(r)
