@@ -44,8 +44,7 @@ func TestResolveRedeflixPassesGate(t *testing.T) {
 	solver := &fakeWidgetSolver{}
 	registerWidgetSolver(t, solver)
 	var posted url.Values
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/playback-resolve.php":
 			_, _ = w.Write([]byte(`{"url":"https://cdn.example/v.m3u8"}`))
