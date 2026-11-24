@@ -466,8 +466,8 @@ func parseTurnstile(body []byte) (siteKey, action, cdata string, ok bool) {
 
 var (
 	turnstileSiteKeyRe = regexp.MustCompile(`(?i)(?:data-sitekey\s*=\s*["']|["']?sitekey["']?\s*[:=]\s*["'])([^"']+)["']`)
-	turnstileActionRe  = regexp.MustCompile(`(?i)(?:data-action\s*=\s*["']|["']?action["']?\s*[:=]\s*["'])([^"']+)["']`)
-	turnstileCDataRe   = regexp.MustCompile(`(?i)(?:data-cdata\s*=\s*["']|["']?cdata["']?\s*[:=]\s*["'])([^"']+)["']`)
+	turnstileActionRe  = regexp.MustCompile(`(?i)(?:data-action\s*=\s*["']|["']?action["']?\s*:\s*["'])([^"']+)["']`)
+	turnstileCDataRe   = regexp.MustCompile(`(?i)(?:data-cdata\s*=\s*["']|["']?cdata["']?\s*:\s*["'])([^"']+)["']`)
 )
 
 // playerNeedsFallback says a response is neither the gate nor a solved page, so
