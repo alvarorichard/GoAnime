@@ -81,12 +81,14 @@ together. The Pobreflix live test above checks the Turnstile path by hand.
 
 ## Platforms
 
-Releases carry cfsolve for **linux/amd64, linux/arm64, darwin/arm64 and
-windows/amd64**, built in CI. The Windows build is the only one tested on a real
+Releases carry cfsolve for **linux/amd64, linux/arm64, darwin/arm64,
+darwin/amd64 and windows/amd64**, built in CI, and bundle the one for their own
+platform inside the GoAnime executable (it is unpacked on first run). The Windows build is the only one tested on a real
 machine of its kind: on Windows 11 it cleared Goyabu's gate (HTTP 403, then 200,
 with a `cf_clearance`). It is compiled with MinGW-w64; upstream merged the
 Windows support ([chris124567/cfsolve#2](https://github.com/chris124567/cfsolve/pull/2)),
-so GoAnime no longer patches it. There is no Intel Mac build.
+so GoAnime no longer patches it. The Intel Mac build is cross-compiled on an
+Apple Silicon runner and has not been run on real hardware.
 On a platform without a build, Goyabu is simply absent unless the network does
 not challenge it and you enable it with `GOANIME_ENABLED_SOURCES=goyabu`;
 Pobreflix still plays its direct files and falls back to the panel.

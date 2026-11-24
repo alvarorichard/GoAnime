@@ -43,8 +43,8 @@ case "$(uname -m)" in
 esac
 asset="challenge-$os-$arch"
 case "$asset" in
-  challenge-linux-amd64|challenge-linux-arm64|challenge-darwin-arm64) ;;
-  *) echo "releases carry no cfsolve for $os/$arch (Windows and Intel Macs are not built); try --build" >&2; exit 1 ;;
+  challenge-linux-amd64|challenge-linux-arm64|challenge-darwin-arm64|challenge-darwin-amd64) ;;
+  *) echo "releases carry no cfsolve for $os/$arch (Windows is not built here); try --build" >&2; exit 1 ;;
 esac
 base="https://github.com/alvarorichard/GoAnime/releases/latest/download"
 

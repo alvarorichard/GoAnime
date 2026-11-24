@@ -83,8 +83,8 @@ site moves.
 Goyabu and Pobreflix's player are behind Cloudflare. On networks that do not
 challenge them they just work. Elsewhere they need
 [cfsolve](https://github.com/chris124567/cfsolve), which release builds
-download and verify on first run (Linux and Apple Silicon Macs). Windows and
-Intel Macs have no build yet, so Goyabu only works there on unchallenged
+bundle it (and can still download and verify it on first run). Every release
+platform bundles it; on any other platform Goyabu only works on unchallenged
 networks (`GOANIME_ENABLED_SOURCES=goyabu`).
 
 - `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns the download off.

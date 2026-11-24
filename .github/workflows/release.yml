@@ -123,7 +123,10 @@ jobs:
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    needs: test
+    # The cfsolve jobs may fail (continue-on-error); the build then ships
+    # without the bundled solver and falls back to downloading it.
+    needs: [test, cfsolve, cfsolve-windows]
+    if: ${{ !cancelled() && needs.test.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -184,6 +187,20 @@ jobs:
         id: version
         shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      # Bundle this platform's cfsolve (go:embed in internal/scraper/cfsolver),
+      # so the executable is the only file a user needs. A failed cfsolve job
+      # leaves nothing to download; the build then goes without it.
+      - name: Download the cfsolve binary to bundle
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: challenge-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
+          path: internal/scraper/cfsolver/embedded
+
+      - name: Show what is bundled
+        shell: bash
+        run: ls -la internal/scraper/cfsolver/embedded
 
       - name: Build binary (Unix)
         if: matrix.os != 'windows'
@@ -258,9 +275,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { asset: challenge-linux-amd64,  runner: ubuntu-24.04 }
-          - { asset: challenge-linux-arm64,  runner: ubuntu-24.04-arm }
-          - { asset: challenge-darwin-arm64, runner: macos-latest }
+          - { asset: challenge-linux-amd64,  runner: ubuntu-24.04,     triple: '' }
+          - { asset: challenge-linux-arm64,  runner: ubuntu-24.04-arm, triple: '' }
+          - { asset: challenge-darwin-arm64, runner: macos-latest,     triple: '' }
+          # Intel Macs: cross-compiled on the Apple Silicon runner. Not tried
+          # on real hardware, so a failure here only leaves them without it.
+          - { asset: challenge-darwin-amd64, runner: macos-latest,     triple: x86_64-apple-darwin }
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -301,17 +321,45 @@ jobs:
         working-directory: cfsolve-src
         run: rustup toolchain install
 
+      - name: Add the cross-compilation target
+        if: matrix.triple != ''
+        working-directory: cfsolve-src
+        run: rustup target add "${{ matrix.triple }}"
+
       - name: Build
         working-directory: cfsolve-src
-        run: cargo build --release --locked --bin challenge
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build --release --locked --bin challenge --target "${{ matrix.triple }}"
+          else
+            cargo build --release --locked --bin challenge
+          fi
+
+      - name: Locate the binary
+        id: bin
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            echo "path=cfsolve-src/target/${{ matrix.triple }}/release/challenge" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=cfsolve-src/target/release/challenge" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Smoke test
-        run: ./cfsolve-src/target/release/challenge --help >/dev/null
+        if: matrix.triple == ''
+        run: ${{ steps.bin.outputs.path }} --help >/dev/null
+
+      # An x86_64 binary on an arm64 runner runs under Rosetta.
+      - name: Smoke test (Intel, under Rosetta)
+        if: matrix.triple == 'x86_64-apple-darwin'
+        run: |
+          file "${{ steps.bin.outputs.path }}" | grep -q x86_64
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          arch -x86_64 "${{ steps.bin.outputs.path }}" --help >/dev/null
 
       - name: Stage
         run: |
           mkdir -p dist
-          cp cfsolve-src/target/release/challenge "dist/${{ matrix.asset }}"
+          cp "${{ steps.bin.outputs.path }}" "dist/${{ matrix.asset }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -58,11 +58,11 @@ func releaseTag(ver string) (string, bool) {
 }
 
 // assetName is the release asset for a platform, or false when none is built.
-// These are the platforms the release workflow compiles cfsolve for. macOS on
-// Intel has none: the workflow has no Intel Mac build.
+// These are the platforms the release workflow compiles cfsolve for. The Intel
+// Mac build is cross-compiled and has not been run on real hardware.
 func assetName(goos, goarch string) (string, bool) {
 	switch goos + "/" + goarch {
-	case "linux/amd64", "linux/arm64", "darwin/arm64":
+	case "linux/amd64", "linux/arm64", "darwin/arm64", "darwin/amd64":
 		return "challenge-" + goos + "-" + goarch, true
 	case "windows/amd64":
 		return "challenge-windows-amd64.exe", true
