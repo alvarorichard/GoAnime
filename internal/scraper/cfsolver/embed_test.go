@@ -3,6 +3,7 @@ package cfsolver
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 )
@@ -18,7 +19,8 @@ func TestUnpackEmbedded(t *testing.T) {
 	if b, _ := os.ReadFile(p); string(b) != "binary-v1" {
 		t.Fatalf("content %q", b)
 	}
-	if st, _ := os.Stat(p); st.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable bit; it runs a file by its extension.
+	if st, _ := os.Stat(p); runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("not executable: %v", st.Mode())
 	}
 
