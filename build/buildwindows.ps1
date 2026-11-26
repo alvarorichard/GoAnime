@@ -25,6 +25,43 @@ if ($ARCH -eq "AMD64") {
 # Cria diretório de saída
 New-Item -ItemType Directory -Force -Path $OUTPUT_DIR | Out-Null
 
+# Embute o cfsolve (go:embed em internal/scraper/cfsolver/embedded), baixando o
+# binário assinado do último release e conferindo o SHA-256. Se faltar, o build
+# segue sem ele e o GoAnime o baixa sozinho na primeira execução.
+$EMBED_DIR = Join-Path $ROOT_DIR "internal\scraper\cfsolver\embedded"
+$CFSOLVE_ASSET = "challenge-windows-$GOARCH.exe"
+try {
+    if ($GOARCH -ne "amd64") { throw "não há cfsolve para windows/$GOARCH" }
+    $base = "https://github.com/alvarorichard/GoAnime/releases/latest/download"
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("goanime-cfsolve-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    try {
+        $sums = Join-Path $tmp "checksums-sha256.txt"
+        $bin = Join-Path $tmp $CFSOLVE_ASSET
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums-sha256.txt" -OutFile $sums
+        Invoke-WebRequest -UseBasicParsing -Uri "$base/$CFSOLVE_ASSET" -OutFile $bin
+        $want = $null
+        foreach ($line in Get-Content $sums) {
+            $parts = $line -split '\s+'
+            if ($parts.Count -ge 2 -and $parts[1].TrimStart('*') -eq $CFSOLVE_ASSET) { $want = $parts[0].ToLower() }
+        }
+        if (-not $want) { throw "o último release não lista $CFSOLVE_ASSET" }
+        $got = (Get-FileHash -Path $bin -Algorithm SHA256).Hash.ToLower()
+        if ($got -ne $want) { throw "checksum de $CFSOLVE_ASSET não confere" }
+        New-Item -ItemType Directory -Force -Path $EMBED_DIR | Out-Null
+        # go:embed leva a pasta inteira: fica só o binário desta plataforma.
+        Get-ChildItem -Path $EMBED_DIR -Filter "challenge-*" -ErrorAction SilentlyContinue | Remove-Item -Force
+        Copy-Item $bin (Join-Path $EMBED_DIR $CFSOLVE_ASSET) -Force
+        Write-Host "cfsolve embutido: $CFSOLVE_ASSET"
+    }
+    finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+catch {
+    Write-Host "Aviso: compilando sem o cfsolve embutido ($_)"
+}
+
 Write-Host "Compilando binário para Windows ($GOARCH)..."
 $env:CGO_ENABLED = "1"
 $env:GOOS = "windows"
