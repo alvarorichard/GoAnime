@@ -36,6 +36,8 @@ if ! pkg-config --exists sqlite3 2>/dev/null; then
     fi
 fi
 
+# Bundle cfsolve (go:embed) so the binary needs nothing else; warns if missing.
+"$(dirname "$0")/../scripts/get-cfsolve.sh" --bundle linux amd64 || echo "warning: building without the bundled cfsolve"
 # For Linux we don't need go-winio, but we need SQLite with CGO enabled
 # Using !windows tag to ensure go-winio dependencies are excluded
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o "$BINARY_PATH" -ldflags="-s -w" -trimpath -tags="!windows" "$MAIN_PACKAGE"

@@ -327,6 +327,13 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
+      # Bundle cfsolve like release builds do (go:embed), taking the signed
+      # binary of the latest release. A platform it lacks just builds without.
+      - name: Bundle cfsolve
+        continue-on-error: true
+        shell: bash
+        run: scripts/get-cfsolve.sh --bundle ${{ matrix.goos }} ${{ matrix.goarch }}
+
       - name: Build binary
         shell: bash
         env:
@@ -420,6 +427,11 @@ jobs:
           }
           gcc --version
           Write-Host "GCC available for CGO builds"
+
+      - name: Bundle cfsolve
+        continue-on-error: true
+        shell: bash
+        run: scripts/get-cfsolve.sh --bundle windows amd64
 
       - name: Build GoAnime binary with SQLite
         shell: pwsh

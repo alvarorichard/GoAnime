@@ -26,6 +26,8 @@ fi
 # Cria o diretório de saída se não existir
 mkdir -p "$OUTPUT_DIR"
 
+# Bundle cfsolve (go:embed) so the binary needs nothing else; warns if missing.
+"$(dirname "$0")/../scripts/get-cfsolve.sh" --bundle windows "$GOARCH" || echo "warning: building without the bundled cfsolve"
 echo "Compilando o binário goanime para Windows ($GOARCH)..."
 # Para Windows, precisamos garantir que o go-winio esteja disponível
 # Mas com CGO_ENABLED=0, o SQLite será compilado sem suporte nativo

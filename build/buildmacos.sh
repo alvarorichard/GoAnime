@@ -22,11 +22,13 @@ echo "Building goanime binaries for macOS..."
 
 # Build for Intel (amd64)
 echo "Building for Intel (amd64)..."
+"$(dirname "$0")/../scripts/get-cfsolve.sh" --bundle darwin amd64 || echo "warning: building without the bundled cfsolve"
 CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o "$BINARY_PATH_AMD64" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
 echo "Intel build completed: $BINARY_PATH_AMD64"
 
 # Build for Apple Silicon (arm64)
 echo "Building for Apple Silicon (arm64)..."
+"$(dirname "$0")/../scripts/get-cfsolve.sh" --bundle darwin arm64 || echo "warning: building without the bundled cfsolve"
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o "$BINARY_PATH_ARM64" -ldflags="-s -w" -trimpath "$MAIN_PACKAGE"
 echo "Apple Silicon build completed: $BINARY_PATH_ARM64"
 

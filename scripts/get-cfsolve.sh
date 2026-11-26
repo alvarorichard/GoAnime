@@ -3,6 +3,10 @@
 #
 #   scripts/get-cfsolve.sh           download the binary from GoAnime's latest release and verify it
 #   scripts/get-cfsolve.sh --build   build the commit pinned in cfsolve.lock (Rust, cmake, libclang)
+#   scripts/get-cfsolve.sh --bundle GOOS GOARCH
+#                                    put that platform's binary in internal/scraper/cfsolver/embedded,
+#                                    so the next "go build" carries it inside GoAnime (the build/
+#                                    scripts call this; a missing binary only warns)
 #
 # Release binaries are built from the commit pinned in
 # internal/scraper/cfsolver/cfsolve.lock at the time of that release. Use --build
@@ -20,6 +24,13 @@ case "$(uname -s)" in
   *)      cfg="${XDG_CONFIG_HOME:-$HOME/.config}" ;;
 esac
 dest="$cfg/goanime/cfsolve"
+bundle=""
+if [ "${1:-}" = "--bundle" ]; then
+  [ -n "${2:-}" ] && [ -n "${3:-}" ] || { echo "usage: $0 --bundle GOOS GOARCH" >&2; exit 2; }
+  bundle=1
+  os="$2"; arch="$3"
+  dest="$root/internal/scraper/cfsolver/embedded"
+fi
 mkdir -p "$dest"
 
 if [ "${1:-}" = "--build" ]; then
@@ -35,16 +46,20 @@ if [ "${1:-}" = "--build" ]; then
   exit 0
 fi
 
-os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-case "$(uname -m)" in
-  x86_64|amd64) arch=amd64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *) echo "no prebuilt cfsolve for $(uname -m); try --build" >&2; exit 1 ;;
-esac
+if [ -z "$bundle" ]; then
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "no prebuilt cfsolve for $(uname -m); try --build" >&2; exit 1 ;;
+  esac
+fi
 asset="challenge-$os-$arch"
+[ "$os" = windows ] && asset="$asset.exe"
 case "$asset" in
   challenge-linux-amd64|challenge-linux-arm64|challenge-darwin-arm64|challenge-darwin-amd64) ;;
-  *) echo "releases carry no cfsolve for $os/$arch (Windows is not built here); try --build" >&2; exit 1 ;;
+  challenge-windows-amd64.exe) [ -n "$bundle" ] || { echo "on Windows GoAnime installs cfsolve itself" >&2; exit 1; } ;;
+  *) echo "releases carry no cfsolve for $os/$arch; try --build" >&2; exit 1 ;;
 esac
 base="https://github.com/alvarorichard/GoAnime/releases/latest/download"
 
@@ -66,5 +81,12 @@ want="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1}' "$work/checksums-sh
 if command -v sha256sum >/dev/null; then got="$(sha256sum "$work/$asset" | cut -d' ' -f1)"
 else got="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"; fi
 [ "$got" = "$want" ] || { echo "checksum mismatch for $asset" >&2; exit 1; }
+if [ -n "$bundle" ]; then
+  # go:embed takes every file in the folder: keep only this platform's binary.
+  rm -f "$dest"/challenge-*
+  install -m 0644 "$work/$asset" "$dest/$asset"
+  echo "bundled $asset from the latest GoAnime release -> $dest/$asset"
+  exit 0
+fi
 install -m 0755 "$work/$asset" "$dest/challenge"
 echo "installed $asset from the latest GoAnime release -> $dest/challenge"
