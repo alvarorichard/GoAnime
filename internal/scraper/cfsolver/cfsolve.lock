@@ -1,6 +1,7 @@
-# The cfsolve commit GoAnime is built and tested against. Never track upstream's
-# HEAD: bump this with scripts/update-cfsolve.sh, which also refreshes the
-# embedded profile from the same commit. The release workflow builds this
-# commit and attaches the binaries to each GoAnime release.
+# The cfsolve commit the profile in this folder comes from. CI and release
+# builds move both to upstream's latest commit before building
+# (.github/workflows/cfsolve-build.yml); "go test", local builds and
+# scripts/get-cfsolve.sh --build use what is committed here. Change it with
+# scripts/update-cfsolve.sh, which moves the sha and the profile together.
 repo=https://github.com/chris124567/cfsolve
 sha=3d2f67ed56df29be6ceba1de60b7ab9077e554c8

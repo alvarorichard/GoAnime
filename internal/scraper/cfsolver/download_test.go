@@ -226,8 +226,8 @@ func TestDefaultInstallerNeedsAReleaseBuild(t *testing.T) {
 	}
 }
 
-// cfsolve.lock is read by the release workflow and the scripts, not by Go; keep
-// its shape honest.
+// cfsolve.lock is read by the workflows (repo=) and the scripts, not by Go;
+// keep its shape honest.
 func TestLockFileNamesAFullCommit(t *testing.T) {
 	b, err := os.ReadFile("cfsolve.lock")
 	if err != nil {

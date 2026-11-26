@@ -23,9 +23,10 @@ import (
 )
 
 // GoAnime does not make anyone build cfsolve. When no binary is installed it
-// fetches the one built with its own release (the release workflow compiles the
-// commit pinned in cfsolve.lock and attaches it), so the binary and the profile
-// embedded in this GoAnime always come from the same commit. The download is
+// fetches the one built with its own release (the release workflow compiles
+// cfsolve's latest commit, embeds that commit's profile and attaches the
+// binary), so the binary and the profile embedded in this GoAnime always come
+// from the same commit. The download is
 // checked against the release's checksums-sha256.txt, whose minisign signature
 // must verify against the key embedded in GoAnime, the same trust the updater
 // applies. Every failure is silent to the user: Goyabu simply stays out of the

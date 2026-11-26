@@ -13,9 +13,10 @@ import (
 
 // A release build carries the cfsolve binary for its own platform inside the
 // GoAnime executable, so the tool needs no download and works offline. The
-// release workflow copies the pinned build (cfsolve.lock) into embedded/ under
-// its release asset name before "go build"; a development build finds the
-// folder empty and keeps looking for an installed binary or downloading one.
+// release and CI workflows build cfsolve's latest commit, take that commit's
+// profile and copy the binary into embedded/ under its release asset name
+// before "go build"; a development build finds the folder empty and keeps
+// looking for an installed binary or downloading one.
 // The binary is unpacked on first use into GoAnime's config folder.
 
 //go:embed all:embedded

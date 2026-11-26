@@ -125,7 +125,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # The cfsolve jobs may fail (continue-on-error); the build then ships
     # without the bundled solver and falls back to downloading it.
-    needs: [test, cfsolve, cfsolve-windows]
+    needs: [test, cfsolve]
     if: ${{ !cancelled() && needs.test.result == 'success' }}
     strategy:
       fail-fast: false
@@ -190,7 +190,15 @@ jobs:
 
       # Bundle this platform's cfsolve (go:embed in internal/scraper/cfsolver),
       # so the executable is the only file a user needs. A failed cfsolve job
-      # leaves nothing to download; the build then goes without it.
+      # leaves nothing to download; the build then goes without it. The profile
+      # is embedded too and must come from the commit the binary was built from.
+      - name: Take the cfsolve profile from the commit this release builds
+        if: needs.cfsolve.outputs.sha != ''
+        shell: bash
+        env:
+          CFSOLVE_SHA: ${{ needs.cfsolve.outputs.sha }}
+        run: scripts/update-cfsolve.sh "$CFSOLVE_SHA" --no-build
+
       - name: Download the cfsolve binary to bundle
         continue-on-error: true
         uses: actions/download-artifact@v8
@@ -260,199 +268,16 @@ jobs:
   # =============================================================================
   # Job 2b: Build cfsolve (clears Goyabu's Cloudflare gate; optional, no browser)
   # =============================================================================
-  # GoAnime downloads the binary for its own version from this release on first
-  # use. It is optional: a failure here must never block a release, it only
-  # leaves that platform without Goyabu. The binaries join the signed
-  # checksums-sha256.txt below, which is what the downloader verifies.
-  # Windows has its own job below (MinGW-w64 toolchain).
+  # cfsolve-build.yml compiles upstream's latest commit for every platform. Each
+  # GoAnime build bundles its own platform's binary and the profile from that
+  # same commit, and the binaries join the signed checksums-sha256.txt below,
+  # which is what the downloader verifies. Optional: a failure never blocks a
+  # release, it only leaves that platform without the solver. No cache: a
+  # release compiles what it ships.
   cfsolve:
-    name: Build cfsolve ${{ matrix.asset }}
-    runs-on: ${{ matrix.runner }}
+    name: cfsolve
     needs: test
-    continue-on-error: true
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { asset: challenge-linux-amd64,  runner: ubuntu-24.04,     triple: '' }
-          - { asset: challenge-linux-arm64,  runner: ubuntu-24.04-arm, triple: '' }
-          - { asset: challenge-darwin-arm64, runner: macos-latest,     triple: '' }
-          # Intel Macs: cross-compiled on the Apple Silicon runner. Not tried
-          # on real hardware, so a failure here only leaves them without it.
-          - { asset: challenge-darwin-amd64, runner: macos-latest,     triple: x86_64-apple-darwin }
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Read the pinned cfsolve commit
-        id: pin
-        shell: bash
-        run: |
-          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
-          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
-          {
-            echo "repo=${repo#https://github.com/}"
-            echo "sha=$sha"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Check out cfsolve at that commit
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ steps.pin.outputs.repo }}
-          ref: ${{ steps.pin.outputs.sha }}
-          path: cfsolve-src
-          persist-credentials: false
-
-      - name: Install build tools (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
-
-      - name: Install build tools (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install cmake llvm
-          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
-
-      - name: Install the pinned Rust toolchain
-        working-directory: cfsolve-src
-        run: rustup toolchain install
-
-      - name: Add the cross-compilation target
-        if: matrix.triple != ''
-        working-directory: cfsolve-src
-        run: rustup target add "${{ matrix.triple }}"
-
-      - name: Build
-        working-directory: cfsolve-src
-        run: |
-          if [ -n "${{ matrix.triple }}" ]; then
-            cargo build --release --locked --bin challenge --target "${{ matrix.triple }}"
-          else
-            cargo build --release --locked --bin challenge
-          fi
-
-      - name: Locate the binary
-        id: bin
-        run: |
-          if [ -n "${{ matrix.triple }}" ]; then
-            echo "path=cfsolve-src/target/${{ matrix.triple }}/release/challenge" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=cfsolve-src/target/release/challenge" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Smoke test
-        if: matrix.triple == ''
-        run: ${{ steps.bin.outputs.path }} --help >/dev/null
-
-      # An x86_64 binary on an arm64 runner runs under Rosetta.
-      - name: Smoke test (Intel, under Rosetta)
-        if: matrix.triple == 'x86_64-apple-darwin'
-        run: |
-          file "${{ steps.bin.outputs.path }}" | grep -q x86_64
-          sudo softwareupdate --install-rosetta --agree-to-license || true
-          arch -x86_64 "${{ steps.bin.outputs.path }}" --help >/dev/null
-
-      - name: Stage
-        run: |
-          mkdir -p dist
-          cp "${{ steps.bin.outputs.path }}" "dist/${{ matrix.asset }}"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          retention-days: 1
-
-  # Tested on a real Windows 11: the solver cleared Goyabu's gate (HTTP 403 -> 200).
-  cfsolve-windows:
-    name: Build cfsolve challenge-windows-amd64.exe
-    runs-on: windows-latest
-    needs: test
-    continue-on-error: true
-    timeout-minutes: 90
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Read the pinned cfsolve commit
-        id: pin
-        shell: bash
-        run: |
-          repo="$(sed -n 's/^repo=//p' internal/scraper/cfsolver/cfsolve.lock)"
-          sha="$(sed -n 's/^sha=//p' internal/scraper/cfsolver/cfsolve.lock)"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cfsolve.lock has no full commit sha"; exit 1; }
-          {
-            echo "repo=${repo#https://github.com/}"
-            echo "sha=$sha"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Check out cfsolve at that commit
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ steps.pin.outputs.repo }}
-          ref: ${{ steps.pin.outputs.sha }}
-          path: cfsolve-src
-          persist-credentials: false
-
-      - name: Install MinGW-w64 and the BoringSSL build tools
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          path-type: inherit
-          update: true
-          install: >-
-            git patch perl
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-nasm
-            mingw-w64-x86_64-clang
-
-      - name: Install the pinned Rust toolchain and the windows-gnu target
-        shell: msys2 {0}
-        working-directory: cfsolve-src
-        run: |
-          rustup toolchain install
-          rustup target add x86_64-pc-windows-gnu
-
-      - name: Build
-        shell: msys2 {0}
-        working-directory: cfsolve-src
-        env:
-          LIBCLANG_PATH: ${{ steps.msys2.outputs.msys2-location }}\mingw64\bin
-        run: cargo build --release --locked --bin challenge --target x86_64-pc-windows-gnu
-
-      - name: Smoke test
-        shell: msys2 {0}
-        working-directory: cfsolve-src
-        run: |
-          exe=target/x86_64-pc-windows-gnu/release/challenge.exe
-          "$exe" --help >/dev/null
-          if objdump -p "$exe" | grep -qiE 'libstdc\+\+|libgcc_s|libwinpthread'; then
-            echo "::error::the .exe imports a MinGW runtime DLL that a clean Windows does not have"
-            exit 1
-          fi
-
-      - name: Stage
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp cfsolve-src/target/x86_64-pc-windows-gnu/release/challenge.exe dist/challenge-windows-amd64.exe
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: challenge-windows-amd64.exe
-          path: dist/challenge-windows-amd64.exe
-          retention-days: 1
+    uses: ./.github/workflows/cfsolve-build.yml
 
   # =============================================================================
   # Job 3: Merge macOS binaries into a single universal (x86_64 + arm64) binary
@@ -654,7 +479,9 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-24.04
-    needs: [build, macos-universal, windows-installer, cfsolve, cfsolve-windows]
+    needs: [build, macos-universal, windows-installer, cfsolve]
+    # cfsolve is optional: release whatever it built, or nothing of it.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.macos-universal.result == 'success' && needs.windows-installer.result == 'success' }}
     # The environment holds the minisign secret key and requires a reviewer's
     # approval, so nothing is signed or published without a human saying yes.
     environment: release
@@ -796,6 +623,9 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        env:
+          CFSOLVE_SHA: ${{ needs.cfsolve.outputs.sha }}
+          CFSOLVE_REPO: ${{ needs.cfsolve.outputs.repo }}
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
           VERSION_NUMBER=${{ steps.version.outputs.VERSION_NUMBER }}
@@ -898,7 +728,11 @@ jobs:
           echo "| Arch Linux | x86_64 | \`yay -S goanime\` (AUR) |" >> RELEASE_NOTES.md
           echo "" >> RELEASE_NOTES.md
           echo "All binaries are built with SQLite tracking support enabled." >> RELEASE_NOTES.md
-          
+          if [ -n "$CFSOLVE_SHA" ] && compgen -G 'release/challenge-*' >/dev/null; then
+            echo "" >> RELEASE_NOTES.md
+            echo "The cfsolve binaries in this release (\`challenge-*\`, also bundled in GoAnime) are built from [${CFSOLVE_REPO}@${CFSOLVE_SHA:0:12}](https://github.com/${CFSOLVE_REPO}/commit/${CFSOLVE_SHA})." >> RELEASE_NOTES.md
+          fi
+
           cat RELEASE_NOTES.md
 
       - name: Create GitHub Release

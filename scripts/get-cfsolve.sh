@@ -8,15 +8,16 @@
 #                                    so the next "go build" carries it inside GoAnime (the build/
 #                                    scripts call this; a missing binary only warns)
 #
-# Release binaries are built from the commit pinned in
-# internal/scraper/cfsolver/cfsolve.lock at the time of that release. Use --build
-# to get exactly the commit of the checkout you are on.
+# Release binaries are built from cfsolve's latest commit at the time of that
+# release, which can differ from the commit in this checkout's
+# internal/scraper/cfsolver/cfsolve.lock, and cfsolve can refuse a profile from
+# another commit. Use --build to get exactly the commit of the checkout you are on.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 lock="$root/internal/scraper/cfsolver/cfsolve.lock"
-sha="$(sed -n 's/^sha=//p' "$lock")"
-repo="$(sed -n 's/^repo=//p' "$lock")"
+sha="$(sed -n 's/^sha=//p' "$lock" | tr -d '\r')"
+repo="$(sed -n 's/^repo=//p' "$lock" | tr -d '\r')"
 [ -n "$sha" ] || { echo "no sha in $lock" >&2; exit 1; }
 
 case "$(uname -s)" in

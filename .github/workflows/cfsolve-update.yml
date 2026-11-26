@@ -1,8 +1,14 @@
 name: Update cfsolve
 
 # Weekly: try cfsolve's latest commit. If it builds and still clears Goyabu's
-# gate, open a PR moving internal/scraper/cfsolver/cfsolve.lock (and the embedded
-# profile) to it. GoAnime never follows upstream unattended; a person merges.
+# gate, open a PR moving internal/scraper/cfsolver/cfsolve.lock (and the
+# profile) to it.
+#
+# CI and releases do not wait for this PR: every run builds upstream's latest
+# commit (cfsolve-build.yml). The committed copy is what "go test", local builds
+# and get-cfsolve.sh --build use, and this is the only workflow that checks the
+# gate live, so a warning here means the next release ships a cfsolve that did
+# not clear it.
 #
 # Two jobs on purpose. `try` compiles and runs code from another repository, so
 # it has a read-only token and no stored credentials. `pull-request` holds the
@@ -83,11 +89,13 @@ jobs:
 
       - id: verdict
         run: |
-          if [ "${{ steps.diff.outputs.changed }}" = true ] && [ "${{ steps.live.outcome }}" = success ] && [ "${{ steps.unit.outcome }}" = success ]; then
+          if [ "${{ steps.diff.outputs.changed }}" != true ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.live.outcome }}" = success ] && [ "${{ steps.unit.outcome }}" = success ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Upstream HEAD is not adopted (unchanged, or it did not build/clear the gate)."
+            echo "::warning::upstream's latest cfsolve did not build or did not clear Goyabu's gate; CI and the next release build it anyway"
           fi
 
       - name: Save the change as a patch
@@ -137,4 +145,4 @@ jobs:
           git push -q origin "$branch"
           gh pr create --base dev --head "$branch" \
             --title "chore(cfsolve): move to upstream ${sha:0:12}" \
-            --body "Automated. Upstream's latest cfsolve commit built and cleared Goyabu's gate in CI (TestGoyabuThroughCfsolveLive), so the pin and the embedded profile now follow it. Linux and macOS only: Windows is not built. The next GoAnime release builds and ships the new commit; releases already published keep the one they were built with."
+            --body "Automated. Upstream's latest cfsolve commit built on Linux and cleared Goyabu's gate (TestGoyabuThroughCfsolveLive), so the lock and the profile committed here now follow it. CI and releases already build upstream's latest commit; this keeps go test, local builds and get-cfsolve.sh --build on the same one. Releases already published keep the commit they were built with."

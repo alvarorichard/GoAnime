@@ -54,30 +54,46 @@ and the rest takes the previous panel fallback. A catalog
 solver tests use a fake binary. To see the gates working:
 
     scripts/get-cfsolve.sh            # latest release's binary, checksum verified
-    scripts/get-cfsolve.sh --build    # or build the pinned commit (Rust, cmake, libclang)
+    scripts/get-cfsolve.sh --build    # or build the commit in cfsolve.lock (Rust, cmake, libclang)
     go test -tags live -run TestGoyabuThroughCfsolveLive -v ./internal/scraper/providers/goyabu
     go test -tags live -run TestLivePobreflixPlayerThroughCfsolve -v ./internal/scraper/providers/pobreflix
 
 The Pobreflix test clears the live gate for *Todo Poderoso* (TMDB 310) and skips
 when cfsolve is not installed.
 
-## Pinning and updates
+## Which commit ships
 
-GoAnime never follows cfsolve's HEAD. `internal/scraper/cfsolver/cfsolve.lock`
-names one commit, and the embedded profile must come from that same commit.
+CI and release builds use cfsolve's latest commit. `cfsolve-build.yml` reads
+upstream's HEAD once per run and builds that commit for every platform, and each
+GoAnime build runs `scripts/update-cfsolve.sh <that commit> --no-build` before
+`go build`, so the profile it embeds comes from the same commit as the binary it
+bundles: cfsolve refuses a profile that names another reference build than its
+own, which a new commit can change. The release notes name the commit a release
+was built from.
+
+`internal/scraper/cfsolver/cfsolve.lock` and the profile beside it are the copy
+committed in the repository, which `go test`, the `build/` scripts and
+`scripts/get-cfsolve.sh --build` use. The latest release's binary
+(`scripts/get-cfsolve.sh`, and the one the `build/` scripts bundle) can be
+refused by a checkout whose lock names another commit than that release was
+built from; use `--build` then.
 
     scripts/update-cfsolve.sh <sha|HEAD>   # moves the lock and the profile together
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `release.yml` (job `cfsolve`) | every release tag | builds the pinned commit, adds the binaries to the signed `checksums-sha256.txt` and to the release assets. Optional: a failure never blocks a release |
+| `cfsolve-build.yml` | called by `ci.yml` and `release.yml` | reads upstream's latest commit and builds it for the five platforms. CI keeps each binary in the Actions cache until upstream moves; a release always compiles |
+| `ci.yml` | every push and pull request | bundles that build and its profile in the binaries and the Windows installer it uploads |
+| `release.yml` | every release tag | bundles that build and its profile in each binary, and adds the binaries to the signed `checksums-sha256.txt` and to the release assets. Optional: a failure never blocks a release |
 | `source-health.yml` (`goyabu-cfsolve`) | manual | installs the latest release's binary the way a user would and runs the live Goyabu test |
-| `cfsolve-update.yml` | weekly | tries upstream HEAD in a read-only job; if it builds and clears the gate, opens a PR moving the pin |
+| `cfsolve-update.yml` | weekly | tries upstream HEAD in a read-only job; if it builds and clears the gate, opens a PR moving the committed lock and profile, and warns when it does not |
 
 If Cloudflare changes a gate, the affected source stops working until cfsolve
-is updated. The weekly workflow shows whether upstream already fixed the Goyabu
-gate; merge its PR and the next release carries the new binary and profile
-together. The Pobreflix live test above checks the Turnstile path by hand.
+is fixed upstream; the next release then ships the fix with no change here.
+`cfsolve-update.yml` is the only workflow that runs the live Goyabu test against
+upstream's latest commit, so its warning means the next release would ship a
+solver that does not clear the gate. The Pobreflix live test above checks the
+Turnstile path by hand.
 
 ## Platforms
 
