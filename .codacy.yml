@@ -1,0 +1,16 @@
+---
+# Codacy reads this file from the default branch; what a pull request adds
+# here also applies to that pull request's own analysis. While this file
+# exists, the "Ignored files" set in Codacy's UI no longer apply, so list any
+# path to ignore here instead.
+#
+# Opengrep (Codacy's Semgrep since February 2026) runs per-file security
+# patterns that read the httptest servers in the tests, which answer with
+# fixtures, as XSS and SQL injection, and the 0o700 of the executables a test
+# writes as overly permissive. Tests stay in every other Codacy analysis, and
+# CI checks them with gosec and golangci-lint (staticcheck, every gocritic
+# checker).
+engines:
+  opengrep:
+    exclude_paths:
+      - "**/*_test.go"
