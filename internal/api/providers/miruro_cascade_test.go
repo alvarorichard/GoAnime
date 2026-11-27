@@ -249,9 +249,9 @@ func TestMiruroCascade_FailurePropagation(t *testing.T) {
 		return &models.Episode{URL: s.srv.URL + "/watch/" + miruroTestID + "/" + miruroTestSlug + "?ep=1"}
 	}
 	tests := []struct {
-		name   string
+		name     string
 		sabotage func(*miruroStub)
-		run    func(*miruroProvider, *miruroStub) error
+		run      func(*miruroProvider, *miruroStub) error
 	}{
 		{"search 503", func(s *miruroStub) { s.failSearch = http.StatusServiceUnavailable }, func(p *miruroProvider, _ *miruroStub) error {
 			_, err := p.Search(context.Background(), "x")
