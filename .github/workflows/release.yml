@@ -76,7 +76,7 @@ jobs:
       - name: Run linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.14.0
+          version: v2.15.0
 
       - name: Run tests
         run: go test -short -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
