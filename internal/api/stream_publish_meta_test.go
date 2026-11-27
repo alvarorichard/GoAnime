@@ -417,11 +417,6 @@ var streamPublishMutants = []mutant{
 
 	// ---- HiAnime / AnimesROLL / AnimeDrive ---------------------------------------
 	{
-		name:  "HiAnime ignores the scraper's playback metadata",
-		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil", "_ = metadata\n\treturn source.Stream{URL: url}, nil"}},
-		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestHiAnimeCascade_StreamCarriesPlaybackState"}},
-	},
-	{
 		name:  "AnimesROLL ignores the scraper's playback metadata",
 		edits: []codeEdit{{providersFile, "return streamFromMetadata(streamURL, metadata), nil\n}\n\nfunc (p *anrollProvider) FetchStreamURL", "_ = metadata\n\treturn source.Stream{URL: streamURL}, nil\n}\n\nfunc (p *anrollProvider) FetchStreamURL"}},
 		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext"}},
@@ -497,34 +492,87 @@ var streamPublishMutants = []mutant{
 		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestAnimeDriveCascade_StreamCarriesPlaybackState"}},
 	},
 	{
-		name:  "HiAnime publishes behind the dispatcher's back",
-		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil", "s := streamFromMetadata(url, metadata)\n\ts.Publish()\n\treturn s, nil"}},
-		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
-	},
-	{
-		name:  "HiAnime's quality never reaches a plain scraper",
-		edits: []codeEdit{{providersFile, "url, metadata, err = adapter.GetStreamURL(episode.URL, quality)", "url, metadata, err = adapter.GetStreamURL(episode.URL)"}},
-		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
-	},
-	{
 		name:  "AnimeDrive's quality never reaches the scraper",
 		edits: []codeEdit{{providersFile, "adapter.GetStreamURL(episode.URL, quality)\n\tif err != nil {\n\t\t// The leaf client", "adapter.GetStreamURL(episode.URL)\n\tif err != nil {\n\t\t// The leaf client"}},
 		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
 	},
 	{
+		name:  "AnimesROLL hands the scraper a fresh context, not the caller's",
+		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+
+	// HiAnime and Miruro share one shape of FetchStream; each mutant is anchored
+	// on the provider's own error text or method so it breaks one of them only.
+	{
+		name:  "HiAnime ignores the scraper's playback metadata",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil\n}\n\nfunc (p *hianimeProvider) FetchStreamURL", "_ = metadata\n\treturn source.Stream{URL: url}, nil\n}\n\nfunc (p *hianimeProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestHiAnimeCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "HiAnime publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil\n}\n\nfunc (p *hianimeProvider) FetchStreamURL", "s := streamFromMetadata(url, metadata)\n\ts.Publish()\n\treturn s, nil\n}\n\nfunc (p *hianimeProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
+	},
+	{
+		name:  "HiAnime's quality never reaches a plain scraper",
+		edits: []codeEdit{{providersFile, "url, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream", "url, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
+	},
+	{
 		name:  "HiAnime never uses a context-aware scraper",
-		edits: []codeEdit{{providersFile, "if ca, ok := adapter.(scraper.ContextualScraper); ok {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)", "if ca, ok := adapter.(scraper.ContextualScraper); ok && false {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)"}},
+		edits: []codeEdit{{providersFile, "if ca, ok := adapter.(scraper.ContextualScraper); ok {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream", "if ca, ok := adapter.(scraper.ContextualScraper); ok && false {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream"}},
 		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
 	},
 	{
 		name:  "HiAnime hands the scraper a fresh context, not the caller's",
-		edits: []codeEdit{{providersFile, "ca.GetStreamURLContext(ctx, episode.URL, quality)", "ca.GetStreamURLContext(context.Background(), episode.URL, quality)"}},
+		edits: []codeEdit{{providersFile, "ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream", "ca.GetStreamURLContext(context.Background(), episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"hianime stream"}},
 		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
 	},
 	{
-		name:  "AnimesROLL hands the scraper a fresh context, not the caller's",
-		edits: []codeEdit{{providersFile, "contextual.GetStreamURLContext(ctx, episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream", "contextual.GetStreamURLContext(context.Background(), episode.URL)\n\t} else {\n\t\tstreamURL, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"anroll stream"}},
+		name:  "Miruro ignores the scraper's playback metadata",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil\n}\n\nfunc (p *miruroProvider) FetchStreamURL", "_ = metadata\n\treturn source.Stream{URL: url}, nil\n}\n\nfunc (p *miruroProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone", "TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestMiruroCascade_StreamCarriesPlaybackState"}},
+	},
+	{
+		name:  "Miruro publishes behind the dispatcher's back",
+		edits: []codeEdit{{providersFile, "return streamFromMetadata(url, metadata), nil\n}\n\nfunc (p *miruroProvider) FetchStreamURL", "s := streamFromMetadata(url, metadata)\n\ts.Publish()\n\treturn s, nil\n}\n\nfunc (p *miruroProvider) FetchStreamURL"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamReturnsTheContextAndWritesNone"}},
+	},
+	{
+		name:  "Miruro's quality never reaches a plain scraper",
+		edits: []codeEdit{{providersFile, "url, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream", "url, metadata, err = adapter.GetStreamURL(episode.URL)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersPassTheQualityOnlyWhereTheyAlwaysDid"}},
+	},
+	{
+		name:  "Miruro never uses a context-aware scraper",
+		edits: []codeEdit{{providersFile, "if ca, ok := adapter.(scraper.ContextualScraper); ok {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream", "if ca, ok := adapter.(scraper.ContextualScraper); ok && false {\n\t\turl, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream"}},
 		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+	{
+		name:  "Miruro hands the scraper a fresh context, not the caller's",
+		edits: []codeEdit{{providersFile, "ca.GetStreamURLContext(ctx, episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream", "ca.GetStreamURLContext(context.Background(), episode.URL, quality)\n\t} else {\n\t\turl, metadata, err = adapter.GetStreamURL(episode.URL, quality)\n\t}\n\tif err != nil {\n\t\treturn source.Stream{}, fmt.Errorf(\"miruro stream"}},
+		kills: map[string][]string{providersPkg: {"TestContextAwareAdaptersAreUsedWithTheCallersContext"}},
+	},
+	{
+		name:  "Miruro accepts an empty stream URL",
+		edits: []codeEdit{{providersFile, "\tif url == \"\" {\n\t\treturn source.Stream{}, fmt.Errorf(\"empty stream URL returned from Miruro\")\n\t}\n", ""}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersRejectAnEmptyURLWithoutPublishingItsContext"}},
+	},
+	{
+		name:  "a Miruro scraper failure is not wrapped",
+		edits: []codeEdit{{providersFile, "return source.Stream{}, fmt.Errorf(\"miruro stream: %w\", err)", "return source.Stream{}, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersWrapAScraperFailureAndKeepItInspectable"}},
+	},
+	{
+		name:  "the Miruro resolver is reached with a cancelled context",
+		edits: []codeEdit{{providersFile, "func (p *miruroProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n\tif err := ctx.Err(); err != nil {\n\t\treturn source.Stream{}, err\n\t}\n", "func (p *miruroProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {\n"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersNeverReachTheAdapterOnACancelledContext"}},
+	},
+	{
+		name:  "Miruro's FetchStreamURL stops publishing",
+		edits: []codeEdit{{providersFile, "func (p *miruroProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\treturn fetchAndPublish(ctx, p, episode, anime, quality)", "func (p *miruroProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {\n\ts, err := p.FetchStream(ctx, episode, anime, quality)\n\treturn s.URL, err"}},
+		kills: map[string][]string{providersPkg: {"TestAdapterProvidersFetchStreamURLPublishesTheContext", "TestMiruroCascade_StreamCarriesPlaybackState"}},
 	},
 
 	// ---- AnimeFire / Goyabu / AnimesDigital --------------------------------------
