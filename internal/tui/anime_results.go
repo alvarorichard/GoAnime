@@ -207,7 +207,7 @@ func makeVersion(anime *models.Anime) animeVersion {
 
 // versionLanguage is the language a result is in: the [PT-BR]/[English] tag
 // the scrapers put on the name wins, otherwise the source decides (only
-// HiAnime is English).
+// HiAnime and Miruro are English).
 func versionLanguage(anime *models.Anime) (badge, word string) {
 	name := strings.ToLower(singleLine(anime.Name))
 	switch {
@@ -218,7 +218,7 @@ func versionLanguage(anime *models.Anime) (badge, word string) {
 	case strings.Contains(name, "[english]"):
 		return "EN", "English"
 	}
-	if strings.Contains(strings.ToLower(singleLine(anime.Source)), "hianime") {
+	if src := strings.ToLower(singleLine(anime.Source)); strings.Contains(src, "hianime") || strings.Contains(src, "miruro") {
 		return "EN", "English"
 	}
 	return "PT-BR", "PT-BR"

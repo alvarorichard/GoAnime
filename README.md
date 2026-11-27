@@ -398,7 +398,8 @@ common needs:
 | `GOANIME_TERMINAL`            | `conhost` keeps Windows GoAnime in the classic console instead of reopening it in Windows Terminal |
 | `GOANIME_PLAIN`               | Set to `1` for the plain interface: no colors, no Japanese glosses, ASCII only (same as `--plain`, `NO_COLOR` or `TERM=dumb`) |
 | `GOANIME_JAPANESE`            | `1` always shows the Japanese glosses, `0` always hides them; unset, GoAnime shows them where the terminal has a font for them |
-| `GOANIME_HIANIME_AUDIO`       | `sub` (default) or `dub`                                                 |
+| `GOANIME_HIANIME_AUDIO`       | HiAnime audio: `sub` (default) or `dub`                                  |
+| `GOANIME_MIRURO_AUDIO`        | Miruro audio: `sub` (default) or `dub`                                   |
 | `GOANIME_STRICT_SOURCE`       | Set to `1` to report an error instead of guessing an unknown source      |
 | `GOANIME_ANIMEFIRE_API`       | Address of the AnimeFire API                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Address of AnimeDrive                                                    |

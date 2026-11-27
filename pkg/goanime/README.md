@@ -67,7 +67,8 @@ season lacks is `ErrAudioUnavailable`; both messages say what exists.
 ### `func (c *Client) GetAvailableSources() []types.Source`
 
 Returns the sources that support episode lists and stream URLs: AnimeFire,
-Goyabu, HiAnime, StartFlix, AnimesDigital, AnimeDrive and AnimesROLL. `types.Sources()`
+Goyabu, HiAnime, StartFlix, AnimesDigital, AnimeDrive, AnimesROLL, AnimesFHD and
+Miruro. `types.Sources()`
 lists every source that can be searched. A source that is switched off
 (Goyabu is, by default; see `GOANIME_ENABLED_SOURCES`) is still listed but
 returns no search results.
@@ -109,11 +110,14 @@ quality.
 | `types.SourcePobreflix`       | `"Pobreflix"`     |
 | `types.SourceAnroll`          | `"AnimesROLL"`    |
 | `types.SourcePomfy`           | `"Pomfy"`         |
+| `types.SourceAnimesFHD`       | `"AnimesFHD"`     |
+| `types.SourcePlutoTV`         | `"PlutoTV"`       |
+| `types.SourceMiruro`          | `"Miruro"`        |
 
 `types.Sources()` returns all of them. All can be searched. StartFlix, TopCine,
-Pobreflix and Pomfy are movie and series catalogues; only StartFlix lists
+Pobreflix, Pomfy and Pluto TV are movie and series catalogues; only StartFlix lists
 episodes through this package so far (`Source.IsCatalog()`). For the other
-three, `GetAnimeEpisodes`, `GetStreamURL` and `GetEpisodeStreamURL` return
+four, `GetAnimeEpisodes`, `GetStreamURL` and `GetEpisodeStreamURL` return
 `goanime.ErrEpisodesUnsupported`; `Source.SupportsEpisodes()` tells which.
 Some catalogues index PT-BR titles only, so search `A Origem`, not `Inception`.
 

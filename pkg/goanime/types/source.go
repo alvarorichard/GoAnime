@@ -37,6 +37,8 @@ const (
 	SourceAnimesFHD
 	// SourcePlutoTV is Pluto TV (free movies and series).
 	SourcePlutoTV
+	// SourceMiruro is Miruro (English, subbed and dubbed).
+	SourceMiruro
 
 	sourceCount // not a source: the number of them
 )
@@ -68,6 +70,7 @@ var sourceTable = [sourceCount]sourceInfo{
 	SourceAnimesFHD:     {"AnimesFHD", scraper.AnimesFHDType, []string{"animesfhd"}, true, false},
 	SourcePomfy:         {"Pomfy", scraper.PomfyType, []string{"pomfy"}, false, false},
 	SourcePlutoTV:       {"PlutoTV", scraper.PlutoTVType, []string{"plutotv", "pluto"}, false, false},
+	SourceMiruro:        {"Miruro", scraper.MiruroType, []string{"miruro"}, true, false},
 }
 
 func (s Source) valid() bool { return s >= 0 && s < sourceCount }

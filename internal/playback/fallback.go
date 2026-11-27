@@ -36,6 +36,7 @@ var fallbackOrder = []apisource.SourceKind{
 	apisource.Anroll,
 	apisource.AnimeDrive,
 	apisource.HiAnime,
+	apisource.Miruro,
 }
 
 // fallbackSearchTimeout bounds the search and the episode listing on each

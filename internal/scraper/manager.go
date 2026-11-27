@@ -23,6 +23,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/anroll"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/goyabu"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/hianime"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/miruro"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/plutotv"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
@@ -52,6 +53,7 @@ const (
 	PomfyType     // Pomfy movie/series catalog, Byse HLS with a PoW captcha
 	AnimesFHDType // AnimesFHD PT-BR anime source
 	PlutoTVType   // Pluto TV free movies and series
+	MiruroType    // miruro.cx: subbed/dubbed HLS, ani-cli's source since 2026-11-25
 )
 
 // SearchContextScraper is the optional search-only cancellation capability.
@@ -114,6 +116,8 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 		return &PomfyAdapter{client: pomfy.Shared()}, nil
 	case PlutoTVType:
 		return &PlutoTVAdapter{client: plutotv.Shared()}, nil
+	case MiruroType:
+		return &MiruroAdapter{client: miruro.NewMiruroClient()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -147,6 +151,8 @@ func scraperDisplayName(scraperType ScraperType) string {
 		return pomfy.SourceName
 	case PlutoTVType:
 		return plutotv.SourceName
+	case MiruroType:
+		return "Miruro"
 	default:
 		return "Desconhecido"
 	}
@@ -159,7 +165,7 @@ func scraperLanguageTag(scraperType ScraperType) string {
 		return "[PT-BR]"
 	case GoyabuType:
 		return "[PT-BR]"
-	case HiAnimeType:
+	case HiAnimeType, MiruroType:
 		return "[English]"
 	case StartFlixType, TopCineType, AnimesDigitalType, AnimeDriveType, PobreflixType, AnrollType, AnimesFHDType:
 		return "[PT-BR]"
@@ -488,6 +494,49 @@ func (a *HiAnimeAdapter) GetType() ScraperType {
 // adapter, and an adapter bug would go unnoticed. Only for tests.
 func NewHiAnimeAdapterForTest(serverURL string) UnifiedScraper {
 	return &HiAnimeAdapter{client: hianime.NewClientForTest(serverURL)}
+}
+
+// MiruroAdapter adapts miruro.MiruroClient to the UnifiedScraper interface.
+// Like HiAnimeAdapter, the *Context methods are the real implementations.
+type MiruroAdapter struct {
+	client *miruro.MiruroClient
+}
+
+func (a *MiruroAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {
+	return a.client.SearchAnime(ctx, query)
+}
+
+func (a *MiruroAdapter) GetAnimeEpisodesContext(ctx context.Context, animeURL string) ([]models.Episode, error) {
+	return a.client.GetAnimeEpisodes(ctx, animeURL)
+}
+
+// GetStreamURLContext accepts an optional quality string ("best", "1080p", …)
+// as the first variadic option.
+func (a *MiruroAdapter) GetStreamURLContext(ctx context.Context, episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.client.GetEpisodeStreamURL(ctx, episodeURL, qualityOption(options))
+}
+
+func (a *MiruroAdapter) SearchAnime(query string, options ...any) ([]*models.Anime, error) {
+	return a.SearchAnimeContext(context.Background(), query, options...)
+}
+
+func (a *MiruroAdapter) GetAnimeEpisodes(animeURL string) ([]models.Episode, error) {
+	return a.GetAnimeEpisodesContext(context.Background(), animeURL)
+}
+
+func (a *MiruroAdapter) GetStreamURL(episodeURL string, options ...any) (streamURL string, metadata map[string]string, err error) {
+	return a.GetStreamURLContext(context.Background(), episodeURL, options...)
+}
+
+func (a *MiruroAdapter) GetType() ScraperType {
+	return MiruroType
+}
+
+// NewMiruroAdapterForTest builds a Miruro adapter whose client talks to a test
+// server instead of miruro.cx, so the registry-level cascade test drives the
+// real adapter glue offline. Only for tests.
+func NewMiruroAdapterForTest(serverURL string) UnifiedScraper {
+	return &MiruroAdapter{client: miruro.NewClientForTest(serverURL)}
 }
 
 // StartFlixAdapter adapts startflix.Client to the UnifiedScraper interface.

@@ -50,6 +50,7 @@ body:
       description: The source of the title that failed. The details panel beside the search results shows it under Source.
       options:
         - HiAnime
+        - Miruro
         - AnimeFire
         - Goyabu
         - StartFlix

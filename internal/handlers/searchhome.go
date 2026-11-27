@@ -201,7 +201,7 @@ func init() {
 // scopeIndexForSource maps a --source flag to the home screen's scope tab.
 func scopeIndexForSource(src string) int {
 	switch strings.ToLower(strings.TrimSpace(src)) {
-	case "hianime", "english":
+	case "hianime", "miruro", "english":
 		return 2
 	case "ptbr", "pt-br", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd":
 		return 1
@@ -322,6 +322,8 @@ func sourceFromURL(rawURL string) string {
 		return "Goyabu"
 	case strings.Contains(host, "hianime"):
 		return "HiAnime"
+	case strings.Contains(host, "miruro"):
+		return "Miruro"
 	case strings.Contains(host, "animesdigital"):
 		return "AnimesDigital"
 	case strings.Contains(host, "anroll"):

@@ -32,6 +32,8 @@ func sourceDisplayName(kind source.SourceKind) string {
 		return "Goyabu"
 	case source.HiAnime:
 		return "HiAnime"
+	case source.Miruro:
+		return "Miruro"
 	case source.StartFlix:
 		return "StartFlix"
 	case source.TopCine:
@@ -56,7 +58,7 @@ func sourceDisplayName(kind source.SourceKind) string {
 }
 
 func languageTag(kind source.SourceKind) string {
-	if kind == source.HiAnime {
+	if kind == source.HiAnime || kind == source.Miruro {
 		return "[English]"
 	}
 	return "[PT-BR]"

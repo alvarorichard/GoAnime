@@ -283,6 +283,110 @@ func (p *hianimeProvider) FetchStreamURL(ctx context.Context, episode *models.Ep
 	return fetchAndPublish(ctx, p, episode, anime, quality)
 }
 
+// --- Miruro Provider ---
+//
+// miruro.cx is the second English source, beside HiAnime: upstream ani-cli
+// switched to it on 2026-11-25 while hianime.at still answered, so GoAnime
+// keeps both and an outage of one leaves the other.
+//
+// Priority 46 puts it before HiAnime (50) on purpose. Resolution walks the
+// sources by priority and checks each one's tags before its URL; HiAnime owns
+// the "[english]" tag, so if it came first a Miruro title that lost its Source
+// field ("[English] Frieren", a miruro.cx URL) would be routed to HiAnime by
+// the tag before Miruro ever saw its own URL.
+
+type miruroProvider struct {
+	once    sync.Once
+	adapter adapterSlot
+}
+
+func init() {
+	source.Register(&miruroProvider{})
+}
+
+func (p *miruroProvider) scraper() (scraper.UnifiedScraper, error) {
+	return lazyGetAdapter(&p.once, &p.adapter, scraper.MiruroType)
+}
+
+func (p *miruroProvider) Describe() source.Descriptor {
+	return source.Descriptor{
+		Kind:        source.Miruro,
+		Priority:    46,
+		Explicit:    []string{"Miruro", "miruro.cx"},
+		Tags:        []string{"[miruro]"},
+		URLMatchers: []string{"miruro.cx"},
+		ProbeURL:    "https://miruro.cx",
+	}
+}
+
+func (p *miruroProvider) HasSeasons() bool { return false }
+
+func (p *miruroProvider) Search(ctx context.Context, query string) ([]*models.Anime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	var results []*models.Anime
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		results, err = ca.SearchAnimeContext(ctx, query)
+	} else {
+		results, err = adapter.SearchAnime(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tagResults(results, source.Miruro)
+	return results, nil
+}
+
+func (p *miruroProvider) FetchEpisodes(ctx context.Context, anime *models.Anime) ([]models.Episode, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return nil, err
+	}
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		return ca.GetAnimeEpisodesContext(ctx, anime.URL)
+	}
+	return adapter.GetAnimeEpisodes(anime.URL)
+}
+
+// FetchStream resolves the episode without writing playback state. The
+// referer and origin matter here: one of the site's CDN families answers 403
+// without the Origin, the others without the Referer.
+func (p *miruroProvider) FetchStream(ctx context.Context, episode *models.Episode, _ *models.Anime, quality string) (source.Stream, error) {
+	if err := ctx.Err(); err != nil {
+		return source.Stream{}, err
+	}
+	adapter, err := p.scraper()
+	if err != nil {
+		return source.Stream{}, err
+	}
+	var url string
+	var metadata map[string]string
+	if ca, ok := adapter.(scraper.ContextualScraper); ok {
+		url, metadata, err = ca.GetStreamURLContext(ctx, episode.URL, quality)
+	} else {
+		url, metadata, err = adapter.GetStreamURL(episode.URL, quality)
+	}
+	if err != nil {
+		return source.Stream{}, fmt.Errorf("miruro stream: %w", err)
+	}
+	if url == "" {
+		return source.Stream{}, fmt.Errorf("empty stream URL returned from Miruro")
+	}
+	return streamFromMetadata(url, metadata), nil
+}
+
+func (p *miruroProvider) FetchStreamURL(ctx context.Context, episode *models.Episode, anime *models.Anime, quality string) (string, error) {
+	return fetchAndPublish(ctx, p, episode, anime, quality)
+}
+
 // streamFromMetadata moves a scraper's playback hints into the globals mpv
 // and the downloader read.
 //

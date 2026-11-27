@@ -269,7 +269,8 @@ func TestSourceValuesAreStable(t *testing.T) {
 	assert.Equal(t, 9, int(SourcePomfy))
 	assert.Equal(t, 10, int(SourceAnimesFHD))
 	assert.Equal(t, 11, int(SourcePlutoTV))
-	assert.Len(t, Sources(), 12)
+	assert.Equal(t, 12, int(SourceMiruro))
+	assert.Len(t, Sources(), 13)
 	assert.Equal(t, "Unknown", Source(-1).String())
 }
 
