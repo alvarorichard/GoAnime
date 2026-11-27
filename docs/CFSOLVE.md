@@ -85,14 +85,15 @@ built from; use `--build` then.
 | `cfsolve-build.yml` | called by `ci.yml` and `release.yml` | reads upstream's latest commit and builds it for the five platforms. CI keeps each binary in the Actions cache until upstream moves; a release always compiles |
 | `ci.yml` | every push and pull request | bundles that build and its profile in the binaries and the Windows installer it uploads |
 | `release.yml` | every release tag | bundles that build and its profile in each binary, and adds the binaries to the signed `checksums-sha256.txt` and to the release assets. Optional: a failure never blocks a release |
-| `source-health.yml` (`goyabu-cfsolve`) | manual | installs the latest release's binary the way a user would and runs the live Goyabu test |
+| `source-health.yml` (`goyabu-cfsolve`) | manual | builds upstream's latest commit with that commit's profile, as the next release would ship it, and runs the live Goyabu test |
 | `cfsolve-update.yml` | weekly | tries upstream HEAD in a read-only job; if it builds and clears the gate, opens a PR moving the committed lock and profile, and warns when it does not |
 
 If Cloudflare changes a gate, the affected source stops working until cfsolve
 is fixed upstream; the next release then ships the fix with no change here.
-`cfsolve-update.yml` is the only workflow that runs the live Goyabu test against
-upstream's latest commit, so its warning means the next release would ship a
-solver that does not clear the gate. The Pobreflix live test above checks the
+`cfsolve-update.yml` (weekly) and `goyabu-cfsolve` (on demand) run the live
+Goyabu test against upstream's latest commit, so a warning from the first or a
+failure of the second means the next release would ship a solver that does not
+clear the gate. The Pobreflix live test above checks the
 Turnstile path by hand.
 
 ## Platforms
