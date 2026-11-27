@@ -365,6 +365,27 @@ jobs:
           mkdir -p dist
           go build -o dist/${{ matrix.binary_name }} -ldflags="-s -w" -trimpath ./cmd/goanime
 
+      - name: Install Rosetta
+        if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+
+      # What release.yml requires of every binary, checked here on each push for
+      # every binary that carries a solver: started with an empty config folder,
+      # it unpacks that solver and the solver starts (on Linux, in AlmaLinux 9 too).
+      - name: Check what a new user gets
+        shell: bash
+        run: |
+          solver="internal/scraper/cfsolver/embedded/challenge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}"
+          if [ ! -s "$solver" ]; then
+            echo "::notice::this build carries no cfsolve; nothing to check"
+            exit 0
+          fi
+          if [ "${{ matrix.goos }}" = linux ]; then
+            scripts/check-bundled-cfsolve.sh "dist/${{ matrix.binary_name }}" "$solver" --in-image almalinux:9
+          else
+            scripts/check-bundled-cfsolve.sh "dist/${{ matrix.binary_name }}" "$solver"
+          fi
+
       - name: Create archive (Unix)
         if: matrix.goos != 'windows'
         shell: bash

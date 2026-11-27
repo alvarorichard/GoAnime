@@ -20,6 +20,9 @@ env:
   BINARY_NAME: goanime
   GOFLAGS: -mod=readonly
   GOTOOLCHAIN: local
+  # Each Linux binary is also started here, with the solver it unpacks: glibc
+  # 2.34, the oldest GoAnime runs on (see cfsolve-build.yml).
+  CFSOLVE_LINUX_IMAGE: almalinux:9
 
 jobs:
   # =============================================================================
@@ -123,8 +126,10 @@ jobs:
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    # The cfsolve jobs may fail (continue-on-error); the build then ships
-    # without the bundled solver and falls back to downloading it.
+    # Every published binary carries its platform's cfsolve, so a new user
+    # never has to set anything up: a build whose solver is missing fails, and
+    # with it the release (the cfsolve jobs themselves may fail, but then the
+    # artifact this job needs is missing).
     needs: [test, cfsolve]
     if: ${{ !cancelled() && needs.test.result == 'success' }}
     strategy:
@@ -189,18 +194,22 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       # Bundle this platform's cfsolve (go:embed in internal/scraper/cfsolver),
-      # so the executable is the only file a user needs. A failed cfsolve job
-      # leaves nothing to download; the build then goes without it. The profile
-      # is embedded too and must come from the commit the binary was built from.
+      # so the executable is the only file a user needs. The profile is
+      # embedded too and must come from the commit the binary was built from.
+      - name: Require the cfsolve build
+        if: needs.cfsolve.outputs.sha == ''
+        shell: bash
+        run: |
+          echo "::error::cfsolve's latest commit could not be read or built; a release must carry the solver"
+          exit 1
+
       - name: Take the cfsolve profile from the commit this release builds
-        if: needs.cfsolve.outputs.sha != ''
         shell: bash
         env:
           CFSOLVE_SHA: ${{ needs.cfsolve.outputs.sha }}
         run: scripts/update-cfsolve.sh "$CFSOLVE_SHA" --no-build
 
       - name: Download the cfsolve binary to bundle
-        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: challenge-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
@@ -208,7 +217,9 @@ jobs:
 
       - name: Show what is bundled
         shell: bash
-        run: ls -la internal/scraper/cfsolver/embedded
+        run: |
+          ls -la internal/scraper/cfsolver/embedded
+          test -s "internal/scraper/cfsolver/embedded/challenge-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
 
       - name: Build binary (Unix)
         if: matrix.os != 'windows'
@@ -258,6 +269,26 @@ jobs:
           
           Write-Host "Built $OUTPUT_NAME with SQLite support"
 
+      # The Intel binary is built on an Apple Silicon runner and runs there
+      # under Rosetta.
+      - name: Install Rosetta
+        if: matrix.os == 'darwin' && matrix.arch == 'amd64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+
+      # Start the binary the way a new user does, with an empty config folder:
+      # it must unpack the solver it carries, and that solver must start (on
+      # Linux, also in CFSOLVE_LINUX_IMAGE). A failure here stops the release.
+      - name: Check what a new user gets
+        shell: bash
+        run: |
+          bin="dist/${{ env.BINARY_NAME }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          solver="internal/scraper/cfsolver/embedded/challenge-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          if [ "${{ matrix.os }}" = linux ]; then
+            scripts/check-bundled-cfsolve.sh "$bin" "$solver" --in-image "$CFSOLVE_LINUX_IMAGE"
+          else
+            scripts/check-bundled-cfsolve.sh "$bin" "$solver"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -266,14 +297,14 @@ jobs:
           retention-days: 1
 
   # =============================================================================
-  # Job 2b: Build cfsolve (clears Goyabu's Cloudflare gate; optional, no browser)
+  # Job 2b: Build cfsolve (clears Cloudflare's gates for Goyabu and Pobreflix; no browser)
   # =============================================================================
   # cfsolve-build.yml compiles upstream's latest commit for every platform. Each
   # GoAnime build bundles its own platform's binary and the profile from that
   # same commit, and the binaries join the signed checksums-sha256.txt below,
-  # which is what the downloader verifies. Optional: a failure never blocks a
-  # release, it only leaves that platform without the solver. No cache: a
-  # release compiles what it ships.
+  # which is what the downloader verifies. Required: a platform whose solver
+  # fails to build fails its GoAnime build, so no release goes out without it.
+  # No cache: a release compiles what it ships.
   cfsolve:
     name: cfsolve
     needs: test
@@ -480,7 +511,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-24.04
     needs: [build, macos-universal, windows-installer, cfsolve]
-    # cfsolve is optional: release whatever it built, or nothing of it.
+    # Every build succeeded, so every platform's solver was built and bundled.
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.macos-universal.result == 'success' && needs.windows-installer.result == 'success' }}
     # The environment holds the minisign secret key and requires a reviewer's
     # approval, so nothing is signed or published without a human saying yes.
@@ -521,8 +552,6 @@ jobs:
           path: artifacts/windows-installer
 
       - name: Download cfsolve binaries
-        # Optional: with none built, the release simply has no solver assets.
-        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           path: cfsolve-assets
@@ -573,10 +602,12 @@ jobs:
             cp "$f" "release/$(basename "$f")"
             chmod +x "release/$(basename "$f")"
           done
-          if [ ! -f release/challenge-linux-amd64 ]; then
-            echo "::warning::no cfsolve linux/amd64 binary; this release ships without the Goyabu solver"
-          fi
-          ls -l release/challenge-* 2>/dev/null || true
+          # GoAnime downloads these when a build carries no solver (go install).
+          for asset in challenge-linux-amd64 challenge-linux-arm64 challenge-darwin-arm64 \
+                       challenge-darwin-amd64 challenge-windows-amd64.exe; do
+            test -s "release/$asset" || { echo "::error::no $asset among the release assets"; exit 1; }
+          done
+          ls -l release/challenge-*
 
       - name: Generate checksums
         run: |
