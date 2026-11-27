@@ -8,6 +8,13 @@ updates:
       time: '08:00'
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 10
+    ignore:
+      # Every bubbletea after v2.1.1 closes the terminal it opens when stdin is
+      # not one, and on Windows without a console that close waits forever:
+      # the Windows tests hang in internal/appflow and internal/download
+      # (CHANGELOG 2.0.1 and 2.0.4). Lift this once a release fixes it.
+      - dependency-name: charm.land/bubbletea/v2
+        versions: ['>= 2.1.2']
     groups:
       go-minor-and-patch:
         update-types:

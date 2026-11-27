@@ -2,7 +2,7 @@
 
 Release date: 2026-11-27
 
-Miruro joins HiAnime as a second English source, dubbed Pobreflix titles play again behind the Turnstile gate RedeFlixApi added on 2026-11-24, and release executables now carry cfsolve inside them, Intel Macs included. A title whose source already names its AniList entry is looked up by that id instead of by name, and every library is on its latest release. 92 files changed, +8,358 / −2,134 lines; 23 of those files are tests, and 3,359 of the changed lines are the cfsolve profile, regenerated for the new upstream commit.
+Miruro joins HiAnime as a second English source, dubbed Pobreflix titles play again behind the Turnstile gate RedeFlixApi added on 2026-11-24, and release executables now carry cfsolve inside them, Intel Macs included. A title whose source already names its AniList entry is looked up by that id instead of by name, and every library but bubbletea, held back for a Windows hang, is on its latest release. 92 files changed, +8,358 / −2,134 lines; 23 of those files are tests, and 3,359 of the changed lines are the cfsolve profile, regenerated for the new upstream commit.
 
 ## New source
 
@@ -29,10 +29,11 @@ Miruro joins HiAnime as a second English source, dubbed Pobreflix titles play ag
 
 ## Dependencies
 
-- `charm.land/bubbletea/v2` v2.1.1 to v2.2.0, `charm.land/bubbles/v2` v2.2.1 to v2.2.2, `github.com/charmbracelet/x/ansi` v0.11.10 to v0.12.0.
+- `charm.land/bubbles/v2` v2.2.1 to v2.2.2.
 - `github.com/lrstanley/go-ytdlp` v1.5.6 to v1.5.7. It pins yt-dlp 2026.11.23 (was 2026.10.26), the version GoAnime downloads when it manages its own copy.
-- Indirect: `github.com/charmbracelet/ultraviolet` to 8ed499892fb4 (2026-11-25), `github.com/klauspost/compress` v1.20.5, `github.com/wzshiming/socks5` v0.10.0, `golang.org/x/exp` to d6646c509b6d (2026-11-24), and `github.com/rivo/uniseg` to the 2026-11-10 pre-release commit that bubbles v2.2.2 requires.
-- Go stays at 1.27.4, the latest release. Every other module in `go.mod` was already on its latest version; the copies of the enetx modules stay frozen (see 2.0.3). `go mod verify` passes and `govulncheck` finds no vulnerabilities.
+- Indirect: `github.com/klauspost/compress` v1.20.5, `github.com/wzshiming/socks5` v0.10.0, `golang.org/x/exp` to d6646c509b6d (2026-11-24), and `github.com/rivo/uniseg` to the 2026-11-10 pre-release commit that bubbles v2.2.2 requires.
+- **Held back: `charm.land/bubbletea/v2` stays at v2.1.1**, with `github.com/charmbracelet/x/ansi` v0.11.10 and `ultraviolet` a45b7c86333f, the versions 2.0.3 shipped with. Every later bubbletea (v2.1.2, v2.1.3, v2.2.0) closes the terminal it opens, when stdin is not one, as soon as a screen exits; on Windows without a console that close waits forever for a read still in progress, and the Windows tests hung for ten minutes in `internal/appflow` and `internal/download`, at the end of a `huh` spinner: the hang 2.0.1 already found in v2.1.2, still there. Dependabot no longer offers those versions.
+- Go stays at 1.27.4, the latest release. Every other module in `go.mod` is on its latest version; the copies of the enetx modules stay frozen (see 2.0.3). `go mod verify` passes and `govulncheck` finds no vulnerabilities.
 - CI: golangci-lint v2.14.0 to v2.15.0, `github/codeql-action` v4.37.4 to v4.39.5. The other Actions are pinned to major tags that already resolve to their latest releases.
 
 ## Docs
