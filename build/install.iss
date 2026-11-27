@@ -2,7 +2,7 @@
 ; This script is designed to be run from CI with files staged in the build directory
 
 #define MyAppName "GoAnime"
-#define MyAppVersion "2.0.3"
+#define MyAppVersion "2.0.4"
 #define MyAppPublisher "GoAnime Team"
 #define MyAppURL "https://github.com/alvarorichard/GoAnime"
 #define MyAppExeName "goanime.exe"

@@ -1,3 +1,57 @@
+# GoAnime Release Notes - Version 2.0.4
+
+Release date: 2026-11-27
+
+Miruro joins HiAnime as a second English source, dubbed Pobreflix titles play again behind the Turnstile gate RedeFlixApi added on 2026-11-24, and release executables now carry cfsolve inside them, Intel Macs included. A title whose source already names its AniList entry is looked up by that id instead of by name, and every library is on its latest release. 90 files changed, +7,960 / −2,115 lines; 22 of those files are tests, and 3,359 of the changed lines are the cfsolve profile, regenerated for the new upstream commit.
+
+## New source
+
+- **Miruro (miruro.cx), English, subbed and dubbed.** Upstream ani-cli moved from hianime.at to miruro.cx on 2026-11-25 ([pystardust/ani-cli#1993](https://github.com/pystardust/ani-cli/pull/1993)). HiAnime still plays, so GoAnime keeps it and adds Miruro beside it: either can go down without leaving GoAnime with no English source. It is on by default, searched on the ALL and ENGLISH tabs and alone with `--source miruro`, listed on the sources screen (`ctrl+s`), tried after HiAnime when an episode falls back to another source, probed by the health check, and in the SDK as `types.SourceMiruro`.
+- **Three requests, no key.** Search, the episode list and an episode's sources each come from the site's own data endpoint. Results carry the AniList and MAL ids, and titles AniList marks as not yet released are left out (their watch page lists no episodes).
+- **The first mirror that answers is played.** Each episode lists several mirrors per audio track. GoAnime tries at most eight, the preferred audio first and then in the site's own order, and plays the first whose playlist answers, sending the Referer and Origin that mirror's CDN checks (one family answers 403 without the Origin).
+- **Subtitles.** A subtitled episode uses separate subtitle files when the mirror has an English or Portuguese one, and burned-in subtitles otherwise; only English and Portuguese files are offered. `GOANIME_MIRURO_AUDIO=dub` prefers the dub, and an episode without one plays subtitled.
+
+## Bug Fixes
+
+- **Dubbed Pobreflix titles play again.** Since 2026-11-24 the RedeFlixApi player (now on `redeflixapi.click`) shows a Turnstile form before its ticket page. GoAnime no longer recognised the page as RedeFlixApi, so every dubbed title was treated as gated. It now answers that Turnstile with cfsolve, submits the form the way the page's script does and carries on with the ticket flow; without cfsolve the player is skipped as gated, as before. The Turnstile parser also stopped reading a `<form action="...">` attribute as the widget's action.
+- **A title whose source names its AniList entry is looked up by that id.** The AniList lookup after a pick always searched by title and then overwrote the AniList and MAL ids with whatever it matched, so a source that already knew the exact entry lost it, and a title shared by several seasons could land on the wrong one. When the result carries an AniList id (Miruro's do), GoAnime reads that entry directly, remembers the answer, and falls back to the title search only if the id lookup fails; during an AniList outage it does not try the title search either.
+
+## cfsolve
+
+- **Release executables carry cfsolve.** Each release binary embeds the cfsolve build for its own platform and unpacks it into GoAnime's config folder (`goanime/cfsolve` under the system's user config directory) on first run, so Goyabu and the gated Pobreflix players work with no download. `GOANIME_CFSOLVE_BIN` still takes precedence, and a build without the embedded binary keeps the signed download as its fallback. The macOS universal binary carries one solver per architecture. A solver already in that folder is kept only when it holds exactly the bundled bytes: a file of the same size is not taken for the same build, so an upgrade never keeps a stale solver (an older bundle, a download, a local build) that this version's profile would refuse. On an SSD the check of a 20 MB solver takes a few milliseconds.
+- **Intel Macs get cfsolve.** It is cross-compiled for `x86_64-apple-darwin` on the Apple Silicon runner and published as `challenge-darwin-amd64`. It has not been run on Intel hardware yet.
+- **Builds follow upstream's latest commit.** Releases used to build the commit pinned in `cfsolve.lock`, so an upstream fix reached users only after a pin was merged. The new `cfsolve-build.yml` workflow reads upstream's HEAD once per run and builds it for the five platforms; each GoAnime build moves the embedded profile to that same commit before `go build`, because cfsolve refuses a profile from another reference build. A failed cfsolve build never fails CI or a release, and the release notes name the commit a release was built from. The on-demand Goyabu check in `source-health.yml` builds upstream's latest commit too, instead of installing the latest release's binary. The committed lock, used by `go test`, local builds and `get-cfsolve.sh --build`, moves to upstream 3d2f67ed56df ("fix for new build", 2026-11-26).
+- **CI artifacts and local builds bundle it too.** `scripts/get-cfsolve.sh --bundle GOOS GOARCH` puts that platform's binary from the latest release in the embed folder, after checking it against the release's checksums (and their signature when minisign is installed). `ci.yml` and the `build/*.sh` scripts call it before `go build`, and `build/buildwindows.ps1` does the same with its own SHA-256 check; a failure only warns and the build goes on without the solver.
+- **Windows checkouts.** `update-cfsolve.sh` and `get-cfsolve.sh` strip carriage returns from the lock, whose repository URL kept a trailing `\r` on a Windows checkout and made `git clone` refuse it. `cfsolve-windows-trial.yml` is removed, since CI now builds the Windows solver on every push.
+- **The weekly `cfsolve-update.yml` warns** when upstream's latest commit does not clear Goyabu's gate, since the next release would ship it anyway.
+
+## Dependencies
+
+- `charm.land/bubbletea/v2` v2.1.1 to v2.2.0, `charm.land/bubbles/v2` v2.2.1 to v2.2.2, `github.com/charmbracelet/x/ansi` v0.11.10 to v0.12.0.
+- `github.com/lrstanley/go-ytdlp` v1.5.6 to v1.5.7. It pins yt-dlp 2026.11.23 (was 2026.10.26), the version GoAnime downloads when it manages its own copy.
+- Indirect: `github.com/charmbracelet/ultraviolet` to 8ed499892fb4 (2026-11-25), `github.com/klauspost/compress` v1.20.5, `github.com/wzshiming/socks5` v0.10.0, `golang.org/x/exp` to d6646c509b6d (2026-11-24), and `github.com/rivo/uniseg` to the 2026-11-10 pre-release commit that bubbles v2.2.2 requires.
+- Go stays at 1.27.4, the latest release. Every other module in `go.mod` was already on its latest version; the copies of the enetx modules stay frozen (see 2.0.3). `go mod verify` passes and `govulncheck` finds no vulnerabilities.
+- CI: golangci-lint v2.14.0 to v2.15.0, `github/codeql-action` v4.37.4 to v4.39.5. The other Actions are pinned to major tags that already resolve to their latest releases.
+
+## Docs
+
+- `SOURCES.md`, `SCRAPING_INTEGRATION.md`, both READMEs, the SDK docs, `goanime -h` and the bug form name Miruro; the READMEs and `SOURCES.md` document `GOANIME_MIRURO_AUDIO`. `CFSOLVE.md` and `SOURCES.md` describe the bundled solver, the new platform and which commit ships.
+- Fixed what was already wrong there: the SDK docs missed AnimesFHD and Pluto TV, the priority list in `ADDING_A_SOURCE.md` was out of date, two docs named a function that no longer exists, and `SOURCES.md` still said Windows had no cfsolve build.
+
+## Tested
+
+The Miruro chain was run against the live site on 2026-11-27 (search, episodes, and the subbed and dubbed streams at best and 720p, then the playlist and the first subtitle fetched with the headers the scraper hands out) and through the source registry. With the Apple Silicon solver CI built from upstream's latest commit and the profile from that commit, the pair this release ships, the live tests passed on 2026-11-27: Pobreflix cleared the RedeFlixApi gate for *Todo Poderoso*, resolved the dubbed stream and got HTTP 206 `video/mp4` for the first 64 KiB of the signed media URL, and Goyabu cleared its gate and reached a stream. The gate fix also has offline tests over the gate page. Offline, Miruro has unit tests for every function against a scripted site and CDNs, a fixture in the site's exact wire format that 22 fixture mutants must each break, and tamper metatests for the stream order, subtitles, variants and redirects; mutation testing built 364 mutants, and the 12 that survive change only logging or nothing observable. The AniList id lookup has a scenario table shared by its unit test and a metatest. The bundled-solver check has a case table (same and different bytes at chunk edges, other sizes, a directory) shared by its unit test and a metatest whose mutants, the old size-only check among them, must each fail it, plus mutation testing of the code itself. After the library updates, `go test -short -race ./...` passes on every package on macOS, the mutation guards pass, and golangci-lint v2.14.0 and v2.15.0 report no issues.
+
+## Known Limitations
+
+- Everything listed under 2.0.3, 2.0.2 and 2.0.1 still applies.
+- Release executables are larger because they carry cfsolve: by about 20 MB (Apple Silicon) to 38 MB (Windows), going by the 2.0.3 solver assets.
+- The Intel Mac solver has only been built, not run.
+- The latest release's solver, which `get-cfsolve.sh` and the `build/` scripts bundle, can be refused by a checkout whose `cfsolve.lock` names another commit; `get-cfsolve.sh --build` builds the matching one.
+- Miruro depends on the site's data endpoints and on mirrors that change often; when none of the eight mirrors tried answers, the episode falls back to another source like any other.
+
+---
+
 # GoAnime Release Notes - Version 2.0.3
 
 Release date: 2026-11-23
