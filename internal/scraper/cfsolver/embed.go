@@ -64,6 +64,11 @@ func unpackEmbedded(fsys fs.FS, root, goos, goarch, dir string) (string, error) 
 	}
 	dst := filepath.Join(dir, localBinaryName(goos))
 	if sameFileContent(dst, data) {
+		// The right bytes, but a copy or a restore can drop the executable
+		// bit, and the solver would then never start.
+		if err := os.Chmod(dst, 0o700); err != nil { // #nosec G302 -- an executable the user's own account runs
+			return "", err
+		}
 		return dst, nil
 	}
 	tmp, err := os.CreateTemp(dir, ".challenge-*")

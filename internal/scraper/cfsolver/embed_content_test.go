@@ -205,13 +205,16 @@ func TestSameFileContentMetatest(t *testing.T) {
 type unpackCase struct {
 	name        string
 	existing    []byte // nil: nothing there yet
+	executable  bool   // the existing file has its executable bit
 	wantReplace bool   // the file must be written anew (a new file, not the old one)
 }
 
 func unpackCases(bundled []byte) []unpackCase {
 	return []unpackCase{
 		{name: "nothing there", wantReplace: true},
-		{name: "the same binary", existing: bundled, wantReplace: false},
+		{name: "the same binary", existing: bundled, executable: true, wantReplace: false},
+		// A copy or a restore can drop the bit: the bytes are kept, the bit put back.
+		{name: "the same binary without its executable bit", existing: bundled, wantReplace: false},
 		{name: "another build of the same size", existing: flipped(bundled, len(bundled)/2), wantReplace: true},
 		{name: "another build of another size", existing: bundled[:len(bundled)-1], wantReplace: true},
 	}
@@ -235,8 +238,13 @@ func unpackFailures(t *testing.T, unpack unpackFunc) []string {
 		dir := t.TempDir()
 		dst := filepath.Join(dir, "challenge")
 		if c.existing != nil {
-			if err := os.WriteFile(dst, c.existing, 0o700); err != nil {
+			if err := os.WriteFile(dst, c.existing, 0o600); err != nil {
 				t.Fatal(err)
+			}
+			if c.executable {
+				if err := os.Chmod(dst, 0o700); err != nil { // #nosec G302 -- a stand-in for the unpacked solver
+					t.Fatal(err)
+				}
 			}
 			if err := os.Chtimes(dst, oldStamp, oldStamp); err != nil {
 				t.Fatal(err)
@@ -257,6 +265,10 @@ func unpackFailures(t *testing.T, unpack unpackFunc) []string {
 		}
 		if replaced := !after.ModTime().Equal(oldStamp); replaced != c.wantReplace {
 			bad = append(bad, fmt.Sprintf("%s: replaced=%v, want %v", c.name, replaced, c.wantReplace))
+		}
+		// Windows has no executable bit; it runs a file by its extension.
+		if runtime.GOOS != "windows" && after.Mode().Perm()&0o100 == 0 {
+			bad = append(bad, fmt.Sprintf("%s: left a solver that cannot be run (%v)", c.name, after.Mode()))
 		}
 	}
 	return bad
@@ -292,6 +304,15 @@ func TestUnpackEmbeddedMetatest(t *testing.T) {
 			_ = os.Remove(filepath.Join(dir, "challenge"))
 			return unpackEmbedded(fsys, root, goos, goarch, dir)
 		},
+	}
+	if runtime.GOOS != "windows" { // the bit it forgets does not exist there
+		mutants["keeps the same bytes without the executable bit"] = func(fsys fs.FS, root, goos, goarch, dir string) (string, error) {
+			data, _ := fs.ReadFile(fsys, root+"/challenge-"+goos+"-"+goarch)
+			if dst := filepath.Join(dir, "challenge"); sameFileContent(dst, data) {
+				return dst, nil
+			}
+			return unpackEmbedded(fsys, root, goos, goarch, dir)
+		}
 	}
 	for name, m := range mutants {
 		if bad := unpackFailures(t, m); len(bad) == 0 {
