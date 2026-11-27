@@ -2,6 +2,10 @@ package api
 
 import (
 	"context"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/cfsolver"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -88,6 +92,12 @@ func TestLiveTopCineTodoPoderosoPlaysViaFallback(t *testing.T) {
 // hosts. The panel/vidsrc fallback keeps unit coverage for old-theme pages.
 func TestLivePobreflixTodoPoderosoPlays(t *testing.T) {
 	ctx := liveFallbackSetup(t)
+	// The dub sits behind the RedeFlixApi Turnstile: it needs the solver, as
+	// the app registers it at startup.
+	if !cfsolver.Register() {
+		t.Skip("cfsolve is not installed")
+	}
+	t.Cleanup(func() { netx.RegisterChallengeSolver(nil) })
 
 	results, err := pobreflix.Shared().Search(ctx, "todo poderoso")
 	require.NoError(t, err, "search")
@@ -96,7 +106,7 @@ func TestLivePobreflixTodoPoderosoPlays(t *testing.T) {
 	for _, r := range results {
 		t.Logf("result: %s (%s) %s", r.Title, r.Kind, r.URL)
 		// The catalog lists the year since 2026-10-27: "Todo Poderoso (2003)".
-		if r.Kind == pobreflix.KindMovie && r.Title == "Todo Poderoso (2003)" {
+		if r.Kind == pobreflix.KindMovie && (r.Title == "Todo Poderoso (2003)" || r.Title == "Todo Poderoso") {
 			anime = r.ToAnimeModel()
 			break
 		}
@@ -112,6 +122,18 @@ func TestLivePobreflixTodoPoderosoPlays(t *testing.T) {
 	require.NoError(t, err, "the fallback must save the title its panel could not")
 	require.True(t, strings.HasPrefix(streamURL, "http"), "URL shape: %s", head(streamURL, 100))
 	t.Logf("stream: %s", head(streamURL, 100))
+
+	// The signed URL must actually serve media, not just look like one.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set("Range", "bytes=0-65535")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err, "media request")
+	defer func() { _ = resp.Body.Close() }()
+	n, _ := io.Copy(io.Discard, resp.Body)
+	t.Logf("media: HTTP %d, %d bytes, %s", resp.StatusCode, n, resp.Header.Get("Content-Type"))
+	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
+	require.EqualValues(t, 65536, n)
 }
 
 func head(s string, limit int) string {

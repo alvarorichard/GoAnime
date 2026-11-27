@@ -86,6 +86,12 @@ var adapterProviders = []struct {
 		p.once.Do(func() {})
 		return p
 	}, true, "hianime stream: ", "empty stream URL returned from HiAnime", true},
+	{"miruro", func(a scraper.UnifiedScraper) streamProvider {
+		p := &miruroProvider{}
+		p.adapter.UnifiedScraper = a
+		p.once.Do(func() {})
+		return p
+	}, true, "miruro stream: ", "empty stream URL returned from Miruro", true},
 	{"anroll", func(a scraper.UnifiedScraper) streamProvider {
 		p := &anrollProvider{}
 		p.adapter.UnifiedScraper = a
@@ -273,7 +279,7 @@ func TestAdapterProvidersFetchStreamURLReplacesTheLastEpisodesContext(t *testing
 
 func TestContextAwareAdaptersAreUsedWithTheCallersContext(t *testing.T) {
 	type ctxKey struct{}
-	for _, name := range []string{"hianime", "anroll", "animesdigital", "animesfhd"} {
+	for _, name := range []string{"hianime", "miruro", "anroll", "animesdigital", "animesfhd"} {
 		for _, pc := range adapterProviders {
 			if pc.name != name {
 				continue

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/alvarorichard/Goanime/v2/internal/models"
@@ -209,4 +210,80 @@ func FetchAnimeFromAniListWithURL(animeName, animeURL string) (*models.AniListRe
 	}
 
 	return nil, lastErr
+}
+
+// aniListByIDQuery reads one entry by id, with the fields the title search
+// asks for, so both answers fill the same models.AniListResponse.
+const aniListByIDQuery = `query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+            id
+            title { romaji english native }
+            idMal
+            coverImage { large }
+            synonyms
+        }
+    }`
+
+// FetchAnimeFromAniListByID reads the AniList entry with the given id. A
+// source that names the entry itself (Miruro's results carry their AniList
+// id) is looked up this way, exactly, instead of by a title that can match
+// another season or another show of the same name.
+func FetchAnimeFromAniListByID(id int) (*models.AniListResponse, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("no AniList id to look up (%d)", id)
+	}
+	cache := util.GetAniListCache()
+	cacheKey := "anilist:id:" + strconv.Itoa(id)
+	if cached, found := cache.Get(cacheKey); found {
+		var result models.AniListResponse
+		if err := jsonx.Unmarshal(cached, &result); err == nil && result.Data.Media.ID == id {
+			return &result, nil
+		}
+	}
+	if aniListIsDisabled() {
+		return nil, ErrAniListAPIDisabled
+	}
+
+	jsonData, err := json.Marshal(map[string]any{
+		"query":     aniListByIDQuery,
+		"variables": map[string]any{"id": id},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("JSON marshal failed: %w", err)
+	}
+	resp, body, err := aniListPost(aniListEndpoint, jsonData) //nolint:bodyclose // aniListPost reads and closes the body before returning.
+	if err != nil {
+		return nil, fmt.Errorf("AniList request failed: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		if bodySaysAniListDisabled(body) {
+			noteAniListDisabled()
+			return nil, ErrAniListAPIDisabled
+		}
+		return nil, fmt.Errorf("AniList returned: %s", resp.Status)
+	}
+	var result models.AniListResponse
+	if err := jsonx.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("JSON decode failed: %w", err)
+	}
+	if result.Data.Media.ID != id {
+		return nil, fmt.Errorf("AniList has no anime with id %d", id)
+	}
+	cache.Set(cacheKey, body)
+	return &result, nil
+}
+
+// fetchAniListForAnime is the lookup enrichAnimeData makes: by id when the
+// anime already carries one, by title otherwise. A failed id lookup falls
+// back to the title, except when AniList is switched off, which the caller
+// handles.
+func fetchAniListForAnime(anime *models.Anime) (*models.AniListResponse, error) {
+	if anime.AnilistID > 0 {
+		info, err := FetchAnimeFromAniListByID(anime.AnilistID)
+		if err == nil || errors.Is(err, ErrAniListAPIDisabled) {
+			return info, err
+		}
+		util.Debugf("AniList lookup of id %d failed, searching by title instead: %v", anime.AnilistID, err)
+	}
+	return FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
 }

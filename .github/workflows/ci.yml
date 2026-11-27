@@ -58,7 +58,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.14.0
+          version: v2.15.0
           args: --timeout=20m
 
   security:
@@ -287,9 +287,20 @@ jobs:
         # systems, so this job runs beside the tests instead of after them.
         run: go test -count=1 -timeout 55m ./internal/api -run 'KillsMutants$|FullyCovered$'
 
+  # The binaries below bundle cfsolve built from upstream's latest commit, as a
+  # release does. The cache keeps each platform's binary until upstream moves,
+  # so most runs compile nothing.
+  cfsolve:
+    name: cfsolve
+    uses: ./.github/workflows/cfsolve-build.yml
+    with:
+      cache: true
+
   build-binaries:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [quality, security, test, mutation]
+    needs: [quality, security, test, mutation, cfsolve]
+    # cfsolve is optional: build without it rather than not at all.
+    if: ${{ !cancelled() && needs.quality.result == 'success' && needs.security.result == 'success' && needs.test.result == 'success' && needs.mutation.result == 'success' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -327,6 +338,23 @@ jobs:
       - name: Get dependencies
         run: go mod download
 
+      # Bundle cfsolve like release builds do (go:embed): the binary this run
+      # built and the profile from the same commit. A platform whose cfsolve
+      # build failed just builds without it.
+      - name: Take the cfsolve profile from the commit this run builds
+        if: needs.cfsolve.outputs.sha != ''
+        shell: bash
+        env:
+          CFSOLVE_SHA: ${{ needs.cfsolve.outputs.sha }}
+        run: scripts/update-cfsolve.sh "$CFSOLVE_SHA" --no-build
+
+      - name: Bundle cfsolve
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: challenge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
+          path: internal/scraper/cfsolver/embedded
+
       - name: Build binary
         shell: bash
         env:
@@ -336,6 +364,27 @@ jobs:
         run: |
           mkdir -p dist
           go build -o dist/${{ matrix.binary_name }} -ldflags="-s -w" -trimpath ./cmd/goanime
+
+      - name: Install Rosetta
+        if: matrix.goos == 'darwin' && matrix.goarch == 'amd64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+
+      # What release.yml requires of every binary, checked here on each push for
+      # every binary that carries a solver: started with an empty config folder,
+      # it unpacks that solver and the solver starts (on Linux, in AlmaLinux 9 too).
+      - name: Check what a new user gets
+        shell: bash
+        run: |
+          solver="internal/scraper/cfsolver/embedded/challenge-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}"
+          if [ ! -s "$solver" ]; then
+            echo "::notice::this build carries no cfsolve; nothing to check"
+            exit 0
+          fi
+          if [ "${{ matrix.goos }}" = linux ]; then
+            scripts/check-bundled-cfsolve.sh "dist/${{ matrix.binary_name }}" "$solver" --in-image almalinux:9
+          else
+            scripts/check-bundled-cfsolve.sh "dist/${{ matrix.binary_name }}" "$solver"
+          fi
 
       - name: Create archive (Unix)
         if: matrix.goos != 'windows'
@@ -380,7 +429,9 @@ jobs:
   # Windows Installer Job - Creates an offline installer with bundled mpv
   build-windows-installer:
     name: Build Windows installer
-    needs: [quality, security, test, mutation]
+    needs: [quality, security, test, mutation, cfsolve]
+    # cfsolve is optional: build without it rather than not at all.
+    if: ${{ !cancelled() && needs.quality.result == 'success' && needs.security.result == 'success' && needs.test.result == 'success' && needs.mutation.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -420,6 +471,20 @@ jobs:
           }
           gcc --version
           Write-Host "GCC available for CGO builds"
+
+      - name: Take the cfsolve profile from the commit this run builds
+        if: needs.cfsolve.outputs.sha != ''
+        shell: bash
+        env:
+          CFSOLVE_SHA: ${{ needs.cfsolve.outputs.sha }}
+        run: scripts/update-cfsolve.sh "$CFSOLVE_SHA" --no-build
+
+      - name: Bundle cfsolve
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: challenge-windows-amd64.exe
+          path: internal/scraper/cfsolver/embedded
 
       - name: Build GoAnime binary with SQLite
         shell: pwsh

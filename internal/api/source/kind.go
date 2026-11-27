@@ -28,6 +28,9 @@ const (
 	// Pomfy is the Byse-CDN movie/series catalog keyed by TMDB id; its
 	// playback runs the proof-of-work captcha and AES-256-GCM seal flow.
 	Pomfy SourceKind = "Pomfy"
+	// Miruro is the second English anime source beside HiAnime: miruro.cx,
+	// which upstream ani-cli moved to on 2026-11-25.
+	Miruro SourceKind = "Miruro"
 
 	// Unknown is returned when no definition matches. It is surfaced with a
 	// warning rather than guessed at: the best-effort fallback used to be
@@ -66,4 +69,5 @@ var scraperTypeMap = map[SourceKind]scraper.ScraperType{
 	AnimesFHD:     scraper.AnimesFHDType,
 	Pomfy:         scraper.PomfyType,
 	PlutoTV:       scraper.PlutoTVType,
+	Miruro:        scraper.MiruroType,
 }

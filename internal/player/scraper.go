@@ -517,7 +517,7 @@ func GetVideoURLForEpisodeEnhanced(ctx context.Context, episode *models.Episode,
 			util.Debug("Movie/TV stream URL failed", "source", sourceLabel, "error", err)
 			return "", fmt.Errorf("failed to get %s stream URL: %w", sourceLabel, err)
 		}
-		if resolved.Kind == source.HiAnime {
+		if resolved.Kind == source.HiAnime || resolved.Kind == source.Miruro {
 			// Registry-backed source: surface the real error instead of falling
 			// back to the legacy scraper, which knows nothing about it. (This
 			// guard used to name AllAnime, which held the same position.)

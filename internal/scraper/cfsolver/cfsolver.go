@@ -112,6 +112,11 @@ func Discover() (*Solver, bool) {
 // Register installs a discovered Solver as the process-wide challenge solver.
 // It does nothing, and reports false, when cfsolve is not installed.
 func Register() bool {
+	// A release build carries cfsolve itself; unpack it first so it is the one
+	// found (GOANIME_CFSOLVE_BIN still wins).
+	if os.Getenv(envBin) == "" {
+		EnsureEmbedded()
+	}
 	s, ok := Discover()
 	if !ok {
 		return false

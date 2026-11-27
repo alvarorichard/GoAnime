@@ -40,9 +40,10 @@ func (registryMediaSource) SearchAll(query string) ([]*models.Anime, error) {
 }
 
 func (registryMediaSource) SearchAnimeOnly(query string) ([]*models.Anime, error) {
-	// HiAnime is the subbed/dubbed anime source, third to hold that slot after
-	// AllAnime and anidb.app both went dark; AnimeFire stays as the PT-BR one.
-	return providers.SearchAll(context.Background(), query, source.HiAnime, source.AnimeFire)
+	// HiAnime and Miruro are the subbed/dubbed anime sources (HiAnime is the
+	// third to hold that slot after AllAnime and anidb.app both went dark);
+	// AnimeFire stays as the PT-BR one.
+	return providers.SearchAll(context.Background(), query, source.HiAnime, source.Miruro, source.AnimeFire)
 }
 
 func (registryMediaSource) GetAnimeStreamURL(anime *models.Anime, episodeNum, quality, _ string) (streamURL string, metadata map[string]string, err error) {

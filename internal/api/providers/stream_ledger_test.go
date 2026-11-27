@@ -18,7 +18,7 @@ var streamSources = []source.SourceKind{
 	source.Pomfy, source.StartFlix, source.TopCine, source.Pobreflix,
 	source.HiAnime, source.Anroll, source.AnimeDrive,
 	source.AnimeFire, source.Goyabu, source.AnimesDigital, source.AnimesFHD,
-	source.PlutoTV,
+	source.PlutoTV, source.Miruro,
 }
 
 func TestEveryRegisteredSourceReturnsAStream(t *testing.T) {

@@ -190,13 +190,15 @@ func TestReleaseTag(t *testing.T) {
 }
 
 func TestAssetNames(t *testing.T) {
-	if _, ok := assetName("linux", "amd64"); !ok {
-		t.Error("linux/amd64 must have an asset")
+	for _, p := range [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "arm64"}, {"darwin", "amd64"}} {
+		if _, ok := assetName(p[0], p[1]); !ok {
+			t.Errorf("%s/%s must have an asset", p[0], p[1])
+		}
 	}
 	if n, ok := assetName("windows", "amd64"); !ok || n != "challenge-windows-amd64.exe" {
 		t.Errorf("windows/amd64 = %q, %v; the release workflow builds challenge-windows-amd64.exe", n, ok)
 	}
-	for _, p := range [][2]string{{"darwin", "amd64"}, {"windows", "arm64"}} {
+	for _, p := range [][2]string{{"windows", "arm64"}, {"linux", "386"}} {
 		if n, ok := assetName(p[0], p[1]); ok {
 			t.Errorf("%s/%s reported %q, but the release workflow builds nothing for it", p[0], p[1], n)
 		}
@@ -224,8 +226,8 @@ func TestDefaultInstallerNeedsAReleaseBuild(t *testing.T) {
 	}
 }
 
-// cfsolve.lock is read by the release workflow and the scripts, not by Go; keep
-// its shape honest.
+// cfsolve.lock is read by the workflows (repo=) and the scripts, not by Go;
+// keep its shape honest.
 func TestLockFileNamesAFullCommit(t *testing.T) {
 	b, err := os.ReadFile("cfsolve.lock")
 	if err != nil {

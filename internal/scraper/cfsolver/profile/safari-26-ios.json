@@ -197,6 +197,16 @@
     "collect_start": 498,
     "sent": 500
   },
+  "challenge_page_timeline": {
+    "script_fetch": 90.0,
+    "implicit_render": 117,
+    "render_start": 118,
+    "render_end": 124,
+    "init_start": 449,
+    "params_start": 449,
+    "collect_start": 449,
+    "sent": 455
+  },
   "intervals": {
     "initialise": 7,
     "handoff": 8,

@@ -13,6 +13,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
 )
 
 // Since 2026-11-02 the site lists, next to the Turnstile player, a RedeFlixApi
@@ -112,7 +114,18 @@ func (c *Client) ResolveRedeflix(ctx context.Context, serverURL string, want Aud
 	}
 	m := redeflixTicketRe.FindSubmatch(body)
 	if m == nil {
-		return Stream{}, ErrNotRedeflixPlayer
+		// Since 2026-11-24 the page (now on redeflixapi.click) sits behind a
+		// Turnstile form gate; answering it yields the ticket page.
+		if _, ok := parseRedeflixGate(body); !ok {
+			return Stream{}, ErrNotRedeflixPlayer
+		}
+		body, finalURL, err = c.passRedeflixGate(ctx, hc, body, finalURL)
+		if err != nil {
+			return Stream{}, err
+		}
+		if m = redeflixTicketRe.FindSubmatch(body); m == nil {
+			return Stream{}, fmt.Errorf("%w after the Turnstile was answered", ErrPlayerNoStream)
+		}
 	}
 	ticket := string(m[1])
 
@@ -201,4 +214,70 @@ func (c *Client) postPlayerJSON(ctx context.Context, hc *http.Client, endpoint, 
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+var redeflixGateTicketRe = regexp.MustCompile(`name="rf_gate_ticket"\s+value="([^"]+)"`)
+
+// parseRedeflixGate finds the gate form's ticket on a RedeFlixApi gate page.
+func parseRedeflixGate(body []byte) (ticket string, ok bool) {
+	if m := redeflixGateTicketRe.FindSubmatch(body); m != nil && bytes.Contains(body, []byte("rf-gate-form")) {
+		return string(m[1]), true
+	}
+	return "", false
+}
+
+// passRedeflixGate answers the gate's Turnstile with the registered solver and
+// submits the form as the page's script does: rf_gate_ticket plus the widget's
+// cf-turnstile-response, posted back to the page's own URL. It returns the page
+// the server answers with. Without a solver the answer is ErrPlayerSolverMissing.
+func (c *Client) passRedeflixGate(ctx context.Context, hc *http.Client, body []byte, pageURL string) ([]byte, string, error) {
+	ticket, ok := parseRedeflixGate(body)
+	if !ok {
+		return nil, "", ErrNotRedeflixPlayer
+	}
+	siteKey, action, cdata, ok := parseTurnstile(body)
+	if !ok {
+		return nil, "", ErrPlayerNoTurnstile
+	}
+	token, solverOK, err := netx.SolveTurnstileFor(ctx, netx.TurnstileRequest{
+		PageURL: pageURL, SiteKey: siteKey, Action: action, CData: cdata,
+	}, playerSolveTimeout)
+	if !solverOK {
+		return nil, "", ErrPlayerSolverMissing
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("pobreflix: Turnstile solve failed: %w", err)
+	}
+	u, err := url.Parse(pageURL)
+	if err != nil || u.Host == "" {
+		return nil, "", fmt.Errorf("pobreflix: cannot answer the gate of %q", pageURL)
+	}
+	form := url.Values{"rf_gate_ticket": {ticket}, "cf-turnstile-response": {token}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pageURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Origin", u.Scheme+"://"+u.Host)
+	req.Header.Set("Referer", pageURL)
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept-Language", netx.ChromeAcceptLanguage)
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("pobreflix: answering the player gate: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	if err != nil {
+		return nil, "", fmt.Errorf("pobreflix: answering the player gate: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, "", fmt.Errorf("pobreflix: the player gate answered HTTP %d", resp.StatusCode)
+	}
+	final := pageURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		final = resp.Request.URL.String()
+	}
+	return out, final, nil
 }

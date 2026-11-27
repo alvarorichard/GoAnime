@@ -33,3 +33,7 @@ claude
 
 # folder .tokensave
 .tokensave/
+
+# cfsolve binaries the release workflow bundles into the build
+internal/scraper/cfsolver/embedded/*
+!internal/scraper/cfsolver/embedded/.gitkeep

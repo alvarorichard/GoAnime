@@ -9,6 +9,7 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 | Source        | Content    | Language            | Notes                                |
 | ------------- | ---------- | ------------------- | ------------------------------------ |
 | HiAnime       | Anime      | English             | Subbed by default, dub available     |
+| Miruro        | Anime      | English             | Subbed by default, dub available     |
 | AnimeFire     | Anime      | Portuguese (Brazil) |                                      |
 | AnimesDigital | Anime      | Portuguese (Brazil) | Subtitled and dubbed                 |
 | AnimeDrive    | Anime      | Portuguese (Brazil) |                                      |
@@ -23,11 +24,12 @@ updated. A [daily workflow](../.github/workflows/source-health.yml) checks them.
 
 ## Choosing a source
 
-`--source` limits a search to one source (`hianime`, `animefire`, `goyabu`,
+`--source` limits a search to one source (`hianime`, `miruro`, `animefire`, `goyabu`,
 `animesdigital`, `anroll`, `animesfhd`, `animedrive`, `startflix`, `topcine`, `pobreflix`,
 `pomfy`, `plutotv`). `movietv` covers the movie and TV sources, `ptbr` every Portuguese one,
-`english` HiAnime and Pluto TV. Pluto TV's catalog has anime too, so it is searched on the
-ALL, PT-BR, ENGLISH and MOVIES/TV tabs; `--source hianime` is still HiAnime alone. Pluto TV
+`english` HiAnime, Miruro and Pluto TV. Pluto TV's catalog has anime too, so it is searched on the
+ALL, PT-BR, ENGLISH and MOVIES/TV tabs; `--source hianime` is still HiAnime alone and
+`--source miruro` Miruro alone. Pluto TV
 says each title's language, so on the PT-BR tab its English titles are left out and on the
 ENGLISH tab its Portuguese ones are; ALL and MOVIES/TV show every title.
 
@@ -49,6 +51,16 @@ site moves.
   Referer and Portuguese captions passed to playback. The public SDK lists
   the exact series URL supplied by the caller; the season/audio menu belongs
   to the CLI.
+- **Miruro** (`goanime --source miruro "frieren"`): the English source upstream
+  ani-cli moved to on 2026-11-25. HiAnime stays beside it, so either can go
+  down without leaving GoAnime without an English source. Results carry the
+  title's AniList id, so the AniList lookup after a pick is exact. Each episode
+  lists several mirrors; GoAnime plays the first whose playlist answers, sending
+  the Referer and Origin that mirror's CDN checks. Subtitled episodes use
+  separate subtitle files when the mirror has English ones (English and
+  Portuguese are offered), burned-in subtitles otherwise. `GOANIME_MIRURO_AUDIO=dub`
+  prefers the dub; an episode without one plays subtitled. Titles AniList marks
+  as not yet released are left out of the results.
 - **Pobreflix**: plays public MP4s directly. Pages with a Turnstile-gated
   player need cfsolve; without it GoAnime falls back to the StartFlix panel.
 - **Pluto TV** (`goanime --source plutotv "death note"`): the free service,
@@ -83,8 +95,8 @@ site moves.
 Goyabu and Pobreflix's player are behind Cloudflare. On networks that do not
 challenge them they just work. Elsewhere they need
 [cfsolve](https://github.com/chris124567/cfsolve), which release builds
-download and verify on first run (Linux and Apple Silicon Macs). Windows and
-Intel Macs have no build yet, so Goyabu only works there on unchallenged
+bundle it (and can still download and verify it on first run). Every release
+platform bundles it; on any other platform Goyabu only works on unchallenged
 networks (`GOANIME_ENABLED_SOURCES=goyabu`).
 
 - `GOANIME_CFSOLVE_AUTODOWNLOAD=0` turns the download off.

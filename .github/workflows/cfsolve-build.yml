@@ -1,0 +1,303 @@
+name: cfsolve build
+
+# Builds cfsolve's challenge binary from upstream's latest commit for every
+# platform GoAnime ships, and uploads each one as an artifact named after its
+# release asset: challenge-linux-amd64, challenge-linux-arm64,
+# challenge-darwin-arm64, challenge-darwin-amd64 and
+# challenge-windows-amd64.exe. ci.yml and release.yml call it.
+#
+# The `sha` output is the commit built. Callers pass it to
+# scripts/update-cfsolve.sh before "go build", so the profile GoAnime embeds
+# comes from the same commit as the binary; cfsolve can refuse one from another
+# commit. The commit is read once per run, so every platform gets the same one
+# even if upstream pushes in the meantime.
+#
+# This compiles code from another repository, so no job here has a write token
+# or keeps credentials. Every job may fail without failing the caller: in CI a
+# platform whose build fails is only left without the solver, while release.yml
+# refuses to publish a GoAnime binary that does not carry one.
+
+on:
+  workflow_call:
+    inputs:
+      cache:
+        description: Reuse a binary an earlier run built from the same commit (CI). Releases always compile.
+        type: boolean
+        default: false
+    outputs:
+      sha:
+        description: The cfsolve commit built (full sha); empty when upstream could not be read.
+        value: ${{ jobs.pin.outputs.sha }}
+      repo:
+        description: The cfsolve repository as owner/name.
+        value: ${{ jobs.pin.outputs.repo }}
+
+permissions:
+  contents: read
+
+env:
+  # The Linux solvers are built in this image. Its glibc, 2.34, is the oldest
+  # one GoAnime itself runs on, so a solver built here starts wherever GoAnime
+  # does. Built on the runner's Ubuntu 24.04 instead, the amd64 solver needed
+  # glibc 2.38 (BoringSSL's strtoull became __isoc23_strtoull) and did not
+  # start on Ubuntu 22.04, Linux Mint 21, Debian 12 or RHEL 9.
+  CFSOLVE_LINUX_IMAGE: almalinux:9
+  CFSOLVE_GLIBC_FLOOR: '2.34'
+
+jobs:
+  pin:
+    name: Read cfsolve's latest commit
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      repo: ${{ steps.head.outputs.repo }}
+      sha: ${{ steps.head.outputs.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ask upstream for its latest commit
+        id: head
+        run: |
+          lock=internal/scraper/cfsolver/cfsolve.lock
+          repo="$(sed -n 's/^repo=//p' "$lock")"
+          [[ "$repo" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "::error::cfsolve.lock has no GitHub repo="; exit 1; }
+          sha="$(git ls-remote "$repo" HEAD | cut -f1)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::cannot read the latest commit of $repo"; exit 1; }
+          pinned="$(sed -n 's/^sha=//p' "$lock")"
+          {
+            echo "repo=${repo#https://github.com/}"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "cfsolve: building ${repo#https://github.com/}@${sha:0:12} (cfsolve.lock in this checkout: ${pinned:0:12})" >> "$GITHUB_STEP_SUMMARY"
+
+  unix:
+    name: Build ${{ matrix.asset }}
+    needs: pin
+    if: needs.pin.outputs.sha != ''
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { asset: challenge-linux-amd64,  runner: ubuntu-24.04,     triple: '' }
+          - { asset: challenge-linux-arm64,  runner: ubuntu-24.04-arm, triple: '' }
+          - { asset: challenge-darwin-arm64, runner: macos-latest,     triple: '' }
+          # Intel Macs: cross-compiled on the Apple Silicon runner. Not tried
+          # on real hardware, so a failure here only leaves them without it.
+          - { asset: challenge-darwin-amd64, runner: macos-latest,     triple: x86_64-apple-darwin }
+    steps:
+      - name: Reuse an earlier build of this commit
+        id: cache
+        if: inputs.cache
+        uses: actions/cache/restore@v6
+        with:
+          path: dist/${{ matrix.asset }}
+          # "alma9": binaries cached before the Linux builds moved to AlmaLinux 9
+          # needed a newer glibc and must not be reused.
+          key: cfsolve-${{ matrix.asset }}-${{ needs.pin.outputs.sha }}-alma9
+
+      - name: Check out cfsolve at that commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.pin.outputs.repo }}
+          ref: ${{ needs.pin.outputs.sha }}
+          path: cfsolve-src
+          persist-credentials: false
+
+      - name: Install build tools (macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: |
+          brew install cmake llvm
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+      - name: Install the pinned Rust toolchain (macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        working-directory: cfsolve-src
+        run: rustup toolchain install
+
+      - name: Add the cross-compilation target
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.triple != ''
+        working-directory: cfsolve-src
+        run: rustup target add "${{ matrix.triple }}"
+
+      - name: Build (macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        working-directory: cfsolve-src
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build --release --locked --bin challenge --target "${{ matrix.triple }}"
+          else
+            cargo build --release --locked --bin challenge
+          fi
+
+      # In CFSOLVE_LINUX_IMAGE, so the binary needs no newer glibc than
+      # GoAnime does (see the env block above). The toolchain is the one
+      # cfsolve pins in rust-toolchain.toml.
+      - name: Build (Linux, in AlmaLinux 9)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/cfsolve-src:/src" -w /src "$CFSOLVE_LINUX_IMAGE" bash -euo pipefail -c '
+            dnf install -y -q --setopt=install_weak_deps=False \
+              cmake clang clang-devel gcc gcc-c++ make perl git golang
+            curl -sSf https://sh.rustup.rs | sh -s -- -y -q --profile minimal --default-toolchain none
+            . "$HOME/.cargo/env"
+            rustup toolchain install
+            cargo build --release --locked --bin challenge
+          '
+          sudo chown -R "$(id -u):$(id -g)" cfsolve-src/target
+
+      - name: Locate the binary
+        id: bin
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            echo "path=cfsolve-src/target/${{ matrix.triple }}/release/challenge" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=cfsolve-src/target/release/challenge" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Smoke test
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.triple == ''
+        run: ${{ steps.bin.outputs.path }} --help >/dev/null
+
+      # An x86_64 binary on an arm64 runner runs under Rosetta.
+      - name: Smoke test (Intel, under Rosetta)
+        if: steps.cache.outputs.cache-hit != 'true' && matrix.triple == 'x86_64-apple-darwin'
+        run: |
+          file "${{ steps.bin.outputs.path }}" | grep -q x86_64
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+          arch -x86_64 "${{ steps.bin.outputs.path }}" --help >/dev/null
+
+      - name: Stage
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p dist
+          cp "${{ steps.bin.outputs.path }}" "dist/${{ matrix.asset }}"
+
+      # Before the binary is cached or uploaded, so one that would not start on
+      # an older distribution never reaches a release (release.yml refuses to
+      # publish a GoAnime without its solver). Runs on a cached binary too.
+      - name: Check the glibc it needs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bin="dist/${{ matrix.asset }}"
+          need="$(objdump -T "$bin" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/^GLIBC_//' | sort -V -u | tail -1)"
+          echo "${{ matrix.asset }} needs glibc ${need}; GoAnime's floor is ${CFSOLVE_GLIBC_FLOOR}"
+          if [ "$(printf '%s\n%s\n' "$need" "$CFSOLVE_GLIBC_FLOOR" | sort -V | tail -1)" != "$CFSOLVE_GLIBC_FLOOR" ]; then
+            echo "::error::${{ matrix.asset }} needs glibc ${need}, newer than the ${CFSOLVE_GLIBC_FLOOR} GoAnime runs on"
+            exit 1
+          fi
+          docker run --rm -v "$PWD/dist:/dist:ro" "$CFSOLVE_LINUX_IMAGE" "/dist/${{ matrix.asset }}" --help >/dev/null
+          echo "starts in $CFSOLVE_LINUX_IMAGE"
+
+      - name: Keep the build for later runs
+        if: inputs.cache && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: dist/${{ matrix.asset }}
+          key: cfsolve-${{ matrix.asset }}-${{ needs.pin.outputs.sha }}-alma9
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 1
+
+  # Tested on a real Windows 11: the solver cleared Goyabu's gate (HTTP 403 -> 200).
+  windows:
+    name: Build challenge-windows-amd64.exe
+    needs: pin
+    if: needs.pin.outputs.sha != ''
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - name: Reuse an earlier build of this commit
+        id: cache
+        if: inputs.cache
+        uses: actions/cache/restore@v6
+        with:
+          path: dist/challenge-windows-amd64.exe
+          key: cfsolve-challenge-windows-amd64.exe-${{ needs.pin.outputs.sha }}
+
+      - name: Check out cfsolve at that commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.pin.outputs.repo }}
+          ref: ${{ needs.pin.outputs.sha }}
+          path: cfsolve-src
+          persist-credentials: false
+
+      - name: Install MinGW-w64 and the BoringSSL build tools
+        id: msys2
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          update: true
+          install: >-
+            git patch perl
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-clang
+
+      - name: Install the pinned Rust toolchain and the windows-gnu target
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        env:
+          LIBCLANG_PATH: ${{ steps.msys2.outputs.msys2-location }}\mingw64\bin
+        run: cargo build --release --locked --bin challenge --target x86_64-pc-windows-gnu
+
+      - name: Smoke test
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        working-directory: cfsolve-src
+        run: |
+          exe=target/x86_64-pc-windows-gnu/release/challenge.exe
+          "$exe" --help >/dev/null
+          if objdump -p "$exe" | grep -qiE 'libstdc\+\+|libgcc_s|libwinpthread'; then
+            echo "::error::the .exe imports a MinGW runtime DLL that a clean Windows does not have"
+            exit 1
+          fi
+
+      - name: Stage
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp cfsolve-src/target/x86_64-pc-windows-gnu/release/challenge.exe dist/challenge-windows-amd64.exe
+
+      - name: Keep the build for later runs
+        if: inputs.cache && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: dist/challenge-windows-amd64.exe
+          key: cfsolve-challenge-windows-amd64.exe-${{ needs.pin.outputs.sha }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: challenge-windows-amd64.exe
+          path: dist/challenge-windows-amd64.exe
+          retention-days: 1

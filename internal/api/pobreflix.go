@@ -581,6 +581,10 @@ func resolvePobreflixPlayer(ctx context.Context, server pobreflix.Server, target
 	pb := pbClientFn()
 	if pb.IsSolverFreePlayer(server.URL) {
 		stream, err := pb.ResolveRedeflix(ctx, server.URL, want)
+		if errors.Is(err, pobreflix.ErrPlayerSolverMissing) {
+			// the RedeFlix page sits behind a Turnstile and nothing can answer it
+			return pobreflix.Stream{}, errPobreflixGated
+		}
 		if err == nil || !errors.Is(err, pobreflix.ErrNotRedeflixPlayer) {
 			return stream, err
 		}

@@ -4,18 +4,22 @@
 #
 #   scripts/update-cfsolve.sh <sha|HEAD> [--no-build]
 #
-# Commit the result; the next GoAnime release builds the new commit and attaches
-# its binaries. The profile and the binary must come from the same commit,
-# which is why one script changes both.
+# CI and release builds run it with upstream's latest commit before "go build"
+# (.github/workflows/cfsolve-build.yml), so what they ship always follows
+# upstream. Commit its result to move the copy in the repository, which
+# "go test", local builds and get-cfsolve.sh --build use. The profile and the
+# binary must come from the same commit, which is why one script changes both.
 set -euo pipefail
 
 target="${1:?usage: update-cfsolve.sh <sha|HEAD> [--no-build]}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pkg="$root/internal/scraper/cfsolver"
-repo="$(sed -n 's/^repo=//p' "$pkg/cfsolve.lock")"
+# A Windows checkout may have given the lock CRLF line endings.
+repo="$(sed -n 's/^repo=//p' "$pkg/cfsolve.lock" | tr -d '\r')"
 
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
-git clone --quiet "$repo" "$work/src"
+# No CRLF conversion: the profile must be byte for byte the one upstream ships.
+git clone --quiet --config core.autocrlf=false "$repo" "$work/src"
 git -C "$work/src" checkout --quiet "$target"
 sha="$(git -C "$work/src" rev-parse HEAD)"
 
@@ -28,10 +32,11 @@ cp -r "$work/src/profiles/safari-26-ios" "$work/src/profiles/safari-26-ios.json"
 cp "$work/src/LICENSE" "$pkg/profile/LICENSE-cfsolve"
 
 cat > "$pkg/cfsolve.lock" <<LOCK
-# The cfsolve commit GoAnime is built and tested against. Never track upstream's
-# HEAD: bump this with scripts/update-cfsolve.sh, which also refreshes the
-# embedded profile from the same commit. The release workflow builds this
-# commit and attaches the binaries to each GoAnime release.
+# The cfsolve commit the profile in this folder comes from. CI and release
+# builds move both to upstream's latest commit before building
+# (.github/workflows/cfsolve-build.yml); "go test", local builds and
+# scripts/get-cfsolve.sh --build use what is committed here. Change it with
+# scripts/update-cfsolve.sh, which moves the sha and the profile together.
 repo=$repo
 sha=$sha
 LOCK

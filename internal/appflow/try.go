@@ -134,7 +134,7 @@ func buildTrySuggestions(query, loopSource string) []tui.TrySuggestion {
 			Label: shorter, Hint: "fewer words", Query: shorter, Scope: loopSource,
 		})
 	}
-	if scope := strings.ToLower(strings.TrimSpace(loopSource)); scope != "hianime" && scope != "english" {
+	if scope := strings.ToLower(strings.TrimSpace(loopSource)); scope != "hianime" && scope != "miruro" && scope != "english" {
 		out = append(out, tui.TrySuggestion{
 			Label: query, Hint: "English sources only", Query: query, Scope: "english",
 		})

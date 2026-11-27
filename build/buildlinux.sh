@@ -15,6 +15,8 @@ MAIN_PACKAGE="../cmd/goanime"
 # Create the output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
 
+# Bundle cfsolve (go:embed) so the binary needs nothing else; warns if missing.
+"$(dirname "$0")/../scripts/get-cfsolve.sh" --bundle linux amd64 || echo "warning: building without the bundled cfsolve"
 echo "Building the goanime binary for Linux..."
 # For Linux we don't need go-winio, using !windows tag to ensure it's excluded
 # With CGO_ENABLED=0, SQLite will be compiled without native support

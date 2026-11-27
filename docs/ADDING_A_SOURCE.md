@@ -73,8 +73,8 @@ regexes compiled at package level (as in Goyabu's `client.go`), errors via
 **2. Adapter.** `manager.go`, the six sites in the table. `ScraperType` is an
 `iota`: **append at the end, never insert.** If your stream needs a referer,
 subtitles or an audio language, put them in `GetStreamURL`'s
-`metadata map[string]string` under `referer` / `subtitles` / `subtitle_labels` /
-`audio_lang`. `providers.applyPlaybackMetadata` reads `referer` and
+`metadata map[string]string` under `referer` / `origin` / `subtitles` / `subtitle_labels` /
+`audio_lang`. `providers.streamFromMetadata` reads `referer`, `origin` and
 `subtitles` (a JSON array of `{"url","language","label"}`); `StartFlixAdapter`
 is the example.
 
@@ -107,7 +107,7 @@ func (p *goyabuProvider) Describe() source.Descriptor {
 | `DefaultDisabled` | ships off unless `GOANIME_ENABLED_SOURCES` names it | shipping live |
 | `ProbeURL` | homepage; HEAD-probed on search timeout to tell "site down" from "opaque hang" | GraphQL/opaque APIs, browser-gated sources |
 
-Priorities in use: AnimeFire `10` · Goyabu `20` · AnimesDigital `30` · AnimesROLL `35` · StartFlix `40` · TopCine `45` · HiAnime `50` · AnimeDrive `60`.
+Priorities in use: AnimeFire `10` · Goyabu `20` · AnimesDigital `30` · AnimesROLL `35` · StartFlix `40` · TopCine `45` · Miruro `46` · Pomfy `47` · Pobreflix `48` · Pluto TV `49` · HiAnime `50` · AnimeDrive `60` · AnimesFHD `70`.
 Leave gaps of 10. Priority is ignored when `anime.Source` matches an `Explicit`
 entry.
 

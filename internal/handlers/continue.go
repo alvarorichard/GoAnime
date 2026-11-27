@@ -163,7 +163,7 @@ func continueSourceToken(source string) string {
 	switch token {
 	case "animesroll":
 		return "anroll"
-	case "animefire", "goyabu", "hianime", "animesdigital", "anroll", "startflix", "topcine", "pobreflix", "animedrive", "animesfhd", "plutotv":
+	case "animefire", "goyabu", "hianime", "miruro", "animesdigital", "anroll", "startflix", "topcine", "pobreflix", "animedrive", "animesfhd", "plutotv":
 		return token
 	default:
 		return ""

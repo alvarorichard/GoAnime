@@ -73,14 +73,14 @@ jobs:
         run: go test -run Integration -count=1 -v ./pkg/goanime
 
   # Manual only (Actions > Source Health > Run workflow). Daily it would build
-  # Rust until the pinned release exists and could go red for reasons that are
-  # the runner's network, not the code; the weekly "Update cfsolve" workflow
-  # already exercises the gate when upstream moves.
+  # Rust every day and could go red for reasons that are the runner's network,
+  # not the code; the weekly "Update cfsolve" workflow already exercises the
+  # gate when upstream moves.
   goyabu-cfsolve:
-    name: Goyabu through the pinned cfsolve
+    name: Goyabu through cfsolve's latest commit
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Check out code
         uses: actions/checkout@v7
@@ -93,18 +93,20 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # What users get: the binary attached to GoAnime's latest release. Building
-      # the pinned commit is only the fallback for a release that has none.
-      - name: Install the pinned cfsolve
-        run: |
-          if ! scripts/get-cfsolve.sh; then
-            echo "::warning::the latest release has no cfsolve binary; building the pinned commit"
-            sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
-            scripts/get-cfsolve.sh --build
-          fi
+      # What the next release ships: upstream's latest commit, with the profile
+      # from that same commit (cfsolve refuses a profile from another build),
+      # as cfsolve-build.yml does for CI and releases.
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake clang libclang-dev
 
-      # Red here with a published pin means Cloudflare changed the gate. The
-      # weekly "Update cfsolve" workflow then shows whether upstream fixed it.
+      - name: Take the profile from cfsolve's latest commit
+        run: scripts/update-cfsolve.sh HEAD --no-build
+
+      - name: Build and install that commit
+        run: scripts/get-cfsolve.sh --build
+
+      # Red here means upstream's latest commit does not clear the gate, most
+      # likely because Cloudflare changed it; the next release would ship it.
       - name: Clear Goyabu's gate and reach a stream
         run: >
           go test -tags live -run '^TestGoyabuThroughCfsolveLive$'

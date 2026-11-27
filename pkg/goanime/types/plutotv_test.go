@@ -27,7 +27,8 @@ func TestPlutoTVParsesFromEverySpellingItAnswersTo(t *testing.T) {
 	assert.Error(t, err, "spellings are exact")
 }
 
-func TestSourceValuesStayAppendOnlyWithPlutoTVLast(t *testing.T) {
+func TestSourceValuesStayAppendOnlyAfterPlutoTV(t *testing.T) {
 	assert.Equal(t, int(SourceAnimesFHD)+1, int(SourcePlutoTV), "a new source goes at the end; a stored value keeps its meaning")
-	assert.Equal(t, int(SourcePlutoTV)+1, len(Sources()))
+	assert.Equal(t, int(SourcePlutoTV)+1, int(SourceMiruro), "Miruro came after Pluto TV")
+	assert.Equal(t, int(SourceMiruro)+1, len(Sources()))
 }

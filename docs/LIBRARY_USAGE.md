@@ -13,7 +13,8 @@ and [pkg/goanime/examples](../pkg/goanime/examples) has complete programs.
 
 - Search covers every enabled source.
 - Episode lists and stream URLs are available for the anime sources
-  (AnimeFire, Goyabu, HiAnime, AnimesDigital, AnimeDrive, AnimesROLL) and for
+  (AnimeFire, Goyabu, HiAnime, Miruro, AnimesDigital, AnimeDrive, AnimesROLL,
+  AnimesFHD) and for
   StartFlix (`Source.SupportsEpisodes()`). StartFlix is a movie and series
   catalogue: use `GetSeasons` and `GetSeasonEpisodes` for its series, and pass
   `StreamOptions.Audio` for the audio. TopCine, Pobreflix and Pomfy can only be

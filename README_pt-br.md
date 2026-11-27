@@ -350,7 +350,8 @@ ambiente cobrem casos menos comuns:
 | `GOANIME_TERMINAL`            | `conhost` mantém o GoAnime no console clássico do Windows em vez de reabri-lo no Windows Terminal |
 | `GOANIME_PLAIN`               | `1` para o modo simples: sem cores, sem glosas em japonês, só ASCII (igual a `--plain`, `NO_COLOR` ou `TERM=dumb`) |
 | `GOANIME_JAPANESE`            | `1` sempre mostra as glosas em japonês, `0` sempre esconde; sem ela, o GoAnime mostra onde o terminal tem fonte para elas |
-| `GOANIME_HIANIME_AUDIO`       | `sub` (padrão) ou `dub`                                                  |
+| `GOANIME_HIANIME_AUDIO`       | Áudio do HiAnime: `sub` (padrão) ou `dub`                                |
+| `GOANIME_MIRURO_AUDIO`        | Áudio do Miruro: `sub` (padrão) ou `dub`                                 |
 | `GOANIME_STRICT_SOURCE`       | `1` para mostrar um erro em vez de adivinhar uma fonte desconhecida      |
 | `GOANIME_ANIMEFIRE_API`       | Endereço da API do AnimeFire                                             |
 | `GOANIME_ANIMEDRIVE_URL`      | Endereço da AnimeDrive                                                   |

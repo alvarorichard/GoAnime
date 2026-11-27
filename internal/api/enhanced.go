@@ -240,9 +240,12 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 	switch normalizedSource {
 	case "hianime":
 		return []apisource.SourceKind{apisource.HiAnime}
+	case "miruro":
+		return []apisource.SourceKind{apisource.Miruro}
 	case "english":
-		// The ENGLISH tab: HiAnime, and Pluto TV, whose catalog has anime too.
-		return []apisource.SourceKind{apisource.HiAnime, apisource.PlutoTV}
+		// The ENGLISH tab: HiAnime and Miruro, and Pluto TV, whose catalog has
+		// anime too.
+		return []apisource.SourceKind{apisource.HiAnime, apisource.Miruro, apisource.PlutoTV}
 	case "animefire":
 		return []apisource.SourceKind{apisource.AnimeFire}
 	case "goyabu":
@@ -287,7 +290,7 @@ func registryKindsForSource(normalizedSource string) []apisource.SourceKind {
 
 // SourceSelectors are the names --source takes, as the help lists them.
 var SourceSelectors = []string{
-	"hianime", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd",
+	"hianime", "miruro", "animefire", "goyabu", "animesdigital", "anroll", "animesfhd",
 	"startflix", "topcine", "pobreflix", "pomfy", "plutotv", "animedrive",
 	"movietv", "ptbr",
 }
@@ -385,6 +388,7 @@ func searchAnimeEnhanced(
 			"Goyabu", breakdown.Goyabu,
 			"AnimesDigital", breakdown.AnimesDigital,
 			"HiAnime", breakdown.HiAnime,
+			"Miruro", breakdown.Miruro,
 			"AnimeDrive", breakdown.AnimeDrive,
 			"AnimesFHD", breakdown.AnimesFHD,
 			"PlutoTV", breakdown.PlutoTV,
@@ -458,6 +462,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 				anime.Source = "Goyabu"
 			case "hianime":
 				anime.Source = "HiAnime"
+			case "miruro":
+				anime.Source = "Miruro"
 			case "animesdigital":
 				anime.Source = "AnimesDigital"
 			case "anroll":
@@ -484,6 +490,8 @@ func identifyAnimeSources(animes []*models.Anime, normalizedSource string) error
 					anime.Source = "Goyabu"
 				case strings.Contains(lowerURL, "hianime"):
 					anime.Source = "HiAnime"
+				case strings.Contains(lowerURL, "miruro.cx"):
+					anime.Source = "Miruro"
 				case strings.Contains(lowerURL, "animesdigital.org"):
 					anime.Source = "AnimesDigital"
 				case strings.Contains(lowerURL, "anroll.io"):
@@ -625,6 +633,7 @@ type sourceBreakdown struct {
 	AnimesFHD     int
 	PlutoTV       int
 	HiAnime       int
+	Miruro        int
 	StartFlix     int
 	TopCine       int
 	AnimeDrive    int
@@ -655,6 +664,8 @@ func countSourceBreakdown(animes []*models.Anime) sourceBreakdown {
 			b.PlutoTV++
 		case strings.EqualFold(anime.Source, "HiAnime"):
 			b.HiAnime++
+		case strings.EqualFold(anime.Source, "Miruro"):
+			b.Miruro++
 		case strings.EqualFold(anime.Source, "StartFlix"):
 			b.StartFlix++
 		case strings.EqualFold(anime.Source, "TopCine"):
