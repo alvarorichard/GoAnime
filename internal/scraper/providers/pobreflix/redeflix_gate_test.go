@@ -29,7 +29,7 @@ func TestParseRedeflixGate(t *testing.T) {
 
 func TestResolveRedeflixGateWithoutSolver(t *testing.T) {
 	clearChallengeSolver(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(redeflixGatePage))
 	}))
 	t.Cleanup(srv.Close)

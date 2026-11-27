@@ -23,7 +23,7 @@ func TestLiveMiruroChain(t *testing.T) {
 		t.Skip("set GOANIME_LIVE=1 to run against the live network")
 	}
 	util.InitLogger()
-	c := NewMiruroClient()
+	c := NewClient()
 
 	results, err := c.SearchAnime(context.Background(), "frieren")
 	if err != nil {

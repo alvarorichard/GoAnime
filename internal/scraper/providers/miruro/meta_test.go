@@ -377,7 +377,7 @@ var variantTampers = map[string]func(variantFn) variantFn{
 		}
 	},
 	"first variant whatever was asked": func(fn variantFn) variantFn {
-		return func(p []byte, u, q string) (string, bool) { return fn(p, u, "360") }
+		return func(p []byte, u, _ string) (string, bool) { return fn(p, u, "360") }
 	},
 }
 

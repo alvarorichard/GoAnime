@@ -38,8 +38,8 @@ const (
 	maxRedirects = 2
 )
 
-// MiruroClient handles interactions with miruro.cx.
-type MiruroClient struct {
+// Client handles interactions with miruro.cx.
+type Client struct {
 	client     *http.Client
 	baseURL    string
 	userAgent  string
@@ -50,10 +50,10 @@ type MiruroClient struct {
 	probeTimeout time.Duration
 }
 
-// NewMiruroClient creates a new miruro.cx client. Performs no network I/O: it
+// NewClient creates a new miruro.cx client. Performs no network I/O: it
 // runs under sync.Once in the adapter.
-func NewMiruroClient() *MiruroClient {
-	return &MiruroClient{
+func NewClient() *Client {
+	return &Client{
 		client:       util.NewFastClient(),
 		baseURL:      miruroBase,
 		userAgent:    netx.UserAgent,
@@ -65,8 +65,8 @@ func NewMiruroClient() *MiruroClient {
 
 // NewClientForTest returns a client pointed at a test server with retries
 // disabled. Only for tests.
-func NewClientForTest(serverURL string) *MiruroClient {
-	c := NewMiruroClient()
+func NewClientForTest(serverURL string) *Client {
+	c := NewClient()
 	c.baseURL = strings.TrimSuffix(serverURL, "/")
 	c.maxRetries = 0
 	c.retryDelay = 0
@@ -77,19 +77,19 @@ func NewClientForTest(serverURL string) *MiruroClient {
 // HTTP plumbing
 // ---------------------------------------------------------------------------
 
-func (c *MiruroClient) decorateRequest(req *http.Request) {
+func (c *Client) decorateRequest(req *http.Request) {
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json, */*;q=0.8")
 	req.Header.Set("Accept-Language", netx.EnglishAcceptLanguage)
 	req.Header.Set("Referer", c.baseURL+"/")
 }
 
-func (c *MiruroClient) shouldRetry(attempt int) bool {
+func (c *Client) shouldRetry(attempt int) bool {
 	return attempt < c.maxRetries
 }
 
 // sleep waits out the retry delay, or returns early when ctx is cancelled.
-func (c *MiruroClient) sleep(ctx context.Context) {
+func (c *Client) sleep(ctx context.Context) {
 	if c.retryDelay <= 0 {
 		return
 	}
@@ -105,7 +105,7 @@ func (c *MiruroClient) sleep(ctx context.Context) {
 // being the page ("/search", "/watch/<id>/<slug>") and query its query
 // string. A redirect the app answers with (a watch URL whose slug is not the
 // canonical one) is followed, but only to another path on the same site.
-func (c *MiruroClient) getData(ctx context.Context, path string, query url.Values, layer string) (dataResponse, error) {
+func (c *Client) getData(ctx context.Context, path string, query url.Values, layer string) (dataResponse, error) {
 	for hop := 0; ; hop++ {
 		rawURL := c.baseURL + strings.TrimSuffix(path, "/") + dataSuffix
 		if len(query) > 0 {
@@ -151,7 +151,7 @@ func sitePath(location string) (*url.URL, error) {
 var errOffSite = errors.New("not a path on miruro.cx")
 
 // getBody performs a GET with the client's retry policy and returns the body.
-func (c *MiruroClient) getBody(ctx context.Context, rawURL, layer string) ([]byte, error) {
+func (c *Client) getBody(ctx context.Context, rawURL, layer string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, http.NoBody)

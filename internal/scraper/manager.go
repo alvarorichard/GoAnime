@@ -117,7 +117,7 @@ func NewAdapter(t ScraperType) (UnifiedScraper, error) {
 	case PlutoTVType:
 		return &PlutoTVAdapter{client: plutotv.Shared()}, nil
 	case MiruroType:
-		return &MiruroAdapter{client: miruro.NewMiruroClient()}, nil
+		return &MiruroAdapter{client: miruro.NewClient()}, nil
 	default:
 		return nil, fmt.Errorf("no adapter for scraper type %v", t)
 	}
@@ -496,10 +496,10 @@ func NewHiAnimeAdapterForTest(serverURL string) UnifiedScraper {
 	return &HiAnimeAdapter{client: hianime.NewClientForTest(serverURL)}
 }
 
-// MiruroAdapter adapts miruro.MiruroClient to the UnifiedScraper interface.
+// MiruroAdapter adapts miruro.Client to the UnifiedScraper interface.
 // Like HiAnimeAdapter, the *Context methods are the real implementations.
 type MiruroAdapter struct {
-	client *miruro.MiruroClient
+	client *miruro.Client
 }
 
 func (a *MiruroAdapter) SearchAnimeContext(ctx context.Context, query string, _ ...any) ([]*models.Anime, error) {

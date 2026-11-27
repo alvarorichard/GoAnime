@@ -36,7 +36,7 @@ type searchPage struct {
 }
 
 // SearchAnime searches miruro.cx and returns the first page of results.
-func (c *MiruroClient) SearchAnime(ctx context.Context, query string) ([]*models.Anime, error) {
+func (c *Client) SearchAnime(ctx context.Context, query string) ([]*models.Anime, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, netx.NewParserError(sourceLabel, "search", "empty query", nil)
 	}
@@ -68,7 +68,7 @@ func (c *MiruroClient) SearchAnime(ctx context.Context, query string) ([]*models
 // episodes and no sources, so all it could do is lead to "no episodes yet".
 // The per-audio episode counts are not used to filter: they lag the sources
 // (a title counted with no subtitled episodes still served subtitled ones).
-func (c *MiruroClient) toResults(items []searchItem) []*models.Anime {
+func (c *Client) toResults(items []searchItem) []*models.Anime {
 	seen := make(map[string]struct{}, len(items))
 	out := make([]*models.Anime, 0, len(items))
 	for i := range items {

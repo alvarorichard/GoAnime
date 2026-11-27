@@ -73,13 +73,13 @@ func parseEpisodeURL(episodeURL string) (episodeRef, error) {
 }
 
 // animeURL is the title's page; GetAnimeEpisodes reads the id back out of it.
-func (c *MiruroClient) animeURL(id string) string {
+func (c *Client) animeURL(id string) string {
 	return c.baseURL + "/info/" + id
 }
 
 // episodeURL is the page a human would open, and the only channel this scraper
 // has back to itself: GetEpisodeStreamURL reads the id and number out of it.
-func (c *MiruroClient) episodeURL(id, slug, number string) string {
+func (c *Client) episodeURL(id, slug, number string) string {
 	return fmt.Sprintf("%s%s?ep=%s", c.baseURL, watchPath(id, slug), number)
 }
 

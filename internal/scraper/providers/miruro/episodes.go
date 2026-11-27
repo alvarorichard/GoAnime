@@ -34,7 +34,7 @@ type watchPage struct {
 
 // fetchWatchPage reads the watch page of episode ep. The slug may be empty:
 // the site redirects to the canonical one, and the returned path carries it.
-func (c *MiruroClient) fetchWatchPage(ctx context.Context, id, slug, ep, layer string) (watchPage, string, error) {
+func (c *Client) fetchWatchPage(ctx context.Context, id, slug, ep, layer string) (watchPage, string, error) {
 	resp, err := c.getData(ctx, watchPath(id, slug), url.Values{"ep": {ep}}, layer)
 	if err != nil {
 		return watchPage{}, "", err
@@ -56,7 +56,7 @@ func (c *MiruroClient) fetchWatchPage(ctx context.Context, id, slug, ep, layer s
 // The list comes from the watch page of the first episode, which carries the
 // whole list (One Piece's 1180 entries included) and, through its redirect,
 // the slug the episode URLs are built with.
-func (c *MiruroClient) GetAnimeEpisodes(ctx context.Context, animeURL string) ([]models.Episode, error) {
+func (c *Client) GetAnimeEpisodes(ctx context.Context, animeURL string) ([]models.Episode, error) {
 	id, err := AnimeID(animeURL)
 	if err != nil {
 		return nil, err

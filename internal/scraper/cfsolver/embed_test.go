@@ -25,7 +25,7 @@ func TestUnpackEmbedded(t *testing.T) {
 	}
 
 	// A stale file of another size is replaced by the bundled one.
-	if err := os.WriteFile(p, []byte("old"), 0o700); err != nil {
+	if err := os.WriteFile(p, []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := unpackEmbedded(fsys, "embedded", "linux", "amd64", dir); err != nil {

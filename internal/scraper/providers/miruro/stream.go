@@ -83,7 +83,7 @@ const maxCandidates = 8
 //	audio_lang       "sub" or "dub": what was actually picked, which may not be
 //	                 the preference when the episode lacks it
 //	subtitles        a JSON array of {"url","language","label"}
-func (c *MiruroClient) GetEpisodeStreamURL(ctx context.Context, episodeURL, quality string) (streamURL string, metadata map[string]string, err error) {
+func (c *Client) GetEpisodeStreamURL(ctx context.Context, episodeURL, quality string) (streamURL string, metadata map[string]string, err error) {
 	ref, err := parseEpisodeURL(episodeURL)
 	if err != nil {
 		return "", nil, err
@@ -256,7 +256,7 @@ func header(h map[string]string, name string) string {
 // probe fetches a candidate the way the player will, with its headers, and
 // returns the playlist for an HLS stream. A failure is logged and reported as
 // false: the next candidate gets its turn.
-func (c *MiruroClient) probe(ctx context.Context, cand candidate) ([]byte, bool) {
+func (c *Client) probe(ctx context.Context, cand candidate) ([]byte, bool) {
 	pctx, cancel := context.WithTimeout(ctx, c.probeTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(pctx, http.MethodGet, cand.url, http.NoBody)

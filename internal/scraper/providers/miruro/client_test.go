@@ -35,7 +35,7 @@ func TestHostIsPinned(t *testing.T) {
 	// A rotation must be a deliberate edit, checked against the live site
 	// (2026-11-26: miruro.cx, the host ani-cli 5.2.0 reads).
 	assert.Equal(t, "https://miruro.cx", miruroBase)
-	assert.Equal(t, miruroBase, NewMiruroClient().baseURL)
+	assert.Equal(t, miruroBase, NewClient().baseURL)
 }
 
 func TestHydrateRoundTripsTheTestEncoder(t *testing.T) {
@@ -306,7 +306,7 @@ func TestNewClientForTest(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:1", c.baseURL)
 	assert.Equal(t, 0, c.maxRetries, "tests fail fast")
 	assert.Equal(t, time.Duration(0), c.retryDelay)
-	live := NewMiruroClient()
+	live := NewClient()
 	assert.Equal(t, 2, live.maxRetries)
 	assert.Equal(t, 300*time.Millisecond, live.retryDelay)
 	assert.Equal(t, 6*time.Second, live.probeTimeout)
@@ -527,7 +527,7 @@ func TestDecorateRequest(t *testing.T) {
 
 func TestSleepHonoursCancellation(t *testing.T) {
 	t.Parallel()
-	c := NewMiruroClient()
+	c := NewClient()
 	c.retryDelay = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1226,7 +1226,7 @@ func TestProbe(t *testing.T) {
 func TestProbeGivesUpOnASlowMirror(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		select {
 		case <-release:
 		case <-r.Context().Done():

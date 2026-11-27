@@ -250,7 +250,7 @@ func TestMiruroCascade_FailurePropagation(t *testing.T) {
 	}
 	tests := []struct {
 		name   string
-		break_ func(*miruroStub)
+		sabotage func(*miruroStub)
 		run    func(*miruroProvider, *miruroStub) error
 	}{
 		{"search 503", func(s *miruroStub) { s.failSearch = http.StatusServiceUnavailable }, func(p *miruroProvider, _ *miruroStub) error {
@@ -269,7 +269,7 @@ func TestMiruroCascade_FailurePropagation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := newMiruroStub(t)
-			tt.break_(stub)
+			tt.sabotage(stub)
 			require.Error(t, tt.run(stub.provider(t), stub), "a broken stage must not report success")
 		})
 	}
