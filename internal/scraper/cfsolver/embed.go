@@ -1,8 +1,10 @@
 package cfsolver
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,10 +41,12 @@ func EnsureEmbedded() (string, bool) {
 	return path, path != ""
 }
 
-// unpackEmbedded writes the platform's binary from fsys into dir, unless a
-// file of the same size is already there (it is only ever written whole, by a
-// rename). It returns "" with no error when fsys holds no binary for the
-// platform.
+// unpackEmbedded writes the platform's binary from fsys into dir, unless the
+// file already there holds exactly those bytes (it is only ever written whole,
+// by a rename). A file of the same size is not enough: two cfsolve builds can
+// have the same size, and a stale one (an older GoAnime's bundle, a download,
+// a local build) is refused by this GoAnime's profile. It returns "" with no
+// error when fsys holds no binary for the platform.
 func unpackEmbedded(fsys fs.FS, root, goos, goarch, dir string) (string, error) {
 	asset, ok := assetName(goos, goarch)
 	if !ok {
@@ -59,7 +63,7 @@ func unpackEmbedded(fsys fs.FS, root, goos, goarch, dir string) (string, error) 
 		return "", err
 	}
 	dst := filepath.Join(dir, localBinaryName(goos))
-	if st, err := os.Stat(dst); err == nil && st.Mode().IsRegular() && st.Size() == int64(len(data)) {
+	if sameFileContent(dst, data) {
 		return dst, nil
 	}
 	tmp, err := os.CreateTemp(dir, ".challenge-*")
@@ -82,4 +86,33 @@ func unpackEmbedded(fsys fs.FS, root, goos, goarch, dir string) (string, error) 
 		return "", err
 	}
 	return dst, nil
+}
+
+// compareChunk is how much of the file sameFileContent reads at a time.
+const compareChunk = 256 << 10
+
+// sameFileContent reports whether path is a regular file holding exactly data.
+// It runs on every start, so it reads the file in chunks (no second copy of a
+// 40 MB binary in memory) and stops at the first difference; a file of another
+// size is not read at all. On an SSD the whole comparison of a 20 MB binary
+// takes a few milliseconds.
+func sameFileContent(path string, data []byte) bool {
+	f, err := os.Open(path) // #nosec G304 -- GoAnime's own config folder
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() || st.Size() != int64(len(data)) {
+		return false
+	}
+	buf := make([]byte, min(compareChunk, len(data)))
+	for off := 0; off < len(data); {
+		n, err := io.ReadFull(f, buf[:min(len(buf), len(data)-off)])
+		if err != nil || !bytes.Equal(buf[:n], data[off:off+n]) {
+			return false
+		}
+		off += n
+	}
+	return true
 }
