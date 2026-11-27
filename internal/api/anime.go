@@ -240,7 +240,7 @@ func enrichAnimeData(anime *models.Anime) error {
 		return movie.EnrichMedia(anime)
 	}
 
-	aniListInfo, err := FetchAnimeFromAniListWithURL(anime.Name, anime.URL)
+	aniListInfo, err := fetchAniListForAnime(anime)
 	if errors.Is(err, ErrAniListAPIDisabled) {
 		// AniList switched its API off upstream; nothing here can fix that, and
 		// returning an error would drop the cover art, MAL id and title forms
@@ -551,7 +551,7 @@ var (
 	// AnimeFire and AllAnime prepend an emoji to their tag — fire and globe,
 	// spelled out below as \x{...} code points so no emoji glyph ever lands in
 	// this source tree (plain bracket tags still match too).
-	reSourceTag = regexp.MustCompile(`(?i)[\x{1F525}\x{1F310}]?\[(?:animefire|allanime|hianime|anidb|animedrive|9anime)\]\s*`)
+	reSourceTag = regexp.MustCompile(`(?i)[\x{1F525}\x{1F310}]?\[(?:animefire|allanime|hianime|miruro|anidb|animedrive|9anime)\]\s*`)
 	reEmDash    = regexp.MustCompile(`\s*[–—]\s+.*$`)
 	// For the regular hyphen ( - ) we cannot strip blindly — it appears inside legitimate
 	// titles such as "Jujutsu Kaisen: Shimetsu Kaiyuu - Zenpen" / "- Kouhen" (前編/後編,
@@ -565,7 +565,7 @@ var (
 		`\d+[ªº]?\s*temporada|temporada\s*\d*|` +
 		`season\s*\d+|\d+(?:st|nd|rd|th)\s*season|` +
 		`parte\s*\d+|part\s*\d+|` +
-		`allanime|hianime|anidb|animefire|animedrive|9anime|goyabu|animesdigital|animesroll|animesfhd|plutotv|startflix|topcine|flixhq|sflix` +
+		`allanime|hianime|miruro|anidb|animefire|animedrive|9anime|goyabu|animesdigital|animesroll|animesfhd|plutotv|startflix|topcine|flixhq|sflix` +
 		`).*$`)
 	reLangParens    = regexp.MustCompile(`(?i)\s*\([^)]*(?:dublado|legendado|dub|sub)[^)]*\)`)
 	reLangSuffix    = regexp.MustCompile(`(?i)\s+(?:dublado|legendado|dub|sub|dual\s*[aá]udio)\s*$`)
