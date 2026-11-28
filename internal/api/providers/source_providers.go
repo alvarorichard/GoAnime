@@ -12,6 +12,7 @@ import (
 	"github.com/alvarorichard/Goanime/v2/internal/models"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/netx"
+	"github.com/alvarorichard/Goanime/v2/internal/scraper/offlinecache"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pobreflix"
 	"github.com/alvarorichard/Goanime/v2/internal/scraper/providers/pomfy"
 	"github.com/alvarorichard/Goanime/v2/internal/util"
@@ -120,8 +121,38 @@ func (p *animeFireProvider) Search(ctx context.Context, query string) ([]*models
 	if err != nil {
 		return nil, err
 	}
+	results = HideOfflineTitles(offlinecache.Shared(), string(source.AnimeFire), results)
 	tagResults(results, source.AnimeFire)
 	return results, nil
+}
+
+// HideOfflineTitles removes titles recorded in cache for sourceKey and says how
+// many it hid. If every result is recorded the original list is kept, so the
+// user is never left with an empty, silent search.
+func HideOfflineTitles(cache *offlinecache.Cache, sourceKey string, results []*models.Anime) []*models.Anime {
+	if !offlinecache.HidingEnabled() || len(results) == 0 {
+		return results
+	}
+	urls := make([]string, len(results))
+	for i, r := range results {
+		urls[i] = r.URL
+	}
+	recorded := cache.Set(sourceKey, urls)
+	if len(recorded) == 0 {
+		return results
+	}
+	kept := make([]*models.Anime, 0, len(results))
+	for _, r := range results {
+		if !recorded[r.URL] {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == 0 {
+		return results
+	}
+	util.Infof("Hid %d title(s) that had no playable video here or on other sources (set %s=0 to show them).",
+		len(results)-len(kept), offlinecache.EnvHide)
+	return kept
 }
 
 func (p *animeFireProvider) FetchEpisodes(_ context.Context, anime *models.Anime) ([]models.Episode, error) {
